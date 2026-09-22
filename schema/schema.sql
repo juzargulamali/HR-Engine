@@ -45,9 +45,12 @@ create type contract_type as enum (
 );
 
 create type policy_type as enum (
-  'leave_rules', 'public_holidays', 'overtime_rules', 'notice_period',
+  'leave_rules', 'overtime_rules', 'notice_period',
   'probation_rules', 'working_week', 'end_of_service_benefit'
 );
+-- Deliberately no 'public_holidays' member: holiday calendars are plain
+-- dated facts (see the public_holidays table), not versioned JSON rules
+-- with an effective-date range and a draft/activate workflow.
 
 create type policy_status as enum ('draft', 'active', 'superseded');
 
@@ -307,6 +310,7 @@ create table policy_versions (
   approved_by     uuid,
   approved_at     timestamptz,
   created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
   -- Only one *active* row may cover a given date for a given (country, policy_type).
   exclude using gist (
     country_code with =,
@@ -314,6 +318,9 @@ create table policy_versions (
     daterange(effective_from, effective_to, '[]') with &&
   ) where (status = 'active')
 );
+
+create trigger policy_versions_set_updated_at before update on policy_versions
+  for each row execute function set_updated_at();
 
 create table policy_leave_types (
   id                          uuid primary key default gen_random_uuid(),
@@ -329,8 +336,12 @@ create table policy_leave_types (
   requires_medical_cert_after_days int,
   approval_levels_required   int not null default 1,
   gender_restricted          text,               -- null | 'male' | 'female'
+  updated_at                 timestamptz not null default now(),
   unique (policy_version_id, leave_type_code)
 );
+
+create trigger policy_leave_types_set_updated_at before update on policy_leave_types
+  for each row execute function set_updated_at();
 
 create table public_holidays (
   id            uuid primary key default gen_random_uuid(),
@@ -338,8 +349,12 @@ create table public_holidays (
   holiday_date  date not null,
   name          text not null,
   is_paid       boolean not null default true,
+  updated_at    timestamptz not null default now(),
   unique (country_code, holiday_date)
 );
+
+create trigger public_holidays_set_updated_at before update on public_holidays
+  for each row execute function set_updated_at();
 
 -- -----------------------------------------------------------------------------
 -- 4. Leave, comp-off, deduction priority
@@ -866,6 +881,9 @@ alter table employees enable row level security;
 alter table employment_contracts enable row level security;
 alter table compensation_details enable row level security;
 alter table identity_documents enable row level security;
+alter table policy_versions enable row level security;
+alter table policy_leave_types enable row level security;
+alter table public_holidays enable row level security;
 alter table leave_requests enable row level security;
 alter table leave_ledger enable row level security;
 alter table comp_day_ledger enable row level security;
@@ -1062,6 +1080,130 @@ create policy identity_docs_insert on identity_documents for insert
 create policy identity_docs_update on identity_documents for update
   using (has_role('hr_admin', (select company_id from employees where id = employee_id)))
   with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
+
+-- ---- policy_versions: active versions are visible to any signed-in user
+--      (it's company policy, not a secret); drafts are visible only to the
+--      HR Admin/CEO who'd act on them. Drafting is HR Admin's alone;
+--      updating a draft (content edit or activation) is HR Admin or CEO,
+--      country-scoped — "CEO can only activate, not edit" and "not the
+--      same person who drafted it" live in the trigger below, since RLS
+--      can't express either at the row-visibility level.
+--
+--      has_role(..., null, country_code) intentionally requires an
+--      unscoped-by-company grant — a single-company HR Admin shouldn't
+--      unilaterally change a policy that can affect every company in that
+--      country.
+create policy policy_versions_select on policy_versions for select
+  using (
+    status = 'active'
+    or has_role('hr_admin', null, country_code)
+    or has_role('ceo', null, country_code)
+  );
+
+-- Every new version must start as a draft — without this, an HR Admin could
+-- insert a row already marked 'active' and skip the two-person activation
+-- control entirely, since that control only guards the UPDATE path above.
+create policy policy_versions_insert on policy_versions for insert
+  with check (has_role('hr_admin', null, country_code) and status = 'draft');
+
+create policy policy_versions_update on policy_versions for update
+  using (
+    status = 'draft'
+    and (has_role('hr_admin', null, country_code) or has_role('ceo', null, country_code))
+  )
+  with check (has_role('hr_admin', null, country_code) or has_role('ceo', null, country_code));
+
+create or replace function guard_policy_version_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  if auth.uid() is null then
+    return new; -- trusted backend write (migration/seed/service-role) — see the Phase 1 employee self-update guard for why
+  end if;
+
+  if not has_role('hr_admin', null, new.country_code) then
+    if new.policy_type is distinct from old.policy_type
+      or new.version_no is distinct from old.version_no
+      or new.effective_from is distinct from old.effective_from
+      or new.effective_to is distinct from old.effective_to
+      or new.payload is distinct from old.payload
+      or new.country_code is distinct from old.country_code
+      or new.created_by is distinct from old.created_by
+    then
+      raise exception 'CEO may only activate a drafted policy, not edit its content — ask HR Admin to change it.';
+    end if;
+  end if;
+
+  if new.status = 'active' and old.status is distinct from 'active' then
+    if auth.uid() = old.created_by then
+      raise exception 'A policy version must be activated by someone other than who drafted it.';
+    end if;
+    new.approved_by := auth.uid();
+    new.approved_at := now();
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger policy_versions_guard_update
+  before update on policy_versions
+  for each row execute function guard_policy_version_update();
+
+-- ---- policy_leave_types: follows its parent policy_version's visibility;
+--      only editable while the parent is still a draft, HR Admin only.
+create policy policy_leave_types_select on policy_leave_types for select
+  using (
+    exists (
+      select 1 from policy_versions pv
+      where pv.id = policy_version_id
+        and (
+          pv.status = 'active'
+          or has_role('hr_admin', null, pv.country_code)
+          or has_role('ceo', null, pv.country_code)
+        )
+    )
+  );
+
+create policy policy_leave_types_insert on policy_leave_types for insert
+  with check (
+    exists (
+      select 1 from policy_versions pv
+      where pv.id = policy_version_id and pv.status = 'draft' and has_role('hr_admin', null, pv.country_code)
+    )
+  );
+
+create policy policy_leave_types_update on policy_leave_types for update
+  using (
+    exists (
+      select 1 from policy_versions pv
+      where pv.id = policy_version_id and pv.status = 'draft' and has_role('hr_admin', null, pv.country_code)
+    )
+  )
+  with check (
+    exists (
+      select 1 from policy_versions pv
+      where pv.id = policy_version_id and pv.status = 'draft' and has_role('hr_admin', null, pv.country_code)
+    )
+  );
+
+create policy policy_leave_types_delete on policy_leave_types for delete
+  using (
+    exists (
+      select 1 from policy_versions pv
+      where pv.id = policy_version_id and pv.status = 'draft' and has_role('hr_admin', null, pv.country_code)
+    )
+  );
+
+-- ---- public_holidays: reference data, readable by any signed-in user,
+--      managed by HR Admin for that country.
+create policy public_holidays_select on public_holidays for select
+  using (auth.role() = 'authenticated');
+
+create policy public_holidays_write on public_holidays for all
+  using (has_role('hr_admin', null, country_code))
+  with check (has_role('hr_admin', null, country_code));
 
 -- ---- appraisals & goals: employee, manager chain, HR Admin — never Finance
 create policy appraisals_select on appraisals for select

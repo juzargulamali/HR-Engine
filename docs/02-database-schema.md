@@ -85,13 +85,17 @@ schema rather than via row-level flags on one wide table (which would be easy to
 
 ```
 policy_versions
-  id, country_code, policy_type ('leave_rules' | 'public_holidays' | 'overtime_rules'
-                                  | 'notice_period' | 'probation_rules' | 'working_week'),
+  id, country_code, policy_type ('leave_rules' | 'overtime_rules' | 'notice_period'
+                                  | 'probation_rules' | 'working_week' | 'end_of_service_benefit'),
   version_no, effective_from, effective_to (nullable = open-ended),
   status ('draft' | 'active' | 'superseded'),
   payload jsonb,      -- shape depends on policy_type, validated in app layer with zod schemas
   created_by, approved_by, created_at
 ```
+
+`policy_type` deliberately has no `'public_holidays'` member: a holiday calendar is a set of plain
+dated facts (see `public_holidays` below), not a versioned JSON rule with an effective-date range
+and a draft/activate workflow — adding next year's holidays is just inserting rows.
 
 - Only one `active` version per `(country_code, policy_type)` may have an open-ended or overlapping
   date range — enforced by an exclusion constraint (`EXCLUDE USING gist` on
@@ -109,6 +113,14 @@ policy_versions
   relationally and it benefits from constraints/tests.
 - `public_holidays`: `(country_code, holiday_date, name, is_paid)` — used by the day-count
   calculator so requesting leave across a public holiday doesn't consume a leave day.
+- **Two-person control on activation**: HR Admin drafts a version; activating it (`draft` →
+  `active`) requires a *different* HR Admin or the CEO, both scoped to that country. RLS is
+  row-level and can't express "not the same person," so a `BEFORE UPDATE` trigger
+  (`guard_policy_version_update`) does — it also enforces that a CEO-only activator (someone who
+  holds `ceo` but not `hr_admin`) can flip `status` and nothing else, never edit a draft's content.
+  `has_role('hr_admin', null, country_code)` deliberately requires an unscoped-by-company grant:
+  a single-company HR Admin manages that company's employees, but shouldn't unilaterally change a
+  policy that can affect every company operating in that country.
 
 ## 2.5 Leave, comp-off, and deduction priority
 

@@ -4,11 +4,17 @@ Multi-country HR platform for Enginious LLC FZ (UAE headquarters; Saudi Arabia a
 satellite offices). Start with [`docs/00-overview.md`](./docs/00-overview.md) — it's the design
 package this codebase implements, phase by phase.
 
-**Currently implemented: Phases 0–1** — auth, roles, companies, departments, employee core
+**Currently implemented: Phases 0–2** — auth, roles, companies, departments, employee core
 records (Phase 0); employment contracts, compensation, identity documents, private document
-storage, and soft-delete recovery (Phase 1), all with RLS enabled and tested from the migration
-that creates them. See [`docs/06-implementation-phases.md`](./docs/06-implementation-phases.md)
-for what's next.
+storage, and soft-delete recovery (Phase 1); the country policy engine — versioned, effective-dated
+leave/notice/probation rules and public holidays for UAE/KSA/Poland, with two-person draft-then-
+activate control (Phase 2). Every table has RLS enabled and tested from the migration that creates
+it. See [`docs/06-implementation-phases.md`](./docs/06-implementation-phases.md) for what's next.
+
+Starter policy content for UAE, Saudi Arabia, and Poland is seeded as **drafts only** — see the
+comment at the top of `supabase/seed.sql`. None of it takes effect until a real HR Admin reviews it
+and a different HR Admin or the CEO activates it; treat the numbers as a starting point, not legal
+advice.
 
 ## Layout
 

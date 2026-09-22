@@ -1,8 +1,9 @@
 /**
- * Hand-written to match supabase/migrations/20260922000000_phase0_foundations.sql
- * and supabase/migrations/20260924000000_phase1_contracts_compensation_identity.sql
- * exactly. Once a real Supabase project exists, regenerate this file with
- * `npm run db:types` (root package.json) instead of hand-editing it — see
+ * Hand-written to match supabase/migrations/20260922000000_phase0_foundations.sql,
+ * 20260924000000_phase1_contracts_compensation_identity.sql, and
+ * 20260925000000_phase2_country_policy_engine.sql exactly. Once a real
+ * Supabase project exists, regenerate this file with `npm run db:types`
+ * (root package.json) instead of hand-editing it — see
  * docs/09-extending-the-system.md "adding a table" checklist, which ends
  * with this regeneration step for exactly that reason.
  */
@@ -11,6 +12,14 @@ export type AppRole = "employee" | "line_manager" | "hr_admin" | "finance" | "ce
 export type EmploymentStatus = "active" | "on_leave" | "suspended" | "terminated";
 export type EmploymentType = "full_time" | "part_time" | "contractor" | "intern";
 export type ContractType = "permanent" | "fixed_term" | "probation" | "contractor";
+export type PolicyType =
+  | "leave_rules"
+  | "overtime_rules"
+  | "notice_period"
+  | "probation_rules"
+  | "working_week"
+  | "end_of_service_benefit";
+export type PolicyStatus = "draft" | "active" | "superseded";
 
 export interface Database {
   public: {
@@ -275,6 +284,96 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["identity_documents"]["Insert"]>;
         Relationships: [];
       };
+      policy_versions: {
+        Row: {
+          id: string;
+          country_code: string;
+          policy_type: PolicyType;
+          version_no: number;
+          effective_from: string;
+          effective_to: string | null;
+          status: PolicyStatus;
+          payload: Record<string, unknown>;
+          created_by: string;
+          approved_by: string | null;
+          approved_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          country_code: string;
+          policy_type: PolicyType;
+          version_no: number;
+          effective_from: string;
+          effective_to?: string | null;
+          status?: PolicyStatus;
+          payload: Record<string, unknown>;
+          created_by: string;
+        };
+        Update: {
+          status?: PolicyStatus;
+          payload?: Record<string, unknown>;
+          effective_to?: string | null;
+          approved_by?: string | null;
+          approved_at?: string | null;
+        };
+        Relationships: [];
+      };
+      policy_leave_types: {
+        Row: {
+          id: string;
+          policy_version_id: string;
+          leave_type_code: string;
+          name: string;
+          accrual_method: string;
+          accrual_rate_per_period: string | null;
+          max_balance_days: string | null;
+          carryover_max_days: string | null;
+          carryover_expiry_months: number | null;
+          min_service_days_to_accrue: number | null;
+          requires_medical_cert_after_days: number | null;
+          approval_levels_required: number;
+          gender_restricted: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          policy_version_id: string;
+          leave_type_code: string;
+          name: string;
+          accrual_method: string;
+          accrual_rate_per_period?: number | null;
+          max_balance_days?: number | null;
+          carryover_max_days?: number | null;
+          carryover_expiry_months?: number | null;
+          min_service_days_to_accrue?: number | null;
+          requires_medical_cert_after_days?: number | null;
+          approval_levels_required?: number;
+          gender_restricted?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["policy_leave_types"]["Insert"]>;
+        Relationships: [];
+      };
+      public_holidays: {
+        Row: {
+          id: string;
+          country_code: string;
+          holiday_date: string;
+          name: string;
+          is_paid: boolean;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          country_code: string;
+          holiday_date: string;
+          name: string;
+          is_paid?: boolean;
+        };
+        Update: Partial<Database["public"]["Tables"]["public_holidays"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -282,12 +381,18 @@ export interface Database {
         Args: { p_employee_id: string; p_as_of: string };
         Returns: Database["public"]["Tables"]["employment_contracts"]["Row"][];
       };
+      resolve_policy: {
+        Args: { p_country_code: string; p_policy_type: PolicyType; p_as_of: string };
+        Returns: Record<string, unknown> | null;
+      };
     };
     Enums: {
       app_role: AppRole;
       employment_status: EmploymentStatus;
       employment_type: EmploymentType;
       contract_type: ContractType;
+      policy_type: PolicyType;
+      policy_status: PolicyStatus;
     };
     CompositeTypes: Record<string, never>;
   };
