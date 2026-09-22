@@ -78,7 +78,7 @@ time-boxed, logged elevation procedure, not a standing role grant.
 | Resource | Employee | Line Manager | HR Admin | Finance | CEO | Sys Admin |
 |---|---|---|---|---|---|---|
 | Run payroll-variable export | – | – | R | F | R | – |
-| Authorize payroll export for sending | – | – | – | A | A (final sign-off, configurable) | – |
+| Authorize payroll export for sending | – | – | – | A (step 1, reviews figures) | A (step 2, **mandatory on every export**) | – |
 | View audit log | – | – | R (HR-scoped entries) | – | – | R (system-scoped entries) |
 | Manage roles / user access | – | – | R (request only) | – | – | F |
 | Manage companies / countries / policy activation | – | – | F (draft + propose) | – | A | F (structural: create company/country records) |

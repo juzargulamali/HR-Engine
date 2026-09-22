@@ -67,6 +67,12 @@ of how it's triggered.
   requester's `user_id`, the resolver skips to the next step automatically and logs why in
   `approvals.comments` (system-generated skip reason), never silently auto-approving.
 - Rejection at any step stops the chain; already-decided steps remain in the log unchanged.
+- **Payroll export is the one workflow with no conditional steps**: every `payroll_export_run`
+  goes through both `role:finance` (reviews the generated figures) and `role:ceo` (final
+  authorization) unconditionally — there is no amount threshold that skips the CEO step. This is a
+  deliberate stakeholder decision (see `08-decisions-log.md`, decision 2), not the general pattern;
+  every other workflow in the system (leave, reimbursement, letters) does use amount/level
+  conditions to decide how many steps apply.
 
 ## 5.4 The AI-draft boundary — what AI may and may never do
 

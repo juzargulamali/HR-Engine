@@ -19,6 +19,7 @@ a live database.
 | 5 | [05-automation-rules.md](./05-automation-rules.md) | Deterministic jobs, calculation rules, AI-draft boundary |
 | 6 | [06-implementation-phases.md](./06-implementation-phases.md) | Phased delivery plan |
 | 7 | [07-risk-register.md](./07-risk-register.md) | Risks and mitigations |
+| 8 | [08-decisions-log.md](./08-decisions-log.md) | Stakeholder decisions confirmed before Phase 0 |
 
 ## Non-negotiable constraints carried through every document
 
@@ -34,8 +35,9 @@ a live database.
 - **Immutability where it matters**: `leave_ledger`, `comp_day_ledger`, `approvals`, and `audit_log`
   are insert-only. Corrections are new offsetting entries, never updates or deletes.
 - **Soft delete for business records**: employees, contracts, claims, documents, assets carry
-  `deleted_at`/`deleted_by`; hard deletes are reserved for GDPR erasure requests handled by a
-  dedicated, audited procedure (see risk register).
+  `deleted_at`/`deleted_by`. A GDPR erasure request is handled by anonymizing personal details
+  in place — not a hard delete — so payroll/audit history required for legal retention survives
+  (confirmed decision, see `08-decisions-log.md` #4 and risk register #9).
 - **Least privilege**: salary/bank data, government ID data, and appraisal content each have their
   own RLS-guarded tables, separate from the general employee profile.
 

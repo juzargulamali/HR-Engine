@@ -121,19 +121,21 @@ exercised, so the schema and permission matrix can be sanity-checked against rea
 2. Finance reviews the generated lines (this is a **variable-pay export**, not a full payroll run —
    base salary lives in the country's payroll system already; this feeds the variable components
    into it).
-3. Finance (or CEO, per company policy) authorizes (`payroll_export_runs.authorized_by/at` set) —
-   this is the gate before the file is downloadable/sendable; authorization is itself an
-   `approvals`-style logged action.
-4. Downloads CSV/XLSX for import into the country payroll provider.
+3. Finance approves the reviewed figures (step 1 of the `payroll_export_run` approval workflow),
+   then the run routes to the CEO for sign-off (step 2) — **mandatory on every export, regardless
+   of amount**, not a threshold-triggered exception. Both decisions post to `approvals`; the CEO's
+   approval also stamps `payroll_export_runs.authorized_by/at`.
+4. Only once the CEO has signed off does the file become downloadable — Finance downloads the
+   CSV/XLSX for import into the country payroll provider.
 
 ## 4.9 CEO — dashboards and executive approvals
 
 1. Opens **Executive Dashboard**: headcount by country/department, attrition, leave liability
    (sum of outstanding `leave_ledger` balances valued at current salary — a Finance-relevant
    number), pending high-value approvals awaiting CEO action.
-2. Approves/rejects items routed to them by workflow condition (large reimbursements, policy
-   activation, payroll authorization if configured) — same `approvals` mechanism as any other
-   role, just a different `approver_type` in the workflow step.
+2. Approves/rejects items routed to them: large reimbursements and policy activation by workflow
+   condition, plus **every** payroll-variable export unconditionally (§4.8) — same `approvals`
+   mechanism as any other role, just a different `approver_type` in the workflow step.
 
 ## 4.10 System Administrator — access & configuration
 
