@@ -1,16 +1,24 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isAuthorizedCronRequest } from "@/lib/cron/auth";
 
 /**
  * The one real, end-to-end AI-assisted flow docs/06-implementation-phases.md
- * (Phase 6) asks for: a service identity — authenticated by its own secret,
- * never a human session — that reviews leave_balances for a specific,
- * explainable discrepancy (a negative balance, which always means an
- * approval bug or a data-import error, never a legitimate state) and
- * drafts a corrective adjustment. It is deliberately a plain deterministic
- * rule, not a call out to a generative model — docs/05-automation-rules.md
- * §5.4 only asks for the draft-only BOUNDARY to be real and enforced, not
- * for the detection itself to be an LLM.
+ * (Phase 6) asks for: a service identity — never a human session — that
+ * reviews leave_balances for a specific, explainable discrepancy (a
+ * negative balance, which always means an approval bug or a data-import
+ * error, never a legitimate state) and drafts a corrective adjustment. It
+ * is deliberately a plain deterministic rule, not a call out to a
+ * generative model — docs/05-automation-rules.md §5.4 only asks for the
+ * draft-only BOUNDARY to be real and enforced, not for the detection
+ * itself to be an LLM.
+ *
+ * The only thing that actually invokes this on a schedule is Vercel Cron
+ * (vercel.json), which sends `Authorization: Bearer $CRON_SECRET` — same
+ * as every other /api/cron/* route — so this checks that secret too, via
+ * the shared helper, rather than the separate AI_SERVICE_SECRET this
+ * previously checked (which nothing in the deployed config ever actually
+ * sent, so the scheduled run 401'd on every firing).
  *
  * This endpoint's code has no path to leave_ledger, comp_day_ledger,
  * approvals, or any other operational table — the one thing it ever writes
@@ -21,8 +29,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * authorize it — never from here.
  */
 export async function GET(request: Request) {
-  const secret = process.env.AI_SERVICE_SECRET;
-  if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
+  if (!isAuthorizedCronRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
