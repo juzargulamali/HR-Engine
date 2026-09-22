@@ -214,6 +214,69 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       const peerView = await db.asUser(USER_PEER, (query) => query("select id from reimbursement_claims where id = $1", [requestId]));
       expect(peerView.rows).toEqual([]);
     });
+
+    // Regression coverage for the exact blind spot that hid the original
+    // is_entity_owner() bug (see phase6's generated_letter/payroll_export_run
+    // tests, and the phase3 leave_request equivalent): every OTHER approvable
+    // entity type has a test that inserts its first approvals row through the
+    // real RLS path (asUser(), not the seed() bypass) — reimbursement_claim
+    // and timesheet didn't, so a regression in is_entity_owner() specific to
+    // either of them could have gone undetected indefinitely.
+    it("lets the requester insert the first approvals row on their own just-submitted claim (real RLS path, not db.seed())", async () => {
+      const claimId = randomUUID();
+      await db.seed(`insert into reimbursement_claims (id, employee_id, currency, status) values ('${claimId}', '${EMPLOYEE_REPORT}', 'ZZD', 'submitted');`);
+      const { rows } = await db.asUser(USER_REPORT, (query) =>
+        query(
+          `insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id)
+           values ('reimbursement_claim', $1, $2, 1, $3) returning decision`,
+          [claimId, reimbursementWorkflowId, USER_MANAGER],
+        ),
+      );
+      expect(rows).toEqual([{ decision: "pending" }]);
+    });
+
+    it("blocks a peer from inserting the first approvals row on someone else's claim", async () => {
+      const claimId = randomUUID();
+      await db.seed(`insert into reimbursement_claims (id, employee_id, currency, status) values ('${claimId}', '${EMPLOYEE_REPORT}', 'ZZD', 'submitted');`);
+      await expect(
+        db.asUser(USER_PEER, (query) =>
+          query(
+            `insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id)
+             values ('reimbursement_claim', $1, $2, 1, $3)`,
+            [claimId, reimbursementWorkflowId, USER_MANAGER],
+          ),
+        ),
+      ).rejects.toThrow(/row-level security/);
+    });
+  });
+
+  describe("timesheet approval: initial insert (real RLS path)", () => {
+    it("lets the requester insert the first approvals row on their own just-submitted timesheet (real RLS path, not db.seed())", async () => {
+      const timesheetId = randomUUID();
+      await db.seed(`insert into timesheets (id, employee_id, period_start, period_end, status) values ('${timesheetId}', '${EMPLOYEE_REPORT}', '2026-05-04', '2026-05-10', 'submitted');`);
+      const { rows } = await db.asUser(USER_REPORT, (query) =>
+        query(
+          `insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id)
+           values ('timesheet', $1, $2, 1, $3) returning decision`,
+          [timesheetId, timesheetWorkflowId, USER_MANAGER],
+        ),
+      );
+      expect(rows).toEqual([{ decision: "pending" }]);
+    });
+
+    it("blocks a peer from inserting the first approvals row on someone else's timesheet", async () => {
+      const timesheetId = randomUUID();
+      await db.seed(`insert into timesheets (id, employee_id, period_start, period_end, status) values ('${timesheetId}', '${EMPLOYEE_REPORT}', '2026-05-11', '2026-05-17', 'submitted');`);
+      await expect(
+        db.asUser(USER_PEER, (query) =>
+          query(
+            `insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id)
+             values ('timesheet', $1, $2, 1, $3)`,
+            [timesheetId, timesheetWorkflowId, USER_MANAGER],
+          ),
+        ),
+      ).rejects.toThrow(/row-level security/);
+    });
   });
 
   describe("reimbursement approval: threshold-based routing", () => {
@@ -302,6 +365,66 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
         const laterSteps = await query("select id from approvals where entity_id = $1 and step_order > 1", [claimId]);
         expect(laterSteps.rows).toEqual([]);
       });
+    });
+
+    it("skips step 2 straight to step 3 when the requester themselves is the only Finance role holder (self-approval prevention)", async () => {
+      // Make USER_REPORT the ONLY finance holder in the company (revoke
+      // Finance's own grant, add it to the requester) so resolve_approver()
+      // has no other candidate to pick — unlike phase3's leave_request
+      // equivalent (which can't force the scenario because an earlier
+      // hr_admin holder always wins the earliest-granted tiebreak), this
+      // deterministically forces the self-approval branch to fire.
+      await db.seed(`
+        update user_roles set revoked_at = now() where user_id = '${USER_FINANCE}' and role = 'finance';
+        insert into user_roles (user_id, role, company_id) values ('${USER_REPORT}', 'finance', '${COMPANY_A}');
+      `);
+      try {
+        const { claimId, approvalId } = await seedSubmittedClaim(5000);
+
+        await db.asUser(USER_MANAGER, async (query) => {
+          await query("select decide_leave_approval($1, 'approved', null)", [approvalId]);
+
+          // Step 2 (role:finance) resolves to USER_REPORT — the requester —
+          // so it must be skipped entirely; step 3 (role:ceo) is where this
+          // lands instead.
+          const step2 = await query("select id from approvals where entity_id = $1 and step_order = 2", [claimId]);
+          expect(step2.rows).toEqual([]);
+
+          await actAs(query, USER_CEO);
+          const step3 = await query("select approver_id, decision from approvals where entity_id = $1 and step_order = 3", [claimId]);
+          expect(step3.rows[0]).toEqual({ approver_id: USER_CEO, decision: "pending" });
+
+          const status = await query("select status from reimbursement_claims where id = $1", [claimId]);
+          expect(status.rows[0]?.status).toBe("pending_approval");
+        });
+      } finally {
+        await db.seed(`
+          update user_roles set revoked_at = null where user_id = '${USER_FINANCE}' and role = 'finance';
+          delete from user_roles where user_id = '${USER_REPORT}' and role = 'finance';
+        `);
+      }
+    });
+
+    it("aborts the decision (rather than silently finalizing) when a required step's role has no current holder", async () => {
+      // No one at all holds 'finance' in this company for the duration of
+      // this test — the exact real-world gap the payroll control-bypass fix
+      // targets, exercised here against reimbursement_claim since this
+      // describe block already has a two-step (Finance -> CEO) workflow
+      // wired up for a >1000 claim.
+      await db.seed(`update user_roles set revoked_at = now() where user_id = '${USER_FINANCE}' and role = 'finance';`);
+      try {
+        const { approvalId } = await seedSubmittedClaim(5000);
+
+        // Every asUser() call's transaction always rolls back at the end
+        // (see harness.ts) — a rejected call has nothing to check
+        // afterward, so this asserts only the exception itself, same as
+        // phase3's "blocks deciding the same approval twice".
+        await expect(
+          db.asUser(USER_MANAGER, (query) => query("select decide_leave_approval($1, 'approved', null)", [approvalId])),
+        ).rejects.toThrow(/no one currently holds/);
+      } finally {
+        await db.seed(`update user_roles set revoked_at = null where user_id = '${USER_FINANCE}' and role = 'finance';`);
+      }
     });
   });
 
