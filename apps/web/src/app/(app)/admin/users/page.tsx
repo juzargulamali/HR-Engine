@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { revokeRole } from "@/lib/actions/users";
 import { InviteUserForm } from "./invite-user-form";
 import { AssignRoleForm } from "./assign-role-form";
+import { ResendInviteButton } from "./resend-invite-button";
 
 export default async function UsersPage() {
   const supabase = await createClient();
@@ -64,6 +65,7 @@ export default async function UsersPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Roles</TableHead>
+                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -90,6 +92,9 @@ export default async function UsersPage() {
                         <span className="text-xs text-muted-foreground">No role yet</span>
                       ) : null}
                     </div>
+                  </TableCell>
+                  <TableCell>
+                    <ResendInviteButton email={p.email} />
                   </TableCell>
                 </TableRow>
               ))}

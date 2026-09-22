@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { ROLES } from "@enginious-hr/domain";
+import { isSysAdmin, ROLES } from "@enginious-hr/domain";
+import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ActionState } from "./companies";
@@ -20,6 +21,11 @@ const inviteUserSchema = z.object({
  * automatically by the `handle_new_auth_user` trigger, not by this code.
  */
 export async function inviteUser(_prevState: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await getCurrentSession();
+  if (!session || !isSysAdmin(session.grants)) {
+    return { error: "Only a Sys Admin can invite users." };
+  }
+
   const parsed = inviteUserSchema.safeParse({
     email: formData.get("email"),
     fullName: formData.get("fullName"),
@@ -43,11 +49,47 @@ export async function inviteUser(_prevState: ActionState, formData: FormData): P
   });
 
   if (error) {
-    return { error: error.message };
+    return {
+      error: error.message.includes("already been registered")
+        ? `${parsed.data.email} already has an account — use "Resend invite" next to their name below instead.`
+        : error.message,
+    };
   }
 
   revalidatePath("/admin/users");
   return { error: null };
+}
+
+const resendInviteSchema = z.object({ email: z.string().email() });
+
+/**
+ * Supabase has no direct "resend invite" call — inviteUserByEmail errors
+ * once the auth user already exists (exactly the case once someone's been
+ * invited but hasn't finished setting a password). resetPasswordForEmail
+ * sends the same kind of set-a-password email via the default "Reset
+ * Password" template, and works regardless of whether the original invite
+ * was ever completed — set-password-form.tsx handles either link the same
+ * way, since both deliver the same access_token/refresh_token-in-URL-hash
+ * shape.
+ */
+export async function resendInvite(email: string): Promise<{ error: string | null }> {
+  const session = await getCurrentSession();
+  if (!session || !isSysAdmin(session.grants)) {
+    return { error: "Only a Sys Admin can resend invites." };
+  }
+
+  const parsed = resendInviteSchema.safeParse({ email });
+  if (!parsed.success) {
+    return { error: "Invalid email." };
+  }
+
+  const supabase = await createClient();
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  const { error } = await supabase.auth.resetPasswordForEmail(parsed.data.email, {
+    ...(siteUrl ? { redirectTo: `${siteUrl.replace(/\/$/, "")}/set-password` } : {}),
+  });
+
+  return { error: error?.message ?? null };
 }
 
 const assignRoleSchema = z.object({
