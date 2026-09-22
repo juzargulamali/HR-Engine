@@ -30,8 +30,16 @@ export async function inviteUser(_prevState: ActionState, formData: FormData): P
   }
 
   const admin = createAdminClient();
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
   const { error } = await admin.auth.admin.inviteUserByEmail(parsed.data.email, {
     data: { full_name: parsed.data.fullName },
+    // Without this, Supabase falls back to the project's dashboard "Site
+    // URL" — which is `http://localhost:3000` until someone updates it, so
+    // the invite email would send the recipient to a page on nobody's
+    // machine but the original developer's. /set-password is a public
+    // route (see proxy.ts) built specifically to receive this redirect and
+    // turn the one-time invite token into a real password.
+    ...(siteUrl ? { redirectTo: `${siteUrl.replace(/\/$/, "")}/set-password` } : {}),
   });
 
   if (error) {
