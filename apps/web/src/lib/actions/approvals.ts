@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { notifyAfterLeaveDecision } from "@/lib/email/leave-notifications";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -73,11 +74,22 @@ export async function decideApproval(input: { approvalId: string; decision: "app
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
 
   const supabase = await createClient();
+
+  const { data: approvalBefore } = await supabase
+    .from("approvals")
+    .select("entity_type, entity_id, approver_id")
+    .eq("id", parsed.data.approvalId)
+    .maybeSingle();
+
   const { error } = await supabase.rpc("decide_leave_approval", {
     p_approval_id: parsed.data.approvalId,
     p_decision: parsed.data.decision,
     p_comments: parsed.data.comments || null,
   });
+
+  if (!error && approvalBefore?.entity_type === "leave_request") {
+    await notifyAfterLeaveDecision(supabase, { requestId: approvalBefore.entity_id, decidedByUserId: approvalBefore.approver_id });
+  }
 
   revalidatePath("/approvals");
   revalidatePath("/leave");

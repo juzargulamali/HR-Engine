@@ -1091,6 +1091,10 @@ export interface Database {
         Args: { p_approver_type: string; p_company_id: string };
         Returns: string | null;
       };
+      resolve_role_holders: {
+        Args: { p_role: AppRole; p_company_id: string };
+        Returns: string[];
+      };
     };
     Enums: {
       app_role: AppRole;

@@ -7,6 +7,7 @@ import { computeLeaveDays } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
 import { resolveInitialApprover } from "./approvals";
+import { notifyLeaveSubmitted } from "@/lib/email/leave-notifications";
 
 const submitLeaveRequestSchema = z
   .object({
@@ -34,7 +35,7 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
 
   const { data: employee } = await supabase
     .from("employees")
-    .select("id, company_id, country_code")
+    .select("id, company_id, country_code, manager_id, first_name, last_name")
     .eq("user_id", user.id)
     .is("deleted_at", null)
     .maybeSingle();
@@ -90,6 +91,17 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
     decision: "pending",
   });
   if (approvalError) return { error: approvalError.message };
+
+  await notifyLeaveSubmitted(supabase, {
+    employeeUserId: user.id,
+    employeeName: `${employee.first_name} ${employee.last_name}`,
+    managerEmployeeId: employee.manager_id,
+    companyId: employee.company_id,
+    leaveTypeCode: d.leaveTypeCode,
+    startDate: d.startDate,
+    endDate: d.endDate,
+    totalDays,
+  });
 
   revalidatePath("/leave");
   revalidatePath("/approvals");

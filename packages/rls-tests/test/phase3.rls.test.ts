@@ -121,6 +121,21 @@ describe("Phase 3 row-level security: leave, ledgers, deduction priority, approv
       expect(rows[0]?.approver).toBe(USER_MANAGER);
     });
 
+    it("lets an ordinary employee resolve all HR Admin / CEO holders for their company (for leave-notification emails), despite user_roles' own RLS blocking a direct select", async () => {
+      const directSelect = await db.asUser(USER_REPORT, (query) => query("select user_id from user_roles where role = 'hr_admin'"));
+      expect(directSelect.rows).toEqual([]); // user_roles_select_own blocks seeing anyone else's grants directly
+
+      const hrHolders = await db.asUser(USER_REPORT, (query) =>
+        query("select resolve_role_holders('hr_admin', $1) as holder", [COMPANY_A]),
+      );
+      expect(hrHolders.rows.map((r) => r.holder)).toEqual([USER_HR]);
+
+      const ceoHolders = await db.asUser(USER_REPORT, (query) =>
+        query("select resolve_role_holders('ceo', $1) as holder", [COMPANY_A]),
+      );
+      expect(ceoHolders.rows.map((r) => r.holder)).toEqual([USER_CEO]);
+    });
+
     it("blocks submitting a leave request for someone else", async () => {
       await expect(
         db.asUser(USER_REPORT, (query) =>
