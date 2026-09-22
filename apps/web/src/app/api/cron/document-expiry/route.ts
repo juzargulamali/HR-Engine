@@ -115,5 +115,11 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ ranAt: today, documentsChecked: (documents ?? []).length, statusUpdates, remindersSent, failures });
+  // A non-2xx status is what makes a real failure visible to Vercel Cron's
+  // own monitoring/alerting — returning 200 while `failures` is non-empty
+  // would report this run as healthy even though some rows were dropped.
+  return NextResponse.json(
+    { ranAt: today, documentsChecked: (documents ?? []).length, statusUpdates, remindersSent, failures },
+    { status: failures.length > 0 ? 500 : 200 },
+  );
 }

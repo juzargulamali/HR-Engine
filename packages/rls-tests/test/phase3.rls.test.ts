@@ -461,4 +461,52 @@ describe("Phase 3 row-level security: leave, ledgers, deduction priority, approv
       expect(rowCount).toBe(0); // no UPDATE policy exists at all for approvals
     });
   });
+
+  // Regression coverage for the cron double-posting race: the leave-accrual
+  // and comp-day-expiry crons used to only check "has this already been
+  // posted?" in application code before inserting, which two overlapping
+  // invocations (a Vercel Cron retry racing the original request) could
+  // both pass before either had written anything. idempotency_key is a
+  // real database-level unique constraint, so it holds even against a
+  // client that bypasses RLS entirely (like the crons' service-role
+  // client) — proven here with a plain duplicate insert, independent of
+  // the ON CONFLICT DO NOTHING upsert the routes use on top of it.
+  describe("cron idempotency keys", () => {
+    it("rejects a second leave_ledger row with the same idempotency_key", async () => {
+      const key = `test-accrual-${randomUUID()}`;
+      await db.seed(`
+        insert into leave_ledger (employee_id, leave_type_code, txn_date, entry_type, amount_days, reference_type, created_by, idempotency_key)
+        values ('${EMPLOYEE_REPORT}', 'annual', '2026-05-01', 'accrual', 1.5, 'policy_run', '${USER_HR}', '${key}');
+      `);
+      await expect(
+        db.seed(`
+          insert into leave_ledger (employee_id, leave_type_code, txn_date, entry_type, amount_days, reference_type, created_by, idempotency_key)
+          values ('${EMPLOYEE_REPORT}', 'annual', '2026-05-01', 'accrual', 1.5, 'policy_run', '${USER_HR}', '${key}');
+        `),
+      ).rejects.toThrow(/duplicate key value violates unique constraint/);
+    });
+
+    it("rejects a second comp_day_ledger row with the same idempotency_key", async () => {
+      const key = `test-expiry-${randomUUID()}`;
+      await db.seed(`
+        insert into comp_day_ledger (employee_id, txn_date, entry_type, days, reference_type, created_by, idempotency_key)
+        values ('${EMPLOYEE_REPORT}', '2026-05-01', 'expired', -2, 'comp_day_expiry_sweep', '${USER_HR}', '${key}');
+      `);
+      await expect(
+        db.seed(`
+          insert into comp_day_ledger (employee_id, txn_date, entry_type, days, reference_type, created_by, idempotency_key)
+          values ('${EMPLOYEE_REPORT}', '2026-05-01', 'expired', -2, 'comp_day_expiry_sweep', '${USER_HR}', '${key}');
+        `),
+      ).rejects.toThrow(/duplicate key value violates unique constraint/);
+    });
+
+    it("still allows any number of rows with a null idempotency_key (every non-cron write)", async () => {
+      await db.seed(`
+        insert into leave_ledger (employee_id, leave_type_code, txn_date, entry_type, amount_days, reference_type, created_by)
+        values
+          ('${EMPLOYEE_REPORT}', 'annual', '2026-05-02', 'deduction', -1, 'manual_adjustment', '${USER_HR}'),
+          ('${EMPLOYEE_REPORT}', 'annual', '2026-05-02', 'deduction', -1, 'manual_adjustment', '${USER_HR}');
+      `);
+    });
+  });
 });

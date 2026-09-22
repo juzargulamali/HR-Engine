@@ -77,5 +77,11 @@ export async function GET(request: Request) {
     else draftsCreated += 1;
   }
 
-  return NextResponse.json({ discrepanciesFound: (negativeBalances ?? []).length, draftsCreated, skippedExisting, failures });
+  // A non-2xx status is what makes a real failure visible to Vercel Cron's
+  // own monitoring/alerting — returning 200 while `failures` is non-empty
+  // would report this run as healthy even though some drafts weren't created.
+  return NextResponse.json(
+    { discrepanciesFound: (negativeBalances ?? []).length, draftsCreated, skippedExisting, failures },
+    { status: failures.length > 0 ? 500 : 200 },
+  );
 }

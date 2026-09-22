@@ -441,6 +441,7 @@ export interface Database {
           note: string | null;
           created_by: string;
           created_at: string;
+          idempotency_key: string | null;
         };
         Insert: {
           id?: string;
@@ -454,6 +455,7 @@ export interface Database {
           reversal_of_id?: string | null;
           note?: string | null;
           created_by: string;
+          idempotency_key?: string | null;
         };
         Update: Record<string, never>; // append-only — no UPDATE policy exists
         Relationships: [];
@@ -472,6 +474,7 @@ export interface Database {
           reversal_of_id: string | null;
           created_by: string;
           created_at: string;
+          idempotency_key: string | null;
         };
         Insert: {
           id?: string;
@@ -485,6 +488,7 @@ export interface Database {
           reference_id?: string | null;
           reversal_of_id?: string | null;
           created_by: string;
+          idempotency_key?: string | null;
         };
         Update: Record<string, never>; // append-only — no UPDATE policy exists
         Relationships: [];

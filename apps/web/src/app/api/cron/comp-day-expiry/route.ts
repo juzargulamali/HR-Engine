@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { computeCompDayExpiry } from "@enginious-hr/domain";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAuthorizedCronRequest, SYSTEM_ACTOR_ID } from "@/lib/cron/auth";
+import { chunk } from "@/lib/cron/batch";
+
+const INSERT_BATCH_SIZE = 500;
 
 /**
  * Daily comp-day expiry sweep (docs/05-automation-rules.md §5.1). Re-derives
@@ -10,6 +13,13 @@ import { isAuthorizedCronRequest, SYSTEM_ACTOR_ID } from "@/lib/cron/auth";
  * entry" state — a run's own 'expired' postings become part of next run's
  * consumption pool, so re-running (including a retried/duplicate cron hit)
  * naturally posts nothing further for an entry already fully accounted for.
+ *
+ * That self-correction only holds for runs that don't overlap: two
+ * invocations racing each other both read the ledger before either has
+ * posted, so both compute the same "remaining" balance for an earned entry
+ * and would both post its full expiry — double-expiring it. idempotency_key
+ * (unique in the database, one per earned entry ever) is what actually
+ * closes that race.
  */
 export async function GET(request: Request) {
   if (!isAuthorizedCronRequest(request)) {
@@ -44,7 +54,9 @@ export async function GET(request: Request) {
     reference_type: string;
     reference_id: string;
     created_by: string;
+    idempotency_key: string;
   }[] = [];
+  let skipped = 0;
 
   for (const [employeeId, employeeEntries] of byEmployee) {
     const postings = computeCompDayExpiry(
@@ -59,6 +71,15 @@ export async function GET(request: Request) {
     );
 
     for (const posting of postings) {
+      // A malformed `days` value somewhere in this employee's history could
+      // in principle carry a NaN through computeCompDayExpiry()'s running
+      // totals — NaN fails every comparison, so it wouldn't be caught by
+      // any check inside that pure function. Guard it here instead of
+      // letting it reach the insert as a NaN `days` column.
+      if (!Number.isFinite(posting.expiredDays) || posting.expiredDays <= 0) {
+        skipped += 1;
+        continue;
+      }
       rows.push({
         employee_id: employeeId,
         txn_date: today,
@@ -67,17 +88,33 @@ export async function GET(request: Request) {
         reference_type: "comp_day_expiry_sweep",
         reference_id: posting.earnedEntryId,
         created_by: SYSTEM_ACTOR_ID,
+        idempotency_key: `expiry:${posting.earnedEntryId}`,
       });
     }
   }
 
+  // One chunk at a time (not one giant insert): a single bad row rejected
+  // by the database would otherwise fail the entire run's insert and post
+  // nothing at all, for anyone. Chunking bounds that blast radius to the
+  // other rows in the same chunk.
   let posted = 0;
   const failures: string[] = [];
-  if (rows.length > 0) {
-    const { error: insertError, count } = await admin.from("comp_day_ledger").insert(rows, { count: "exact" });
+  for (const batch of chunk(rows, INSERT_BATCH_SIZE)) {
+    // upsert + ignoreDuplicates (not insert): idempotency_key is unique, so
+    // a row that lost the race to a concurrent invocation is silently
+    // dropped instead of failing the whole batch.
+    const { error: insertError, count } = await admin
+      .from("comp_day_ledger")
+      .upsert(batch, { onConflict: "idempotency_key", ignoreDuplicates: true, count: "exact" });
     if (insertError) failures.push(insertError.message);
-    else posted = count ?? rows.length;
+    else posted += count ?? batch.length;
   }
 
-  return NextResponse.json({ ranAt: today, employeesSwept: byEmployee.size, entriesPosted: posted, failures });
+  // A non-2xx status is what makes a real failure visible to Vercel Cron's
+  // own monitoring/alerting — returning 200 while `failures` is non-empty
+  // would report this run as healthy even though it dropped rows.
+  return NextResponse.json(
+    { ranAt: today, employeesSwept: byEmployee.size, entriesPosted: posted, skipped, failures },
+    { status: failures.length > 0 ? 500 : 200 },
+  );
 }

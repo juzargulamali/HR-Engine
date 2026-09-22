@@ -397,7 +397,14 @@ create table leave_ledger (
   reversal_of_id    uuid references leave_ledger(id),
   note              text,
   created_by        uuid not null,
-  created_at        timestamptz not null default now()
+  created_at        timestamptz not null default now(),
+  -- Set only by the leave-accrual cron ('accrual:{employee}:{leave_type}:{YYYY-MM}')
+  -- so a concurrent/retried invocation can't double-post the same
+  -- employee/leave-type/month accrual — the app-level "already accrued
+  -- this month?" check alone can't prevent two overlapping requests from
+  -- both passing it before either has inserted. Null (and therefore
+  -- unconstrained) for every other kind of entry.
+  idempotency_key   text unique
 );
 
 create index idx_leave_ledger_employee_type
@@ -420,7 +427,15 @@ create table comp_day_ledger (
   reference_id    uuid,
   reversal_of_id  uuid references comp_day_ledger(id),
   created_by      uuid not null,
-  created_at      timestamptz not null default now()
+  created_at      timestamptz not null default now(),
+  -- Set only by the comp-day-expiry cron ('expiry:{earned_entry_id}') — an
+  -- earned entry is fully expired in one shot (computeCompDayExpiry posts
+  -- its whole remaining balance at once), so at most one 'expired' row may
+  -- ever reference a given earned entry. Without this, two overlapping
+  -- runs that both read the ledger before either had posted would both
+  -- compute the same "remaining" amount and double-expire it. Null (and
+  -- therefore unconstrained) for every other kind of entry.
+  idempotency_key text unique
 );
 
 create index idx_comp_ledger_employee on comp_day_ledger(employee_id, txn_date);

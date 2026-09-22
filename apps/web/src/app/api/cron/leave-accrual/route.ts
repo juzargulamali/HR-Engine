@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAuthorizedCronRequest, SYSTEM_ACTOR_ID } from "@/lib/cron/auth";
+import { chunk } from "@/lib/cron/batch";
+
+const INSERT_BATCH_SIZE = 500;
 
 function daysBetween(from: string, to: string): number {
   return Math.floor((Date.parse(to) - Date.parse(from)) / (24 * 60 * 60 * 1000));
@@ -18,7 +21,12 @@ function daysBetween(from: string, to: string): number {
  *
  * Idempotent per calendar month: an employee/leave-type pair that already
  * has a 'policy_run' accrual posted this month is skipped, so a retried or
- * manually re-triggered run this same month can't double-pay.
+ * manually re-triggered run this same month can't double-pay. That
+ * app-level check alone can't stop two overlapping invocations (a Vercel
+ * Cron retry racing the original request) from both passing it before
+ * either has inserted — idempotency_key (unique in the database) is what
+ * actually closes that race; the check above just avoids the redundant
+ * work in the ordinary sequential case.
  */
 export async function GET(request: Request) {
   if (!isAuthorizedCronRequest(request)) {
@@ -29,11 +37,21 @@ export async function GET(request: Request) {
   const today = new Date().toISOString().slice(0, 10);
   const monthStart = `${today.slice(0, 7)}-01`;
 
+  // Mirrors resolve_policy()'s own filter (schema.sql): 'active' status
+  // alone isn't enough — a policy can be activated ahead of time with a
+  // future effective_from (or left with a past effective_to after being
+  // superseded), and the exclusion constraint on this table only stops
+  // *overlapping* active ranges per country, not multiple non-overlapping
+  // active rows existing at once. Without this date window, a future-dated
+  // policy started accruing at its new rate the moment someone activated
+  // it, months before it was supposed to take effect.
   const { data: activePolicies, error: policiesError } = await admin
     .from("policy_versions")
     .select("id, country_code")
     .eq("policy_type", "leave_rules")
-    .eq("status", "active");
+    .eq("status", "active")
+    .lte("effective_from", today)
+    .or(`effective_to.is.null,effective_to.gte.${today}`);
   if (policiesError) return NextResponse.json({ error: policiesError.message }, { status: 500 });
   if (!activePolicies || activePolicies.length === 0) {
     return NextResponse.json({ ranAt: today, note: "No active leave_rules policy anywhere — nothing to accrue.", entriesPosted: 0 });
@@ -79,6 +97,7 @@ export async function GET(request: Request) {
   // per-row insert risks a serverless function timeout; a single batched
   // insert keeps this a constant number of round trips regardless of
   // headcount.
+  const accrualMonth = today.slice(0, 7); // YYYY-MM
   const rows: {
     employee_id: string;
     leave_type_code: string;
@@ -87,6 +106,7 @@ export async function GET(request: Request) {
     amount_days: number;
     reference_type: string;
     created_by: string;
+    idempotency_key: string;
   }[] = [];
   let skipped = 0;
 
@@ -116,7 +136,13 @@ export async function GET(request: Request) {
       const maxBalance = leaveType.max_balance_days ? Number(leaveType.max_balance_days) : null;
       const currentBalance = balanceByKey.get(key) ?? 0;
       const amount = maxBalance !== null ? Math.min(rate, Math.max(0, maxBalance - currentBalance)) : rate;
-      if (amount <= 0) {
+      // NaN fails every comparison (including `<= 0`), so a malformed
+      // accrual_rate_per_period/max_balance_days would otherwise slip past
+      // that check and reach the insert as a NaN amount_days — rejecting
+      // that one row at the database, and (pre-chunking) the whole batch
+      // with it. Catch it here instead: skip just this one row, with a
+      // reason, and keep going.
+      if (!Number.isFinite(amount) || amount <= 0) {
         skipped += 1;
         continue;
       }
@@ -129,17 +155,30 @@ export async function GET(request: Request) {
         amount_days: amount,
         reference_type: "policy_run",
         created_by: SYSTEM_ACTOR_ID,
+        idempotency_key: `accrual:${employee.id}:${leaveType.leave_type_code}:${accrualMonth}`,
       });
     }
   }
 
+  // One chunk at a time (not one giant insert): a single bad row rejected
+  // by the database — a stale employee_id, say — would otherwise fail the
+  // entire run's insert and post nothing at all, for anyone. Chunking
+  // bounds that blast radius to the other rows in the same chunk.
   let posted = 0;
   const failures: string[] = [];
-  if (rows.length > 0) {
-    const { error: insertError, count } = await admin.from("leave_ledger").insert(rows, { count: "exact" });
+  for (const batch of chunk(rows, INSERT_BATCH_SIZE)) {
+    // upsert + ignoreDuplicates (not insert): idempotency_key is unique, so
+    // a row that lost the race to a concurrent invocation is silently
+    // dropped instead of failing the whole batch.
+    const { error: insertError, count } = await admin
+      .from("leave_ledger")
+      .upsert(batch, { onConflict: "idempotency_key", ignoreDuplicates: true, count: "exact" });
     if (insertError) failures.push(insertError.message);
-    else posted = count ?? rows.length;
+    else posted += count ?? batch.length;
   }
 
-  return NextResponse.json({ ranAt: today, entriesPosted: posted, skipped, failures });
+  // A non-2xx status is what makes a real failure visible to Vercel Cron's
+  // own monitoring/alerting — returning 200 while `failures` is non-empty
+  // would report this run as healthy even though it dropped rows.
+  return NextResponse.json({ ranAt: today, entriesPosted: posted, skipped, failures }, { status: failures.length > 0 ? 500 : 200 });
 }
