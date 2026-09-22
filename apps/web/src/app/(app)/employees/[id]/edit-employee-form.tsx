@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { updateEmployee, updateOwnContactInfo } from "@/lib/actions/employees";
+import { linkEmployeeToUser, updateEmployee, updateOwnContactInfo } from "@/lib/actions/employees";
 import type { ActionState } from "@/lib/actions/companies";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,17 +22,20 @@ interface EmployeeCore {
 
 export function EditEmployeeForm({
   employee,
+  linkedEmail,
   managers,
   canEditCore,
   isSelf,
 }: {
   employee: EmployeeCore;
+  linkedEmail: string | null;
   managers: { id: string; first_name: string; last_name: string }[];
   canEditCore: boolean;
   isSelf: boolean;
 }) {
   const [coreState, coreAction, corePending] = useActionState(updateEmployee, initialState);
   const [contactState, contactAction, contactPending] = useActionState(updateOwnContactInfo, initialState);
+  const [linkState, linkAction, linkPending] = useActionState(linkEmployeeToUser, initialState);
 
   return (
     <div className="space-y-6">
@@ -99,6 +102,29 @@ export function EditEmployeeForm({
           {coreState.error ? <Alert variant="destructive">{coreState.error}</Alert> : null}
           <Button type="submit" size="sm" disabled={corePending}>
             {corePending ? "Saving…" : "Save profile"}
+          </Button>
+        </form>
+      ) : null}
+
+      {canEditCore ? (
+        <form action={linkAction} className="space-y-3 border-t border-border pt-4">
+          <input type="hidden" name="employeeId" value={employee.id} />
+          <p className="text-sm font-medium">Linked login</p>
+          <p className="text-sm text-muted-foreground">
+            {linkedEmail
+              ? "This record is linked to a login, so its owner sees their own profile, leave, and approvals."
+              : "Not linked to a login yet — this person can't sign in as themselves until you link one."}
+          </p>
+          <div className="max-w-sm space-y-1.5">
+            <Label htmlFor="email">Account email</Label>
+            <Input id="email" name="email" type="email" placeholder="name@enginious.ae" defaultValue={linkedEmail ?? ""} />
+            <p className="text-xs text-muted-foreground">
+              Must already be invited from Admin → Users. Clear this field and save to unlink.
+            </p>
+          </div>
+          {linkState.error ? <Alert variant="destructive">{linkState.error}</Alert> : null}
+          <Button type="submit" size="sm" variant="outline" disabled={linkPending}>
+            {linkPending ? "Saving…" : linkedEmail ? "Update link" : "Link account"}
           </Button>
         </form>
       ) : null}

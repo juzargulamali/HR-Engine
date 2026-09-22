@@ -115,6 +115,56 @@ export async function updateEmployee(_prevState: ActionState, formData: FormData
   return { error: null };
 }
 
+const linkEmployeeUserSchema = z.object({
+  employeeId: z.string().uuid(),
+  email: z.string().email().optional().or(z.literal("")),
+});
+
+/**
+ * Connects an employee record to a login — the step nothing else in the
+ * app ever does. Inviting someone (Admin -> Users) only creates their
+ * auth.users/profiles row; creating their employee record (Employees ->
+ * New) never asks for an email. Without this, current_employee_id() never
+ * resolves for them and every self-service page ("My Profile", leave,
+ * reimbursements) tells a real, logged-in person HR hasn't created their
+ * record yet — even after both rows exist. Looks the account up by email
+ * via `profiles` (readable by any signed-in user, per profiles_select) and
+ * reports a clear error if nobody's been invited yet, rather than a raw
+ * constraint violation, when the email doesn't resolve to anyone. Clearing
+ * the field unlinks the employee (sets user_id back to null).
+ */
+export async function linkEmployeeToUser(_prevState: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = linkEmployeeUserSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  const supabase = await createClient();
+
+  let userId: string | null = null;
+  if (d.email) {
+    const { data: profile } = await supabase.from("profiles").select("id").ilike("email", d.email).maybeSingle();
+    if (!profile) {
+      return { error: `No account found for ${d.email} — invite them from Admin → Users first, then link them here.` };
+    }
+    userId = profile.id;
+  }
+
+  const { error } = await supabase.from("employees").update({ user_id: userId }).eq("id", d.employeeId);
+  if (error) {
+    return {
+      error: error.message.includes("employees_user_id_unique")
+        ? "That account is already linked to a different employee record."
+        : error.message,
+    };
+  }
+
+  revalidatePath(`/employees/${d.employeeId}`);
+  revalidatePath("/profile");
+  return { error: null };
+}
+
 /** Self-service: an employee editing their own contact details only. */
 const updateContactSchema = z.object({
   employeeId: z.string().uuid(),

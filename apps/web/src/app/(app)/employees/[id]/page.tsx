@@ -35,12 +35,16 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   const { data: employee } = await supabase
     .from("employees")
     .select(
-      "id, first_name, last_name, job_title, employment_status, company_id, country_code, manager_id, hire_date, termination_date, deleted_at, personal_email, phone",
+      "id, first_name, last_name, job_title, employment_status, company_id, country_code, manager_id, hire_date, termination_date, deleted_at, personal_email, phone, user_id",
     )
     .eq("id", id)
     .maybeSingle();
 
   if (!employee) notFound();
+
+  const { data: linkedProfile } = employee.user_id
+    ? await supabase.from("profiles").select("email").eq("id", employee.user_id).maybeSingle()
+    : { data: null };
 
   const isSelf = session.employeeId === employee.id;
   // Direct-report approximation only — see the note in
@@ -119,6 +123,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
         <CardContent>
           <EditEmployeeForm
             employee={employee}
+            linkedEmail={linkedProfile?.email ?? null}
             managers={(managers ?? []).filter((m) => m.id !== employee.id)}
             canEditCore={canEditCore}
             isSelf={isSelf}

@@ -219,6 +219,10 @@ create table employees (
 
 create index idx_employees_manager on employees(manager_id) where deleted_at is null;
 create index idx_employees_company on employees(company_id) where deleted_at is null;
+-- Partial (non-null values only) so any number of not-yet-linked employees
+-- can coexist, but a login can never be attached to two employee rows —
+-- current_employee_id()'s `limit 1` would otherwise pick an arbitrary one.
+create unique index employees_user_id_unique on employees(user_id) where user_id is not null;
 
 -- Append-only contract history. Never UPDATE a row's terms; insert a new
 -- version and flip the old one's is_current.
