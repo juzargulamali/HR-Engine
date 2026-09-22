@@ -187,6 +187,40 @@ describe("Phase 2 row-level security: country policy engine", () => {
       );
       expect(rows).toEqual([{ status: "active", approved_by: USER_CEO }]);
     });
+
+    // Regression test: guard_policy_version_update() used to gate its
+    // content-immutability check on has_role('hr_admin', null,
+    // new.country_code) — the caller-supplied NEW value — instead of
+    // old.country_code. A CEO of country AE (not hr_admin there) who also
+    // happens to hold hr_admin in a different country could rewrite an
+    // AE draft's content in the same UPDATE that relocates it to their own
+    // hr_admin country: RLS's own USING passes against the OLD row (they're
+    // CEO of AE), WITH CHECK passes against the NEW row (they're hr_admin
+    // of the new country), and the old buggy trigger check would then look
+    // at the NEW country and let every other column through unchecked.
+    it("blocks a CEO from rewriting a draft's content by relocating it to a country they administer as hr_admin", async () => {
+      const foreignCountryHrCeo = USER_CEO; // already ceo of AE — grant them hr_admin in a different country too
+      await db.seed(`
+        insert into countries (code, name, default_currency) values ('IN', 'India', 'INR') on conflict do nothing;
+        insert into user_roles (user_id, role, country_code) values ('${foreignCountryHrCeo}', 'hr_admin', 'IN') on conflict do nothing;
+      `);
+      const draftId = randomUUID();
+      await db.seed(`
+        insert into policy_versions (id, country_code, policy_type, version_no, effective_from, status, payload, created_by)
+          values ('${draftId}', 'AE', 'notice_period', 2, '2027-01-01', 'draft', '{"default_days":30}', '${USER_HR1}');
+      `);
+
+      await expect(
+        db.asUser(USER_CEO, (query) =>
+          query("update policy_versions set country_code = 'IN', payload = '{\"pwned\":true}'::jsonb where id = $1", [draftId]),
+        ),
+      ).rejects.toThrow(/CEO may only activate/);
+
+      const check = await db.asUser(USER_HR1, (query) => query("select country_code, payload from policy_versions where id = $1", [draftId]));
+      expect(check.rows).toEqual([{ country_code: "AE", payload: { default_days: 30 } }]);
+
+      await db.seed(`delete from user_roles where user_id = '${foreignCountryHrCeo}' and role = 'hr_admin' and country_code = 'IN';`);
+    });
   });
 
   describe("exclusion constraint", () => {

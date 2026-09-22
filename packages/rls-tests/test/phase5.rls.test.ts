@@ -100,6 +100,25 @@ describe("Phase 5 row-level security: performance, checklists, documents, assets
         expect(check.rows[0]?.manager_rating).toBe(5);
       });
     });
+
+    // Regression test: goals_write_self and goals_write_manager both apply
+    // to an UPDATE, and Postgres OR-combines every applicable policy's
+    // WITH CHECK independently of USING — so without a dedicated guard, a
+    // manager targeting a report's goal (passing goals_write_manager's
+    // USING against the OLD row) could set employee_id to their OWN id in
+    // the same UPDATE, and goals_write_self's check would then pass
+    // trivially against the NEW row, hijacking the goal.
+    it("blocks a manager from hijacking a report's goal by reassigning employee_id to themselves", async () => {
+      const goalId = randomUUID();
+      await db.seed(`insert into goals (id, employee_id, cycle_id, title) values ('${goalId}', '${EMPLOYEE_REPORT}', '${cycleId}', 'Hijack target');`);
+
+      await expect(
+        db.asUser(USER_MANAGER, (query) => query("update goals set employee_id = $1 where id = $2", [EMPLOYEE_MANAGER, goalId])),
+      ).rejects.toThrow(/cannot be reassigned to a different employee/);
+
+      const check = await db.asUser(USER_HR, (query) => query("select employee_id from goals where id = $1", [goalId]));
+      expect(check.rows).toEqual([{ employee_id: EMPLOYEE_REPORT }]);
+    });
   });
 
   describe("appraisals: separate RLS tier, Finance excluded entirely", () => {
@@ -158,6 +177,27 @@ describe("Phase 5 row-level security: performance, checklists, documents, assets
         const check = await query("select overall_rating from appraisals where id = $1", [appraisalId]);
         expect(check.rows[0]?.overall_rating).toBe(4);
       });
+    });
+
+    // Regression test: appraisals_update_appraiser lets the appraiser edit
+    // their own draft freely but places no constraint on employee_id at
+    // all — without a dedicated guard, any manager who has ever legitimately
+    // created one appraisal for a real report could retarget that draft
+    // onto an arbitrary employee (even one they don't manage) while it's
+    // still a draft.
+    it("blocks an appraiser from retargeting their own draft appraisal onto a different employee", async () => {
+      const draftId = randomUUID();
+      await db.seed(`
+        insert into appraisals (id, employee_id, cycle_id, appraiser_id, status)
+        values ('${draftId}', '${EMPLOYEE_REPORT}', '${cycleId}', '${USER_MANAGER}', 'draft');
+      `);
+
+      await expect(
+        db.asUser(USER_MANAGER, (query) => query("update appraisals set employee_id = $1 where id = $2", [EMPLOYEE_PEER, draftId])),
+      ).rejects.toThrow(/cannot be reassigned to a different employee/);
+
+      const check = await db.asUser(USER_HR, (query) => query("select employee_id from appraisals where id = $1", [draftId]));
+      expect(check.rows).toEqual([{ employee_id: EMPLOYEE_REPORT }]);
     });
 
     it("lets the appraiser delete their own draft, but never a submitted appraisal", async () => {

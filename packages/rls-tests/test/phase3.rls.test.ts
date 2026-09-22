@@ -121,6 +121,31 @@ describe("Phase 3 row-level security: leave, ledgers, deduction priority, approv
       expect(rows[0]?.approver).toBe(USER_MANAGER);
     });
 
+    // Regression test: resolve_approver() never excluded a terminated
+    // employee, so a manager who left the company remained a fully valid,
+    // resolvable approver of their former reports' leave/reimbursements
+    // indefinitely — nothing else in the schema cascades a termination
+    // into reassigning direct reports.
+    it("excludes a terminated manager from direct_manager resolution", async () => {
+      const terminatedManagerUserId = randomUUID();
+      const terminatedManagerEmployeeId = randomUUID();
+      const tempReportEmployeeId = randomUUID();
+      await db.seed(`
+        insert into auth.users (id, email) values ('${terminatedManagerUserId}', 'terminated-mgr@enginious.ae');
+        insert into employees (id, user_id, employee_number, company_id, country_code, first_name, last_name, hire_date, employment_status)
+          values ('${terminatedManagerEmployeeId}', '${terminatedManagerUserId}', 'TERM-01', '${COMPANY_A}', 'AE', 'Former', 'Manager', '2020-01-01', 'terminated');
+        insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date, manager_id)
+          values ('${tempReportEmployeeId}', 'TEMP-01', '${COMPANY_A}', 'AE', 'Temp', 'Report', '2024-01-01', '${terminatedManagerEmployeeId}');
+      `);
+
+      const { rows } = await db.asUser(USER_HR, (query) =>
+        query("select resolve_approver('direct_manager', $1) as approver", [tempReportEmployeeId]),
+      );
+      expect(rows[0]?.approver).toBeNull();
+
+      await db.seed(`delete from employees where id in ('${tempReportEmployeeId}', '${terminatedManagerEmployeeId}');`);
+    });
+
     it("lets an ordinary employee resolve all HR Admin / CEO holders for their company (for leave-notification emails), despite user_roles' own RLS blocking a direct select", async () => {
       const directSelect = await db.asUser(USER_REPORT, (query) => query("select user_id from user_roles where role = 'hr_admin'"));
       expect(directSelect.rows).toEqual([]); // user_roles_select_own blocks seeing anyone else's grants directly
@@ -148,34 +173,51 @@ describe("Phase 3 row-level security: leave, ledgers, deduction priority, approv
       ).rejects.toThrow(/row-level security/);
     });
 
-    it("lets the requester insert the first approvals row on their own just-created request", async () => {
+    it("lets the requester create the first approval via create_initial_approval() on their own just-created request", async () => {
       const requestId = randomUUID();
       await db.seed(
         `insert into leave_requests (id, employee_id, leave_type_code, start_date, end_date, total_days)
          values ('${requestId}', '${EMPLOYEE_REPORT}', 'annual', '2026-04-05', '2026-04-05', 1)`,
       );
-      const { rows } = await db.asUser(USER_REPORT, (query) =>
-        query(
-          `insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id)
-           values ('leave_request', $1, $2, 1, $3) returning decision`,
-          [requestId, defaultWorkflowId, USER_MANAGER],
-        ),
-      );
+      const { rows } = await db.asUser(USER_REPORT, async (query) => {
+        const { rows: created } = await query("select create_initial_approval('leave_request', $1) as id", [requestId]);
+        return query("select decision from approvals where id = $1", [created[0]?.id]);
+      });
       expect(rows).toEqual([{ decision: "pending" }]);
     });
 
-    it("blocks a peer from inserting the first approvals row on someone else's request", async () => {
+    it("blocks a peer from creating the first approval on someone else's request", async () => {
       const requestId = randomUUID();
       await db.seed(
         `insert into leave_requests (id, employee_id, leave_type_code, start_date, end_date, total_days)
          values ('${requestId}', '${EMPLOYEE_REPORT}', 'annual', '2026-04-06', '2026-04-06', 1)`,
       );
       await expect(
-        db.asUser(USER_PEER, (query) =>
+        db.asUser(USER_PEER, (query) => query("select create_initial_approval('leave_request', $1)", [requestId])),
+      ).rejects.toThrow(/do not own this/);
+    });
+
+    // Regression test for the real bug this replaced: approvals_insert_initial
+    // used to let ANY owner of an entity insert the first approvals row
+    // directly, with no validation on workflow_id or approver_id at all — an
+    // owner could set workflow_id = null and approver_id = themselves, then
+    // call decide_leave_approval() to self-approve, since a null/foreign
+    // workflow_id makes the "walk every remaining step" loop match nothing
+    // and fall straight through to final approval. There is now no INSERT
+    // policy on approvals at all — create_initial_approval() (SECURITY
+    // DEFINER) is the only way a row is ever created.
+    it("blocks a direct client INSERT into approvals entirely, even from the entity's own owner", async () => {
+      const requestId = randomUUID();
+      await db.seed(
+        `insert into leave_requests (id, employee_id, leave_type_code, start_date, end_date, total_days)
+         values ('${requestId}', '${EMPLOYEE_REPORT}', 'annual', '2026-04-07', '2026-04-07', 1)`,
+      );
+      await expect(
+        db.asUser(USER_REPORT, (query) =>
           query(
             `insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id)
-             values ('leave_request', $1, $2, 1, $3)`,
-            [requestId, defaultWorkflowId, USER_MANAGER],
+             values ('leave_request', $1, null, 1, $2)`,
+            [requestId, USER_REPORT],
           ),
         ),
       ).rejects.toThrow(/row-level security/);

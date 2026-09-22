@@ -58,13 +58,9 @@ export async function submitPayrollRun(runId: string, companyId: string): Promis
   const { error: updateError } = await supabase.from("payroll_export_runs").update({ status: "submitted" }).eq("id", runId);
   if (updateError) return { error: updateError.message };
 
-  const { error: approvalError } = await supabase.from("approvals").insert({
-    entity_type: "payroll_export_run",
-    entity_id: runId,
-    workflow_id: resolved.workflowId,
-    step_order: 1,
-    approver_id: resolved.approverId,
-    decision: "pending",
+  const { error: approvalError } = await supabase.rpc("create_initial_approval", {
+    p_entity_type: "payroll_export_run",
+    p_entity_id: runId,
   });
   if (approvalError) return { error: approvalError.message };
 

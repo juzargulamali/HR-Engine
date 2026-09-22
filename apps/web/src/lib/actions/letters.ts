@@ -114,12 +114,9 @@ export async function issueLetter(_prevState: { error: string | null }, formData
   if (insertError || !letter) return { error: insertError?.message ?? "Could not create the letter." };
 
   if (resolved) {
-    const { error: approvalError } = await supabase.from("approvals").insert({
-      entity_type: "generated_letter",
-      entity_id: letter.id,
-      workflow_id: resolved.workflowId,
-      step_order: 1,
-      approver_id: resolved.approverId,
+    const { error: approvalError } = await supabase.rpc("create_initial_approval", {
+      p_entity_type: "generated_letter",
+      p_entity_id: letter.id,
     });
     if (approvalError) return { error: approvalError.message };
   }

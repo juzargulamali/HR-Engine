@@ -646,6 +646,36 @@ create table goals (
 
 create index idx_goals_employee on goals(employee_id);
 
+-- goals_write_self and goals_write_manager (RLS, section 14) both apply to
+-- an UPDATE on this table, and Postgres OR-combines every applicable
+-- permissive policy's WITH CHECK independently of USING — so a manager
+-- targeting a report's goal (passing goals_write_manager's USING against
+-- the OLD row) could set employee_id to their OWN employee id in the same
+-- UPDATE, and goals_write_self's WITH CHECK (employee_id =
+-- current_employee_id()) would then pass trivially against the NEW row,
+-- silently hijacking a subordinate's goal. employee_id has no legitimate
+-- reason to ever change after creation, so this blocks it outright for
+-- every caller, closing that OR-combination gap without having to touch
+-- either policy.
+create or replace function guard_goal_employee_immutable()
+returns trigger
+language plpgsql
+as $$
+begin
+  if auth.uid() is null then
+    return new; -- trusted backend/migration/seed context
+  end if;
+  if new.employee_id is distinct from old.employee_id then
+    raise exception 'A goal cannot be reassigned to a different employee';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger goals_guard_employee_immutable
+  before update on goals
+  for each row execute function guard_goal_employee_immutable();
+
 -- Sensitive tier 3: appraisal content — separate RLS from base employee
 -- record and from goals; Finance never gets a select policy on this table
 -- at all (docs/03-permission-matrix.md §3.7).
@@ -688,6 +718,18 @@ begin
       raise exception 'An employee may only acknowledge their appraisal, not edit its content';
     end if;
   end if;
+
+  -- appraisals_update_appraiser (RLS) lets the appraiser edit their own
+  -- draft freely but places no constraint on employee_id at all — without
+  -- this, any manager who has ever legitimately created one appraisal for
+  -- a real report could retarget that draft onto an arbitrary employee
+  -- (even in a different company) by changing employee_id in the same
+  -- UPDATE, since neither appraisals_insert's is_manager_of() check nor
+  -- any other policy re-runs on UPDATE.
+  if auth.uid() = old.appraiser_id and new.employee_id is distinct from old.employee_id then
+    raise exception 'An appraisal cannot be reassigned to a different employee';
+  end if;
+
   return new;
 end;
 $$;
@@ -1111,16 +1153,28 @@ declare
 begin
   select company_id, manager_id into v_company_id, v_manager_id from employees where id = p_employee_id;
 
+  -- employment_status <> 'terminated' (not e.g. 'active' only) — a
+  -- terminated employee should never remain resolvable as an approver of
+  -- record indefinitely (nothing else in the schema cascades a
+  -- termination into reassigning their reports or revoking their roles),
+  -- but someone merely on_leave/suspended is still a legitimate approver.
   if p_approver_type = 'direct_manager' then
-    select user_id into v_result from employees where id = v_manager_id;
+    select user_id into v_result from employees
+    where id = v_manager_id and employment_status <> 'terminated' and deleted_at is null;
   elsif p_approver_type = 'manager_of_manager' then
-    select user_id into v_result from employees where id = (select manager_id from employees where id = v_manager_id);
+    select user_id into v_result from employees
+    where id = (select manager_id from employees where id = v_manager_id)
+      and employment_status <> 'terminated' and deleted_at is null;
   elsif p_approver_type like 'role:%' then
     select ur.user_id into v_result
     from user_roles ur
     where ur.role = replace(p_approver_type, 'role:', '')::app_role
       and ur.revoked_at is null
       and (ur.company_id is null or ur.company_id = v_company_id)
+      and not exists (
+        select 1 from employees e2
+        where e2.user_id = ur.user_id and (e2.employment_status = 'terminated' or e2.deleted_at is not null)
+      )
     order by ur.granted_at asc
     limit 1;
   end if;
@@ -1151,6 +1205,10 @@ begin
     where ur.role = replace(p_approver_type, 'role:', '')::app_role
       and ur.revoked_at is null
       and (ur.company_id is null or ur.company_id = p_company_id)
+      and not exists (
+        select 1 from employees e2
+        where e2.user_id = ur.user_id and (e2.employment_status = 'terminated' or e2.deleted_at is not null)
+      )
     order by ur.granted_at asc
     limit 1;
   end if;
@@ -1251,14 +1309,29 @@ returns trigger
 language plpgsql
 as $$
 declare
-  v_workflow_id uuid := coalesce(new.workflow_id, old.workflow_id);
-  v_entity_type approvable_entity;
+  v_old_entity_type approvable_entity;
+  v_new_entity_type approvable_entity;
 begin
   if current_user <> 'authenticated' then
     return coalesce(new, old); -- trusted context: SECURITY DEFINER provisioning, migrations, admin/service-role
   end if;
-  select entity_type into v_entity_type from approval_workflows where id = v_workflow_id;
-  if v_entity_type = 'payroll_export_run' then
+
+  -- Checks BOTH the row's real current workflow (old, present on
+  -- update/delete) and its would-be new workflow (new, present on
+  -- insert/update) — checking only new.workflow_id (as this used to) let
+  -- an HR Admin evade the guard entirely by re-parenting a payroll step
+  -- onto a different, ordinary workflow they also manage: that UPDATE's
+  -- new.workflow_id resolves to a non-payroll entity_type, so the old
+  -- single-sided check passed even though the row being detached WAS a
+  -- mandatory payroll step the instant before.
+  if tg_op <> 'INSERT' then
+    select entity_type into v_old_entity_type from approval_workflows where id = old.workflow_id;
+  end if;
+  if tg_op <> 'DELETE' then
+    select entity_type into v_new_entity_type from approval_workflows where id = new.workflow_id;
+  end if;
+
+  if v_old_entity_type = 'payroll_export_run' or v_new_entity_type = 'payroll_export_run' then
     raise exception 'The payroll export approval workflow (Finance then CEO, every time) cannot be modified';
   end if;
   return coalesce(new, old);
@@ -1295,6 +1368,100 @@ $$;
 create trigger payroll_runs_guard_client_update
   before update on payroll_export_runs
   for each row execute function guard_payroll_run_client_update();
+
+-- Creates the FIRST approvals row for a just-submitted entity — the one
+-- write every entity type's submit action needs to make, and the one this
+-- schema used to leave to a client-side INSERT under approvals_insert_initial
+-- (with check (step_order = 1 and decision = 'pending' and
+-- is_entity_owner(...))). That policy never validated workflow_id or
+-- approver_id at all — neither column is constrained to "the real workflow
+-- for this entity_type/company" or "the real resolved step-1 approver" — so
+-- any owner of an entity could insert a row with workflow_id = null (or any
+-- other workflow's id, e.g. one with a single, self-resolving step) and
+-- approver_id = themselves, then call decide_leave_approval() on it: with a
+-- null/foreign workflow_id, the "walk every remaining step" loop
+-- (`where workflow_id = v_approval.workflow_id ...`) matches nothing, so it
+-- falls straight through to final approval — a full self-approval bypass on
+-- every entity type, including payroll_export_run's mandatory Finance-then-
+-- CEO sign-off. This function is the fix: it re-resolves the workflow and
+-- step-1 approver itself (SECURITY DEFINER, the same authority
+-- decide_leave_approval() already has to do this), so nothing client-
+-- supplied about the approval's routing is ever trusted. The client-facing
+-- INSERT policy on approvals is dropped entirely (see section 14) — this
+-- function is now the ONLY way an approvals row is ever created.
+create or replace function create_initial_approval(p_entity_type approvable_entity, p_entity_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_company_id uuid;
+  v_employee_id uuid;
+  v_workflow_id uuid;
+  v_approver_type text;
+  v_approver_id uuid;
+  v_approval_id uuid;
+begin
+  if not is_entity_owner(p_entity_type, p_entity_id) then
+    raise exception 'You do not own this % (or it does not exist)', p_entity_type;
+  end if;
+
+  if p_entity_type = 'leave_request' then
+    select e.company_id, r.employee_id into v_company_id, v_employee_id
+    from leave_requests r join employees e on e.id = r.employee_id where r.id = p_entity_id;
+  elsif p_entity_type = 'reimbursement_claim' then
+    select e.company_id, c.employee_id into v_company_id, v_employee_id
+    from reimbursement_claims c join employees e on e.id = c.employee_id where c.id = p_entity_id;
+  elsif p_entity_type = 'timesheet' then
+    select e.company_id, t.employee_id into v_company_id, v_employee_id
+    from timesheets t join employees e on e.id = t.employee_id where t.id = p_entity_id;
+  elsif p_entity_type = 'generated_letter' then
+    select e.company_id, l.employee_id into v_company_id, v_employee_id
+    from generated_letters l join employees e on e.id = l.employee_id where l.id = p_entity_id;
+  elsif p_entity_type = 'payroll_export_run' then
+    select company_id into v_company_id from payroll_export_runs where id = p_entity_id;
+  else
+    raise exception 'Unsupported entity type: %', p_entity_type;
+  end if;
+
+  select id into v_workflow_id from approval_workflows
+  where company_id = v_company_id and entity_type = p_entity_type and is_active = true
+  order by created_at asc
+  limit 1;
+  if v_workflow_id is null then
+    raise exception 'No approval workflow is configured for your company. Contact HR Admin.';
+  end if;
+
+  select approver_type into v_approver_type
+  from approval_workflow_steps where workflow_id = v_workflow_id and step_order = 1;
+  if v_approver_type is null then
+    raise exception 'This workflow has no first step configured. Contact HR Admin.';
+  end if;
+
+  if p_entity_type = 'payroll_export_run' then
+    v_approver_id := resolve_approver_for_company(v_approver_type, v_company_id);
+  else
+    v_approver_id := resolve_approver(v_approver_type, v_employee_id);
+  end if;
+  if v_approver_id is null then
+    raise exception 'No approver could be resolved (e.g. no manager assigned, or no one holds the required role). Contact HR Admin.';
+  end if;
+
+  -- Self-approval prevention for step 1 — decide_leave_approval() already
+  -- refuses to route any LATER step back to the requester; this is the same
+  -- check for the first step, which that function never sees.
+  if v_approver_id = auth.uid() then
+    raise exception 'The resolved approver for this workflow''s first step (%) is you — you can''t approve your own request. Contact HR Admin to assign a different approver.', v_approver_type;
+  end if;
+
+  insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id, decision)
+  values (p_entity_type, p_entity_id, v_workflow_id, 1, v_approver_id, 'pending')
+  returning id into v_approval_id;
+
+  return v_approval_id;
+end;
+$$;
 
 -- The approval state machine — SECURITY DEFINER so it can read/write across
 -- leave/reimbursement/timesheet/generated_letter/payroll_export_run tables
@@ -1796,7 +1963,15 @@ begin
     return new; -- trusted backend write (migration/seed/service-role) — see the Phase 1 employee self-update guard for why
   end if;
 
-  if not has_role('hr_admin', null, new.country_code) then
+  -- Checks old.country_code (the row's CURRENT country), never
+  -- new.country_code — same reasoning as guard_employee_self_update()'s
+  -- old.company_id fix: the caller controls the new row's contents, so a
+  -- CEO of country A who also happens to hold hr_admin in country B could
+  -- otherwise rewrite a country-A draft's content in the same statement
+  -- that relocates it to country B (RLS's own WITH CHECK only requires
+  -- holding hr_admin-or-ceo in the NEW country, which that dual-role user
+  -- satisfies too).
+  if not has_role('hr_admin', null, old.country_code) then
     if new.policy_type is distinct from old.policy_type
       or new.version_no is distinct from old.version_no
       or new.effective_from is distinct from old.effective_from
@@ -2208,24 +2383,32 @@ create policy approval_workflow_steps_write on approval_workflow_steps for all
   with check (exists (select 1 from approval_workflows w where w.id = workflow_id and has_role('hr_admin', w.company_id)));
 
 -- ---- approvals: the assigned approver, the requester (for leave_request),
---      and HR Admin can see a decision row. Only decide_leave_approval()
---      (SECURITY DEFINER) writes to this table for the leave_request flow —
---      no direct INSERT/UPDATE policy exists for ordinary users, so a
---      client can never forge or edit a decision by calling .from() directly.
+--      and HR Admin can see a decision row. No INSERT/UPDATE/DELETE policy
+--      exists for ordinary users at all — create_initial_approval() and
+--      decide_leave_approval() (both SECURITY DEFINER) are the only ways
+--      this table is ever written, so a client can never forge, edit, or
+--      redirect an approval by calling .from() directly.
+--
+-- This used to have an approvals_insert_initial policy
+-- (with check (step_order = 1 and decision = 'pending' and
+-- is_entity_owner(entity_type, entity_id))) letting the Server Action that
+-- submits a request insert the first row directly. That check never
+-- validated workflow_id or approver_id at all — so any owner of an entity
+-- could insert step 1 with workflow_id = null (or any other workflow's id)
+-- and approver_id = themselves, then call decide_leave_approval(): with a
+-- null/foreign workflow_id, the "walk every remaining step" loop matches
+-- nothing, so it falls straight through to final approval — a full
+-- self-approval bypass on every entity type, payroll_export_run's
+-- mandatory Finance-then-CEO sign-off included. create_initial_approval()
+-- (section 13) closes this by re-resolving the workflow and approver
+-- itself rather than trusting anything client-supplied about an
+-- approval's routing.
 create policy approvals_select on approvals for select
   using (
     approver_id = auth.uid()
     or has_role('hr_admin')
     or is_entity_owner(entity_type, entity_id)
   );
-
--- The Server Action that submits a request inserts the FIRST approvals row
--- under the requester's own identity — allowed only when they're inserting
--- a pending step-1 row for their own just-created leave/claim/timesheet.
--- is_entity_owner() is the one place a 4th approvable entity type needs
--- touching (docs/09-extending-the-system.md) — this policy never changes.
-create policy approvals_insert_initial on approvals for insert
-  with check (step_order = 1 and decision = 'pending' and is_entity_owner(entity_type, entity_id));
 
 -- ---- projects: broad read (same "transparency" pattern as departments —
 --      every employee needs to pick a project for a timesheet/claim line),

@@ -125,13 +125,9 @@ export async function submitClaim(claimId: string): Promise<{ error: string | nu
     .eq("id", claimId);
   if (updateError) return { error: updateError.message };
 
-  const { error: approvalError } = await supabase.from("approvals").insert({
-    entity_type: "reimbursement_claim",
-    entity_id: claimId,
-    workflow_id: resolved.workflowId,
-    step_order: 1,
-    approver_id: resolved.approverId,
-    decision: "pending",
+  const { error: approvalError } = await supabase.rpc("create_initial_approval", {
+    p_entity_type: "reimbursement_claim",
+    p_entity_id: claimId,
   });
   if (approvalError) return { error: approvalError.message };
 

@@ -10,6 +10,7 @@ const USER_FINANCE = "00000000-0000-0000-0000-0000000006b2";
 const USER_CEO = "00000000-0000-0000-0000-0000000006b3";
 const USER_REPORT = "00000000-0000-0000-0000-0000000006b4";
 const USER_PEER = "00000000-0000-0000-0000-0000000006b5";
+const USER_FINANCE_2 = "00000000-0000-0000-0000-0000000006b6";
 
 const EMPLOYEE_REPORT = "00000000-0000-0000-0000-0000000006c1";
 const EMPLOYEE_PEER = "00000000-0000-0000-0000-0000000006c2";
@@ -114,6 +115,40 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
       );
       await db.seed(`delete from approval_workflow_steps where id = '${stepId}';`);
     });
+
+    // Regression test: guard_payroll_workflow_immutable() used to check
+    // only the NEW row's workflow_id, so an HR Admin could evade "the
+    // payroll workflow's steps are immutable" by re-parenting a payroll
+    // step onto a different, ordinary workflow they also manage — that
+    // UPDATE's new.workflow_id resolves to a non-payroll entity_type, so
+    // the old single-sided check passed even though the row being detached
+    // WAS a mandatory payroll step the instant before.
+    it("blocks HR Admin from detaching a payroll step by re-parenting it onto a different workflow", async () => {
+      const { rows } = await db.asUser(USER_HR, (query) =>
+        query("select id from approval_workflows where company_id = $1 and entity_type = 'timesheet'", [COMPANY_A]),
+      );
+      const timesheetWorkflowId = rows[0]?.id;
+
+      await expect(
+        db.asUser(USER_HR, (query) =>
+          query("update approval_workflow_steps set workflow_id = $1 where workflow_id = $2 and step_order = 2", [
+            timesheetWorkflowId,
+            payrollWorkflowId,
+          ]),
+        ),
+      ).rejects.toThrow(/cannot be modified/);
+
+      // And the reverse direction: moving an ordinary step ONTO the payroll
+      // workflow should be blocked too, for the same reason.
+      const stepId = randomUUID();
+      await db.seed(`insert into approval_workflow_steps (id, workflow_id, step_order, approver_type) values ('${stepId}', '${timesheetWorkflowId}', 2, 'role:hr_admin');`);
+      await expect(
+        db.asUser(USER_HR, (query) =>
+          query("update approval_workflow_steps set workflow_id = $1 where id = $2", [payrollWorkflowId, stepId]),
+        ),
+      ).rejects.toThrow(/cannot be modified/);
+      await db.seed(`delete from approval_workflow_steps where id = '${stepId}';`);
+    });
   });
 
   describe("payroll export authorization", () => {
@@ -209,6 +244,18 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
       const runId = await seedDraftRun(9);
       const secondRunId = await seedDraftRun(10);
       const approvalId = randomUUID();
+      // This test is about decide_leave_approval()'s release-on-reject fix,
+      // not about create_initial_approval()'s own authorization — the
+      // approval row is seeded via db.seed (trusted bypass) like the other
+      // fixtures in this describe block, rather than exercising the real
+      // RPC (which would hit its own, separately-tested self-approval
+      // block: USER_FINANCE is this fixture's only finance-role holder, so
+      // they can never resolve as anyone but themselves for a payroll run
+      // they generated).
+      await db.seed(`
+        insert into approvals (id, entity_type, entity_id, workflow_id, step_order, approver_id)
+          values ('${approvalId}', 'payroll_export_run', '${runId}', '${payrollWorkflowId}', 1, '${USER_FINANCE}');
+      `);
 
       // Everything below runs inside a single db.asUser transaction (which
       // always rolls back at the end) — separate asUser calls each get
@@ -219,10 +266,6 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
         expect(firstLines.some((l) => l.source_reference_id === claimId)).toBe(true);
 
         await query("update payroll_export_runs set status = 'submitted' where id = $1", [runId]);
-        await query(
-          "insert into approvals (id, entity_type, entity_id, workflow_id, step_order, approver_id, decision) values ($1, 'payroll_export_run', $2, $3, 1, $4, 'pending')",
-          [approvalId, runId, payrollWorkflowId, USER_FINANCE],
-        );
         await query("select decide_leave_approval($1, 'rejected', 'redo it')", [approvalId]);
 
         const afterReject = await query("select id from payroll_export_lines where run_id = $1", [runId]);
@@ -288,27 +331,51 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
     // Regression test for a real bug: every fixture above inserts into
     // approvals via db.seed (a trusted connection, bypassing RLS entirely),
     // which is why is_entity_owner() missing a payroll_export_run branch
-    // went undetected — submitPayrollExport() inserts as the signed-in
-    // Finance user, through the real RLS path exercised here.
-    it("lets the generating Finance user insert the first approval row directly, the same way submitPayrollExport() does", async () => {
+    // went undetected — submitPayrollExport() calls create_initial_approval()
+    // as the signed-in Finance user, through the real RLS/ownership path
+    // exercised here. A second Finance user is seeded with an earlier
+    // granted_at so resolve_approver_for_company() resolves to them, not
+    // USER_FINANCE — otherwise this would hit create_initial_approval()'s
+    // own self-approval block, since USER_FINANCE is both the run's
+    // generator and (without this) the only finance-role holder.
+    it("lets the generating Finance user create the first approval via create_initial_approval(), the same way submitPayrollExport() does", async () => {
       const runId = await seedDraftRun(7);
-      await db.seed(`update payroll_export_runs set status = 'submitted' where id = '${runId}';`);
+      await db.seed(`
+        insert into auth.users (id, email) values ('${USER_FINANCE_2}', 'p6-finance2@enginious.ae') on conflict do nothing;
+        insert into user_roles (user_id, role, company_id, granted_at) values ('${USER_FINANCE_2}', 'finance', '${COMPANY_A}', '2000-01-01') on conflict do nothing;
+        update payroll_export_runs set status = 'submitted' where id = '${runId}';
+      `);
 
-      const { rows } = await db.asUser(USER_FINANCE, (query) =>
-        query(
-          "insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id, decision) values ('payroll_export_run', $1, $2, 1, $3, 'pending') returning id",
-          [runId, payrollWorkflowId, USER_FINANCE],
-        ),
-      );
-      expect(rows.length).toBe(1);
+      const { rows } = await db.asUser(USER_FINANCE, async (query) => {
+        const { rows: created } = await query("select create_initial_approval('payroll_export_run', $1) as id", [runId]);
+        return query("select decision from approvals where id = $1", [created[0]?.id]);
+      });
+      expect(rows).toEqual([{ decision: "pending" }]);
+
+      await db.seed(`delete from user_roles where user_id = '${USER_FINANCE_2}' and role = 'finance';`);
     });
 
-    it("blocks anyone other than the run's own generated_by from inserting that first approval row", async () => {
+    it("blocks anyone other than the run's own generated_by from creating that first approval", async () => {
       const runId = await seedDraftRun(8);
       await db.seed(`update payroll_export_runs set status = 'submitted' where id = '${runId}';`);
 
       await expect(
-        db.asUser(USER_HR, (query) =>
+        db.asUser(USER_HR, (query) => query("select create_initial_approval('payroll_export_run', $1)", [runId])),
+      ).rejects.toThrow(/do not own this/);
+    });
+
+    // Regression test for the real bug this whole flow replaced:
+    // approvals_insert_initial never validated workflow_id or approver_id,
+    // so any owner could forge a self-approving first approval row
+    // directly — including for payroll_export_run's mandatory
+    // Finance-then-CEO sign-off. There is no INSERT policy on approvals at
+    // all anymore.
+    it("blocks a direct client INSERT into approvals entirely, even from the run's own generating Finance user", async () => {
+      const runId = await seedDraftRun(2, 2028);
+      await db.seed(`update payroll_export_runs set status = 'submitted' where id = '${runId}';`);
+
+      await expect(
+        db.asUser(USER_FINANCE, (query) =>
           query(
             "insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id, decision) values ('payroll_export_run', $1, $2, 1, $3, 'pending')",
             [runId, payrollWorkflowId, USER_FINANCE],
@@ -385,26 +452,24 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
     // Regression test for a real bug: every fixture in this describe block
     // inserts into approvals via db.seed (a trusted connection, bypassing
     // RLS entirely), which is why is_entity_owner() missing a
-    // generated_letter branch went undetected — issueLetter() inserts as
-    // the signed-in HR Admin who issued it, through the real RLS path
-    // exercised here.
-    it("lets the issuing HR Admin insert the first approval row directly, the same way issueLetter() does", async () => {
+    // generated_letter branch went undetected — issueLetter() calls
+    // create_initial_approval() as the signed-in HR Admin who issued it,
+    // through the real RLS/ownership path exercised here.
+    it("lets the issuing HR Admin create the first approval via create_initial_approval(), the same way issueLetter() does", async () => {
       const letterId = randomUUID();
       await db.seed(`
         insert into generated_letters (id, employee_id, template_id, generated_by, status)
           values ('${letterId}', '${EMPLOYEE_REPORT}', '${templateId}', '${USER_HR}', 'pending_approval');
       `);
 
-      const { rows } = await db.asUser(USER_HR, (query) =>
-        query(
-          "insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id, decision) values ('generated_letter', $1, $2, 1, $3, 'pending') returning id",
-          [letterId, letterWorkflowId, USER_CEO],
-        ),
-      );
-      expect(rows.length).toBe(1);
+      const { rows } = await db.asUser(USER_HR, async (query) => {
+        const { rows: created } = await query("select create_initial_approval('generated_letter', $1) as id", [letterId]);
+        return query("select decision from approvals where id = $1", [created[0]?.id]);
+      });
+      expect(rows).toEqual([{ decision: "pending" }]);
     });
 
-    it("blocks anyone other than the letter's own generated_by from inserting that first approval row", async () => {
+    it("blocks anyone other than the letter's own generated_by from creating that first approval", async () => {
       const letterId = randomUUID();
       await db.seed(`
         insert into generated_letters (id, employee_id, template_id, generated_by, status)
@@ -412,7 +477,24 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
       `);
 
       await expect(
-        db.asUser(USER_PEER, (query) =>
+        db.asUser(USER_PEER, (query) => query("select create_initial_approval('generated_letter', $1)", [letterId])),
+      ).rejects.toThrow(/do not own this/);
+    });
+
+    // Regression test for the real bug this whole flow replaced:
+    // approvals_insert_initial never validated workflow_id or approver_id,
+    // so any owner could forge a self-approving first approval row
+    // directly — including for a letter template's mandatory CEO
+    // sign-off. There is no INSERT policy on approvals at all anymore.
+    it("blocks a direct client INSERT into approvals entirely, even from the letter's own issuing HR Admin", async () => {
+      const letterId = randomUUID();
+      await db.seed(`
+        insert into generated_letters (id, employee_id, template_id, generated_by, status)
+          values ('${letterId}', '${EMPLOYEE_REPORT}', '${templateId}', '${USER_HR}', 'pending_approval');
+      `);
+
+      await expect(
+        db.asUser(USER_HR, (query) =>
           query(
             "insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id, decision) values ('generated_letter', $1, $2, 1, $3, 'pending')",
             [letterId, letterWorkflowId, USER_CEO],

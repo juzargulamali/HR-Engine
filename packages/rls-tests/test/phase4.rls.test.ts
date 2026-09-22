@@ -222,28 +222,37 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
     // real RLS path (asUser(), not the seed() bypass) — reimbursement_claim
     // and timesheet didn't, so a regression in is_entity_owner() specific to
     // either of them could have gone undetected indefinitely.
-    it("lets the requester insert the first approvals row on their own just-submitted claim (real RLS path, not db.seed())", async () => {
+    it("lets the requester create the first approval via create_initial_approval() on their own just-submitted claim", async () => {
       const claimId = randomUUID();
       await db.seed(`insert into reimbursement_claims (id, employee_id, currency, status) values ('${claimId}', '${EMPLOYEE_REPORT}', 'ZZD', 'submitted');`);
-      const { rows } = await db.asUser(USER_REPORT, (query) =>
-        query(
-          `insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id)
-           values ('reimbursement_claim', $1, $2, 1, $3) returning decision`,
-          [claimId, reimbursementWorkflowId, USER_MANAGER],
-        ),
-      );
+      const { rows } = await db.asUser(USER_REPORT, async (query) => {
+        const { rows: created } = await query("select create_initial_approval('reimbursement_claim', $1) as id", [claimId]);
+        return query("select decision from approvals where id = $1", [created[0]?.id]);
+      });
       expect(rows).toEqual([{ decision: "pending" }]);
     });
 
-    it("blocks a peer from inserting the first approvals row on someone else's claim", async () => {
+    it("blocks a peer from creating the first approval on someone else's claim", async () => {
       const claimId = randomUUID();
       await db.seed(`insert into reimbursement_claims (id, employee_id, currency, status) values ('${claimId}', '${EMPLOYEE_REPORT}', 'ZZD', 'submitted');`);
       await expect(
-        db.asUser(USER_PEER, (query) =>
+        db.asUser(USER_PEER, (query) => query("select create_initial_approval('reimbursement_claim', $1)", [claimId])),
+      ).rejects.toThrow(/do not own this/);
+    });
+
+    // Regression test: approvals_insert_initial never validated workflow_id
+    // or approver_id, so any owner could forge a self-approving first
+    // approval row directly. There is no INSERT policy on approvals at all
+    // anymore — create_initial_approval() is the only way in.
+    it("blocks a direct client INSERT into approvals entirely, even from the claim's own owner", async () => {
+      const claimId = randomUUID();
+      await db.seed(`insert into reimbursement_claims (id, employee_id, currency, status) values ('${claimId}', '${EMPLOYEE_REPORT}', 'ZZD', 'submitted');`);
+      await expect(
+        db.asUser(USER_REPORT, (query) =>
           query(
             `insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id)
              values ('reimbursement_claim', $1, $2, 1, $3)`,
-            [claimId, reimbursementWorkflowId, USER_MANAGER],
+            [claimId, reimbursementWorkflowId, USER_REPORT],
           ),
         ),
       ).rejects.toThrow(/row-level security/);
@@ -251,31 +260,22 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
   });
 
   describe("timesheet approval: initial insert (real RLS path)", () => {
-    it("lets the requester insert the first approvals row on their own just-submitted timesheet (real RLS path, not db.seed())", async () => {
+    it("lets the requester create the first approval via create_initial_approval() on their own just-submitted timesheet", async () => {
       const timesheetId = randomUUID();
       await db.seed(`insert into timesheets (id, employee_id, period_start, period_end, status) values ('${timesheetId}', '${EMPLOYEE_REPORT}', '2026-05-04', '2026-05-10', 'submitted');`);
-      const { rows } = await db.asUser(USER_REPORT, (query) =>
-        query(
-          `insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id)
-           values ('timesheet', $1, $2, 1, $3) returning decision`,
-          [timesheetId, timesheetWorkflowId, USER_MANAGER],
-        ),
-      );
+      const { rows } = await db.asUser(USER_REPORT, async (query) => {
+        const { rows: created } = await query("select create_initial_approval('timesheet', $1) as id", [timesheetId]);
+        return query("select decision from approvals where id = $1", [created[0]?.id]);
+      });
       expect(rows).toEqual([{ decision: "pending" }]);
     });
 
-    it("blocks a peer from inserting the first approvals row on someone else's timesheet", async () => {
+    it("blocks a peer from creating the first approval on someone else's timesheet", async () => {
       const timesheetId = randomUUID();
       await db.seed(`insert into timesheets (id, employee_id, period_start, period_end, status) values ('${timesheetId}', '${EMPLOYEE_REPORT}', '2026-05-11', '2026-05-17', 'submitted');`);
       await expect(
-        db.asUser(USER_PEER, (query) =>
-          query(
-            `insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id)
-             values ('timesheet', $1, $2, 1, $3)`,
-            [timesheetId, timesheetWorkflowId, USER_MANAGER],
-          ),
-        ),
-      ).rejects.toThrow(/row-level security/);
+        db.asUser(USER_PEER, (query) => query("select create_initial_approval('timesheet', $1)", [timesheetId])),
+      ).rejects.toThrow(/do not own this/);
     });
   });
 

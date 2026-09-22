@@ -1085,6 +1085,10 @@ export interface Database {
         Args: { p_approval_id: string; p_decision: ApprovalDecision; p_comments?: string | null };
         Returns: undefined;
       };
+      create_initial_approval: {
+        Args: { p_entity_type: ApprovableEntity; p_entity_id: string };
+        Returns: string;
+      };
       generate_checklist_items: {
         Args: { p_employee_id: string; p_template_id: string; p_anchor_date: string };
         Returns: Database["public"]["Tables"]["employee_checklist_items"]["Row"][];

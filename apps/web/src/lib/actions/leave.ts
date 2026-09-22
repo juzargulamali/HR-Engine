@@ -82,13 +82,9 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
     .single();
   if (insertError || !request) return { error: insertError?.message ?? "Could not submit the leave request." };
 
-  const { error: approvalError } = await supabase.from("approvals").insert({
-    entity_type: "leave_request",
-    entity_id: request.id,
-    workflow_id: resolved.workflowId,
-    step_order: 1,
-    approver_id: resolved.approverId,
-    decision: "pending",
+  const { error: approvalError } = await supabase.rpc("create_initial_approval", {
+    p_entity_type: "leave_request",
+    p_entity_id: request.id,
   });
   if (approvalError) return { error: approvalError.message };
 

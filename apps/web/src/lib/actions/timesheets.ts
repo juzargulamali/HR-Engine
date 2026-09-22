@@ -106,13 +106,9 @@ export async function submitTimesheet(timesheetId: string): Promise<{ error: str
   const { error: updateError } = await supabase.from("timesheets").update({ status: "submitted" }).eq("id", timesheetId);
   if (updateError) return { error: updateError.message };
 
-  const { error: approvalError } = await supabase.from("approvals").insert({
-    entity_type: "timesheet",
-    entity_id: timesheetId,
-    workflow_id: resolved.workflowId,
-    step_order: 1,
-    approver_id: resolved.approverId,
-    decision: "pending",
+  const { error: approvalError } = await supabase.rpc("create_initial_approval", {
+    p_entity_type: "timesheet",
+    p_entity_id: timesheetId,
   });
   if (approvalError) return { error: approvalError.message };
 
