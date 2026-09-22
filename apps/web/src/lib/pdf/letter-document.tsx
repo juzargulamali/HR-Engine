@@ -4,13 +4,13 @@ import path from "node:path";
 import { Document, Page, View, Text, Image, StyleSheet, Font } from "@react-pdf/renderer";
 
 /**
- * The Enginious letterhead — logo + contact/registration footer — recreated
- * from the company's own LetterHead_Enginious.docx (header2.xml's logo +
- * contact bar, footer's blank). Applies to every letter template_type for
- * now (offer_letter, experience_letter, noc, salary_certificate all
- * confirmed to share this design); a template type that turns out to need
- * a genuinely different layout gets its own component and a lookup by
- * type here, not a rewrite of this one.
+ * Recreates the company's actual LetterHead_Enginious.docx pixel-for-pixel:
+ * logo top-left, registration/address block top-right, a faint circuit
+ * watermark behind the body, and the solid teal contact bar at the very
+ * bottom of the page — all traced from the docx's own XML (positions,
+ * colors, image assets) rather than approximated, per the exact-copy ask.
+ * Applies to every letter template_type for now — a template type that
+ * turns out to need a genuinely different layout gets its own component.
  */
 
 // react-pdf's default hyphenation engine dynamically requires a
@@ -22,69 +22,123 @@ import { Document, Page, View, Text, Image, StyleSheet, Font } from "@react-pdf/
 // mid-word breaks.
 Font.registerHyphenationCallback((word) => [word]);
 
-const LOGO_DATA_URI = (() => {
-  const filePath = path.join(process.cwd(), "public", "brand", "enginious-logo.png");
-  const buffer = readFileSync(filePath);
-  return `data:image/png;base64,${buffer.toString("base64")}`;
-})();
+const BRAND_DIR = path.join(process.cwd(), "public", "brand");
+const FONT_DIR = path.join(process.cwd(), "src", "lib", "pdf", "fonts");
 
+function dataUri(fileName: string, mime: string): string {
+  const buffer = readFileSync(path.join(BRAND_DIR, fileName));
+  return `data:${mime};base64,${buffer.toString("base64")}`;
+}
+
+const LOGO = dataUri("enginious-logo.png", "image/png");
+const WATERMARK = dataUri("letterhead-watermark.png", "image/png");
+const ICON_PHONE = dataUri("letterhead-icon-phone.png", "image/png");
+const ICON_EMAIL = dataUri("letterhead-icon-email.png", "image/png");
+const ICON_GLOBE = dataUri("letterhead-icon-globe.png", "image/png");
+
+// Carlito is metric-compatible with Calibri (the docx's actual theme
+// font) and OFL-licensed, so it renders the original's line breaks and
+// spacing correctly instead of substituting Helvetica.
+Font.register({
+  family: "Carlito",
+  fonts: [
+    { src: path.join(FONT_DIR, "Carlito-Regular.ttf"), fontWeight: "normal" },
+    { src: path.join(FONT_DIR, "Carlito-Bold.ttf"), fontWeight: "bold" },
+  ],
+});
+
+// Exact colors read off the docx XML runs, not eyeballed off a render.
 const COLORS = {
-  heading: "#0F6E70",
-  body: "#1F2933",
-  muted: "#5B6B74",
-  rule: "#BFE3E1",
+  brand: "#1C5C6B",
+  address: "#0A202A",
+  contactText: "#EDECDE",
+  contactTextAlt: "#FFFFFF",
+  body: "#0A202A",
 };
 
 const styles = StyleSheet.create({
   page: {
-    // Comfortably clears the header/footer's real rendered height (measured
-    // from an actual generated PDF, not guessed) — a mismatch here silently
-    // overlaps body text under the logo instead of erroring.
-    paddingTop: 150,
-    paddingBottom: 100,
-    paddingHorizontal: 56,
+    // Clears the header's real height (logo ~93pt tall) and the bottom
+    // bar (52pt) — measured from the docx's own EMU coordinates, not
+    // guessed.
+    paddingTop: 132,
+    paddingBottom: 76,
+    paddingHorizontal: 36,
     fontSize: 11,
-    fontFamily: "Helvetica",
+    fontFamily: "Carlito",
     color: COLORS.body,
   },
-  header: {
+  headerLogo: {
     position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    paddingTop: 28,
-    paddingHorizontal: 56,
-    paddingBottom: 14,
-    borderBottomWidth: 1.5,
-    borderBottomColor: COLORS.rule,
+    top: 24,
+    left: 36,
+    width: 150,
+    height: 93.4,
   },
-  logo: {
-    width: 130,
-    height: undefined,
+  headerAddress: {
+    position: "absolute",
+    top: 28,
+    right: 36,
+    width: 230,
+    textAlign: "right",
   },
-  footer: {
+  addressBrand: {
+    fontFamily: "Carlito",
+    fontWeight: "bold",
+    fontSize: 11,
+    color: COLORS.brand,
+    marginBottom: 3,
+  },
+  addressLine: {
+    fontSize: 8.5,
+    lineHeight: 1.3,
+    color: COLORS.address,
+  },
+  watermark: {
+    position: "absolute",
+    top: 138,
+    left: "50%",
+    marginLeft: -210,
+    width: 420,
+    height: 319.4,
+  },
+  bottomBar: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 56,
-    paddingTop: 10,
-    paddingBottom: 28,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.rule,
+    height: 52,
+    backgroundColor: COLORS.brand,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 40,
   },
-  footerLine: {
+  contactItem: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  contactIcon: {
+    width: 14,
+    height: 14,
+    marginRight: 6,
+  },
+  contactText: {
     fontSize: 8,
-    color: COLORS.muted,
-    textAlign: "center",
-    marginTop: 2,
+    color: COLORS.contactText,
+    lineHeight: 1.3,
+  },
+  contactTextAlt: {
+    fontSize: 8,
+    color: COLORS.contactTextAlt,
+    lineHeight: 1.3,
   },
   pageNumber: {
     position: "absolute",
-    bottom: 12,
-    right: 56,
+    bottom: 58,
+    right: 36,
     fontSize: 8,
-    color: COLORS.muted,
+    color: COLORS.address,
   },
   paragraph: {
     marginBottom: 10,
@@ -95,20 +149,48 @@ const styles = StyleSheet.create({
 
 function LetterHeader() {
   return (
-    <View style={styles.header} fixed>
+    <>
       {/* eslint-disable-next-line jsx-a11y/alt-text -- react-pdf's own Image primitive (renders into a PDF, not the DOM); it has no alt prop. */}
-      <Image src={LOGO_DATA_URI} style={styles.logo} />
-    </View>
+      <Image src={LOGO} style={styles.headerLogo} fixed />
+      <View style={styles.headerAddress} fixed>
+        <Text style={styles.addressBrand}>ENGINIOUS LLC-FZ</Text>
+        <Text style={styles.addressLine}>License Number: 210020301</Text>
+        <Text style={styles.addressLine}>Business Center 1, M Floor,</Text>
+        <Text style={styles.addressLine}>The Meydan Hotel, Nad Al Sheba,</Text>
+        <Text style={styles.addressLine}>Dubai, U.A.E.</Text>
+      </View>
+    </>
   );
 }
 
-function LetterFooter() {
+function LetterWatermark() {
   return (
-    <View style={styles.footer} fixed>
-      <Text style={styles.footerLine}>ENGINIOUS LLC-FZ · License Number: 210020301</Text>
-      <Text style={styles.footerLine}>Business Center 1, M Floor, The Meydan Hotel, Nad Al Sheba, Dubai, U.A.E.</Text>
-      <Text style={styles.footerLine}>Tel: +971 04 251 5127 · Email: info@enginious.ae · Web: www.enginious.ae</Text>
-      <Text style={styles.pageNumber} render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} fixed />
+    // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf's own Image primitive, no alt prop.
+    <Image src={WATERMARK} style={styles.watermark} fixed />
+  );
+}
+
+function LetterBottomBar() {
+  return (
+    <View style={styles.bottomBar} fixed>
+      <View style={styles.contactItem}>
+        {/* eslint-disable-next-line jsx-a11y/alt-text -- react-pdf's own Image primitive, no alt prop. */}
+        <Image src={ICON_PHONE} style={styles.contactIcon} />
+        <Text style={styles.contactText}>(+971) 04 251 5127</Text>
+      </View>
+      <View style={styles.contactItem}>
+        {/* eslint-disable-next-line jsx-a11y/alt-text -- react-pdf's own Image primitive, no alt prop. */}
+        <Image src={ICON_EMAIL} style={styles.contactIcon} />
+        <View>
+          <Text style={styles.contactText}>info@enginious.ae</Text>
+          <Text style={styles.contactTextAlt}>Meydan - Free Zone</Text>
+        </View>
+      </View>
+      <View style={styles.contactItem}>
+        {/* eslint-disable-next-line jsx-a11y/alt-text -- react-pdf's own Image primitive, no alt prop. */}
+        <Image src={ICON_GLOBE} style={styles.contactIcon} />
+        <Text style={styles.contactText}>www.enginious.ae</Text>
+      </View>
     </View>
   );
 }
@@ -120,12 +202,14 @@ export function LetterDocument({ bodyText }: { bodyText: string }) {
     <Document>
       <Page size="A4" style={styles.page}>
         <LetterHeader />
+        <LetterWatermark />
         {paragraphs.map((paragraph, index) => (
           <Text key={index} style={styles.paragraph}>
             {paragraph.trim()}
           </Text>
         ))}
-        <LetterFooter />
+        <LetterBottomBar />
+        <Text style={styles.pageNumber} render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} fixed />
       </Page>
     </Document>
   );
