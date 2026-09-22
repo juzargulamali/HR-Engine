@@ -107,6 +107,18 @@ h6 {
   color: hsl(var(--foreground));
 }
 
+/* Chrome/Safari paint autofilled fields with their own light background by
+   default, which breaks the dark theme outright — this repaints it with
+   the real background color instead (the only reliable way, since the
+   autofill layer ignores normal background-color). */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: hsl(var(--foreground));
+  box-shadow: 0 0 0px 1000px hsl(var(--background)) inset;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
 /* A faint circuit-board grid, the brand deck's own background texture —
    used behind the sidebar and page heroes, never behind dense tables. */
 .brand-grid {

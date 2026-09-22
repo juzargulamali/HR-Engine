@@ -41,13 +41,17 @@ export function NewEmployeeForm({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="countryCode">Country</Label>
-          <Select id="countryCode" name="countryCode" value={selectedCompany?.country_code ?? ""} disabled required>
+          {/* A disabled <select> never submits its value in FormData, so the
+              actual value travels in a hidden input — this one is purely
+              for display. */}
+          <Select id="countryCode" value={selectedCompany?.country_code ?? ""} disabled required>
             {countries.map((c) => (
               <option key={c.code} value={c.code}>
                 {c.name}
               </option>
             ))}
           </Select>
+          <input type="hidden" name="countryCode" value={selectedCompany?.country_code ?? ""} />
           <p className="text-xs text-muted-foreground">Set by the company&apos;s registered country.</p>
         </div>
       </div>
