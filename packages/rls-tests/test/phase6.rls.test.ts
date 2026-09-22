@@ -204,6 +204,38 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
       const employeeView = await db.asUser(USER_REPORT, (query) => query("select id from payroll_export_runs where id = $1", [runId]));
       expect(employeeView.rows).toEqual([]);
     });
+
+    // Regression test for a real bug: every fixture above inserts into
+    // approvals via db.seed (a trusted connection, bypassing RLS entirely),
+    // which is why is_entity_owner() missing a payroll_export_run branch
+    // went undetected — submitPayrollExport() inserts as the signed-in
+    // Finance user, through the real RLS path exercised here.
+    it("lets the generating Finance user insert the first approval row directly, the same way submitPayrollExport() does", async () => {
+      const runId = await seedDraftRun(7);
+      await db.seed(`update payroll_export_runs set status = 'submitted' where id = '${runId}';`);
+
+      const { rows } = await db.asUser(USER_FINANCE, (query) =>
+        query(
+          "insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id, decision) values ('payroll_export_run', $1, $2, 1, $3, 'pending') returning id",
+          [runId, payrollWorkflowId, USER_FINANCE],
+        ),
+      );
+      expect(rows.length).toBe(1);
+    });
+
+    it("blocks anyone other than the run's own generated_by from inserting that first approval row", async () => {
+      const runId = await seedDraftRun(8);
+      await db.seed(`update payroll_export_runs set status = 'submitted' where id = '${runId}';`);
+
+      await expect(
+        db.asUser(USER_HR, (query) =>
+          query(
+            "insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id, decision) values ('payroll_export_run', $1, $2, 1, $3, 'pending')",
+            [runId, payrollWorkflowId, USER_FINANCE],
+          ),
+        ),
+      ).rejects.toThrow(/row-level security/);
+    });
   });
 
   describe("generate_payroll_export_lines: reconciliation", () => {
@@ -268,6 +300,45 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
         query("update letter_templates set name = 'Hacked' where id = $1", [templateId]),
       );
       expect(rowCount).toBe(0);
+    });
+
+    // Regression test for a real bug: every fixture in this describe block
+    // inserts into approvals via db.seed (a trusted connection, bypassing
+    // RLS entirely), which is why is_entity_owner() missing a
+    // generated_letter branch went undetected — issueLetter() inserts as
+    // the signed-in HR Admin who issued it, through the real RLS path
+    // exercised here.
+    it("lets the issuing HR Admin insert the first approval row directly, the same way issueLetter() does", async () => {
+      const letterId = randomUUID();
+      await db.seed(`
+        insert into generated_letters (id, employee_id, template_id, generated_by, status)
+          values ('${letterId}', '${EMPLOYEE_REPORT}', '${templateId}', '${USER_HR}', 'pending_approval');
+      `);
+
+      const { rows } = await db.asUser(USER_HR, (query) =>
+        query(
+          "insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id, decision) values ('generated_letter', $1, $2, 1, $3, 'pending') returning id",
+          [letterId, letterWorkflowId, USER_CEO],
+        ),
+      );
+      expect(rows.length).toBe(1);
+    });
+
+    it("blocks anyone other than the letter's own generated_by from inserting that first approval row", async () => {
+      const letterId = randomUUID();
+      await db.seed(`
+        insert into generated_letters (id, employee_id, template_id, generated_by, status)
+          values ('${letterId}', '${EMPLOYEE_REPORT}', '${templateId}', '${USER_HR}', 'pending_approval');
+      `);
+
+      await expect(
+        db.asUser(USER_PEER, (query) =>
+          query(
+            "insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id, decision) values ('generated_letter', $1, $2, 1, $3, 'pending')",
+            [letterId, letterWorkflowId, USER_CEO],
+          ),
+        ),
+      ).rejects.toThrow(/row-level security/);
     });
 
     it("routes a letter requiring approval to the CEO, finalizing as 'issued' only once they approve", async () => {

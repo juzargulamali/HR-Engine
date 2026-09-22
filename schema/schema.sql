@@ -1048,6 +1048,9 @@ create trigger companies_seed_default_approval_workflows
 
 -- Generic ownership check for the approvals table — one `when` branch per
 -- approvable entity type, added as each one lands (docs/09-extending-the-system.md).
+-- generated_letter/payroll_export_run have no owning employee the way a
+-- leave request does — both are staff-initiated on someone/something
+-- else's behalf — so their rightful initiator is generated_by instead.
 create or replace function is_entity_owner(p_entity_type approvable_entity, p_entity_id uuid)
 returns boolean
 language plpgsql
@@ -1063,6 +1066,10 @@ begin
       return exists (select 1 from reimbursement_claims where id = p_entity_id and employee_id = current_employee_id());
     when 'timesheet' then
       return exists (select 1 from timesheets where id = p_entity_id and employee_id = current_employee_id());
+    when 'generated_letter' then
+      return exists (select 1 from generated_letters where id = p_entity_id and generated_by = auth.uid());
+    when 'payroll_export_run' then
+      return exists (select 1 from payroll_export_runs where id = p_entity_id and generated_by = auth.uid());
     else
       return false;
   end case;
