@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { IssueLetterForm } from "./issue-letter-form";
 import { NewTemplateForm } from "./new-template-form";
 import { DeleteLetterButton } from "./delete-letter-button";
+import { DeleteTemplateButton } from "./delete-template-button";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   draft: "outline",
@@ -108,6 +109,45 @@ export default async function LettersPage() {
             </CardContent>
           </Card>
         </div>
+      ) : null}
+
+      {canManage ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Templates</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Requires approval</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(templates ?? []).map((t) => (
+                  <TableRow key={t.id}>
+                    <TableCell>{t.name}</TableCell>
+                    <TableCell className="capitalize">{t.template_type.replace(/_/g, " ")}</TableCell>
+                    <TableCell>{t.requires_approval ? "Yes" : "No"}</TableCell>
+                    <TableCell>
+                      <DeleteTemplateButton templateId={t.id} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {(templates ?? []).length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                      No templates yet.
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       ) : null}
 
       <Card>

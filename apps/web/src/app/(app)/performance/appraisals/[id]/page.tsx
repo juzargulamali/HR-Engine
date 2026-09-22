@@ -33,6 +33,7 @@ export default async function AppraisalDetailPage({ params }: { params: Promise<
   const canEditContent = (isAppraiser && appraisal.status === "draft") || canManageAny;
   const canSubmit = isAppraiser && appraisal.status === "draft";
   const canAcknowledge = isSelf && appraisal.status === "submitted";
+  const canDelete = appraisal.status === "draft" && (isAppraiser || canManageAny);
 
   return (
     <div className="space-y-6">
@@ -80,8 +81,8 @@ export default async function AppraisalDetailPage({ params }: { params: Promise<
         </CardContent>
       </Card>
 
-      {canSubmit || canAcknowledge ? (
-        <AppraisalActions appraisalId={appraisal.id} canSubmit={canSubmit} canAcknowledge={canAcknowledge} />
+      {canSubmit || canAcknowledge || canDelete ? (
+        <AppraisalActions appraisalId={appraisal.id} canSubmit={canSubmit} canAcknowledge={canAcknowledge} canDelete={canDelete} />
       ) : null}
     </div>
   );

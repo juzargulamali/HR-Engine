@@ -207,6 +207,15 @@ export async function submitAppraisal(appraisalId: string): Promise<{ error: str
   return { error: error?.message ?? null };
 }
 
+/** appraisals_delete only allows this while status = 'draft' — a submitted/acknowledged appraisal is real history and can't be removed. */
+export async function deleteAppraisal(appraisalId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("appraisals").delete().eq("id", appraisalId);
+  revalidatePath("/performance");
+  revalidatePath("/performance/team");
+  return { error: error?.message ?? null };
+}
+
 /** appraisals_update_acknowledge + the guard_appraisal_acknowledge trigger both enforce this is the only edit an employee can make. */
 export async function acknowledgeAppraisal(appraisalId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();

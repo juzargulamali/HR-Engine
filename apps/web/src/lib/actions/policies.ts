@@ -80,6 +80,14 @@ export async function activatePolicy(policyVersionId: string): Promise<{ error: 
   return { error: error?.message ?? null };
 }
 
+/** policy_versions_delete only allows this while status = 'draft' — an active version is real, in-effect policy and stays forever. */
+export async function deletePolicyVersion(policyVersionId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("policy_versions").delete().eq("id", policyVersionId);
+  revalidatePath("/policies");
+  return { error: error?.message ?? null };
+}
+
 const addLeaveTypeSchema = z.object({
   policyVersionId: z.string().uuid(),
   leaveTypeCode: z.string().min(1),
@@ -151,4 +159,11 @@ export async function addHoliday(_prevState: ActionState, formData: FormData): P
 
   revalidatePath("/holidays");
   return { error: null };
+}
+
+export async function deleteHoliday(holidayId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("public_holidays").delete().eq("id", holidayId);
+  revalidatePath("/holidays");
+  return { error: error?.message ?? null };
 }

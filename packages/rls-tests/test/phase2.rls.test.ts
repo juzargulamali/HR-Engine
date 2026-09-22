@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Client } from "pg";
 import { RlsTestDatabase } from "../src/harness";
@@ -200,6 +201,39 @@ describe("Phase 2 row-level security: country policy engine", () => {
       // overlapping PV_ACTIVE_2025 with no error at insert time.
       const { rows } = await db.asUser(USER_HR1, (query) => query("select status from policy_versions where id = $1", [PV_DRAFT_OVERLAPPING]));
       expect(rows).toEqual([{ status: "draft" }]);
+    });
+  });
+
+  describe("deleting a draft", () => {
+    it("lets a country HR Admin or CEO delete a draft version, but never an active one", async () => {
+      const draftId = randomUUID();
+      await db.seed(`
+        insert into policy_versions (id, country_code, policy_type, version_no, effective_from, status, payload, created_by)
+        values ('${draftId}', 'AE', 'probation_rules', 1, '2027-01-01', 'draft', '{}', '${USER_HR1}');
+      `);
+      await db.asUser(USER_HR2, async (query) => {
+        const { rowCount } = await query("delete from policy_versions where id = $1", [draftId]);
+        expect(rowCount).toBe(1);
+      });
+
+      await db.asUser(USER_HR1, async (query) => {
+        const { rowCount } = await query("delete from policy_versions where id = $1", [PV_ACTIVE_2025]);
+        expect(rowCount).toBe(0); // RLS silently filters rather than throwing on a no-match delete
+      });
+      const stillActive = await db.asUser(USER_HR1, (query) => query("select status from policy_versions where id = $1", [PV_ACTIVE_2025]));
+      expect(stillActive.rows[0]?.status).toBe("active");
+    });
+
+    it("blocks a company-scoped HR Admin and a line manager from deleting a country-level draft", async () => {
+      const draftId = randomUUID();
+      await db.seed(`
+        insert into policy_versions (id, country_code, policy_type, version_no, effective_from, status, payload, created_by)
+        values ('${draftId}', 'AE', 'probation_rules', 2, '2027-01-01', 'draft', '{}', '${USER_HR1}');
+      `);
+      for (const user of [USER_COMPANY_HR, USER_MANAGER]) {
+        const { rowCount } = await db.asUser(user, (query) => query("delete from policy_versions where id = $1", [draftId]));
+        expect(rowCount).toBe(0);
+      }
     });
   });
 

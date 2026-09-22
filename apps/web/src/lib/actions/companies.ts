@@ -46,3 +46,30 @@ export async function createCompany(_prevState: ActionState, formData: FormData)
   revalidatePath("/admin/companies");
   return { error: null };
 }
+
+/**
+ * companies_write (Sys Admin only) already covers this — is_active exists
+ * on the table but nothing in the app actually reads it (not even
+ * companies_select, which filters on deleted_at); flipping it would be
+ * purely cosmetic. deleted_at is the column RLS genuinely enforces, same
+ * soft-delete pattern as employees, so that's what "deactivate" uses here.
+ */
+export async function softDeleteCompany(companyId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { error } = await supabase
+    .from("companies")
+    .update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null })
+    .eq("id", companyId);
+  revalidatePath("/admin/companies");
+  return { error: error?.message ?? null };
+}
+
+export async function restoreCompany(companyId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("companies").update({ deleted_at: null, deleted_by: null }).eq("id", companyId);
+  revalidatePath("/admin/companies");
+  return { error: error?.message ?? null };
+}

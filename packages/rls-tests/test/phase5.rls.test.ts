@@ -159,6 +159,42 @@ describe("Phase 5 row-level security: performance, checklists, documents, assets
         expect(check.rows[0]?.overall_rating).toBe(4);
       });
     });
+
+    it("lets the appraiser delete their own draft, but never a submitted appraisal", async () => {
+      const draftId = randomUUID();
+      await db.seed(`
+        insert into appraisals (id, employee_id, cycle_id, appraiser_id, status)
+        values ('${draftId}', '${EMPLOYEE_REPORT}', '${cycleId}', '${USER_MANAGER}', 'draft');
+      `);
+      await db.asUser(USER_MANAGER, async (query) => {
+        const { rowCount } = await query("delete from appraisals where id = $1", [draftId]);
+        expect(rowCount).toBe(1);
+      });
+
+      const submittedId = randomUUID();
+      await db.seed(`
+        insert into appraisals (id, employee_id, cycle_id, appraiser_id, status)
+        values ('${submittedId}', '${EMPLOYEE_REPORT}', '${cycleId}', '${USER_MANAGER}', 'submitted');
+      `);
+      await db.asUser(USER_MANAGER, async (query) => {
+        const { rowCount } = await query("delete from appraisals where id = $1", [submittedId]);
+        expect(rowCount).toBe(0); // RLS silently filters rather than throwing on a no-match delete
+        const stillThere = await query("select id from appraisals where id = $1", [submittedId]);
+        expect(stillThere.rows.length).toBe(1);
+      });
+    });
+
+    it("blocks a peer from deleting someone else's draft appraisal", async () => {
+      const draftId = randomUUID();
+      await db.seed(`
+        insert into appraisals (id, employee_id, cycle_id, appraiser_id, status)
+        values ('${draftId}', '${EMPLOYEE_REPORT}', '${cycleId}', '${USER_MANAGER}', 'draft');
+      `);
+      await db.asUser(USER_PEER, async (query) => {
+        const { rowCount } = await query("delete from appraisals where id = $1", [draftId]);
+        expect(rowCount).toBe(0);
+      });
+    });
   });
 
   describe("onboarding checklist generation and assignee-scoped access", () => {

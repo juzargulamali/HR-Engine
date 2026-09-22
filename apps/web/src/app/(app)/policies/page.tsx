@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { canActivatePolicy, canDraftPolicy } from "@enginious-hr/domain";
+import { canActivatePolicy, canDeleteDraftPolicy, canDraftPolicy } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ActivateButton } from "./activate-button";
+import { DeletePolicyVersionButton } from "./delete-policy-version-button";
 
 export default async function PoliciesPage() {
   const session = await getCurrentSession();
@@ -68,6 +69,7 @@ export default async function PoliciesPage() {
               {(policies ?? []).map((p) => {
                 const isDrafter = p.created_by === session.userId;
                 const canActivate = p.status === "draft" && canActivatePolicy(session.grants, p.country_code, isDrafter);
+                const canDelete = p.status === "draft" && canDeleteDraftPolicy(session.grants, p.country_code);
                 return (
                   <TableRow key={p.id}>
                     <TableCell>{countryName.get(p.country_code) ?? p.country_code}</TableCell>
@@ -87,10 +89,13 @@ export default async function PoliciesPage() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      {canActivate ? <ActivateButton policyVersionId={p.id} /> : null}
-                      {p.status === "draft" && isDrafter ? (
-                        <span className="text-xs text-muted-foreground">awaiting a different approver</span>
-                      ) : null}
+                      <div className="flex items-center gap-2">
+                        {canActivate ? <ActivateButton policyVersionId={p.id} /> : null}
+                        {canDelete ? <DeletePolicyVersionButton policyVersionId={p.id} /> : null}
+                        {p.status === "draft" && isDrafter ? (
+                          <span className="text-xs text-muted-foreground">awaiting a different approver</span>
+                        ) : null}
+                      </div>
                     </TableCell>
                   </TableRow>
                 );

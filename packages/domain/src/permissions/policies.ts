@@ -32,6 +32,16 @@ export function canViewDraftPolicies(grants: readonly RoleGrant[], countryCode: 
   return isHrAdmin(grants, { countryCode }) || isCeo(grants, { countryCode });
 }
 
+/**
+ * Deleting a draft has no separation-of-duties concern (unlike activating
+ * one) — it isn't putting anything into effect — so unlike
+ * canActivatePolicy, this doesn't exclude the drafter themselves. Mirrors
+ * policy_versions_delete, which only ever applies to status = 'draft'.
+ */
+export function canDeleteDraftPolicy(grants: readonly RoleGrant[], countryCode: string): boolean {
+  return isHrAdmin(grants, { countryCode }) || isCeo(grants, { countryCode });
+}
+
 export function canManageHolidays(grants: readonly RoleGrant[], countryCode: string): boolean {
   return isHrAdmin(grants, { countryCode });
 }

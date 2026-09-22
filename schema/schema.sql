@@ -1790,6 +1790,16 @@ create policy policy_versions_update on policy_versions for update
   )
   with check (has_role('hr_admin', null, country_code) or has_role('ceo', null, country_code));
 
+-- Same "draft only" restriction the update policy above applies — an
+-- active version is real, in-effect policy and stays append-only forever,
+-- so this only lets a mis-drafted version that was never activated be
+-- removed.
+create policy policy_versions_delete on policy_versions for delete
+  using (
+    status = 'draft'
+    and (has_role('hr_admin', null, country_code) or has_role('ceo', null, country_code))
+  );
+
 create or replace function guard_policy_version_update()
 returns trigger
 language plpgsql
@@ -1938,6 +1948,15 @@ create policy appraisals_update_hr on appraisals for update
 create policy appraisals_update_acknowledge on appraisals for update
   using (employee_id = current_employee_id() and status = 'submitted')
   with check (employee_id = current_employee_id() and status = 'acknowledged');
+
+-- Scoped to drafts only — same restriction appraisals_update_appraiser
+-- already applies to editing — so a submitted/acknowledged appraisal (real
+-- history) can never be deleted, only a not-yet-submitted one.
+create policy appraisals_delete on appraisals for delete
+  using (
+    status = 'draft'
+    and (appraiser_id = auth.uid() or has_role('hr_admin', (select company_id from employees where id = employee_id)))
+  );
 
 -- ---- checklist templates: readable by anyone signed in (transparency on
 --      what onboarding/offboarding involves), HR Admin manages.

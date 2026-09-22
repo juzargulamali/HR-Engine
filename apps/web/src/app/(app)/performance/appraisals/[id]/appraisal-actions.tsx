@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { acknowledgeAppraisal, submitAppraisal } from "@/lib/actions/performance";
+import { useRouter } from "next/navigation";
+import { acknowledgeAppraisal, deleteAppraisal, submitAppraisal } from "@/lib/actions/performance";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
@@ -10,11 +11,14 @@ export function AppraisalActions({
   appraisalId,
   canSubmit,
   canAcknowledge,
+  canDelete,
 }: {
   appraisalId: string;
   canSubmit: boolean;
   canAcknowledge: boolean;
+  canDelete: boolean;
 }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +50,25 @@ export function AppraisalActions({
               }
             >
               {pending ? "Acknowledging…" : "Acknowledge"}
+            </Button>
+          ) : null}
+          {canDelete ? (
+            <Button
+              variant="outline"
+              disabled={pending}
+              onClick={() => {
+                if (!window.confirm("Delete this draft appraisal?")) return;
+                startTransition(async () => {
+                  const result = await deleteAppraisal(appraisalId);
+                  if (result.error) {
+                    setError(result.error);
+                  } else {
+                    router.push("/performance");
+                  }
+                });
+              }}
+            >
+              {pending ? "Deleting…" : "Delete"}
             </Button>
           ) : null}
         </div>

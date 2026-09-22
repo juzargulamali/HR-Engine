@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AddHolidayForm } from "./add-holiday-form";
+import { DeleteHolidayButton } from "./delete-holiday-button";
 
 export default async function HolidaysPage() {
   const session = await getCurrentSession();
@@ -50,6 +51,7 @@ export default async function HolidaysPage() {
                 <TableHead>Date</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Country</TableHead>
+                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -58,11 +60,12 @@ export default async function HolidaysPage() {
                   <TableCell>{h.holiday_date}</TableCell>
                   <TableCell>{h.name}</TableCell>
                   <TableCell>{countryName.get(h.country_code) ?? h.country_code}</TableCell>
+                  <TableCell>{canManageHolidays(session.grants, h.country_code) ? <DeleteHolidayButton holidayId={h.id} /> : null}</TableCell>
                 </TableRow>
               ))}
               {(holidays ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="text-center text-muted-foreground">
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
                     No holidays on the calendar yet.
                   </TableCell>
                 </TableRow>

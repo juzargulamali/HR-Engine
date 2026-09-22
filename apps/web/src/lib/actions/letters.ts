@@ -130,6 +130,19 @@ export async function issueLetter(_prevState: { error: string | null }, formData
 }
 
 /**
+ * Soft-delete, same as employees/employee_documents — letter_templates
+ * already carries deleted_at (its select policy already filters on it) and
+ * generated_letters.template_id references it with no cascade, so a hard
+ * delete would fail once any letter had ever been issued from it anyway.
+ */
+export async function deleteLetterTemplate(templateId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("letter_templates").update({ deleted_at: new Date().toISOString() }).eq("id", templateId);
+  revalidatePath("/letters");
+  return { error: error?.message ?? null };
+}
+
+/**
  * Storage removal is best-effort — if it fails, the row still goes (and
  * with it, the only visible/downloadable path to the file: the storage
  * object itself becomes unreachable through the UI either way, since

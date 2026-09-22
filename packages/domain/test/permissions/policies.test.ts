@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canActivatePolicy,
+  canDeleteDraftPolicy,
   canDraftPolicy,
   canManageHolidays,
   canViewDraftPolicies,
@@ -62,5 +63,14 @@ describe("canViewDraftPolicies", () => {
     expect(canViewDraftPolicies(countryCeo, AE)).toBe(true);
     expect(canViewDraftPolicies(companyScopedHrAdmin, AE)).toBe(false);
     expect(canViewDraftPolicies(lineManager, AE)).toBe(false);
+  });
+});
+
+describe("canDeleteDraftPolicy", () => {
+  it("is HR Admin or CEO, country-scoped — unlike canActivatePolicy, does not exclude the drafter", () => {
+    expect(canDeleteDraftPolicy(countryHrAdmin, AE)).toBe(true);
+    expect(canDeleteDraftPolicy(countryCeo, AE)).toBe(true);
+    expect(canDeleteDraftPolicy(companyScopedHrAdmin, AE)).toBe(false);
+    expect(canDeleteDraftPolicy(lineManager, AE)).toBe(false);
   });
 });

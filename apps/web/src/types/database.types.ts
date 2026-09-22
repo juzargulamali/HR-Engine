@@ -81,6 +81,8 @@ export interface Database {
           registration_no?: string | null;
           default_currency: string;
           is_active?: boolean;
+          deleted_at?: string | null;
+          deleted_by?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["companies"]["Insert"]>;
         Relationships: [];
