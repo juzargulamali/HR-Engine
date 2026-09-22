@@ -1,94 +1,118 @@
+import Image from "next/image";
 import Link from "next/link";
 import { hasRoleAnyScope, isSysAdmin, ROLE_LABELS } from "@enginious-hr/domain";
 import type { CurrentSession } from "@/lib/auth/session";
 import { signOut } from "@/lib/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { SidebarNav, type NavGroup } from "./sidebar-nav";
 
 export function AppShell({ session, children }: { session: CurrentSession; children: React.ReactNode }) {
   const roleLabels = [...new Set(session.grants.map((g) => ROLE_LABELS[g.role]))];
   const showAdminLink = isSysAdmin(session.grants);
-  const showAiOrAuditLink = hasRoleAnyScope(session.grants, "hr_admin") || hasRoleAnyScope(session.grants, "sys_admin");
+  const showInsightsLinks = hasRoleAnyScope(session.grants, "hr_admin") || hasRoleAnyScope(session.grants, "sys_admin");
+
+  const groups: NavGroup[] = [
+    {
+      label: "Overview",
+      links: [
+        { href: "/", label: "Dashboard" },
+        { href: "/profile", label: "My Profile" },
+      ],
+    },
+    {
+      label: "People",
+      links: [
+        { href: "/employees", label: "Employees" },
+        { href: "/leave", label: "Leave" },
+        { href: "/reimbursements", label: "Reimbursements" },
+        { href: "/approvals", label: "Approvals" },
+      ],
+    },
+    {
+      label: "Operations",
+      links: [
+        { href: "/letters", label: "Letters" },
+        { href: "/payroll", label: "Payroll" },
+        { href: "/policies", label: "Policies" },
+        { href: "/holidays", label: "Holidays" },
+      ],
+    },
+    ...(showInsightsLinks
+      ? [
+          {
+            label: "Insights",
+            links: [
+              { href: "/ai-suggestions", label: "AI Suggestions" },
+              { href: "/audit-log", label: "Audit Log" },
+            ],
+          },
+        ]
+      : []),
+    ...(showAdminLink
+      ? [
+          {
+            label: "System",
+            links: [
+              { href: "/admin/companies", label: "Companies" },
+              { href: "/admin/users", label: "Users & Roles" },
+            ],
+          },
+        ]
+      : []),
+  ];
+
+  const userSummary = (
+    <div className="text-right">
+      <div className="text-sm font-medium">{session.fullName ?? session.email}</div>
+      <div className="mt-0.5 flex justify-end gap-1">
+        {roleLabels.length > 0 ? (
+          roleLabels.map((label) => (
+            <Badge key={label} variant="brand" className="text-[10px]">
+              {label}
+            </Badge>
+          ))
+        ) : (
+          <Badge variant="outline" className="text-[10px]">
+            No role assigned yet
+          </Badge>
+        )}
+      </div>
+    </div>
+  );
+
+  const signOutButton = (
+    <form action={signOut}>
+      <Button variant="outline" size="sm" type="submit">
+        Sign out
+      </Button>
+    </form>
+  );
 
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3">
-          <div className="flex items-center gap-6">
-            <Link href="/" className="font-semibold">
-              Enginious HR
-            </Link>
-            <nav className="flex items-center gap-4 text-sm text-muted-foreground">
-              <Link href="/" className="hover:text-foreground">
-                Dashboard
-              </Link>
-              <Link href="/profile" className="hover:text-foreground">
-                My Profile
-              </Link>
-              <Link href="/employees" className="hover:text-foreground">
-                Employees
-              </Link>
-              <Link href="/leave" className="hover:text-foreground">
-                Leave
-              </Link>
-              <Link href="/reimbursements" className="hover:text-foreground">
-                Reimbursements
-              </Link>
-              <Link href="/approvals" className="hover:text-foreground">
-                Approvals
-              </Link>
-              <Link href="/letters" className="hover:text-foreground">
-                Letters
-              </Link>
-              <Link href="/payroll" className="hover:text-foreground">
-                Payroll
-              </Link>
-              <Link href="/policies" className="hover:text-foreground">
-                Policies
-              </Link>
-              {showAiOrAuditLink ? (
-                <Link href="/ai-suggestions" className="hover:text-foreground">
-                  AI Suggestions
-                </Link>
-              ) : null}
-              {showAiOrAuditLink ? (
-                <Link href="/audit-log" className="hover:text-foreground">
-                  Audit Log
-                </Link>
-              ) : null}
-              {showAdminLink ? (
-                <Link href="/admin/companies" className="hover:text-foreground">
-                  Admin
-                </Link>
-              ) : null}
-            </nav>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="hidden text-right sm:block">
-              <div className="text-sm font-medium">{session.fullName ?? session.email}</div>
-              <div className="flex justify-end gap-1">
-                {roleLabels.length > 0 ? (
-                  roleLabels.map((label) => (
-                    <Badge key={label} variant="secondary" className="text-[10px]">
-                      {label}
-                    </Badge>
-                  ))
-                ) : (
-                  <Badge variant="outline" className="text-[10px]">
-                    No role assigned yet
-                  </Badge>
-                )}
-              </div>
+    <div className="flex min-h-screen flex-col md:flex-row">
+      <SidebarNav groups={groups} userSummary={userSummary} signOutButton={signOutButton} />
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="hidden items-center justify-between gap-4 border-b border-border bg-card px-8 py-3 md:flex">
+          <Link href="/" className="flex items-center gap-2.5">
+            <Image src="/brand/enginious-icon.png" alt="Enginious" width={28} height={28} priority />
+            <div className="leading-tight">
+              <div className="font-heading text-sm font-bold tracking-tight">ENGINIOUS</div>
+              <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">HR Engine</div>
             </div>
-            <form action={signOut}>
-              <Button variant="outline" size="sm" type="submit">
-                Sign out
-              </Button>
-            </form>
+          </Link>
+
+          <div className="ml-auto flex items-center gap-3">
+            {userSummary}
+            {signOutButton}
           </div>
-        </div>
-      </header>
-      <main className="mx-auto max-w-5xl px-4 py-8">{children}</main>
+        </header>
+
+        <main className="flex-1 px-4 py-8 md:px-8">
+          <div className="mx-auto max-w-6xl">{children}</div>
+        </main>
+      </div>
     </div>
   );
 }

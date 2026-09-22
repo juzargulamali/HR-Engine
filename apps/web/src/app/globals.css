@@ -20,53 +20,132 @@
   --color-ring: hsl(var(--ring));
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
+  --radius-sm: calc(var(--radius) - 5px);
+  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-sora), ui-sans-serif, system-ui, sans-serif;
 }
 
+/*
+ * Enginious brand tokens, dark-first — the flagship "circuit board glow" look
+ * from the company profile deck (near-black ground, teal/cyan accent,
+ * geometric bold headline type). Light mode is a deliberate second theme for
+ * anyone whose OS prefers it, not an afterthought — same hues, recalibrated
+ * for a white ground.
+ */
 :root {
-  --radius: 0.5rem;
-  --background: 40 20% 97%;
-  --foreground: 222 47% 11%;
-  --card: 0 0% 100%;
-  --card-foreground: 222 47% 11%;
-  --primary: 174 55% 27%;
+  --radius: 0.55rem;
+  --background: 195 42% 5%;
+  --foreground: 180 22% 94%;
+  --card: 196 36% 8%;
+  --card-foreground: 180 22% 94%;
+  --primary: 178 78% 34%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 40 12% 92%;
-  --secondary-foreground: 222 47% 11%;
-  --muted: 40 12% 92%;
-  --muted-foreground: 222 15% 40%;
-  --accent: 38 55% 45%;
-  --accent-foreground: 0 0% 100%;
-  --destructive: 0 55% 45%;
+  --secondary: 195 26% 13%;
+  --secondary-foreground: 180 16% 90%;
+  --muted: 195 26% 11%;
+  --muted-foreground: 190 14% 62%;
+  --accent: 187 85% 55%;
+  --accent-foreground: 196 45% 7%;
+  --destructive: 355 72% 56%;
   --destructive-foreground: 0 0% 100%;
-  --border: 222 15% 85%;
-  --input: 222 15% 85%;
-  --ring: 174 55% 27%;
+  --border: 195 24% 17%;
+  --input: 195 24% 17%;
+  --ring: 187 85% 58%;
+
+  /* Brand-specific extras, not part of the shadcn-style token set above. */
+  --brand-glow: 187 85% 55%;
+  --brand-deep: 178 78% 34%;
+  --brand-grid-line: 190 45% 20%;
+  --brand-grid-opacity: 0.55;
 }
 
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
   :root {
-    --background: 222 40% 8%;
-    --foreground: 210 20% 94%;
-    --card: 222 35% 12%;
-    --card-foreground: 210 20% 94%;
-    --primary: 174 45% 55%;
-    --primary-foreground: 222 47% 11%;
-    --secondary: 222 30% 16%;
-    --secondary-foreground: 210 20% 94%;
-    --muted: 222 30% 16%;
-    --muted-foreground: 220 12% 65%;
-    --accent: 38 60% 60%;
-    --accent-foreground: 222 47% 11%;
-    --destructive: 0 55% 60%;
-    --destructive-foreground: 222 47% 11%;
-    --border: 222 25% 22%;
-    --input: 222 25% 22%;
-    --ring: 174 45% 55%;
+    --background: 190 32% 97%;
+    --foreground: 196 45% 9%;
+    --card: 0 0% 100%;
+    --card-foreground: 196 45% 9%;
+    --primary: 178 82% 27%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 190 22% 93%;
+    --secondary-foreground: 196 40% 13%;
+    --muted: 190 22% 93%;
+    --muted-foreground: 195 15% 40%;
+    --accent: 187 76% 38%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 355 68% 46%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 190 20% 87%;
+    --input: 190 20% 87%;
+    --ring: 178 82% 32%;
+
+    --brand-glow: 187 76% 42%;
+    --brand-deep: 178 82% 27%;
+    --brand-grid-line: 190 30% 82%;
+    --brand-grid-opacity: 0.6;
   }
 }
 
 body {
   background: hsl(var(--background));
   color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
+  letter-spacing: -0.01em;
+}
+
+::selection {
+  background: hsl(var(--accent) / 0.35);
+  color: hsl(var(--foreground));
+}
+
+/* A faint circuit-board grid, the brand deck's own background texture —
+   used behind the sidebar and page heroes, never behind dense tables. */
+.brand-grid {
+  background-image:
+    linear-gradient(hsl(var(--brand-grid-line) / var(--brand-grid-opacity)) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--brand-grid-line) / var(--brand-grid-opacity)) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.brand-gradient {
+  background-image: linear-gradient(135deg, hsl(var(--brand-deep)) 0%, hsl(var(--brand-glow)) 100%);
+}
+
+.brand-gradient-text {
+  background-image: linear-gradient(135deg, hsl(var(--brand-deep)) 0%, hsl(var(--brand-glow)) 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.brand-glow-ring {
+  box-shadow: 0 0 0 1px hsl(var(--brand-glow) / 0.4), 0 8px 24px -8px hsl(var(--brand-glow) / 0.35);
+}
+
+/* A small right-angle "circuit trace" corner mark, echoing the bracket
+   frames used around every image in the brand deck. Applied as a pseudo
+   element so it never affects layout or clips content. */
+.brand-corner {
+  position: relative;
+}
+.brand-corner::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 14px;
+  height: 14px;
+  border-top: 2px solid hsl(var(--accent) / 0.7);
+  border-left: 2px solid hsl(var(--accent) / 0.7);
+  border-top-left-radius: 4px;
+  pointer-events: none;
 }
