@@ -196,24 +196,26 @@ export async function updateOwnContactInfo(_prevState: ActionState, formData: Fo
   return { error: null };
 }
 
-export async function softDeleteEmployee(employeeId: string): Promise<void> {
+export async function softDeleteEmployee(employeeId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  await supabase
+  const { error } = await supabase
     .from("employees")
     .update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null })
     .eq("id", employeeId);
   revalidatePath("/employees");
   revalidatePath(`/employees/${employeeId}`);
+  return { error: error?.message ?? null };
 }
 
-export async function restoreEmployee(employeeId: string): Promise<void> {
+export async function restoreEmployee(employeeId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
-  await supabase.from("employees").update({ deleted_at: null, deleted_by: null }).eq("id", employeeId);
+  const { error } = await supabase.from("employees").update({ deleted_at: null, deleted_by: null }).eq("id", employeeId);
   revalidatePath("/employees");
   revalidatePath(`/employees/${employeeId}`);
+  return { error: error?.message ?? null };
 }
 
 const addContractVersionSchema = z.object({
@@ -376,6 +378,25 @@ export async function addIdentityDocument(_prevState: ActionState, formData: For
   return { error: null };
 }
 
+/**
+ * identity_documents has no soft-delete column (unlike employee_documents),
+ * so this is a real delete — row plus its storage object, same
+ * remove-then-delete order as deleteLetter() so a failed storage remove
+ * still leaves the row (and its download link) rather than orphaning a
+ * file with nothing left to serve it.
+ */
+export async function deleteIdentityDocument(documentId: string, employeeId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { data: doc } = await supabase.from("identity_documents").select("file_path").eq("id", documentId).maybeSingle();
+  if (doc?.file_path) {
+    await supabase.storage.from("identity-documents").remove([doc.file_path]);
+  }
+
+  const { error } = await supabase.from("identity_documents").delete().eq("id", documentId);
+  revalidatePath(`/employees/${employeeId}`);
+  return { error: error?.message ?? null };
+}
+
 const addEmployeeDocumentSchema = z.object({
   employeeId: z.string().uuid(),
   companyId: z.string().uuid(),
@@ -416,4 +437,24 @@ export async function addEmployeeDocument(_prevState: ActionState, formData: For
 
   revalidatePath(`/employees/${d.employeeId}`);
   return { error: null };
+}
+
+/**
+ * Soft-delete, same as employees' own restore/remove pattern — the storage
+ * file is deliberately left in place (deleted_at is what "recovery" means
+ * here; the row's own select policy already hides it from the employee
+ * while HR Admin keeps seeing it, same as employees_select).
+ */
+export async function deleteEmployeeDocument(documentId: string, employeeId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("employee_documents").update({ deleted_at: new Date().toISOString() }).eq("id", documentId);
+  revalidatePath(`/employees/${employeeId}`);
+  return { error: error?.message ?? null };
+}
+
+export async function restoreEmployeeDocument(documentId: string, employeeId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("employee_documents").update({ deleted_at: null }).eq("id", documentId);
+  revalidatePath(`/employees/${employeeId}`);
+  return { error: error?.message ?? null };
 }

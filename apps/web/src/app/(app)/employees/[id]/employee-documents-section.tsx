@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { AddEmployeeDocumentForm } from "./add-employee-document-form";
+import { DeleteEmployeeDocumentButton } from "./delete-employee-document-button";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
   valid: "default",
@@ -21,7 +22,7 @@ export async function EmployeeDocumentsSection({
   const supabase = await createClient();
   const { data: documents } = await supabase
     .from("employee_documents")
-    .select("id, document_type, expiry_date, status, file_path")
+    .select("id, document_type, expiry_date, status, file_path, deleted_at")
     .eq("employee_id", employeeId)
     .order("created_at", { ascending: false });
 
@@ -49,20 +50,29 @@ export async function EmployeeDocumentsSection({
         </TableHeader>
         <TableBody>
           {documentsWithUrl.map((d) => (
-            <TableRow key={d.id}>
+            <TableRow key={d.id} className={d.deleted_at ? "opacity-60" : undefined}>
               <TableCell className="capitalize">{d.document_type.replace(/_/g, " ")}</TableCell>
               <TableCell>{d.expiry_date ?? "—"}</TableCell>
               <TableCell>
-                <Badge variant={STATUS_VARIANT[d.status] ?? "secondary"}>{d.status.replace(/_/g, " ")}</Badge>
+                {d.deleted_at ? (
+                  <Badge variant="destructive">removed</Badge>
+                ) : (
+                  <Badge variant={STATUS_VARIANT[d.status] ?? "secondary"}>{d.status.replace(/_/g, " ")}</Badge>
+                )}
               </TableCell>
               <TableCell>
-                {d.url ? (
-                  <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
-                    View / Download
-                  </a>
-                ) : (
-                  <span className="text-muted-foreground">—</span>
-                )}
+                <div className="flex items-center gap-3">
+                  {d.url ? (
+                    <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+                      View / Download
+                    </a>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                  {canEdit ? (
+                    <DeleteEmployeeDocumentButton documentId={d.id} employeeId={employeeId} deleted={Boolean(d.deleted_at)} />
+                  ) : null}
+                </div>
               </TableCell>
             </TableRow>
           ))}

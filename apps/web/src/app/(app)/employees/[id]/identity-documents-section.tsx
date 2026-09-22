@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AddIdentityDocumentForm } from "./add-identity-document-form";
+import { DeleteIdentityDocumentButton } from "./delete-identity-document-button";
 
 export async function IdentityDocumentsSection({
   employeeId,
@@ -47,13 +48,16 @@ export async function IdentityDocumentsSection({
               <TableCell className="font-mono text-xs">{d.document_number}</TableCell>
               <TableCell>{d.expiry_date ?? "—"}</TableCell>
               <TableCell>
-                {d.url ? (
-                  <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
-                    View / Download
-                  </a>
-                ) : (
-                  <span className="text-muted-foreground">—</span>
-                )}
+                <div className="flex items-center gap-3">
+                  {d.url ? (
+                    <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+                      View / Download
+                    </a>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                  {canEdit ? <DeleteIdentityDocumentButton documentId={d.id} employeeId={employeeId} /> : null}
+                </div>
               </TableCell>
             </TableRow>
           ))}
