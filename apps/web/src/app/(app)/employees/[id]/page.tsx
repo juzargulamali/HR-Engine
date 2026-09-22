@@ -3,10 +3,12 @@ import {
   canDeleteOrRestoreEmployee,
   canEditEmployeeCore,
   canManageAssets,
+  canManageAttendance,
   canManageContracts,
   canManageEmployeeDocuments,
   canManageIdentityDocuments,
   canViewAssetAssignments,
+  canViewAttendance,
   canViewCompensation,
   canViewContracts,
   canViewEmployeeDocuments,
@@ -28,6 +30,7 @@ import { IdentityDocumentsSection } from "./identity-documents-section";
 import { EmployeeDocumentsSection } from "./employee-documents-section";
 import { FinalSettlementSection } from "./final-settlement-section";
 import { AssetsSection } from "./assets-section";
+import { AttendanceSection } from "./attendance-section";
 
 export default async function EmployeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -82,6 +85,8 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   const canDelete = canDeleteOrRestoreEmployee(session.grants, employee.company_id);
   const canSeeAssets = canViewAssetAssignments(session.grants, employee.company_id, { isSelf, isManager });
   const canEditAssets = canManageAssets(session.grants, employee.company_id);
+  const canSeeAttendance = canViewAttendance(session.grants, employee.company_id, { isSelf, isManager });
+  const canEditAttendance = canManageAttendance(session.grants, employee.company_id);
 
   return (
     <div className="space-y-6">
@@ -192,6 +197,17 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           </CardHeader>
           <CardContent>
             <AssetsSection employeeId={employee.id} companyId={employee.company_id} canManage={canEditAssets} />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {canSeeAttendance ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Attendance</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <AttendanceSection employeeId={employee.id} canManage={canEditAttendance} />
           </CardContent>
         </Card>
       ) : null}
