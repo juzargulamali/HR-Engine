@@ -14,8 +14,8 @@ export default async function DashboardPage() {
       <div>
         <h1 className="text-2xl font-semibold">Welcome{session.fullName ? `, ${session.fullName.split(" ")[0]}` : ""}</h1>
         <p className="text-muted-foreground">
-          Phase 0 of Enginious HR — accounts, roles, and companies. Leave, payroll, and everything
-          else land in later phases (see docs/06-implementation-phases.md).
+          Employee records, leave, reimbursements, timesheets, letters, payroll export, and policy
+          management — everything below is scoped to what your role can see and do.
         </p>
       </div>
 
@@ -26,12 +26,33 @@ export default async function DashboardPage() {
             <CardDescription>
               {session.employeeId
                 ? "View your employee record."
-                : "No employee record yet — HR sets this up in Phase 1."}
+                : "No employee record yet — ask HR Admin to add you as an employee."}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Link href="/profile" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
               Open
+            </Link>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Quick links</CardTitle>
+            <CardDescription>Jump to a common area.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            <Link href="/leave" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+              Leave
+            </Link>
+            <Link href="/reimbursements" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+              Reimbursements
+            </Link>
+            <Link href="/approvals" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+              Approvals
+            </Link>
+            <Link href="/employees" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+              Employees
             </Link>
           </CardContent>
         </Card>
