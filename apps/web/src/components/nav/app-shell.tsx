@@ -24,6 +24,9 @@ export function AppShell({ session, children }: { session: CurrentSession; child
               <Link href="/profile" className="hover:text-foreground">
                 My Profile
               </Link>
+              <Link href="/employees" className="hover:text-foreground">
+                Employees
+              </Link>
               {showAdminLink ? (
                 <Link href="/admin/companies" className="hover:text-foreground">
                   Admin

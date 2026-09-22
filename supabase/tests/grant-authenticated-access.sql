@@ -11,3 +11,8 @@ alter default privileges in schema public
   grant select, insert, update, delete on tables to anon, authenticated;
 alter default privileges in schema public
   grant usage, select on sequences to anon, authenticated;
+
+-- Same idea for the storage stub (stub-storage-schema.sql) — Supabase grants
+-- this automatically on a real project too.
+grant usage on schema storage to anon, authenticated;
+grant select, insert, update, delete on storage.objects, storage.buckets to anon, authenticated;

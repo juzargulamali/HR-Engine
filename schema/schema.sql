@@ -238,6 +238,21 @@ create table employment_contracts (
 create index idx_contracts_employee_current
   on employment_contracts(employee_id) where is_current;
 
+-- One function every reader goes through — never re-derive "the contract in
+-- effect on date X" ad hoc in application code (same principle as
+-- resolve_policy() for country rules, §2.4).
+create or replace function get_contract_as_of(p_employee_id uuid, p_as_of date)
+returns setof employment_contracts
+language sql stable
+as $$
+  select * from employment_contracts
+  where employee_id = p_employee_id
+    and start_date <= p_as_of
+    and (end_date is null or end_date >= p_as_of)
+  order by version_no desc
+  limit 1;
+$$;
+
 -- Sensitive tier 1: compensation & bank data. Same versioning pattern.
 create table compensation_details (
   id                  uuid primary key default gen_random_uuid(),
@@ -403,9 +418,14 @@ create table deduction_priority_rules (
   leave_type_code text not null,
   source_ledger   text not null,      -- 'comp_day' | 'leave_ledger'
   priority_order  int not null,       -- lower = drawn first
-  effective_from  date not null default current_date,
-  unique (coalesce(company_id::text, country_code), leave_type_code, source_ledger, effective_from)
+  effective_from  date not null default current_date
 );
+
+-- A plain table UNIQUE constraint can't take an expression like coalesce(...)
+-- — a unique index can, so the "company override or country default" scope
+-- de-duplication has to live here instead.
+create unique index idx_deduction_priority_scope
+  on deduction_priority_rules (coalesce(company_id::text, country_code), leave_type_code, source_ledger, effective_from);
 
 -- -----------------------------------------------------------------------------
 -- 5. Generic approval workflow engine (reused by leave, reimbursement, timesheets,
@@ -910,15 +930,20 @@ create policy profiles_write_sysadmin on profiles for update
 
 -- ---- employees: self, manager chain (read-only, non-sensitive columns only via a view),
 --      HR Admin (full), Finance (read, for cost-center/payroll purposes), CEO (read), Sys Admin (read, no write to content)
+--      HR Admin and Sys Admin bypass the deleted_at filter — they're the two
+--      roles who can recover a soft-deleted employee (§2.8), which requires
+--      being able to see the row exists in the first place.
 create policy employees_select on employees for select
   using (
-    deleted_at is null and (
-      id = current_employee_id()
-      or is_manager_of(id)
-      or has_role('hr_admin', company_id)
-      or has_role('finance', company_id)
-      or has_role('ceo', company_id)
-      or has_role('sys_admin')
+    has_role('hr_admin', company_id)
+    or has_role('sys_admin')
+    or (
+      deleted_at is null and (
+        id = current_employee_id()
+        or is_manager_of(id)
+        or has_role('finance', company_id)
+        or has_role('ceo', company_id)
+      )
     )
   );
 
@@ -926,6 +951,79 @@ create policy employees_write_hr on employees for insert with check (has_role('h
 create policy employees_update_hr on employees for update
   using (has_role('hr_admin', company_id))
   with check (has_role('hr_admin', company_id));
+
+-- Self-service contact info edit (personal_email/phone only). RLS is
+-- row-level, not column-level, so the "nothing else" part is enforced by a
+-- trigger, not the policy itself — HR Admin passes straight through it via
+-- employees_update_hr already covering full edit rights.
+create policy employees_update_self on employees for update
+  using (id = current_employee_id())
+  with check (id = current_employee_id());
+
+create or replace function guard_employee_self_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  -- Triggers fire regardless of role, unlike RLS — a trusted backend write
+  -- (migration, seed, admin/service-role operation with no PostgREST JWT
+  -- session) has auth.uid() = null and is never what this guard constrains.
+  if auth.uid() is null or has_role('hr_admin', new.company_id) then
+    return new;
+  end if;
+
+  if new.first_name is distinct from old.first_name
+    or new.last_name is distinct from old.last_name
+    or new.company_id is distinct from old.company_id
+    or new.country_code is distinct from old.country_code
+    or new.department_id is distinct from old.department_id
+    or new.manager_id is distinct from old.manager_id
+    or new.employee_number is distinct from old.employee_number
+    or new.job_title is distinct from old.job_title
+    or new.employment_status is distinct from old.employment_status
+    or new.employment_type is distinct from old.employment_type
+    or new.hire_date is distinct from old.hire_date
+    or new.termination_date is distinct from old.termination_date
+    or new.cost_center is distinct from old.cost_center
+    or new.work_location is distinct from old.work_location
+    or new.deleted_at is distinct from old.deleted_at
+    or new.deleted_by is distinct from old.deleted_by
+  then
+    raise exception 'Only personal_email and phone can be self-updated — ask HR Admin to change anything else.';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger employees_guard_self_update
+  before update on employees
+  for each row execute function guard_employee_self_update();
+
+-- ---- employment_contracts: employee (own, every version), Line Manager (team,
+--      current version only — historical terms aren't a manager's business),
+--      HR Admin (full), Finance/CEO (read), Sys Admin (no access) — matches
+--      permission matrix §3.1 exactly.
+create policy employment_contracts_select on employment_contracts for select
+  using (
+    employee_id = current_employee_id()
+    or (is_manager_of(employee_id) and is_current)
+    or has_role('hr_admin', (select company_id from employees where id = employee_id))
+    or has_role('finance', (select company_id from employees where id = employee_id))
+    or has_role('ceo', (select company_id from employees where id = employee_id))
+  );
+
+create policy employment_contracts_insert on employment_contracts for insert
+  with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
+
+-- The only legitimate UPDATE is HR Admin flipping an old version's
+-- is_current/superseded_by when a new one is inserted, never editing a
+-- version's terms after the fact — a process convention (RLS doesn't
+-- restrict by column), same trust level the permission matrix already
+-- gives HR Admin ("F") for this resource.
+create policy employment_contracts_update on employment_contracts for update
+  using (has_role('hr_admin', (select company_id from employees where id = employee_id)))
+  with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
 
 -- ---- compensation_details: HR Admin + Finance (full within their company), employee (read own only)
 create policy compensation_select on compensation_details for select
@@ -935,7 +1033,17 @@ create policy compensation_select on compensation_details for select
     or has_role('finance', (select company_id from employees where id = employee_id))
   );
 
-create policy compensation_write on compensation_details for insert
+create policy compensation_insert on compensation_details for insert
+  with check (
+    has_role('hr_admin', (select company_id from employees where id = employee_id))
+    or has_role('finance', (select company_id from employees where id = employee_id))
+  );
+
+create policy compensation_update on compensation_details for update
+  using (
+    has_role('hr_admin', (select company_id from employees where id = employee_id))
+    or has_role('finance', (select company_id from employees where id = employee_id))
+  )
   with check (
     has_role('hr_admin', (select company_id from employees where id = employee_id))
     or has_role('finance', (select company_id from employees where id = employee_id))
@@ -948,7 +1056,11 @@ create policy identity_docs_select on identity_documents for select
     or has_role('hr_admin', (select company_id from employees where id = employee_id))
   );
 
-create policy identity_docs_write on identity_documents for insert
+create policy identity_docs_insert on identity_documents for insert
+  with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
+
+create policy identity_docs_update on identity_documents for update
+  using (has_role('hr_admin', (select company_id from employees where id = employee_id)))
   with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
 
 -- ---- appraisals & goals: employee, manager chain, HR Admin — never Finance
@@ -1173,3 +1285,57 @@ create trigger audit_generated_letters after insert or update on generated_lette
 revoke update, delete on leave_ledger from authenticated, anon;
 revoke update, delete on comp_day_ledger from authenticated, anon;
 revoke delete on approvals from authenticated, anon;
+
+-- =============================================================================
+-- 16. Storage buckets — private, path-based RLS via storage.objects policies
+--     using the same helper functions as every table policy above. Path
+--     convention throughout: `{company_id}/{employee_id}/{sub_path}`. See
+--     §2.9 for the full bucket table (receipts, letters, assets — added by
+--     their own phases, following this exact pattern).
+-- =============================================================================
+
+insert into storage.buckets (id, name, public)
+values
+  ('employee-documents', 'employee-documents', false),
+  ('identity-documents', 'identity-documents', false)
+on conflict (id) do nothing;
+
+-- employee-documents: owner reads their own files, HR Admin reads/writes
+-- everything in their company. Sys Admin has no content access.
+create policy employee_documents_select on storage.objects for select
+  using (
+    bucket_id = 'employee-documents'
+    and (
+      (storage.foldername(name))[2]::uuid = current_employee_id()
+      or has_role('hr_admin', (storage.foldername(name))[1]::uuid)
+    )
+  );
+
+create policy employee_documents_write on storage.objects for insert
+  with check (bucket_id = 'employee-documents' and has_role('hr_admin', (storage.foldername(name))[1]::uuid));
+
+create policy employee_documents_update on storage.objects for update
+  using (bucket_id = 'employee-documents' and has_role('hr_admin', (storage.foldername(name))[1]::uuid));
+
+create policy employee_documents_delete on storage.objects for delete
+  using (bucket_id = 'employee-documents' and has_role('hr_admin', (storage.foldername(name))[1]::uuid));
+
+-- identity-documents: same shape, HR Admin only for writes, owner + HR Admin
+-- for reads — never a manager, Finance, or Sys Admin.
+create policy identity_documents_select on storage.objects for select
+  using (
+    bucket_id = 'identity-documents'
+    and (
+      (storage.foldername(name))[2]::uuid = current_employee_id()
+      or has_role('hr_admin', (storage.foldername(name))[1]::uuid)
+    )
+  );
+
+create policy identity_documents_write on storage.objects for insert
+  with check (bucket_id = 'identity-documents' and has_role('hr_admin', (storage.foldername(name))[1]::uuid));
+
+create policy identity_documents_update on storage.objects for update
+  using (bucket_id = 'identity-documents' and has_role('hr_admin', (storage.foldername(name))[1]::uuid));
+
+create policy identity_documents_delete on storage.objects for delete
+  using (bucket_id = 'identity-documents' and has_role('hr_admin', (storage.foldername(name))[1]::uuid));

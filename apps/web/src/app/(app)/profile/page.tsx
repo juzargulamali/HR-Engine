@@ -1,7 +1,6 @@
+import { redirect } from "next/navigation";
 import { getCurrentSession } from "@/lib/auth/session";
-import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 
 export default async function ProfilePage() {
   const session = await getCurrentSession();
@@ -18,42 +17,16 @@ export default async function ProfilePage() {
             You&apos;re signed in as <span className="text-foreground">{session.email}</span>, but HR
             hasn&apos;t created your employee record yet.
           </p>
-          <p>Employee records, contracts, and everything else land in Phase 1 — see docs/06-implementation-phases.md.</p>
+          <p>Once HR creates it, this page will take you straight to it.</p>
         </CardContent>
       </Card>
     );
   }
 
-  const supabase = await createClient();
-  const { data: employee } = await supabase
-    .from("employees")
-    .select("first_name, last_name, job_title, hire_date, employment_status, company_id")
-    .eq("id", session.employeeId)
-    .single();
-
-  const { data: company } = employee
-    ? await supabase.from("companies").select("legal_name").eq("id", employee.company_id).single()
-    : { data: null };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>
-          {employee?.first_name} {employee?.last_name}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <div className="flex items-center gap-2">
-          <Badge variant="secondary">{employee?.employment_status}</Badge>
-          {employee?.job_title ? <span className="text-muted-foreground">{employee.job_title}</span> : null}
-        </div>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-muted-foreground">
-          <dt>Company</dt>
-          <dd className="text-foreground">{company?.legal_name}</dd>
-          <dt>Hire date</dt>
-          <dd className="text-foreground">{employee?.hire_date}</dd>
-        </dl>
-      </CardContent>
-    </Card>
-  );
+  // "My Profile" is just a stable link to the employee's own record —
+  // /employees/[id] already renders everything they're allowed to see
+  // (self-service contact edit, contracts, compensation, identity
+  // documents if visible to them) and there's no reason to duplicate that
+  // rendering here.
+  redirect(`/employees/${session.employeeId}`);
 }

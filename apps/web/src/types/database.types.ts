@@ -1,5 +1,6 @@
 /**
  * Hand-written to match supabase/migrations/20260922000000_phase0_foundations.sql
+ * and supabase/migrations/20260924000000_phase1_contracts_compensation_identity.sql
  * exactly. Once a real Supabase project exists, regenerate this file with
  * `npm run db:types` (root package.json) instead of hand-editing it — see
  * docs/09-extending-the-system.md "adding a table" checklist, which ends
@@ -9,6 +10,7 @@
 export type AppRole = "employee" | "line_manager" | "hr_admin" | "finance" | "ceo" | "sys_admin";
 export type EmploymentStatus = "active" | "on_leave" | "suspended" | "terminated";
 export type EmploymentType = "full_time" | "part_time" | "contractor" | "intern";
+export type ContractType = "permanent" | "fixed_term" | "probation" | "contractor";
 
 export interface Database {
   public: {
@@ -168,16 +170,124 @@ export interface Database {
           cost_center?: string | null;
           work_location?: string | null;
         };
-        Update: Partial<Database["public"]["Tables"]["employees"]["Insert"]>;
+        Update: Partial<Database["public"]["Tables"]["employees"]["Insert"]> & {
+          deleted_at?: string | null;
+          deleted_by?: string | null;
+        };
+        Relationships: [];
+      };
+      employment_contracts: {
+        Row: {
+          id: string;
+          employee_id: string;
+          contract_type: ContractType;
+          start_date: string;
+          end_date: string | null;
+          notice_period_days: number;
+          probation_end_date: string | null;
+          document_file_path: string | null;
+          is_current: boolean;
+          superseded_by: string | null;
+          version_no: number;
+          created_at: string;
+          created_by: string;
+        };
+        Insert: {
+          id?: string;
+          employee_id: string;
+          contract_type: ContractType;
+          start_date: string;
+          end_date?: string | null;
+          notice_period_days?: number;
+          probation_end_date?: string | null;
+          document_file_path?: string | null;
+          is_current?: boolean;
+          superseded_by?: string | null;
+          version_no: number;
+          created_by: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employment_contracts"]["Insert"]>;
+        Relationships: [];
+      };
+      compensation_details: {
+        Row: {
+          id: string;
+          employee_id: string;
+          effective_from: string;
+          effective_to: string | null;
+          base_salary: string;
+          currency: string;
+          allowances: Record<string, unknown>;
+          payment_method: string | null;
+          bank_name: string | null;
+          bank_iban: string | null;
+          bank_swift: string | null;
+          is_current: boolean;
+          superseded_by: string | null;
+          created_at: string;
+          created_by: string;
+        };
+        Insert: {
+          id?: string;
+          employee_id: string;
+          effective_from: string;
+          effective_to?: string | null;
+          base_salary: number;
+          currency: string;
+          allowances?: Record<string, unknown>;
+          payment_method?: string | null;
+          bank_name?: string | null;
+          bank_iban?: string | null;
+          bank_swift?: string | null;
+          is_current?: boolean;
+          superseded_by?: string | null;
+          created_by: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["compensation_details"]["Insert"]>;
+        Relationships: [];
+      };
+      identity_documents: {
+        Row: {
+          id: string;
+          employee_id: string;
+          document_type: string;
+          document_number: string;
+          issuing_country: string | null;
+          issue_date: string | null;
+          expiry_date: string | null;
+          file_path: string | null;
+          is_current: boolean;
+          created_at: string;
+          created_by: string;
+        };
+        Insert: {
+          id?: string;
+          employee_id: string;
+          document_type: string;
+          document_number: string;
+          issuing_country?: string | null;
+          issue_date?: string | null;
+          expiry_date?: string | null;
+          file_path?: string | null;
+          is_current?: boolean;
+          created_by: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["identity_documents"]["Insert"]>;
         Relationships: [];
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      get_contract_as_of: {
+        Args: { p_employee_id: string; p_as_of: string };
+        Returns: Database["public"]["Tables"]["employment_contracts"]["Row"][];
+      };
+    };
     Enums: {
       app_role: AppRole;
       employment_status: EmploymentStatus;
       employment_type: EmploymentType;
+      contract_type: ContractType;
     };
     CompositeTypes: Record<string, never>;
   };

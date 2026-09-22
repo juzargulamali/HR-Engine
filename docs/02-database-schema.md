@@ -170,10 +170,13 @@ All are `SECURITY DEFINER`, `STABLE`, owned by a locked-down role, and only ever
 
 Business record tables (`employees`, `employment_contracts` rows are never deleted, only
 superseded; `reimbursement_claims`, `assets`, `employee_documents`, `letter_templates`, `projects`)
-carry `deleted_at timestamptz`, `deleted_by uuid`. RLS `SELECT` policies filter
-`deleted_at IS NULL` by default; a `hr_admin`/`sys_admin`-only view exposes soft-deleted rows for
-recovery/audit. Ledgers, `approvals`, and `audit_log` are never deleted, soft or hard — deletion
-would break the traceability guarantee.
+carry `deleted_at timestamptz`, `deleted_by uuid`. RLS `SELECT` policies filter `deleted_at IS
+NULL` for every role except `hr_admin` and `sys_admin`, who bypass that filter in the same
+policy — the two roles who can recover a soft-deleted row need to be able to see it exists in the
+first place. The application UI still defaults every list view to "active only," with a separate,
+explicit "show deleted" toggle for HR Admin/Sys Admin — the RLS bypass is what makes that toggle
+possible, not a separate database view. Ledgers, `approvals`, and `audit_log` are never deleted,
+soft or hard — deletion would break the traceability guarantee.
 
 ## 2.9 Storage buckets
 

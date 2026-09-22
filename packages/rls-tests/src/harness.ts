@@ -7,6 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 const MIGRATIONS_DIR = path.join(REPO_ROOT, "supabase", "migrations");
 const STUB_AUTH_SCHEMA = path.join(REPO_ROOT, "supabase", "tests", "stub-auth-schema.sql");
+const STUB_STORAGE_SCHEMA = path.join(REPO_ROOT, "supabase", "tests", "stub-storage-schema.sql");
 const GRANT_AUTHENTICATED_ACCESS = path.join(REPO_ROOT, "supabase", "tests", "grant-authenticated-access.sql");
 
 const ADMIN_URL = process.env.RLS_TEST_ADMIN_URL ?? "postgres://postgres:postgres@127.0.0.1:5432/postgres";
@@ -41,6 +42,7 @@ export class RlsTestDatabase {
     this.pool = new Pool({ connectionString: dbUrl.toString() });
 
     await this.runSqlFile(STUB_AUTH_SCHEMA);
+    await this.runSqlFile(STUB_STORAGE_SCHEMA);
     for (const file of this.migrationFiles()) {
       await this.runSqlFile(file);
     }
