@@ -134,3 +134,42 @@ export async function revokeRole(roleGrantId: string): Promise<void> {
   await supabase.from("user_roles").update({ revoked_at: new Date().toISOString() }).eq("id", roleGrantId);
   revalidatePath("/admin/users");
 }
+
+/**
+ * Uses the service-role client throughout, not just for deleteUser itself —
+ * unlinking the employee record and revoking roles are ordinary RLS-scoped
+ * operations elsewhere, but a Sys Admin deleting a login isn't guaranteed
+ * to also hold HR Admin on that person's company, and this cleanup has to
+ * succeed regardless for the delete below to have a chance.
+ *
+ * approver_id/appraiser_id (approvals, appraisals) reference auth.users
+ * with NOT NULL and no cascade, by design, to preserve the audit trail —
+ * deleteUser() will fail with a foreign-key error for anyone who ever
+ * approved or appraised something, and that's surfaced as a real answer,
+ * not a bug: revoking their roles above is the correct move for those.
+ */
+export async function deleteUserAccount(userId: string): Promise<{ error: string | null }> {
+  const session = await getCurrentSession();
+  if (!session || !isSysAdmin(session.grants)) {
+    return { error: "Only a Sys Admin can delete users." };
+  }
+  if (userId === session.userId) {
+    return { error: "You can't delete your own account." };
+  }
+
+  const admin = createAdminClient();
+  await admin.from("employees").update({ user_id: null }).eq("user_id", userId);
+  await admin.from("user_roles").update({ revoked_at: new Date().toISOString() }).eq("user_id", userId).is("revoked_at", null);
+
+  const { error } = await admin.auth.admin.deleteUser(userId);
+  if (error) {
+    return {
+      error: error.message.toLowerCase().includes("foreign key")
+        ? "Can't delete — this account is tied to historical records (like an approval or appraisal) that need to stay for the audit trail. Revoking their roles above is the safer option."
+        : error.message,
+    };
+  }
+
+  revalidatePath("/admin/users");
+  return { error: null };
+}

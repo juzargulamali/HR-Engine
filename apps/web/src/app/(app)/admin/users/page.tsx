@@ -1,4 +1,5 @@
 import { ROLE_LABELS } from "@enginious-hr/domain";
+import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -8,10 +9,12 @@ import { revokeRole } from "@/lib/actions/users";
 import { InviteUserForm } from "./invite-user-form";
 import { AssignRoleForm } from "./assign-role-form";
 import { ResendInviteButton } from "./resend-invite-button";
+import { DeleteUserButton } from "./delete-user-button";
 
 export default async function UsersPage() {
+  const session = await getCurrentSession();
   const supabase = await createClient();
-  const [{ data: profiles }, { data: roleGrants }, { data: companies }] = await Promise.all([
+  const [{ data: profiles }, { data: roleGrants }, { data: companies }, { data: employees }] = await Promise.all([
     supabase.from("profiles").select("id, email, full_name").order("email"),
     supabase
       .from("user_roles")
@@ -19,6 +22,13 @@ export default async function UsersPage() {
       .is("revoked_at", null)
       .order("granted_at"),
     supabase.from("companies").select("id, legal_name").order("legal_name"),
+    // profiles.full_name is only ever set from invite metadata (the
+    // handle_new_auth_user trigger) — an account created directly in
+    // Supabase (the original bootstrap admin) never gets one, even once
+    // they've since linked and named an employee record of their own. Fall
+    // back to that linked employee's name rather than showing "—" for
+    // someone who very much does have a name on file.
+    supabase.from("employees").select("user_id, first_name, last_name").not("user_id", "is", null),
   ]);
 
   const companyName = new Map((companies ?? []).map((c) => [c.id, c.legal_name]));
@@ -26,6 +36,7 @@ export default async function UsersPage() {
   for (const grant of roleGrants ?? []) {
     grantsByUser.set(grant.user_id, [...(grantsByUser.get(grant.user_id) ?? []), grant]);
   }
+  const employeeNameByUser = new Map((employees ?? []).map((e) => [e.user_id as string, `${e.first_name} ${e.last_name}`]));
 
   return (
     <div className="space-y-6">
@@ -71,7 +82,7 @@ export default async function UsersPage() {
             <TableBody>
               {(profiles ?? []).map((p) => (
                 <TableRow key={p.id}>
-                  <TableCell className="font-medium">{p.full_name ?? "—"}</TableCell>
+                  <TableCell className="font-medium">{p.full_name ?? employeeNameByUser.get(p.id) ?? "—"}</TableCell>
                   <TableCell>{p.email}</TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1.5">
@@ -94,7 +105,10 @@ export default async function UsersPage() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <ResendInviteButton email={p.email} />
+                    <div className="flex flex-wrap gap-2">
+                      <ResendInviteButton email={p.email} />
+                      {p.id !== session?.userId ? <DeleteUserButton userId={p.id} email={p.email} /> : null}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
