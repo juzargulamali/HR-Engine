@@ -1,0 +1,36 @@
+# 7. Risk Register
+
+Likelihood/Impact rated Low/Medium/High. Owner = role accountable for the mitigation during
+implementation, not necessarily who executes it day to day.
+
+| # | Risk | Likelihood | Impact | Mitigation | Owner |
+|---|---|---|---|---|---|
+| 1 | RLS policy gap exposes salary/bank/ID data to an unintended role | Medium | High | Sensitive data split into dedicated tables (§2.3); RLS policy test suite runs on every PR simulating each role's JWT against every table, including negative tests ("X must NOT see Y"); security review (Phase 7) before go-live | Sys Admin / Security review |
+| 2 | Service-role key leaks into client bundle | Low | High | Service key used only inside server-only files (Route Handlers/Edge Functions), never imported by any file reachable from a client component; CI grep/lint rule fails the build if `SUPABASE_SERVICE_ROLE_KEY` appears outside an allowed server-only path list | Tech lead |
+| 3 | Leave/comp-day balance drift from a bug or race condition | Medium | High | Balances are never stored, only derived via `SUM()` over an append-only ledger (§2.5); concurrent submissions serialized per employee via a DB-level advisory lock or `SELECT ... FOR UPDATE` on the employee row inside the posting transaction; reconciliation job periodically diffs materialized cache vs. live sum and alerts on mismatch | Backend lead |
+| 4 | Country policy misconfiguration (e.g. wrong accrual rate) silently miscalculates pay/leave for months | Medium | High | Policy activation requires a second approver (not the author); `resolve_policy` unit tests per country seeded from real published labor-law figures reviewed with local HR/legal counsel before activation; effective-dated versions mean a fix is a new version, not a silent overwrite of history | HR Admin + Legal counsel |
+| 5 | Overlapping/duplicate leave requests double-deduct a balance | Medium | Medium | Server-side overlap check before submission; DB-level safeguard considered (see implementation note below); ledger is still append-only so any double-deduction is visible and reversible via an explicit reversal entry, never a silent balance edit | Backend lead |
+| 6 | AI process bypasses the draft-only boundary (e.g. a future integration is given a broader service key by mistake) | Low | High | No RLS policy anywhere grants an AI/service identity direct write to `leave_ledger`, `comp_day_ledger`, `approvals`, `payroll_export_lines`, or any `deleted_at` column; automated test asserts this policy inventory on every deploy; AI integrations use their own scoped Postgres role, never `service_role`, wherever technically possible | Tech lead |
+| 7 | Multi-currency rounding/precision errors in payroll export | Medium | Medium | All monetary columns `numeric`, never floating point; currency-parameterized rounding function with unit tests per currency's minor-unit convention; Finance reviews generated lines before authorization (human checkpoint retained, not fully automated) | Finance + Backend lead |
+| 8 | Timezone/date-boundary bugs (e.g. a leave day counted wrong across a UTC offset) | Medium | Medium | All HR dates stored as `date` (no time component, no timezone ambiguity) for leave/contract/policy fields; only `timestamptz` for true instants (login, approval decision time); day-count function tested against country weekend patterns and DST-free "date" arithmetic (UAE/KSA/Poland don't need cross-day timezone math for leave, so this is a contained risk) | Backend lead |
+| 9 | GDPR (Poland/EU) data-subject erasure request conflicts with immutable audit/ledger requirement | Medium | Medium | Documented erasure procedure: personal identifiers are anonymized/pseudonymized in place (name → "Former Employee #N") while numeric ledger/audit facts (amounts, dates, decisions) are retained for legal/tax retention periods, which is compliant under GDPR's legitimate-interest/legal-obligation exceptions for payroll and labor records; this procedure is a Phase 7 deliverable, executed manually by Sys Admin+HR Admin jointly, never a self-service delete | Sys Admin + Legal counsel |
+| 10 | Cross-country data residency expectations (Poland/EU vs. UAE/KSA) not met by a single Supabase region | Low–Medium | Medium | Confirm Supabase project region and any EU-data-residency requirement with legal counsel before go-live; if required, this is a project-configuration decision (region selection), not a schema change, since the design doesn't hard-code regional assumptions | Legal counsel + Sys Admin |
+| 11 | Approval workflow misconfiguration creates an unapprovable request (e.g. resolved approver has no active role) | Low | Medium | Workflow resolver falls back to an HR Admin catch-all step if no approver resolves at a given level, and logs the fallback; SLA escalation job (§5.1) surfaces stuck approvals daily | HR Admin |
+| 12 | Storage bucket policy misconfiguration exposes another employee's documents/receipts | Low | High | Path convention encodes `employee_id`; Storage RLS policies reuse the same helper functions as table RLS; automated test uploads as employee A and attempts read as employee B/line manager outside chain, expects denial | Sys Admin / Security review |
+| 13 | Vercel Cron / Edge Function scheduling failure silently skips accrual or reminder runs | Low | Medium | Each scheduled job writes a `job_runs` heartbeat row (timestamp, success/failure, row counts) monitored by an alert if a run is overdue; jobs are idempotent (safe to re-run for a missed period) | Backend lead |
+| 14 | Feature creep / country-specific hard-coding sneaks into application code over time | Medium | Medium | Lint rule/code-review checklist item: no `if (countryCode === ...)` for business rules outside the policy resolver and seed data; new-country onboarding is a documented data-only checklist, tested in Phase 2 exit criteria | Tech lead |
+| 15 | Single Supabase project outage affects all countries simultaneously (no per-country isolation) | Low | Medium | Accepted trade-off for v1 given team size and the "one small team" delivery model; documented explicitly so it's a conscious choice, not an oversight; Supabase's own HA/backup guarantees plus the DR runbook (Phase 7) are the mitigation, not architectural sharding | Sys Admin |
+
+## Implementation note on Risk 5 (overlap enforcement)
+
+A full database-level exclusion constraint on `(employee_id, leave_type_code, daterange(start_date,
+end_date))` is attractive but complicates status transitions (a `rejected`/`cancelled` request must
+not block a new overlapping one, and a constraint can't easily condition on mutable `status`
+without a trigger-based partial-index approach). Recommended approach: enforce overlap purely in
+the Server Action (`submitLeaveRequest`) with a `SELECT ... FOR UPDATE` on relevant rows to close
+the race window, backed by a test that fires two concurrent submissions and asserts only one
+succeeds. Revisit a partial unique index (`WHERE status IN ('submitted','pending_approval',
+'approved')`) as a Phase 7 hardening item once the status lifecycle is stable.
+
+Proceed back to [00-overview.md](./00-overview.md) for the full package, or begin Phase 0 once this
+package has been reviewed and signed off.
