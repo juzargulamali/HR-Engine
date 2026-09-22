@@ -27,6 +27,12 @@ export function AppShell({ session, children }: { session: CurrentSession; child
               <Link href="/employees" className="hover:text-foreground">
                 Employees
               </Link>
+              <Link href="/leave" className="hover:text-foreground">
+                Leave
+              </Link>
+              <Link href="/approvals" className="hover:text-foreground">
+                Approvals
+              </Link>
               <Link href="/policies" className="hover:text-foreground">
                 Policies
               </Link>

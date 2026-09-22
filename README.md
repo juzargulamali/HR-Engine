@@ -4,12 +4,16 @@ Multi-country HR platform for Enginious LLC FZ (UAE headquarters; Saudi Arabia a
 satellite offices). Start with [`docs/00-overview.md`](./docs/00-overview.md) — it's the design
 package this codebase implements, phase by phase.
 
-**Currently implemented: Phases 0–2** — auth, roles, companies, departments, employee core
+**Currently implemented: Phases 0–3** — auth, roles, companies, departments, employee core
 records (Phase 0); employment contracts, compensation, identity documents, private document
 storage, and soft-delete recovery (Phase 1); the country policy engine — versioned, effective-dated
 leave/notice/probation rules and public holidays for UAE/KSA/Poland, with two-person draft-then-
-activate control (Phase 2). Every table has RLS enabled and tested from the migration that creates
-it. See [`docs/06-implementation-phases.md`](./docs/06-implementation-phases.md) for what's next.
+activate control (Phase 2); leave requests, the leave and comp-day ledgers, deduction-priority
+rules, and a generic approval-workflow engine (auto-provisioned per company, multi-step routing,
+self-approval prevention, atomic approve/finalize with priority-ordered ledger deduction), plus the
+monthly accrual and daily comp-day expiry sweep as Vercel Cron-triggered Route Handlers (Phase 3).
+Every table has RLS enabled and tested from the migration that creates it. See
+[`docs/06-implementation-phases.md`](./docs/06-implementation-phases.md) for what's next.
 
 Starter policy content for UAE, Saudi Arabia, and Poland is seeded as **drafts only** — see the
 comment at the top of `supabase/seed.sql`. None of it takes effect until a real HR Admin reviews it
@@ -103,6 +107,15 @@ npm run db:types
 This overwrites `apps/web/src/types/database.types.ts`, currently hand-written to match
 `supabase/migrations/` exactly (see the comment at the top of that file for why its shape matters —
 `@supabase/supabase-js`'s generic types silently collapse to `never` if a required key is missing).
+
+## Scheduled jobs
+
+`vercel.json` schedules two Cron-triggered Route Handlers (see `docs/05-automation-rules.md` §5.1):
+monthly leave accrual (`/api/cron/leave-accrual`) and the daily comp-day expiry sweep
+(`/api/cron/comp-day-expiry`). Both run under the service-role client (they're trusted backend jobs
+writing ledger entries no user-scoped RLS policy allows) and refuse every request unless it carries
+`Authorization: Bearer $CRON_SECRET` — set `CRON_SECRET` in the Vercel project's env to the same
+value Vercel Cron is configured to send.
 
 ## Security notes for anyone extending this
 

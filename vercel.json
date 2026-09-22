@@ -1,0 +1,6 @@
+{
+  "crons": [
+    { "path": "/api/cron/leave-accrual", "schedule": "0 0 1 * *" },
+    { "path": "/api/cron/comp-day-expiry", "schedule": "0 1 * * *" }
+  ]
+}
