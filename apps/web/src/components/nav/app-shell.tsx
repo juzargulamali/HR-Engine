@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { isSysAdmin, ROLE_LABELS } from "@enginious-hr/domain";
+import { hasRoleAnyScope, isSysAdmin, ROLE_LABELS } from "@enginious-hr/domain";
 import type { CurrentSession } from "@/lib/auth/session";
 import { signOut } from "@/lib/actions/auth";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 export function AppShell({ session, children }: { session: CurrentSession; children: React.ReactNode }) {
   const roleLabels = [...new Set(session.grants.map((g) => ROLE_LABELS[g.role]))];
   const showAdminLink = isSysAdmin(session.grants);
+  const showAiOrAuditLink = hasRoleAnyScope(session.grants, "hr_admin") || hasRoleAnyScope(session.grants, "sys_admin");
 
   return (
     <div className="min-h-screen">
@@ -36,9 +37,25 @@ export function AppShell({ session, children }: { session: CurrentSession; child
               <Link href="/approvals" className="hover:text-foreground">
                 Approvals
               </Link>
+              <Link href="/letters" className="hover:text-foreground">
+                Letters
+              </Link>
+              <Link href="/payroll" className="hover:text-foreground">
+                Payroll
+              </Link>
               <Link href="/policies" className="hover:text-foreground">
                 Policies
               </Link>
+              {showAiOrAuditLink ? (
+                <Link href="/ai-suggestions" className="hover:text-foreground">
+                  AI Suggestions
+                </Link>
+              ) : null}
+              {showAiOrAuditLink ? (
+                <Link href="/audit-log" className="hover:text-foreground">
+                  Audit Log
+                </Link>
+              ) : null}
               {showAdminLink ? (
                 <Link href="/admin/companies" className="hover:text-foreground">
                   Admin

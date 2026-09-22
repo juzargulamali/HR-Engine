@@ -21,8 +21,10 @@ export default async function ApprovalsPage() {
   const leaveRequestIds = idsOf("leave_request");
   const claimIds = idsOf("reimbursement_claim");
   const timesheetIds = idsOf("timesheet");
+  const letterIds = idsOf("generated_letter");
+  const payrollRunIds = idsOf("payroll_export_run");
 
-  const [{ data: requests }, { data: claims }, { data: timesheets }] = await Promise.all([
+  const [{ data: requests }, { data: claims }, { data: timesheets }, { data: letters }, { data: payrollRuns }] = await Promise.all([
     leaveRequestIds.length > 0
       ? supabase.from("leave_requests").select("id, employee_id, leave_type_code, start_date, end_date, total_days, reason").in("id", leaveRequestIds)
       : Promise.resolve({ data: [] as never[] }),
@@ -32,10 +34,21 @@ export default async function ApprovalsPage() {
     timesheetIds.length > 0
       ? supabase.from("timesheets").select("id, employee_id, period_start, period_end").in("id", timesheetIds)
       : Promise.resolve({ data: [] as never[] }),
+    letterIds.length > 0
+      ? supabase.from("generated_letters").select("id, employee_id, template_id").in("id", letterIds)
+      : Promise.resolve({ data: [] as never[] }),
+    payrollRunIds.length > 0
+      ? supabase.from("payroll_export_runs").select("id, period_month, period_year").in("id", payrollRunIds)
+      : Promise.resolve({ data: [] as never[] }),
   ]);
 
+  const templateIds = [...new Set((letters ?? []).map((l) => l.template_id))];
+  const { data: templates } =
+    templateIds.length > 0 ? await supabase.from("letter_templates").select("id, name").in("id", templateIds) : { data: [] as never[] };
+  const templateName = new Map((templates ?? []).map((t) => [t.id, t.name]));
+
   const employeeIds = [
-    ...new Set([...(requests ?? []), ...(claims ?? []), ...(timesheets ?? [])].map((r) => r.employee_id)),
+    ...new Set([...(requests ?? []), ...(claims ?? []), ...(timesheets ?? []), ...(letters ?? [])].map((r) => r.employee_id)),
   ];
   const { data: employees } =
     employeeIds.length > 0
@@ -50,12 +63,21 @@ export default async function ApprovalsPage() {
   const requestById = new Map((requests ?? []).map((r) => [r.id, r]));
   const claimById = new Map((claims ?? []).map((c) => [c.id, c]));
   const timesheetById = new Map((timesheets ?? []).map((t) => [t.id, t]));
+  const letterById = new Map((letters ?? []).map((l) => [l.id, l]));
+  const payrollRunById = new Map((payrollRuns ?? []).map((p) => [p.id, p]));
 
   const leaveApprovals = (approvals ?? []).filter((a) => a.entity_type === "leave_request" && requestById.has(a.entity_id));
   const claimApprovals = (approvals ?? []).filter((a) => a.entity_type === "reimbursement_claim" && claimById.has(a.entity_id));
   const timesheetApprovals = (approvals ?? []).filter((a) => a.entity_type === "timesheet" && timesheetById.has(a.entity_id));
+  const letterApprovals = (approvals ?? []).filter((a) => a.entity_type === "generated_letter" && letterById.has(a.entity_id));
+  const payrollApprovals = (approvals ?? []).filter((a) => a.entity_type === "payroll_export_run" && payrollRunById.has(a.entity_id));
 
-  const nothingPending = leaveApprovals.length === 0 && claimApprovals.length === 0 && timesheetApprovals.length === 0;
+  const nothingPending =
+    leaveApprovals.length === 0 &&
+    claimApprovals.length === 0 &&
+    timesheetApprovals.length === 0 &&
+    letterApprovals.length === 0 &&
+    payrollApprovals.length === 0;
 
   return (
     <div className="space-y-6">
@@ -170,6 +192,72 @@ export default async function ApprovalsPage() {
                       <TableCell>{employeeName(timesheet.employee_id)}</TableCell>
                       <TableCell>
                         {timesheet.period_start} – {timesheet.period_end}
+                      </TableCell>
+                      <TableCell>
+                        <DecisionButtons approvalId={a.id} />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {letterApprovals.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Letters</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Employee</TableHead>
+                  <TableHead>Template</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {letterApprovals.map((a) => {
+                  const letter = letterById.get(a.entity_id)!;
+                  return (
+                    <TableRow key={a.id}>
+                      <TableCell>{employeeName(letter.employee_id)}</TableCell>
+                      <TableCell>{templateName.get(letter.template_id) ?? "—"}</TableCell>
+                      <TableCell>
+                        <DecisionButtons approvalId={a.id} />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {payrollApprovals.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Payroll exports</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Period</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {payrollApprovals.map((a) => {
+                  const run = payrollRunById.get(a.entity_id)!;
+                  return (
+                    <TableRow key={a.id}>
+                      <TableCell>
+                        {run.period_month}/{run.period_year}
                       </TableCell>
                       <TableCell>
                         <DecisionButtons approvalId={a.id} />

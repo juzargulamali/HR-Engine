@@ -4,7 +4,7 @@ Multi-country HR platform for Enginious LLC FZ (UAE headquarters; Saudi Arabia a
 satellite offices). Start with [`docs/00-overview.md`](./docs/00-overview.md) — it's the design
 package this codebase implements, phase by phase.
 
-**Currently implemented: Phases 0–5** — auth, roles, companies, departments, employee core
+**Currently implemented: Phases 0–6** — auth, roles, companies, departments, employee core
 records (Phase 0); employment contracts, compensation, identity documents, private document
 storage, and soft-delete recovery (Phase 1); the country policy engine — versioned, effective-dated
 leave/notice/probation rules and public holidays for UAE/KSA/Poland, with two-person draft-then-
@@ -19,8 +19,15 @@ routed and decided through the exact same approval engine from Phase 3, no schem
 (Phase 4); performance goals and appraisals (a separate RLS tier Finance never touches),
 onboarding/offboarding checklists generated from a template in one call, employee documents with a
 daily expiry-status/reminder sweep, assets, and a deterministic, country-agnostic final-settlement
-calculator surfaced on a terminated employee's profile (Phase 5). Every table has RLS enabled and
-tested from the migration that creates it. See
+calculator surfaced on a terminated employee's profile (Phase 5); employment letters generated from
+HR-managed templates (issued immediately or routed through a CEO sign-off approval), a
+payroll-variable export with an always-present, immutable two-step Finance-then-CEO authorization
+workflow (mandatory on every export, regardless of amount — no override path, even for HR Admin),
+a generic audit log capturing before/after state on every HR and system-scoped table, and an
+AI Suggestions queue — the one surface an AI service identity may ever write to, restricted to a
+draft-only proposal that a human HR Admin/Sys Admin must explicitly authorize before it becomes a
+real ledger entry (Phase 6). Every table has RLS enabled and tested from the migration that creates
+it. See
 [`docs/06-implementation-phases.md`](./docs/06-implementation-phases.md) for what's next.
 
 Starter policy content for UAE, Saudi Arabia, and Poland is seeded as **drafts only** — see the

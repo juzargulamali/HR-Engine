@@ -12,3 +12,5 @@ export * from "./policies";
 export * from "./leave";
 export * from "./projects";
 export * from "./documents";
+export * from "./payroll";
+export * from "./aiDrafts";

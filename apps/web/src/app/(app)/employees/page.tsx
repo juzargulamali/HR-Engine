@@ -55,6 +55,11 @@ export default async function EmployeesPage({
               {showDeleted ? "Hide deleted" : "Show deleted"}
             </Link>
           ) : null}
+          {canManageAnyCompany ? (
+            <a href="/api/reports/headcount" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+              Download CSV
+            </a>
+          ) : null}
           {isHrAdmin(session.grants) ? (
             <Link href="/employees/new" className={cn(buttonVariants({ size: "sm" }))}>
               New employee

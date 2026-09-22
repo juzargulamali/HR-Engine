@@ -824,12 +824,13 @@ create table payroll_export_runs (
   company_id    uuid not null references companies(id),
   period_month  int not null check (period_month between 1 and 12),
   period_year   int not null,
-  status        text not null default 'generated', -- 'generated'|'authorized'|'sent'
+  status        request_status not null default 'draft', -- draft (lines generated) -> submitted -> pending_approval -> approved/rejected
   generated_by  uuid not null,
   generated_at  timestamptz not null default now(),
   authorized_by uuid,
   authorized_at timestamptz,
-  file_path     text,
+  sent_at       timestamptz,  -- Finance marks this once the file has actually gone to the payroll provider
+  file_path     text,         -- storage path in `payroll-exports`, a real CSV
   unique (company_id, period_month, period_year)
 );
 
@@ -837,12 +838,14 @@ create table payroll_export_lines (
   id             uuid primary key default gen_random_uuid(),
   run_id         uuid not null references payroll_export_runs(id) on delete cascade,
   employee_id    uuid not null references employees(id),
-  component_code text not null,  -- 'basic'|'allowance'|'overtime'|'deduction'|'reimbursement'|'leave_encashment'
+  component_code text not null check (component_code in ('reimbursement', 'leave_encashment')),
   amount         numeric(14,2) not null,
   currency       text not null,
-  source_reference_type text,    -- traces back to the ledger/claim/timesheet row that produced it
-  source_reference_id   uuid
+  source_reference_type text not null,  -- 'reimbursement_claim' | 'leave_ledger' — traces back to the exact source row
+  source_reference_id   uuid not null
 );
+
+create index idx_payroll_export_lines_run on payroll_export_lines(run_id);
 
 -- -----------------------------------------------------------------------------
 -- 11. Audit log & AI drafts
@@ -856,6 +859,7 @@ create table audit_log (
   action        text not null,   -- 'insert'|'update'|'delete'|'approve'|'reject'|'status_change'
   actor_id      uuid,
   actor_role    app_role,
+  company_id    uuid references companies(id), -- resolved by write_audit_log() so HR Admin's view scopes to their own company
   before_data   jsonb,
   after_data    jsonb,
   is_ai_generated boolean not null default false,
@@ -864,6 +868,7 @@ create table audit_log (
 );
 
 create index idx_audit_log_record on audit_log(table_name, record_id);
+create index idx_audit_log_company on audit_log(company_id);
 
 -- The ONLY table an AI integration's service credential may write to.
 -- Turning a draft into reality is a human action performed through the normal
@@ -879,6 +884,7 @@ create table ai_drafts (
   status            ai_draft_status not null default 'draft',
   authorized_by     uuid,
   authorized_at     timestamptz,
+  reference_id      uuid,             -- back-link to whatever row the normal Server Action created on authorize
   created_at        timestamptz not null default now()
 );
 
@@ -923,6 +929,20 @@ as $$
       and (company_id is null or company_id = p_company_id)
       and (country_code is null or country_code = p_country_code)
   );
+$$;
+
+-- has_role(role, scope) requires an EXACT scope match (a company-scoped
+-- grant does not satisfy an unscoped check, matching the SQL null-equality
+-- semantics above) — right for every company/country-scoped resource, but
+-- ai_drafts has no natural company to scope by and is a role-restricted,
+-- not company-scoped, review surface — so this checks "holds the role in
+-- ANY scope" instead.
+create or replace function has_role_any_scope(p_role app_role)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (select 1 from user_roles where user_id = auth.uid() and role = p_role and revoked_at is null);
 $$;
 
 create or replace function is_manager_of(target_employee_id uuid)
@@ -979,8 +999,13 @@ $$;
 -- until this same statement creates it). Auto-provisioning must always
 -- succeed regardless of who created the company, so it bypasses RLS
 -- deliberately rather than depending on the caller's own grants. Seeds a
--- default one-step (direct manager) workflow for all three approvable
--- entity types leave/reimbursement/timesheet share this engine for.
+-- default one-step (direct manager) workflow for leave/reimbursement/
+-- timesheet, a default one-step (role:ceo) workflow for generated_letter
+-- (only used when a letter_templates row has requires_approval = true),
+-- and an always-present, unconditional 2-step (role:finance then
+-- role:ceo) workflow for payroll_export_run — the one workflow nobody,
+-- not even HR Admin, may reconfigure (see guard_payroll_workflow_immutable()
+-- below).
 create or replace function seed_default_approval_workflows()
 returns trigger
 language plpgsql
@@ -991,15 +1016,23 @@ declare
   v_entity approvable_entity;
   v_workflow_id uuid;
 begin
-  foreach v_entity in array array['leave_request', 'reimbursement_claim', 'timesheet']::approvable_entity[]
+  foreach v_entity in array array['leave_request', 'reimbursement_claim', 'timesheet', 'generated_letter']::approvable_entity[]
   loop
     insert into approval_workflows (company_id, entity_type, name)
     values (new.id, v_entity, 'Default ' || replace(v_entity::text, '_', ' ') || ' approval')
     returning id into v_workflow_id;
 
     insert into approval_workflow_steps (workflow_id, step_order, approver_type)
-    values (v_workflow_id, 1, 'direct_manager');
+    values (v_workflow_id, 1, case when v_entity = 'generated_letter' then 'role:ceo' else 'direct_manager' end);
   end loop;
+
+  insert into approval_workflows (company_id, entity_type, name)
+  values (new.id, 'payroll_export_run', 'Payroll export authorization (Finance, then CEO — mandatory, every time)')
+  returning id into v_workflow_id;
+
+  insert into approval_workflow_steps (workflow_id, step_order, approver_type) values
+    (v_workflow_id, 1, 'role:finance'),
+    (v_workflow_id, 2, 'role:ceo');
 
   return new;
 end;
@@ -1070,17 +1103,163 @@ begin
 end;
 $$;
 
+-- resolve_approver() is employee-centric (it needs an employee to find
+-- their company/manager chain) — payroll_export_run has no single
+-- employee, it's company-wide, so role:finance/role:ceo resolution for it
+-- goes through this company-scoped variant instead. direct_manager/
+-- manager_of_manager make no sense for a company-wide entity, so this
+-- only implements the role:% branch.
+create or replace function resolve_approver_for_company(p_approver_type text, p_company_id uuid)
+returns uuid
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_result uuid;
+begin
+  if p_approver_type like 'role:%' then
+    select ur.user_id into v_result
+    from user_roles ur
+    where ur.role = replace(p_approver_type, 'role:', '')::app_role
+      and ur.revoked_at is null
+      and (ur.company_id is null or ur.company_id = p_company_id)
+    order by ur.granted_at asc
+    limit 1;
+  end if;
+  return v_result;
+end;
+$$;
+
+-- Aggregates approved-but-not-yet-exported reimbursements and leave
+-- encashments into payroll_export_lines, one line per source row so
+-- reconciliation is exact. "Not yet exported" means no earlier
+-- payroll_export_lines row already references that exact source row — so
+-- re-running this for the same run is safe, and a source row can never be
+-- paid out twice across different runs either. Runs under the caller's own
+-- RLS (Finance already has read access to both source tables and insert
+-- access to payroll_export_lines) — no SECURITY DEFINER needed.
+create or replace function generate_payroll_export_lines(p_run_id uuid)
+returns setof payroll_export_lines
+language plpgsql
+as $$
+declare
+  v_company_id uuid;
+  v_period_start date;
+  v_period_end date;
+begin
+  select company_id, make_date(period_year, period_month, 1), (make_date(period_year, period_month, 1) + interval '1 month - 1 day')::date
+  into v_company_id, v_period_start, v_period_end
+  from payroll_export_runs where id = p_run_id;
+
+  return query
+  insert into payroll_export_lines (run_id, employee_id, component_code, amount, currency, source_reference_type, source_reference_id)
+  select p_run_id, c.employee_id, 'reimbursement', c.total_amount, c.currency, 'reimbursement_claim', c.id
+  from reimbursement_claims c
+  join employees e on e.id = c.employee_id
+  where e.company_id = v_company_id
+    and c.status = 'approved'
+    and not exists (
+      select 1 from payroll_export_lines l where l.source_reference_type = 'reimbursement_claim' and l.source_reference_id = c.id
+    )
+  union all
+  select p_run_id, l.employee_id, 'leave_encashment', l.amount_days, comp.currency, 'leave_ledger', l.id
+  from leave_ledger l
+  join employees e on e.id = l.employee_id
+  join compensation_details comp on comp.employee_id = e.id and comp.is_current = true
+  where e.company_id = v_company_id
+    and l.entry_type = 'encashment'
+    and l.txn_date between v_period_start and v_period_end
+    and not exists (
+      select 1 from payroll_export_lines pl where pl.source_reference_type = 'leave_ledger' and pl.source_reference_id = l.id
+    )
+  returning *;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Payroll export's approval steps are immutable — the one workflow the
+-- generic engine runs that nobody, not even HR Admin, may reconfigure.
+-- Mandatory on every export, regardless of amount — otherwise this would
+-- just be a convention someone could quietly edit away.
+-- -----------------------------------------------------------------------------
+
+-- NOTE on the bypass check: this can't use "auth.uid() is null" the way a
+-- self-service guard would, because seed_default_approval_workflows()
+-- (SECURITY DEFINER) is what creates the payroll workflow's two steps in
+-- the first place, and it fires on every company insert with auth.uid()
+-- still populated (the real Sys Admin who created the company) —
+-- auth.uid() is unaffected by SECURITY DEFINER. current_user IS affected:
+-- a SECURITY DEFINER function executes as its owner (never the
+-- 'authenticated' role PostgREST always connects as for an ordinary
+-- client request), so checking current_user correctly tells "trusted
+-- internal write" apart from "someone's direct client request" even when
+-- both have the same auth.uid().
+create or replace function guard_payroll_workflow_immutable()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_workflow_id uuid := coalesce(new.workflow_id, old.workflow_id);
+  v_entity_type approvable_entity;
+begin
+  if current_user <> 'authenticated' then
+    return coalesce(new, old); -- trusted context: SECURITY DEFINER provisioning, migrations, admin/service-role
+  end if;
+  select entity_type into v_entity_type from approval_workflows where id = v_workflow_id;
+  if v_entity_type = 'payroll_export_run' then
+    raise exception 'The payroll export approval workflow (Finance then CEO, every time) cannot be modified';
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+
+create trigger approval_workflow_steps_guard_payroll
+  before insert or update or delete on approval_workflow_steps
+  for each row execute function guard_payroll_workflow_immutable();
+
+-- Same current_user reasoning: decide_leave_approval() (SECURITY DEFINER)
+-- is the only path allowed to set authorized_by/authorized_at or move
+-- status to 'approved'/'rejected' — Finance's own broad UPDATE policy on
+-- this table would otherwise let them set those columns directly via an
+-- ordinary REST call, defeating the mandatory CEO sign-off.
+create or replace function guard_payroll_run_client_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  if current_user <> 'authenticated' then
+    return new; -- trusted context: decide_leave_approval(), migrations, admin/service-role
+  end if;
+  if new.authorized_by is distinct from old.authorized_by
+    or new.authorized_at is distinct from old.authorized_at
+    or (new.status is distinct from old.status and new.status not in ('draft', 'submitted', 'cancelled'))
+  then
+    raise exception 'Payroll export authorization can only happen through the approval workflow';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger payroll_runs_guard_client_update
+  before update on payroll_export_runs
+  for each row execute function guard_payroll_run_client_update();
+
 -- The approval state machine — SECURITY DEFINER so it can read/write across
--- leave/reimbursement/timesheet tables plus the ledgers atomically inside
--- one transaction (with row locks, so two concurrent decisions on the same
--- approval can't both succeed). It re-checks the caller's authorization
--- manually since SECURITY DEFINER bypasses RLS — the checks below are the
--- enforcement here, not a convenience mirror of it. Same function/name as
--- when it only handled leave (its own comment said "reserved for future
--- entity types") — reimbursement_claim and timesheet are that extension,
--- routed and finalized generically, with two real fixes along the way: (1)
--- it used to look only ONE step ahead, so a self-resolving step 2 could
--- skip straight to finalizing even if step 3+ existed — it now walks every
+-- leave/reimbursement/timesheet/generated_letter/payroll_export_run tables
+-- plus the ledgers atomically inside one transaction (with row locks, so
+-- two concurrent decisions on the same approval can't both succeed). It
+-- re-checks the caller's authorization manually since SECURITY DEFINER
+-- bypasses RLS — the checks below are the enforcement here, not a
+-- convenience mirror of it. Still one state machine: entity-specific only
+-- in how it fetches the entity and how it finalizes. payroll_export_run is
+-- the one entity type with no single employee_id, so it resolves approvers
+-- via resolve_approver_for_company() instead of resolve_approver(), and
+-- its "requester" for self-approval purposes is whoever generated the run.
+-- Two real fixes along the way from its original leave-only version: (1) it
+-- used to look only ONE step ahead, so a self-resolving step 2 could skip
+-- straight to finalizing even if step 3+ existed — it now walks every
 -- remaining step; (2) steps can be conditional on `condition->>'amount_gt'`,
 -- which is what makes reimbursement threshold routing possible.
 create or replace function decide_leave_approval(p_approval_id uuid, p_decision approval_decision, p_comments text default null)
@@ -1108,6 +1287,7 @@ declare
   v_overtime_hours numeric;
   v_comp_days numeric(5,2);
   v_country_code text;
+  v_payroll_company_id uuid;
   v_step record;
   v_next_approver uuid;
   v_found_next boolean := false;
@@ -1132,17 +1312,24 @@ begin
   if v_approval.entity_type = 'leave_request' then
     select * into v_leave_request from leave_requests where id = v_approval.entity_id for update;
     v_employee_id := v_leave_request.employee_id;
+    select user_id into v_requester_user_id from employees where id = v_employee_id;
   elsif v_approval.entity_type = 'reimbursement_claim' then
     select employee_id, total_amount into v_employee_id, v_amount
     from reimbursement_claims where id = v_approval.entity_id for update;
+    select user_id into v_requester_user_id from employees where id = v_employee_id;
   elsif v_approval.entity_type = 'timesheet' then
     select * into v_timesheet from timesheets where id = v_approval.entity_id for update;
     v_employee_id := v_timesheet.employee_id;
+    select user_id into v_requester_user_id from employees where id = v_employee_id;
+  elsif v_approval.entity_type = 'generated_letter' then
+    select employee_id into v_employee_id from generated_letters where id = v_approval.entity_id for update;
+    select user_id into v_requester_user_id from employees where id = v_employee_id;
+  elsif v_approval.entity_type = 'payroll_export_run' then
+    select company_id, generated_by into v_payroll_company_id, v_requester_user_id
+    from payroll_export_runs where id = v_approval.entity_id for update;
   else
     return; -- reserved for future entity types; nothing further to do here
   end if;
-
-  select user_id into v_requester_user_id from employees where id = v_employee_id;
 
   if p_decision = 'rejected' then
     if v_approval.entity_type = 'leave_request' then
@@ -1151,6 +1338,10 @@ begin
       update reimbursement_claims set status = 'rejected', decided_at = now() where id = v_approval.entity_id;
     elsif v_approval.entity_type = 'timesheet' then
       update timesheets set status = 'rejected', decided_at = now() where id = v_approval.entity_id;
+    elsif v_approval.entity_type = 'generated_letter' then
+      update generated_letters set status = 'void' where id = v_approval.entity_id;
+    elsif v_approval.entity_type = 'payroll_export_run' then
+      update payroll_export_runs set status = 'rejected' where id = v_approval.entity_id;
     end if;
     return; -- rejection stops the chain; earlier decisions in the log are untouched
   end if;
@@ -1171,7 +1362,12 @@ begin
       end if;
     end if;
 
-    v_next_approver := resolve_approver(v_step.approver_type, v_employee_id);
+    if v_approval.entity_type = 'payroll_export_run' then
+      v_next_approver := resolve_approver_for_company(v_step.approver_type, v_payroll_company_id);
+    else
+      v_next_approver := resolve_approver(v_step.approver_type, v_employee_id);
+    end if;
+
     if v_next_approver is not null and v_next_approver <> v_requester_user_id then
       insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id)
       values (v_approval.entity_type, v_approval.entity_id, v_approval.workflow_id, v_step.step_order, v_next_approver);
@@ -1189,7 +1385,10 @@ begin
       update reimbursement_claims set status = 'pending_approval' where id = v_approval.entity_id;
     elsif v_approval.entity_type = 'timesheet' then
       update timesheets set status = 'pending_approval' where id = v_approval.entity_id;
+    elsif v_approval.entity_type = 'payroll_export_run' then
+      update payroll_export_runs set status = 'pending_approval' where id = v_approval.entity_id;
     end if;
+    -- generated_letter has only ever had one step (role:ceo) so it never reaches here
     return;
   end if;
 
@@ -1232,7 +1431,7 @@ begin
 
   elsif v_approval.entity_type = 'reimbursement_claim' then
     -- No ledger write here — approved claims are picked up by the payroll
-    -- export job (Phase 6). Finalizing just unblocks that downstream step.
+    -- export job. Finalizing just unblocks that downstream step.
     update reimbursement_claims set status = 'approved', decided_at = now() where id = v_approval.entity_id;
 
   elsif v_approval.entity_type = 'timesheet' then
@@ -1274,6 +1473,17 @@ begin
         );
       end if;
     end if;
+
+  elsif v_approval.entity_type = 'generated_letter' then
+    update generated_letters set status = 'issued' where id = v_approval.entity_id;
+
+  elsif v_approval.entity_type = 'payroll_export_run' then
+    -- The CEO's decision (the final, always-present step) stamps
+    -- authorized_by/at — the one place this column is ever set, since
+    -- there's no direct UPDATE policy on those columns for anyone.
+    update payroll_export_runs
+    set status = 'approved', authorized_by = coalesce(auth.uid(), v_requester_user_id), authorized_at = now()
+    where id = v_approval.entity_id;
   end if;
 end;
 $$;
@@ -1319,6 +1529,7 @@ alter table document_expiry_reminders_sent enable row level security;
 alter table notifications enable row level security;
 alter table assets enable row level security;
 alter table asset_assignments enable row level security;
+alter table letter_templates enable row level security;
 alter table generated_letters enable row level security;
 alter table payroll_export_runs enable row level security;
 alter table payroll_export_lines enable row level security;
@@ -2080,47 +2291,98 @@ create policy attendance_write on attendance_records for all
   using (has_role('hr_admin', (select company_id from employees where id = employee_id)))
   with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
 
--- ---- generated_letters: employee (own), HR Admin
+-- ---- letter_templates: readable by anyone signed in (an employee needs
+--      to see what they can request), HR Admin manages.
+create policy letter_templates_select on letter_templates for select
+  using (deleted_at is null and auth.role() = 'authenticated');
+
+create policy letter_templates_write on letter_templates for all
+  using (has_role('hr_admin', company_id))
+  with check (has_role('hr_admin', company_id));
+
+-- ---- generated_letters: employee (own, request/view), HR Admin (full,
+--      issues on request), CEO (read — they need the letter itself, not
+--      just their own approvals row, to know what they're signing off on).
 create policy generated_letters_select on generated_letters for select
   using (
     employee_id = current_employee_id()
     or has_role('hr_admin', (select company_id from employees where id = employee_id))
+    or has_role('ceo', (select company_id from employees where id = employee_id))
   );
 
--- ---- payroll_export_runs/lines: Finance (full), HR Admin (read), CEO (read), never line managers/employees
+create policy generated_letters_insert on generated_letters for insert
+  with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
+
+create policy generated_letters_update on generated_letters for update
+  using (has_role('hr_admin', (select company_id from employees where id = employee_id)))
+  with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
+
+-- ---- payroll_export_runs & lines: HR Admin (read), Finance (full run,
+--      never a CEO's own field since the CEO acts through `approvals`),
+--      CEO (read, so they can see what they're signing off on beyond just
+--      the approvals row).
 create policy payroll_runs_select on payroll_export_runs for select
   using (
-    has_role('finance', company_id) or has_role('hr_admin', company_id) or has_role('ceo', company_id)
+    has_role('hr_admin', company_id)
+    or has_role('finance', company_id)
+    or has_role('ceo', company_id)
   );
 
-create policy payroll_runs_write on payroll_export_runs for insert
+create policy payroll_runs_insert on payroll_export_runs for insert
+  with check (has_role('finance', company_id) and status = 'draft');
+
+-- Finance can edit while still a draft, submit it (draft -> submitted),
+-- and later mark it sent (only once authorized) — never touch
+-- authorized_by/authorized_at, which only decide_leave_approval() sets
+-- (guard_payroll_run_client_update() above enforces that, not this policy).
+create policy payroll_runs_update_finance on payroll_export_runs for update
+  using (has_role('finance', company_id))
   with check (has_role('finance', company_id));
 
 create policy payroll_lines_select on payroll_export_lines for select
   using (exists (
-    select 1 from payroll_export_runs r where r.id = run_id and (
-      has_role('finance', r.company_id) or has_role('hr_admin', r.company_id) or has_role('ceo', r.company_id)
-    )
+    select 1 from payroll_export_runs r
+    where r.id = run_id and (has_role('hr_admin', r.company_id) or has_role('finance', r.company_id) or has_role('ceo', r.company_id))
   ));
 
--- ---- ai_drafts: readable by whoever is entitled to see the underlying entity type;
---      writable ONLY by the ai_agent role via service key inside a trusted Edge
---      Function (no INSERT policy for regular authenticated users at all — the
---      absence of an insert policy is deliberate: browser sessions cannot create
---      ai_drafts even for themselves).
+create policy payroll_lines_insert on payroll_export_lines for insert
+  with check (exists (
+    select 1 from payroll_export_runs r where r.id = run_id and has_role('finance', r.company_id) and r.status = 'draft'
+  ));
+
+-- ---- ai_drafts: HR Admin/Sys Admin review queue, in ANY scope they hold
+--      it (has_role_any_scope — ai_drafts has no natural company to scope
+--      by, and this is a role-restricted, not company-scoped, review
+--      surface). No INSERT policy for any authenticated role at all — only
+--      the AI service's own credential (a Route Handler using the
+--      service-role client, which bypasses RLS entirely) ever writes here,
+--      and even that credential still has zero RLS grants on any
+--      operational table.
 create policy ai_drafts_select on ai_drafts for select
-  using (has_role('hr_admin') or has_role('sys_admin'));
+  using (has_role_any_scope('hr_admin') or has_role_any_scope('sys_admin'));
 
-create policy ai_drafts_authorize on ai_drafts for update
-  using (status = 'draft' and (has_role('hr_admin') or has_role('sys_admin')))
-  with check (authorized_by = auth.uid());
+-- HR Admin/Sys Admin authorize or reject by updating status —
+-- authorized_by/authorized_at only meaningfully set alongside 'authorized'.
+create policy ai_drafts_update on ai_drafts for update
+  using (has_role_any_scope('hr_admin') or has_role_any_scope('sys_admin'))
+  with check (has_role_any_scope('hr_admin') or has_role_any_scope('sys_admin'));
 
--- ---- audit_log: read-only, HR Admin + Sys Admin (Sys Admin sees actor/action
---      metadata for system operations, not necessarily HR content — enforce
---      redaction of before/after payloads for HR tables at the view layer if
---      Sys Admin should not see field-level content).
-create policy audit_log_select on audit_log for select
-  using (has_role('hr_admin') or has_role('sys_admin'));
+-- ---- audit_log: HR Admin sees HR-content rows scoped to their own
+--      company; Sys Admin sees system-scoped rows (any company) — the
+--      exact split in docs/03-permission-matrix.md §3.6. No one else, and
+--      no INSERT/UPDATE/DELETE policy for any client role at all.
+create policy audit_log_select_hr on audit_log for select
+  using (
+    table_name in (
+      'employees', 'compensation_details', 'employment_contracts', 'leave_requests', 'leave_ledger',
+      'comp_day_ledger', 'approvals', 'reimbursement_claims', 'payroll_export_runs', 'generated_letters'
+    )
+    and company_id is not null
+    and has_role('hr_admin', company_id)
+  );
+
+create policy audit_log_select_sysadmin on audit_log for select
+  using (table_name in ('companies', 'user_roles') and has_role('sys_admin'));
 
 -- No insert/update/delete policies for audit_log for `authenticated` at all —
 -- only the trigger function (running as definer, table owner) and service_role
@@ -2139,6 +2401,11 @@ create policy user_roles_write_sysadmin on user_roles for all
 -- 15. Audit trigger wiring (generic before/after capture on guarded tables)
 -- =============================================================================
 
+-- company_id is resolved so HR Admin's view can be scoped to their own
+-- company, not every company's history. Not every audited table carries
+-- company_id directly, so it's derived: a direct column if present, else
+-- via the row's employee_id, else (approvals, which is entity-type-generic)
+-- by resolving the approved entity the same way is_entity_owner() does.
 create or replace function write_audit_log()
 returns trigger
 language plpgsql
@@ -2147,24 +2414,52 @@ set search_path = public
 as $$
 declare
   v_actor_role app_role;
+  v_row jsonb := to_jsonb(coalesce(new, old));
+  v_employee_id uuid;
+  v_company_id uuid;
 begin
   select role into v_actor_role from user_roles
   where user_id = auth.uid() and revoked_at is null order by granted_at desc limit 1;
 
-  insert into audit_log(table_name, record_id, action, actor_id, actor_role, before_data, after_data)
+  if v_row ? 'company_id' then
+    v_company_id := (v_row ->> 'company_id')::uuid;
+  elsif TG_TABLE_NAME = 'companies' then
+    v_company_id := (v_row ->> 'id')::uuid;
+  elsif v_row ? 'employee_id' then
+    select company_id into v_company_id from employees where id = (v_row ->> 'employee_id')::uuid;
+  elsif TG_TABLE_NAME = 'employees' then
+    v_company_id := (v_row ->> 'company_id')::uuid;
+  elsif TG_TABLE_NAME = 'approvals' then
+    v_employee_id := case v_row ->> 'entity_type'
+      when 'leave_request' then (select employee_id from leave_requests where id = (v_row ->> 'entity_id')::uuid)
+      when 'reimbursement_claim' then (select employee_id from reimbursement_claims where id = (v_row ->> 'entity_id')::uuid)
+      when 'timesheet' then (select employee_id from timesheets where id = (v_row ->> 'entity_id')::uuid)
+      when 'generated_letter' then (select employee_id from generated_letters where id = (v_row ->> 'entity_id')::uuid)
+      else null
+    end;
+    if v_employee_id is not null then
+      select company_id into v_company_id from employees where id = v_employee_id;
+    elsif v_row ->> 'entity_type' = 'payroll_export_run' then
+      select company_id into v_company_id from payroll_export_runs where id = (v_row ->> 'entity_id')::uuid;
+    end if;
+  end if;
+
+  insert into audit_log(table_name, record_id, action, actor_id, actor_role, company_id, before_data, after_data)
   values (
     TG_TABLE_NAME,
     coalesce(new.id, old.id),
     lower(TG_OP),
     auth.uid(),
     v_actor_role,
-    case when TG_OP in ('UPDATE','DELETE') then to_jsonb(old) else null end,
-    case when TG_OP in ('UPDATE','INSERT') then to_jsonb(new) else null end
+    v_company_id,
+    case when TG_OP in ('UPDATE', 'DELETE') then to_jsonb(old) else null end,
+    case when TG_OP in ('UPDATE', 'INSERT') then to_jsonb(new) else null end
   );
   return coalesce(new, old);
 end;
 $$;
 
+-- HR-content tables (docs/03-permission-matrix.md's "HR-scoped entries").
 create trigger audit_employees after insert or update or delete on employees
   for each row execute function write_audit_log();
 create trigger audit_compensation after insert or update or delete on compensation_details
@@ -2186,6 +2481,15 @@ create trigger audit_payroll_runs after insert or update on payroll_export_runs
 create trigger audit_generated_letters after insert or update on generated_letters
   for each row execute function write_audit_log();
 
+-- System-scoped tables (docs/03-permission-matrix.md's "system-scoped
+-- entries" — role changes and company/tenant structure; NOT general HR
+-- content). Login events aren't captured here — those live in Supabase
+-- Auth's own logs, outside this application schema's reach.
+create trigger audit_user_roles after insert or update on user_roles
+  for each row execute function write_audit_log();
+create trigger audit_companies after insert or update on companies
+  for each row execute function write_audit_log();
+
 -- Ledgers and approvals are append-only at the table-grant level too.
 revoke update, delete on leave_ledger from authenticated, anon;
 revoke update, delete on comp_day_ledger from authenticated, anon;
@@ -2203,7 +2507,8 @@ insert into storage.buckets (id, name, public)
 values
   ('employee-documents', 'employee-documents', false),
   ('identity-documents', 'identity-documents', false),
-  ('receipts', 'receipts', false)
+  ('receipts', 'receipts', false),
+  ('letters', 'letters', false)
 on conflict (id) do nothing;
 
 -- employee-documents: owner reads their own files, HR Admin reads/writes
@@ -2267,3 +2572,18 @@ create policy receipts_update on storage.objects for update
 
 create policy receipts_delete on storage.objects for delete
   using (bucket_id = 'receipts' and (storage.foldername(name))[2]::uuid = current_employee_id());
+
+-- letters: same path convention as every other bucket. The rendered letter
+-- is an HTML file (no PDF renderer in this stack), stored in the same
+-- {company_id}/{employee_id}/{sub_path} shape.
+create policy letters_select on storage.objects for select
+  using (
+    bucket_id = 'letters'
+    and (
+      (storage.foldername(name))[2]::uuid = current_employee_id()
+      or has_role('hr_admin', (storage.foldername(name))[1]::uuid)
+    )
+  );
+
+create policy letters_write on storage.objects for insert
+  with check (bucket_id = 'letters' and has_role('hr_admin', (storage.foldername(name))[1]::uuid));

@@ -75,11 +75,15 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
     await db.teardown();
   });
 
-  it("auto-creates default one-step (direct manager) workflows for all three entity types on company creation", async () => {
+  it("auto-creates default one-step (direct manager) workflows for reimbursement_claim and timesheet on company creation", async () => {
+    // Later phases (letters, payroll) add their own entity types to this
+    // same auto-provisioning trigger, so this only asserts Phase 4's own
+    // contribution is present, not the full current set.
     const { rows } = await db.asUser(USER_HR, (query) =>
-      query("select entity_type from approval_workflows where company_id = $1 order by entity_type", [COMPANY_A]),
+      query("select entity_type from approval_workflows where company_id = $1", [COMPANY_A]),
     );
-    expect(rows.map((r) => r.entity_type).sort()).toEqual(["leave_request", "reimbursement_claim", "timesheet"]);
+    const entityTypes = rows.map((r) => r.entity_type);
+    expect(entityTypes).toEqual(expect.arrayContaining(["leave_request", "reimbursement_claim", "timesheet"]));
     expect(reimbursementWorkflowId).toBeTruthy();
     expect(timesheetWorkflowId).toBeTruthy();
   });

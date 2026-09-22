@@ -35,6 +35,17 @@ export function hasRole(grants: readonly RoleGrant[], role: AppRole, scope: Role
   );
 }
 
+/**
+ * Mirrors has_role_any_scope() — for the few resources (the AI Suggestions
+ * queue, the audit log's own role check before its company_id scoping)
+ * that are role-restricted rather than company/country-scoped, so a
+ * company-scoped grant should still count. Ignores scope entirely; never
+ * use this where the real RLS policy does scope by company/country.
+ */
+export function hasRoleAnyScope(grants: readonly RoleGrant[], role: AppRole): boolean {
+  return grants.some((grant) => grant.role === role);
+}
+
 export const isEmployee = (grants: readonly RoleGrant[], scope?: RoleScope) => hasRole(grants, "employee", scope);
 export const isLineManager = (grants: readonly RoleGrant[], scope?: RoleScope) => hasRole(grants, "line_manager", scope);
 export const isHrAdmin = (grants: readonly RoleGrant[], scope?: RoleScope) => hasRole(grants, "hr_admin", scope);

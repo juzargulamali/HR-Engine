@@ -4,7 +4,8 @@
  * 20260925000000_phase2_country_policy_engine.sql, and
  * 20260926000000_phase3_leave_and_approvals.sql,
  * 20260927000000_phase4_reimbursements_projects_timesheets.sql, and
- * 20260928000000_phase5_performance_onboarding_documents_assets.sql exactly. Once a real
+ * 20260928000000_phase5_performance_onboarding_documents_assets.sql, and
+ * 20260929000000_phase6_letters_payroll_audit_ai_drafts.sql exactly. Once a real
  * Supabase project exists, regenerate this file with `npm run db:types`
  * (root package.json) instead of hand-editing it — see
  * docs/09-extending-the-system.md "adding a table" checklist, which ends
@@ -37,6 +38,8 @@ export type ApprovableEntity =
   | "payroll_export_run";
 export type DocumentStatus = "valid" | "expiring_soon" | "expired";
 export type AssetStatus = "in_stock" | "issued" | "under_repair" | "retired";
+export type LetterStatus = "draft" | "pending_approval" | "issued" | "void";
+export type AiDraftStatus = "draft" | "authorized" | "rejected" | "discarded";
 
 export interface Database {
   public: {
@@ -906,6 +909,148 @@ export interface Database {
         Update: { returned_date?: string | null; condition_on_return?: string | null };
         Relationships: [];
       };
+      letter_templates: {
+        Row: {
+          id: string;
+          company_id: string;
+          country_code: string | null;
+          template_type: string;
+          name: string;
+          body_template: string;
+          requires_approval: boolean;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          country_code?: string | null;
+          template_type: string;
+          name: string;
+          body_template: string;
+          requires_approval?: boolean;
+        };
+        Update: Partial<Database["public"]["Tables"]["letter_templates"]["Insert"]> & { deleted_at?: string | null };
+        Relationships: [];
+      };
+      generated_letters: {
+        Row: {
+          id: string;
+          employee_id: string;
+          template_id: string;
+          generated_by: string;
+          generated_at: string;
+          file_path: string | null;
+          status: LetterStatus;
+        };
+        Insert: {
+          id?: string;
+          employee_id: string;
+          template_id: string;
+          generated_by: string;
+          file_path?: string | null;
+          status?: LetterStatus;
+        };
+        Update: { status?: LetterStatus; file_path?: string | null };
+        Relationships: [];
+      };
+      payroll_export_runs: {
+        Row: {
+          id: string;
+          company_id: string;
+          period_month: number;
+          period_year: number;
+          status: RequestStatus;
+          generated_by: string;
+          generated_at: string;
+          authorized_by: string | null;
+          authorized_at: string | null;
+          sent_at: string | null;
+          file_path: string | null;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          period_month: number;
+          period_year: number;
+          generated_by: string;
+        };
+        Update: { status?: RequestStatus; sent_at?: string | null; file_path?: string | null };
+        Relationships: [];
+      };
+      payroll_export_lines: {
+        Row: {
+          id: string;
+          run_id: string;
+          employee_id: string;
+          component_code: "reimbursement" | "leave_encashment";
+          amount: string;
+          currency: string;
+          source_reference_type: string;
+          source_reference_id: string;
+        };
+        Insert: {
+          id?: string;
+          run_id: string;
+          employee_id: string;
+          component_code: "reimbursement" | "leave_encashment";
+          amount: number;
+          currency: string;
+          source_reference_type: string;
+          source_reference_id: string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      audit_log: {
+        Row: {
+          id: string;
+          table_name: string;
+          record_id: string | null;
+          action: string;
+          actor_id: string | null;
+          actor_role: AppRole | null;
+          company_id: string | null;
+          before_data: Record<string, unknown> | null;
+          after_data: Record<string, unknown> | null;
+          is_ai_generated: boolean;
+          ai_context: Record<string, unknown> | null;
+          occurred_at: string;
+        };
+        Insert: Record<string, never>; // written only by write_audit_log() (SECURITY DEFINER)
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      ai_drafts: {
+        Row: {
+          id: string;
+          entity_type: string;
+          entity_id: string | null;
+          proposed_action: string;
+          proposed_payload: Record<string, unknown>;
+          rationale: string | null;
+          created_by_agent: string;
+          status: AiDraftStatus;
+          authorized_by: string | null;
+          authorized_at: string | null;
+          reference_id: string | null;
+          created_at: string;
+        };
+        // No RLS insert policy grants this to any authenticated role — only the AI
+        // service's own service-role credential (which bypasses RLS) can actually
+        // write one; the shape below just describes what that one caller sends.
+        Insert: {
+          id?: string;
+          entity_type: string;
+          entity_id?: string | null;
+          proposed_action: string;
+          proposed_payload: Record<string, unknown>;
+          rationale?: string | null;
+          created_by_agent: string;
+          status?: AiDraftStatus;
+        };
+        Update: { status?: AiDraftStatus; authorized_by?: string | null; authorized_at?: string | null; reference_id?: string | null };
+        Relationships: [];
+      };
     };
     Views: {
       leave_balances: {
@@ -938,6 +1083,14 @@ export interface Database {
         Args: { p_employee_id: string; p_template_id: string; p_anchor_date: string };
         Returns: Database["public"]["Tables"]["employee_checklist_items"]["Row"][];
       };
+      generate_payroll_export_lines: {
+        Args: { p_run_id: string };
+        Returns: Database["public"]["Tables"]["payroll_export_lines"]["Row"][];
+      };
+      resolve_approver_for_company: {
+        Args: { p_approver_type: string; p_company_id: string };
+        Returns: string | null;
+      };
     };
     Enums: {
       app_role: AppRole;
@@ -953,6 +1106,8 @@ export interface Database {
       approvable_entity: ApprovableEntity;
       document_status: DocumentStatus;
       asset_status: AssetStatus;
+      letter_status: LetterStatus;
+      ai_draft_status: AiDraftStatus;
     };
     CompositeTypes: Record<string, never>;
   };

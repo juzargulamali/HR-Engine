@@ -6,16 +6,23 @@ import { createClient } from "@/lib/supabase/server";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
+export type ApprovableEntityType = "leave_request" | "reimbursement_claim" | "timesheet" | "generated_letter" | "payroll_export_run";
+
 /**
  * Resolves an approval workflow's own step 1 approver (the same resolver
  * decide_leave_approval() uses to advance later steps) BEFORE creating
- * anything, so a request/claim/timesheet never lands with no one able to
+ * anything, so a request/claim/letter/run never lands with no one able to
  * decide it — e.g. an employee with no manager assigned yet. Shared across
  * every entity type this engine handles (docs/09-extending-the-system.md).
+ *
+ * payroll_export_run has no single employee (it's company-wide), so its
+ * role:finance/role:ceo steps resolve through resolve_approver_for_company()
+ * instead of the employee-centric resolve_approver() every other entity
+ * type uses — same split decide_leave_approval() itself makes.
  */
 export async function resolveInitialApprover(
   supabase: SupabaseClient,
-  entityType: "leave_request" | "reimbursement_claim" | "timesheet",
+  entityType: ApprovableEntityType,
   companyId: string,
   employeeId: string,
 ): Promise<{ workflowId: string; approverId: string } | { error: string }> {
@@ -38,12 +45,12 @@ export async function resolveInitialApprover(
     .single();
   if (!step) return { error: "This workflow has no first step configured. Contact HR Admin." };
 
-  const { data: approverId } = await supabase.rpc("resolve_approver", {
-    p_approver_type: step.approver_type,
-    p_employee_id: employeeId,
-  });
+  const { data: approverId } =
+    entityType === "payroll_export_run"
+      ? await supabase.rpc("resolve_approver_for_company", { p_approver_type: step.approver_type, p_company_id: companyId })
+      : await supabase.rpc("resolve_approver", { p_approver_type: step.approver_type, p_employee_id: employeeId });
   if (!approverId) {
-    return { error: "No approver could be resolved (e.g. no manager assigned). Contact HR Admin." };
+    return { error: "No approver could be resolved (e.g. no manager assigned, or no one holds the required role). Contact HR Admin." };
   }
 
   return { workflowId: workflow.id, approverId };
