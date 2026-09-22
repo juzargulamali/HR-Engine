@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { addMonthsClamped } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
 
@@ -129,17 +130,56 @@ export async function bulkRecordAttendance(input: {
     const toCredit = candidates.filter((c) => !alreadyCreditedIds.has(c.id));
 
     if (toCredit.length > 0) {
+      // expiry_date has no default and nothing else sets it for this earn
+      // path — without it, these entries never expire regardless of
+      // country policy (computeCompDayExpiry() only ever flags an entry
+      // with a non-null expiry_date). overtime_rules' comp_day_expiry_months
+      // is the one field this system already has for "how long does an
+      // earned comp day last" (previously read only by the now-removed
+      // timesheet-overtime conversion) — reused here for the same purpose,
+      // resolved per employee's own country as of the work date. A country
+      // with no active overtime_rules policy, or one that doesn't define
+      // this field, gets a null expiry_date — an explicit "never expires"
+      // policy choice, not a bug, same as the original conversion's own
+      // fallback.
+      const { data: employeeCountries } = await supabase
+        .from("employees")
+        .select("id, country_code")
+        .in(
+          "id",
+          toCredit.map((c) => c.employee_id),
+        );
+      const countryByEmployee = new Map((employeeCountries ?? []).map((e) => [e.id, e.country_code]));
+      const uniqueCountries = [...new Set(countryByEmployee.values())];
+
+      const expiryMonthsByCountry = new Map<string, number | null>();
+      await Promise.all(
+        uniqueCountries.map(async (countryCode) => {
+          const { data: overtimeRules } = await supabase.rpc("resolve_policy", {
+            p_country_code: countryCode,
+            p_policy_type: "overtime_rules",
+            p_as_of: workDate,
+          });
+          const rawMonths = (overtimeRules as Record<string, unknown> | null)?.comp_day_expiry_months;
+          expiryMonthsByCountry.set(countryCode, typeof rawMonths === "number" ? rawMonths : null);
+        }),
+      );
+
       const { error: creditError } = await supabase.from("comp_day_ledger").insert(
-        toCredit.map((c) => ({
-          employee_id: c.employee_id,
-          txn_date: workDate,
-          entry_type: "earned",
-          days: 1,
-          source: "holiday_worked",
-          reference_type: "attendance_record",
-          reference_id: c.id,
-          created_by: user.id,
-        })),
+        toCredit.map((c) => {
+          const expiryMonths = expiryMonthsByCountry.get(countryByEmployee.get(c.employee_id) ?? "") ?? null;
+          return {
+            employee_id: c.employee_id,
+            txn_date: workDate,
+            entry_type: "earned" as const,
+            days: 1,
+            source: "holiday_worked",
+            expiry_date: expiryMonths !== null ? addMonthsClamped(workDate, expiryMonths) : null,
+            reference_type: "attendance_record",
+            reference_id: c.id,
+            created_by: user.id,
+          };
+        }),
       );
       if (!creditError) creditedCount = toCredit.length;
     }

@@ -5,5 +5,6 @@ export * from "./policies";
 export * from "./leaveDays";
 export * from "./leaveDeduction";
 export * from "./compDayExpiry";
+export * from "./addMonthsClamped";
 export * from "./finalSettlement";
 export * from "./permissions/index";
