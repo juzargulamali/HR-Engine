@@ -302,5 +302,40 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
       );
       expect(rows).toEqual([{ job_title: "Staff Engineer" }]);
     });
+
+    it("blocks a dual-role user from escalating by setting company_id to a company they administer elsewhere (regression: guard checked NEW.company_id instead of OLD.company_id)", async () => {
+      // Ravi-of-another-company: has an ordinary employees row in Company B,
+      // but is ALSO hr_admin of Company C — a legitimate, unrelated grant.
+      // The bug: guard_employee_self_update() checked has_role('hr_admin',
+      // new.company_id) — the attacker-supplied value — so setting
+      // company_id to Company C (which they genuinely administer) made the
+      // trigger treat the whole payload as an HR Admin write and let every
+      // other column through unchecked, including job_title/
+      // employment_status/manager_id in the SAME statement.
+      const companyB = "00000000-0000-0000-0000-0000000001d1";
+      const companyC = "00000000-0000-0000-0000-0000000001d2";
+      const dualRoleUser = "00000000-0000-0000-0000-0000000001b8";
+      const dualRoleEmployee = "00000000-0000-0000-0000-0000000001c4";
+      await db.seed(`
+        insert into auth.users (id, email) values ('${dualRoleUser}', 'dual-role@enginious.ae');
+        insert into companies (id, legal_name, country_code, default_currency) values
+          ('${companyB}', 'Company B', 'AE', 'AED'),
+          ('${companyC}', 'Company C', 'AE', 'AED');
+        insert into employees (id, user_id, employee_number, company_id, country_code, first_name, last_name, hire_date)
+          values ('${dualRoleEmployee}', '${dualRoleUser}', 'DUAL-01', '${companyB}', 'AE', 'Dana', 'Dual', '2024-01-01');
+        insert into user_roles (user_id, role, company_id) values ('${dualRoleUser}', 'hr_admin', '${companyC}');
+      `);
+
+      await expect(
+        db.asUser(dualRoleUser, (query) =>
+          query("update employees set company_id = $1, job_title = 'Self-Promoted CEO' where id = $2", [companyC, dualRoleEmployee]),
+        ),
+      ).rejects.toThrow(/Only personal_email and phone can be self-updated/);
+
+      const check = await db.asUser(USER_SYS_ADMIN, (query) =>
+        query("select company_id, job_title from employees where id = $1", [dualRoleEmployee]),
+      );
+      expect(check.rows).toEqual([{ company_id: companyB, job_title: null }]);
+    });
   });
 });

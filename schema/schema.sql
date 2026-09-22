@@ -1660,7 +1660,14 @@ begin
   -- Triggers fire regardless of role, unlike RLS — a trusted backend write
   -- (migration, seed, admin/service-role operation with no PostgREST JWT
   -- session) has auth.uid() = null and is never what this guard constrains.
-  if auth.uid() is null or has_role('hr_admin', new.company_id) then
+  --
+  -- Checks old.company_id (the row's CURRENT company), never
+  -- new.company_id — the caller controls the new row's contents, so
+  -- checking new.company_id would let anyone who is hr_admin of ANY
+  -- company escalate by setting company_id to one they administer and
+  -- having every other column (employment_status, manager_id, job_title,
+  -- deleted_at, ...) pass through unchecked in the same payload.
+  if auth.uid() is null or has_role('hr_admin', old.company_id) then
     return new;
   end if;
 
