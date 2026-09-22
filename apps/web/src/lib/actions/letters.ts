@@ -1,9 +1,12 @@
 "use server";
 
+import { createElement } from "react";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { renderToBuffer } from "@react-pdf/renderer";
 import { createClient } from "@/lib/supabase/server";
 import { resolveInitialApprover } from "./approvals";
+import { LetterDocument } from "@/lib/pdf/letter-document";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -79,10 +82,16 @@ export async function issueLetter(_prevState: { error: string | null }, formData
     "date.today": new Date().toISOString().slice(0, 10),
   });
 
-  const filePath = `${employee.company_id}/${employee.id}/letters/${Date.now()}-${template.template_type}.html`;
+  // react-pdf types renderToBuffer's parameter as ReactElement<DocumentProps>
+  // specifically, which doesn't fit a wrapper component's own prop type even
+  // though it renders a <Document> under the hood — a real gap in react-pdf's
+  // types, not a genuine type mismatch here.
+  const pdfBuffer = await renderToBuffer(createElement(LetterDocument, { bodyText: rendered }) as Parameters<typeof renderToBuffer>[0]);
+
+  const filePath = `${employee.company_id}/${employee.id}/letters/${Date.now()}-${template.template_type}.pdf`;
   const { error: uploadError } = await supabase.storage
     .from("letters")
-    .upload(filePath, new Blob([rendered], { type: "text/html" }));
+    .upload(filePath, pdfBuffer, { contentType: "application/pdf" });
   if (uploadError) return { error: `Could not store the letter: ${uploadError.message}` };
 
   const initialStatus = template.requires_approval ? "pending_approval" : "issued";

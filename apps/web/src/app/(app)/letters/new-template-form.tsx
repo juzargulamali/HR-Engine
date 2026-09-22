@@ -17,6 +17,7 @@ const TEMPLATE_TYPES = [
   { value: "experience_letter", label: "Experience letter" },
   { value: "noc", label: "No-objection certificate" },
   { value: "offer_letter", label: "Offer letter" },
+  { value: "final_settlement", label: "End of service settlement" },
 ];
 
 export function NewTemplateForm({ companyId }: { companyId: string }) {
