@@ -33,15 +33,12 @@ export async function inviteUser(_prevState: ActionState, formData: FormData): P
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
   const { error } = await admin.auth.admin.inviteUserByEmail(parsed.data.email, {
     data: { full_name: parsed.data.fullName },
-    // Read as `{{ .RedirectTo }}` by the project's "Invite user" email
-    // template (Supabase Dashboard -> Authentication -> Emails) — that
-    // template must link to /auth/confirm?token_hash={{ .TokenHash
-    // }}&type=invite&next={{ .RedirectTo }}, not the default {{
-    // .ConfirmationURL }}. The default sends a ready-made access_token in
-    // the URL hash, which @supabase/ssr's browser client (hardcoded to
-    // flowType: "pkce") explicitly rejects as "Not a valid PKCE flow url" —
-    // see apps/web/src/app/auth/confirm/route.ts for the exchange this
-    // relies on instead.
+    // Without this, Supabase falls back to the project's dashboard "Site
+    // URL" for the invite email's redirect target. /set-password is a
+    // public route (see proxy.ts) built to receive it and turn the
+    // one-time invite token into a real password — see
+    // set-password-form.tsx for why that page parses the token itself
+    // instead of using the Supabase browser client's automatic detection.
     ...(siteUrl ? { redirectTo: `${siteUrl.replace(/\/$/, "")}/set-password` } : {}),
   });
 

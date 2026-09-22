@@ -1,19 +1,12 @@
 import Image from "next/image";
-import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
-import { Alert } from "@/components/ui/alert";
 import { SetPasswordForm } from "./set-password-form";
 
-export default async function SetPasswordPage() {
-  // By the time anyone lands here, /auth/confirm has already turned their
-  // one-time invite token into a real session (cookies included) — this
-  // page's own job is only to collect the password, never to detect a
-  // token itself.
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+export default function SetPasswordPage() {
+  // No session cookie exists yet at this point — the invite link's token
+  // arrives as a URL hash fragment, which the server never sees, only the
+  // browser. SetPasswordForm itself does the parsing and establishes the
+  // session client-side; this page just renders it.
   return (
     <div className="brand-grid relative flex min-h-screen items-center justify-center overflow-hidden px-4">
       <div
@@ -33,13 +26,7 @@ export default async function SetPasswordPage() {
         </div>
         <Card>
           <CardContent className="pt-6">
-            {user ? (
-              <SetPasswordForm />
-            ) : (
-              <Alert variant="destructive">
-                This link is invalid or has expired. Ask HR to send you a new invite from Admin → Users.
-              </Alert>
-            )}
+            <SetPasswordForm />
           </CardContent>
         </Card>
       </div>

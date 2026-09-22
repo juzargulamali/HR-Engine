@@ -1,14 +1,11 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// /auth/confirm must stay public: it's where an invite/reset email link
-// lands with the one-time token, before the recipient has any session
-// cookie at all — that's the whole point of the route (see
-// apps/web/src/app/auth/confirm/route.ts). /set-password stays public too,
-// as a fallback for anyone who somehow reaches it without a session — the
-// page itself checks for one server-side and shows an error instead of the
-// form.
-const PUBLIC_PATHS = ["/login", "/auth/confirm", "/set-password"];
+// /set-password must stay public: it's where an invite email lands before
+// the recipient has any session cookie at all — the invite token arrives
+// as a URL hash fragment, which never reaches this server-side check, only
+// the browser JS running on that page (see set-password-form.tsx).
+const PUBLIC_PATHS = ["/login", "/set-password"];
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
