@@ -4,15 +4,19 @@ Multi-country HR platform for Enginious LLC FZ (UAE headquarters; Saudi Arabia a
 satellite offices). Start with [`docs/00-overview.md`](./docs/00-overview.md) — it's the design
 package this codebase implements, phase by phase.
 
-**Currently implemented: Phases 0–3** — auth, roles, companies, departments, employee core
+**Currently implemented: Phases 0–4** — auth, roles, companies, departments, employee core
 records (Phase 0); employment contracts, compensation, identity documents, private document
 storage, and soft-delete recovery (Phase 1); the country policy engine — versioned, effective-dated
 leave/notice/probation rules and public holidays for UAE/KSA/Poland, with two-person draft-then-
 activate control (Phase 2); leave requests, the leave and comp-day ledgers, deduction-priority
 rules, and a generic approval-workflow engine (auto-provisioned per company, multi-step routing,
 self-approval prevention, atomic approve/finalize with priority-ordered ledger deduction), plus the
-monthly accrual and daily comp-day expiry sweep as Vercel Cron-triggered Route Handlers (Phase 3).
-Every table has RLS enabled and tested from the migration that creates it. See
+monthly accrual and daily comp-day expiry sweep as Vercel Cron-triggered Route Handlers (Phase 3);
+projects, reimbursement claims (with receipt uploads and threshold-based routing that escalates
+past the manager to Finance/CEO for large claims), timesheets with attendance records, and
+event-triggered overtime-to-comp-day conversion on timesheet approval — all three new entity types
+routed and decided through the exact same approval engine from Phase 3, no schema change needed
+(Phase 4). Every table has RLS enabled and tested from the migration that creates it. See
 [`docs/06-implementation-phases.md`](./docs/06-implementation-phases.md) for what's next.
 
 Starter policy content for UAE, Saudi Arabia, and Poland is seeded as **drafts only** — see the

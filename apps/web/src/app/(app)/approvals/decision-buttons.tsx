@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { decideLeaveApproval } from "@/lib/actions/leave";
+import { decideApproval } from "@/lib/actions/approvals";
 import { Button } from "@/components/ui/button";
 
 export function DecisionButtons({ approvalId }: { approvalId: string }) {
@@ -10,7 +10,7 @@ export function DecisionButtons({ approvalId }: { approvalId: string }) {
 
   function decide(decision: "approved" | "rejected") {
     startTransition(async () => {
-      const result = await decideLeaveApproval({ approvalId, decision });
+      const result = await decideApproval({ approvalId, decision });
       setError(result.error);
     });
   }

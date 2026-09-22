@@ -509,6 +509,8 @@ create table project_allocations (
   end_date          date
 );
 
+create index idx_project_allocations_employee on project_allocations(employee_id);
+
 create table reimbursement_claims (
   id             uuid primary key default gen_random_uuid(),
   employee_id    uuid not null references employees(id),
@@ -528,13 +530,36 @@ create table reimbursement_claim_lines (
   line_no        int not null,
   expense_date   date not null,
   category       text not null,
-  amount         numeric(12,2) not null,
+  amount         numeric(12,2) not null check (amount > 0),
   description    text,
   project_id     uuid references projects(id),
   cost_center    text,
   receipt_file_path text,     -- storage path in `receipts`
   unique (claim_id, line_no)
 );
+
+create index idx_reimbursement_lines_claim on reimbursement_claim_lines(claim_id);
+
+-- total_amount is NEVER client-supplied: kept in sync with
+-- SUM(reimbursement_claim_lines.amount) here, so a claim can't under-report
+-- its own total to dodge the approval threshold in decide_leave_approval().
+create or replace function recompute_claim_total()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_claim_id uuid := coalesce(new.claim_id, old.claim_id);
+begin
+  update reimbursement_claims
+  set total_amount = coalesce((select sum(amount) from reimbursement_claim_lines where claim_id = v_claim_id), 0)
+  where id = v_claim_id;
+  return null;
+end;
+$$;
+
+create trigger reimbursement_lines_recompute_total
+  after insert or update or delete on reimbursement_claim_lines
+  for each row execute function recompute_claim_total();
 
 create table attendance_records (
   id            uuid primary key default gen_random_uuid(),
@@ -556,7 +581,8 @@ create table timesheets (
   status        request_status not null default 'draft',
   submitted_at  timestamptz,
   decided_at    timestamptz,
-  unique (employee_id, period_start, period_end)
+  unique (employee_id, period_start, period_end),
+  check (period_end >= period_start)
 );
 
 create table timesheet_entries (
@@ -568,6 +594,8 @@ create table timesheet_entries (
   hours         numeric(4,2) not null check (hours >= 0 and hours <= 24),
   is_billable   boolean not null default true
 );
+
+create index idx_timesheet_entries_timesheet on timesheet_entries(timesheet_id);
 
 -- -----------------------------------------------------------------------------
 -- 7. Performance
@@ -881,30 +909,59 @@ $$;
 -- nobody could hold hr_admin scoped to a company that doesn't exist yet
 -- until this same statement creates it). Auto-provisioning must always
 -- succeed regardless of who created the company, so it bypasses RLS
--- deliberately rather than depending on the caller's own grants.
-create or replace function seed_default_leave_workflow()
+-- deliberately rather than depending on the caller's own grants. Seeds a
+-- default one-step (direct manager) workflow for all three approvable
+-- entity types leave/reimbursement/timesheet share this engine for.
+create or replace function seed_default_approval_workflows()
 returns trigger
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
+  v_entity approvable_entity;
   v_workflow_id uuid;
 begin
-  insert into approval_workflows (company_id, entity_type, name)
-  values (new.id, 'leave_request', 'Default leave approval')
-  returning id into v_workflow_id;
+  foreach v_entity in array array['leave_request', 'reimbursement_claim', 'timesheet']::approvable_entity[]
+  loop
+    insert into approval_workflows (company_id, entity_type, name)
+    values (new.id, v_entity, 'Default ' || replace(v_entity::text, '_', ' ') || ' approval')
+    returning id into v_workflow_id;
 
-  insert into approval_workflow_steps (workflow_id, step_order, approver_type)
-  values (v_workflow_id, 1, 'direct_manager');
+    insert into approval_workflow_steps (workflow_id, step_order, approver_type)
+    values (v_workflow_id, 1, 'direct_manager');
+  end loop;
 
   return new;
 end;
 $$;
 
-create trigger companies_seed_default_leave_workflow
+create trigger companies_seed_default_approval_workflows
   after insert on companies
-  for each row execute function seed_default_leave_workflow();
+  for each row execute function seed_default_approval_workflows();
+
+-- Generic ownership check for the approvals table — one `when` branch per
+-- approvable entity type, added as each one lands (docs/09-extending-the-system.md).
+create or replace function is_entity_owner(p_entity_type approvable_entity, p_entity_id uuid)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  case p_entity_type
+    when 'leave_request' then
+      return exists (select 1 from leave_requests where id = p_entity_id and employee_id = current_employee_id());
+    when 'reimbursement_claim' then
+      return exists (select 1 from reimbursement_claims where id = p_entity_id and employee_id = current_employee_id());
+    when 'timesheet' then
+      return exists (select 1 from timesheets where id = p_entity_id and employee_id = current_employee_id());
+    else
+      return false;
+  end case;
+end;
+$$;
 
 -- SECURITY DEFINER for the same reason as is_manager_of()/has_role(): it
 -- needs to read across employees/user_roles rows the caller can't
@@ -944,12 +1001,19 @@ begin
 end;
 $$;
 
--- The leave approval state machine — SECURITY DEFINER so it can read/write
--- across leave_requests/approvals/leave_ledger/comp_day_ledger atomically
--- inside one transaction (with row locks, so two concurrent decisions on
--- the same approval can't both succeed). It re-checks the caller's
--- authorization manually since SECURITY DEFINER bypasses RLS — the checks
--- below are the enforcement here, not a convenience mirror of it.
+-- The approval state machine — SECURITY DEFINER so it can read/write across
+-- leave/reimbursement/timesheet tables plus the ledgers atomically inside
+-- one transaction (with row locks, so two concurrent decisions on the same
+-- approval can't both succeed). It re-checks the caller's authorization
+-- manually since SECURITY DEFINER bypasses RLS — the checks below are the
+-- enforcement here, not a convenience mirror of it. Same function/name as
+-- when it only handled leave (its own comment said "reserved for future
+-- entity types") — reimbursement_claim and timesheet are that extension,
+-- routed and finalized generically, with two real fixes along the way: (1)
+-- it used to look only ONE step ahead, so a self-resolving step 2 could
+-- skip straight to finalizing even if step 3+ existed — it now walks every
+-- remaining step; (2) steps can be conditional on `condition->>'amount_gt'`,
+-- which is what makes reimbursement threshold routing possible.
 create or replace function decide_leave_approval(p_approval_id uuid, p_decision approval_decision, p_comments text default null)
 returns void
 language plpgsql
@@ -958,15 +1022,26 @@ set search_path = public
 as $$
 declare
   v_approval approvals%rowtype;
-  v_request leave_requests%rowtype;
-  v_next_step int;
-  v_next_approver_type text;
-  v_next_approver uuid;
+  v_employee_id uuid;
   v_requester_user_id uuid;
+  v_amount numeric(12,2);
+  v_leave_request leave_requests%rowtype;
   v_remaining numeric(6,2);
   v_rule record;
   v_available numeric(6,2);
   v_draw numeric(6,2);
+  v_timesheet timesheets%rowtype;
+  v_total_hours numeric(8,2);
+  v_overtime_rules jsonb;
+  v_threshold_hours numeric;
+  v_ratio numeric;
+  v_expiry_months int;
+  v_overtime_hours numeric;
+  v_comp_days numeric(5,2);
+  v_country_code text;
+  v_step record;
+  v_next_approver uuid;
+  v_found_next boolean := false;
 begin
   if p_decision not in ('approved', 'rejected') then
     raise exception 'Decision must be ''approved'' or ''rejected''';
@@ -985,79 +1060,152 @@ begin
 
   update approvals set decision = p_decision, decided_at = now(), comments = p_comments where id = p_approval_id;
 
-  if v_approval.entity_type <> 'leave_request' then
-    return; -- reserved for future entity types (Phase 4+); nothing further to do here
+  if v_approval.entity_type = 'leave_request' then
+    select * into v_leave_request from leave_requests where id = v_approval.entity_id for update;
+    v_employee_id := v_leave_request.employee_id;
+  elsif v_approval.entity_type = 'reimbursement_claim' then
+    select employee_id, total_amount into v_employee_id, v_amount
+    from reimbursement_claims where id = v_approval.entity_id for update;
+  elsif v_approval.entity_type = 'timesheet' then
+    select * into v_timesheet from timesheets where id = v_approval.entity_id for update;
+    v_employee_id := v_timesheet.employee_id;
+  else
+    return; -- reserved for future entity types; nothing further to do here
   end if;
 
-  select * into v_request from leave_requests where id = v_approval.entity_id for update;
+  select user_id into v_requester_user_id from employees where id = v_employee_id;
 
   if p_decision = 'rejected' then
-    update leave_requests set status = 'rejected', decided_at = now() where id = v_request.id;
+    if v_approval.entity_type = 'leave_request' then
+      update leave_requests set status = 'rejected', decided_at = now() where id = v_approval.entity_id;
+    elsif v_approval.entity_type = 'reimbursement_claim' then
+      update reimbursement_claims set status = 'rejected', decided_at = now() where id = v_approval.entity_id;
+    elsif v_approval.entity_type = 'timesheet' then
+      update timesheets set status = 'rejected', decided_at = now() where id = v_approval.entity_id;
+    end if;
     return; -- rejection stops the chain; earlier decisions in the log are untouched
   end if;
 
-  select user_id into v_requester_user_id from employees where id = v_request.employee_id;
+  -- Walk every remaining step in order (not just the next one) — a step
+  -- whose condition doesn't apply (amount below its threshold) or whose
+  -- resolved approver is the requester themselves is skipped, not treated
+  -- as "no more steps".
+  for v_step in
+    select step_order, approver_type, condition
+    from approval_workflow_steps
+    where workflow_id = v_approval.workflow_id and step_order > v_approval.step_order
+    order by step_order asc
+  loop
+    if v_step.condition is not null and v_step.condition ? 'amount_gt' then
+      if v_amount is null or v_amount <= (v_step.condition ->> 'amount_gt')::numeric then
+        continue; -- this step's threshold doesn't apply to this entity
+      end if;
+    end if;
 
-  -- Is there a next step in this workflow?
-  select step_order, approver_type into v_next_step, v_next_approver_type
-  from approval_workflow_steps
-  where workflow_id = v_approval.workflow_id and step_order > v_approval.step_order
-  order by step_order asc
-  limit 1;
-
-  if found then
-    v_next_approver := resolve_approver(v_next_approver_type, v_request.employee_id);
-    -- Self-approval is structurally prevented: skip a step that would
-    -- resolve back to the requester themselves (docs/05-automation-rules.md §5.3).
+    v_next_approver := resolve_approver(v_step.approver_type, v_employee_id);
     if v_next_approver is not null and v_next_approver <> v_requester_user_id then
       insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id)
-      values ('leave_request', v_request.id, v_approval.workflow_id, v_next_step, v_next_approver);
-      update leave_requests set status = 'pending_approval' where id = v_request.id;
-      return;
+      values (v_approval.entity_type, v_approval.entity_id, v_approval.workflow_id, v_step.step_order, v_next_approver);
+      v_found_next := true;
+      exit;
     end if;
-    -- No eligible approver (role has nobody, or it's the requester) — fall
-    -- through and finalize instead of leaving the request stuck forever.
-  end if;
-
-  -- Final approval: post the ledger deductions per deduction_priority_rules,
-  -- comp-day capped at its current balance, remainder from the leave type's
-  -- own ledger — mirrors resolveDeductionSources() in packages/domain.
-  v_remaining := v_request.total_days;
-
-  for v_rule in
-    select dpr.source_ledger
-    from deduction_priority_rules dpr
-    join employees e on e.id = v_request.employee_id
-    where dpr.leave_type_code = v_request.leave_type_code
-      and (dpr.company_id = e.company_id or (dpr.company_id is null and dpr.country_code = e.country_code))
-      and dpr.effective_from <= v_request.start_date
-    order by dpr.priority_order asc
-  loop
-    exit when v_remaining <= 0;
-
-    if v_rule.source_ledger = 'comp_day' then
-      select coalesce(sum(days), 0) into v_available from comp_day_ledger where employee_id = v_request.employee_id;
-      if v_available > 0 then
-        v_draw := least(v_remaining, v_available);
-        insert into comp_day_ledger (employee_id, txn_date, entry_type, days, reference_type, reference_id, created_by)
-        values (v_request.employee_id, v_request.start_date, 'redeemed', -v_draw, 'leave_request', v_request.id, coalesce(auth.uid(), v_requester_user_id));
-        v_remaining := v_remaining - v_draw;
-      end if;
-    elsif v_rule.source_ledger = 'leave_ledger' then
-      insert into leave_ledger (employee_id, leave_type_code, txn_date, entry_type, amount_days, reference_type, reference_id, created_by)
-      values (v_request.employee_id, v_request.leave_type_code, v_request.start_date, 'deduction', -v_remaining, 'leave_request', v_request.id, coalesce(auth.uid(), v_requester_user_id));
-      v_remaining := 0;
-    end if;
+    -- no eligible approver (role has nobody, or it's the requester) — keep
+    -- walking forward rather than getting stuck or finalizing prematurely
   end loop;
 
-  if v_remaining > 0 then
-    -- No deduction_priority_rules configured for this leave type at all —
-    -- default behavior: draw the whole amount from the leave type's own ledger.
-    insert into leave_ledger (employee_id, leave_type_code, txn_date, entry_type, amount_days, reference_type, reference_id, created_by)
-    values (v_request.employee_id, v_request.leave_type_code, v_request.start_date, 'deduction', -v_remaining, 'leave_request', v_request.id, coalesce(auth.uid(), v_requester_user_id));
+  if v_found_next then
+    if v_approval.entity_type = 'leave_request' then
+      update leave_requests set status = 'pending_approval' where id = v_approval.entity_id;
+    elsif v_approval.entity_type = 'reimbursement_claim' then
+      update reimbursement_claims set status = 'pending_approval' where id = v_approval.entity_id;
+    elsif v_approval.entity_type = 'timesheet' then
+      update timesheets set status = 'pending_approval' where id = v_approval.entity_id;
+    end if;
+    return;
   end if;
 
-  update leave_requests set status = 'approved', decided_at = now() where id = v_request.id;
+  -- Final approval — entity-specific finalization.
+  if v_approval.entity_type = 'leave_request' then
+    v_remaining := v_leave_request.total_days;
+
+    for v_rule in
+      select dpr.source_ledger
+      from deduction_priority_rules dpr
+      join employees e on e.id = v_leave_request.employee_id
+      where dpr.leave_type_code = v_leave_request.leave_type_code
+        and (dpr.company_id = e.company_id or (dpr.company_id is null and dpr.country_code = e.country_code))
+        and dpr.effective_from <= v_leave_request.start_date
+      order by dpr.priority_order asc
+    loop
+      exit when v_remaining <= 0;
+
+      if v_rule.source_ledger = 'comp_day' then
+        select coalesce(sum(days), 0) into v_available from comp_day_ledger where employee_id = v_leave_request.employee_id;
+        if v_available > 0 then
+          v_draw := least(v_remaining, v_available);
+          insert into comp_day_ledger (employee_id, txn_date, entry_type, days, reference_type, reference_id, created_by)
+          values (v_leave_request.employee_id, v_leave_request.start_date, 'redeemed', -v_draw, 'leave_request', v_leave_request.id, coalesce(auth.uid(), v_requester_user_id));
+          v_remaining := v_remaining - v_draw;
+        end if;
+      elsif v_rule.source_ledger = 'leave_ledger' then
+        insert into leave_ledger (employee_id, leave_type_code, txn_date, entry_type, amount_days, reference_type, reference_id, created_by)
+        values (v_leave_request.employee_id, v_leave_request.leave_type_code, v_leave_request.start_date, 'deduction', -v_remaining, 'leave_request', v_leave_request.id, coalesce(auth.uid(), v_requester_user_id));
+        v_remaining := 0;
+      end if;
+    end loop;
+
+    if v_remaining > 0 then
+      insert into leave_ledger (employee_id, leave_type_code, txn_date, entry_type, amount_days, reference_type, reference_id, created_by)
+      values (v_leave_request.employee_id, v_leave_request.leave_type_code, v_leave_request.start_date, 'deduction', -v_remaining, 'leave_request', v_leave_request.id, coalesce(auth.uid(), v_requester_user_id));
+    end if;
+
+    update leave_requests set status = 'approved', decided_at = now() where id = v_leave_request.id;
+
+  elsif v_approval.entity_type = 'reimbursement_claim' then
+    -- No ledger write here — approved claims are picked up by the payroll
+    -- export job (Phase 6). Finalizing just unblocks that downstream step.
+    update reimbursement_claims set status = 'approved', decided_at = now() where id = v_approval.entity_id;
+
+  elsif v_approval.entity_type = 'timesheet' then
+    update timesheets set status = 'approved', decided_at = now() where id = v_timesheet.id;
+
+    -- Overtime -> comp-day conversion (docs/05-automation-rules.md §5.1):
+    -- event-triggered on approval, not scheduled. Resolves the employee's
+    -- country overtime_rules policy as of the timesheet's period end; if
+    -- none is active, or it doesn't define the fields below, nothing is
+    -- converted. Documented payload shape (docs/02-database-schema.md
+    -- §2.4): {"weekly_threshold_hours": number, "comp_day_conversion_ratio":
+    -- number (hours per comp-day), "comp_day_expiry_months": number|null}.
+    select country_code into v_country_code from employees where id = v_timesheet.employee_id;
+    v_overtime_rules := resolve_policy(v_country_code, 'overtime_rules', v_timesheet.period_end);
+
+    if v_overtime_rules is not null
+      and v_overtime_rules ? 'weekly_threshold_hours'
+      and v_overtime_rules ? 'comp_day_conversion_ratio' then
+      v_threshold_hours := (v_overtime_rules ->> 'weekly_threshold_hours')::numeric;
+      v_ratio := (v_overtime_rules ->> 'comp_day_conversion_ratio')::numeric;
+      v_expiry_months := nullif(v_overtime_rules ->> 'comp_day_expiry_months', '')::int;
+
+      select coalesce(sum(hours), 0) into v_total_hours from timesheet_entries where timesheet_id = v_timesheet.id;
+      v_overtime_hours := greatest(0, v_total_hours - v_threshold_hours);
+
+      if v_overtime_hours > 0 and v_ratio > 0 then
+        v_comp_days := round(v_overtime_hours / v_ratio, 2);
+        insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, expiry_date, reference_type, reference_id, created_by)
+        values (
+          v_timesheet.employee_id,
+          v_timesheet.period_end,
+          'earned',
+          v_comp_days,
+          'overtime',
+          case when v_expiry_months is not null then (v_timesheet.period_end + (v_expiry_months || ' months')::interval)::date else null end,
+          'timesheet',
+          v_timesheet.id,
+          coalesce(auth.uid(), v_requester_user_id)
+        );
+      end if;
+    end if;
+  end if;
 end;
 $$;
 
@@ -1083,6 +1231,8 @@ alter table deduction_priority_rules enable row level security;
 alter table approval_workflows enable row level security;
 alter table approval_workflow_steps enable row level security;
 alter table approvals enable row level security;
+alter table projects enable row level security;
+alter table project_allocations enable row level security;
 alter table reimbursement_claims enable row level security;
 alter table reimbursement_claim_lines enable row level security;
 alter table timesheets enable row level security;
@@ -1505,34 +1655,64 @@ create policy approvals_select on approvals for select
   using (
     approver_id = auth.uid()
     or has_role('hr_admin')
-    or (
-      entity_type = 'leave_request'
-      and exists (select 1 from leave_requests lr where lr.id = entity_id and lr.employee_id = current_employee_id())
-    )
+    or is_entity_owner(entity_type, entity_id)
   );
 
--- The Server Action that submits a leave request inserts the FIRST approvals
--- row under the requester's own identity — allowed only when they're
--- inserting a pending step-1 row for their own just-created request.
+-- The Server Action that submits a request inserts the FIRST approvals row
+-- under the requester's own identity — allowed only when they're inserting
+-- a pending step-1 row for their own just-created leave/claim/timesheet.
+-- is_entity_owner() is the one place a 4th approvable entity type needs
+-- touching (docs/09-extending-the-system.md) — this policy never changes.
 create policy approvals_insert_initial on approvals for insert
-  with check (
-    step_order = 1
-    and decision = 'pending'
-    and entity_type = 'leave_request'
-    and exists (select 1 from leave_requests lr where lr.id = entity_id and lr.employee_id = current_employee_id())
+  with check (step_order = 1 and decision = 'pending' and is_entity_owner(entity_type, entity_id));
+
+-- ---- projects: broad read (same "transparency" pattern as departments —
+--      every employee needs to pick a project for a timesheet/claim line),
+--      HR Admin manages.
+create policy projects_select on projects for select
+  using (deleted_at is null and auth.role() = 'authenticated');
+
+create policy projects_write on projects for all
+  using (has_role('hr_admin', company_id))
+  with check (has_role('hr_admin', company_id));
+
+create policy project_allocations_select on project_allocations for select
+  using (
+    employee_id = current_employee_id()
+    or is_manager_of(employee_id)
+    or has_role('hr_admin', (select company_id from employees where id = employee_id))
+    or has_role('finance', (select company_id from employees where id = employee_id))
+    or has_role('ceo', (select company_id from employees where id = employee_id))
   );
 
--- ---- reimbursement_claims & lines: employee (own), manager chain (read+approve), Finance (read/write), HR Admin (read)
+create policy project_allocations_write on project_allocations for all
+  using (has_role('hr_admin', (select company_id from employees where id = employee_id)))
+  with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
+
+-- ---- reimbursement_claims & lines: employee (own, full lifecycle while
+--      draft/pending), manager chain + HR Admin + Finance + CEO (read).
+--      Two self-update policies (same split as leave_requests): free
+--      editing while still a draft (including draft -> submitted), but once
+--      submitted the ONLY change a client can make is cancelling.
 create policy reimbursement_select on reimbursement_claims for select
   using (
     employee_id = current_employee_id()
     or is_manager_of(employee_id)
-    or has_role('finance', (select company_id from employees where id = employee_id))
     or has_role('hr_admin', (select company_id from employees where id = employee_id))
+    or has_role('finance', (select company_id from employees where id = employee_id))
+    or has_role('ceo', (select company_id from employees where id = employee_id))
   );
 
 create policy reimbursement_insert on reimbursement_claims for insert
-  with check (employee_id = current_employee_id());
+  with check (employee_id = current_employee_id() and status = 'draft');
+
+create policy reimbursement_update_draft on reimbursement_claims for update
+  using (employee_id = current_employee_id() and status = 'draft')
+  with check (employee_id = current_employee_id() and status in ('draft', 'submitted'));
+
+create policy reimbursement_update_cancel on reimbursement_claims for update
+  using (employee_id = current_employee_id() and status in ('submitted', 'pending_approval'))
+  with check (employee_id = current_employee_id() and status = 'cancelled');
 
 create policy reimbursement_lines_select on reimbursement_claim_lines for select
   using (exists (
@@ -1540,25 +1720,74 @@ create policy reimbursement_lines_select on reimbursement_claim_lines for select
     where c.id = claim_id and (
       c.employee_id = current_employee_id()
       or is_manager_of(c.employee_id)
-      or has_role('finance', (select company_id from employees where id = c.employee_id))
       or has_role('hr_admin', (select company_id from employees where id = c.employee_id))
+      or has_role('finance', (select company_id from employees where id = c.employee_id))
+      or has_role('ceo', (select company_id from employees where id = c.employee_id))
     )
   ));
 
--- ---- timesheets / attendance: employee (own), manager chain (read+approve), HR Admin (read)
+-- Lines can only be added/changed/removed by the claim's own owner, and
+-- only while the claim is still a draft — RLS enforces the lifecycle, not
+-- just the ownership.
+create policy reimbursement_lines_write on reimbursement_claim_lines for all
+  using (exists (
+    select 1 from reimbursement_claims c where c.id = claim_id and c.employee_id = current_employee_id() and c.status = 'draft'
+  ))
+  with check (exists (
+    select 1 from reimbursement_claims c where c.id = claim_id and c.employee_id = current_employee_id() and c.status = 'draft'
+  ));
+
+-- ---- timesheets / entries: same lifecycle shape as reimbursements.
 create policy timesheets_select on timesheets for select
   using (
     employee_id = current_employee_id()
     or is_manager_of(employee_id)
     or has_role('hr_admin', (select company_id from employees where id = employee_id))
+    or has_role('finance', (select company_id from employees where id = employee_id))
   );
 
+create policy timesheets_insert on timesheets for insert
+  with check (employee_id = current_employee_id() and status = 'draft');
+
+create policy timesheets_update_draft on timesheets for update
+  using (employee_id = current_employee_id() and status = 'draft')
+  with check (employee_id = current_employee_id() and status in ('draft', 'submitted'));
+
+create policy timesheets_update_cancel on timesheets for update
+  using (employee_id = current_employee_id() and status in ('submitted', 'pending_approval'))
+  with check (employee_id = current_employee_id() and status = 'cancelled');
+
+create policy timesheet_entries_select on timesheet_entries for select
+  using (exists (
+    select 1 from timesheets t
+    where t.id = timesheet_id and (
+      t.employee_id = current_employee_id()
+      or is_manager_of(t.employee_id)
+      or has_role('hr_admin', (select company_id from employees where id = t.employee_id))
+      or has_role('finance', (select company_id from employees where id = t.employee_id))
+    )
+  ));
+
+create policy timesheet_entries_write on timesheet_entries for all
+  using (exists (
+    select 1 from timesheets t where t.id = timesheet_id and t.employee_id = current_employee_id() and t.status = 'draft'
+  ))
+  with check (exists (
+    select 1 from timesheets t where t.id = timesheet_id and t.employee_id = current_employee_id() and t.status = 'draft'
+  ));
+
+-- ---- attendance_records: self/manager/HR Admin read; HR Admin writes
+--      (manual correction/import).
 create policy attendance_select on attendance_records for select
   using (
     employee_id = current_employee_id()
     or is_manager_of(employee_id)
     or has_role('hr_admin', (select company_id from employees where id = employee_id))
   );
+
+create policy attendance_write on attendance_records for all
+  using (has_role('hr_admin', (select company_id from employees where id = employee_id)))
+  with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
 
 -- ---- employee_documents: employee (own), HR Admin (all in company)
 create policy employee_documents_select on employee_documents for select
@@ -1689,7 +1918,8 @@ revoke update, delete on approvals from authenticated, anon;
 insert into storage.buckets (id, name, public)
 values
   ('employee-documents', 'employee-documents', false),
-  ('identity-documents', 'identity-documents', false)
+  ('identity-documents', 'identity-documents', false),
+  ('receipts', 'receipts', false)
 on conflict (id) do nothing;
 
 -- employee-documents: owner reads their own files, HR Admin reads/writes
@@ -1731,3 +1961,25 @@ create policy identity_documents_update on storage.objects for update
 
 create policy identity_documents_delete on storage.objects for delete
   using (bucket_id = 'identity-documents' and has_role('hr_admin', (storage.foldername(name))[1]::uuid));
+
+-- receipts: owner (while their claim is a draft) + HR Admin + Finance read;
+-- manager and CEO deliberately do NOT get file access, same least-privilege
+-- pattern as identity-documents (docs/03-permission-matrix.md §3.3).
+create policy receipts_select on storage.objects for select
+  using (
+    bucket_id = 'receipts'
+    and (
+      (storage.foldername(name))[2]::uuid = current_employee_id()
+      or has_role('hr_admin', (storage.foldername(name))[1]::uuid)
+      or has_role('finance', (storage.foldername(name))[1]::uuid)
+    )
+  );
+
+create policy receipts_write on storage.objects for insert
+  with check (bucket_id = 'receipts' and (storage.foldername(name))[2]::uuid = current_employee_id());
+
+create policy receipts_update on storage.objects for update
+  using (bucket_id = 'receipts' and (storage.foldername(name))[2]::uuid = current_employee_id());
+
+create policy receipts_delete on storage.objects for delete
+  using (bucket_id = 'receipts' and (storage.foldername(name))[2]::uuid = current_employee_id());

@@ -2,7 +2,8 @@
  * Hand-written to match supabase/migrations/20260922000000_phase0_foundations.sql,
  * 20260924000000_phase1_contracts_compensation_identity.sql,
  * 20260925000000_phase2_country_policy_engine.sql, and
- * 20260926000000_phase3_leave_and_approvals.sql exactly. Once a real
+ * 20260926000000_phase3_leave_and_approvals.sql, and
+ * 20260927000000_phase4_reimbursements_projects_timesheets.sql exactly. Once a real
  * Supabase project exists, regenerate this file with `npm run db:types`
  * (root package.json) instead of hand-editing it — see
  * docs/09-extending-the-system.md "adding a table" checklist, which ends
@@ -565,6 +566,164 @@ export interface Database {
           comments?: string | null;
         };
         Update: Record<string, never>; // no UPDATE policy — only decide_leave_approval() writes decisions
+        Relationships: [];
+      };
+      projects: {
+        Row: {
+          id: string;
+          company_id: string;
+          code: string;
+          name: string;
+          client_name: string | null;
+          is_billable: boolean;
+          is_active: boolean;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          code: string;
+          name: string;
+          client_name?: string | null;
+          is_billable?: boolean;
+          is_active?: boolean;
+        };
+        Update: Partial<Database["public"]["Tables"]["projects"]["Insert"]>;
+        Relationships: [];
+      };
+      project_allocations: {
+        Row: {
+          id: string;
+          employee_id: string;
+          project_id: string;
+          allocation_percent: string;
+          start_date: string;
+          end_date: string | null;
+        };
+        Insert: {
+          id?: string;
+          employee_id: string;
+          project_id: string;
+          allocation_percent: number;
+          start_date: string;
+          end_date?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["project_allocations"]["Insert"]>;
+        Relationships: [];
+      };
+      reimbursement_claims: {
+        Row: {
+          id: string;
+          employee_id: string;
+          claim_date: string;
+          currency: string;
+          total_amount: string;
+          status: RequestStatus;
+          submitted_at: string | null;
+          decided_at: string | null;
+          created_at: string;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          employee_id: string;
+          claim_date?: string;
+          currency: string;
+        };
+        Update: { status?: RequestStatus; submitted_at?: string | null; decided_at?: string | null };
+        Relationships: [];
+      };
+      reimbursement_claim_lines: {
+        Row: {
+          id: string;
+          claim_id: string;
+          line_no: number;
+          expense_date: string;
+          category: string;
+          amount: string;
+          description: string | null;
+          project_id: string | null;
+          cost_center: string | null;
+          receipt_file_path: string | null;
+        };
+        Insert: {
+          id?: string;
+          claim_id: string;
+          line_no: number;
+          expense_date: string;
+          category: string;
+          amount: number;
+          description?: string | null;
+          project_id?: string | null;
+          cost_center?: string | null;
+          receipt_file_path?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["reimbursement_claim_lines"]["Insert"]>;
+        Relationships: [];
+      };
+      timesheets: {
+        Row: {
+          id: string;
+          employee_id: string;
+          period_start: string;
+          period_end: string;
+          status: RequestStatus;
+          submitted_at: string | null;
+          decided_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          employee_id: string;
+          period_start: string;
+          period_end: string;
+        };
+        Update: { status?: RequestStatus; submitted_at?: string | null; decided_at?: string | null };
+        Relationships: [];
+      };
+      timesheet_entries: {
+        Row: {
+          id: string;
+          timesheet_id: string;
+          work_date: string;
+          project_id: string | null;
+          task_description: string | null;
+          hours: string;
+          is_billable: boolean;
+        };
+        Insert: {
+          id?: string;
+          timesheet_id: string;
+          work_date: string;
+          project_id?: string | null;
+          task_description?: string | null;
+          hours: number;
+          is_billable?: boolean;
+        };
+        Update: Partial<Database["public"]["Tables"]["timesheet_entries"]["Insert"]>;
+        Relationships: [];
+      };
+      attendance_records: {
+        Row: {
+          id: string;
+          employee_id: string;
+          work_date: string;
+          clock_in: string | null;
+          clock_out: string | null;
+          hours_worked: string | null;
+          status: string;
+          source: string;
+        };
+        Insert: {
+          id?: string;
+          employee_id: string;
+          work_date: string;
+          clock_in?: string | null;
+          clock_out?: string | null;
+          hours_worked?: number | null;
+          status?: string;
+          source?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["attendance_records"]["Insert"]>;
         Relationships: [];
       };
     };

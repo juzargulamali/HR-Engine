@@ -113,6 +113,12 @@ and a draft/activate workflow — adding next year's holidays is just inserting 
   relationally and it benefits from constraints/tests.
 - `public_holidays`: `(country_code, holiday_date, name, is_paid)` — used by the day-count
   calculator so requesting leave across a public holiday doesn't consume a leave day.
+- `overtime_rules` payload shape (established in Phase 4, consumed by `decide_leave_approval()`'s
+  overtime -> comp-day conversion on timesheet approval): `{"weekly_threshold_hours": number,
+  "comp_day_conversion_ratio": number (hours per comp-day earned), "comp_day_expiry_months":
+  number | null}`. A country with no active `overtime_rules` version, or one missing
+  `weekly_threshold_hours`/`comp_day_conversion_ratio`, simply gets no conversion — "not configured
+  yet," never a guessed default.
 - **Two-person control on activation**: HR Admin drafts a version; activating it (`draft` →
   `active`) requires a *different* HR Admin or the CEO, both scoped to that country. RLS is
   row-level and can't express "not the same person," so a `BEFORE UPDATE` trigger

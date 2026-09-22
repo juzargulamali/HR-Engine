@@ -10,3 +10,4 @@ export * from "./users";
 export * from "./employees";
 export * from "./policies";
 export * from "./leave";
+export * from "./projects";

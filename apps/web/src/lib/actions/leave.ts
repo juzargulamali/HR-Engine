@@ -6,6 +6,7 @@ import { z } from "zod";
 import { computeLeaveDays } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
+import { resolveInitialApprover } from "./approvals";
 
 const submitLeaveRequestSchema = z
   .object({
@@ -17,47 +18,6 @@ const submitLeaveRequestSchema = z
     reason: z.string().optional(),
   })
   .refine((v) => v.endDate >= v.startDate, { message: "End date must be on or after the start date", path: ["endDate"] });
-
-/**
- * Resolves the leave-request workflow's own step 1 approver (the same
- * resolver decide_leave_approval() uses to advance later steps) BEFORE
- * creating anything, so a request never lands with no one able to decide
- * it — e.g. an employee with no manager assigned yet.
- */
-async function resolveInitialApprover(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  companyId: string,
-  employeeId: string,
-): Promise<{ workflowId: string; approverId: string } | { error: string }> {
-  const { data: workflows } = await supabase
-    .from("approval_workflows")
-    .select("id")
-    .eq("company_id", companyId)
-    .eq("entity_type", "leave_request")
-    .eq("is_active", true)
-    .order("created_at", { ascending: true })
-    .limit(1);
-  const workflow = workflows?.[0];
-  if (!workflow) return { error: "No leave-approval workflow is configured for your company. Contact HR Admin." };
-
-  const { data: step } = await supabase
-    .from("approval_workflow_steps")
-    .select("approver_type")
-    .eq("workflow_id", workflow.id)
-    .eq("step_order", 1)
-    .single();
-  if (!step) return { error: "This workflow has no first step configured. Contact HR Admin." };
-
-  const { data: approverId } = await supabase.rpc("resolve_approver", {
-    p_approver_type: step.approver_type,
-    p_employee_id: employeeId,
-  });
-  if (!approverId) {
-    return { error: "No approver could be resolved for your leave request (e.g. no manager assigned). Contact HR Admin." };
-  }
-
-  return { workflowId: workflow.id, approverId };
-}
 
 export async function submitLeaveRequest(_prevState: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = submitLeaveRequestSchema.safeParse(Object.fromEntries(formData));
@@ -102,7 +62,7 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
     return { error: "That date range has no working days (weekends/holidays only)." };
   }
 
-  const resolved = await resolveInitialApprover(supabase, employee.company_id, employee.id);
+  const resolved = await resolveInitialApprover(supabase, "leave_request", employee.company_id, employee.id);
   if ("error" in resolved) return resolved;
 
   const { data: request, error: insertError } = await supabase
@@ -143,24 +103,3 @@ export async function cancelLeaveRequest(requestId: string): Promise<{ error: st
   return { error: error?.message ?? null };
 }
 
-const decideSchema = z.object({
-  approvalId: z.string().uuid(),
-  decision: z.enum(["approved", "rejected"]),
-  comments: z.string().optional(),
-});
-
-export async function decideLeaveApproval(input: { approvalId: string; decision: "approved" | "rejected"; comments?: string }) {
-  const parsed = decideSchema.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
-
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("decide_leave_approval", {
-    p_approval_id: parsed.data.approvalId,
-    p_decision: parsed.data.decision,
-    p_comments: parsed.data.comments || null,
-  });
-
-  revalidatePath("/approvals");
-  revalidatePath("/leave");
-  return { error: error?.message ?? null };
-}
