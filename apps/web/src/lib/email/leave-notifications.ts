@@ -14,6 +14,23 @@ function logFailure(where: string, err: unknown) {
   console.error(`[leave-notifications] ${where} failed`, err);
 }
 
+/**
+ * employeeName is built from employees.first_name/last_name — free text
+ * only HR Admin can set (createEmployee), never the employee themselves
+ * (updateOwnContactInfo only allows personal_email/phone) — but HR Admin
+ * setting a name containing HTML would otherwise render unescaped in every
+ * recipient's email client. Escaping here costs nothing and closes that
+ * off regardless of who could reach it.
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 async function emailsById(supabase: SupabaseClient, userIds: string[]): Promise<Map<string, string>> {
   const unique = Array.from(new Set(userIds));
   if (unique.length === 0) return new Map();
@@ -57,11 +74,11 @@ export async function notifyLeaveSubmitted(
       to: toEmails,
       subject: `Leave request — ${params.employeeName} (${params.startDate} to ${params.endDate})`,
       html: `
-        <p>${params.employeeName} has submitted a leave request.</p>
+        <p>${escapeHtml(params.employeeName)} has submitted a leave request.</p>
         <ul>
-          <li>Type: ${params.leaveTypeCode}</li>
-          <li>From: ${params.startDate}</li>
-          <li>To: ${params.endDate}</li>
+          <li>Type: ${escapeHtml(params.leaveTypeCode)}</li>
+          <li>From: ${escapeHtml(params.startDate)}</li>
+          <li>To: ${escapeHtml(params.endDate)}</li>
           <li>Total days: ${params.totalDays}</li>
         </ul>
         <p>Review it in the HR Engine app.</p>
@@ -87,7 +104,7 @@ async function notifyApproverTurn(
       to: [toEmail],
       subject: `Action needed — leave request for ${params.employeeName}`,
       html: `
-        <p>${params.employeeName}'s leave request (${params.startDate} to ${params.endDate}) now needs your decision.</p>
+        <p>${escapeHtml(params.employeeName)}'s leave request (${escapeHtml(params.startDate)} to ${escapeHtml(params.endDate)}) now needs your decision.</p>
         <p>Review it in the HR Engine app.</p>
       `,
     });
@@ -110,7 +127,7 @@ async function notifyLeaveDecision(
       fromEmail,
       to: [toEmail],
       subject: `Your leave request was ${params.decision} (${params.startDate} to ${params.endDate})`,
-      html: `<p>Your leave request from ${params.startDate} to ${params.endDate} has been <strong>${params.decision}</strong>.</p>`,
+      html: `<p>Your leave request from ${escapeHtml(params.startDate)} to ${escapeHtml(params.endDate)} has been <strong>${params.decision}</strong>.</p>`,
     });
   } catch (err) {
     logFailure("notifyLeaveDecision", err);
