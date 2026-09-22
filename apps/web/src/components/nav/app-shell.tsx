@@ -5,6 +5,7 @@ import type { CurrentSession } from "@/lib/auth/session";
 import { signOut } from "@/lib/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { SidebarNav, type NavGroup } from "./sidebar-nav";
 
 export function AppShell({ session, children }: { session: CurrentSession; children: React.ReactNode }) {
@@ -97,7 +98,7 @@ export function AppShell({ session, children }: { session: CurrentSession; child
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <SidebarNav groups={groups} userSummary={userSummary} signOutButton={signOutButton} />
+      <SidebarNav groups={groups} userSummary={userSummary} signOutButton={signOutButton} themeToggle={<ThemeToggle />} />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="hidden items-center justify-between gap-4 border-b border-border bg-card px-8 py-3 md:flex">
@@ -111,6 +112,7 @@ export function AppShell({ session, children }: { session: CurrentSession; child
 
           <div className="ml-auto flex items-center gap-3">
             {userSummary}
+            <ThemeToggle />
             {signOutButton}
           </div>
         </header>

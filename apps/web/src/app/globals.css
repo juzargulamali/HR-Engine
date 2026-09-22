@@ -28,9 +28,11 @@
 /*
  * Enginious brand tokens, dark-first — the flagship "circuit board glow" look
  * from the company profile deck (near-black ground, teal/cyan accent,
- * geometric bold headline type). Light mode is a deliberate second theme for
- * anyone whose OS prefers it, not an afterthought — same hues, recalibrated
- * for a white ground.
+ * geometric bold headline type). Dark is the default and only theme unless
+ * the manual toggle (components/theme/theme-toggle.tsx) sets
+ * data-theme="light" on <html> — deliberately not driven by
+ * prefers-color-scheme, so a visitor's OS setting never silently changes
+ * which brand look they see; the theme is a per-app choice, not a per-device one.
  */
 :root {
   --radius: 0.55rem;
@@ -59,31 +61,29 @@
   --brand-grid-opacity: 0.55;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --background: 190 32% 97%;
-    --foreground: 196 45% 9%;
-    --card: 0 0% 100%;
-    --card-foreground: 196 45% 9%;
-    --primary: 178 82% 27%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 190 22% 93%;
-    --secondary-foreground: 196 40% 13%;
-    --muted: 190 22% 93%;
-    --muted-foreground: 195 15% 40%;
-    --accent: 187 76% 38%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 355 68% 46%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 190 20% 87%;
-    --input: 190 20% 87%;
-    --ring: 178 82% 32%;
+:root[data-theme="light"] {
+  --background: 190 32% 97%;
+  --foreground: 196 45% 9%;
+  --card: 0 0% 100%;
+  --card-foreground: 196 45% 9%;
+  --primary: 178 82% 27%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 190 22% 93%;
+  --secondary-foreground: 196 40% 13%;
+  --muted: 190 22% 93%;
+  --muted-foreground: 195 15% 40%;
+  --accent: 187 76% 38%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 355 68% 46%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 190 20% 87%;
+  --input: 190 20% 87%;
+  --ring: 178 82% 32%;
 
-    --brand-glow: 187 76% 42%;
-    --brand-deep: 178 82% 27%;
-    --brand-grid-line: 190 30% 82%;
-    --brand-grid-opacity: 0.6;
-  }
+  --brand-glow: 187 76% 42%;
+  --brand-deep: 178 82% 27%;
+  --brand-grid-line: 190 30% 82%;
+  --brand-grid-opacity: 0.6;
 }
 
 body {

@@ -56,10 +56,12 @@ export function SidebarNav({
   groups,
   userSummary,
   signOutButton,
+  themeToggle,
 }: {
   groups: NavGroup[];
   userSummary: React.ReactNode;
   signOutButton: React.ReactNode;
+  themeToggle: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -101,7 +103,10 @@ export function SidebarNav({
         <div className="brand-grid flex flex-col border-b border-border bg-card md:hidden">
           <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
             {userSummary}
-            {signOutButton}
+            <div className="flex items-center gap-2">
+              {themeToggle}
+              {signOutButton}
+            </div>
           </div>
           <NavLinks groups={groups} onNavigate={() => setOpen(false)} />
         </div>

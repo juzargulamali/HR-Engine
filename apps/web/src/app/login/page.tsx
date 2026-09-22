@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { LoginForm } from "./login-form";
 
 export default async function LoginPage({
@@ -15,6 +16,9 @@ export default async function LoginPage({
         style={{ background: "radial-gradient(700px circle at 50% 0%, hsl(var(--brand-glow) / 0.14), transparent 65%)" }}
         aria-hidden
       />
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
       <div className="relative w-full max-w-sm space-y-6">
         <div className="space-y-3 text-center">
           <Image src="/brand/enginious-icon.png" alt="" width={52} height={52} className="mx-auto" priority />
