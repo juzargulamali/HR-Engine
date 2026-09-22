@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeLeaveDays } from "../src/leaveDays";
+import { computeLeaveDays, isWeekend } from "../src/leaveDays";
 
 describe("computeLeaveDays", () => {
   it("counts a plain work week correctly for a Sun-Thu week (UAE/KSA, weekStartDay=0)", () => {
@@ -49,5 +49,19 @@ describe("computeLeaveDays", () => {
 
   it("returns 0 for a range that's entirely weekend", () => {
     expect(computeLeaveDays({ startDate: "2026-03-06", endDate: "2026-03-07", weekStartDay: 0, holidays: [] })).toBe(0);
+  });
+});
+
+describe("isWeekend", () => {
+  it("flags Fri/Sat for a Sun-Thu work week (UAE/KSA, weekStartDay=0)", () => {
+    expect(isWeekend("2026-03-06", 0)).toBe(true); // Friday
+    expect(isWeekend("2026-03-07", 0)).toBe(true); // Saturday
+    expect(isWeekend("2026-03-05", 0)).toBe(false); // Thursday
+  });
+
+  it("flags Sat/Sun for a Mon-Fri work week (Poland, weekStartDay=1)", () => {
+    expect(isWeekend("2026-03-07", 1)).toBe(true); // Saturday
+    expect(isWeekend("2026-03-08", 1)).toBe(true); // Sunday
+    expect(isWeekend("2026-03-06", 1)).toBe(false); // Friday
   });
 });

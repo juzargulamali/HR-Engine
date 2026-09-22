@@ -25,6 +25,11 @@ function isWorkingDay(date: Date, weekStartDay: number): boolean {
   return (dayOfWeek - weekStartDay + 7) % 7 < 5;
 }
 
+/** Same weekend/work-week rule as computeLeaveDays, exposed for callers that just need a yes/no for one date (e.g. flagging attendance). */
+export function isWeekend(dateISO: string, weekStartDay: number): boolean {
+  return !isWorkingDay(new Date(`${dateISO}T00:00:00Z`), weekStartDay);
+}
+
 export function computeLeaveDays(params: ComputeLeaveDaysParams): number {
   const { startDate, endDate, weekStartDay, holidays, halfDayStart = false, halfDayEnd = false } = params;
   const holidaySet = new Set(holidays);

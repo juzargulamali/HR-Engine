@@ -27,9 +27,9 @@ export function AppShell({ session, children }: { session: CurrentSession; child
       links: [
         { href: "/employees", label: "Employees" },
         ...(showAlertsLink ? [{ href: "/alerts", label: "Alerts" }] : []),
+        { href: "/attendance", label: "Attendance" },
         { href: "/leave", label: "Leave" },
         { href: "/reimbursements", label: "Reimbursements" },
-        { href: "/timesheets", label: "Timesheets" },
         { href: "/performance", label: "Performance" },
         { href: "/approvals", label: "Approvals" },
       ],
