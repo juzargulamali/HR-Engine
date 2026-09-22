@@ -15,3 +15,4 @@ export * from "./documents";
 export * from "./payroll";
 export * from "./aiDrafts";
 export * from "./alerts";
+export * from "./assets";

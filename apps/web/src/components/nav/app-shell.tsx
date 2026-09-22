@@ -12,6 +12,7 @@ export function AppShell({ session, children }: { session: CurrentSession; child
   const showAdminLink = isSysAdmin(session.grants);
   const showInsightsLinks = hasRoleAnyScope(session.grants, "hr_admin") || hasRoleAnyScope(session.grants, "sys_admin");
   const showAlertsLink = canViewHrAlerts(session.grants);
+  const showAssetsLink = hasRoleAnyScope(session.grants, "hr_admin") || hasRoleAnyScope(session.grants, "finance");
 
   const groups: NavGroup[] = [
     {
@@ -36,6 +37,7 @@ export function AppShell({ session, children }: { session: CurrentSession; child
       links: [
         { href: "/letters", label: "Letters" },
         { href: "/payroll", label: "Payroll" },
+        ...(showAssetsLink ? [{ href: "/assets", label: "Assets" }] : []),
         { href: "/policies", label: "Policies" },
         { href: "/holidays", label: "Holidays" },
       ],
