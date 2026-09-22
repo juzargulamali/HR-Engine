@@ -14,12 +14,13 @@ export function DeleteAttendanceButton({ recordId, employeeId }: { recordId: str
         size="sm"
         variant="outline"
         disabled={pending}
-        onClick={() =>
+        onClick={() => {
+          if (!window.confirm("Remove this attendance record?")) return;
           startTransition(async () => {
             const result = await deleteAttendanceRecord(recordId, employeeId);
             setError(result.error);
-          })
-        }
+          });
+        }}
       >
         {pending ? "Removing…" : "Remove"}
       </Button>

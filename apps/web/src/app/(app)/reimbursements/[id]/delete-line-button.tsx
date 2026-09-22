@@ -14,12 +14,13 @@ export function DeleteLineButton({ lineId, claimId }: { lineId: string; claimId:
         size="sm"
         variant="outline"
         disabled={pending}
-        onClick={() =>
+        onClick={() => {
+          if (!window.confirm("Remove this expense line? Its receipt (if any) is removed too.")) return;
           startTransition(async () => {
             const result = await deleteClaimLine(lineId, claimId);
             setError(result.error);
-          })
-        }
+          });
+        }}
       >
         {pending ? "Removing…" : "Remove"}
       </Button>

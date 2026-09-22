@@ -4,12 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { revokeRole } from "@/lib/actions/users";
 import { InviteUserForm } from "./invite-user-form";
 import { AssignRoleForm } from "./assign-role-form";
 import { ResendInviteButton } from "./resend-invite-button";
 import { DeleteUserButton } from "./delete-user-button";
+import { RevokeRoleButton } from "./revoke-role-button";
 
 export default async function UsersPage() {
   const session = await getCurrentSession();
@@ -92,11 +91,7 @@ export default async function UsersPage() {
                             {ROLE_LABELS[grant.role]}
                             {grant.company_id ? ` · ${companyName.get(grant.company_id) ?? ""}` : ""}
                           </Badge>
-                          <form action={revokeRole.bind(null, grant.id)}>
-                            <Button type="submit" variant="ghost" size="sm" className="h-5 px-1 text-[10px]">
-                              revoke
-                            </Button>
-                          </form>
+                          <RevokeRoleButton roleGrantId={grant.id} />
                         </span>
                       ))}
                       {(grantsByUser.get(p.id) ?? []).length === 0 ? (

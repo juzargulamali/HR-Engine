@@ -127,10 +127,11 @@ export async function createPerformanceCycle(_prevState: ActionState, formData: 
   return { error: null };
 }
 
-export async function closePerformanceCycle(cycleId: string): Promise<void> {
+export async function closePerformanceCycle(cycleId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
-  await supabase.from("performance_cycles").update({ status: "closed" }).eq("id", cycleId);
+  const { error } = await supabase.from("performance_cycles").update({ status: "closed" }).eq("id", cycleId);
   revalidatePath("/performance/cycles");
+  return { error: error?.message ?? null };
 }
 
 const createAppraisalSchema = z.object({

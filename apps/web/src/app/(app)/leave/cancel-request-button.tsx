@@ -14,12 +14,13 @@ export function CancelRequestButton({ requestId }: { requestId: string }) {
         size="sm"
         variant="outline"
         disabled={pending}
-        onClick={() =>
+        onClick={() => {
+          if (!window.confirm("Cancel this leave request?")) return;
           startTransition(async () => {
             const result = await cancelLeaveRequest(requestId);
             setError(result.error);
-          })
-        }
+          });
+        }}
       >
         {pending ? "Cancelling…" : "Cancel"}
       </Button>

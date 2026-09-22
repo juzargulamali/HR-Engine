@@ -47,12 +47,13 @@ export function GoalRowControls({
         size="sm"
         variant="outline"
         disabled={deletePending}
-        onClick={() =>
+        onClick={() => {
+          if (!window.confirm("Remove this goal?")) return;
           startDelete(async () => {
             const result = await deleteGoal(goalId);
             setDeleteError(result.error);
-          })
-        }
+          });
+        }}
       >
         {deletePending ? "Removing…" : "Remove"}
       </Button>

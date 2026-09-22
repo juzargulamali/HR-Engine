@@ -14,12 +14,13 @@ export function DeleteEntryButton({ entryId, timesheetId }: { entryId: string; t
         size="sm"
         variant="outline"
         disabled={pending}
-        onClick={() =>
+        onClick={() => {
+          if (!window.confirm("Remove this entry?")) return;
           startTransition(async () => {
             const result = await deleteTimesheetEntry(entryId, timesheetId);
             setError(result.error);
-          })
-        }
+          });
+        }}
       >
         {pending ? "Removing…" : "Remove"}
       </Button>

@@ -42,10 +42,11 @@ export async function createAsset(_prevState: ActionState, formData: FormData): 
   return { error: null };
 }
 
-export async function retireAsset(assetId: string): Promise<void> {
+export async function retireAsset(assetId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
-  await supabase.from("assets").update({ status: "retired" }).eq("id", assetId);
+  const { error } = await supabase.from("assets").update({ status: "retired" }).eq("id", assetId);
   revalidatePath("/assets");
+  return { error: error?.message ?? null };
 }
 
 const assignAssetSchema = z.object({

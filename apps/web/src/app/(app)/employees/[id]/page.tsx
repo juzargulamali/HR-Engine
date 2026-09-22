@@ -20,11 +20,10 @@ import {
 } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
-import { restoreEmployee, softDeleteEmployee } from "@/lib/actions/employees";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
+import { RestoreOrRemoveEmployeeButton } from "./restore-or-remove-employee-button";
 import { EditEmployeeForm } from "./edit-employee-form";
 import { ContractHistory } from "./contract-history";
 import { CompensationSection } from "./compensation-section";
@@ -113,21 +112,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="secondary">{employee.employment_status}</Badge>
-          {canDelete ? (
-            employee.deleted_at ? (
-              <form action={restoreEmployee.bind(null, employee.id)}>
-                <Button type="submit" variant="outline" size="sm">
-                  Restore
-                </Button>
-              </form>
-            ) : (
-              <form action={softDeleteEmployee.bind(null, employee.id)}>
-                <Button type="submit" variant="destructive" size="sm">
-                  Remove
-                </Button>
-              </form>
-            )
-          ) : null}
+          {canDelete ? <RestoreOrRemoveEmployeeButton employeeId={employee.id} deleted={Boolean(employee.deleted_at)} /> : null}
         </div>
       </div>
 

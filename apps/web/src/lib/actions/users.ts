@@ -129,10 +129,11 @@ export async function assignRole(_prevState: ActionState, formData: FormData): P
   return { error: null };
 }
 
-export async function revokeRole(roleGrantId: string): Promise<void> {
+export async function revokeRole(roleGrantId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
-  await supabase.from("user_roles").update({ revoked_at: new Date().toISOString() }).eq("id", roleGrantId);
+  const { error } = await supabase.from("user_roles").update({ revoked_at: new Date().toISOString() }).eq("id", roleGrantId);
   revalidatePath("/admin/users");
+  return { error: error?.message ?? null };
 }
 
 /**
