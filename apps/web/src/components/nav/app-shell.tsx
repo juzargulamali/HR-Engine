@@ -30,6 +30,7 @@ export function AppShell({ session, children }: { session: CurrentSession; child
         { href: "/leave", label: "Leave" },
         { href: "/reimbursements", label: "Reimbursements" },
         { href: "/timesheets", label: "Timesheets" },
+        { href: "/performance", label: "Performance" },
         { href: "/approvals", label: "Approvals" },
       ],
     },

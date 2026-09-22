@@ -7,12 +7,14 @@ import {
   canManageContracts,
   canManageEmployeeDocuments,
   canManageIdentityDocuments,
+  canRateGoal,
   canViewAssetAssignments,
   canViewAttendance,
   canViewCompensation,
   canViewContracts,
   canViewEmployeeDocuments,
   canViewFinalSettlement,
+  canViewGoals,
   canViewIdentityDocuments,
   resolveContractAsOf,
 } from "@enginious-hr/domain";
@@ -31,6 +33,7 @@ import { EmployeeDocumentsSection } from "./employee-documents-section";
 import { FinalSettlementSection } from "./final-settlement-section";
 import { AssetsSection } from "./assets-section";
 import { AttendanceSection } from "./attendance-section";
+import { PerformanceSection } from "./performance-section";
 
 export default async function EmployeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -87,6 +90,8 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   const canEditAssets = canManageAssets(session.grants, employee.company_id);
   const canSeeAttendance = canViewAttendance(session.grants, employee.company_id, { isSelf, isManager });
   const canEditAttendance = canManageAttendance(session.grants, employee.company_id);
+  const canSeeGoals = canViewGoals(session.grants, employee.company_id, { isSelf, isManager });
+  const canRateGoals = canRateGoal(session.grants, employee.company_id, isManager);
 
   return (
     <div className="space-y-6">
@@ -208,6 +213,17 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           </CardHeader>
           <CardContent>
             <AttendanceSection employeeId={employee.id} canManage={canEditAttendance} />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {canSeeGoals ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Performance</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <PerformanceSection employeeId={employee.id} companyId={employee.company_id} canManage={canRateGoals} />
           </CardContent>
         </Card>
       ) : null}
