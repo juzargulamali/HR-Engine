@@ -3,9 +3,12 @@ import {
   canDeleteOrRestoreEmployee,
   canEditEmployeeCore,
   canManageContracts,
+  canManageEmployeeDocuments,
   canManageIdentityDocuments,
   canViewCompensation,
   canViewContracts,
+  canViewEmployeeDocuments,
+  canViewFinalSettlement,
   canViewIdentityDocuments,
   resolveContractAsOf,
 } from "@enginious-hr/domain";
@@ -20,6 +23,8 @@ import { EditEmployeeForm } from "./edit-employee-form";
 import { ContractHistory } from "./contract-history";
 import { CompensationSection } from "./compensation-section";
 import { IdentityDocumentsSection } from "./identity-documents-section";
+import { EmployeeDocumentsSection } from "./employee-documents-section";
+import { FinalSettlementSection } from "./final-settlement-section";
 
 export default async function EmployeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -30,7 +35,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   const { data: employee } = await supabase
     .from("employees")
     .select(
-      "id, first_name, last_name, job_title, employment_status, company_id, manager_id, hire_date, deleted_at, personal_email, phone",
+      "id, first_name, last_name, job_title, employment_status, company_id, country_code, manager_id, hire_date, termination_date, deleted_at, personal_email, phone",
     )
     .eq("id", id)
     .maybeSingle();
@@ -64,6 +69,9 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   const canSeeComp = canViewCompensation(session.grants, employee.company_id, isSelf);
   const canSeeIdentity = canViewIdentityDocuments(session.grants, employee.company_id, isSelf);
   const canEditIdentity = canManageIdentityDocuments(session.grants, employee.company_id);
+  const canSeeDocuments = canViewEmployeeDocuments(session.grants, employee.company_id, isSelf);
+  const canEditDocuments = canManageEmployeeDocuments(session.grants, employee.company_id);
+  const canSeeSettlement = canViewFinalSettlement(session.grants, employee.company_id);
   const canDelete = canDeleteOrRestoreEmployee(session.grants, employee.company_id);
 
   return (
@@ -152,6 +160,33 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           </CardHeader>
           <CardContent>
             <IdentityDocumentsSection employeeId={employee.id} companyId={employee.company_id} canEdit={canEditIdentity} />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {canSeeDocuments ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Documents</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <EmployeeDocumentsSection employeeId={employee.id} companyId={employee.company_id} canEdit={canEditDocuments} />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {canSeeSettlement && employee.employment_status === "terminated" && employee.termination_date ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Final settlement</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <FinalSettlementSection
+              employeeId={employee.id}
+              countryCode={employee.country_code}
+              hireDate={employee.hire_date}
+              terminationDate={employee.termination_date}
+            />
           </CardContent>
         </Card>
       ) : null}

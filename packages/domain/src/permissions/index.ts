@@ -11,3 +11,4 @@ export * from "./employees";
 export * from "./policies";
 export * from "./leave";
 export * from "./projects";
+export * from "./documents";

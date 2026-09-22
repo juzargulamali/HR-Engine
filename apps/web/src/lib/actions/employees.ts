@@ -325,3 +325,45 @@ export async function addIdentityDocument(_prevState: ActionState, formData: For
   revalidatePath(`/employees/${d.employeeId}`);
   return { error: null };
 }
+
+const addEmployeeDocumentSchema = z.object({
+  employeeId: z.string().uuid(),
+  companyId: z.string().uuid(),
+  documentType: z.string().min(1),
+  expiryDate: z.string().optional(),
+});
+
+/** employee_documents (Phase 5) — same employee-documents bucket/path convention Phase 1 set up, HR Admin only. */
+export async function addEmployeeDocument(_prevState: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = addEmployeeDocumentSchema.safeParse({
+    employeeId: formData.get("employeeId"),
+    companyId: formData.get("companyId"),
+    documentType: formData.get("documentType"),
+    expiryDate: formData.get("expiryDate"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: "A file is required." };
+  }
+
+  const supabase = await createClient();
+  const filePath = `${d.companyId}/${d.employeeId}/${d.documentType}/${Date.now()}-${file.name}`;
+  const { error: uploadError } = await supabase.storage.from("employee-documents").upload(filePath, file);
+  if (uploadError) return { error: `Upload failed: ${uploadError.message}` };
+
+  const { error } = await supabase.from("employee_documents").insert({
+    employee_id: d.employeeId,
+    document_type: d.documentType,
+    file_path: filePath,
+    expiry_date: d.expiryDate || null,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath(`/employees/${d.employeeId}`);
+  return { error: null };
+}

@@ -2,8 +2,9 @@
  * Hand-written to match supabase/migrations/20260922000000_phase0_foundations.sql,
  * 20260924000000_phase1_contracts_compensation_identity.sql,
  * 20260925000000_phase2_country_policy_engine.sql, and
- * 20260926000000_phase3_leave_and_approvals.sql, and
- * 20260927000000_phase4_reimbursements_projects_timesheets.sql exactly. Once a real
+ * 20260926000000_phase3_leave_and_approvals.sql,
+ * 20260927000000_phase4_reimbursements_projects_timesheets.sql, and
+ * 20260928000000_phase5_performance_onboarding_documents_assets.sql exactly. Once a real
  * Supabase project exists, regenerate this file with `npm run db:types`
  * (root package.json) instead of hand-editing it — see
  * docs/09-extending-the-system.md "adding a table" checklist, which ends
@@ -34,6 +35,8 @@ export type ApprovableEntity =
   | "onboarding_task"
   | "offboarding_task"
   | "payroll_export_run";
+export type DocumentStatus = "valid" | "expiring_soon" | "expired";
+export type AssetStatus = "in_stock" | "issued" | "under_repair" | "retired";
 
 export interface Database {
   public: {
@@ -726,6 +729,183 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["attendance_records"]["Insert"]>;
         Relationships: [];
       };
+      performance_cycles: {
+        Row: { id: string; company_id: string; name: string; period_start: string; period_end: string; status: string };
+        Insert: { id?: string; company_id: string; name: string; period_start: string; period_end: string; status?: string };
+        Update: Partial<Database["public"]["Tables"]["performance_cycles"]["Insert"]>;
+        Relationships: [];
+      };
+      goals: {
+        Row: {
+          id: string;
+          employee_id: string;
+          cycle_id: string;
+          title: string;
+          description: string | null;
+          weight_percent: string | null;
+          target_date: string | null;
+          status: string;
+          self_rating: number | null;
+          manager_rating: number | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          employee_id: string;
+          cycle_id: string;
+          title: string;
+          description?: string | null;
+          weight_percent?: number | null;
+          target_date?: string | null;
+          status?: string;
+          self_rating?: number | null;
+          manager_rating?: number | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["goals"]["Insert"]>;
+        Relationships: [];
+      };
+      appraisals: {
+        Row: {
+          id: string;
+          employee_id: string;
+          cycle_id: string;
+          appraiser_id: string;
+          overall_rating: number | null;
+          strengths: string | null;
+          areas_for_improvement: string | null;
+          status: string;
+          submitted_at: string | null;
+          acknowledged_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          employee_id: string;
+          cycle_id: string;
+          appraiser_id: string;
+          overall_rating?: number | null;
+          strengths?: string | null;
+          areas_for_improvement?: string | null;
+          status?: string;
+          submitted_at?: string | null;
+        };
+        Update: {
+          overall_rating?: number | null;
+          strengths?: string | null;
+          areas_for_improvement?: string | null;
+          status?: string;
+          submitted_at?: string | null;
+          acknowledged_at?: string | null;
+        };
+        Relationships: [];
+      };
+      checklist_templates: {
+        Row: { id: string; company_id: string | null; country_code: string | null; kind: string; name: string; is_active: boolean };
+        Insert: { id?: string; company_id?: string | null; country_code?: string | null; kind: string; name: string; is_active?: boolean };
+        Update: Partial<Database["public"]["Tables"]["checklist_templates"]["Insert"]>;
+        Relationships: [];
+      };
+      checklist_template_items: {
+        Row: { id: string; template_id: string; step_order: number; task_name: string; assignee_role: AppRole; due_offset_days: number };
+        Insert: { id?: string; template_id: string; step_order: number; task_name: string; assignee_role: AppRole; due_offset_days?: number };
+        Update: Partial<Database["public"]["Tables"]["checklist_template_items"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_checklist_items: {
+        Row: {
+          id: string;
+          employee_id: string;
+          template_item_id: string;
+          kind: string;
+          due_date: string | null;
+          status: string;
+          completed_by: string | null;
+          completed_at: string | null;
+        };
+        Insert: { id?: string; employee_id: string; template_item_id: string; kind: string; due_date?: string | null };
+        Update: { status?: string; completed_by?: string | null; completed_at?: string | null };
+        Relationships: [];
+      };
+      employee_documents: {
+        Row: {
+          id: string;
+          employee_id: string;
+          document_type: string;
+          file_path: string;
+          expiry_date: string | null;
+          status: DocumentStatus;
+          created_at: string;
+          deleted_at: string | null;
+        };
+        Insert: { id?: string; employee_id: string; document_type: string; file_path: string; expiry_date?: string | null };
+        Update: { status?: DocumentStatus; deleted_at?: string | null };
+        Relationships: [];
+      };
+      document_expiry_reminder_rules: {
+        Row: { id: string; company_id: string | null; country_code: string | null; document_type: string; lead_days: number };
+        Insert: { id?: string; company_id?: string | null; country_code?: string | null; document_type: string; lead_days: number };
+        Update: Partial<Database["public"]["Tables"]["document_expiry_reminder_rules"]["Insert"]>;
+        Relationships: [];
+      };
+      document_expiry_reminders_sent: {
+        Row: { id: string; employee_document_id: string; lead_days: number; sent_at: string };
+        Insert: { id?: string; employee_document_id: string; lead_days: number };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      notifications: {
+        Row: { id: string; user_id: string; type: string; payload: Record<string, unknown>; read_at: string | null; created_at: string };
+        Insert: { id?: string; user_id: string; type: string; payload?: Record<string, unknown> };
+        Update: { read_at?: string | null };
+        Relationships: [];
+      };
+      assets: {
+        Row: {
+          id: string;
+          company_id: string;
+          asset_tag: string;
+          category: string;
+          description: string | null;
+          purchase_date: string | null;
+          value: string | null;
+          status: AssetStatus;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          asset_tag: string;
+          category: string;
+          description?: string | null;
+          purchase_date?: string | null;
+          value?: number | null;
+          status?: AssetStatus;
+        };
+        Update: Partial<Database["public"]["Tables"]["assets"]["Insert"]> & { deleted_at?: string | null };
+        Relationships: [];
+      };
+      asset_assignments: {
+        Row: {
+          id: string;
+          asset_id: string;
+          employee_id: string;
+          issued_date: string;
+          returned_date: string | null;
+          condition_on_issue: string | null;
+          condition_on_return: string | null;
+          issued_by: string;
+        };
+        Insert: {
+          id?: string;
+          asset_id: string;
+          employee_id: string;
+          issued_date?: string;
+          condition_on_issue?: string | null;
+          issued_by: string;
+        };
+        Update: { returned_date?: string | null; condition_on_return?: string | null };
+        Relationships: [];
+      };
     };
     Views: {
       leave_balances: {
@@ -754,6 +934,10 @@ export interface Database {
         Args: { p_approval_id: string; p_decision: ApprovalDecision; p_comments?: string | null };
         Returns: undefined;
       };
+      generate_checklist_items: {
+        Args: { p_employee_id: string; p_template_id: string; p_anchor_date: string };
+        Returns: Database["public"]["Tables"]["employee_checklist_items"]["Row"][];
+      };
     };
     Enums: {
       app_role: AppRole;
@@ -767,6 +951,8 @@ export interface Database {
       request_status: RequestStatus;
       approval_decision: ApprovalDecision;
       approvable_entity: ApprovableEntity;
+      document_status: DocumentStatus;
+      asset_status: AssetStatus;
     };
     CompositeTypes: Record<string, never>;
   };
