@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { isSysAdmin } from "@enginious-hr/domain";
+import { canViewHrAlerts, isSysAdmin } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
+import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 
 function Tile({ href, title, description }: { href: string; title: string; description: string }) {
@@ -36,6 +37,29 @@ export default async function DashboardPage() {
 
   const firstName = session.fullName ? session.fullName.split(" ")[0] : null;
 
+  const showAlerts = canViewHrAlerts(session.grants);
+  let alertsCount = 0;
+  if (showAlerts) {
+    const supabase = await createClient();
+    const horizonDate = new Date();
+    horizonDate.setDate(horizonDate.getDate() + 30);
+    const horizon = horizonDate.toISOString().slice(0, 10);
+    const [{ count: contractCount }, { count: docCount }, { count: identityCount }] = await Promise.all([
+      supabase
+        .from("employment_contracts")
+        .select("id", { count: "exact", head: true })
+        .eq("is_current", true)
+        .or(`end_date.lte.${horizon},probation_end_date.lte.${horizon}`),
+      supabase.from("employee_documents").select("id", { count: "exact", head: true }).in("status", ["expiring_soon", "expired"]),
+      supabase
+        .from("identity_documents")
+        .select("id", { count: "exact", head: true })
+        .not("expiry_date", "is", null)
+        .lte("expiry_date", horizon),
+    ]);
+    alertsCount = (contractCount ?? 0) + (docCount ?? 0) + (identityCount ?? 0);
+  }
+
   return (
     <div className="space-y-8">
       <div className="brand-corner relative overflow-hidden rounded-xl border border-border bg-card p-6 sm:p-8">
@@ -64,6 +88,17 @@ export default async function DashboardPage() {
           <Tile href="/reimbursements" title="Reimbursements" description="Submit a claim or check its approval status." />
           <Tile href="/approvals" title="Approvals" description="Decide what's waiting on you." />
           <Tile href="/employees" title="Employees" description="Look up people and their records." />
+          {showAlerts ? (
+            <Tile
+              href="/alerts"
+              title="Alerts"
+              description={
+                alertsCount > 0
+                  ? `${alertsCount} item${alertsCount === 1 ? "" : "s"} need attention.`
+                  : "Nothing needs attention right now."
+              }
+            />
+          ) : null}
           {isSysAdmin(session.grants) ? (
             <>
               <Tile href="/admin/companies" title="Companies" description="Manage companies and countries." />

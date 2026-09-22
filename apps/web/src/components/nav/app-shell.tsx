@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { hasRoleAnyScope, isSysAdmin, ROLE_LABELS } from "@enginious-hr/domain";
+import { canViewHrAlerts, hasRoleAnyScope, isSysAdmin, ROLE_LABELS } from "@enginious-hr/domain";
 import type { CurrentSession } from "@/lib/auth/session";
 import { signOut } from "@/lib/actions/auth";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ export function AppShell({ session, children }: { session: CurrentSession; child
   const roleLabels = [...new Set(session.grants.map((g) => ROLE_LABELS[g.role]))];
   const showAdminLink = isSysAdmin(session.grants);
   const showInsightsLinks = hasRoleAnyScope(session.grants, "hr_admin") || hasRoleAnyScope(session.grants, "sys_admin");
+  const showAlertsLink = canViewHrAlerts(session.grants);
 
   const groups: NavGroup[] = [
     {
@@ -24,6 +25,7 @@ export function AppShell({ session, children }: { session: CurrentSession; child
       label: "People",
       links: [
         { href: "/employees", label: "Employees" },
+        ...(showAlertsLink ? [{ href: "/alerts", label: "Alerts" }] : []),
         { href: "/leave", label: "Leave" },
         { href: "/reimbursements", label: "Reimbursements" },
         { href: "/approvals", label: "Approvals" },
