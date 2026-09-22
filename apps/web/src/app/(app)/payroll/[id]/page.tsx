@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { canManagePayrollExport } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
@@ -31,6 +32,9 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
 
   return (
     <div className="space-y-6">
+      <Link href="/payroll" className="text-sm text-muted-foreground hover:underline">
+        ← Back to payroll
+      </Link>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">

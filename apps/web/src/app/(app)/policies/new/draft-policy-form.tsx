@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 import { draftPolicy } from "@/lib/actions/policies";
 import type { ActionState } from "@/lib/actions/companies";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -76,9 +77,14 @@ export function DraftPolicyForm({ countries }: { countries: { code: string; name
       </div>
 
       {state.error ? <Alert variant="destructive">{state.error}</Alert> : null}
-      <Button type="submit" disabled={pending}>
-        {pending ? "Saving…" : "Save draft"}
-      </Button>
+      <div className="flex gap-3">
+        <Button type="submit" disabled={pending}>
+          {pending ? "Saving…" : "Save draft"}
+        </Button>
+        <Link href="/policies" className={buttonVariants({ variant: "outline" })}>
+          Cancel
+        </Link>
+      </div>
       <p className="text-xs text-muted-foreground">
         This saves as a draft. A <em>different</em> HR Admin or the CEO for this country must activate it before it
         takes effect.

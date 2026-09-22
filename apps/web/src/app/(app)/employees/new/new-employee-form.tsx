@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useState } from "react";
 import { createEmployee } from "@/lib/actions/employees";
 import type { ActionState } from "@/lib/actions/companies";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -107,9 +108,14 @@ export function NewEmployeeForm({
       </fieldset>
 
       {state.error ? <Alert variant="destructive">{state.error}</Alert> : null}
-      <Button type="submit" disabled={pending}>
-        {pending ? "Creating…" : "Create employee"}
-      </Button>
+      <div className="flex gap-3">
+        <Button type="submit" disabled={pending}>
+          {pending ? "Creating…" : "Create employee"}
+        </Button>
+        <Link href="/employees" className={buttonVariants({ variant: "outline" })}>
+          Cancel
+        </Link>
+      </div>
     </form>
   );
 }

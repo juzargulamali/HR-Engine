@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
@@ -47,6 +48,9 @@ export default async function TimesheetDetailPage({ params }: { params: Promise<
 
   return (
     <div className="space-y-6">
+      <Link href="/timesheets" className="text-sm text-muted-foreground hover:underline">
+        ← Back to timesheets
+      </Link>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">

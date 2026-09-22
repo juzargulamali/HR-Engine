@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { canManageAnyAppraisal } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
@@ -35,6 +36,9 @@ export default async function AppraisalDetailPage({ params }: { params: Promise<
 
   return (
     <div className="space-y-6">
+      <Link href="/performance" className="text-sm text-muted-foreground hover:underline">
+        ← Back to performance
+      </Link>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">
