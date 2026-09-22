@@ -2545,12 +2545,21 @@ revoke update, delete on approvals from authenticated, anon;
 --     their own phases, following this exact pattern).
 -- =============================================================================
 
-insert into storage.buckets (id, name, public)
+-- file_size_limit/allowed_mime_types are Supabase Storage's own guard
+-- against an upload nobody validated client-side (a devtools edit, or a
+-- direct POST to the server action, bypasses any <input accept="...">) —
+-- belt-and-braces alongside the application-level validation in
+-- apps/web/src/lib/uploads.ts, which every upload path calls before ever
+-- reaching storage.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values
-  ('employee-documents', 'employee-documents', false),
-  ('identity-documents', 'identity-documents', false),
-  ('receipts', 'receipts', false),
-  ('letters', 'letters', false)
+  ('employee-documents', 'employee-documents', false, 10485760, array['application/pdf', 'image/jpeg', 'image/png', 'image/webp']),
+  ('identity-documents', 'identity-documents', false, 10485760, array['application/pdf', 'image/jpeg', 'image/png', 'image/webp']),
+  ('receipts', 'receipts', false, 10485760, array['application/pdf', 'image/jpeg', 'image/png', 'image/webp']),
+  -- populated only by issueLetter() itself (react-pdf output), never a
+  -- user-supplied file — still worth a matching ceiling and an exact-type
+  -- lock as defense in depth.
+  ('letters', 'letters', false, 10485760, array['application/pdf'])
 on conflict (id) do nothing;
 
 -- employee-documents: owner reads their own files, HR Admin reads/writes

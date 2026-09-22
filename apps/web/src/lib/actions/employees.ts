@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
+import { validateUploadFile } from "@/lib/uploads";
 
 const createEmployeeSchema = z.object({
   companyId: z.string().uuid(),
@@ -358,8 +359,13 @@ export async function addIdentityDocument(_prevState: ActionState, formData: For
   let filePath: string | null = null;
   const file = formData.get("file");
   if (file instanceof File && file.size > 0) {
+    const validationError = validateUploadFile(file);
+    if (validationError) return { error: validationError };
+
     filePath = `${d.companyId}/${d.employeeId}/${d.documentType}/${Date.now()}-${file.name}`;
-    const { error: uploadError } = await supabase.storage.from("identity-documents").upload(filePath, file);
+    const { error: uploadError } = await supabase.storage
+      .from("identity-documents")
+      .upload(filePath, file, { contentType: file.type });
     if (uploadError) return { error: `Upload failed: ${uploadError.message}` };
   }
 
@@ -421,10 +427,14 @@ export async function addEmployeeDocument(_prevState: ActionState, formData: For
   if (!(file instanceof File) || file.size === 0) {
     return { error: "A file is required." };
   }
+  const validationError = validateUploadFile(file);
+  if (validationError) return { error: validationError };
 
   const supabase = await createClient();
   const filePath = `${d.companyId}/${d.employeeId}/${d.documentType}/${Date.now()}-${file.name}`;
-  const { error: uploadError } = await supabase.storage.from("employee-documents").upload(filePath, file);
+  const { error: uploadError } = await supabase.storage
+    .from("employee-documents")
+    .upload(filePath, file, { contentType: file.type });
   if (uploadError) return { error: `Upload failed: ${uploadError.message}` };
 
   const { error } = await supabase.from("employee_documents").insert({

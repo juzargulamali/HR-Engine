@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
 import { resolveInitialApprover } from "./approvals";
+import { validateUploadFile } from "@/lib/uploads";
 
 async function currentEmployee(supabase: Awaited<ReturnType<typeof createClient>>) {
   const {
@@ -62,8 +63,13 @@ export async function addClaimLine(_prevState: ActionState, formData: FormData):
   let receiptFilePath: string | null = null;
   const file = formData.get("receipt");
   if (file instanceof File && file.size > 0) {
+    const validationError = validateUploadFile(file);
+    if (validationError) return { error: validationError };
+
     receiptFilePath = `${employee.company_id}/${employee.id}/receipts/${Date.now()}-${file.name}`;
-    const { error: uploadError } = await supabase.storage.from("receipts").upload(receiptFilePath, file);
+    const { error: uploadError } = await supabase.storage
+      .from("receipts")
+      .upload(receiptFilePath, file, { contentType: file.type });
     if (uploadError) return { error: `Receipt upload failed: ${uploadError.message}` };
   }
 
