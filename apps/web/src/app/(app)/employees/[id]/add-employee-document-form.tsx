@@ -25,6 +25,8 @@ export function AddEmployeeDocumentForm({ employeeId, companyId }: { employeeId:
           <Select id="documentType" name="documentType" defaultValue="visa">
             <option value="visa">Visa</option>
             <option value="labor_card">Labor card</option>
+            <option value="emirates_id">Emirates ID</option>
+            <option value="passport">Passport</option>
             <option value="certificate">Certificate</option>
             <option value="other">Other</option>
           </Select>
