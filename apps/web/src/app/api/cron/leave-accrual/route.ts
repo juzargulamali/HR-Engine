@@ -73,9 +73,22 @@ export async function GET(request: Request) {
   const { data: balances } = await admin.from("leave_balances").select("employee_id, leave_type_code, balance_days");
   const balanceByKey = new Map((balances ?? []).map((b) => [`${b.employee_id}:${b.leave_type_code}`, Number(b.balance_days)]));
 
-  let posted = 0;
+  // Collect rows and insert them in one bulk call at the end rather than
+  // one round trip per employee/leave-type pair — at realistic headcount
+  // (hundreds of employees across several leave types) a sequential
+  // per-row insert risks a serverless function timeout; a single batched
+  // insert keeps this a constant number of round trips regardless of
+  // headcount.
+  const rows: {
+    employee_id: string;
+    leave_type_code: string;
+    txn_date: string;
+    entry_type: "accrual";
+    amount_days: number;
+    reference_type: string;
+    created_by: string;
+  }[] = [];
   let skipped = 0;
-  const failures: string[] = [];
 
   for (const employee of employees ?? []) {
     const leaveTypes = leaveTypesByCountry.get(employee.country_code) ?? [];
@@ -108,7 +121,7 @@ export async function GET(request: Request) {
         continue;
       }
 
-      const { error: insertError } = await admin.from("leave_ledger").insert({
+      rows.push({
         employee_id: employee.id,
         leave_type_code: leaveType.leave_type_code,
         txn_date: today,
@@ -117,9 +130,15 @@ export async function GET(request: Request) {
         reference_type: "policy_run",
         created_by: SYSTEM_ACTOR_ID,
       });
-      if (insertError) failures.push(`${key}: ${insertError.message}`);
-      else posted += 1;
     }
+  }
+
+  let posted = 0;
+  const failures: string[] = [];
+  if (rows.length > 0) {
+    const { error: insertError, count } = await admin.from("leave_ledger").insert(rows, { count: "exact" });
+    if (insertError) failures.push(insertError.message);
+    else posted = count ?? rows.length;
   }
 
   return NextResponse.json({ ranAt: today, entriesPosted: posted, skipped, failures });

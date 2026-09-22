@@ -110,6 +110,52 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
     });
   });
 
+  describe("project_allocations", () => {
+    it("lets the employee and their manager read an allocation, blocks an unrelated peer, HR Admin manages", async () => {
+      const projectId = "00000000-0000-0000-0000-0000000004d1";
+      // Seeded via the admin pool, not asUser(): every asUser() call is its
+      // own transaction that always rolls back (see harness.ts), so an
+      // insert made there would never be visible to a later asUser() read.
+      await db.seed(`
+        insert into projects (id, company_id, code, name) values ('${projectId}', '${COMPANY_A}', 'ALLOC', 'Allocation project');
+        insert into project_allocations (employee_id, project_id, allocation_percent, start_date)
+        values ('${EMPLOYEE_REPORT}', '${projectId}', 50, '2024-03-01');
+      `);
+
+      const selfRead = await db.asUser(USER_REPORT, (query) =>
+        query("select id from project_allocations where employee_id = $1", [EMPLOYEE_REPORT]),
+      );
+      expect(selfRead.rows.length).toBe(1);
+
+      const managerRead = await db.asUser(USER_MANAGER, (query) =>
+        query("select id from project_allocations where employee_id = $1", [EMPLOYEE_REPORT]),
+      );
+      expect(managerRead.rows.length).toBe(1);
+
+      const peerRead = await db.asUser(USER_PEER, (query) =>
+        query("select id from project_allocations where employee_id = $1", [EMPLOYEE_REPORT]),
+      );
+      expect(peerRead.rows.length).toBe(0);
+
+      await expect(
+        db.asUser(USER_PEER, (query) =>
+          query(
+            "insert into project_allocations (employee_id, project_id, allocation_percent, start_date) values ($1, $2, 100, '2024-03-01')",
+            [EMPLOYEE_PEER, projectId],
+          ),
+        ),
+      ).rejects.toThrow(/row-level security/);
+
+      const hrInsert = await db.asUser(USER_HR, (query) =>
+        query(
+          "insert into project_allocations (employee_id, project_id, allocation_percent, start_date) values ($1, $2, 100, '2024-03-01') returning id",
+          [EMPLOYEE_PEER, projectId],
+        ),
+      );
+      expect(hrInsert.rows.length).toBe(1);
+    });
+  });
+
   describe("reimbursement claims: lifecycle and total_amount trigger", () => {
     it("lets an employee create a draft claim and add lines, keeping total_amount in sync automatically", async () => {
       await db.asUser(USER_REPORT, async (query) => {

@@ -13,6 +13,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:rls": "npm run test:rls -w @enginious-hr/rls-tests",
+    "check:secrets": "node scripts/check-no-secrets-in-client-bundle.mjs",
     "db:types": "supabase gen types typescript --local > apps/web/src/types/database.types.ts"
   },
   "devDependencies": {

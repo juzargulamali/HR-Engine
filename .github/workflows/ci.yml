@@ -34,6 +34,11 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
           SUPABASE_SERVICE_ROLE_KEY: placeholder-service-role-key
 
+      - name: Secrets audit — SUPABASE_SERVICE_ROLE_KEY must never reach the client bundle
+        run: npm run check:secrets
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: placeholder-service-role-key
+
   rls-policies:
     runs-on: ubuntu-latest
     services:

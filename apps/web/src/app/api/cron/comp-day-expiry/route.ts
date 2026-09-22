@@ -31,8 +31,20 @@ export async function GET(request: Request) {
     byEmployee.set(entry.employee_id, list);
   }
 
-  let posted = 0;
-  const failures: string[] = [];
+  // One bulk insert for the whole run rather than one round trip per
+  // posting — at realistic headcount (hundreds of employees, each
+  // potentially posting several expiry entries) a sequential per-row
+  // insert risks a serverless function timeout; a single batched insert
+  // keeps this a constant number of round trips regardless of headcount.
+  const rows: {
+    employee_id: string;
+    txn_date: string;
+    entry_type: "expired";
+    days: number;
+    reference_type: string;
+    reference_id: string;
+    created_by: string;
+  }[] = [];
 
   for (const [employeeId, employeeEntries] of byEmployee) {
     const postings = computeCompDayExpiry(
@@ -47,7 +59,7 @@ export async function GET(request: Request) {
     );
 
     for (const posting of postings) {
-      const { error: insertError } = await admin.from("comp_day_ledger").insert({
+      rows.push({
         employee_id: employeeId,
         txn_date: today,
         entry_type: "expired",
@@ -56,9 +68,15 @@ export async function GET(request: Request) {
         reference_id: posting.earnedEntryId,
         created_by: SYSTEM_ACTOR_ID,
       });
-      if (insertError) failures.push(`${employeeId}/${posting.earnedEntryId}: ${insertError.message}`);
-      else posted += 1;
     }
+  }
+
+  let posted = 0;
+  const failures: string[] = [];
+  if (rows.length > 0) {
+    const { error: insertError, count } = await admin.from("comp_day_ledger").insert(rows, { count: "exact" });
+    if (insertError) failures.push(insertError.message);
+    else posted = count ?? rows.length;
   }
 
   return NextResponse.json({ ranAt: today, employeesSwept: byEmployee.size, entriesPosted: posted, failures });

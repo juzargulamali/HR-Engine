@@ -4,7 +4,7 @@ Multi-country HR platform for Enginious LLC FZ (UAE headquarters; Saudi Arabia a
 satellite offices). Start with [`docs/00-overview.md`](./docs/00-overview.md) — it's the design
 package this codebase implements, phase by phase.
 
-**Currently implemented: Phases 0–6** — auth, roles, companies, departments, employee core
+**Currently implemented: Phases 0–7** — auth, roles, companies, departments, employee core
 records (Phase 0); employment contracts, compensation, identity documents, private document
 storage, and soft-delete recovery (Phase 1); the country policy engine — versioned, effective-dated
 leave/notice/probation rules and public holidays for UAE/KSA/Poland, with two-person draft-then-
@@ -26,8 +26,14 @@ workflow (mandatory on every export, regardless of amount — no override path, 
 a generic audit log capturing before/after state on every HR and system-scoped table, and an
 AI Suggestions queue — the one surface an AI service identity may ever write to, restricted to a
 draft-only proposal that a human HR Admin/Sys Admin must explicitly authorize before it becomes a
-real ledger entry (Phase 6). Every table has RLS enabled and tested from the migration that creates
-it. See
+real ledger entry (Phase 6); a hardening pass — an RLS coverage audit across every table (which
+found and fixed one real gap), batched two scheduled jobs that were doing a per-row round trip per
+employee, and an automated CI check that fails the build if `SUPABASE_SERVICE_ROLE_KEY` ever
+reaches a client bundle (Phase 7 — see
+[`docs/10-phase7-hardening-report.md`](./docs/10-phase7-hardening-report.md) for the full report,
+including what's inherently operational and still needs a real Supabase/Vercel project: backup/
+restore drills, a load test at realistic headcount, and a full accessibility pass). Every table has
+RLS enabled and tested from the migration that creates it. See
 [`docs/06-implementation-phases.md`](./docs/06-implementation-phases.md) for what's next.
 
 Starter policy content for UAE, Saudi Arabia, and Poland is seeded as **drafts only** — see the
