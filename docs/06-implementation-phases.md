@@ -4,6 +4,23 @@ Each phase ends with a working, deployed increment and its own tests — not a "
 Phases are sequential dependencies; a phase should not start implementation until the prior phase's
 domain logic has unit tests green.
 
+## Company context
+
+Enginious LLC FZ is headquartered in the **UAE**, with **Saudi Arabia** and **Poland** run as
+smaller satellite offices with limited headcount today. This shapes the plan in three concrete
+ways:
+
+- **UAE is the build-and-pilot country**, not just an equal third of the initial scope — its policy
+  set, approval structure, and letter templates are built and validated first, with KSA and Poland
+  proven against the same generic engine afterward (§ Phase 7 rollout order).
+- **Role coverage can be thin at the satellite offices without special-casing the schema.** A KSA
+  or Poland employee's Line Manager, HR Admin, or Finance approver can be a HQ-based person holding
+  a role scoped to that `country_code`/`company_id` (see `user_roles` in the schema doc) — there is
+  no requirement to staff a full local HR/Finance function before onboarding employees there.
+- **Growth headroom is assumed.** KSA/Poland having "limited employees currently" is a headcount
+  fact, not a design constraint — the schema and policy engine are already headcount-agnostic, so
+  no rework is needed if either office grows.
+
 ## Phase 0 — Foundations (auth, tenancy, RLS skeleton)
 - Next.js + TypeScript + Tailwind + shadcn/ui scaffold; Supabase project provisioning
   (dev/staging/prod).
@@ -89,7 +106,9 @@ domain logic has unit tests green.
 - Backup/restore drill on Supabase project; disaster-recovery runbook.
 - Accessibility pass (keyboard nav, screen reader labels) on core journeys, mobile responsiveness
   check on the same set.
-- Staged rollout: UAE pilot company first (smallest policy surface to validate), then KSA and
-  Poland once the policy engine has proven itself against a second and third country's real rules.
+- Staged rollout: UAE headquarters first — it carries the fullest role coverage and the most
+  employees, so it's the strongest validation of the whole system — then KSA and Poland, whose
+  smaller headcount today makes them lower-risk to bring on once the policy engine has proven
+  itself against a second and third country's real rules.
 
 Proceed to [07-risk-register.md](./07-risk-register.md).
