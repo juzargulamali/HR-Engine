@@ -1,0 +1,17 @@
+{
+  "name": "@enginious-hr/rls-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:rls": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/pg": "^8.11.10",
+    "pg": "^8.13.1",
+    "typescript": "^5.6.3",
+    "vitest": "^5.0.1"
+  }
+}

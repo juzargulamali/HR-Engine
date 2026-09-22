@@ -50,6 +50,13 @@ take effect immediately without waiting for token refresh. Every RLS policy and 
 re-checks `user_roles` against the live `auth.uid()` on each request via `SECURITY DEFINER` helper
 functions (`has_role`, `is_manager_of`, `same_company`), listed in §2.6.
 
+A `profiles` row is created automatically the moment an `auth.users` row is (a
+`SECURITY DEFINER` trigger, `handle_new_auth_user`) — inviting a user never requires a separate
+manual "now go create their profile" step. `countries`, `companies`, `departments`, and `profiles`
+are all low-sensitivity reference/directory data: readable by any signed-in user (so name pickers,
+manager selectors, and org browsing work without a special case), writable only by Sys Admin
+(companies/countries — structural) or HR Admin scoped to their company (departments).
+
 ## 2.3 Employee, contract and sensitive-data separation
 
 - `employees`: name, org placement (`company_id`, `department_id`, `manager_id`), job title,

@@ -31,8 +31,9 @@ ways:
   "add RLS later" step.
 - CI: lint, typecheck, a first RLS policy test harness (spin up local Supabase, run pgTAP or
   Vitest-driven policy assertions as different simulated JWTs).
-- **Exit criteria**: an HR Admin can create a company, a Sys Admin can create a user and assign a
-  role, an Employee can log in and see only their own (empty) profile.
+- **Exit criteria**: a Sys Admin can create a company/country and create a user and assign a role
+  (per the permission matrix, §3.6 — company/country structure is Sys Admin's, not HR Admin's), an
+  Employee can log in and see only their own (empty) profile.
 
 ## Phase 1 — Employee master data & contracts
 - Full `employees`, `employment_contracts`, `compensation_details`, `identity_documents` tables +

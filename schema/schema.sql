@@ -78,6 +78,18 @@ create type letter_status as enum ('draft', 'pending_approval', 'issued', 'void'
 
 create type ai_draft_status as enum ('draft', 'authorized', 'rejected', 'discarded');
 
+-- Shared trigger utility — every table with an updated_at column reuses this
+-- rather than each migration redefining its own copy.
+create or replace function set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
 -- -----------------------------------------------------------------------------
 -- 1. Org & identity
 -- -----------------------------------------------------------------------------
@@ -98,9 +110,13 @@ create table companies (
   default_currency text not null,
   is_active       boolean not null default true,
   created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
   deleted_at      timestamptz,
   deleted_by      uuid
 );
+
+create trigger companies_set_updated_at before update on companies
+  for each row execute function set_updated_at();
 
 create table departments (
   id                    uuid primary key default gen_random_uuid(),
@@ -108,8 +124,12 @@ create table departments (
   name                  text not null,
   parent_department_id  uuid references departments(id),
   created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now(),
   deleted_at            timestamptz
 );
+
+create trigger departments_set_updated_at before update on departments
+  for each row execute function set_updated_at();
 
 -- 1:1 with auth.users; no sensitive HR data here.
 create table profiles (
@@ -118,8 +138,32 @@ create table profiles (
   full_name   text,
   locale      text not null default 'en',
   is_active   boolean not null default true,
-  created_at  timestamptz not null default now()
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
 );
+
+create trigger profiles_set_updated_at before update on profiles
+  for each row execute function set_updated_at();
+
+-- Auto-provision a profile the moment a login is created (invite or
+-- self-signup) — no manual follow-up step for a new user to end up without one.
+create or replace function handle_new_auth_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, email, full_name)
+  values (new.id, new.email, new.raw_user_meta_data ->> 'full_name')
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function handle_new_auth_user();
 
 create table user_roles (
   id            uuid primary key default gen_random_uuid(),
@@ -794,6 +838,10 @@ $$;
 -- 14. Row-Level Security
 -- =============================================================================
 
+alter table countries enable row level security;
+alter table companies enable row level security;
+alter table departments enable row level security;
+alter table profiles enable row level security;
 alter table employees enable row level security;
 alter table employment_contracts enable row level security;
 alter table compensation_details enable row level security;
@@ -818,6 +866,47 @@ alter table payroll_export_lines enable row level security;
 alter table ai_drafts enable row level security;
 alter table audit_log enable row level security;
 alter table user_roles enable row level security;
+
+-- ---- countries: reference data, readable by any signed-in user, written only
+--      by Sys Admin (structural — see permission matrix §3.6).
+create policy countries_select on countries for select
+  using (auth.role() = 'authenticated');
+
+create policy countries_write on countries for all
+  using (has_role('sys_admin'))
+  with check (has_role('sys_admin'));
+
+-- ---- companies: same pattern — visible company-directory data, structural
+--      writes reserved for Sys Admin.
+create policy companies_select on companies for select
+  using (deleted_at is null and auth.role() = 'authenticated');
+
+create policy companies_write on companies for all
+  using (has_role('sys_admin'))
+  with check (has_role('sys_admin'));
+
+-- ---- departments: visible to any signed-in user (org browsing), managed by
+--      HR Admin within their company or Sys Admin structurally.
+create policy departments_select on departments for select
+  using (deleted_at is null and auth.role() = 'authenticated');
+
+create policy departments_write on departments for all
+  using (has_role('hr_admin', company_id) or has_role('sys_admin'))
+  with check (has_role('hr_admin', company_id) or has_role('sys_admin'));
+
+-- ---- profiles: low-sensitivity directory data (name/email/locale) — visible
+--      to any signed-in user so approver/manager pickers work; a user edits
+--      only their own row; Sys Admin manages any (account troubleshooting).
+create policy profiles_select on profiles for select
+  using (auth.role() = 'authenticated');
+
+create policy profiles_update_own on profiles for update
+  using (id = auth.uid())
+  with check (id = auth.uid());
+
+create policy profiles_write_sysadmin on profiles for update
+  using (has_role('sys_admin'))
+  with check (has_role('sys_admin'));
 
 -- ---- employees: self, manager chain (read-only, non-sensitive columns only via a view),
 --      HR Admin (full), Finance (read, for cost-center/payroll purposes), CEO (read), Sys Admin (read, no write to content)

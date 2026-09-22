@@ -20,6 +20,7 @@ a live database.
 | 6 | [06-implementation-phases.md](./06-implementation-phases.md) | Phased delivery plan |
 | 7 | [07-risk-register.md](./07-risk-register.md) | Risks and mitigations |
 | 8 | [08-decisions-log.md](./08-decisions-log.md) | Stakeholder decisions confirmed before Phase 0 |
+| 9 | [09-extending-the-system.md](./09-extending-the-system.md) | How to add a country, role, or module without a rewrite |
 
 ## Non-negotiable constraints carried through every document
 
