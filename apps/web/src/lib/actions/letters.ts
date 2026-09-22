@@ -69,6 +69,17 @@ export async function issueLetter(_prevState: { error: string | null }, formData
   if (!template) return { error: "Template not found." };
   if (!employee) return { error: "Employee not found." };
 
+  // Resolved BEFORE anything is generated or stored — every other entity
+  // type (leave, reimbursement, timesheet, payroll) already fails fast this
+  // way; this one used to resolve the approver only after the letter row
+  // was already committed, so a resolution failure (e.g. no one holds the
+  // required role) left an orphaned letter stuck in "pending_approval"
+  // forever, with no approvals row and no way to retry short of deleting it.
+  const resolved = template.requires_approval
+    ? await resolveInitialApprover(supabase, "generated_letter", employee.company_id, employeeId, userId)
+    : null;
+  if (resolved && "error" in resolved) return resolved;
+
   const { data: company } = await supabase.from("companies").select("legal_name").eq("id", employee.company_id).single();
 
   const rendered = renderTemplate(template.body_template, {
@@ -102,10 +113,7 @@ export async function issueLetter(_prevState: { error: string | null }, formData
     .single();
   if (insertError || !letter) return { error: insertError?.message ?? "Could not create the letter." };
 
-  if (template.requires_approval) {
-    const resolved = await resolveInitialApprover(supabase, "generated_letter", employee.company_id, employeeId);
-    if ("error" in resolved) return resolved;
-
+  if (resolved) {
     const { error: approvalError } = await supabase.from("approvals").insert({
       entity_type: "generated_letter",
       entity_id: letter.id,

@@ -26,6 +26,7 @@ export async function resolveInitialApprover(
   entityType: ApprovableEntityType,
   companyId: string,
   employeeId: string,
+  requesterUserId: string,
 ): Promise<{ workflowId: string; approverId: string } | { error: string }> {
   const { data: workflows } = await supabase
     .from("approval_workflows")
@@ -52,6 +53,16 @@ export async function resolveInitialApprover(
       : await supabase.rpc("resolve_approver", { p_approver_type: step.approver_type, p_employee_id: employeeId });
   if (!approverId) {
     return { error: "No approver could be resolved (e.g. no manager assigned, or no one holds the required role). Contact HR Admin." };
+  }
+  // decide_leave_approval() already refuses to route any LATER step back to
+  // the requester (self-approval prevention) — this first step is created
+  // client-side before that function ever runs, so it needs the same check
+  // here, or a single-Finance-user company could submit and approve their
+  // own payroll run, for example.
+  if (approverId === requesterUserId) {
+    return {
+      error: `The resolved approver for this workflow's first step (${step.approver_type}) is you — you can't approve your own request. Contact HR Admin to assign a different approver.`,
+    };
   }
 
   return { workflowId: workflow.id, approverId };

@@ -18,7 +18,7 @@ async function currentEmployee(supabase: Awaited<ReturnType<typeof createClient>
     .eq("user_id", user.id)
     .is("deleted_at", null)
     .maybeSingle();
-  return employee;
+  return employee ? { ...employee, userId: user.id } : null;
 }
 
 const createClaimSchema = z.object({ currency: z.string().length(3, "3-letter currency code, e.g. AED") });
@@ -88,8 +88,18 @@ export async function addClaimLine(_prevState: ActionState, formData: FormData):
   return { error: null };
 }
 
+/**
+ * Storage removal is best-effort — if it fails, the row still goes (same
+ * remove-then-delete order as deleteLetter()), since a receipt with no line
+ * left pointing at it is unreachable through the UI either way.
+ */
 export async function deleteClaimLine(lineId: string, claimId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
+  const { data: line } = await supabase.from("reimbursement_claim_lines").select("receipt_file_path").eq("id", lineId).maybeSingle();
+  if (line?.receipt_file_path) {
+    await supabase.storage.from("receipts").remove([line.receipt_file_path]);
+  }
+
   const { error } = await supabase.from("reimbursement_claim_lines").delete().eq("id", lineId);
   revalidatePath(`/reimbursements/${claimId}`);
   return { error: error?.message ?? null };
@@ -100,7 +110,7 @@ export async function submitClaim(claimId: string): Promise<{ error: string | nu
   const employee = await currentEmployee(supabase);
   if (!employee) return { error: "No employee record is linked to your account." };
 
-  const resolved = await resolveInitialApprover(supabase, "reimbursement_claim", employee.company_id, employee.id);
+  const resolved = await resolveInitialApprover(supabase, "reimbursement_claim", employee.company_id, employee.id, employee.userId);
   if ("error" in resolved) return resolved;
 
   const { error: updateError } = await supabase

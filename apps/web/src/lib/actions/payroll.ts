@@ -47,8 +47,12 @@ export async function regenerateLines(runId: string): Promise<{ error: string | 
 
 export async function submitPayrollRun(runId: string, companyId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in." };
 
-  const resolved = await resolveInitialApprover(supabase, "payroll_export_run", companyId, ""); // employee_id unused for payroll's role-based steps
+  const resolved = await resolveInitialApprover(supabase, "payroll_export_run", companyId, "", user.id); // employee_id unused for payroll's role-based steps
   if ("error" in resolved) return resolved;
 
   const { error: updateError } = await supabase.from("payroll_export_runs").update({ status: "submitted" }).eq("id", runId);

@@ -18,7 +18,7 @@ async function currentEmployee(supabase: Awaited<ReturnType<typeof createClient>
     .eq("user_id", user.id)
     .is("deleted_at", null)
     .maybeSingle();
-  return employee;
+  return employee ? { ...employee, userId: user.id } : null;
 }
 
 const createTimesheetSchema = z
@@ -100,7 +100,7 @@ export async function submitTimesheet(timesheetId: string): Promise<{ error: str
     .eq("timesheet_id", timesheetId);
   if (!count) return { error: "Add at least one entry before submitting." };
 
-  const resolved = await resolveInitialApprover(supabase, "timesheet", employee.company_id, employee.id);
+  const resolved = await resolveInitialApprover(supabase, "timesheet", employee.company_id, employee.id, employee.userId);
   if ("error" in resolved) return resolved;
 
   const { error: updateError } = await supabase.from("timesheets").update({ status: "submitted" }).eq("id", timesheetId);

@@ -63,7 +63,7 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
     return { error: "That date range has no working days (weekends/holidays only)." };
   }
 
-  const resolved = await resolveInitialApprover(supabase, "leave_request", employee.company_id, employee.id);
+  const resolved = await resolveInitialApprover(supabase, "leave_request", employee.company_id, employee.id, user.id);
   if ("error" in resolved) return resolved;
 
   const { data: request, error: insertError } = await supabase

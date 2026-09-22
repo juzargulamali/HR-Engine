@@ -1382,9 +1382,13 @@ begin
   end if;
 
   -- Walk every remaining step in order (not just the next one) — a step
-  -- whose condition doesn't apply (amount below its threshold) or whose
-  -- resolved approver is the requester themselves is skipped, not treated
-  -- as "no more steps".
+  -- whose condition doesn't apply (amount below its threshold) is skipped,
+  -- and a step that resolves to the requester themselves is skipped too
+  -- (self-approval prevention). A step that resolves to NO ONE AT ALL (the
+  -- role has zero holders in this company) is different: that's not "skip
+  -- and keep going", it's "this cannot legitimately proceed" — abort the
+  -- whole decision rather than silently finalizing as if this step had
+  -- been satisfied.
   for v_step in
     select step_order, approver_type, condition
     from approval_workflow_steps
@@ -1403,14 +1407,17 @@ begin
       v_next_approver := resolve_approver(v_step.approver_type, v_employee_id);
     end if;
 
-    if v_next_approver is not null and v_next_approver <> v_requester_user_id then
+    if v_next_approver is null then
+      raise exception 'Cannot advance this approval: no one currently holds the "%" role required for the next step. Ask HR Admin to assign that role, then try again.', v_step.approver_type;
+    end if;
+
+    if v_next_approver <> v_requester_user_id then
       insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id)
       values (v_approval.entity_type, v_approval.entity_id, v_approval.workflow_id, v_step.step_order, v_next_approver);
       v_found_next := true;
       exit;
     end if;
-    -- no eligible approver (role has nobody, or it's the requester) — keep
-    -- walking forward rather than getting stuck or finalizing prematurely
+    -- self-approval: keep walking forward to find a different eligible approver
   end loop;
 
   if v_found_next then
@@ -1748,6 +1755,9 @@ create policy identity_docs_update on identity_documents for update
   using (has_role('hr_admin', (select company_id from employees where id = employee_id)))
   with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
 
+create policy identity_docs_delete on identity_documents for delete
+  using (has_role('hr_admin', (select company_id from employees where id = employee_id)));
+
 -- ---- policy_versions: active versions are visible to any signed-in user
 --      (it's company policy, not a secret); drafts are visible only to the
 --      HR Admin/CEO who'd act on them. Drafting is HR Admin's alone;
@@ -1979,6 +1989,10 @@ create policy employee_checklist_items_select on employee_checklist_items for se
       and has_role('finance', (select company_id from employees where id = employee_id))
     )
     or (
+      exists (select 1 from checklist_template_items cti where cti.id = template_item_id and cti.assignee_role = 'ceo')
+      and has_role('ceo', (select company_id from employees where id = employee_id))
+    )
+    or (
       exists (select 1 from checklist_template_items cti where cti.id = template_item_id and cti.assignee_role = 'sys_admin')
       and has_role('sys_admin')
     )
@@ -2003,6 +2017,10 @@ create policy employee_checklist_items_complete on employee_checklist_items for 
     or (
       exists (select 1 from checklist_template_items cti where cti.id = template_item_id and cti.assignee_role = 'finance')
       and has_role('finance', (select company_id from employees where id = employee_id))
+    )
+    or (
+      exists (select 1 from checklist_template_items cti where cti.id = template_item_id and cti.assignee_role = 'ceo')
+      and has_role('ceo', (select company_id from employees where id = employee_id))
     )
     or (
       exists (select 1 from checklist_template_items cti where cti.id = template_item_id and cti.assignee_role = 'sys_admin')
@@ -2413,7 +2431,7 @@ create policy audit_log_select_hr on audit_log for select
   using (
     table_name in (
       'employees', 'compensation_details', 'employment_contracts', 'leave_requests', 'leave_ledger',
-      'comp_day_ledger', 'approvals', 'reimbursement_claims', 'payroll_export_runs', 'generated_letters'
+      'comp_day_ledger', 'approvals', 'reimbursement_claims', 'timesheets', 'payroll_export_runs', 'generated_letters'
     )
     and company_id is not null
     and has_role('hr_admin', company_id)
@@ -2513,6 +2531,8 @@ create trigger audit_comp_ledger after insert on comp_day_ledger
 create trigger audit_approvals after insert or update on approvals
   for each row execute function write_audit_log();
 create trigger audit_reimbursements after insert or update or delete on reimbursement_claims
+  for each row execute function write_audit_log();
+create trigger audit_timesheets after insert or update or delete on timesheets
   for each row execute function write_audit_log();
 create trigger audit_payroll_runs after insert or update on payroll_export_runs
   for each row execute function write_audit_log();
