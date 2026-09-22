@@ -18,3 +18,4 @@ export * from "./alerts";
 export * from "./assets";
 export * from "./attendance";
 export * from "./performance";
+export * from "./dashboard";

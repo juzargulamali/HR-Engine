@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { canViewHrAlerts, isSysAdmin } from "@enginious-hr/domain";
+import { canViewCompanyOverview, canViewHrAlerts, isSysAdmin } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
+import { CompanyOverviewSection } from "./company-overview-section";
 
 function Tile({ href, title, description }: { href: string; title: string; description: string }) {
   return (
@@ -37,10 +38,11 @@ export default async function DashboardPage() {
 
   const firstName = session.fullName ? session.fullName.split(" ")[0] : null;
 
+  const supabase = await createClient();
+
   const showAlerts = canViewHrAlerts(session.grants);
   let alertsCount = 0;
   if (showAlerts) {
-    const supabase = await createClient();
     const horizonDate = new Date();
     horizonDate.setDate(horizonDate.getDate() + 30);
     const horizon = horizonDate.toISOString().slice(0, 10);
@@ -60,6 +62,9 @@ export default async function DashboardPage() {
     alertsCount = (contractCount ?? 0) + (docCount ?? 0) + (identityCount ?? 0);
   }
 
+  const { data: companies } = await supabase.from("companies").select("id, legal_name, country_code");
+  const overviewCompanies = (companies ?? []).filter((c) => canViewCompanyOverview(session.grants, c.id));
+
   return (
     <div className="space-y-8">
       <div className="brand-corner relative overflow-hidden rounded-xl border border-border bg-card p-6 sm:p-8">
@@ -75,6 +80,14 @@ export default async function DashboardPage() {
           </p>
         </div>
       </div>
+
+      {overviewCompanies.length > 0 ? (
+        <div className="space-y-6">
+          {overviewCompanies.map((c) => (
+            <CompanyOverviewSection key={c.id} companyId={c.id} companyName={c.legal_name} countryCode={c.country_code} />
+          ))}
+        </div>
+      ) : null}
 
       <div>
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Quick links</h2>
