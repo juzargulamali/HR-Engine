@@ -80,3 +80,17 @@ export async function markPayrollSent(runId: string): Promise<{ error: string | 
   revalidatePath(`/payroll/${runId}`);
   return { error: error?.message ?? null };
 }
+
+/**
+ * RLS only permits this while the run is still a draft — deleting it
+ * cascades to its lines, releasing any reimbursement/leave-encashment rows
+ * it had claimed back for a future run's generation (the same release a
+ * rejection performs in decide_leave_approval()).
+ */
+export async function deletePayrollRun(runId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("payroll_export_runs").delete().eq("id", runId);
+  if (error) return { error: error.message };
+  revalidatePath("/payroll");
+  redirect("/payroll");
+}

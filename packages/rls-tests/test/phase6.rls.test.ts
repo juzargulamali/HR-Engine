@@ -117,11 +117,11 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
   });
 
   describe("payroll export authorization", () => {
-    async function seedDraftRun(month: number) {
+    async function seedDraftRun(month: number, year = 2026) {
       const runId = randomUUID();
       await db.seed(`
         insert into payroll_export_runs (id, company_id, period_month, period_year, generated_by)
-        values ('${runId}', '${COMPANY_A}', ${month}, 2026, '${USER_FINANCE}');
+        values ('${runId}', '${COMPANY_A}', ${month}, ${year}, '${USER_FINANCE}');
       `);
       return runId;
     }
@@ -192,6 +192,86 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
 
         const ceoStep = await query("select id from approvals where entity_id = $1 and step_order = 2", [runId]);
         expect(ceoStep.rows).toEqual([]);
+      });
+    });
+
+    // Regression test for the permanent-drop bug: generate_payroll_export_lines()
+    // only checks payroll_export_lines for an existing claim on a source
+    // row — it never looked at whether the run that claimed it was later
+    // rejected. Without decide_leave_approval() releasing the rejected
+    // run's lines, this approved claim would never be exportable again.
+    it("releases a rejected run's lines, so a later run can pick up the same source rows", async () => {
+      const claimId = randomUUID();
+      await db.seed(`
+        insert into reimbursement_claims (id, employee_id, currency, status) values ('${claimId}', '${EMPLOYEE_REPORT}', 'ZZD', 'approved');
+        insert into reimbursement_claim_lines (claim_id, line_no, expense_date, category, amount) values ('${claimId}', 1, '2026-07-01', 'travel', 150);
+      `);
+      const runId = await seedDraftRun(9);
+      const secondRunId = await seedDraftRun(10);
+      const approvalId = randomUUID();
+
+      // Everything below runs inside a single db.asUser transaction (which
+      // always rolls back at the end) — separate asUser calls each get
+      // their own transaction and can't see each other's writes, so the
+      // reject-then-regenerate sequence has to stay in one.
+      await db.asUser(USER_FINANCE, async (query) => {
+        const { rows: firstLines } = await query("select * from generate_payroll_export_lines($1)", [runId]);
+        expect(firstLines.some((l) => l.source_reference_id === claimId)).toBe(true);
+
+        await query("update payroll_export_runs set status = 'submitted' where id = $1", [runId]);
+        await query(
+          "insert into approvals (id, entity_type, entity_id, workflow_id, step_order, approver_id, decision) values ($1, 'payroll_export_run', $2, $3, 1, $4, 'pending')",
+          [approvalId, runId, payrollWorkflowId, USER_FINANCE],
+        );
+        await query("select decide_leave_approval($1, 'rejected', 'redo it')", [approvalId]);
+
+        const afterReject = await query("select id from payroll_export_lines where run_id = $1", [runId]);
+        expect(afterReject.rows).toEqual([]);
+
+        const { rows: secondLines } = await query("select * from generate_payroll_export_lines($1)", [secondRunId]);
+        expect(secondLines.some((l) => l.source_reference_id === claimId)).toBe(true);
+      });
+
+      // This claim's own db.seed insert isn't rolled back by the asUser
+      // transaction above — clean it up so it doesn't leak into other
+      // tests in this file that also generate lines for COMPANY_A.
+      await db.seed(`delete from reimbursement_claims where id = '${claimId}';`);
+    });
+
+    it("lets Finance delete a draft run, cascading to its lines and releasing their source rows", async () => {
+      const claimId = randomUUID();
+      await db.seed(`
+        insert into reimbursement_claims (id, employee_id, currency, status) values ('${claimId}', '${EMPLOYEE_REPORT}', 'ZZD', 'approved');
+        insert into reimbursement_claim_lines (claim_id, line_no, expense_date, category, amount) values ('${claimId}', 1, '2026-08-01', 'travel', 90);
+      `);
+      const runId = await seedDraftRun(11);
+      const secondRunId = await seedDraftRun(12);
+
+      await db.asUser(USER_FINANCE, async (query) => {
+        await query("select * from generate_payroll_export_lines($1)", [runId]);
+
+        await query("delete from payroll_export_runs where id = $1", [runId]);
+        const runGone = await query("select id from payroll_export_runs where id = $1", [runId]);
+        expect(runGone.rows).toEqual([]);
+
+        // Proves the cascade actually removed the line (not just that RLS
+        // now hides it): if it were still there, generate_payroll_export_lines()'s
+        // "not exists" check on this same claim would skip it again.
+        const { rows: secondLines } = await query("select * from generate_payroll_export_lines($1)", [secondRunId]);
+        expect(secondLines.some((l) => l.source_reference_id === claimId)).toBe(true);
+      });
+
+      await db.seed(`delete from reimbursement_claims where id = '${claimId}';`);
+    });
+
+    it("blocks Finance from deleting a run once it's no longer a draft", async () => {
+      const runId = await seedDraftRun(1, 2027);
+      await db.seed(`update payroll_export_runs set status = 'submitted' where id = '${runId}';`);
+
+      await db.asUser(USER_FINANCE, async (query) => {
+        await query("delete from payroll_export_runs where id = $1", [runId]);
+        const stillThere = await query("select id from payroll_export_runs where id = $1", [runId]);
+        expect(stillThere.rows.length).toBe(1);
       });
     });
 

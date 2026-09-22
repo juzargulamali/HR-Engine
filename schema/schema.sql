@@ -1369,6 +1369,13 @@ begin
       update generated_letters set status = 'void' where id = v_approval.entity_id;
     elsif v_approval.entity_type = 'payroll_export_run' then
       update payroll_export_runs set status = 'rejected' where id = v_approval.entity_id;
+      -- Release this run's claim on its source rows (approved reimbursements,
+      -- leave-encashment ledger entries) so a rejected run doesn't
+      -- permanently block them from ever being paid — otherwise
+      -- generate_payroll_export_lines()'s "not exists" check (keyed only on
+      -- source_reference_type/id, with no regard for the referencing run's
+      -- status) would treat them as already exported, forever.
+      delete from payroll_export_lines where run_id = v_approval.entity_id;
     end if;
     return; -- rejection stops the chain; earlier decisions in the log are untouched
   end if;
@@ -2378,6 +2385,14 @@ create policy payroll_runs_insert on payroll_export_runs for insert
 create policy payroll_runs_update_finance on payroll_export_runs for update
   using (has_role('finance', company_id))
   with check (has_role('finance', company_id));
+
+-- Finance can delete a run only while it's still a draft — once submitted,
+-- its fate belongs to the approval workflow (decide_leave_approval()
+-- above), not a direct delete. Deleting a draft cascades to its lines (FK
+-- on delete cascade), releasing any source rows it had claimed back for a
+-- future run's generation — the same release a rejection performs.
+create policy payroll_runs_delete_finance on payroll_export_runs for delete
+  using (has_role('finance', company_id) and status = 'draft');
 
 create policy payroll_lines_select on payroll_export_lines for select
   using (exists (

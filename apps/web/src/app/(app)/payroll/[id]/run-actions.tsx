@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { markPayrollSent, regenerateLines, submitPayrollRun } from "@/lib/actions/payroll";
+import { deletePayrollRun, markPayrollSent, regenerateLines, submitPayrollRun } from "@/lib/actions/payroll";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
@@ -48,6 +48,19 @@ export function RunActions({
                 }
               >
                 {pending ? "Submitting…" : "Submit for approval"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={pending}
+                onClick={() => {
+                  if (!window.confirm("Delete this draft run? Its lines are removed too, and their source claims/encashments become available for a future run.")) return;
+                  startTransition(async () => {
+                    const result = await deletePayrollRun(runId);
+                    setError(result.error);
+                  });
+                }}
+              >
+                {pending ? "Deleting…" : "Delete draft"}
               </Button>
             </>
           ) : null}
