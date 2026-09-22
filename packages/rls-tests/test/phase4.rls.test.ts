@@ -472,7 +472,18 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       expect(peerView.rows).toEqual([]);
     });
 
-    it("converts approved overtime into a comp_day_ledger 'earned' entry per the country's active overtime_rules policy", async () => {
+    // Timesheets are deprecated: decide_leave_approval() used to convert
+    // approved overtime into comp_day_ledger 'earned' entries here, but that
+    // conversion compared a WHOLE timesheet period's hours against a
+    // "weekly" threshold — timesheets can be any length (the UI's own
+    // comment calls the default weekly range "freely editable"), so a
+    // monthly timesheet could wildly over-credit comp days for perfectly
+    // normal work. Attendance's bulkRecordAttendance now owns comp-day
+    // crediting for weekend/holiday work instead (phase4's own "attendance
+    // records" describe block below, and phase 5's bulk-attendance tests).
+    // This just confirms approving a timesheet no longer posts anything,
+    // even with an active overtime_rules policy still configured.
+    it("approving a timesheet posts nothing to comp_day_ledger, even with an active overtime_rules policy in place", async () => {
       await db.seed(`
         insert into policy_versions (id, country_code, policy_type, version_no, effective_from, status, payload, created_by) values
           ('${randomUUID()}', 'ZZ', 'overtime_rules', 1, '2020-01-01', 'active',
@@ -501,46 +512,10 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
         const timesheet = await query("select status from timesheets where id = $1", [timesheetId]);
         expect(timesheet.rows[0]?.status).toBe("approved");
 
-        const compEntries = await query(
-          "select entry_type, days, source from comp_day_ledger where employee_id = $1 and reference_id = $2",
-          [EMPLOYEE_REPORT, timesheetId],
-        );
-        expect(compEntries.rows).toEqual([{ entry_type: "earned", days: "1.00", source: "overtime" }]);
-      });
-    });
-
-    it("posts nothing when no active overtime_rules policy covers the employee's country", async () => {
-      await db.seed(`insert into countries (code, name, default_currency) values ('YY', 'Yland', 'YYD');`);
-      const companyId = randomUUID();
-      const userId = randomUUID();
-      const employeeId = randomUUID();
-      const timesheetId = randomUUID();
-      const approvalId = randomUUID();
-
-      await db.seed(`
-        insert into auth.users (id, email) values ('${userId}', 'no-overtime-policy@enginious.ae');
-        insert into companies (id, legal_name, country_code, default_currency) values ('${companyId}', 'No Overtime Policy Co', 'YY', 'YYD');
-        insert into employees (id, user_id, employee_number, company_id, country_code, first_name, last_name, hire_date)
-          values ('${employeeId}', '${userId}', 'Y-01', '${companyId}', 'YY', 'No', 'Manager', '2024-01-01');
-        insert into user_roles (user_id, role, company_id) values ('${userId}', 'line_manager', '${companyId}');
-      `);
-
-      const { rows: workflowRows } = await db.asUser(USER_HR, (query) =>
-        query("select id from approval_workflows where company_id = $1 and entity_type = 'timesheet'", [companyId]),
-      );
-      const workflowId = workflowRows[0]?.id;
-
-      await db.seed(`
-        insert into timesheets (id, employee_id, period_start, period_end, status)
-          values ('${timesheetId}', '${employeeId}', '2026-03-02', '2026-03-08', 'submitted');
-        insert into timesheet_entries (timesheet_id, work_date, hours) values ('${timesheetId}', '2026-03-02', 20);
-        insert into approvals (id, entity_type, entity_id, workflow_id, step_order, approver_id)
-          values ('${approvalId}', 'timesheet', '${timesheetId}', '${workflowId}', 1, '${userId}');
-      `);
-
-      await db.asUser(userId, async (query) => {
-        await query("select decide_leave_approval($1, 'approved', null)", [approvalId]);
-        const compEntries = await query("select id from comp_day_ledger where employee_id = $1", [employeeId]);
+        const compEntries = await query("select id from comp_day_ledger where employee_id = $1 and reference_id = $2", [
+          EMPLOYEE_REPORT,
+          timesheetId,
+        ]);
         expect(compEntries.rows).toEqual([]);
       });
     });

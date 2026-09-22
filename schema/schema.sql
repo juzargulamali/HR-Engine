@@ -1314,14 +1314,6 @@ declare
   v_available numeric(6,2);
   v_draw numeric(6,2);
   v_timesheet timesheets%rowtype;
-  v_total_hours numeric(8,2);
-  v_overtime_rules jsonb;
-  v_threshold_hours numeric;
-  v_ratio numeric;
-  v_expiry_months int;
-  v_overtime_hours numeric;
-  v_comp_days numeric(5,2);
-  v_country_code text;
   v_payroll_company_id uuid;
   v_step record;
   v_next_approver uuid;
@@ -1477,44 +1469,10 @@ begin
     update reimbursement_claims set status = 'approved', decided_at = now() where id = v_approval.entity_id;
 
   elsif v_approval.entity_type = 'timesheet' then
+    -- Deliberately no ledger write — timesheets are deprecated. Comp-days
+    -- for weekend/holiday work come from Attendance instead (see
+    -- bulkRecordAttendance in apps/web/src/lib/actions/attendance.ts).
     update timesheets set status = 'approved', decided_at = now() where id = v_timesheet.id;
-
-    -- Overtime -> comp-day conversion (docs/05-automation-rules.md §5.1):
-    -- event-triggered on approval, not scheduled. Resolves the employee's
-    -- country overtime_rules policy as of the timesheet's period end; if
-    -- none is active, or it doesn't define the fields below, nothing is
-    -- converted. Documented payload shape (docs/02-database-schema.md
-    -- §2.4): {"weekly_threshold_hours": number, "comp_day_conversion_ratio":
-    -- number (hours per comp-day), "comp_day_expiry_months": number|null}.
-    select country_code into v_country_code from employees where id = v_timesheet.employee_id;
-    v_overtime_rules := resolve_policy(v_country_code, 'overtime_rules', v_timesheet.period_end);
-
-    if v_overtime_rules is not null
-      and v_overtime_rules ? 'weekly_threshold_hours'
-      and v_overtime_rules ? 'comp_day_conversion_ratio' then
-      v_threshold_hours := (v_overtime_rules ->> 'weekly_threshold_hours')::numeric;
-      v_ratio := (v_overtime_rules ->> 'comp_day_conversion_ratio')::numeric;
-      v_expiry_months := nullif(v_overtime_rules ->> 'comp_day_expiry_months', '')::int;
-
-      select coalesce(sum(hours), 0) into v_total_hours from timesheet_entries where timesheet_id = v_timesheet.id;
-      v_overtime_hours := greatest(0, v_total_hours - v_threshold_hours);
-
-      if v_overtime_hours > 0 and v_ratio > 0 then
-        v_comp_days := round(v_overtime_hours / v_ratio, 2);
-        insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, expiry_date, reference_type, reference_id, created_by)
-        values (
-          v_timesheet.employee_id,
-          v_timesheet.period_end,
-          'earned',
-          v_comp_days,
-          'overtime',
-          case when v_expiry_months is not null then (v_timesheet.period_end + (v_expiry_months || ' months')::interval)::date else null end,
-          'timesheet',
-          v_timesheet.id,
-          coalesce(auth.uid(), v_requester_user_id)
-        );
-      end if;
-    end if;
 
   elsif v_approval.entity_type = 'generated_letter' then
     update generated_letters set status = 'issued' where id = v_approval.entity_id;
