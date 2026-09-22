@@ -111,3 +111,21 @@ export async function issueLetter(_prevState: { error: string | null }, formData
   revalidatePath("/approvals");
   return { error: null };
 }
+
+/**
+ * Storage removal is best-effort — if it fails, the row still goes (and
+ * with it, the only visible/downloadable path to the file: the storage
+ * object itself becomes unreachable through the UI either way, since
+ * every signed URL is generated from this row's file_path).
+ */
+export async function deleteLetter(letterId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { data: letter } = await supabase.from("generated_letters").select("file_path").eq("id", letterId).maybeSingle();
+  if (letter?.file_path) {
+    await supabase.storage.from("letters").remove([letter.file_path]);
+  }
+
+  const { error } = await supabase.from("generated_letters").delete().eq("id", letterId);
+  revalidatePath("/letters");
+  return { error: error?.message ?? null };
+}

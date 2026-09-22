@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { IssueLetterForm } from "./issue-letter-form";
 import { NewTemplateForm } from "./new-template-form";
+import { DeleteLetterButton } from "./delete-letter-button";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   draft: "outline",
@@ -37,16 +38,26 @@ export default async function LettersPage() {
   const lettersQuery = canManage
     ? supabase
         .from("generated_letters")
-        .select("id, employee_id, template_id, status, generated_at")
+        .select("id, employee_id, template_id, status, generated_at, file_path")
         .order("generated_at", { ascending: false })
     : session.employeeId
       ? supabase
           .from("generated_letters")
-          .select("id, employee_id, template_id, status, generated_at")
+          .select("id, employee_id, template_id, status, generated_at, file_path")
           .eq("employee_id", session.employeeId)
           .order("generated_at", { ascending: false })
       : null;
   const { data: letters } = lettersQuery ? await lettersQuery : { data: [] as never[] };
+
+  const downloadUrlByLetter = new Map(
+    await Promise.all(
+      (letters ?? []).map(async (l) => {
+        if (!l.file_path) return [l.id, null] as const;
+        const { data } = await supabase.storage.from("letters").createSignedUrl(l.file_path, 300);
+        return [l.id, data?.signedUrl ?? null] as const;
+      }),
+    ),
+  );
 
   const employeeIds = [...new Set((letters ?? []).map((l) => l.employee_id))];
   const { data: employees } =
@@ -111,6 +122,7 @@ export default async function LettersPage() {
                 <TableHead>Template</TableHead>
                 <TableHead>Generated</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -122,11 +134,21 @@ export default async function LettersPage() {
                   <TableCell>
                     <Badge variant={STATUS_VARIANT[l.status] ?? "outline"}>{l.status.replace(/_/g, " ")}</Badge>
                   </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-3">
+                      {downloadUrlByLetter.get(l.id) ? (
+                        <a href={downloadUrlByLetter.get(l.id)!} className="text-sm text-accent hover:underline">
+                          Download
+                        </a>
+                      ) : null}
+                      {canManage ? <DeleteLetterButton letterId={l.id} /> : null}
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
               {(letters ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={canManage ? 4 : 3} className="text-center text-muted-foreground">
+                  <TableCell colSpan={canManage ? 5 : 4} className="text-center text-muted-foreground">
                     No letters yet.
                   </TableCell>
                 </TableRow>

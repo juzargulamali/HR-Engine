@@ -388,6 +388,54 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
       const peerView = await db.asUser(USER_PEER, (query) => query("select id from generated_letters where id = $1", [letterId]));
       expect(peerView.rows).toEqual([]);
     });
+
+    it("lets HR Admin delete a letter; blocks an unrelated peer", async () => {
+      const letterId = randomUUID();
+      await db.seed(`
+        insert into generated_letters (id, employee_id, template_id, generated_by, status)
+        values ('${letterId}', '${EMPLOYEE_REPORT}', '${templateId}', '${USER_HR}', 'issued');
+      `);
+
+      const peerAttempt = await db.asUser(USER_PEER, (query) => query("delete from generated_letters where id = $1", [letterId]));
+      expect(peerAttempt.rowCount).toBe(0);
+
+      const hrDelete = await db.asUser(USER_HR, (query) => query("delete from generated_letters where id = $1", [letterId]));
+      expect(hrDelete.rowCount).toBe(1);
+    });
+
+    describe("storage", () => {
+      const fileName = () => `${COMPANY_A}/${EMPLOYEE_REPORT}/letters/${randomUUID()}.pdf`;
+
+      beforeAll(async () => {
+        await db.seed(`insert into storage.buckets (id, name, public) values ('letters', 'letters', false) on conflict (id) do nothing;`);
+      });
+
+      it("lets the owning employee, HR Admin, and CEO read a stored letter file; blocks a peer", async () => {
+        const name = fileName();
+        await db.seed(`insert into storage.objects (bucket_id, name) values ('letters', '${name}');`);
+
+        for (const viewer of [USER_REPORT, USER_HR, USER_CEO]) {
+          const { rows } = await db.asUser(viewer, (query) => query("select name from storage.objects where bucket_id = 'letters' and name = $1", [name]));
+          expect(rows.length).toBe(1);
+        }
+
+        const peerView = await db.asUser(USER_PEER, (query) =>
+          query("select name from storage.objects where bucket_id = 'letters' and name = $1", [name]),
+        );
+        expect(peerView.rows).toEqual([]);
+      });
+
+      it("lets HR Admin delete a stored letter file; blocks an unrelated peer", async () => {
+        const name = fileName();
+        await db.seed(`insert into storage.objects (bucket_id, name) values ('letters', '${name}');`);
+
+        const peerAttempt = await db.asUser(USER_PEER, (query) => query("delete from storage.objects where bucket_id = 'letters' and name = $1", [name]));
+        expect(peerAttempt.rowCount).toBe(0);
+
+        const hrDelete = await db.asUser(USER_HR, (query) => query("delete from storage.objects where bucket_id = 'letters' and name = $1", [name]));
+        expect(hrDelete.rowCount).toBe(1);
+      });
+    });
   });
 
   describe("audit_log", () => {

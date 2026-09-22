@@ -2328,6 +2328,9 @@ create policy generated_letters_update on generated_letters for update
   using (has_role('hr_admin', (select company_id from employees where id = employee_id)))
   with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
 
+create policy generated_letters_delete on generated_letters for delete
+  using (has_role('hr_admin', (select company_id from employees where id = employee_id)));
+
 -- ---- payroll_export_runs & lines: HR Admin (read), Finance (full run,
 --      never a CEO's own field since the CEO acts through `approvals`),
 --      CEO (read, so they can see what they're signing off on beyond just
@@ -2584,8 +2587,8 @@ create policy receipts_update on storage.objects for update
 create policy receipts_delete on storage.objects for delete
   using (bucket_id = 'receipts' and (storage.foldername(name))[2]::uuid = current_employee_id());
 
--- letters: same path convention as every other bucket. The rendered letter
--- is an HTML file (no PDF renderer in this stack), stored in the same
+-- letters: same path convention as every other bucket, stored as a real
+-- PDF (see lib/pdf/letter-document.tsx) in the same
 -- {company_id}/{employee_id}/{sub_path} shape.
 create policy letters_select on storage.objects for select
   using (
@@ -2596,5 +2599,15 @@ create policy letters_select on storage.objects for select
     )
   );
 
+-- CEO gets its own policy (mirroring generated_letters_select's read
+-- access) rather than folding into letters_select above, since a CEO
+-- deciding a letter's approval needs to read the file itself, not just
+-- its row.
+create policy letters_select_ceo on storage.objects for select
+  using (bucket_id = 'letters' and has_role('ceo', (storage.foldername(name))[1]::uuid));
+
 create policy letters_write on storage.objects for insert
   with check (bucket_id = 'letters' and has_role('hr_admin', (storage.foldername(name))[1]::uuid));
+
+create policy letters_delete on storage.objects for delete
+  using (bucket_id = 'letters' and has_role('hr_admin', (storage.foldername(name))[1]::uuid));
