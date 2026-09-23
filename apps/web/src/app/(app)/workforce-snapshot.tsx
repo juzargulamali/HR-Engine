@@ -6,13 +6,13 @@ export function WorkforceSnapshot({
   presentCount,
   leaveCount,
   notRecordedCount,
-  pendingLeaveApprovals,
+  leaveRequestsAwaitingDecision,
 }: {
   totalEmployees: number;
   presentCount: number;
   leaveCount: number;
   notRecordedCount: number;
-  pendingLeaveApprovals: number;
+  leaveRequestsAwaitingDecision: number;
 }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
@@ -34,11 +34,18 @@ export function WorkforceSnapshot({
         href="/attendance"
       />
       <MetricCard
-        label="Pending approvals"
-        value={pendingLeaveApprovals}
-        tone={pendingLeaveApprovals > 0 ? "warning" : "default"}
+        label="Leave requests in review"
+        value={leaveRequestsAwaitingDecision}
+        // Company-wide count of every leave request not yet decided by
+        // anyone — deliberately NOT labeled "pending approvals" and
+        // deliberately not linked to /approvals, which only ever shows
+        // items assigned to the viewer. The two numbers are both real but
+        // answer different questions, and showing them under the same
+        // label (or sending this card to a page scoped to something else
+        // entirely) is exactly the confusion this metric used to cause.
+        hint="Company-wide, any approver — not just items waiting on you"
+        tone={leaveRequestsAwaitingDecision > 0 ? "warning" : "default"}
         icon={ClipboardCheck}
-        href="/approvals"
       />
     </div>
   );

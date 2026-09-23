@@ -114,8 +114,13 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
 
 export async function cancelLeaveRequest(requestId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
-  const { error } = await supabase.from("leave_requests").update({ status: "cancelled" }).eq("id", requestId);
+  // A plain table update can't touch approvals (no UPDATE grant for
+  // authenticated at all) — cancel_leave_request() closes out any
+  // still-pending approval step atomically with the status change, so a
+  // withdrawn request stops showing up in the approver's queue and count.
+  const { error } = await supabase.rpc("cancel_leave_request", { p_request_id: requestId });
   revalidatePath("/leave");
+  revalidatePath("/approvals");
   return { error: error?.message ?? null };
 }
 

@@ -66,7 +66,11 @@ create type request_status as enum (
   'draft', 'submitted', 'pending_approval', 'approved', 'rejected', 'cancelled'
 );
 
-create type approval_decision as enum ('pending', 'approved', 'rejected', 'skipped');
+-- 'cancelled' is distinct from 'skipped': skipped means a step was never
+-- exercised because workflow routing bypassed it (a threshold condition,
+-- self-approval); cancelled means the underlying request was withdrawn by
+-- its own requester while a real decision was still outstanding.
+create type approval_decision as enum ('pending', 'approved', 'rejected', 'skipped', 'cancelled');
 
 create type approvable_entity as enum (
   'leave_request', 'reimbursement_claim', 'timesheet', 'generated_letter',
@@ -2030,6 +2034,47 @@ begin
     set status = 'approved', authorized_by = coalesce(auth.uid(), v_requester_user_id), authorized_at = now()
     where id = v_approval.entity_id;
   end if;
+end;
+$$;
+
+-- Withdraws a leave request that's still awaiting a decision — the
+-- requester's own action, distinct from decide_leave_approval() above
+-- (an approver's action). Without this, cancelling used to be a bare
+-- `update leave_requests set status = 'cancelled'` from the app that never
+-- touched the approvals table (which has no UPDATE grant for authenticated
+-- anyway — see the revoke below) — the approver's now-moot approvals row
+-- stayed 'pending' forever, still counting toward their pending-approvals
+-- total and still listed on their Approvals page for a request that no
+-- longer needs (or wants) a decision.
+create or replace function cancel_leave_request(p_request_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_status request_status;
+  v_employee_id uuid;
+begin
+  select lr.status, lr.employee_id into v_status, v_employee_id
+  from leave_requests lr
+  join employees e on e.id = lr.employee_id
+  where lr.id = p_request_id and e.user_id = auth.uid()
+  for update of lr;
+
+  if v_employee_id is null then
+    raise exception 'Leave request not found, or it is not yours to cancel';
+  end if;
+
+  if v_status not in ('submitted', 'pending_approval') then
+    raise exception 'This request can no longer be cancelled (status: %)', v_status;
+  end if;
+
+  update leave_requests set status = 'cancelled', decided_at = now() where id = p_request_id;
+
+  update approvals
+  set decision = 'cancelled', decided_at = now(), comments = coalesce(comments, 'Cancelled by requester before a decision was made')
+  where entity_type = 'leave_request' and entity_id = p_request_id and decision = 'pending';
 end;
 $$;
 

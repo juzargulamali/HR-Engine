@@ -1,0 +1,12 @@
+-- Phase 1 hardening (B — Approvals): 'cancelled' is a new approval_decision
+-- value, distinct from 'skipped' (which already means "this step was never
+-- exercised because workflow routing bypassed it" — a threshold condition
+-- or self-approval). This one means the underlying request was withdrawn
+-- by its own requester while a decision was still outstanding.
+--
+-- Split into its own migration, applied before cancel_leave_request() is
+-- created (next migration) — Postgres refuses to let a new enum label be
+-- used in the same transaction that added it, so the two have to land as
+-- separate, separately-committed migrations even though they're one
+-- logical change.
+alter type approval_decision add value if not exists 'cancelled';

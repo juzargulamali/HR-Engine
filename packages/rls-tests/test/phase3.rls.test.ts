@@ -429,6 +429,92 @@ describe("Phase 3 row-level security: leave, ledgers, deduction priority, approv
     });
   });
 
+  describe("cancelling", () => {
+    it("cancels a pending request and resolves its still-pending approval row atomically", async () => {
+      const { approvalId, requestId } = await seedPendingRequest({
+        employeeId: EMPLOYEE_REPORT,
+        approverId: USER_MANAGER,
+        startDate: "2026-08-01",
+        endDate: "2026-08-01",
+        totalDays: 1,
+      });
+
+      await db.asUser(USER_REPORT, async (query) => {
+        await query("select cancel_leave_request($1)", [requestId]);
+
+        const request = await query("select status from leave_requests where id = $1", [requestId]);
+        expect(request.rows[0]?.status).toBe("cancelled");
+
+        // Only the assigned approver, the requester, or HR can see an
+        // approvals row (RLS) — switch to the manager (this approval's
+        // approver) to confirm it no longer reads as pending.
+        await actAs(query, USER_MANAGER);
+        const approval = await query("select decision from approvals where id = $1", [approvalId]);
+        expect(approval.rows[0]?.decision).toBe("cancelled");
+      });
+    });
+
+    it("no longer counts toward the approver's pending total, or appears on their Approvals page, once cancelled", async () => {
+      const { requestId } = await seedPendingRequest({
+        employeeId: EMPLOYEE_REPORT,
+        approverId: USER_MANAGER,
+        startDate: "2026-08-05",
+        endDate: "2026-08-05",
+        totalDays: 1,
+      });
+
+      // cancel_leave_request()'s write only exists within the transaction
+      // that called it (asUser() always rolls back) — the manager's "pending
+      // total" query has to run inside that same transaction, after
+      // switching identity with actAs(), not as a separate asUser() call.
+      await db.asUser(USER_REPORT, async (query) => {
+        await query("select cancel_leave_request($1)", [requestId]);
+
+        await actAs(query, USER_MANAGER);
+        const managerPending = await query("select id from approvals where approver_id = $1 and decision = 'pending' and entity_id = $2", [
+          USER_MANAGER,
+          requestId,
+        ]);
+        expect(managerPending.rows).toEqual([]);
+      });
+    });
+
+    it("blocks cancelling someone else's leave request", async () => {
+      const { requestId } = await seedPendingRequest({
+        employeeId: EMPLOYEE_REPORT,
+        approverId: USER_MANAGER,
+        startDate: "2026-08-10",
+        endDate: "2026-08-10",
+        totalDays: 1,
+      });
+
+      await expect(db.asUser(USER_PEER, (query) => query("select cancel_leave_request($1)", [requestId]))).rejects.toThrow(
+        /not yours to cancel/,
+      );
+    });
+
+    it("blocks cancelling a request that's already been decided", async () => {
+      const { approvalId, requestId } = await seedPendingRequest({
+        employeeId: EMPLOYEE_REPORT,
+        approverId: USER_MANAGER,
+        startDate: "2026-08-15",
+        endDate: "2026-08-15",
+        totalDays: 1,
+      });
+
+      // Same-transaction requirement as above: the approval only persists
+      // within the transaction that decided it, so the cancel attempt has
+      // to run in that same transaction (after switching identity back to
+      // the requester), not as a separate asUser() call.
+      await db.asUser(USER_MANAGER, async (query) => {
+        await query("select decide_leave_approval($1, 'approved', null)", [approvalId]);
+
+        await actAs(query, USER_REPORT);
+        await expect(query("select cancel_leave_request($1)", [requestId])).rejects.toThrow(/can no longer be cancelled/);
+      });
+    });
+  });
+
   describe("comp-day deduction priority", () => {
     it("draws from comp-day before the leave ledger when configured to, capped at the available balance", async () => {
       await db.seed(`

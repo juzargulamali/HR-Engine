@@ -15,7 +15,7 @@ export interface CompanySnapshot {
   leaveCount: number;
   absentCount: number;
   notRecordedCount: number;
-  pendingLeaveApprovals: number;
+  leaveRequestsAwaitingDecision: number;
   isRecoveryDay: boolean;
   holidayName: string | null;
   /** Set when this company's own data couldn't be loaded — every count
@@ -35,7 +35,7 @@ function emptySnapshot(company: { id: string; legal_name: string; country_code: 
     leaveCount: 0,
     absentCount: 0,
     notRecordedCount: 0,
-    pendingLeaveApprovals: 0,
+    leaveRequestsAwaitingDecision: 0,
     isRecoveryDay: false,
     holidayName: null,
     error,
@@ -112,7 +112,7 @@ export async function getCompanySnapshot(
       leaveCount,
       absentCount,
       notRecordedCount,
-      pendingLeaveApprovals: leaveApprovalsResult.count ?? 0,
+      leaveRequestsAwaitingDecision: leaveApprovalsResult.count ?? 0,
       isRecoveryDay,
       holidayName: holidayResult.data?.name ?? null,
     };

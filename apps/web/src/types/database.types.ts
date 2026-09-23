@@ -32,7 +32,7 @@ export type PolicyStatus = "draft" | "active" | "superseded";
 export type LeaveLedgerEntryType = "accrual" | "deduction" | "adjustment" | "carryover" | "encashment" | "reversal";
 export type CompDayEntryType = "earned" | "redeemed" | "expired" | "adjustment" | "reversal";
 export type RequestStatus = "draft" | "submitted" | "pending_approval" | "approved" | "rejected" | "cancelled";
-export type ApprovalDecision = "pending" | "approved" | "rejected" | "skipped";
+export type ApprovalDecision = "pending" | "approved" | "rejected" | "skipped" | "cancelled";
 export type ApprovableEntity =
   | "leave_request"
   | "reimbursement_claim"
@@ -1226,6 +1226,10 @@ export interface Database {
       };
       permanently_delete_employee: {
         Args: { p_employee_id: string };
+        Returns: undefined;
+      };
+      cancel_leave_request: {
+        Args: { p_request_id: string };
         Returns: undefined;
       };
     };

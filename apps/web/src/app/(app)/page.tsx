@@ -158,9 +158,9 @@ export default async function DashboardPage() {
       leaveCount: acc.leaveCount + s.leaveCount,
       absentCount: acc.absentCount + s.absentCount,
       notRecordedCount: acc.notRecordedCount + s.notRecordedCount,
-      pendingLeaveApprovals: acc.pendingLeaveApprovals + s.pendingLeaveApprovals,
+      leaveRequestsAwaitingDecision: acc.leaveRequestsAwaitingDecision + s.leaveRequestsAwaitingDecision,
     }),
-    { totalEmployees: 0, presentCount: 0, leaveCount: 0, absentCount: 0, notRecordedCount: 0, pendingLeaveApprovals: 0 },
+    { totalEmployees: 0, presentCount: 0, leaveCount: 0, absentCount: 0, notRecordedCount: 0, leaveRequestsAwaitingDecision: 0 },
   );
 
   // Real, permission-scoped, and role-prioritized — never a decorative
@@ -243,7 +243,7 @@ export default async function DashboardPage() {
             presentCount={totals.presentCount}
             leaveCount={totals.leaveCount}
             notRecordedCount={totals.notRecordedCount}
-            pendingLeaveApprovals={totals.pendingLeaveApprovals}
+            leaveRequestsAwaitingDecision={totals.leaveRequestsAwaitingDecision}
           />
 
           <div className="grid gap-4 lg:grid-cols-3">
