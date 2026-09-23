@@ -1129,7 +1129,8 @@ create table audit_log (
   record_id     uuid,
   action        text not null,   -- 'insert'|'update'|'delete'|'approve'|'reject'|'status_change'
   actor_id      uuid,
-  actor_role    app_role,
+  actor_role    app_role,   -- kept for backward compatibility: the same "most recently granted" role write_audit_log() always resolved here
+  actor_roles   app_role[], -- every role the actor held (unrevoked) at the moment of the action — a multi-role user must never be flattened to just one
   company_id    uuid references companies(id), -- resolved by write_audit_log() so HR Admin's view scopes to their own company
   before_data   jsonb,
   after_data    jsonb,
@@ -3355,12 +3356,19 @@ set search_path = public
 as $$
 declare
   v_actor_role app_role;
+  v_actor_roles app_role[];
   v_row jsonb := to_jsonb(coalesce(new, old));
   v_employee_id uuid;
   v_company_id uuid;
 begin
-  select role into v_actor_role from user_roles
-  where user_id = auth.uid() and revoked_at is null order by granted_at desc limit 1;
+  -- A multi-role user (e.g. a Line Manager also granted Finance) must never
+  -- be recorded as if they only held one role — every currently-held,
+  -- unrevoked role is captured. actor_role is kept alongside for backward
+  -- compatibility with anything still reading the single-value column;
+  -- it's always the same "most recently granted" choice it always was.
+  select array_agg(role order by granted_at desc) into v_actor_roles
+  from user_roles where user_id = auth.uid() and revoked_at is null;
+  v_actor_role := v_actor_roles[1];
 
   if v_row ? 'company_id' then
     v_company_id := (v_row ->> 'company_id')::uuid;
@@ -3385,13 +3393,14 @@ begin
     end if;
   end if;
 
-  insert into audit_log(table_name, record_id, action, actor_id, actor_role, company_id, before_data, after_data)
+  insert into audit_log(table_name, record_id, action, actor_id, actor_role, actor_roles, company_id, before_data, after_data)
   values (
     TG_TABLE_NAME,
     coalesce(new.id, old.id),
     lower(TG_OP),
     auth.uid(),
     v_actor_role,
+    v_actor_roles,
     v_company_id,
     case when TG_OP in ('UPDATE', 'DELETE') then to_jsonb(old) else null end,
     case when TG_OP in ('UPDATE', 'INSERT') then to_jsonb(new) else null end

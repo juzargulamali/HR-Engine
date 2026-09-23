@@ -1129,6 +1129,7 @@ export interface Database {
           action: string;
           actor_id: string | null;
           actor_role: AppRole | null;
+          actor_roles: AppRole[] | null;
           company_id: string | null;
           before_data: Record<string, unknown> | null;
           after_data: Record<string, unknown> | null;

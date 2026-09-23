@@ -811,6 +811,48 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
       const hrContentRows = await db.asUser(sysAdminUserId, (query) => query("select id from audit_log where table_name = 'leave_requests'"));
       expect(hrContentRows.rows).toEqual([]);
     });
+
+    it("captures every currently-held role for a multi-role actor, never collapsing them to just one", async () => {
+      const multiRoleUserId = randomUUID();
+      const multiRoleEmployeeId = randomUUID();
+      await db.seed(`
+        insert into auth.users (id, email) values ('${multiRoleUserId}', 'p6-multirole@enginious.ae');
+        insert into employees (id, user_id, employee_number, company_id, country_code, first_name, last_name, hire_date)
+          values ('${multiRoleEmployeeId}', '${multiRoleUserId}', 'P6-MULTI', '${COMPANY_A}', 'ZZ', 'Multi', 'Role', '2024-01-01');
+        insert into user_roles (user_id, role, company_id) values
+          ('${multiRoleUserId}', 'line_manager', '${COMPANY_A}'),
+          ('${multiRoleUserId}', 'finance', '${COMPANY_A}');
+      `);
+
+      const requestId = randomUUID();
+      // The trigger fires within this same transaction, so the resulting
+      // audit_log row is only visible to a query still inside this same
+      // asUser() call (it rolls back at the end, same as every other test).
+      await db.asUser(multiRoleUserId, async (query) => {
+        await query(
+          "insert into leave_requests (id, employee_id, leave_type_code, start_date, end_date, total_days) values ($1, $2, 'annual', '2026-08-01', '2026-08-01', 1)",
+          [requestId, multiRoleEmployeeId],
+        );
+
+        // audit_log_select_hr only lets an hr_admin read this row — the
+        // insert above is already committed within this same transaction
+        // regardless of who queries it next, so switching the session's
+        // claims to an HR Admin here is just to satisfy RLS on the read.
+        await actAs(query, USER_HR);
+        // pg doesn't know how to auto-parse a custom enum array type
+        // (app_role[]) back into a JS array — casting to jsonb first gets
+        // one for free, since jsonb columns are parsed automatically.
+        const { rows } = await query(
+          "select actor_role, to_jsonb(actor_roles) as actor_roles from audit_log where table_name = 'leave_requests' and record_id = $1",
+          [requestId],
+        );
+        expect(rows.length).toBe(1);
+        expect(rows[0]?.actor_roles?.slice().sort()).toEqual(["finance", "line_manager"]);
+        // actor_role (kept for backward compatibility) still resolves to one
+        // of them, never null just because there's more than one now.
+        expect(rows[0]?.actor_roles).toContain(rows[0]?.actor_role);
+      });
+    });
   });
 
   describe("ai_drafts: the one table an AI service identity may write to, and nothing else", () => {
