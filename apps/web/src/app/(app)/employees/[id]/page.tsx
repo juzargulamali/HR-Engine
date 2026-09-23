@@ -52,7 +52,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   const { data: employee } = await supabase
     .from("employees")
     .select(
-      "id, first_name, last_name, job_title, employment_status, company_id, country_code, manager_id, hire_date, termination_date, deleted_at, personal_email, phone, user_id",
+      "id, first_name, last_name, job_title, employment_status, company_id, country_code, manager_id, hire_date, date_of_birth, termination_date, deleted_at, personal_email, phone, user_id",
     )
     .eq("id", id)
     .maybeSingle();

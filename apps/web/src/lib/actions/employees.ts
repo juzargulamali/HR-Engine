@@ -14,6 +14,7 @@ const createEmployeeSchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   hireDate: z.string().min(1),
+  dateOfBirth: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()),
   jobTitle: z.string().optional(),
   contractType: z.enum(["permanent", "fixed_term", "probation", "contractor"]),
   contractStartDate: z.string().min(1),
@@ -62,6 +63,7 @@ export async function createEmployee(_prevState: ActionState, formData: FormData
       first_name: d.firstName,
       last_name: d.lastName,
       hire_date: d.hireDate,
+      date_of_birth: d.dateOfBirth || null,
       job_title: d.jobTitle || null,
     })
     .select("id")
@@ -147,6 +149,7 @@ const updateEmployeeSchema = z.object({
   jobTitle: z.string().optional(),
   employmentStatus: z.enum(["active", "on_leave", "suspended", "terminated"]),
   managerId: z.string().uuid().optional().or(z.literal("")),
+  dateOfBirth: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()),
 });
 
 /** HR Admin editing an employee's core record — see employees_update_hr. */
@@ -164,6 +167,7 @@ export async function updateEmployee(_prevState: ActionState, formData: FormData
       job_title: d.jobTitle || null,
       employment_status: d.employmentStatus,
       manager_id: d.managerId || null,
+      date_of_birth: d.dateOfBirth || null,
     })
     .eq("id", d.employeeId);
 

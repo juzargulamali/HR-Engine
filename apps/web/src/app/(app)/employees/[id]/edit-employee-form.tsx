@@ -18,6 +18,7 @@ interface EmployeeCore {
   manager_id: string | null;
   personal_email: string | null;
   phone: string | null;
+  date_of_birth: string | null;
 }
 
 export function EditEmployeeForm({
@@ -46,6 +47,8 @@ export function EditEmployeeForm({
         <dd>{employee.personal_email ?? "—"}</dd>
         <dt className="text-muted-foreground">Phone</dt>
         <dd>{employee.phone ?? "—"}</dd>
+        <dt className="text-muted-foreground">Date of birth</dt>
+        <dd>{employee.date_of_birth ?? "—"}</dd>
       </dl>
 
       {isSelf ? (
@@ -97,6 +100,10 @@ export function EditEmployeeForm({
                   </option>
                 ))}
               </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="dateOfBirth">Date of birth</Label>
+              <Input id="dateOfBirth" name="dateOfBirth" type="date" defaultValue={employee.date_of_birth ?? ""} />
             </div>
           </div>
           {coreState.error ? <Alert variant="destructive">{coreState.error}</Alert> : null}

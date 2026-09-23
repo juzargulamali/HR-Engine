@@ -7,4 +7,5 @@ export * from "./leaveDeduction";
 export * from "./compDayExpiry";
 export * from "./addMonthsClamped";
 export * from "./finalSettlement";
+export * from "./birthdays";
 export * from "./permissions/index";

@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { canViewCompanyOverview, canViewHrAlerts, isSysAdmin } from "@enginious-hr/domain";
+import { canViewCompanyOverview, canViewHrAlerts, isBirthdayToday, isSysAdmin } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
+import { Alert } from "@/components/ui/alert";
 import { CompanyOverviewSection } from "./company-overview-section";
+import { BirthdaysSection } from "./birthdays-section";
 
 function Tile({ href, title, description }: { href: string; title: string; description: string }) {
   return (
@@ -65,8 +67,21 @@ export default async function DashboardPage() {
   const { data: companies } = await supabase.from("companies").select("id, legal_name, country_code");
   const overviewCompanies = (companies ?? []).filter((c) => canViewCompanyOverview(session.grants, c.id));
 
+  let isMyBirthdayToday = false;
+  if (session.employeeId) {
+    const { data: me } = await supabase.from("employees").select("date_of_birth").eq("id", session.employeeId).maybeSingle();
+    const today = new Date().toISOString().slice(0, 10);
+    isMyBirthdayToday = !!me?.date_of_birth && isBirthdayToday(me.date_of_birth, today);
+  }
+
   return (
     <div className="space-y-8">
+      {isMyBirthdayToday ? (
+        <Alert variant="success">
+          <span className="font-heading font-semibold">Enginious wishes you a very Happy Birthday{firstName ? `, ${firstName}` : ""}!</span>
+        </Alert>
+      ) : null}
+
       <div className="brand-corner relative overflow-hidden rounded-xl border border-border bg-card p-6 sm:p-8">
         <div className="brand-grid pointer-events-none absolute inset-0 opacity-40" aria-hidden />
         <div className="relative">
@@ -80,6 +95,8 @@ export default async function DashboardPage() {
           </p>
         </div>
       </div>
+
+      {showAlerts ? <BirthdaysSection /> : null}
 
       {overviewCompanies.length > 0 ? (
         <div className="space-y-6">

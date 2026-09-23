@@ -82,9 +82,16 @@ export function NewEmployeeForm({
         </div>
       </div>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="hireDate">Hire date</Label>
-        <Input id="hireDate" name="hireDate" type="date" required />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="hireDate">Hire date</Label>
+          <Input id="hireDate" name="hireDate" type="date" required />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="dateOfBirth">Date of birth</Label>
+          <Input id="dateOfBirth" name="dateOfBirth" type="date" />
+          <p className="text-xs text-muted-foreground">Optional, but needed for their birthday to show up on the dashboard.</p>
+        </div>
       </div>
 
       <fieldset className="space-y-4 rounded-md border border-border p-4">
