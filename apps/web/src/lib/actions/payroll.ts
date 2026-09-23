@@ -62,7 +62,16 @@ export async function submitPayrollRun(runId: string, companyId: string): Promis
     p_entity_type: "payroll_export_run",
     p_entity_id: runId,
   });
-  if (approvalError) return { error: approvalError.message };
+  if (approvalError) {
+    // Without this, a failure here leaves the run permanently stuck
+    // "submitted" with no approvals row and no one able to act on it.
+    // Unlike leave/reimbursement/timesheet, guard_payroll_run_client_update()
+    // allows a direct client transition back to 'draft' — reverting there
+    // (rather than 'cancelled') means Finance can just hit "Submit for
+    // approval" again from the run's own page instead of starting over.
+    await supabase.from("payroll_export_runs").update({ status: "draft" }).eq("id", runId);
+    return { error: `Could not route this run for approval, so it was reverted to draft: ${approvalError.message}. Please try submitting again.` };
+  }
 
   revalidatePath("/payroll");
   revalidatePath(`/payroll/${runId}`);

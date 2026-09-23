@@ -86,7 +86,15 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
     p_entity_type: "leave_request",
     p_entity_id: request.id,
   });
-  if (approvalError) return { error: approvalError.message };
+  if (approvalError) {
+    // Without this, a failure here (network blip, the resolved approver's
+    // role getting revoked in the split second since resolveInitialApprover
+    // checked) leaves the request permanently stuck "submitted" with no
+    // approvals row and no one able to act on it — cancelling it here means
+    // the failure is visible and the employee can just resubmit.
+    await supabase.from("leave_requests").update({ status: "cancelled" }).eq("id", request.id);
+    return { error: `Could not route this request for approval, so it was cancelled: ${approvalError.message}. Please try submitting again.` };
+  }
 
   await notifyLeaveSubmitted(supabase, {
     employeeUserId: user.id,

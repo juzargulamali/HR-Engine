@@ -129,7 +129,14 @@ export async function submitClaim(claimId: string): Promise<{ error: string | nu
     p_entity_type: "reimbursement_claim",
     p_entity_id: claimId,
   });
-  if (approvalError) return { error: approvalError.message };
+  if (approvalError) {
+    // Without this, a failure here leaves the claim permanently stuck
+    // "submitted" with no approvals row and no one able to act on it —
+    // cancelling it makes the failure visible; its lines are untouched, so
+    // resubmitting means creating a fresh claim with the same lines.
+    await supabase.from("reimbursement_claims").update({ status: "cancelled" }).eq("id", claimId);
+    return { error: `Could not route this claim for approval, so it was cancelled: ${approvalError.message}. Please try submitting again.` };
+  }
 
   revalidatePath("/reimbursements");
   revalidatePath(`/reimbursements/${claimId}`);

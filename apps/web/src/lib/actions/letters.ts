@@ -118,7 +118,18 @@ export async function issueLetter(_prevState: { error: string | null }, formData
       p_entity_type: "generated_letter",
       p_entity_id: letter.id,
     });
-    if (approvalError) return { error: approvalError.message };
+    if (approvalError) {
+      // Without this, a failure here leaves an orphaned letter stuck
+      // "pending_approval" forever with no approvals row and no way to
+      // retry short of deleting it by hand — exactly the bug the comment
+      // above (resolving the approver before generating anything) was
+      // meant to prevent, just one step later. Both the letter and its
+      // just-rendered PDF were only ever created in this same call, so
+      // there's nothing to preserve: clean up and let the caller retry.
+      await supabase.storage.from("letters").remove([filePath]);
+      await supabase.from("generated_letters").delete().eq("id", letter.id);
+      return { error: `Could not route this letter for approval, so it wasn't issued: ${approvalError.message}. Please try again.` };
+    }
   }
 
   revalidatePath("/letters");

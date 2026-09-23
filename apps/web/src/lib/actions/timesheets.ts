@@ -110,7 +110,13 @@ export async function submitTimesheet(timesheetId: string): Promise<{ error: str
     p_entity_type: "timesheet",
     p_entity_id: timesheetId,
   });
-  if (approvalError) return { error: approvalError.message };
+  if (approvalError) {
+    // Without this, a failure here leaves the timesheet permanently stuck
+    // "submitted" with no approvals row and no one able to act on it —
+    // cancelling it makes the failure visible; its entries are untouched.
+    await supabase.from("timesheets").update({ status: "cancelled" }).eq("id", timesheetId);
+    return { error: `Could not route this timesheet for approval, so it was cancelled: ${approvalError.message}. Please try submitting again.` };
+  }
 
   revalidatePath("/timesheets");
   revalidatePath(`/timesheets/${timesheetId}`);
