@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { NavGroup } from "./sidebar-nav";
+import type { NavGroupData } from "./nav-groups";
+import { NAV_ICONS } from "./nav-icons";
 
 /**
  * Ctrl/Cmd+K navigation search over the nav links the current user can
@@ -13,7 +14,7 @@ import type { NavGroup } from "./sidebar-nav";
  * working "jump to a page" tool, not a stub. Not a full omni-search over
  * HR data; that's a larger, separate feature.
  */
-export function CommandPalette({ groups }: { groups: NavGroup[] }) {
+export function CommandPalette({ groups }: { groups: NavGroupData[] }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -119,7 +120,10 @@ export function CommandPalette({ groups }: { groups: NavGroup[] }) {
                   className="flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-secondary/70 focus-visible:bg-secondary/70 focus-visible:outline-none"
                 >
                   <span className="flex items-center gap-2">
-                    {l.icon ? <l.icon className="h-4 w-4 text-muted-foreground" aria-hidden /> : null}
+                    {(() => {
+                      const Icon = NAV_ICONS[l.iconKey];
+                      return <Icon className="h-4 w-4 text-muted-foreground" aria-hidden />;
+                    })()}
                     {l.label}
                   </span>
                   <span className="text-xs text-muted-foreground">{l.group}</span>

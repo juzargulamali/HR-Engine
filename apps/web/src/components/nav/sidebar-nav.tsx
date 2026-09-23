@@ -5,14 +5,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronDown, Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Drawer } from "@/components/ui/drawer";
 import { UserMenu } from "./user-menu";
-
-export type NavLink = { href: string; label: string; icon: LucideIcon };
-export type NavGroup = { label: string; links: NavLink[] };
+import { NAV_ICONS } from "./nav-icons";
+import type { NavGroupData } from "./nav-groups";
 
 const COLLAPSE_STORAGE_KEY = "sidebar-collapsed";
 
@@ -35,7 +33,7 @@ function BrandMark({ compact }: { compact?: boolean }) {
   );
 }
 
-function NavLinks({ groups, collapsed, onNavigate }: { groups: NavGroup[]; collapsed?: boolean; onNavigate?: () => void }) {
+function NavLinks({ groups, collapsed, onNavigate }: { groups: NavGroupData[]; collapsed?: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
@@ -75,7 +73,7 @@ function NavLinks({ groups, collapsed, onNavigate }: { groups: NavGroup[]; colla
               <div className="flex flex-col gap-0.5">
                 {group.links.map((link) => {
                   const active = isActive(pathname, link.href);
-                  const Icon = link.icon;
+                  const Icon = NAV_ICONS[link.iconKey];
                   const linkEl = (
                     <Link
                       key={link.href}
@@ -122,7 +120,7 @@ export function SidebarNav({
   roleLabels,
   signOutSlot,
 }: {
-  groups: NavGroup[];
+  groups: NavGroupData[];
   fullName: string;
   email: string | null;
   roleLabels: string[];

@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Alert } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { logServerError } from "@/lib/log";
 import { BirthdaysSection } from "./birthdays-section";
 import { getCompanySnapshot } from "./dashboard-data";
 import { WorkforceSnapshot } from "./workforce-snapshot";
@@ -16,6 +17,7 @@ import { AttendanceCompletionBar } from "./attendance-completion-bar";
 import { UpcomingSection } from "./upcoming-section";
 
 const HORIZON_DAYS = 30;
+const ROUTE = "/";
 
 export default async function DashboardPage() {
   const session = await getCurrentSession();
@@ -27,25 +29,42 @@ export default async function DashboardPage() {
 
   const showHrView = canViewHrAlerts(session.grants);
 
-  const { data: companies } = await supabase.from("companies").select("id, legal_name, country_code");
-  const allCompanies = companies ?? [];
+  let allCompanies: { id: string; legal_name: string; country_code: string }[] = [];
+  try {
+    const { data: companies, error } = await supabase.from("companies").select("id, legal_name, country_code");
+    if (error) throw error;
+    allCompanies = companies ?? [];
+  } catch (error) {
+    logServerError({ route: ROUTE, operation: "list companies" }, error);
+  }
   const overviewCompanies = allCompanies.filter((c) => canViewCompanyOverview(session.grants, c.id));
   const canAddEmployee = allCompanies.some((c) => canCreateEmployee(session.grants, c.id));
 
   // Always computed, for anyone — approving isn't an HR/CEO-only capability
   // (a line manager or Finance approver needs this too), unlike the
   // company-wide sections below which stay gated to canViewHrAlerts.
-  const { count: myPendingApprovalsCount } = await supabase
-    .from("approvals")
-    .select("id", { count: "exact", head: true })
-    .eq("approver_id", session.userId)
-    .eq("decision", "pending");
-  const myPendingApprovals = myPendingApprovalsCount ?? 0;
+  let myPendingApprovals = 0;
+  try {
+    const { count, error } = await supabase
+      .from("approvals")
+      .select("id", { count: "exact", head: true })
+      .eq("approver_id", session.userId)
+      .eq("decision", "pending");
+    if (error) throw error;
+    myPendingApprovals = count ?? 0;
+  } catch (error) {
+    logServerError({ route: ROUTE, operation: "count my pending approvals" }, error);
+  }
 
   let isMyBirthdayToday = false;
   if (session.employeeId) {
-    const { data: me } = await supabase.from("employees").select("date_of_birth").eq("id", session.employeeId).maybeSingle();
-    isMyBirthdayToday = !!me?.date_of_birth && isBirthdayToday(me.date_of_birth, today);
+    try {
+      const { data: me, error } = await supabase.from("employees").select("date_of_birth").eq("id", session.employeeId).maybeSingle();
+      if (error) throw error;
+      isMyBirthdayToday = !!me?.date_of_birth && isBirthdayToday(me.date_of_birth, today);
+    } catch (error) {
+      logServerError({ route: ROUTE, operation: "check own birthday" }, error);
+    }
   }
 
   let snapshots: Awaited<ReturnType<typeof getCompanySnapshot>>[] = [];
@@ -55,56 +74,81 @@ export default async function DashboardPage() {
   let identityExpiringCount = 0;
   let upcomingHolidays: { name: string; holiday_date: string; countryCode: string }[] = [];
   let onLeaveToday: { id: string; name: string; companyName: string }[] = [];
+  // Set only if the block below throws outright (a real connection/rate-limit
+  // failure) — getCompanySnapshot() already protects itself per company, so
+  // this only covers the OTHER company-wide queries in this section. Lets
+  // the page render everything else (workforce snapshot, action centre for
+  // the viewer's own approvals, etc.) instead of crashing the whole page.
+  let hrSectionError = false;
 
   if (showHrView) {
-    const horizonDate = new Date();
-    horizonDate.setDate(horizonDate.getDate() + HORIZON_DAYS);
-    const horizon = horizonDate.toISOString().slice(0, 10);
+    try {
+      const horizonDate = new Date();
+      horizonDate.setDate(horizonDate.getDate() + HORIZON_DAYS);
+      const horizon = horizonDate.toISOString().slice(0, 10);
 
-    const [snapshotResults, { count: contractCount }, { count: probationCount }, { count: docCount }, { count: identityCount }] = await Promise.all([
-      Promise.all(overviewCompanies.map((c) => getCompanySnapshot(supabase, c, today))),
-      supabase.from("employment_contracts").select("id", { count: "exact", head: true }).eq("is_current", true).lte("end_date", horizon),
-      supabase.from("employment_contracts").select("id", { count: "exact", head: true }).eq("is_current", true).lte("probation_end_date", horizon),
-      supabase.from("employee_documents").select("id", { count: "exact", head: true }).in("status", ["expiring_soon", "expired"]),
-      supabase.from("identity_documents").select("id", { count: "exact", head: true }).not("expiry_date", "is", null).lte("expiry_date", horizon),
-    ]);
-    snapshots = snapshotResults;
-    contractsEndingCount = contractCount ?? 0;
-    probationDueCount = probationCount ?? 0;
-    docsExpiringCount = docCount ?? 0;
-    identityExpiringCount = identityCount ?? 0;
+      const [snapshotResults, contractResult, probationResult, docResult, identityResult] = await Promise.all([
+        Promise.all(overviewCompanies.map((c) => getCompanySnapshot(supabase, c, today))),
+        supabase.from("employment_contracts").select("id", { count: "exact", head: true }).eq("is_current", true).lte("end_date", horizon),
+        supabase.from("employment_contracts").select("id", { count: "exact", head: true }).eq("is_current", true).lte("probation_end_date", horizon),
+        supabase.from("employee_documents").select("id", { count: "exact", head: true }).in("status", ["expiring_soon", "expired"]),
+        supabase.from("identity_documents").select("id", { count: "exact", head: true }).not("expiry_date", "is", null).lte("expiry_date", horizon),
+      ]);
+      if (contractResult.error) throw contractResult.error;
+      if (probationResult.error) throw probationResult.error;
+      if (docResult.error) throw docResult.error;
+      if (identityResult.error) throw identityResult.error;
 
-    const countryCodes = [...new Set(overviewCompanies.map((c) => c.country_code))];
-    const { data: holidays } =
-      countryCodes.length > 0
-        ? await supabase
-            .from("public_holidays")
-            .select("name, holiday_date, country_code")
-            .in("country_code", countryCodes)
-            .gte("holiday_date", today)
-            .lte("holiday_date", horizon)
-            .order("holiday_date", { ascending: true })
-            .limit(6)
-        : { data: [] as { name: string; holiday_date: string; country_code: string }[] };
-    upcomingHolidays = (holidays ?? []).map((h) => ({ name: h.name, holiday_date: h.holiday_date, countryCode: h.country_code }));
+      snapshots = snapshotResults;
+      contractsEndingCount = contractResult.count ?? 0;
+      probationDueCount = probationResult.count ?? 0;
+      docsExpiringCount = docResult.count ?? 0;
+      identityExpiringCount = identityResult.count ?? 0;
 
-    const employeeNameById = new Map<string, { name: string; companyName: string }>();
-    for (const s of snapshots) {
-      for (const e of s.employees) {
-        employeeNameById.set(e.id, { name: `${e.first_name} ${e.last_name}`, companyName: s.companyName });
+      const countryCodes = [...new Set(overviewCompanies.map((c) => c.country_code))];
+      const { data: holidays, error: holidaysError } =
+        countryCodes.length > 0
+          ? await supabase
+              .from("public_holidays")
+              .select("name, holiday_date, country_code")
+              .in("country_code", countryCodes)
+              .gte("holiday_date", today)
+              .lte("holiday_date", horizon)
+              .order("holiday_date", { ascending: true })
+              .limit(6)
+          : { data: [] as { name: string; holiday_date: string; country_code: string }[], error: null };
+      if (holidaysError) throw holidaysError;
+      upcomingHolidays = (holidays ?? []).map((h) => ({ name: h.name, holiday_date: h.holiday_date, countryCode: h.country_code }));
+
+      const employeeNameById = new Map<string, { name: string; companyName: string }>();
+      for (const s of snapshots) {
+        for (const e of s.employees) {
+          employeeNameById.set(e.id, { name: `${e.first_name} ${e.last_name}`, companyName: s.companyName });
+        }
       }
+      const allEmployeeIds = [...employeeNameById.keys()];
+      const { data: leaveToday, error: leaveTodayError } =
+        allEmployeeIds.length > 0
+          ? await supabase.from("attendance_records").select("employee_id").eq("work_date", today).eq("status", "leave").in("employee_id", allEmployeeIds)
+          : { data: [] as { employee_id: string }[], error: null };
+      if (leaveTodayError) throw leaveTodayError;
+      onLeaveToday = (leaveToday ?? [])
+        .map((r) => {
+          const info = employeeNameById.get(r.employee_id);
+          return info ? { id: r.employee_id, name: info.name, companyName: info.companyName } : null;
+        })
+        .filter((v): v is { id: string; name: string; companyName: string } => v !== null);
+    } catch (error) {
+      logServerError({ route: ROUTE, operation: "load company-wide workforce data" }, error);
+      hrSectionError = true;
+      snapshots = [];
+      contractsEndingCount = 0;
+      probationDueCount = 0;
+      docsExpiringCount = 0;
+      identityExpiringCount = 0;
+      upcomingHolidays = [];
+      onLeaveToday = [];
     }
-    const allEmployeeIds = [...employeeNameById.keys()];
-    const { data: leaveToday } =
-      allEmployeeIds.length > 0
-        ? await supabase.from("attendance_records").select("employee_id").eq("work_date", today).eq("status", "leave").in("employee_id", allEmployeeIds)
-        : { data: [] as { employee_id: string }[] };
-    onLeaveToday = (leaveToday ?? [])
-      .map((r) => {
-        const info = employeeNameById.get(r.employee_id);
-        return info ? { id: r.employee_id, name: info.name, companyName: info.companyName } : null;
-      })
-      .filter((v): v is { id: string; name: string; companyName: string } => v !== null);
   }
 
   const totals = snapshots.reduce(
@@ -140,12 +184,14 @@ export default async function DashboardPage() {
   const recordedToday = totals.totalEmployees - totals.notRecordedCount;
   const totalActionItems = myPendingApprovals + contractsEndingCount + probationDueCount + docsExpiringCount + identityExpiringCount;
 
-  const summarySentence = showHrView
-    ? `${recordedToday} of ${totals.totalEmployees} employee${totals.totalEmployees === 1 ? "" : "s"} have recorded attendance today.` +
-      (totalActionItems > 0 ? ` ${totalActionItems} item${totalActionItems === 1 ? "" : "s"} need attention.` : " Nothing urgent is waiting.")
-    : myPendingApprovals > 0
-      ? `${myPendingApprovals} approval${myPendingApprovals === 1 ? "" : "s"} ${myPendingApprovals === 1 ? "is" : "are"} waiting on your decision.`
-      : "Nothing is waiting on you right now.";
+  const summarySentence = hrSectionError
+    ? "Workforce data couldn't be loaded right now — the numbers below may be incomplete."
+    : showHrView
+      ? `${recordedToday} of ${totals.totalEmployees} employee${totals.totalEmployees === 1 ? "" : "s"} have recorded attendance today.` +
+        (totalActionItems > 0 ? ` ${totalActionItems} item${totalActionItems === 1 ? "" : "s"} need attention.` : " Nothing urgent is waiting.")
+      : myPendingApprovals > 0
+        ? `${myPendingApprovals} approval${myPendingApprovals === 1 ? "" : "s"} ${myPendingApprovals === 1 ? "is" : "are"} waiting on your decision.`
+        : "Nothing is waiting on you right now.";
 
   return (
     <div className="space-y-8">
@@ -182,6 +228,13 @@ export default async function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {hrSectionError ? (
+        <Alert variant="warning">
+          Some workforce data couldn&apos;t be loaded right now. This is usually temporary — refresh in a moment, and contact support if it
+          keeps happening.
+        </Alert>
+      ) : null}
 
       {showHrView ? (
         <>

@@ -1,96 +1,19 @@
-import {
-  BellRing,
-  Building,
-  BookOpen,
-  CalendarCheck,
-  CalendarDays,
-  ClipboardCheck,
-  FileText,
-  Landmark,
-  LayoutDashboard,
-  Package,
-  Receipt,
-  ScrollText,
-  Sparkles,
-  TrendingUp,
-  User,
-  UserCog,
-  Users,
-  Wallet,
-} from "lucide-react";
+import { BellRing } from "lucide-react";
 import Link from "next/link";
-import { canViewHrAlerts, hasRoleAnyScope, isSysAdmin, ROLE_LABELS } from "@enginious-hr/domain";
+import { canViewHrAlerts, ROLE_LABELS } from "@enginious-hr/domain";
 import type { CurrentSession } from "@/lib/auth/session";
 import { signOut } from "@/lib/actions/auth";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { cn } from "@/lib/utils";
-import { SidebarNav, type NavGroup } from "./sidebar-nav";
+import { SidebarNav } from "./sidebar-nav";
 import { CommandPalette } from "./command-palette";
+import { buildNavGroups } from "./nav-groups";
 
 export function AppShell({ session, children }: { session: CurrentSession; children: React.ReactNode }) {
   const roleLabels = [...new Set(session.grants.map((g) => ROLE_LABELS[g.role]))];
-  const showAdminLink = isSysAdmin(session.grants);
-  const showInsightsLinks = hasRoleAnyScope(session.grants, "hr_admin") || hasRoleAnyScope(session.grants, "sys_admin");
   const showAlertsLink = canViewHrAlerts(session.grants);
-  const showAssetsLink = hasRoleAnyScope(session.grants, "hr_admin") || hasRoleAnyScope(session.grants, "finance");
-
-  const groups: NavGroup[] = [
-    {
-      label: "Overview",
-      links: [
-        { href: "/", label: "Dashboard", icon: LayoutDashboard },
-        { href: "/profile", label: "My Profile", icon: User },
-      ],
-    },
-    {
-      label: "People",
-      links: [
-        { href: "/employees", label: "Employees", icon: Users },
-        { href: "/attendance", label: "Attendance", icon: CalendarCheck },
-        { href: "/leave", label: "Leave", icon: CalendarDays },
-        { href: "/reimbursements", label: "Reimbursements", icon: Receipt },
-        { href: "/performance", label: "Performance", icon: TrendingUp },
-      ],
-    },
-    {
-      label: "Workflow",
-      links: [
-        { href: "/approvals", label: "Approvals", icon: ClipboardCheck },
-        ...(showAlertsLink ? [{ href: "/alerts", label: "Alerts", icon: BellRing }] : []),
-        { href: "/letters", label: "Letters", icon: FileText },
-        { href: "/payroll", label: "Payroll", icon: Wallet },
-      ],
-    },
-    {
-      label: "Organisation",
-      links: [
-        ...(showAssetsLink ? [{ href: "/assets", label: "Assets", icon: Package }] : []),
-        { href: "/policies", label: "Policies", icon: BookOpen },
-        { href: "/holidays", label: "Holidays", icon: Landmark },
-        ...(showAdminLink ? [{ href: "/admin/companies", label: "Companies", icon: Building }] : []),
-      ],
-    },
-    ...(showInsightsLinks
-      ? [
-          {
-            label: "Insights",
-            links: [
-              { href: "/ai-suggestions", label: "AI Suggestions", icon: Sparkles },
-              { href: "/audit-log", label: "Audit Log", icon: ScrollText },
-            ],
-          },
-        ]
-      : []),
-    ...(showAdminLink
-      ? [
-          {
-            label: "System",
-            links: [{ href: "/admin/users", label: "Users & Roles", icon: UserCog }],
-          },
-        ]
-      : []),
-  ];
+  const groups = buildNavGroups(session.grants);
 
   const signOutSlot = (
     <form action={signOut}>

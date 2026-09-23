@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ChevronDown, UserPlus } from "lucide-react";
+import { ChevronDown, TriangleAlert, UserPlus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -41,6 +41,18 @@ export function CompanyComparisonTable({
           <span />
         </div>
         {snapshots.map((s) => {
+          if (s.error) {
+            return (
+              <EmptyState
+                key={s.companyId}
+                dense
+                icon={TriangleAlert}
+                title={`${s.companyName}'s data couldn't be loaded right now.`}
+                description="This is a temporary problem on our end, not a sign that the company has no data — try refreshing in a moment."
+              />
+            );
+          }
+
           if (s.totalEmployees === 0) {
             return (
               <EmptyState

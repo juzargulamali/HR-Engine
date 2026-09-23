@@ -3,6 +3,7 @@ import { daysUntilNextBirthday } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { logServerError } from "@/lib/log";
 
 const WINDOW_DAYS = 3;
 
@@ -27,13 +28,25 @@ export async function BirthdaysSection() {
   const supabase = await createClient();
   const today = new Date().toISOString().slice(0, 10);
 
-  const { data: employees } = await supabase
-    .from("employees")
-    .select("id, first_name, last_name, date_of_birth")
-    .is("deleted_at", null)
-    .not("date_of_birth", "is", null);
+  let employees: { id: string; first_name: string; last_name: string; date_of_birth: string | null }[] = [];
+  try {
+    const { data, error } = await supabase
+      .from("employees")
+      .select("id, first_name, last_name, date_of_birth")
+      .is("deleted_at", null)
+      .not("date_of_birth", "is", null);
+    if (error) throw error;
+    employees = data ?? [];
+  } catch (error) {
+    // Best-effort widget — a failure here should never take down the rest
+    // of the dashboard around it, and there's nothing actionable to show
+    // the viewer for "couldn't check birthdays," so this just quietly
+    // omits itself rather than rendering an error card.
+    logServerError({ route: "/", operation: "list upcoming birthdays" }, error);
+    return null;
+  }
 
-  const upcoming = (employees ?? [])
+  const upcoming = employees
     .map((e) => ({ ...e, daysUntil: daysUntilNextBirthday(e.date_of_birth!, today) }))
     .filter((e) => e.daysUntil <= WINDOW_DAYS)
     .sort((a, b) => a.daysUntil - b.daysUntil);
