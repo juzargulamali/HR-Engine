@@ -2,6 +2,7 @@ import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { DecisionButtons } from "./decision-buttons";
 
 export default async function ApprovalsPage() {
@@ -52,13 +53,51 @@ export default async function ApprovalsPage() {
   ];
   const { data: employees } =
     employeeIds.length > 0
-      ? await supabase.from("employees").select("id, first_name, last_name").in("id", employeeIds)
+      ? await supabase.from("employees").select("id, first_name, last_name, company_id, country_code").in("id", employeeIds)
       : { data: [] as never[] };
   const employeeById = new Map((employees ?? []).map((e) => [e.id, e]));
   const employeeName = (id: string) => {
     const e = employeeById.get(id);
     return e ? `${e.first_name} ${e.last_name}` : "—";
   };
+
+  // "Insufficient balance" is a warning shown to the approver, not a block
+  // on submission — nothing stops a manager from knowingly approving
+  // unpaid/negative leave, this just makes sure they're not doing it
+  // unknowingly. Approximates decide_leave_approval()'s own deduction
+  // logic: total available = the leave type's own ledger balance, plus
+  // comp-day balance if deduction_priority_rules routes this leave type
+  // through comp-day for the employee's company/country as of the
+  // request's start date.
+  const leaveTypeCodes = [...new Set((requests ?? []).map((r) => r.leave_type_code))];
+  const [{ data: leaveBalances }, { data: compDayBalances }, { data: deductionRules }] = await Promise.all([
+    employeeIds.length > 0 && leaveTypeCodes.length > 0
+      ? supabase.from("leave_balances").select("employee_id, leave_type_code, balance_days").in("employee_id", employeeIds).in("leave_type_code", leaveTypeCodes)
+      : Promise.resolve({ data: [] as never[] }),
+    employeeIds.length > 0
+      ? supabase.from("comp_day_balances").select("employee_id, balance_days").in("employee_id", employeeIds)
+      : Promise.resolve({ data: [] as never[] }),
+    leaveTypeCodes.length > 0
+      ? supabase.from("deduction_priority_rules").select("company_id, country_code, leave_type_code, source_ledger, effective_from").in("leave_type_code", leaveTypeCodes)
+      : Promise.resolve({ data: [] as never[] }),
+  ]);
+  const leaveBalanceByKey = new Map((leaveBalances ?? []).map((b) => [`${b.employee_id}:${b.leave_type_code}`, Number(b.balance_days)]));
+  const compDayBalanceByEmployee = new Map((compDayBalances ?? []).map((b) => [b.employee_id, Number(b.balance_days)]));
+
+  function hasInsufficientBalance(request: { employee_id: string; leave_type_code: string; start_date: string; total_days: number | string }): boolean {
+    const employee = employeeById.get(request.employee_id);
+    if (!employee) return false;
+    const leaveBalance = leaveBalanceByKey.get(`${request.employee_id}:${request.leave_type_code}`) ?? 0;
+    const usesCompDay = (deductionRules ?? []).some(
+      (r) =>
+        r.leave_type_code === request.leave_type_code &&
+        r.source_ledger === "comp_day" &&
+        r.effective_from <= request.start_date &&
+        (r.company_id === employee.company_id || (r.company_id === null && r.country_code === employee.country_code)),
+    );
+    const available = leaveBalance + (usesCompDay ? (compDayBalanceByEmployee.get(request.employee_id) ?? 0) : 0);
+    return Number(request.total_days) > available;
+  }
 
   const requestById = new Map((requests ?? []).map((r) => [r.id, r]));
   const claimById = new Map((claims ?? []).map((c) => [c.id, c]));
@@ -112,6 +151,7 @@ export default async function ApprovalsPage() {
               <TableBody>
                 {leaveApprovals.map((a) => {
                   const request = requestById.get(a.entity_id)!;
+                  const insufficientBalance = hasInsufficientBalance(request);
                   return (
                     <TableRow key={a.id}>
                       <TableCell>{employeeName(request.employee_id)}</TableCell>
@@ -119,7 +159,16 @@ export default async function ApprovalsPage() {
                       <TableCell>
                         {request.start_date === request.end_date ? request.start_date : `${request.start_date} – ${request.end_date}`}
                       </TableCell>
-                      <TableCell>{request.total_days}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {request.total_days}
+                          {insufficientBalance ? (
+                            <Badge variant="destructive" title="This employee's available balance for this leave type won't cover the full request — approving will draw it negative.">
+                              Insufficient balance
+                            </Badge>
+                          ) : null}
+                        </div>
+                      </TableCell>
                       <TableCell className="max-w-xs truncate text-muted-foreground">{request.reason ?? "—"}</TableCell>
                       <TableCell>
                         <DecisionButtons approvalId={a.id} />
