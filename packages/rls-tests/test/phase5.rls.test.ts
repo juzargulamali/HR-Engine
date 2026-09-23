@@ -148,34 +148,84 @@ describe("Phase 5 row-level security: performance, checklists, documents, assets
     it("lets the employee acknowledge a submitted appraisal but never edit its content", async () => {
       const appraisalId = randomUUID();
       await db.seed(`
-        insert into appraisals (id, employee_id, cycle_id, appraiser_id, overall_rating, strengths, status)
-        values ('${appraisalId}', '${EMPLOYEE_REPORT}', '${cycleId}', '${USER_MANAGER}', 3, 'Solid quarter', 'submitted');
+        insert into appraisals (id, employee_id, cycle_id, appraiser_id, quality_of_work_rating, teamwork_rating, strengths, status)
+        values ('${appraisalId}', '${EMPLOYEE_REPORT}', '${cycleId}', '${USER_MANAGER}', 3, 3, 'Solid quarter', 'submitted');
       `);
 
       await expect(
         db.asUser(USER_REPORT, (query) =>
-          query("update appraisals set status = 'acknowledged', overall_rating = 5 where id = $1", [appraisalId]),
+          query("update appraisals set status = 'acknowledged', strengths = 'rewritten' where id = $1", [appraisalId]),
+        ),
+      ).rejects.toThrow(/only acknowledge/);
+
+      // Also blocked for a competency column specifically — overall_rating
+      // is a rounded average, so comparing it alone wouldn't catch every
+      // possible single-column edit (see guard_appraisal_acknowledge()).
+      await expect(
+        db.asUser(USER_REPORT, (query) =>
+          query("update appraisals set status = 'acknowledged', quality_of_work_rating = 5 where id = $1", [appraisalId]),
         ),
       ).rejects.toThrow(/only acknowledge/);
 
       await db.asUser(USER_REPORT, async (query) => {
         await query("update appraisals set status = 'acknowledged' where id = $1", [appraisalId]);
-        const after = await query("select status, overall_rating from appraisals where id = $1", [appraisalId]);
+        const after = await query(
+          "select status, overall_rating, quality_of_work_rating from appraisals where id = $1",
+          [appraisalId],
+        );
         expect(after.rows[0]?.status).toBe("acknowledged");
         expect(after.rows[0]?.overall_rating).toBe(3);
+        expect(after.rows[0]?.quality_of_work_rating).toBe(3);
       });
     });
 
     it("lets HR Admin write/calibrate any appraisal regardless of who the appraiser is", async () => {
       const appraisalId = randomUUID();
       await db.seed(`
-        insert into appraisals (id, employee_id, cycle_id, appraiser_id, overall_rating, status)
+        insert into appraisals (id, employee_id, cycle_id, appraiser_id, quality_of_work_rating, status)
         values ('${appraisalId}', '${EMPLOYEE_REPORT}', '${cycleId}', '${USER_MANAGER}', 3, 'submitted');
       `);
       await db.asUser(USER_HR, async (query) => {
-        await query("update appraisals set overall_rating = 4 where id = $1", [appraisalId]);
-        const check = await query("select overall_rating from appraisals where id = $1", [appraisalId]);
+        await query("update appraisals set quality_of_work_rating = 4 where id = $1", [appraisalId]);
+        const check = await query(
+          "select overall_rating, quality_of_work_rating from appraisals where id = $1",
+          [appraisalId],
+        );
+        expect(check.rows[0]?.quality_of_work_rating).toBe(4);
         expect(check.rows[0]?.overall_rating).toBe(4);
+      });
+    });
+
+    describe("appraisals: derived overall_rating (competency matrix)", () => {
+      it("computes overall_rating as the rounded average of whichever competency ratings are set", async () => {
+        const appraisalId = randomUUID();
+        await db.seed(`
+          insert into appraisals (id, employee_id, cycle_id, appraiser_id, quality_of_work_rating, productivity_rating, status)
+          values ('${appraisalId}', '${EMPLOYEE_REPORT}', '${cycleId}', '${USER_MANAGER}', 4, 5, 'submitted');
+        `);
+        const check = await db.asUser(USER_HR, (query) =>
+          query("select overall_rating from appraisals where id = $1", [appraisalId]),
+        );
+        // round(avg(4, 5)) = round(4.5) = 5 (Postgres round-half-away-from-zero)
+        expect(check.rows[0]?.overall_rating).toBe(5);
+      });
+
+      it("leaves overall_rating null when no competency rating is set, and ignores a client-supplied value", async () => {
+        const appraisalId = randomUUID();
+        await db.seed(`
+          insert into appraisals (id, employee_id, cycle_id, appraiser_id, overall_rating, status)
+          values ('${appraisalId}', '${EMPLOYEE_REPORT}', '${cycleId}', '${USER_MANAGER}', 5, 'submitted');
+        `);
+        const check = await db.asUser(USER_HR, (query) =>
+          query("select overall_rating from appraisals where id = $1", [appraisalId]),
+        );
+        expect(check.rows[0]?.overall_rating).toBeNull();
+
+        await db.asUser(USER_HR, async (query) => {
+          await query("update appraisals set overall_rating = 5 where id = $1", [appraisalId]);
+          const after = await query("select overall_rating from appraisals where id = $1", [appraisalId]);
+          expect(after.rows[0]?.overall_rating).toBeNull();
+        });
       });
     });
 

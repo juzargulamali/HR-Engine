@@ -168,14 +168,26 @@ export async function createAppraisal(_prevState: ActionState, formData: FormDat
   redirect(`/performance/appraisals/${data.id}`);
 }
 
+const ratingField = z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().min(1).max(5).optional());
+
 const updateAppraisalSchema = z.object({
   appraisalId: z.string().uuid(),
-  overallRating: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().min(1).max(5).optional()),
+  qualityOfWorkRating: ratingField,
+  productivityRating: ratingField,
+  initiativeRating: ratingField,
+  teamworkRating: ratingField,
+  punctualityRating: ratingField,
   strengths: z.string().optional(),
   areasForImprovement: z.string().optional(),
 });
 
-/** Content edits — allowed by RLS for the appraiser while still draft, or HR Admin at any status (calibration). */
+/**
+ * Content edits — allowed by RLS for the appraiser while still draft, or HR
+ * Admin at any status (calibration). overall_rating is intentionally left
+ * out of this update payload: a DB trigger (compute_appraisal_overall_rating)
+ * now owns it exclusively, recomputing it from the five competency ratings
+ * on every write — writing it from here would just be overwritten anyway.
+ */
 export async function updateAppraisal(_prevState: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = updateAppraisalSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -185,7 +197,11 @@ export async function updateAppraisal(_prevState: ActionState, formData: FormDat
   const { error } = await supabase
     .from("appraisals")
     .update({
-      overall_rating: d.overallRating ?? null,
+      quality_of_work_rating: d.qualityOfWorkRating ?? null,
+      productivity_rating: d.productivityRating ?? null,
+      initiative_rating: d.initiativeRating ?? null,
+      teamwork_rating: d.teamworkRating ?? null,
+      punctuality_rating: d.punctualityRating ?? null,
       strengths: d.strengths || null,
       areas_for_improvement: d.areasForImprovement || null,
     })

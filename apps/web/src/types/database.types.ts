@@ -867,7 +867,17 @@ export interface Database {
           employee_id: string;
           cycle_id: string;
           appraiser_id: string;
+          // Fully derived by a DB trigger from the five competency ratings
+          // below (rounded average, skipping nulls). Still settable in
+          // Insert/Update for type-shape convenience — the trigger silently
+          // overwrites whatever a client sends, so it's effectively
+          // ignore-on-write, never a real client-owned value.
           overall_rating: number | null;
+          quality_of_work_rating: number | null;
+          productivity_rating: number | null;
+          initiative_rating: number | null;
+          teamwork_rating: number | null;
+          punctuality_rating: number | null;
           strengths: string | null;
           areas_for_improvement: string | null;
           status: string;
@@ -881,6 +891,11 @@ export interface Database {
           cycle_id: string;
           appraiser_id: string;
           overall_rating?: number | null;
+          quality_of_work_rating?: number | null;
+          productivity_rating?: number | null;
+          initiative_rating?: number | null;
+          teamwork_rating?: number | null;
+          punctuality_rating?: number | null;
           strengths?: string | null;
           areas_for_improvement?: string | null;
           status?: string;
@@ -888,6 +903,11 @@ export interface Database {
         };
         Update: {
           overall_rating?: number | null;
+          quality_of_work_rating?: number | null;
+          productivity_rating?: number | null;
+          initiative_rating?: number | null;
+          teamwork_rating?: number | null;
+          punctuality_rating?: number | null;
           strengths?: string | null;
           areas_for_improvement?: string | null;
           status?: string;
@@ -1076,23 +1096,29 @@ export interface Database {
           id: string;
           run_id: string;
           employee_id: string;
-          component_code: "reimbursement" | "leave_encashment";
+          component_code: "basic_salary" | "other_allowance" | "reimbursement" | "leave_encashment" | "deduction" | "bonus";
           amount: string;
           currency: string;
-          source_reference_type: string;
-          source_reference_id: string;
+          source_reference_type: string | null;
+          source_reference_id: string | null;
+          label: string | null;
+          is_manual: boolean;
+          created_by: string;
         };
         Insert: {
           id?: string;
           run_id: string;
           employee_id: string;
-          component_code: "reimbursement" | "leave_encashment";
+          component_code: "basic_salary" | "other_allowance" | "reimbursement" | "leave_encashment" | "deduction" | "bonus";
           amount: number;
           currency: string;
-          source_reference_type: string;
-          source_reference_id: string;
+          source_reference_type?: string | null;
+          source_reference_id?: string | null;
+          label?: string | null;
+          is_manual?: boolean;
+          created_by: string;
         };
-        Update: Record<string, never>;
+        Update: { amount?: number; is_manual?: boolean };
         Relationships: [];
       };
       audit_log: {

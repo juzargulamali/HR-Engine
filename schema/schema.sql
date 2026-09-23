@@ -800,7 +800,19 @@ create table appraisals (
   employee_id    uuid not null references employees(id),
   cycle_id       uuid not null references performance_cycles(id),
   appraiser_id   uuid not null references auth.users(id),
+  -- overall_rating is fully derived (see compute_appraisal_overall_rating()
+  -- below) — the rounded average of whichever of the five competency
+  -- ratings are filled in. It stays a real, readable column (existing
+  -- pages select it directly) but is never independently settable: the
+  -- before-insert-or-update trigger recomputes and overwrites it on every
+  -- write, even one that also tries to set it explicitly in the same
+  -- statement.
   overall_rating int check (overall_rating between 1 and 5),
+  quality_of_work_rating int check (quality_of_work_rating between 1 and 5),
+  productivity_rating     int check (productivity_rating between 1 and 5),
+  initiative_rating       int check (initiative_rating between 1 and 5),
+  teamwork_rating         int check (teamwork_rating between 1 and 5),
+  punctuality_rating      int check (punctuality_rating between 1 and 5),
   strengths      text,
   areas_for_improvement text,
   status         text not null default 'draft' check (status in ('draft', 'submitted', 'acknowledged')),
@@ -824,7 +836,18 @@ begin
     return new; -- trusted backend/migration/seed context
   end if;
   if auth.uid() = (select user_id from employees where id = old.employee_id) then
+    -- Checked directly rather than relying on overall_rating alone: since
+    -- overall_rating is now a rounded average (compute_appraisal_overall_rating,
+    -- which fires first), two different sets of competency scores can round
+    -- to the same overall_rating — comparing only the derived value would
+    -- let an employee tamper with an individual competency score as long as
+    -- the rounded average happened to land unchanged.
     if new.overall_rating is distinct from old.overall_rating
+      or new.quality_of_work_rating is distinct from old.quality_of_work_rating
+      or new.productivity_rating is distinct from old.productivity_rating
+      or new.initiative_rating is distinct from old.initiative_rating
+      or new.teamwork_rating is distinct from old.teamwork_rating
+      or new.punctuality_rating is distinct from old.punctuality_rating
       or new.strengths is distinct from old.strengths
       or new.areas_for_improvement is distinct from old.areas_for_improvement
       or new.cycle_id is distinct from old.cycle_id
@@ -853,6 +876,37 @@ $$;
 create trigger appraisals_guard_self_update
   before update on appraisals
   for each row execute function guard_appraisal_acknowledge();
+
+-- overall_rating is derived, never independently settable: recompute it as
+-- the rounded average of whichever of the five competency ratings are
+-- non-null (all-null -> null), overwriting whatever the statement itself
+-- tried to put in overall_rating. Runs before guard_appraisal_acknowledge's
+-- comparison of new.overall_rating to old.overall_rating on insert since
+-- insert has no "old" row to guard; on update both triggers fire in name
+-- order ("appraisals_compute_overall" before "appraisals_guard_self_update"),
+-- so the acknowledge-guard still correctly sees the freshly-recomputed value.
+create or replace function compute_appraisal_overall_rating()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.overall_rating := round((
+    select avg(v) from (values
+      (new.quality_of_work_rating),
+      (new.productivity_rating),
+      (new.initiative_rating),
+      (new.teamwork_rating),
+      (new.punctuality_rating)
+    ) as t(v)
+    where v is not null
+  ));
+  return new;
+end;
+$$;
+
+create trigger appraisals_compute_overall
+  before insert or update on appraisals
+  for each row execute function compute_appraisal_overall_rating();
 
 -- -----------------------------------------------------------------------------
 -- 8. Onboarding / offboarding
@@ -1011,15 +1065,37 @@ create table payroll_export_runs (
   unique (company_id, period_month, period_year)
 );
 
+-- Sign convention: basic_salary/other_allowance/reimbursement/
+-- leave_encashment/bonus lines are positive; deduction lines are stored
+-- NEGATIVE (payroll_export_lines_component_sign_check enforces this). Net
+-- pay per employee for a run is simply sum(amount) over their lines — no
+-- special-casing needed anywhere downstream because of it.
 create table payroll_export_lines (
   id             uuid primary key default gen_random_uuid(),
   run_id         uuid not null references payroll_export_runs(id) on delete cascade,
   employee_id    uuid not null references employees(id),
-  component_code text not null check (component_code in ('reimbursement', 'leave_encashment')),
-  amount         numeric(14,2) not null,
+  component_code text not null check (component_code in ('basic_salary', 'other_allowance', 'reimbursement', 'leave_encashment', 'deduction', 'bonus')),
+  amount         numeric(14,2) not null check ((component_code = 'deduction' and amount < 0) or (component_code <> 'deduction' and amount > 0)),
   currency       text not null,
-  source_reference_type text not null,  -- 'reimbursement_claim' | 'leave_ledger' — traces back to the exact source row
-  source_reference_id   uuid not null
+  -- 'reimbursement_claim' | 'leave_ledger' when this line traces back to a
+  -- real source row; null (with source_reference_id also null) for a
+  -- generated salary line or a manual line — nothing to trace back to.
+  source_reference_type text,
+  source_reference_id   uuid,
+  -- Free-text description. Required (by the addManualPayrollLine Server
+  -- Action, not a DB constraint) for a manual line ("fine for X", "Q1
+  -- bonus"); left null for an auto-generated line, whose component_code is
+  -- already self-explanatory.
+  label          text,
+  -- true for anything Finance typed in by hand, OR an auto-generated line
+  -- whose amount Finance has directly edited. generate_payroll_export_lines()
+  -- never deletes or touches a row with is_manual = true.
+  is_manual      boolean not null default false,
+  -- Who created/last-edited this line. Sentinel default is only a backfill
+  -- safety net for adding this column to a table that may already have
+  -- rows in some deployment — every real INSERT (generate_payroll_export_lines()
+  -- or the manual-line Server Actions) sets this explicitly.
+  created_by     uuid not null default '00000000-0000-0000-0000-000000000000'
 );
 
 create index idx_payroll_export_lines_run on payroll_export_lines(run_id);
@@ -1032,7 +1108,10 @@ create index idx_payroll_export_lines_run on payroll_export_lines(run_id);
 -- for new lines") each seeing "not yet exported" and both inserting a line
 -- for it. The unique index plus that function's own on-conflict-do-nothing
 -- makes the second racer a no-op instead of a duplicate export line.
-create unique index payroll_export_lines_source_uniq on payroll_export_lines(source_reference_type, source_reference_id);
+-- Partial: only reimbursement/leave-encashment lines carry a real
+-- source_reference_id — salary and manual lines have none to dedup on.
+create unique index payroll_export_lines_source_uniq on payroll_export_lines(source_reference_type, source_reference_id)
+  where source_reference_id is not null;
 
 -- -----------------------------------------------------------------------------
 -- 11. Audit log & AI drafts
@@ -1431,14 +1510,25 @@ as $$
   order by granted_at asc;
 $$;
 
--- Aggregates approved-but-not-yet-exported reimbursements and leave
--- encashments into payroll_export_lines, one line per source row so
--- reconciliation is exact. "Not yet exported" means no earlier
--- payroll_export_lines row already references that exact source row — so
--- re-running this for the same run is safe, and a source row can never be
--- paid out twice across different runs either. Runs under the caller's own
--- RLS (Finance already has read access to both source tables and insert
--- access to payroll_export_lines) — no SECURITY DEFINER needed.
+-- Builds the run's full payroll table: a basic_salary line (and, when
+-- present and positive, an other_allowance line) for every active
+-- employee, plus approved-but-not-yet-exported reimbursements and this
+-- period's leave encashments, one line per source row so reconciliation is
+-- exact. "Not yet exported" means no earlier payroll_export_lines row
+-- already references that exact source row — so re-running this for the
+-- same run is safe, and a source row can never be paid out twice across
+-- different runs either.
+--
+-- Idempotent re-runs ("re-check for new lines"): every previously
+-- auto-generated (is_manual = false) line for this run is deleted and
+-- rebuilt fresh, so the run always reflects current salary/reimbursement/
+-- encashment data. A line Finance added by hand, or an auto-generated line
+-- Finance has directly corrected (is_manual = true either way), is never
+-- touched by this function.
+--
+-- Runs under the caller's own RLS (Finance already has read access to the
+-- source tables and insert access to payroll_export_lines) — no SECURITY
+-- DEFINER needed, so auth.uid() reliably names the acting Finance user.
 create or replace function generate_payroll_export_lines(p_run_id uuid)
 returns setof payroll_export_lines
 language plpgsql
@@ -1452,29 +1542,63 @@ begin
   into v_company_id, v_period_start, v_period_end
   from payroll_export_runs where id = p_run_id;
 
+  delete from payroll_export_lines where run_id = p_run_id and is_manual = false;
+
+  -- Three sibling data-modifying CTEs (none depends on another's writes),
+  -- so the whole regeneration is one statement and the function returns
+  -- every freshly generated line, salary lines included.
   return query
-  insert into payroll_export_lines (run_id, employee_id, component_code, amount, currency, source_reference_type, source_reference_id)
-  select p_run_id, c.employee_id, 'reimbursement', c.total_amount, c.currency, 'reimbursement_claim', c.id
-  from reimbursement_claims c
-  join employees e on e.id = c.employee_id
-  where e.company_id = v_company_id
-    and c.status = 'approved'
-    and not exists (
-      select 1 from payroll_export_lines l where l.source_reference_type = 'reimbursement_claim' and l.source_reference_id = c.id
-    )
+  with ins_salary as (
+    insert into payroll_export_lines (run_id, employee_id, component_code, amount, currency, source_reference_type, source_reference_id, is_manual, created_by)
+    select p_run_id, e.id, 'basic_salary', comp.base_salary, comp.currency, null, null, false, auth.uid()
+    from employees e
+    join compensation_details comp on comp.employee_id = e.id and comp.is_current = true
+    where e.company_id = v_company_id
+      and e.employment_status = 'active'
+      and e.deleted_at is null
+    returning *
+  ),
+  ins_allowance as (
+    insert into payroll_export_lines (run_id, employee_id, component_code, amount, currency, source_reference_type, source_reference_id, is_manual, created_by)
+    select p_run_id, e.id, 'other_allowance', (comp.allowances->>'other')::numeric, comp.currency, null, null, false, auth.uid()
+    from employees e
+    join compensation_details comp on comp.employee_id = e.id and comp.is_current = true
+    where e.company_id = v_company_id
+      and e.employment_status = 'active'
+      and e.deleted_at is null
+      and comp.allowances->>'other' is not null
+      and (comp.allowances->>'other')::numeric > 0
+    returning *
+  ),
+  ins_variable as (
+    insert into payroll_export_lines (run_id, employee_id, component_code, amount, currency, source_reference_type, source_reference_id, is_manual, created_by)
+    select p_run_id, c.employee_id, 'reimbursement', c.total_amount, c.currency, 'reimbursement_claim', c.id, false, auth.uid()
+    from reimbursement_claims c
+    join employees e on e.id = c.employee_id
+    where e.company_id = v_company_id
+      and c.status = 'approved'
+      and not exists (
+        select 1 from payroll_export_lines l where l.source_reference_type = 'reimbursement_claim' and l.source_reference_id = c.id
+      )
+    union all
+    select p_run_id, l.employee_id, 'leave_encashment', l.amount_days, comp.currency, 'leave_ledger', l.id, false, auth.uid()
+    from leave_ledger l
+    join employees e on e.id = l.employee_id
+    join compensation_details comp on comp.employee_id = e.id and comp.is_current = true
+    where e.company_id = v_company_id
+      and l.entry_type = 'encashment'
+      and l.txn_date between v_period_start and v_period_end
+      and not exists (
+        select 1 from payroll_export_lines pl where pl.source_reference_type = 'leave_ledger' and pl.source_reference_id = l.id
+      )
+    on conflict (source_reference_type, source_reference_id) where source_reference_id is not null do nothing
+    returning *
+  )
+  select * from ins_salary
   union all
-  select p_run_id, l.employee_id, 'leave_encashment', l.amount_days, comp.currency, 'leave_ledger', l.id
-  from leave_ledger l
-  join employees e on e.id = l.employee_id
-  join compensation_details comp on comp.employee_id = e.id and comp.is_current = true
-  where e.company_id = v_company_id
-    and l.entry_type = 'encashment'
-    and l.txn_date between v_period_start and v_period_end
-    and not exists (
-      select 1 from payroll_export_lines pl where pl.source_reference_type = 'leave_ledger' and pl.source_reference_id = l.id
-    )
-  on conflict (source_reference_type, source_reference_id) do nothing
-  returning *;
+  select * from ins_allowance
+  union all
+  select * from ins_variable;
 end;
 $$;
 
@@ -2985,8 +3109,38 @@ create policy payroll_lines_select on payroll_export_lines for select
     where r.id = run_id and (has_role('hr_admin', r.company_id) or has_role('finance', r.company_id) or (has_role('ceo', r.company_id) or has_role('cto', r.company_id)))
   ));
 
+-- with check also requires employee_id's own company to match the run's
+-- company — without it, a Finance user could target payroll_export_lines at
+-- an employee_id belonging to a different company than the run (the run's
+-- company only decides who is allowed to write here at all, never which
+-- employee a line is allowed to be about).
 create policy payroll_lines_insert on payroll_export_lines for insert
   with check (exists (
+    select 1 from payroll_export_runs r
+    join employees e on e.id = employee_id and e.company_id = r.company_id
+    where r.id = run_id and has_role('finance', r.company_id) and r.status = 'draft'
+  ));
+
+-- Update/delete: same shape as insert — Finance, only while the parent run
+-- is still draft. Update backs in-place amount corrections
+-- (updatePayrollLineAmount); delete backs removing a bad manual/auto line
+-- before submission. Once submitted, a line's fate belongs to the approval
+-- workflow, same as the parent run. with check repeats the same
+-- employee/run-company match as insert — updatePayrollLineAmount never
+-- sends employee_id, but RLS must not depend on that: without it, any
+-- direct write could retarget a line onto a different company's employee.
+create policy payroll_lines_update on payroll_export_lines for update
+  using (exists (
+    select 1 from payroll_export_runs r where r.id = run_id and has_role('finance', r.company_id) and r.status = 'draft'
+  ))
+  with check (exists (
+    select 1 from payroll_export_runs r
+    join employees e on e.id = employee_id and e.company_id = r.company_id
+    where r.id = run_id and has_role('finance', r.company_id) and r.status = 'draft'
+  ));
+
+create policy payroll_lines_delete on payroll_export_lines for delete
+  using (exists (
     select 1 from payroll_export_runs r where r.id = run_id and has_role('finance', r.company_id) and r.status = 'draft'
   ));
 

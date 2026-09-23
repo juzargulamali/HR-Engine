@@ -428,8 +428,68 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
     });
   });
 
+  describe("payroll_export_lines: employee must belong to the run's own company", () => {
+    // Regression test: payroll_lines_insert/payroll_lines_update originally
+    // verified only that the RUN's company matched the acting Finance
+    // user's role grant — never that employee_id itself belonged to that
+    // company. That let a manual-line insert (or a raw update) target an
+    // employee_id from an entirely different company than the run.
+    const COMPANY_B = "00000000-0000-0000-0000-0000000006a2";
+    const EMPLOYEE_OTHER_CO = "00000000-0000-0000-0000-0000000006c9";
+
+    beforeAll(async () => {
+      await db.seed(`
+        insert into companies (id, legal_name, country_code, default_currency)
+          values ('${COMPANY_B}', 'Phase 6 Co B', 'ZZ', 'ZZD');
+        insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date)
+          values ('${EMPLOYEE_OTHER_CO}', 'P6B-01', '${COMPANY_B}', 'ZZ', 'Other', 'Co', '2024-01-01');
+      `);
+    });
+
+    it("blocks Finance from inserting a manual line for an employee outside the run's company", async () => {
+      const runId = randomUUID();
+      await db.seed(`
+        insert into payroll_export_runs (id, company_id, period_month, period_year, generated_by)
+          values ('${runId}', '${COMPANY_A}', 3, 2030, '${USER_FINANCE}');
+      `);
+
+      await expect(
+        db.asUser(USER_FINANCE, (query) =>
+          query(
+            `insert into payroll_export_lines (run_id, employee_id, component_code, amount, currency, label, is_manual, created_by)
+             values ($1, $2, 'bonus', 100, 'ZZD', 'cross-company attempt', true, $3)`,
+            [runId, EMPLOYEE_OTHER_CO, USER_FINANCE],
+          ),
+        ),
+      ).rejects.toThrow(/row-level security/);
+
+      const check = await db.asUser(USER_HR, (query) => query("select id from payroll_export_lines where run_id = $1", [runId]));
+      expect(check.rows).toEqual([]);
+    });
+
+    it("blocks retargeting an existing line onto an employee outside the run's company", async () => {
+      const runId = randomUUID();
+      const lineId = randomUUID();
+      await db.seed(`
+        insert into payroll_export_runs (id, company_id, period_month, period_year, generated_by)
+          values ('${runId}', '${COMPANY_A}', 4, 2030, '${USER_FINANCE}');
+        insert into payroll_export_lines (id, run_id, employee_id, component_code, amount, currency, label, is_manual, created_by)
+          values ('${lineId}', '${runId}', '${EMPLOYEE_REPORT}', 'bonus', 100, 'ZZD', 'legit bonus', true, '${USER_FINANCE}');
+      `);
+
+      await expect(
+        db.asUser(USER_FINANCE, (query) =>
+          query("update payroll_export_lines set employee_id = $1 where id = $2", [EMPLOYEE_OTHER_CO, lineId]),
+        ),
+      ).rejects.toThrow(/row-level security/);
+
+      const check = await db.asUser(USER_HR, (query) => query("select employee_id from payroll_export_lines where id = $1", [lineId]));
+      expect(check.rows[0]?.employee_id).toBe(EMPLOYEE_REPORT);
+    });
+  });
+
   describe("generate_payroll_export_lines: reconciliation", () => {
-    it("includes only approved reimbursements and this period's leave encashments, and is idempotent on re-run", async () => {
+    it("includes a basic_salary line, only approved reimbursements, and this period's leave encashments, and never duplicates on re-run", async () => {
       const runId = randomUUID();
       const approvedClaimId = randomUUID();
       const draftClaimId = randomUUID();
@@ -450,7 +510,14 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
 
       await db.asUser(USER_FINANCE, async (query) => {
         const { rows } = await query("select * from generate_payroll_export_lines($1)", [runId]);
-        expect(rows.length).toBe(2);
+        // basic_salary (EMPLOYEE_REPORT's only active line for this company —
+        // EMPLOYEE_MANAGER/EMPLOYEE_PEER have no compensation_details seeded)
+        // + the one approved reimbursement + the one in-period encashment.
+        expect(rows.length).toBe(3);
+
+        const salaryLine = rows.find((r) => r.component_code === "basic_salary");
+        expect(salaryLine?.employee_id).toBe(EMPLOYEE_REPORT);
+        expect(Number(salaryLine?.amount)).toBe(3000);
 
         const reimbursementLine = rows.find((r) => r.component_code === "reimbursement");
         expect(reimbursementLine?.source_reference_id).toBe(approvedClaimId);
@@ -459,11 +526,55 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
         const encashmentLine = rows.find((r) => r.component_code === "leave_encashment");
         expect(Number(encashmentLine?.amount)).toBe(3);
 
+        // "Idempotent" now means "re-running never accumulates duplicates",
+        // not "returns nothing" — generate_payroll_export_lines() deletes
+        // every previously auto-generated line for this run and rebuilds it
+        // fresh each time (so a stale salary figure never lingers), so a
+        // re-run returns the same three lines again as new rows, not zero.
         const rerun = await query("select * from generate_payroll_export_lines($1)", [runId]);
-        expect(rerun.rows).toEqual([]);
+        expect(rerun.rows.length).toBe(3);
 
         const total = await query("select count(*) from payroll_export_lines where run_id = $1", [runId]);
-        expect(Number(total.rows[0]?.count)).toBe(2);
+        expect(Number(total.rows[0]?.count)).toBe(3);
+      });
+    });
+
+    it("leaves a manually-added or manually-corrected line untouched across a re-run", async () => {
+      // Relies on the compensation_details row the previous test seeded for
+      // EMPLOYEE_REPORT (persisted via db.seed, never rolled back) so that
+      // generate_payroll_export_lines() has a basic_salary line to generate
+      // here too — inserting a second row here would give EMPLOYEE_REPORT
+      // two is_current rows and double the salary line via the join.
+      const runId = randomUUID();
+      await db.seed(`
+        insert into payroll_export_runs (id, company_id, period_month, period_year, generated_by)
+          values ('${runId}', '${COMPANY_A}', 1, 2031, '${USER_FINANCE}');
+      `);
+
+      await db.asUser(USER_FINANCE, async (query) => {
+        const { rows: firstRun } = await query("select * from generate_payroll_export_lines($1)", [runId]);
+        const salaryLineId = firstRun.find((r) => r.component_code === "basic_salary")?.id;
+        expect(salaryLineId).toBeDefined();
+
+        // Finance hand-corrects the auto-generated salary line and adds a
+        // manual bonus line — both must survive a later re-run untouched.
+        await query("update payroll_export_lines set amount = 3200, is_manual = true where id = $1", [salaryLineId]);
+        const bonusId = randomUUID();
+        await query(
+          "insert into payroll_export_lines (id, run_id, employee_id, component_code, amount, currency, label, is_manual, created_by) values ($1, $2, $3, 'bonus', 500, 'ZZD', 'Spot bonus', true, $4)",
+          [bonusId, runId, EMPLOYEE_REPORT, USER_FINANCE],
+        );
+
+        await query("select * from generate_payroll_export_lines($1)", [runId]);
+
+        const after = await query("select id, component_code, amount, is_manual from payroll_export_lines where run_id = $1", [runId]);
+        const correctedSalary = after.rows.find((r) => r.id === salaryLineId);
+        expect(correctedSalary).toBeDefined();
+        expect(Number(correctedSalary?.amount)).toBe(3200);
+
+        const bonusLine = after.rows.find((r) => r.id === bonusId);
+        expect(bonusLine).toBeDefined();
+        expect(Number(bonusLine?.amount)).toBe(500);
       });
     });
   });

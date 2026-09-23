@@ -99,3 +99,92 @@ export async function deletePayrollRun(runId: string): Promise<{ error: string |
   revalidatePath("/payroll");
   redirect("/payroll");
 }
+
+const MANUAL_COMPONENT_CODES = ["bonus", "deduction", "reimbursement", "basic_salary", "other_allowance"] as const;
+
+const addManualLineSchema = z.object({
+  runId: z.string().uuid(),
+  employeeId: z.string().uuid(),
+  componentCode: z.enum(MANUAL_COMPONENT_CODES),
+  label: z.string().min(1, "A description is required for a manual line."),
+  amount: z.coerce.number().positive("Amount must be a positive number."),
+  currency: z.string().min(1),
+});
+
+/** Deductions are stored negative, everything else positive — matches
+ * payroll_export_lines_component_sign_check. The Finance user always types
+ * in a positive amount; this is the one place the sign is decided. */
+function signedAmount(componentCode: string, amount: number): number {
+  return componentCode === "deduction" ? -amount : amount;
+}
+
+export async function addManualPayrollLine(_prevState: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = addManualLineSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  const d = parsed.data;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in." };
+
+  const { error } = await supabase.from("payroll_export_lines").insert({
+    run_id: d.runId,
+    employee_id: d.employeeId,
+    component_code: d.componentCode,
+    amount: signedAmount(d.componentCode, d.amount),
+    currency: d.currency,
+    label: d.label,
+    is_manual: true,
+    source_reference_type: null,
+    source_reference_id: null,
+    created_by: user.id,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath(`/payroll/${d.runId}`);
+  return { error: null };
+}
+
+/**
+ * Applies the same sign convention as addManualPayrollLine, based on the
+ * line's OWN component_code (fetched first, since the caller only sends the
+ * positive value the user typed) — and marks the line is_manual = true so a
+ * future "re-check for new lines" never stomps this correction, even if the
+ * line started out auto-generated.
+ */
+export async function updatePayrollLineAmount(lineId: string, runId: string, newAmount: number): Promise<{ error: string | null }> {
+  // A Server Action is a public endpoint — the client-side check in
+  // EditPayrollLineForm doesn't bind the caller. Reject non-finite/non-positive
+  // input here too: Postgres numeric's NaN sorts as "greater than everything"
+  // for comparison purposes, so an unvalidated NaN could otherwise slip past
+  // payroll_export_lines_component_sign_check's `< 0` / `> 0` tests.
+  if (!Number.isFinite(newAmount) || newAmount <= 0) return { error: "Amount must be a positive number." };
+
+  const supabase = await createClient();
+  const { data: line, error: fetchError } = await supabase
+    .from("payroll_export_lines")
+    .select("component_code")
+    .eq("id", lineId)
+    .single();
+  if (fetchError || !line) return { error: fetchError?.message ?? "Line not found." };
+
+  const { error } = await supabase
+    .from("payroll_export_lines")
+    .update({ amount: signedAmount(line.component_code, newAmount), is_manual: true })
+    .eq("id", lineId);
+  if (error) return { error: error.message };
+
+  revalidatePath(`/payroll/${runId}`);
+  return { error: null };
+}
+
+/** RLS handles the Finance-only, draft-only restriction. */
+export async function deletePayrollLine(lineId: string, runId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("payroll_export_lines").delete().eq("id", lineId);
+  if (error) return { error: error.message };
+  revalidatePath(`/payroll/${runId}`);
+  return { error: null };
+}
