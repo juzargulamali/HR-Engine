@@ -4,11 +4,11 @@ import { Badge } from "@/components/ui/badge";
 import { DeleteAttendanceButton } from "./delete-attendance-button";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
+  not_recorded: "outline",
   present: "default",
   absent: "destructive",
   leave: "secondary",
-  holiday: "outline",
-  weekend: "outline",
+  partial_day: "secondary",
 };
 
 function formatTime(value: string | null): string {

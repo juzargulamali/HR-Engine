@@ -3,7 +3,6 @@
 import { useState, useTransition } from "react";
 import { bulkRecordAttendance } from "@/lib/actions/attendance";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -13,15 +12,18 @@ interface Row {
   employeeId: string;
   name: string;
   status: string;
+  workMode: string | null;
   hoursWorked: string | null;
 }
 
 export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate: string; rows: Row[]; isRecoveryDay: boolean }) {
-  const [edits, setEdits] = useState(() => new Map(rows.map((r) => [r.employeeId, { status: r.status, hoursWorked: r.hoursWorked ?? "" }])));
+  const [edits, setEdits] = useState(
+    () => new Map(rows.map((r) => [r.employeeId, { status: r.status, workMode: r.workMode ?? "", hoursWorked: r.hoursWorked ?? "" }])),
+  );
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<{ error: string | null; creditedCount: number } | null>(null);
 
-  function updateRow(employeeId: string, patch: Partial<{ status: string; hoursWorked: string }>) {
+  function updateRow(employeeId: string, patch: Partial<{ status: string; workMode: string; hoursWorked: string }>) {
     setEdits((prev) => {
       const next = new Map(prev);
       next.set(employeeId, { ...next.get(employeeId)!, ...patch });
@@ -31,6 +33,11 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
 
   function handleSave() {
     startTransition(async () => {
+      // isRecoveryDay is only ever used here to explain the badge in the
+      // table below — record_attendance_and_recovery() re-derives whether
+      // today is actually a recovery day (and whether a status of
+      // 'present' on it actually earns anything, per policy) itself; this
+      // form never asserts either one.
       const outcome = await bulkRecordAttendance({
         workDate,
         rows: rows.map((r) => {
@@ -38,8 +45,8 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
           return {
             employeeId: r.employeeId,
             status: edit.status,
+            workMode: edit.workMode === "" ? undefined : edit.workMode,
             hoursWorked: edit.hoursWorked === "" ? undefined : Number(edit.hoursWorked),
-            isRecoveryEligible: isRecoveryDay && edit.status === "present",
           };
         }),
       });
@@ -54,14 +61,13 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
           <TableRow>
             <TableHead>Employee</TableHead>
             <TableHead>Status</TableHead>
+            <TableHead>Work mode</TableHead>
             <TableHead>Hours</TableHead>
-            <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {rows.map((r) => {
             const edit = edits.get(r.employeeId)!;
-            const earnsRecoveryDay = isRecoveryDay && edit.status === "present";
             return (
               <TableRow key={r.employeeId}>
                 <TableCell className="font-medium">{r.name}</TableCell>
@@ -71,11 +77,25 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
                     onChange={(e) => updateRow(r.employeeId, { status: e.target.value })}
                     className="h-8 w-36 text-xs"
                   >
+                    <option value="not_recorded">Not recorded</option>
                     <option value="present">Present</option>
                     <option value="absent">Absent</option>
                     <option value="leave">Leave</option>
-                    <option value="holiday">Holiday</option>
-                    <option value="weekend">Weekend</option>
+                    <option value="partial_day">Partial day</option>
+                  </Select>
+                </TableCell>
+                <TableCell>
+                  <Select
+                    value={edit.workMode}
+                    onChange={(e) => updateRow(r.employeeId, { workMode: e.target.value })}
+                    className="h-8 w-36 text-xs"
+                  >
+                    <option value="">—</option>
+                    <option value="office">Office</option>
+                    <option value="client_site">Client site</option>
+                    <option value="work_from_home">Work from home</option>
+                    <option value="field_work">Field work</option>
+                    <option value="business_travel">Business travel</option>
                   </Select>
                 </TableCell>
                 <TableCell>
@@ -89,12 +109,18 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
                     className="h-8 w-20 text-xs"
                   />
                 </TableCell>
-                <TableCell>{earnsRecoveryDay ? <Badge variant="secondary">+1 comp day</Badge> : null}</TableCell>
               </TableRow>
             );
           })}
         </TableBody>
       </Table>
+
+      {isRecoveryDay ? (
+        <p className="text-xs text-muted-foreground">
+          Anyone marked Present today may earn a recovery day, per your country&apos;s policy — the exact credit (or
+          whether one applies at all) is decided when you save, not shown here in advance.
+        </p>
+      ) : null}
 
       {result?.error ? <Alert variant="destructive">{result.error}</Alert> : null}
       {result && !result.error ? (

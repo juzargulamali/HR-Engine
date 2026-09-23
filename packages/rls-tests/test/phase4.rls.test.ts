@@ -357,39 +357,18 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
     });
   });
 
-  describe("comp_day_ledger: attendance-credit dedup constraint", () => {
-    // Regression test: bulkRecordAttendance()'s "already credited?" check
-    // was a plain SELECT immediately followed by an INSERT, with no lock in
-    // between — two concurrent saves for the same attendance record (a
-    // double-clicked "Save" on the daily register, or two admins editing the
-    // same date) could both pass it and both insert an 'earned' comp-day
-    // credit, doubling the day. comp_day_ledger_attendance_uniq backs that
-    // check with a real partial unique index scoped to
-    // reference_type = 'attendance_record' only — a real or fixture UUID is
-    // fine here, since the constraint only cares about uniqueness, not FK
-    // validity.
-    it("rejects a second comp_day_ledger row crediting the same attendance_record, but allows the same reference_id under a different reference_type", async () => {
-      const referenceId = randomUUID();
-      await db.seed(`
-        insert into comp_day_ledger (employee_id, txn_date, entry_type, days, reference_type, reference_id, created_by)
-        values ('${EMPLOYEE_REPORT}', '2026-04-10', 'earned', 1, 'attendance_record', '${referenceId}', '${USER_HR}');
-      `);
-
-      await expect(
-        db.seed(`
-          insert into comp_day_ledger (employee_id, txn_date, entry_type, days, reference_type, reference_id, created_by)
-          values ('${EMPLOYEE_REPORT}', '2026-04-10', 'earned', 1, 'attendance_record', '${referenceId}', '${USER_HR}');
-        `),
-      ).rejects.toThrow(/duplicate key value violates unique constraint/);
-
-      // Same reference_id, but a different reference_type — the partial
-      // index only scopes to 'attendance_record', so this must succeed.
-      await db.seed(`
-        insert into comp_day_ledger (employee_id, txn_date, entry_type, days, reference_type, reference_id, created_by)
-        values ('${EMPLOYEE_REPORT}', '2026-04-10', 'redeemed', -1, 'leave_request', '${referenceId}', '${USER_HR}');
-      `);
-    });
-  });
+  // Attendance-credit deduplication used to be a partial unique index
+  // (comp_day_ledger_attendance_uniq) forbidding a second comp_day_ledger
+  // row from ever referencing the same attendance_record — but a
+  // correction's reversal legitimately needs to do exactly that (reverse,
+  // then possibly re-earn later, both referencing the same
+  // attendance_record id). That index was dropped; deduplication is now
+  // record_attendance_and_recovery()'s own responsibility, backed by an
+  // advisory lock rather than a unique constraint (same technique
+  // decide_leave_approval() already uses for this employee's comp-day
+  // balance) — see the "record_attendance_and_recovery()" describe block
+  // below, whose "idempotent under a repeated ... save" test is this
+  // regression's real coverage now.
 
   describe("reimbursement approval: threshold-based routing", () => {
     let stepFinanceId: string;
@@ -654,6 +633,151 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
           query("insert into attendance_records (employee_id, work_date, status) values ($1, '2026-04-02', 'present')", [EMPLOYEE_REPORT]),
         ),
       ).rejects.toThrow(/row-level security/);
+    });
+  });
+
+  // 2026-04-04 is a Saturday and 2026-04-06 a Monday — ZZ took the default
+  // week_start_day (1, Monday), so Sat/Sun are its weekend.
+  describe("record_attendance_and_recovery()", () => {
+    it("credits a comp day for present on a weekend, re-deriving the day itself rather than trusting the caller", async () => {
+      await db.asUser(USER_HR, async (query) => {
+        const { rows } = await query(
+          "select * from record_attendance_and_recovery($1, $2::jsonb)",
+          ["2026-04-04", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }])],
+        );
+        expect(rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: true, reversed: false }]);
+
+        const record = await query(
+          "select status, work_mode from attendance_records where employee_id = $1 and work_date = '2026-04-04'",
+          [EMPLOYEE_REPORT],
+        );
+        expect(record.rows).toEqual([{ status: "present", work_mode: null }]);
+
+        const ledger = await query(
+          "select entry_type, days from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-04')",
+          [EMPLOYEE_REPORT],
+        );
+        expect(ledger.rows).toEqual([{ entry_type: "earned", days: "1.00" }]);
+      });
+    });
+
+    it("does not credit present on an ordinary weekday", async () => {
+      await db.asUser(USER_HR, async (query) => {
+        const { rows } = await query(
+          "select * from record_attendance_and_recovery($1, $2::jsonb)",
+          ["2026-04-06", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", work_mode: "office" }])],
+        );
+        expect(rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: false, reversed: false }]);
+
+        const ledger = await query(
+          "select id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-06')",
+          [EMPLOYEE_REPORT],
+        );
+        expect(ledger.rows).toEqual([]);
+      });
+    });
+
+    it("is idempotent under a repeated (e.g. double-clicked) save — never double-credits the same day", async () => {
+      await db.asUser(USER_HR, async (query) => {
+        const payload = JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }]);
+        const first = await query("select * from record_attendance_and_recovery($1, $2::jsonb)", ["2026-04-11", payload]);
+        expect(first.rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: true, reversed: false }]);
+
+        const second = await query("select * from record_attendance_and_recovery($1, $2::jsonb)", ["2026-04-11", payload]);
+        expect(second.rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: false, reversed: false }]);
+
+        const ledger = await query(
+          "select entry_type from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-11')",
+          [EMPLOYEE_REPORT],
+        );
+        expect(ledger.rows).toEqual([{ entry_type: "earned" }]);
+      });
+    });
+
+    it("reverses (never deletes) an already-earned credit when the day is corrected away from present", async () => {
+      await db.asUser(USER_HR, async (query) => {
+        await query(
+          "select * from record_attendance_and_recovery($1, $2::jsonb)",
+          ["2026-04-18", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }])],
+        );
+
+        const correction = await query(
+          "select * from record_attendance_and_recovery($1, $2::jsonb)",
+          ["2026-04-18", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "absent" }])],
+        );
+        expect(correction.rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: false, reversed: true }]);
+
+        const record = await query("select status from attendance_records where employee_id = $1 and work_date = '2026-04-18'", [
+          EMPLOYEE_REPORT,
+        ]);
+        expect(record.rows).toEqual([{ status: "absent" }]);
+
+        const ledger = await query(
+          "select entry_type, days, reversal_of_id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-18') order by created_at",
+          [EMPLOYEE_REPORT],
+        );
+        expect(ledger.rows).toHaveLength(2);
+        expect(ledger.rows[0]).toMatchObject({ entry_type: "earned", days: "1.00", reversal_of_id: null });
+        expect(ledger.rows[1]).toMatchObject({ entry_type: "reversal", days: "-1.00" });
+        expect(ledger.rows[1]?.reversal_of_id).toBeTruthy();
+
+        // Correcting it back to present earns a fresh credit — the
+        // original (now-reversed) earned row must not permanently block
+        // this day from ever qualifying again.
+        const restored = await query(
+          "select * from record_attendance_and_recovery($1, $2::jsonb)",
+          ["2026-04-18", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }])],
+        );
+        expect(restored.rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: true, reversed: false }]);
+
+        const finalLedger = await query(
+          "select entry_type from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-18') order by created_at",
+          [EMPLOYEE_REPORT],
+        );
+        expect(finalLedger.rows.map((r) => r.entry_type)).toEqual(["earned", "reversal", "earned"]);
+      });
+    });
+
+    it("blocks anyone other than HR Admin from recording attendance", async () => {
+      const payload = JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }]);
+      await expect(
+        db.asUser(USER_MANAGER, (query) => query("select * from record_attendance_and_recovery($1, $2::jsonb)", ["2026-04-25", payload])),
+      ).rejects.toThrow(/Only HR Admin/);
+      await expect(
+        db.asUser(USER_REPORT, (query) => query("select * from record_attendance_and_recovery($1, $2::jsonb)", ["2026-04-25", payload])),
+      ).rejects.toThrow(/Only HR Admin/);
+    });
+
+    it("honors a country's configured recovery_credit_days, including zero", async () => {
+      // ZZ already has an active, open-ended overtime_rules policy from the
+      // "approving a timesheet..." test above (policy_versions' exclusion
+      // constraint allows only one active row per country/date range, so
+      // this test has to reuse and restore it rather than insert its own).
+      const original = await db.asUser(USER_HR, (query) =>
+        query("select id, payload from policy_versions where country_code = 'ZZ' and policy_type = 'overtime_rules' and status = 'active'"),
+      );
+      const policyId = original.rows[0]?.id;
+      expect(policyId).toBeTruthy();
+
+      try {
+        await db.seed(`update policy_versions set payload = payload || '{"recovery_credit_days": 0}'::jsonb where id = '${policyId}';`);
+
+        await db.asUser(USER_HR, async (query) => {
+          const { rows } = await query(
+            "select * from record_attendance_and_recovery($1, $2::jsonb)",
+            ["2026-05-02", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }])],
+          );
+          expect(rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: false, reversed: false }]);
+
+          const ledger = await query(
+            "select id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-05-02')",
+            [EMPLOYEE_REPORT],
+          );
+          expect(ledger.rows).toEqual([]);
+        });
+      } finally {
+        await db.seed(`update policy_versions set payload = '${JSON.stringify(original.rows[0]?.payload)}'::jsonb where id = '${policyId}';`);
+      }
     });
   });
 });

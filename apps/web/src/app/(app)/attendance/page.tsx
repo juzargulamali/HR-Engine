@@ -12,11 +12,11 @@ import { Alert } from "@/components/ui/alert";
 import { BulkAttendanceForm } from "./bulk-attendance-form";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
+  not_recorded: "outline",
   present: "default",
   absent: "destructive",
   leave: "secondary",
-  holiday: "outline",
-  weekend: "outline",
+  partial_day: "secondary",
 };
 
 function todayISO(): string {
@@ -117,7 +117,11 @@ export default async function AttendancePage({
   const employeeIds = (employees ?? []).map((e) => e.id);
   const { data: existing } =
     employeeIds.length > 0
-      ? await supabase.from("attendance_records").select("employee_id, status, hours_worked").eq("work_date", workDate).in("employee_id", employeeIds)
+      ? await supabase
+          .from("attendance_records")
+          .select("employee_id, status, work_mode, hours_worked")
+          .eq("work_date", workDate)
+          .in("employee_id", employeeIds)
       : { data: [] as never[] };
   const existingByEmployee = new Map((existing ?? []).map((r) => [r.employee_id, r]));
 
@@ -125,12 +129,18 @@ export default async function AttendancePage({
   const isHolidayDate = !!holiday;
   const isRecoveryDay = isHolidayDate || isWeekend(workDate, weekStartDay);
 
+  // A day with no saved row is genuinely unrecorded — never preselected as
+  // Present (or as a synthetic "holiday"/"weekend" status) just because
+  // it's the weekend or a public holiday. The server enforces this too
+  // (attendance_records.status defaults to 'not_recorded'); this is only
+  // what the register shows before anyone has saved anything for the day.
   const rows = (employees ?? []).map((e) => {
     const rec = existingByEmployee.get(e.id);
     return {
       employeeId: e.id,
       name: `${e.first_name} ${e.last_name}`,
-      status: rec?.status ?? (isRecoveryDay ? (isHolidayDate ? "holiday" : "weekend") : "present"),
+      status: rec?.status ?? "not_recorded",
+      workMode: rec?.work_mode ?? null,
       hoursWorked: rec?.hours_worked ?? null,
     };
   });
@@ -173,7 +183,7 @@ export default async function AttendancePage({
       {isRecoveryDay ? (
         <Alert>
           {isHolidayDate ? `${holiday?.name ?? "Public holiday"} — ` : "Weekend — "}
-          anyone marked present today earns a recovery (comp) day automatically.
+          anyone marked present today may earn a recovery (comp) day, per your country&apos;s policy.
         </Alert>
       ) : null}
 

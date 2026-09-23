@@ -811,6 +811,7 @@ export interface Database {
           clock_out: string | null;
           hours_worked: string | null;
           status: string;
+          work_mode: string | null;
           source: string;
         };
         Insert: {
@@ -821,6 +822,7 @@ export interface Database {
           clock_out?: string | null;
           hours_worked?: number | null;
           status?: string;
+          work_mode?: string | null;
           source?: string;
         };
         Update: Partial<Database["public"]["Tables"]["attendance_records"]["Insert"]>;
@@ -1231,6 +1233,13 @@ export interface Database {
       cancel_leave_request: {
         Args: { p_request_id: string };
         Returns: undefined;
+      };
+      record_attendance_and_recovery: {
+        Args: {
+          p_work_date: string;
+          p_rows: { employee_id: string; status: string; work_mode: string | null; hours_worked: number | null }[];
+        };
+        Returns: { employee_id: string; credited: boolean; reversed: boolean }[];
       };
     };
     Enums: {
