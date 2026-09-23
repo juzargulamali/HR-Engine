@@ -33,6 +33,7 @@ export default async function LeavePage() {
     );
   }
 
+  const today = new Date().toISOString().slice(0, 10);
   const supabase = await createClient();
   const [{ data: leaveBalances }, { data: compBalance }, { data: requests }] = await Promise.all([
     supabase.from("leave_balances").select("leave_type_code, balance_days").eq("employee_id", session.employeeId),
@@ -102,8 +103,8 @@ export default async function LeavePage() {
                     <Badge variant={STATUS_VARIANT[r.status] ?? "outline"}>{r.status.replace(/_/g, " ")}</Badge>
                   </TableCell>
                   <TableCell>
-                    {r.status === "submitted" || r.status === "pending_approval" ? (
-                      <CancelRequestButton requestId={r.id} />
+                    {r.status === "submitted" || r.status === "pending_approval" || (r.status === "approved" && r.start_date > today) ? (
+                      <CancelRequestButton requestId={r.id} restoresBalance={r.status === "approved"} />
                     ) : null}
                   </TableCell>
                 </TableRow>

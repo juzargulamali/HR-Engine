@@ -464,10 +464,70 @@ create table leave_requests (
   -- posted at all -- unaccounted, unlimited "free" leave. total_days is
   -- always server-computed at submission (never client-editable after), so
   -- this only rejects the exploit path, not any legitimate value.
-  check (total_days > 0)
+  check (total_days > 0),
+  -- Same backstop role as the total_days check above, for a different
+  -- loophole: submitLeaveRequest() already checks for an overlapping
+  -- request before inserting, but that check-then-insert has the same
+  -- TOCTOU shape as bulkRecordAttendance()'s comp-day race, and a raw
+  -- insert bypassing the app layer entirely skips it altogether. One
+  -- employee may not hold two overlapping requests that are still live
+  -- (not yet rejected/cancelled) — cancelled/rejected requests are
+  -- deliberately excluded so a withdrawn request never blocks a new one
+  -- for the same dates.
+  exclude using gist (
+    employee_id with =,
+    daterange(start_date, end_date, '[]') with &&
+  ) where (status in ('submitted', 'pending_approval', 'approved'))
 );
 
 create index idx_leave_requests_employee on leave_requests(employee_id);
+
+-- Backstop for the same loophole as leave/new/page.tsx's leave-type
+-- allowlist: the app no longer offers a free-text leave type field, but a
+-- raw insert bypassing it entirely could still write any string. Requires
+-- an active leave_rules policy for the employee's country that actually
+-- defines this leave_type_code, as of today — the same "no active policy"
+-- case submitLeaveRequest() blocks with a friendly message surfaces here
+-- as a generic exception for anything that reaches this trigger without
+-- going through the app layer first.
+-- SECURITY DEFINER: the app inserts leave_requests for the requester
+-- themselves, but this check must resolve the SAME way regardless of who's
+-- inserting or which other rows they can see — a plain employee's own
+-- employees_select policy doesn't even cover an unrelated peer's row, and
+-- this check has nothing to do with row ownership anyway (only whether an
+-- active policy defines this leave type for this employee's country), so
+-- it must not be gated by the inserting user's own RLS visibility.
+create or replace function guard_leave_request_type()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_valid boolean;
+begin
+  select exists (
+    select 1
+    from policy_leave_types plt
+    join policy_versions pv on pv.id = plt.policy_version_id
+    join employees e on e.country_code = pv.country_code
+    where e.id = new.employee_id
+      and pv.policy_type = 'leave_rules'
+      and pv.status = 'active'
+      and current_date between pv.effective_from and coalesce(pv.effective_to, 'infinity'::date)
+      and plt.leave_type_code = new.leave_type_code
+  ) into v_valid;
+
+  if not v_valid then
+    raise exception 'No active leave policy for this employee''s country defines leave type "%" — HR must activate a leave policy with this leave type first', new.leave_type_code;
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger leave_requests_guard_type before insert on leave_requests
+  for each row execute function guard_leave_request_type();
 
 -- Append-only, immutable. Balance = SUM(amount_days), never a stored mutable field.
 create table leave_ledger (
@@ -2037,15 +2097,26 @@ begin
 end;
 $$;
 
--- Withdraws a leave request that's still awaiting a decision — the
--- requester's own action, distinct from decide_leave_approval() above
--- (an approver's action). Without this, cancelling used to be a bare
--- `update leave_requests set status = 'cancelled'` from the app that never
--- touched the approvals table (which has no UPDATE grant for authenticated
--- anyway — see the revoke below) — the approver's now-moot approvals row
--- stayed 'pending' forever, still counting toward their pending-approvals
--- total and still listed on their Approvals page for a request that no
--- longer needs (or wants) a decision.
+-- Withdraws a leave request — the requester's own action, distinct from
+-- decide_leave_approval() above (an approver's action). Two cases:
+--   - Still awaiting a decision (submitted/pending_approval): just closes
+--     out the chain. Without this, cancelling used to be a bare
+--     `update leave_requests set status = 'cancelled'` from the app that
+--     never touched the approvals table (which has no UPDATE grant for
+--     authenticated anyway — see the revoke below) — the approver's now-moot
+--     approvals row stayed 'pending' forever, still counting toward their
+--     pending-approvals total and still listed on their Approvals page for
+--     a decision that no longer mattered.
+--   - Already approved, but hasn't started yet: also reverses every ledger
+--     entry that approval posted (leave_ledger deduction, and any
+--     comp_day_ledger redemption from the deduction-priority routing) —
+--     never by deleting them, by the same linked-reversal pattern the
+--     ledgers already use elsewhere (reversal_of_id), so the original
+--     entries and who reversed them both stay on the record. Once a
+--     request's start date has passed, it's cancel-only-going-forward: no
+--     way to know from here how much of it was actually taken, so the
+--     ledger is left alone and the change has to go through a manual
+--     adjustment instead.
 create or replace function cancel_leave_request(p_request_id uuid)
 returns void
 language plpgsql
@@ -2053,28 +2124,58 @@ security definer
 set search_path = public
 as $$
 declare
-  v_status request_status;
-  v_employee_id uuid;
+  v_request leave_requests%rowtype;
+  v_ledger_row record;
+  v_comp_row record;
 begin
-  select lr.status, lr.employee_id into v_status, v_employee_id
+  select lr.* into v_request
   from leave_requests lr
   join employees e on e.id = lr.employee_id
   where lr.id = p_request_id and e.user_id = auth.uid()
   for update of lr;
 
-  if v_employee_id is null then
+  if v_request.id is null then
     raise exception 'Leave request not found, or it is not yours to cancel';
   end if;
 
-  if v_status not in ('submitted', 'pending_approval') then
-    raise exception 'This request can no longer be cancelled (status: %)', v_status;
+  if v_request.status not in ('submitted', 'pending_approval', 'approved') then
+    raise exception 'This request can no longer be cancelled (status: %)', v_request.status;
+  end if;
+
+  if v_request.status = 'approved' and v_request.start_date <= current_date then
+    raise exception 'An approved request can only be cancelled before it starts — once it has started, ask HR for a manual adjustment instead';
   end if;
 
   update leave_requests set status = 'cancelled', decided_at = now() where id = p_request_id;
 
   update approvals
-  set decision = 'cancelled', decided_at = now(), comments = coalesce(comments, 'Cancelled by requester before a decision was made')
+  set decision = 'cancelled', decided_at = now(), comments = coalesce(comments, 'Cancelled by requester')
   where entity_type = 'leave_request' and entity_id = p_request_id and decision = 'pending';
+
+  if v_request.status = 'approved' then
+    -- Same advisory lock decide_leave_approval() takes before touching this
+    -- employee's comp-day balance, for the same reason: serialize concurrent
+    -- reads+writes of a SUM-derived balance against this employee.
+    perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || v_request.employee_id::text));
+
+    for v_ledger_row in
+      select l.* from leave_ledger l
+      where l.reference_type = 'leave_request' and l.reference_id = p_request_id and l.amount_days < 0
+        and not exists (select 1 from leave_ledger r where r.reversal_of_id = l.id)
+    loop
+      insert into leave_ledger (employee_id, leave_type_code, txn_date, entry_type, amount_days, reference_type, reference_id, reversal_of_id, note, created_by)
+      values (v_ledger_row.employee_id, v_ledger_row.leave_type_code, current_date, 'reversal', -v_ledger_row.amount_days, 'leave_request', p_request_id, v_ledger_row.id, 'Reversed: leave request cancelled before it started', auth.uid());
+    end loop;
+
+    for v_comp_row in
+      select c.* from comp_day_ledger c
+      where c.reference_type = 'leave_request' and c.reference_id = p_request_id and c.days < 0
+        and not exists (select 1 from comp_day_ledger r where r.reversal_of_id = c.id)
+    loop
+      insert into comp_day_ledger (employee_id, txn_date, entry_type, days, reference_type, reference_id, reversal_of_id, note, created_by)
+      values (v_comp_row.employee_id, current_date, 'reversal', -v_comp_row.days, 'leave_request', p_request_id, v_comp_row.id, 'Reversed: leave request cancelled before it started', auth.uid());
+    end loop;
+  end if;
 end;
 $$;
 

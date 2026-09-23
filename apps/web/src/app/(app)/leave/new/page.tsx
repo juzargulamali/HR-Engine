@@ -1,3 +1,4 @@
+import { resolvePolicyVersionAsOf } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +15,7 @@ export default async function NewLeaveRequestPage() {
     );
   }
 
+  const today = new Date().toISOString().slice(0, 10);
   const supabase = await createClient();
   const { data: employee } = await supabase
     .from("employees")
@@ -21,25 +23,37 @@ export default async function NewLeaveRequestPage() {
     .eq("id", session.employeeId)
     .single();
 
-  // Leave types come from the active leave_rules policy for the employee's
-  // country (docs/09-extending-the-system.md) — nothing here is hard-coded
-  // per country. If HR Admin hasn't activated one yet, the form falls back
-  // to a free-text leave type code rather than blocking submission.
+  // Leave types come from the leave_rules policy version actually in effect
+  // today for the employee's country (docs/09-extending-the-system.md) —
+  // nothing here is hard-coded per country. Uncontrolled free-text leave
+  // types used to be allowed as a fallback when none was configured; now
+  // submission is blocked outright with a clear HR-configuration message
+  // instead, both here and (authoritatively) in submitLeaveRequest() itself.
   let leaveTypes: { code: string; name: string }[] = [];
+  let hasActivePolicy = false;
   if (employee) {
-    const { data: activePolicy } = await supabase
+    const { data: versions } = await supabase
       .from("policy_versions")
-      .select("id")
+      .select("id, status, effective_from, effective_to, version_no")
       .eq("country_code", employee.country_code)
-      .eq("policy_type", "leave_rules")
-      .eq("status", "active")
-      .maybeSingle();
+      .eq("policy_type", "leave_rules");
+    const active = resolvePolicyVersionAsOf(
+      (versions ?? []).map((v) => ({
+        id: v.id,
+        effectiveFrom: v.effective_from,
+        effectiveTo: v.effective_to,
+        versionNo: v.version_no,
+        status: v.status,
+      })),
+      today,
+    );
+    hasActivePolicy = !!active;
 
-    if (activePolicy) {
+    if (active) {
       const { data: rows } = await supabase
         .from("policy_leave_types")
         .select("leave_type_code, name")
-        .eq("policy_version_id", activePolicy.id);
+        .eq("policy_version_id", active.id);
       leaveTypes = (rows ?? []).map((r) => ({ code: r.leave_type_code, name: r.name }));
     }
   }
@@ -50,13 +64,19 @@ export default async function NewLeaveRequestPage() {
         <CardTitle>Request leave</CardTitle>
       </CardHeader>
       <CardContent>
-        {leaveTypes.length === 0 ? (
-          <Alert className="mb-4">
-            No leave types are configured for your country yet — enter one manually below. Ask HR Admin to activate a
-            leave policy so this becomes a dropdown.
+        {!hasActivePolicy ? (
+          <Alert variant="destructive">
+            HR hasn&apos;t activated a leave policy for your country yet. Leave requests can&apos;t be submitted until
+            one is active — ask HR Admin to activate one.
           </Alert>
-        ) : null}
-        <LeaveRequestForm leaveTypes={leaveTypes} />
+        ) : leaveTypes.length === 0 ? (
+          <Alert variant="destructive">
+            Your country&apos;s active leave policy doesn&apos;t define any leave types yet. Ask HR Admin to add at
+            least one before you can request leave.
+          </Alert>
+        ) : (
+          <LeaveRequestForm leaveTypes={leaveTypes} />
+        )}
       </CardContent>
     </Card>
   );

@@ -12,6 +12,11 @@ import { Alert } from "@/components/ui/alert";
 
 const initialState: ActionState = { error: null };
 
+// The page above only ever renders this form when it already found an
+// active leave policy with at least one leave type — never falls back to a
+// free-text field, since a raw leaveTypeCode string would bypass the
+// server's own allowlist check anyway (submitLeaveRequest() validates
+// against policy_leave_types regardless of what this form sends).
 export function LeaveRequestForm({ leaveTypes }: { leaveTypes: { code: string; name: string }[] }) {
   const [state, formAction, pending] = useActionState(submitLeaveRequest, initialState);
 
@@ -19,17 +24,13 @@ export function LeaveRequestForm({ leaveTypes }: { leaveTypes: { code: string; n
     <form action={formAction} className="space-y-4">
       <div className="space-y-1.5">
         <Label htmlFor="leaveTypeCode">Leave type</Label>
-        {leaveTypes.length > 0 ? (
-          <Select id="leaveTypeCode" name="leaveTypeCode" defaultValue={leaveTypes[0]?.code}>
-            {leaveTypes.map((t) => (
-              <option key={t.code} value={t.code}>
-                {t.name}
-              </option>
-            ))}
-          </Select>
-        ) : (
-          <Input id="leaveTypeCode" name="leaveTypeCode" placeholder="e.g. annual" required />
-        )}
+        <Select id="leaveTypeCode" name="leaveTypeCode" defaultValue={leaveTypes[0]?.code}>
+          {leaveTypes.map((t) => (
+            <option key={t.code} value={t.code}>
+              {t.name}
+            </option>
+          ))}
+        </Select>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">

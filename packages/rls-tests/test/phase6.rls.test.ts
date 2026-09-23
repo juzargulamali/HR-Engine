@@ -48,6 +48,14 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
         ('${USER_HR}', 'hr_admin', '${COMPANY_A}'),
         ('${USER_FINANCE}', 'finance', '${COMPANY_A}'),
         ('${USER_CEO}', 'ceo', '${COMPANY_A}');
+
+      -- guard_leave_request_type() requires an active leave_rules policy
+      -- defining whatever leave_type_code a request uses — every
+      -- leave_requests row seeded below uses 'annual'.
+      insert into policy_versions (id, country_code, policy_type, version_no, effective_from, status, payload, created_by, approved_by, approved_at)
+        values ('00000000-0000-0000-0000-0000000006e1', 'ZZ', 'leave_rules', 1, '2020-01-01', 'active', '{}'::jsonb, '${USER_HR}', '${USER_CEO}', now());
+      insert into policy_leave_types (policy_version_id, leave_type_code, name, accrual_method)
+        values ('00000000-0000-0000-0000-0000000006e1', 'annual', 'Annual Leave', 'monthly_accrual');
     `);
 
     const { rows } = await db.asUser(USER_HR, (query) =>
@@ -775,12 +783,17 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
       const otherEmployeeId = randomUUID();
       const otherUserId = randomUUID();
       const otherRequestId = randomUUID();
+      const otherPolicyId = randomUUID();
       await db.seed(`
         insert into countries (code, name, default_currency) values ('YY', 'Yland', 'YYD') on conflict do nothing;
         insert into auth.users (id, email) values ('${otherUserId}', 'other-co@enginious.ae');
         insert into companies (id, legal_name, country_code, default_currency) values ('${otherCompanyId}', 'Other Co', 'YY', 'YYD');
         insert into employees (id, user_id, employee_number, company_id, country_code, first_name, last_name, hire_date)
           values ('${otherEmployeeId}', '${otherUserId}', 'OC-01', '${otherCompanyId}', 'YY', 'Other', 'Employee', '2024-01-01');
+        insert into policy_versions (id, country_code, policy_type, version_no, effective_from, status, payload, created_by, approved_by, approved_at)
+          values ('${otherPolicyId}', 'YY', 'leave_rules', 1, '2020-01-01', 'active', '{}'::jsonb, '${USER_HR}', '${USER_CEO}', now());
+        insert into policy_leave_types (policy_version_id, leave_type_code, name, accrual_method)
+          values ('${otherPolicyId}', 'annual', 'Annual Leave', 'monthly_accrual');
         insert into leave_requests (id, employee_id, leave_type_code, start_date, end_date, total_days)
           values ('${otherRequestId}', '${otherEmployeeId}', 'annual', '2026-07-02', '2026-07-02', 1);
       `);

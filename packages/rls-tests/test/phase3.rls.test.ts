@@ -27,6 +27,8 @@ const EMPLOYEE_MANAGER = "00000000-0000-0000-0000-0000000003c1";
 const EMPLOYEE_REPORT = "00000000-0000-0000-0000-0000000003c2";
 const EMPLOYEE_PEER = "00000000-0000-0000-0000-0000000003c3";
 
+const LEAVE_RULES_POLICY_ID = "00000000-0000-0000-0000-0000000003d1";
+
 describe("Phase 3 row-level security: leave, ledgers, deduction priority, approvals", () => {
   const db = new RlsTestDatabase();
   let defaultWorkflowId: string;
@@ -82,6 +84,15 @@ describe("Phase 3 row-level security: leave, ledgers, deduction priority, approv
 
       insert into leave_ledger (employee_id, leave_type_code, txn_date, entry_type, amount_days, created_by)
         values ('${EMPLOYEE_REPORT}', 'annual', '2026-01-01', 'accrual', 10, '${USER_HR}');
+
+      -- guard_leave_request_type() requires an active leave_rules policy
+      -- defining whatever leave_type_code a request uses — every raw
+      -- leave_requests insert below uses 'annual', so this has to exist
+      -- before any of them will succeed.
+      insert into policy_versions (id, country_code, policy_type, version_no, effective_from, status, payload, created_by, approved_by, approved_at)
+        values ('${LEAVE_RULES_POLICY_ID}', 'AE', 'leave_rules', 1, '2020-01-01', 'active', '{}'::jsonb, '${USER_HR}', '${USER_CEO}', now());
+      insert into policy_leave_types (policy_version_id, leave_type_code, name, accrual_method)
+        values ('${LEAVE_RULES_POLICY_ID}', 'annual', 'Annual Leave', 'monthly_accrual');
     `);
 
     const { rows } = await db.asUser(USER_HR, (query) =>
@@ -199,6 +210,54 @@ describe("Phase 3 row-level security: leave, ledgers, deduction priority, approv
           ),
         ),
       ).rejects.toThrow(/violates check constraint/);
+    });
+
+    // Regression test: the leave request form used to fall back to a
+    // free-text leave type field, and nothing stopped an arbitrary string
+    // even with one configured. guard_leave_request_type() is the backstop
+    // for a raw insert bypassing the app's own allowlist check entirely.
+    it("rejects a leave type not defined by any active policy for the employee's country, even via a raw insert", async () => {
+      await expect(
+        db.asUser(USER_REPORT, (query) =>
+          query(
+            `insert into leave_requests (employee_id, leave_type_code, start_date, end_date, total_days)
+             values ($1, 'made_up_leave_type', '2026-03-23', '2026-03-23', 1)`,
+            [EMPLOYEE_REPORT],
+          ),
+        ),
+      ).rejects.toThrow(/No active leave policy.*defines leave type/);
+    });
+
+    // Regression test: submitLeaveRequest()'s own overlap check is a
+    // check-then-insert with the same race shape as
+    // bulkRecordAttendance()'s comp-day credit check — the GiST exclusion
+    // constraint on leave_requests is the database-enforced backstop, both
+    // for that race and for a raw insert bypassing the app layer entirely.
+    it("rejects a second live request that overlaps an existing one for the same employee, even via a raw insert", async () => {
+      await db.seed(`
+        insert into leave_requests (employee_id, leave_type_code, start_date, end_date, total_days)
+        values ('${EMPLOYEE_REPORT}', 'annual', '2026-03-25', '2026-03-27', 3);
+      `);
+
+      await expect(
+        db.asUser(USER_REPORT, (query) =>
+          query(
+            `insert into leave_requests (employee_id, leave_type_code, start_date, end_date, total_days)
+             values ($1, 'annual', '2026-03-26', '2026-03-28', 3)`,
+            [EMPLOYEE_REPORT],
+          ),
+        ),
+      ).rejects.toThrow(/conflicting key value violates exclusion constraint/);
+
+      // A non-overlapping range for the same employee is unaffected.
+      const { rows } = await db.asUser(USER_REPORT, (query) =>
+        query(
+          `insert into leave_requests (employee_id, leave_type_code, start_date, end_date, total_days)
+           values ($1, 'annual', '2026-03-29', '2026-03-30', 2) returning id`,
+          [EMPLOYEE_REPORT],
+        ),
+      );
+      expect(rows.length).toBe(1);
     });
 
     it("lets the requester create the first approval via create_initial_approval() on their own just-created request", async () => {
@@ -493,7 +552,7 @@ describe("Phase 3 row-level security: leave, ledgers, deduction priority, approv
       );
     });
 
-    it("blocks cancelling a request that's already been decided", async () => {
+    it("blocks cancelling a rejected request", async () => {
       const { approvalId, requestId } = await seedPendingRequest({
         employeeId: EMPLOYEE_REPORT,
         approverId: USER_MANAGER,
@@ -502,15 +561,74 @@ describe("Phase 3 row-level security: leave, ledgers, deduction priority, approv
         totalDays: 1,
       });
 
-      // Same-transaction requirement as above: the approval only persists
-      // within the transaction that decided it, so the cancel attempt has
-      // to run in that same transaction (after switching identity back to
-      // the requester), not as a separate asUser() call.
+      // Same-transaction requirement as above: the decision only persists
+      // within the transaction that made it, so the cancel attempt has to
+      // run in that same transaction (after switching identity back to the
+      // requester), not as a separate asUser() call.
+      await db.asUser(USER_MANAGER, async (query) => {
+        await query("select decide_leave_approval($1, 'rejected', null)", [approvalId]);
+
+        await actAs(query, USER_REPORT);
+        await expect(query("select cancel_leave_request($1)", [requestId])).rejects.toThrow(/can no longer be cancelled/);
+      });
+    });
+
+    it("cancels an approved request that hasn't started yet, and reverses its ledger deduction", async () => {
+      const { approvalId, requestId } = await seedPendingRequest({
+        employeeId: EMPLOYEE_REPORT,
+        approverId: USER_MANAGER,
+        startDate: "2026-12-01",
+        endDate: "2026-12-02",
+        totalDays: 2,
+      });
+
+      await db.asUser(USER_MANAGER, async (query) => {
+        await query("select decide_leave_approval($1, 'approved', null)", [approvalId]);
+
+        const afterApproval = await query(
+          "select balance_days from leave_balances where employee_id = $1 and leave_type_code = 'annual'",
+          [EMPLOYEE_REPORT],
+        );
+        expect(Number(afterApproval.rows[0]?.balance_days)).toBe(8); // 10 accrued - 2 deducted
+
+        await actAs(query, USER_REPORT);
+        await query("select cancel_leave_request($1)", [requestId]);
+
+        const request = await query("select status from leave_requests where id = $1", [requestId]);
+        expect(request.rows[0]?.status).toBe("cancelled");
+
+        // Reversed via a linked reversal row, not by deleting the original
+        // deduction — both stay on the record.
+        const ledgerRows = await query(
+          "select id, entry_type, amount_days, reversal_of_id from leave_ledger where reference_type = 'leave_request' and reference_id = $1 order by created_at",
+          [requestId],
+        );
+        expect(ledgerRows.rows).toHaveLength(2);
+        expect(ledgerRows.rows[0]).toMatchObject({ entry_type: "deduction", amount_days: "-2.00" });
+        expect(ledgerRows.rows[1]).toMatchObject({ entry_type: "reversal", amount_days: "2.00", reversal_of_id: ledgerRows.rows[0]?.id });
+
+        const restoredBalance = await query(
+          "select balance_days from leave_balances where employee_id = $1 and leave_type_code = 'annual'",
+          [EMPLOYEE_REPORT],
+        );
+        expect(Number(restoredBalance.rows[0]?.balance_days)).toBe(10);
+      });
+    });
+
+    it("blocks cancelling an approved request that has already started", async () => {
+      const { approvalId, requestId } = await seedPendingRequest({
+        employeeId: EMPLOYEE_REPORT,
+        approverId: USER_MANAGER,
+        startDate: "2026-01-01",
+        endDate: "2026-01-01",
+        totalDays: 1,
+      });
+
       await db.asUser(USER_MANAGER, async (query) => {
         await query("select decide_leave_approval($1, 'approved', null)", [approvalId]);
 
         await actAs(query, USER_REPORT);
-        await expect(query("select cancel_leave_request($1)", [requestId])).rejects.toThrow(/can no longer be cancelled/);
+        await expect(query("select cancel_leave_request($1)", [requestId])).rejects.toThrow(/can only be cancelled before it starts/);
       });
     });
   });

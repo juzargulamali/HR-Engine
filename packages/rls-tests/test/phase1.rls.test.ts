@@ -49,6 +49,15 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
         ('${USER_CEO}', 'ceo', '${COMPANY_HQ}');
       insert into user_roles (user_id, role) values ('${USER_SYS_ADMIN}', 'sys_admin');
 
+      -- guard_leave_request_type() requires an active leave_rules policy
+      -- defining whatever leave_type_code a request uses — the
+      -- permanently_delete_employee() history seed below inserts a
+      -- leave_requests row using 'annual'.
+      insert into policy_versions (id, country_code, policy_type, version_no, effective_from, status, payload, created_by, approved_by, approved_at)
+        values ('00000000-0000-0000-0000-0000000001e1', 'AE', 'leave_rules', 1, '2020-01-01', 'active', '{}'::jsonb, '${USER_HR_ADMIN}', '${USER_CEO}', now());
+      insert into policy_leave_types (policy_version_id, leave_type_code, name, accrual_method)
+        values ('00000000-0000-0000-0000-0000000001e1', 'annual', 'Annual Leave', 'monthly_accrual');
+
       -- two contract versions for Ravi: a closed probation period, then permanent
       insert into employment_contracts (employee_id, contract_type, start_date, end_date, version_no, is_current, created_by)
         values ('${EMPLOYEE_REPORT}', 'probation', '2024-02-01', '2024-07-31', 1, false, '${USER_HR_ADMIN}');

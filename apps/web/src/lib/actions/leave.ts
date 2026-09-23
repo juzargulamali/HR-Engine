@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { computeLeaveDays } from "@enginious-hr/domain";
+import { computeLeaveDays, resolvePolicyVersionAsOf } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
 import { resolveInitialApprover } from "./approvals";
@@ -43,6 +43,58 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
 
   const { data: country } = await supabase.from("countries").select("week_start_day").eq("code", employee.country_code).single();
   if (!country) return { error: "Could not resolve your country's working week." };
+
+  // No uncontrolled leave-type strings: the form no longer offers a
+  // free-text fallback, but this is the authoritative check regardless of
+  // what the request actually sends. If no leave_rules policy is in effect
+  // today for this employee's country, submission is blocked outright with
+  // a clear HR-configuration message rather than silently accepting
+  // whatever leave type code was posted.
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: policyVersions } = await supabase
+    .from("policy_versions")
+    .select("id, status, effective_from, effective_to, version_no")
+    .eq("country_code", employee.country_code)
+    .eq("policy_type", "leave_rules");
+  const activePolicy = resolvePolicyVersionAsOf(
+    (policyVersions ?? []).map((v) => ({
+      id: v.id,
+      effectiveFrom: v.effective_from,
+      effectiveTo: v.effective_to,
+      versionNo: v.version_no,
+      status: v.status,
+    })),
+    today,
+  );
+  if (!activePolicy) {
+    return { error: "HR hasn't activated a leave policy for your country yet — leave requests can't be submitted until one is active." };
+  }
+
+  const { data: leaveTypeRows } = await supabase
+    .from("policy_leave_types")
+    .select("leave_type_code")
+    .eq("policy_version_id", activePolicy.id);
+  const validLeaveTypeCodes = new Set((leaveTypeRows ?? []).map((r) => r.leave_type_code));
+  if (!validLeaveTypeCodes.has(d.leaveTypeCode)) {
+    return { error: "That isn't a valid leave type under your country's active leave policy." };
+  }
+
+  // Two overlapping requests for the same employee is a data-integrity
+  // problem regardless of business judgment (unlike balance, where the
+  // system already lets an approver knowingly approve past a warning) —
+  // block it outright rather than letting it through for the approver to
+  // notice.
+  const { data: overlapping } = await supabase
+    .from("leave_requests")
+    .select("id")
+    .eq("employee_id", employee.id)
+    .in("status", ["submitted", "pending_approval", "approved"])
+    .lte("start_date", d.endDate)
+    .gte("end_date", d.startDate)
+    .limit(1);
+  if (overlapping && overlapping.length > 0) {
+    return { error: "You already have a leave request that overlaps these dates." };
+  }
 
   const { data: holidayRows } = await supabase
     .from("public_holidays")
