@@ -12,11 +12,9 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = 
 
 export async function EmployeeDocumentsSection({
   employeeId,
-  companyId,
   canEdit,
 }: {
   employeeId: string;
-  companyId: string;
   canEdit: boolean;
 }) {
   const supabase = await createClient();
@@ -86,7 +84,7 @@ export async function EmployeeDocumentsSection({
         </TableBody>
       </Table>
 
-      {canEdit ? <AddEmployeeDocumentForm employeeId={employeeId} companyId={companyId} /> : null}
+      {canEdit ? <AddEmployeeDocumentForm employeeId={employeeId} /> : null}
     </div>
   );
 }

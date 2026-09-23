@@ -317,6 +317,40 @@ describe("Phase 5 row-level security: performance, checklists, documents, assets
         expect(after.rows[0]?.status).toBe("done");
       });
     });
+
+    // Regression test: employee_checklist_items_complete's first disjunct
+    // (employee_id = current_employee_id()) doesn't reference
+    // template_item_id at all, so an employee could retarget
+    // template_item_id in the same UPDATE and self-mark someone else's
+    // assigned task (e.g. an HR/Finance/Sys-Admin-verified offboarding step)
+    // as done. guard_checklist_item_identity_immutable() now blocks
+    // reassigning either identity column, while a legitimate self-update
+    // touching only status/completed_at still succeeds.
+    it("blocks the employee from retargeting template_item_id on their own item to self-mark a different assigned task done", async () => {
+      const hrAdminItemId = await itemAssignedTo(EMPLOYEE_REPORT, "hr_admin");
+
+      const { rows: sysAdminTemplateRows } = await db.asUser(USER_HR, (query) =>
+        query("select id from checklist_template_items where template_id = $1 and assignee_role = 'sys_admin'", [templateId]),
+      );
+      const sysAdminTemplateItemId = sysAdminTemplateRows[0]?.id as string;
+
+      await expect(
+        db.asUser(USER_REPORT, (query) =>
+          query("update employee_checklist_items set template_item_id = $1, status = 'done' where id = $2", [
+            sysAdminTemplateItemId,
+            hrAdminItemId,
+          ]),
+        ),
+      ).rejects.toThrow(/cannot be reassigned to a different employee or task/);
+
+      // A legitimate self-update touching only status/completed_at (no
+      // identity columns) is unaffected by the guard.
+      await db.asUser(USER_REPORT, async (query) => {
+        await query("update employee_checklist_items set status = 'done', completed_at = now() where id = $1", [hrAdminItemId]);
+        const after = await query("select status from employee_checklist_items where id = $1", [hrAdminItemId]);
+        expect(after.rows[0]?.status).toBe("done");
+      });
+    });
   });
 
   describe("employee_documents", () => {

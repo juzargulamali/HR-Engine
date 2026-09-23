@@ -173,6 +173,34 @@ describe("Phase 3 row-level security: leave, ledgers, deduction priority, approv
       ).rejects.toThrow(/row-level security/);
     });
 
+    // Regression test: total_days had no floor, reachable via a raw insert
+    // bypassing the app's own computeLeaveDays() check (exactly the shape of
+    // a direct PostgREST call). decide_leave_approval()'s deduction loop
+    // starts at v_remaining := total_days and exits immediately once
+    // v_remaining <= 0, so a zero/negative value approved a request with
+    // zero ledger entries posted — unaccounted, unlimited "free" leave.
+    it("rejects a leave request with total_days <= 0, even via a raw insert bypassing computeLeaveDays()", async () => {
+      await expect(
+        db.asUser(USER_REPORT, (query) =>
+          query(
+            `insert into leave_requests (employee_id, leave_type_code, start_date, end_date, total_days)
+             values ($1, 'annual', '2026-03-20', '2026-03-20', 0)`,
+            [EMPLOYEE_REPORT],
+          ),
+        ),
+      ).rejects.toThrow(/violates check constraint/);
+
+      await expect(
+        db.asUser(USER_REPORT, (query) =>
+          query(
+            `insert into leave_requests (employee_id, leave_type_code, start_date, end_date, total_days)
+             values ($1, 'annual', '2026-03-21', '2026-03-22', -1)`,
+            [EMPLOYEE_REPORT],
+          ),
+        ),
+      ).rejects.toThrow(/violates check constraint/);
+    });
+
     it("lets the requester create the first approval via create_initial_approval() on their own just-created request", async () => {
       const requestId = randomUUID();
       await db.seed(

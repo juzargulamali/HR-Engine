@@ -14,12 +14,13 @@ export function DraftDecisionButtons({ draftId }: { draftId: string }) {
         <Button
           size="sm"
           disabled={pending}
-          onClick={() =>
+          onClick={() => {
+            if (!window.confirm("Authorize this draft? It posts a real balance adjustment immediately.")) return;
             startTransition(async () => {
               const result = await authorizeAiDraft(draftId);
               setError(result.error);
-            })
-          }
+            });
+          }}
         >
           Authorize
         </Button>

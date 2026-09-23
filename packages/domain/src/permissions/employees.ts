@@ -1,5 +1,5 @@
 import type { RoleGrant } from "../types";
-import { hasRole, isCeo, isFinance, isHrAdmin, isSysAdmin } from "./core";
+import { hasRole, isCLevel, isFinance, isHrAdmin, isSysAdmin } from "./core";
 
 /**
  * These mirror the RLS policies in
@@ -41,7 +41,7 @@ export function canViewContracts(
   companyId: string,
   { isSelf, isManager }: { isSelf: boolean; isManager: boolean },
 ): boolean {
-  return isSelf || isManager || isHrAdmin(grants, { companyId }) || isFinance(grants, { companyId }) || isCeo(grants, { companyId });
+  return isSelf || isManager || isHrAdmin(grants, { companyId }) || isFinance(grants, { companyId }) || isCLevel(grants, { companyId });
 }
 
 export function canManageContracts(grants: readonly RoleGrant[], companyId: string): boolean {

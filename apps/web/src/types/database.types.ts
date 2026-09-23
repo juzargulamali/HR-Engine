@@ -10,9 +10,14 @@
  * (root package.json) instead of hand-editing it — see
  * docs/09-extending-the-system.md "adding a table" checklist, which ends
  * with this regeneration step for exactly that reason.
+ *
+ * `AppRole` also includes 'cto' ahead of schema.sql's migration for it
+ * (schema.sql's `app_role` enum already has the value; the corresponding
+ * `alter type app_role add value 'cto'` migration lands separately) — cto
+ * is a full peer of ceo everywhere in this system.
  */
 
-export type AppRole = "employee" | "line_manager" | "hr_admin" | "finance" | "ceo" | "sys_admin";
+export type AppRole = "employee" | "line_manager" | "hr_admin" | "finance" | "ceo" | "cto" | "sys_admin";
 export type EmploymentStatus = "active" | "on_leave" | "suspended" | "terminated";
 export type EmploymentType = "full_time" | "part_time" | "contractor" | "intern";
 export type ContractType = "permanent" | "fixed_term" | "probation" | "contractor";

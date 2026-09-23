@@ -1,5 +1,5 @@
 import type { RoleGrant } from "../types";
-import { isCeo, isHrAdmin } from "./core";
+import { isCLevel, isHrAdmin } from "./core";
 
 /**
  * Mirrors the RLS policies in
@@ -25,11 +25,11 @@ export function canEditDraftPolicyContent(grants: readonly RoleGrant[], countryC
  */
 export function canActivatePolicy(grants: readonly RoleGrant[], countryCode: string, isDrafter: boolean): boolean {
   if (isDrafter) return false;
-  return isHrAdmin(grants, { countryCode }) || isCeo(grants, { countryCode });
+  return isHrAdmin(grants, { countryCode }) || isCLevel(grants, { countryCode });
 }
 
 export function canViewDraftPolicies(grants: readonly RoleGrant[], countryCode: string): boolean {
-  return isHrAdmin(grants, { countryCode }) || isCeo(grants, { countryCode });
+  return isHrAdmin(grants, { countryCode }) || isCLevel(grants, { countryCode });
 }
 
 /**
@@ -39,7 +39,7 @@ export function canViewDraftPolicies(grants: readonly RoleGrant[], countryCode: 
  * policy_versions_delete, which only ever applies to status = 'draft'.
  */
 export function canDeleteDraftPolicy(grants: readonly RoleGrant[], countryCode: string): boolean {
-  return isHrAdmin(grants, { countryCode }) || isCeo(grants, { countryCode });
+  return isHrAdmin(grants, { countryCode }) || isCLevel(grants, { countryCode });
 }
 
 export function canManageHolidays(grants: readonly RoleGrant[], countryCode: string): boolean {

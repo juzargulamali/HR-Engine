@@ -51,4 +51,16 @@ export const isLineManager = (grants: readonly RoleGrant[], scope?: RoleScope) =
 export const isHrAdmin = (grants: readonly RoleGrant[], scope?: RoleScope) => hasRole(grants, "hr_admin", scope);
 export const isFinance = (grants: readonly RoleGrant[], scope?: RoleScope) => hasRole(grants, "finance", scope);
 export const isCeo = (grants: readonly RoleGrant[], scope?: RoleScope) => hasRole(grants, "ceo", scope);
+export const isCto = (grants: readonly RoleGrant[], scope?: RoleScope) => hasRole(grants, "cto", scope);
 export const isSysAdmin = (grants: readonly RoleGrant[], scope?: RoleScope) => hasRole(grants, "sys_admin", scope);
+
+/**
+ * `cto` is a full peer of `ceo` everywhere in this system — identical read
+ * access and identical approval authority (mirrors the schema's
+ * `role:ceo` -> "any C-level exec" broadening in
+ * resolve_approver()/resolve_approver_for_company(), and every
+ * `has_role('ceo', ...)` RLS policy, which now reads
+ * `has_role('ceo', ...) or has_role('cto', ...)`). Use this instead of
+ * `isCeo()` alone in any permission check that mirrors one of those.
+ */
+export const isCLevel = (grants: readonly RoleGrant[], scope?: RoleScope) => isCeo(grants, scope) || isCto(grants, scope);

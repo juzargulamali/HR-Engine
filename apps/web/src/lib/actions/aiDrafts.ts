@@ -29,6 +29,23 @@ export async function authorizeAiDraft(draftId: string): Promise<{ error: string
   if (!draft) return { error: "Draft not found." };
   if (draft.status !== "draft") return { error: "This draft has already been decided." };
 
+  // Atomically claim the draft before doing anything consequential. The
+  // status check above is a plain SELECT with no lock, so a double-clicked
+  // "Authorize" (draft-decision-buttons.tsx only disables the button
+  // client-side once React re-renders, not before) could otherwise let two
+  // concurrent calls both pass it and both post the ledger adjustment
+  // below, double-correcting the employee's balance. The .eq("status",
+  // "draft") makes this a compare-and-swap: only the request that actually
+  // flips the row from draft to authorized proceeds.
+  const { data: claimed } = await supabase
+    .from("ai_drafts")
+    .update({ status: "authorized", authorized_by: user.id, authorized_at: new Date().toISOString() })
+    .eq("id", draftId)
+    .eq("status", "draft")
+    .select("id")
+    .maybeSingle();
+  if (!claimed) return { error: "This draft has already been decided." };
+
   let referenceId: string | undefined;
   if (draft.entity_type === "leave_ledger" && draft.proposed_action === "adjust_balance") {
     const payload = draft.proposed_payload as unknown as AdjustBalancePayload;
@@ -38,16 +55,20 @@ export async function authorizeAiDraft(draftId: string): Promise<{ error: string
       amountDays: payload.amount_days,
       note: payload.note,
     });
-    if (result.error) return result;
+    if (result.error) {
+      // Undo the claim so the draft goes back to "draft" and can be
+      // retried, instead of being stuck "authorized" with no ledger entry
+      // actually behind it.
+      await supabase.from("ai_drafts").update({ status: "draft", authorized_by: null, authorized_at: null }).eq("id", draftId);
+      return result;
+    }
     referenceId = result.ledgerEntryId;
   } else {
+    await supabase.from("ai_drafts").update({ status: "draft", authorized_by: null, authorized_at: null }).eq("id", draftId);
     return { error: `No authorize handler is wired up yet for ${draft.entity_type}/${draft.proposed_action}.` };
   }
 
-  const { error } = await supabase
-    .from("ai_drafts")
-    .update({ status: "authorized", authorized_by: user.id, authorized_at: new Date().toISOString(), reference_id: referenceId })
-    .eq("id", draftId);
+  const { error } = await supabase.from("ai_drafts").update({ reference_id: referenceId }).eq("id", draftId);
   if (error) return { error: error.message };
 
   revalidatePath("/ai-suggestions");

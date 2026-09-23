@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { NewClaimForm } from "./new-claim-form";
+import { DeleteDraftClaimButton } from "./delete-draft-claim-button";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   draft: "outline",
@@ -75,6 +76,7 @@ export default async function ReimbursementsPage() {
                 <TableHead>Date</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -89,11 +91,12 @@ export default async function ReimbursementsPage() {
                   <TableCell>
                     <Badge variant={STATUS_VARIANT[c.status] ?? "outline"}>{c.status.replace(/_/g, " ")}</Badge>
                   </TableCell>
+                  <TableCell>{c.status === "draft" ? <DeleteDraftClaimButton claimId={c.id} /> : null}</TableCell>
                 </TableRow>
               ))}
               {(claims ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="text-center text-muted-foreground">
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
                     No claims yet.
                   </TableCell>
                 </TableRow>

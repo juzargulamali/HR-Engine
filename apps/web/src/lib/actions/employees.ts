@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
-import { validateUploadFile } from "@/lib/uploads";
+import { validateUploadFile, sanitizeForStoragePath } from "@/lib/uploads";
 
 const createEmployeeSchema = z.object({
   companyId: z.string().uuid(),
@@ -18,6 +18,10 @@ const createEmployeeSchema = z.object({
   contractType: z.enum(["permanent", "fixed_term", "probation", "contractor"]),
   contractStartDate: z.string().min(1),
   noticePeriodDays: z.coerce.number().int().min(0).default(30),
+  // Opening balances an incoming employee already carries (a mid-year hire,
+  // or a transfer from another entity) — optional, defaulting to none.
+  openingAnnualLeaveDays: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().min(0).optional()),
+  openingCompDays: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().min(0).optional()),
 });
 
 /**
@@ -70,15 +74,52 @@ export async function createEmployee(_prevState: ActionState, formData: FormData
     created_by: user.id,
   });
 
+  // Opening balances (a mid-year hire's carried-over annual leave, or comp
+  // days already earned elsewhere) — posted the same way any other manual
+  // ledger correction is (leave_ledger_insert_hr/comp_ledger_insert_hr
+  // already grant this to HR Admin directly, same RLS postLeaveLedgerAdjustment
+  // uses), just at onboarding time instead of via the AI-suggestions flow.
+  const warnings: string[] = [];
+  if (contractError) {
+    warnings.push(`the initial contract couldn't be saved (${contractError.message})`);
+  }
+
+  if (d.openingAnnualLeaveDays) {
+    const { error: leaveError } = await supabase.from("leave_ledger").insert({
+      employee_id: employee.id,
+      leave_type_code: "annual",
+      txn_date: d.hireDate,
+      entry_type: "adjustment",
+      amount_days: d.openingAnnualLeaveDays,
+      reference_type: "manual_adjustment",
+      note: "Opening annual leave balance recorded at onboarding",
+      created_by: user.id,
+    });
+    if (leaveError) warnings.push(`the opening annual leave balance couldn't be posted (${leaveError.message})`);
+  }
+
+  if (d.openingCompDays) {
+    const { error: compError } = await supabase.from("comp_day_ledger").insert({
+      employee_id: employee.id,
+      txn_date: d.hireDate,
+      entry_type: "earned",
+      days: d.openingCompDays,
+      source: "opening_balance",
+      reference_type: "manual_adjustment",
+      created_by: user.id,
+    });
+    if (compError) warnings.push(`the opening comp-day balance couldn't be posted (${compError.message})`);
+  }
+
   revalidatePath("/employees");
 
-  if (contractError) {
+  if (warnings.length > 0) {
     // The employee record exists either way — send them to its page rather
-    // than losing that context, with the contract error still visible there
-    // isn't possible via this return path (redirect always throws), so this
-    // is the one case where staying on the form to show the message wins.
+    // than losing that context, with any warning still visible there isn't
+    // possible via this return path (redirect always throws), so this is
+    // the one case where staying on the form to show the message wins.
     return {
-      error: `Employee created, but the initial contract couldn't be saved (${contractError.message}). Add it from the employee's page.`,
+      error: `Employee created, but ${warnings.join(", and ")}. Add it from the employee's page.`,
     };
   }
 
@@ -331,7 +372,6 @@ export async function addCompensationVersion(_prevState: ActionState, formData: 
 
 const addIdentityDocumentSchema = z.object({
   employeeId: z.string().uuid(),
-  companyId: z.string().uuid(),
   documentType: z.string().min(1),
   documentNumber: z.string().min(1),
   expiryDate: z.string().optional(),
@@ -340,7 +380,6 @@ const addIdentityDocumentSchema = z.object({
 export async function addIdentityDocument(_prevState: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = addIdentityDocumentSchema.safeParse({
     employeeId: formData.get("employeeId"),
-    companyId: formData.get("companyId"),
     documentType: formData.get("documentType"),
     documentNumber: formData.get("documentNumber"),
     expiryDate: formData.get("expiryDate"),
@@ -356,13 +395,24 @@ export async function addIdentityDocument(_prevState: ActionState, formData: For
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in." };
 
+  // The storage RLS for this bucket (schema.sql) only checks the path's
+  // company-id segment against the caller's own hr_admin grant — it never
+  // verifies the path's employee-id segment actually belongs to that
+  // company. Trusting the client-submitted companyId here would let an
+  // HR Admin plant a file under an arbitrary employee (any company) that
+  // then sits in storage un-linked to any row once the table insert below
+  // rejects the real mismatch. Deriving it from the employee record itself
+  // closes that gap the same way letters.ts/reimbursements.ts already do.
+  const { data: employee } = await supabase.from("employees").select("company_id").eq("id", d.employeeId).single();
+  if (!employee) return { error: "Employee not found." };
+
   let filePath: string | null = null;
   const file = formData.get("file");
   if (file instanceof File && file.size > 0) {
     const validationError = validateUploadFile(file);
     if (validationError) return { error: validationError };
 
-    filePath = `${d.companyId}/${d.employeeId}/${d.documentType}/${Date.now()}-${file.name}`;
+    filePath = `${employee.company_id}/${d.employeeId}/${sanitizeForStoragePath(d.documentType)}/${Date.now()}-${sanitizeForStoragePath(file.name)}`;
     const { error: uploadError } = await supabase.storage
       .from("identity-documents")
       .upload(filePath, file, { contentType: file.type });
@@ -378,7 +428,13 @@ export async function addIdentityDocument(_prevState: ActionState, formData: For
     created_by: user.id,
   });
 
-  if (error) return { error: error.message };
+  if (error) {
+    // The scan (if any) was already uploaded above — without this, a
+    // failed row insert leaves it orphaned in Storage with nothing ever
+    // pointing at it.
+    if (filePath) await supabase.storage.from("identity-documents").remove([filePath]);
+    return { error: error.message };
+  }
 
   revalidatePath(`/employees/${d.employeeId}`);
   return { error: null };
@@ -405,7 +461,6 @@ export async function deleteIdentityDocument(documentId: string, employeeId: str
 
 const addEmployeeDocumentSchema = z.object({
   employeeId: z.string().uuid(),
-  companyId: z.string().uuid(),
   documentType: z.string().min(1),
   expiryDate: z.string().optional(),
 });
@@ -414,7 +469,6 @@ const addEmployeeDocumentSchema = z.object({
 export async function addEmployeeDocument(_prevState: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = addEmployeeDocumentSchema.safeParse({
     employeeId: formData.get("employeeId"),
-    companyId: formData.get("companyId"),
     documentType: formData.get("documentType"),
     expiryDate: formData.get("expiryDate"),
   });
@@ -431,7 +485,14 @@ export async function addEmployeeDocument(_prevState: ActionState, formData: For
   if (validationError) return { error: validationError };
 
   const supabase = await createClient();
-  const filePath = `${d.companyId}/${d.employeeId}/${d.documentType}/${Date.now()}-${file.name}`;
+
+  // Same reasoning as addIdentityDocument() above: derive the real company
+  // from the employee row rather than trusting the client-submitted one,
+  // since this bucket's storage RLS doesn't cross-check the two itself.
+  const { data: employee } = await supabase.from("employees").select("company_id").eq("id", d.employeeId).single();
+  if (!employee) return { error: "Employee not found." };
+
+  const filePath = `${employee.company_id}/${d.employeeId}/${sanitizeForStoragePath(d.documentType)}/${Date.now()}-${sanitizeForStoragePath(file.name)}`;
   const { error: uploadError } = await supabase.storage
     .from("employee-documents")
     .upload(filePath, file, { contentType: file.type });
@@ -443,7 +504,12 @@ export async function addEmployeeDocument(_prevState: ActionState, formData: For
     file_path: filePath,
     expiry_date: d.expiryDate || null,
   });
-  if (error) return { error: error.message };
+  if (error) {
+    // The file was already uploaded above — without this, a failed row
+    // insert leaves it orphaned in Storage with nothing ever pointing at it.
+    await supabase.storage.from("employee-documents").remove([filePath]);
+    return { error: error.message };
+  }
 
   revalidatePath(`/employees/${d.employeeId}`);
   return { error: null };

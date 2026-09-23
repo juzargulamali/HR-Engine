@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
@@ -194,6 +195,84 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
           ]),
         ),
       ).rejects.toThrow(/row-level security/);
+    });
+  });
+
+  // Regression tests for the fourth audit pass: employment_contracts_update/
+  // compensation_update/identity_docs_update all resolve has_role(...) from
+  // employee_id — USING against the OLD row, WITH CHECK against the NEW row
+  // — so nothing stopped employee_id itself changing in the same UPDATE (the
+  // same shape already fixed for goals/appraisals in phase 5, just never
+  // patched on these three sensitive-tier tables). An HR Admin/Finance user
+  // with write access to both the source and destination employee's company
+  // could retarget a row of confidential salary/IBAN or passport/Iqama/PESEL
+  // data onto a different employee. guard_employee_id_immutable() now blocks
+  // this while leaving every other column freely editable.
+  describe("employee_id immutability guard (guard_employee_id_immutable)", () => {
+    it("blocks HR Admin from reassigning an employment_contracts row to a different employee, while an ordinary column update still succeeds", async () => {
+      const contractId = randomUUID();
+      await db.seed(`
+        insert into employment_contracts (id, employee_id, contract_type, start_date, version_no, is_current, created_by)
+        values ('${contractId}', '${EMPLOYEE_OTHER}', 'permanent', '2024-01-01', 1, true, '${USER_HR_ADMIN}');
+      `);
+
+      await expect(
+        db.asUser(USER_HR_ADMIN, (query) =>
+          query("update employment_contracts set employee_id = $1 where id = $2", [EMPLOYEE_MANAGER, contractId]),
+        ),
+      ).rejects.toThrow(/cannot be reassigned to a different employee/);
+
+      await db.asUser(USER_HR_ADMIN, async (query) => {
+        const { rows } = await query(
+          "update employment_contracts set notice_period_days = 45 where id = $1 returning notice_period_days, employee_id",
+          [contractId],
+        );
+        expect(rows).toEqual([{ notice_period_days: 45, employee_id: EMPLOYEE_OTHER }]);
+      });
+    });
+
+    it("blocks Finance from reassigning a compensation_details row to a different employee, while an ordinary column update still succeeds", async () => {
+      const compId = randomUUID();
+      await db.seed(`
+        insert into compensation_details (id, employee_id, effective_from, base_salary, currency, created_by)
+        values ('${compId}', '${EMPLOYEE_OTHER}', '2024-01-01', 5000, 'AED', '${USER_HR_ADMIN}');
+      `);
+
+      await expect(
+        db.asUser(USER_FINANCE, (query) =>
+          query("update compensation_details set employee_id = $1 where id = $2", [EMPLOYEE_MANAGER, compId]),
+        ),
+      ).rejects.toThrow(/cannot be reassigned to a different employee/);
+
+      await db.asUser(USER_FINANCE, async (query) => {
+        const { rows } = await query(
+          "update compensation_details set base_salary = 5500 where id = $1 returning base_salary, employee_id",
+          [compId],
+        );
+        expect(rows).toEqual([{ base_salary: "5500.00", employee_id: EMPLOYEE_OTHER }]);
+      });
+    });
+
+    it("blocks HR Admin from reassigning an identity_documents row to a different employee, while an ordinary column update still succeeds", async () => {
+      const docId = randomUUID();
+      await db.seed(`
+        insert into identity_documents (id, employee_id, document_type, document_number, created_by)
+        values ('${docId}', '${EMPLOYEE_OTHER}', 'passport', 'X9999999', '${USER_HR_ADMIN}');
+      `);
+
+      await expect(
+        db.asUser(USER_HR_ADMIN, (query) =>
+          query("update identity_documents set employee_id = $1 where id = $2", [EMPLOYEE_MANAGER, docId]),
+        ),
+      ).rejects.toThrow(/cannot be reassigned to a different employee/);
+
+      await db.asUser(USER_HR_ADMIN, async (query) => {
+        const { rows } = await query(
+          "update identity_documents set expiry_date = '2030-01-01' where id = $1 returning expiry_date::text as expiry_date, employee_id",
+          [docId],
+        );
+        expect(rows).toEqual([{ expiry_date: "2030-01-01", employee_id: EMPLOYEE_OTHER }]);
+      });
     });
   });
 

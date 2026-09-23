@@ -1,7 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { RecordAttendanceForm } from "./record-attendance-form";
 import { DeleteAttendanceButton } from "./delete-attendance-button";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
@@ -61,12 +60,6 @@ export async function AttendanceSection({ employeeId, canManage }: { employeeId:
           ) : null}
         </TableBody>
       </Table>
-
-      {canManage ? (
-        <div className="border-t border-border pt-4">
-          <RecordAttendanceForm employeeId={employeeId} />
-        </div>
-      ) : null}
     </div>
   );
 }

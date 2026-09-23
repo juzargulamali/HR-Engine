@@ -11,13 +11,12 @@ import { Alert } from "@/components/ui/alert";
 
 const initialState: ActionState = { error: null };
 
-export function AddIdentityDocumentForm({ employeeId, companyId }: { employeeId: string; companyId: string }) {
+export function AddIdentityDocumentForm({ employeeId }: { employeeId: string }) {
   const [state, formAction, pending] = useActionState(addIdentityDocument, initialState);
 
   return (
     <form action={formAction} className="space-y-3 border-t border-border pt-4">
       <input type="hidden" name="employeeId" value={employeeId} />
-      <input type="hidden" name="companyId" value={companyId} />
       <p className="text-sm font-medium">Add an identity document</p>
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="space-y-1.5">

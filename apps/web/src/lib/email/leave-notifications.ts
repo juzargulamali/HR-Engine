@@ -52,15 +52,20 @@ export async function notifyLeaveSubmitted(
   },
 ): Promise<void> {
   try {
-    const [{ data: hrAdmins }, { data: ceos }, manager] = await Promise.all([
+    const [{ data: hrAdmins }, { data: ceos }, { data: ctos }, manager] = await Promise.all([
       supabase.rpc("resolve_role_holders", { p_role: "hr_admin", p_company_id: params.companyId }),
       supabase.rpc("resolve_role_holders", { p_role: "ceo", p_company_id: params.companyId }),
+      // cto is a full peer of ceo everywhere in this system (see
+      // resolve_approver()'s role:ceo -> "any C-level exec" broadening in
+      // schema.sql) — notify both C-level execs, not just whoever holds
+      // the ceo role specifically.
+      supabase.rpc("resolve_role_holders", { p_role: "cto", p_company_id: params.companyId }),
       params.managerEmployeeId
         ? supabase.from("employees").select("user_id").eq("id", params.managerEmployeeId).maybeSingle()
         : Promise.resolve({ data: null }),
     ]);
 
-    const recipientIds = [...(hrAdmins ?? []), ...(ceos ?? []), manager.data?.user_id].filter(
+    const recipientIds = [...(hrAdmins ?? []), ...(ceos ?? []), ...(ctos ?? []), manager.data?.user_id].filter(
       (id): id is string => typeof id === "string" && id !== params.employeeUserId,
     );
 

@@ -164,7 +164,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
             <CardTitle>Identity documents</CardTitle>
           </CardHeader>
           <CardContent>
-            <IdentityDocumentsSection employeeId={employee.id} companyId={employee.company_id} canEdit={canEditIdentity} />
+            <IdentityDocumentsSection employeeId={employee.id} canEdit={canEditIdentity} />
           </CardContent>
         </Card>
       ) : null}
@@ -175,7 +175,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
             <CardTitle>Documents</CardTitle>
           </CardHeader>
           <CardContent>
-            <EmployeeDocumentsSection employeeId={employee.id} companyId={employee.company_id} canEdit={canEditDocuments} />
+            <EmployeeDocumentsSection employeeId={employee.id} canEdit={canEditDocuments} />
           </CardContent>
         </Card>
       ) : null}

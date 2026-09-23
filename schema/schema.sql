@@ -29,7 +29,7 @@ create extension if not exists btree_gist; -- for date-range exclusion constrain
 -- -----------------------------------------------------------------------------
 
 create type app_role as enum (
-  'employee', 'line_manager', 'hr_admin', 'finance', 'ceo', 'sys_admin'
+  'employee', 'line_manager', 'hr_admin', 'finance', 'ceo', 'cto', 'sys_admin'
 );
 
 create type employment_status as enum (
@@ -379,7 +379,15 @@ create table leave_requests (
   decided_at        timestamptz,
   created_at        timestamptz not null default now(),
   deleted_at        timestamptz,
-  check (end_date >= start_date)
+  check (end_date >= start_date),
+  -- decide_leave_approval()'s deduction loop starts with
+  -- v_remaining := total_days and exits immediately once v_remaining <= 0,
+  -- so a zero/negative value (nothing stops one via a raw insert bypassing
+  -- the app's own computeLeaveDays() check) approves with no ledger entry
+  -- posted at all -- unaccounted, unlimited "free" leave. total_days is
+  -- always server-computed at submission (never client-editable after), so
+  -- this only rejects the exploit path, not any legitimate value.
+  check (total_days > 0)
 );
 
 create index idx_leave_requests_employee on leave_requests(employee_id);
@@ -440,6 +448,15 @@ create table comp_day_ledger (
 
 create index idx_comp_ledger_employee on comp_day_ledger(employee_id, txn_date);
 
+-- bulkRecordAttendance()'s "already credited" check (a SELECT immediately
+-- followed by an INSERT, no lock in between) is a TOCTOU race: two
+-- concurrent saves for the same attendance record (a double-clicked "Save"
+-- on the daily register, or two admins editing the same date) can both
+-- pass the check and both insert an 'earned' comp-day credit for it,
+-- doubling the day. This backs that check with a real constraint so the
+-- second racer's insert fails loudly instead of silently double-crediting.
+create unique index comp_day_ledger_attendance_uniq on comp_day_ledger(reference_id) where reference_type = 'attendance_record';
+
 create view comp_day_balances as
   select employee_id, sum(days) as balance_days
   from comp_day_ledger
@@ -498,7 +515,16 @@ create table approvals (
   decision        approval_decision not null default 'pending',
   decided_at      timestamptz,
   comments        text,
-  created_at      timestamptz not null default now()
+  created_at      timestamptz not null default now(),
+  -- Each step of an entity's approval chain is only ever meant to exist
+  -- once. Without this, reimbursement_claims/timesheets/payroll_export_runs
+  -- (which submit against an EXISTING row, unlike leave_requests which
+  -- insert a fresh one each time) can get a second step-1 approval from a
+  -- double-clicked "Submit for approval" racing create_initial_approval()
+  -- twice — and deciding that stale duplicate later can re-walk the whole
+  -- workflow and regress an already-finalized entity (e.g. an approved
+  -- payroll run) back to pending.
+  unique (entity_type, entity_id, step_order)
 );
 
 create index idx_approvals_entity on approvals(entity_type, entity_id);
@@ -579,6 +605,28 @@ $$;
 create trigger reimbursement_lines_recompute_total
   after insert or update or delete on reimbursement_claim_lines
   for each row execute function recompute_claim_total();
+
+-- The comment above only holds if the client never writes total_amount
+-- directly on the claim row itself -- reimbursement_insert/
+-- reimbursement_update_draft's WITH CHECK constrains employee_id and
+-- status, never this column, so nothing stopped an employee inflating
+-- their own claim's total_amount (which flows straight into
+-- generate_payroll_export_lines()'s payroll export) or deflating it to
+-- dodge an amount-gated approval step. Forcing a recompute on every
+-- insert/update of the claim row itself, in addition to the lines
+-- trigger, closes that regardless of what the client sends.
+create or replace function guard_reimbursement_claim_total()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.total_amount := coalesce((select sum(amount) from reimbursement_claim_lines where claim_id = new.id), 0);
+  return new;
+end;
+$$;
+
+create trigger reimbursement_claims_guard_total before insert or update on reimbursement_claims
+  for each row execute function guard_reimbursement_claim_total();
 
 create table attendance_records (
   id            uuid primary key default gen_random_uuid(),
@@ -908,6 +956,16 @@ create table payroll_export_lines (
 
 create index idx_payroll_export_lines_run on payroll_export_lines(run_id);
 
+-- Backs generate_payroll_export_lines()'s own "not exists" check with a real
+-- constraint: that check alone only rules out a source row already being
+-- exported by the time a query's snapshot was taken, not two overlapping
+-- calls (e.g. two draft runs for different periods racing on the same
+-- company's approved reimbursement claims, or a double-clicked "re-check
+-- for new lines") each seeing "not yet exported" and both inserting a line
+-- for it. The unique index plus that function's own on-conflict-do-nothing
+-- makes the second racer a no-op instead of a duplicate export line.
+create unique index payroll_export_lines_source_uniq on payroll_export_lines(source_reference_type, source_reference_id);
+
 -- -----------------------------------------------------------------------------
 -- 11. Audit log & AI drafts
 -- -----------------------------------------------------------------------------
@@ -1149,9 +1207,12 @@ as $$
 declare
   v_company_id uuid;
   v_manager_id uuid;
+  v_requester_user_id uuid;
+  v_grandmanager_id uuid;
   v_result uuid;
 begin
-  select company_id, manager_id into v_company_id, v_manager_id from employees where id = p_employee_id;
+  select company_id, manager_id, user_id into v_company_id, v_manager_id, v_requester_user_id
+  from employees where id = p_employee_id;
 
   -- employment_status <> 'terminated' (not e.g. 'active' only) — a
   -- terminated employee should never remain resolvable as an approver of
@@ -1159,16 +1220,72 @@ begin
   -- termination into reassigning their reports or revoking their roles),
   -- but someone merely on_leave/suspended is still a legitimate approver.
   if p_approver_type = 'direct_manager' then
-    select user_id into v_result from employees
-    where id = v_manager_id and employment_status <> 'terminated' and deleted_at is null;
+    if v_manager_id is null then
+      -- Top of the org chart — exactly the CEO/CTO's own situation, since
+      -- nothing ever assigns them a manager_id. Returning null here used to
+      -- mean create_initial_approval()/decide_leave_approval() both treat
+      -- this as "no approver could be resolved" and hard-block the
+      -- submission outright. There is no manager requirement for a
+      -- C-level exec ("there is no need of manager for them, approval
+      -- wise, anyone can approve as C-Level executives"), so fall back to
+      -- any OTHER active ceo/cto holder in the same company instead of
+      -- leaving them permanently unable to submit their own leave/
+      -- reimbursement/etc. The self-approval check in
+      -- create_initial_approval()/decide_leave_approval() still applies
+      -- normally if this ever resolved back to the requester themselves.
+      select ur.user_id into v_result
+      from user_roles ur
+      where ur.role in ('ceo', 'cto')
+        and ur.revoked_at is null
+        and (ur.company_id is null or ur.company_id = v_company_id)
+        and ur.user_id <> v_requester_user_id
+        and not exists (
+          select 1 from employees e2
+          where e2.user_id = ur.user_id and (e2.employment_status = 'terminated' or e2.deleted_at is not null)
+        )
+      order by ur.granted_at asc
+      limit 1;
+    else
+      select user_id into v_result from employees
+      where id = v_manager_id and employment_status <> 'terminated' and deleted_at is null;
+    end if;
   elsif p_approver_type = 'manager_of_manager' then
-    select user_id into v_result from employees
-    where id = (select manager_id from employees where id = v_manager_id)
-      and employment_status <> 'terminated' and deleted_at is null;
+    select manager_id into v_grandmanager_id from employees where id = v_manager_id;
+    if v_manager_id is null or v_grandmanager_id is null then
+      -- Same top-of-org-chart dead end as direct_manager above: either this
+      -- employee has no manager at all, or their manager has no manager of
+      -- their own (e.g. reports straight to the CEO/CTO) — either way
+      -- there's no "manager of manager" to resolve, so fall back to any
+      -- other active ceo/cto holder for the same reason given above.
+      select ur.user_id into v_result
+      from user_roles ur
+      where ur.role in ('ceo', 'cto')
+        and ur.revoked_at is null
+        and (ur.company_id is null or ur.company_id = v_company_id)
+        and ur.user_id <> v_requester_user_id
+        and not exists (
+          select 1 from employees e2
+          where e2.user_id = ur.user_id and (e2.employment_status = 'terminated' or e2.deleted_at is not null)
+        )
+      order by ur.granted_at asc
+      limit 1;
+    else
+      select user_id into v_result from employees
+      where id = v_grandmanager_id and employment_status <> 'terminated' and deleted_at is null;
+    end if;
   elsif p_approver_type like 'role:%' then
+    -- 'role:ceo' is treated as "any C-level exec" — ceo and cto are equal
+    -- peers for approval-routing purposes (per the CTO rollout: "anyone
+    -- can approve as C-Level executives"), so a workflow step configured
+    -- as role:ceo is satisfied by whichever of them is available. Every
+    -- other role:% value (role:hr_admin, role:finance, ...) keeps its
+    -- exact single-role match, unchanged.
     select ur.user_id into v_result
     from user_roles ur
-    where ur.role = replace(p_approver_type, 'role:', '')::app_role
+    where (
+        case when p_approver_type = 'role:ceo' then ur.role in ('ceo', 'cto')
+        else ur.role = replace(p_approver_type, 'role:', '')::app_role end
+      )
       and ur.revoked_at is null
       and (ur.company_id is null or ur.company_id = v_company_id)
       and not exists (
@@ -1200,9 +1317,15 @@ declare
   v_result uuid;
 begin
   if p_approver_type like 'role:%' then
+    -- Same role:ceo -> "any C-level exec" broadening as resolve_approver()
+    -- above — see its comment for why. payroll_export_run's mandatory
+    -- Finance-then-CEO sign-off is satisfied by ceo OR cto equally.
     select ur.user_id into v_result
     from user_roles ur
-    where ur.role = replace(p_approver_type, 'role:', '')::app_role
+    where (
+        case when p_approver_type = 'role:ceo' then ur.role in ('ceo', 'cto')
+        else ur.role = replace(p_approver_type, 'role:', '')::app_role end
+      )
       and ur.revoked_at is null
       and (ur.company_id is null or ur.company_id = p_company_id)
       and not exists (
@@ -1282,6 +1405,7 @@ begin
     and not exists (
       select 1 from payroll_export_lines pl where pl.source_reference_type = 'leave_ledger' and pl.source_reference_id = l.id
     )
+  on conflict (source_reference_type, source_reference_id) do nothing
   returning *;
 end;
 $$;
@@ -1455,9 +1579,30 @@ begin
     raise exception 'The resolved approver for this workflow''s first step (%) is you — you can''t approve your own request. Contact HR Admin to assign a different approver.', v_approver_type;
   end if;
 
-  insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id, decision)
-  values (p_entity_type, p_entity_id, v_workflow_id, 1, v_approver_id, 'pending')
-  returning id into v_approval_id;
+  -- Idempotent under concurrent double-submission: reimbursement claims,
+  -- timesheets, and payroll runs submit against an EXISTING row (an
+  -- UPDATE then this call), so two racing calls can both pass every check
+  -- above before either has inserted. Returning the existing step-1
+  -- approval instead of raising or duplicating means the "loser" of the
+  -- race gets back the same approval the "winner" created, rather than
+  -- its caller (e.g. submitPayrollRun()) treating this as a routing
+  -- failure and reverting the entity's status out from under a real,
+  -- already-pending approval. The unique index above is the backstop for
+  -- the rare case where both SELECTs below race past each other too.
+  select id into v_approval_id from approvals
+  where entity_type = p_entity_type and entity_id = p_entity_id and step_order = 1;
+  if v_approval_id is not null then
+    return v_approval_id;
+  end if;
+
+  begin
+    insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id, decision)
+    values (p_entity_type, p_entity_id, v_workflow_id, 1, v_approver_id, 'pending')
+    returning id into v_approval_id;
+  exception when unique_violation then
+    select id into v_approval_id from approvals
+    where entity_type = p_entity_type and entity_id = p_entity_id and step_order = 1;
+  end;
 
   return v_approval_id;
 end;
@@ -1619,6 +1764,18 @@ begin
   if v_approval.entity_type = 'leave_request' then
     v_remaining := v_leave_request.total_days;
 
+    -- The row-level "for update" locks above only cover this one
+    -- leave_request/approval pair -- they don't stop a SECOND, independent
+    -- leave request for the SAME employee from being finalized concurrently
+    -- (two approvers, or one approver clicking through two pending items
+    -- quickly). Both would otherwise read the same comp_day_ledger SUM
+    -- before either commits its deduction, letting both draw from what
+    -- looks like an independent full balance and overdraw it. An advisory
+    -- lock keyed on the employee serializes comp-day balance reads+writes
+    -- across concurrent decisions for that employee; it's released
+    -- automatically at transaction end.
+    perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || v_leave_request.employee_id::text));
+
     for v_rule in
       select dpr.source_ledger
       from deduction_priority_rules dpr
@@ -1667,9 +1824,10 @@ begin
     update generated_letters set status = 'issued' where id = v_approval.entity_id;
 
   elsif v_approval.entity_type = 'payroll_export_run' then
-    -- The CEO's decision (the final, always-present step) stamps
-    -- authorized_by/at — the one place this column is ever set, since
-    -- there's no direct UPDATE policy on those columns for anyone.
+    -- The C-level exec's decision (ceo or cto — the final, always-present
+    -- step) stamps authorized_by/at — the one place this column is ever
+    -- set, since there's no direct UPDATE policy on those columns for
+    -- anyone.
     update payroll_export_runs
     set status = 'approved', authorized_by = coalesce(auth.uid(), v_requester_user_id), authorized_at = now()
     where id = v_approval.entity_id;
@@ -1781,7 +1939,7 @@ create policy employees_select on employees for select
         id = current_employee_id()
         or is_manager_of(id)
         or has_role('finance', company_id)
-        or has_role('ceo', company_id)
+        or (has_role('ceo', company_id) or has_role('cto', company_id))
       )
     )
   );
@@ -1856,7 +2014,7 @@ create policy employment_contracts_select on employment_contracts for select
     or (is_manager_of(employee_id) and is_current)
     or has_role('hr_admin', (select company_id from employees where id = employee_id))
     or has_role('finance', (select company_id from employees where id = employee_id))
-    or has_role('ceo', (select company_id from employees where id = employee_id))
+    or (has_role('ceo', (select company_id from employees where id = employee_id)) or has_role('cto', (select company_id from employees where id = employee_id)))
   );
 
 create policy employment_contracts_insert on employment_contracts for insert
@@ -1909,6 +2067,44 @@ create policy identity_docs_update on identity_documents for update
   using (has_role('hr_admin', (select company_id from employees where id = employee_id)))
   with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
 
+-- employment_contracts_update/compensation_update/identity_docs_update all
+-- check has_role(..., company_id) resolved from employee_id -- in USING
+-- against the OLD row's employee_id, in WITH CHECK against the NEW row's.
+-- Nothing stops employee_id itself changing in the same UPDATE (the same
+-- shape already fixed for goals/appraisals, just never patched on these
+-- three sensitive-tier tables). An HR Admin/Finance user with write access
+-- to both the source and destination employee's company could retarget a
+-- row of confidential salary/IBAN or passport/Iqama/PESEL data onto a
+-- DIFFERENT employee, corrupting the append-only versioning these tables
+-- are documented to rely on, and letting that other (uninvolved) employee
+-- read it as "their own" via the plain self-read policy clause.
+create or replace function guard_employee_id_immutable()
+returns trigger
+language plpgsql
+as $$
+begin
+  if auth.uid() is null then
+    return new; -- trusted backend/migration/seed context
+  end if;
+  if new.employee_id is distinct from old.employee_id then
+    raise exception 'This record cannot be reassigned to a different employee';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger employment_contracts_guard_employee_immutable
+  before update on employment_contracts
+  for each row execute function guard_employee_id_immutable();
+
+create trigger compensation_details_guard_employee_immutable
+  before update on compensation_details
+  for each row execute function guard_employee_id_immutable();
+
+create trigger identity_documents_guard_employee_immutable
+  before update on identity_documents
+  for each row execute function guard_employee_id_immutable();
+
 create policy identity_docs_delete on identity_documents for delete
   using (has_role('hr_admin', (select company_id from employees where id = employee_id)));
 
@@ -1928,7 +2124,7 @@ create policy policy_versions_select on policy_versions for select
   using (
     status = 'active'
     or has_role('hr_admin', null, country_code)
-    or has_role('ceo', null, country_code)
+    or (has_role('ceo', null, country_code) or has_role('cto', null, country_code))
   );
 
 -- Every new version must start as a draft — without this, an HR Admin could
@@ -1940,9 +2136,9 @@ create policy policy_versions_insert on policy_versions for insert
 create policy policy_versions_update on policy_versions for update
   using (
     status = 'draft'
-    and (has_role('hr_admin', null, country_code) or has_role('ceo', null, country_code))
+    and (has_role('hr_admin', null, country_code) or (has_role('ceo', null, country_code) or has_role('cto', null, country_code)))
   )
-  with check (has_role('hr_admin', null, country_code) or has_role('ceo', null, country_code));
+  with check (has_role('hr_admin', null, country_code) or (has_role('ceo', null, country_code) or has_role('cto', null, country_code)));
 
 -- Same "draft only" restriction the update policy above applies — an
 -- active version is real, in-effect policy and stays append-only forever,
@@ -1951,7 +2147,7 @@ create policy policy_versions_update on policy_versions for update
 create policy policy_versions_delete on policy_versions for delete
   using (
     status = 'draft'
-    and (has_role('hr_admin', null, country_code) or has_role('ceo', null, country_code))
+    and (has_role('hr_admin', null, country_code) or (has_role('ceo', null, country_code) or has_role('cto', null, country_code)))
   );
 
 create or replace function guard_policy_version_update()
@@ -2010,7 +2206,7 @@ create policy policy_leave_types_select on policy_leave_types for select
         and (
           pv.status = 'active'
           or has_role('hr_admin', null, pv.country_code)
-          or has_role('ceo', null, pv.country_code)
+          or (has_role('ceo', null, pv.country_code) or has_role('cto', null, pv.country_code))
         )
     )
   );
@@ -2171,7 +2367,7 @@ create policy employee_checklist_items_select on employee_checklist_items for se
     )
     or (
       exists (select 1 from checklist_template_items cti where cti.id = template_item_id and cti.assignee_role = 'ceo')
-      and has_role('ceo', (select company_id from employees where id = employee_id))
+      and (has_role('ceo', (select company_id from employees where id = employee_id)) or has_role('cto', (select company_id from employees where id = employee_id)))
     )
     or (
       exists (select 1 from checklist_template_items cti where cti.id = template_item_id and cti.assignee_role = 'sys_admin')
@@ -2201,13 +2397,43 @@ create policy employee_checklist_items_complete on employee_checklist_items for 
     )
     or (
       exists (select 1 from checklist_template_items cti where cti.id = template_item_id and cti.assignee_role = 'ceo')
-      and has_role('ceo', (select company_id from employees where id = employee_id))
+      and (has_role('ceo', (select company_id from employees where id = employee_id)) or has_role('cto', (select company_id from employees where id = employee_id)))
     )
     or (
       exists (select 1 from checklist_template_items cti where cti.id = template_item_id and cti.assignee_role = 'sys_admin')
       and has_role('sys_admin')
     )
   );
+
+-- The comment above claims re-evaluating this same USING clause against the
+-- NEW row "blocks reassigning template_item_id/employee_id to something the
+-- caller couldn't otherwise see" -- that's not actually true: the FIRST
+-- disjunct, `employee_id = current_employee_id()`, doesn't reference
+-- template_item_id at all, so an employee who keeps employee_id pointed at
+-- themselves can freely retarget template_item_id (and every other column)
+-- in the same UPDATE, self-marking someone else's assigned task -- e.g. an
+-- HR/Finance/Sys-Admin-verified offboarding step -- as done. Rows are only
+-- ever created once by generate_employee_checklist_items() with a fixed
+-- employee_id/template_item_id pairing; neither has any legitimate reason
+-- to change afterward, so this blocks both outright.
+create or replace function guard_checklist_item_identity_immutable()
+returns trigger
+language plpgsql
+as $$
+begin
+  if auth.uid() is null then
+    return new; -- trusted backend/migration/seed context
+  end if;
+  if new.employee_id is distinct from old.employee_id or new.template_item_id is distinct from old.template_item_id then
+    raise exception 'A checklist item cannot be reassigned to a different employee or task';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger employee_checklist_items_guard_identity_immutable
+  before update on employee_checklist_items
+  for each row execute function guard_checklist_item_identity_immutable();
 
 -- ---- employee_documents: employee (own, upload/view), HR Admin (all in
 --      company, including soft-deleted for recovery — same pattern as
@@ -2310,7 +2536,7 @@ create policy leave_requests_select on leave_requests for select
     or is_manager_of(employee_id)
     or has_role('hr_admin', (select company_id from employees where id = employee_id))
     or has_role('finance', (select company_id from employees where id = employee_id))
-    or has_role('ceo', (select company_id from employees where id = employee_id))
+    or (has_role('ceo', (select company_id from employees where id = employee_id)) or has_role('cto', (select company_id from employees where id = employee_id)))
   );
 
 create policy leave_requests_insert on leave_requests for insert
@@ -2426,7 +2652,7 @@ create policy project_allocations_select on project_allocations for select
     or is_manager_of(employee_id)
     or has_role('hr_admin', (select company_id from employees where id = employee_id))
     or has_role('finance', (select company_id from employees where id = employee_id))
-    or has_role('ceo', (select company_id from employees where id = employee_id))
+    or (has_role('ceo', (select company_id from employees where id = employee_id)) or has_role('cto', (select company_id from employees where id = employee_id)))
   );
 
 create policy project_allocations_write on project_allocations for all
@@ -2444,7 +2670,7 @@ create policy reimbursement_select on reimbursement_claims for select
     or is_manager_of(employee_id)
     or has_role('hr_admin', (select company_id from employees where id = employee_id))
     or has_role('finance', (select company_id from employees where id = employee_id))
-    or has_role('ceo', (select company_id from employees where id = employee_id))
+    or (has_role('ceo', (select company_id from employees where id = employee_id)) or has_role('cto', (select company_id from employees where id = employee_id)))
   );
 
 create policy reimbursement_insert on reimbursement_claims for insert
@@ -2458,6 +2684,13 @@ create policy reimbursement_update_cancel on reimbursement_claims for update
   using (employee_id = current_employee_id() and status in ('submitted', 'pending_approval'))
   with check (employee_id = current_employee_id() and status = 'cancelled');
 
+-- Once submitted, "cancel" (above) is the only way out — approved/rejected/
+-- cancelled claims are kept for the record, same as leave_requests never
+-- getting a delete policy either. A still-draft claim was never submitted
+-- anywhere, so there's nothing to preserve.
+create policy reimbursement_delete_draft on reimbursement_claims for delete
+  using (employee_id = current_employee_id() and status = 'draft');
+
 create policy reimbursement_lines_select on reimbursement_claim_lines for select
   using (exists (
     select 1 from reimbursement_claims c
@@ -2466,7 +2699,7 @@ create policy reimbursement_lines_select on reimbursement_claim_lines for select
       or is_manager_of(c.employee_id)
       or has_role('hr_admin', (select company_id from employees where id = c.employee_id))
       or has_role('finance', (select company_id from employees where id = c.employee_id))
-      or has_role('ceo', (select company_id from employees where id = c.employee_id))
+      or (has_role('ceo', (select company_id from employees where id = c.employee_id)) or has_role('cto', (select company_id from employees where id = c.employee_id)))
     )
   ));
 
@@ -2549,7 +2782,7 @@ create policy generated_letters_select on generated_letters for select
   using (
     employee_id = current_employee_id()
     or has_role('hr_admin', (select company_id from employees where id = employee_id))
-    or has_role('ceo', (select company_id from employees where id = employee_id))
+    or (has_role('ceo', (select company_id from employees where id = employee_id)) or has_role('cto', (select company_id from employees where id = employee_id)))
   );
 
 create policy generated_letters_insert on generated_letters for insert
@@ -2570,7 +2803,7 @@ create policy payroll_runs_select on payroll_export_runs for select
   using (
     has_role('hr_admin', company_id)
     or has_role('finance', company_id)
-    or has_role('ceo', company_id)
+    or (has_role('ceo', company_id) or has_role('cto', company_id))
   );
 
 create policy payroll_runs_insert on payroll_export_runs for insert
@@ -2595,7 +2828,7 @@ create policy payroll_runs_delete_finance on payroll_export_runs for delete
 create policy payroll_lines_select on payroll_export_lines for select
   using (exists (
     select 1 from payroll_export_runs r
-    where r.id = run_id and (has_role('hr_admin', r.company_id) or has_role('finance', r.company_id) or has_role('ceo', r.company_id))
+    where r.id = run_id and (has_role('hr_admin', r.company_id) or has_role('finance', r.company_id) or (has_role('ceo', r.company_id) or has_role('cto', r.company_id)))
   ));
 
 create policy payroll_lines_insert on payroll_export_lines for insert
@@ -2849,12 +3082,14 @@ create policy letters_select on storage.objects for select
     )
   );
 
--- CEO gets its own policy (mirroring generated_letters_select's read
--- access) rather than folding into letters_select above, since a CEO
+-- CEO/CTO get their own policy (mirroring generated_letters_select's read
+-- access, ceo and cto being equal C-level peers throughout this schema)
+-- rather than folding into letters_select above, since a C-level exec
 -- deciding a letter's approval needs to read the file itself, not just
--- its row.
+-- its row. Policy name kept as letters_select_ceo (an internal identifier,
+-- not user-facing) for continuity with the migration that created it.
 create policy letters_select_ceo on storage.objects for select
-  using (bucket_id = 'letters' and has_role('ceo', (storage.foldername(name))[1]::uuid));
+  using (bucket_id = 'letters' and (has_role('ceo', (storage.foldername(name))[1]::uuid) or has_role('cto', (storage.foldername(name))[1]::uuid)));
 
 create policy letters_write on storage.objects for insert
   with check (bucket_id = 'letters' and has_role('hr_admin', (storage.foldername(name))[1]::uuid));

@@ -67,12 +67,13 @@ export function RunActions({
           {status === "approved" && !sentAt ? (
             <Button
               disabled={pending}
-              onClick={() =>
+              onClick={() => {
+                if (!window.confirm("Mark this run as sent? This confirms the file has actually gone to the payroll provider.")) return;
                 startTransition(async () => {
                   const result = await markPayrollSent(runId);
                   setError(result.error);
-                })
-              }
+                });
+              }}
             >
               {pending ? "Marking…" : "Mark as sent"}
             </Button>

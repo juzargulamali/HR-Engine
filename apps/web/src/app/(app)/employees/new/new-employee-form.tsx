@@ -107,6 +107,24 @@ export function NewEmployeeForm({
         </div>
       </fieldset>
 
+      <fieldset className="space-y-4 rounded-md border border-border p-4">
+        <legend className="px-1 text-sm font-medium">Opening balances (optional)</legend>
+        <p className="text-xs text-muted-foreground">
+          For a mid-year hire or a transfer who already has leave or comp days earned elsewhere — leave blank for a fresh start
+          with nothing carried over.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="openingAnnualLeaveDays">Annual leave balance (days)</Label>
+            <Input id="openingAnnualLeaveDays" name="openingAnnualLeaveDays" type="number" min={0} step={0.5} placeholder="0" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="openingCompDays">Comp days earned to date</Label>
+            <Input id="openingCompDays" name="openingCompDays" type="number" min={0} step={0.5} placeholder="0" />
+          </div>
+        </div>
+      </fieldset>
+
       {state.error ? <Alert variant="destructive">{state.error}</Alert> : null}
       <div className="flex gap-3">
         <Button type="submit" disabled={pending}>

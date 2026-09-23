@@ -28,3 +28,15 @@ export function validateUploadFile(file: File): string | null {
   }
   return null;
 }
+
+/**
+ * Every storage path this app builds is `<trusted-uuid-segments>/<this>`,
+ * and every bucket's RLS keys only off those trusted leading segments — so
+ * an unsanitized filename can't currently traverse out of them. Still,
+ * that safety is incidental to today's path shapes, not a property of this
+ * value itself, so every raw `file.name` (and the free-text `documentType`
+ * used the same way) gets sanitized before going into a path regardless.
+ */
+export function sanitizeForStoragePath(name: string): string {
+  return name.replace(/[^A-Za-z0-9._-]/g, "_");
+}

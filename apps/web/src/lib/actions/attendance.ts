@@ -4,47 +4,13 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { addMonthsClamped } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
-import type { ActionState } from "./companies";
-
-const recordAttendanceSchema = z.object({
-  employeeId: z.string().uuid(),
-  workDate: z.string().min(1),
-  status: z.enum(["present", "absent", "leave", "holiday", "weekend"]),
-  clockIn: z.string().optional(),
-  clockOut: z.string().optional(),
-  hoursWorked: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().min(0).max(24).optional()),
-});
 
 /**
- * Records or corrects a single day's attendance — attendance_write is HR
- * Admin only (manual entry/import), never self-service. Keyed on the
- * table's own unique(employee_id, work_date), so re-submitting the same
- * date corrects it in place instead of erroring.
+ * Deletes/corrects a single day's attendance record — recording it now
+ * only happens through the dedicated bulk daily register
+ * (bulkRecordAttendance below); the per-employee single-day input form
+ * this used to pair with was removed as a duplicate entry point.
  */
-export async function recordAttendance(_prevState: ActionState, formData: FormData): Promise<ActionState> {
-  const parsed = recordAttendanceSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
-  const d = parsed.data;
-
-  const supabase = await createClient();
-  const { error } = await supabase.from("attendance_records").upsert(
-    {
-      employee_id: d.employeeId,
-      work_date: d.workDate,
-      status: d.status,
-      clock_in: d.clockIn ? new Date(`${d.workDate}T${d.clockIn}`).toISOString() : null,
-      clock_out: d.clockOut ? new Date(`${d.workDate}T${d.clockOut}`).toISOString() : null,
-      hours_worked: d.hoursWorked ?? null,
-      source: "manual",
-    },
-    { onConflict: "employee_id,work_date" },
-  );
-  if (error) return { error: error.message };
-
-  revalidatePath(`/employees/${d.employeeId}`);
-  return { error: null };
-}
-
 export async function deleteAttendanceRecord(recordId: string, employeeId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
   const { error } = await supabase.from("attendance_records").delete().eq("id", recordId);
@@ -181,7 +147,16 @@ export async function bulkRecordAttendance(input: {
           };
         }),
       );
-      if (!creditError) creditedCount = toCredit.length;
+      if (creditError) {
+        // A unique-constraint hit here (comp_day_ledger_attendance_uniq)
+        // means a concurrent save already credited one of these exact
+        // attendance records — surface it rather than silently reporting
+        // 0 credited, so the admin knows to re-check rather than assume
+        // this run credited nothing at all.
+        revalidatePath("/attendance");
+        return { error: `Attendance was saved, but comp-day crediting failed: ${creditError.message}`, creditedCount: 0 };
+      }
+      creditedCount = toCredit.length;
     }
   }
 

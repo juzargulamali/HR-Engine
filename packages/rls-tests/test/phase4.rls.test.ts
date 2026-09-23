@@ -189,6 +189,53 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       ).rejects.toThrow(/row-level security/);
     });
 
+    // Regression test: guard_reimbursement_claim_total() (fourth audit pass)
+    // now fires before insert or update on reimbursement_claims itself, not
+    // just on its lines — the lines-recompute trigger only ever fired on
+    // reimbursement_claim_lines, so nothing stopped an employee setting
+    // total_amount directly on the claim row, a value that flows straight
+    // into generate_payroll_export_lines()'s payroll export or could be
+    // deflated to dodge an amount-gated approval step.
+    it("recomputes total_amount from its lines on a direct client UPDATE, ignoring any client-supplied value", async () => {
+      await db.asUser(USER_REPORT, async (query) => {
+        const { rows: claimRows } = await query(
+          "insert into reimbursement_claims (employee_id, currency) values ($1, 'ZZD') returning id",
+          [EMPLOYEE_REPORT],
+        );
+        const claimId = claimRows[0]?.id;
+
+        await query(
+          "insert into reimbursement_claim_lines (claim_id, line_no, expense_date, category, amount) values ($1, 1, '2026-01-01', 'travel', 40)",
+          [claimId],
+        );
+
+        const attempt = await query(
+          "update reimbursement_claims set total_amount = 999999 where id = $1 returning total_amount",
+          [claimId],
+        );
+        expect(Number(attempt.rows[0]?.total_amount)).toBe(40); // recomputed from the one real 40 line, not the attempted 999999
+
+        const reread = await query("select total_amount from reimbursement_claims where id = $1", [claimId]);
+        expect(Number(reread.rows[0]?.total_amount)).toBe(40);
+      });
+    });
+
+    it("recomputes total_amount to 0 on a direct client UPDATE when the claim has no lines at all", async () => {
+      await db.asUser(USER_REPORT, async (query) => {
+        const { rows: claimRows } = await query(
+          "insert into reimbursement_claims (employee_id, currency) values ($1, 'ZZD') returning id",
+          [EMPLOYEE_REPORT],
+        );
+        const claimId = claimRows[0]?.id;
+
+        const attempt = await query(
+          "update reimbursement_claims set total_amount = 500 where id = $1 returning total_amount",
+          [claimId],
+        );
+        expect(Number(attempt.rows[0]?.total_amount)).toBe(0);
+      });
+    });
+
     it("blocks editing claim lines once the claim is no longer a draft", async () => {
       const requestId = randomUUID();
       await db.seed(`
@@ -276,6 +323,71 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       await expect(
         db.asUser(USER_PEER, (query) => query("select create_initial_approval('timesheet', $1)", [timesheetId])),
       ).rejects.toThrow(/do not own this/);
+    });
+  });
+
+  describe("create_initial_approval(): idempotent on a double-submitted entity", () => {
+    // Regression test: approvals had no constraint stopping a second step-1
+    // row from being created for the same entity. reimbursement_claims and
+    // timesheets (unlike leave_requests, which always inserts a fresh row)
+    // submit against an EXISTING row — a double-clicked "Submit for
+    // approval" could race past every check in create_initial_approval()
+    // and insert twice, and deciding that stale duplicate later could
+    // re-walk the whole workflow and regress an already-finalized entity
+    // back to pending. create_initial_approval() now checks for an existing
+    // step-1 row first and returns it instead of inserting again, backed by
+    // approvals_entity_type_entity_id_step_order_key as the race-safe
+    // backstop.
+    it("returns the same approval id on a second call for the same claim, and never creates a second step-1 row", async () => {
+      const claimId = randomUUID();
+      await db.seed(`insert into reimbursement_claims (id, employee_id, currency, status) values ('${claimId}', '${EMPLOYEE_REPORT}', 'ZZD', 'submitted');`);
+
+      await db.asUser(USER_REPORT, async (query) => {
+        const { rows: first } = await query("select create_initial_approval('reimbursement_claim', $1) as id", [claimId]);
+        const { rows: second } = await query("select create_initial_approval('reimbursement_claim', $1) as id", [claimId]);
+        expect(first[0]?.id).toBeTruthy();
+        expect(second[0]?.id).toBe(first[0]?.id);
+
+        const count = await query(
+          "select count(*) from approvals where entity_type = 'reimbursement_claim' and entity_id = $1 and step_order = 1",
+          [claimId],
+        );
+        expect(Number(count.rows[0]?.count)).toBe(1);
+      });
+    });
+  });
+
+  describe("comp_day_ledger: attendance-credit dedup constraint", () => {
+    // Regression test: bulkRecordAttendance()'s "already credited?" check
+    // was a plain SELECT immediately followed by an INSERT, with no lock in
+    // between — two concurrent saves for the same attendance record (a
+    // double-clicked "Save" on the daily register, or two admins editing the
+    // same date) could both pass it and both insert an 'earned' comp-day
+    // credit, doubling the day. comp_day_ledger_attendance_uniq backs that
+    // check with a real partial unique index scoped to
+    // reference_type = 'attendance_record' only — a real or fixture UUID is
+    // fine here, since the constraint only cares about uniqueness, not FK
+    // validity.
+    it("rejects a second comp_day_ledger row crediting the same attendance_record, but allows the same reference_id under a different reference_type", async () => {
+      const referenceId = randomUUID();
+      await db.seed(`
+        insert into comp_day_ledger (employee_id, txn_date, entry_type, days, reference_type, reference_id, created_by)
+        values ('${EMPLOYEE_REPORT}', '2026-04-10', 'earned', 1, 'attendance_record', '${referenceId}', '${USER_HR}');
+      `);
+
+      await expect(
+        db.seed(`
+          insert into comp_day_ledger (employee_id, txn_date, entry_type, days, reference_type, reference_id, created_by)
+          values ('${EMPLOYEE_REPORT}', '2026-04-10', 'earned', 1, 'attendance_record', '${referenceId}', '${USER_HR}');
+        `),
+      ).rejects.toThrow(/duplicate key value violates unique constraint/);
+
+      // Same reference_id, but a different reference_type — the partial
+      // index only scopes to 'attendance_record', so this must succeed.
+      await db.seed(`
+        insert into comp_day_ledger (employee_id, txn_date, entry_type, days, reference_type, reference_id, created_by)
+        values ('${EMPLOYEE_REPORT}', '2026-04-10', 'redeemed', -1, 'leave_request', '${referenceId}', '${USER_HR}');
+      `);
     });
   });
 

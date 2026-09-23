@@ -5,11 +5,9 @@ import { DeleteIdentityDocumentButton } from "./delete-identity-document-button"
 
 export async function IdentityDocumentsSection({
   employeeId,
-  companyId,
   canEdit,
 }: {
   employeeId: string;
-  companyId: string;
   canEdit: boolean;
 }) {
   const supabase = await createClient();
@@ -71,7 +69,7 @@ export async function IdentityDocumentsSection({
         </TableBody>
       </Table>
 
-      {canEdit ? <AddIdentityDocumentForm employeeId={employeeId} companyId={companyId} /> : null}
+      {canEdit ? <AddIdentityDocumentForm employeeId={employeeId} /> : null}
     </div>
   );
 }

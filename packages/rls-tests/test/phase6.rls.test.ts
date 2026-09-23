@@ -385,6 +385,49 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
     });
   });
 
+  describe("payroll_export_lines: source-row dedup constraint", () => {
+    // Regression test: generate_payroll_export_lines()'s only anti-double-
+    // claim mechanism was a plain "not exists" check with no backing
+    // constraint and no locking, so two overlapping calls (e.g. two
+    // different-period draft runs for the same company racing on the same
+    // pool of approved reimbursement claims) could both see a source row as
+    // "not yet exported" and both insert an export line for it — double-
+    // paying the employee once both runs were sent.
+    // payroll_export_lines_source_uniq backs that check with a real unique
+    // constraint, proven here with a plain duplicate insert against two
+    // different draft runs, independent of generate_payroll_export_lines()'s
+    // own on-conflict-do-nothing upsert.
+    it("rejects a second payroll_export_lines row claiming the same source row under a different draft run", async () => {
+      const runIdA = randomUUID();
+      const runIdB = randomUUID();
+      const sourceClaimId = randomUUID();
+      await db.seed(`
+        insert into payroll_export_runs (id, company_id, period_month, period_year, generated_by) values
+          ('${runIdA}', '${COMPANY_A}', 1, 2030, '${USER_FINANCE}'),
+          ('${runIdB}', '${COMPANY_A}', 2, 2030, '${USER_FINANCE}');
+      `);
+
+      // Both inserts happen inside ONE asUser() transaction — every asUser()
+      // call rolls back at the end (see harness.ts), so a separate second
+      // call would never see the first insert to conflict with.
+      await db.asUser(USER_FINANCE, async (query) => {
+        await query(
+          `insert into payroll_export_lines (run_id, employee_id, component_code, amount, currency, source_reference_type, source_reference_id)
+           values ($1, $2, 'reimbursement', 100, 'ZZD', 'reimbursement_claim', $3)`,
+          [runIdA, EMPLOYEE_REPORT, sourceClaimId],
+        );
+
+        await expect(
+          query(
+            `insert into payroll_export_lines (run_id, employee_id, component_code, amount, currency, source_reference_type, source_reference_id)
+             values ($1, $2, 'reimbursement', 100, 'ZZD', 'reimbursement_claim', $3)`,
+            [runIdB, EMPLOYEE_REPORT, sourceClaimId],
+          ),
+        ).rejects.toThrow(/duplicate key value violates unique constraint/);
+      });
+    });
+  });
+
   describe("generate_payroll_export_lines: reconciliation", () => {
     it("includes only approved reimbursements and this period's leave encashments, and is idempotent on re-run", async () => {
       const runId = randomUUID();

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
 import { resolveInitialApprover } from "./approvals";
-import { validateUploadFile } from "@/lib/uploads";
+import { validateUploadFile, sanitizeForStoragePath } from "@/lib/uploads";
 
 async function currentEmployee(supabase: Awaited<ReturnType<typeof createClient>>) {
   const {
@@ -66,7 +66,7 @@ export async function addClaimLine(_prevState: ActionState, formData: FormData):
     const validationError = validateUploadFile(file);
     if (validationError) return { error: validationError };
 
-    receiptFilePath = `${employee.company_id}/${employee.id}/receipts/${Date.now()}-${file.name}`;
+    receiptFilePath = `${employee.company_id}/${employee.id}/receipts/${Date.now()}-${sanitizeForStoragePath(file.name)}`;
     const { error: uploadError } = await supabase.storage
       .from("receipts")
       .upload(receiptFilePath, file, { contentType: file.type });
@@ -88,7 +88,13 @@ export async function addClaimLine(_prevState: ActionState, formData: FormData):
     description: d.description || null,
     receipt_file_path: receiptFilePath,
   });
-  if (error) return { error: error.message };
+  if (error) {
+    // The receipt (if any) was already uploaded to Storage above — without
+    // this, a failed line insert leaves it orphaned there with nothing
+    // ever pointing at it.
+    if (receiptFilePath) await supabase.storage.from("receipts").remove([receiptFilePath]);
+    return { error: error.message };
+  }
 
   revalidatePath(`/reimbursements/${d.claimId}`);
   return { error: null };
@@ -147,6 +153,26 @@ export async function submitClaim(claimId: string): Promise<{ error: string | nu
 export async function cancelClaim(claimId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
   const { error } = await supabase.from("reimbursement_claims").update({ status: "cancelled" }).eq("id", claimId);
+  revalidatePath("/reimbursements");
+  return { error: error?.message ?? null };
+}
+
+/**
+ * RLS (reimbursement_delete_draft) only permits this while the claim is
+ * still a draft — once submitted, "Cancel claim" above is the only way
+ * out, same as leave_requests never getting a delete option either.
+ * reimbursement_claim_lines cascades on delete, but their receipt files in
+ * Storage don't — remove those first or they're orphaned.
+ */
+export async function deleteDraftClaim(claimId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { data: lines } = await supabase.from("reimbursement_claim_lines").select("receipt_file_path").eq("claim_id", claimId);
+  const receiptPaths = (lines ?? []).map((l) => l.receipt_file_path).filter((p): p is string => Boolean(p));
+  if (receiptPaths.length > 0) {
+    await supabase.storage.from("receipts").remove(receiptPaths);
+  }
+
+  const { error } = await supabase.from("reimbursement_claims").delete().eq("id", claimId);
   revalidatePath("/reimbursements");
   return { error: error?.message ?? null };
 }
