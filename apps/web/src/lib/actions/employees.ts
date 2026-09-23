@@ -685,3 +685,116 @@ export async function deleteLoan(loanId: string, employeeId: string): Promise<{ 
   revalidatePath(`/employees/${employeeId}`);
   return { error: error?.message ?? null };
 }
+
+const recordCareerEventSchema = z.object({
+  employeeId: z.string().uuid(),
+  effectiveDate: z.string().min(1),
+  newJobTitle: z.string().optional(),
+  newBasicSalary: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().positive().optional()),
+  newOtherAllowance: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().min(0).optional()),
+  note: z.string().optional(),
+});
+
+/**
+ * The one place HR records a promotion, a title change, a salary change,
+ * or a promotion that's both at once — career_events_insert restricts this
+ * to HR Admin, distinct from Finance's own addCompensationVersion() above
+ * (still available for routine adjustments — bank details, a currency
+ * correction — that aren't career events worth logging here). Whichever
+ * fields actually changed decide the event_type; this also applies the
+ * change itself (employees.job_title and/or a new compensation_details
+ * version), so employee_career_events stays a pure audit trail, never a
+ * second source of truth for the current title/salary.
+ */
+export async function recordCareerEvent(_prevState: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = recordCareerEventSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in." };
+
+  const { data: employee } = await supabase.from("employees").select("job_title, company_id").eq("id", d.employeeId).single();
+  if (!employee) return { error: "Employee not found." };
+
+  const { data: currentComp } = await supabase
+    .from("compensation_details")
+    .select("id, base_salary, allowances, currency")
+    .eq("employee_id", d.employeeId)
+    .eq("is_current", true)
+    .maybeSingle();
+  const currentOther = typeof currentComp?.allowances?.other === "number" ? currentComp.allowances.other : 0;
+
+  const titleChanged = Boolean(d.newJobTitle && d.newJobTitle !== employee.job_title);
+  const salaryChanged =
+    (d.newBasicSalary !== undefined && d.newBasicSalary !== Number(currentComp?.base_salary ?? NaN)) ||
+    (d.newOtherAllowance !== undefined && d.newOtherAllowance !== currentOther);
+
+  if (!titleChanged && !salaryChanged) {
+    return { error: "Nothing changed — enter a new title and/or a new salary." };
+  }
+
+  const eventType = titleChanged && salaryChanged ? "promotion" : titleChanged ? "title_change" : "salary_change";
+
+  const { error: eventError } = await supabase.from("employee_career_events").insert({
+    employee_id: d.employeeId,
+    event_type: eventType,
+    effective_date: d.effectiveDate,
+    previous_job_title: employee.job_title,
+    new_job_title: titleChanged ? d.newJobTitle : null,
+    previous_base_salary: currentComp ? Number(currentComp.base_salary) : null,
+    new_base_salary: salaryChanged ? (d.newBasicSalary ?? Number(currentComp?.base_salary ?? 0)) : null,
+    previous_allowances: currentComp?.allowances ?? null,
+    new_allowances: salaryChanged ? { other: d.newOtherAllowance ?? currentOther } : null,
+    currency: currentComp?.currency ?? null,
+    note: d.note || null,
+    created_by: user.id,
+  });
+  if (eventError) return { error: eventError.message };
+
+  const warnings: string[] = [];
+
+  if (titleChanged) {
+    const { error } = await supabase.from("employees").update({ job_title: d.newJobTitle }).eq("id", d.employeeId);
+    if (error) warnings.push(`the title update failed (${error.message})`);
+  }
+
+  if (salaryChanged) {
+    let currency = currentComp?.currency;
+    if (!currency) {
+      const { data: company } = await supabase.from("companies").select("default_currency").eq("id", employee.company_id).single();
+      currency = company?.default_currency ?? "AED";
+    }
+
+    const { data: newVersion, error: compError } = await supabase
+      .from("compensation_details")
+      .insert({
+        employee_id: d.employeeId,
+        effective_from: d.effectiveDate,
+        base_salary: d.newBasicSalary ?? Number(currentComp?.base_salary ?? 0),
+        allowances: (d.newOtherAllowance ?? currentOther) ? { other: d.newOtherAllowance ?? currentOther } : {},
+        currency,
+        created_by: user.id,
+      })
+      .select("id")
+      .single();
+
+    if (compError || !newVersion) {
+      warnings.push(`the salary update failed (${compError?.message ?? "unknown error"})`);
+    } else if (currentComp?.id) {
+      await supabase.from("compensation_details").update({ is_current: false, superseded_by: newVersion.id }).eq("id", currentComp.id);
+    }
+  }
+
+  revalidatePath(`/employees/${d.employeeId}`);
+
+  if (warnings.length > 0) {
+    return { error: `Career event logged, but ${warnings.join(", and ")}.` };
+  }
+  return { error: null };
+}

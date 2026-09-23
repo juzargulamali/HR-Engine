@@ -20,6 +20,16 @@ export function canEditCompensation(grants: readonly RoleGrant[], companyId: str
   return isHrAdmin(grants, { companyId }) || isFinance(grants, { companyId });
 }
 
+/** Mirrors career_events_select — same visibility tier as compensation. */
+export function canViewCareerEvents(grants: readonly RoleGrant[], companyId: string, isSelf: boolean): boolean {
+  return isSelf || isHrAdmin(grants, { companyId }) || isFinance(grants, { companyId });
+}
+
+/** Mirrors career_events_insert — HR Admin only, distinct from Finance's own plain compensation-adjustment tool. */
+export function canRecordCareerEvent(grants: readonly RoleGrant[], companyId: string): boolean {
+  return isHrAdmin(grants, { companyId });
+}
+
 export function canViewIdentityDocuments(grants: readonly RoleGrant[], companyId: string, isSelf: boolean): boolean {
   return isSelf || isHrAdmin(grants, { companyId });
 }

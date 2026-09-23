@@ -10,8 +10,10 @@ import {
   canManageInsurance,
   canManageLoans,
   canRateGoal,
+  canRecordCareerEvent,
   canViewAssetAssignments,
   canViewAttendance,
+  canViewCareerEvents,
   canViewCompensation,
   canViewContracts,
   canViewEmployeeDocuments,
@@ -31,6 +33,7 @@ import { RestoreOrRemoveEmployeeButton } from "./restore-or-remove-employee-butt
 import { EditEmployeeForm } from "./edit-employee-form";
 import { ContractHistory } from "./contract-history";
 import { CompensationSection } from "./compensation-section";
+import { CareerHistorySection } from "./career-history-section";
 import { IdentityDocumentsSection } from "./identity-documents-section";
 import { InsuranceSection } from "./insurance-section";
 import { LoansSection } from "./loans-section";
@@ -85,6 +88,8 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   const canSeeContracts = canViewContracts(session.grants, employee.company_id, { isSelf, isManager });
   const canEditContracts = canManageContracts(session.grants, employee.company_id);
   const canSeeComp = canViewCompensation(session.grants, employee.company_id, isSelf);
+  const canSeeCareerEvents = canViewCareerEvents(session.grants, employee.company_id, isSelf);
+  const canRecordCareer = canRecordCareerEvent(session.grants, employee.company_id);
   const canSeeIdentity = canViewIdentityDocuments(session.grants, employee.company_id, isSelf);
   const canEditIdentity = canManageIdentityDocuments(session.grants, employee.company_id);
   const canSeeInsurance = canViewInsurance(session.grants, employee.company_id, isSelf);
@@ -164,6 +169,17 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           </CardHeader>
           <CardContent>
             <CompensationSection employeeId={employee.id} canEdit={!isSelf && canSeeComp} isSelf={isSelf} />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {canSeeCareerEvents ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Promotions & salary history</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <CareerHistorySection employeeId={employee.id} canView={canSeeCareerEvents} canRecord={canRecordCareer} />
           </CardContent>
         </Card>
       ) : null}

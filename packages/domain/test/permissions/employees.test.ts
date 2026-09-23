@@ -7,6 +7,8 @@ import {
   canManageIdentityDocuments,
   canManageInsurance,
   canManageLoans,
+  canRecordCareerEvent,
+  canViewCareerEvents,
   canViewCompensation,
   canViewContracts,
   canViewDeletedEmployees,
@@ -41,6 +43,23 @@ describe("compensation permissions", () => {
     expect(canEditCompensation(employeeOnly, COMPANY_A)).toBe(false);
     expect(canEditCompensation(hrAdminA, COMPANY_A)).toBe(true);
     expect(canEditCompensation(financeA, COMPANY_A)).toBe(true);
+  });
+});
+
+describe("career event permissions", () => {
+  it("view mirrors compensation's visibility tier — self, HR Admin, Finance", () => {
+    expect(canViewCareerEvents(employeeOnly, COMPANY_A, true)).toBe(true);
+    expect(canViewCareerEvents(employeeOnly, COMPANY_A, false)).toBe(false);
+    expect(canViewCareerEvents(hrAdminA, COMPANY_A, false)).toBe(true);
+    expect(canViewCareerEvents(financeA, COMPANY_A, false)).toBe(true);
+    expect(canViewCareerEvents(managerA, COMPANY_A, false)).toBe(false);
+    expect(canViewCareerEvents(ceoA, COMPANY_A, false)).toBe(false);
+  });
+
+  it("recording a career event is HR Admin only, unlike plain compensation edits which Finance can also do", () => {
+    expect(canRecordCareerEvent(hrAdminA, COMPANY_A)).toBe(true);
+    expect(canRecordCareerEvent(financeA, COMPANY_A)).toBe(false);
+    expect(canRecordCareerEvent(hrAdminA, COMPANY_B)).toBe(false);
   });
 });
 

@@ -282,6 +282,41 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["compensation_details"]["Insert"]>;
         Relationships: [];
       };
+      employee_career_events: {
+        Row: {
+          id: string;
+          employee_id: string;
+          event_type: "promotion" | "title_change" | "salary_change";
+          effective_date: string;
+          previous_job_title: string | null;
+          new_job_title: string | null;
+          previous_base_salary: string | null;
+          new_base_salary: string | null;
+          previous_allowances: Record<string, unknown> | null;
+          new_allowances: Record<string, unknown> | null;
+          currency: string | null;
+          note: string | null;
+          created_at: string;
+          created_by: string;
+        };
+        Insert: {
+          id?: string;
+          employee_id: string;
+          event_type: "promotion" | "title_change" | "salary_change";
+          effective_date: string;
+          previous_job_title?: string | null;
+          new_job_title?: string | null;
+          previous_base_salary?: number | null;
+          new_base_salary?: number | null;
+          previous_allowances?: Record<string, unknown> | null;
+          new_allowances?: Record<string, unknown> | null;
+          currency?: string | null;
+          note?: string | null;
+          created_by: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_career_events"]["Insert"]>;
+        Relationships: [];
+      };
       employee_loans: {
         Row: {
           id: string;
@@ -1157,6 +1192,10 @@ export interface Database {
       resolve_role_holders: {
         Args: { p_role: AppRole; p_company_id: string };
         Returns: string[];
+      };
+      get_career_summary_for_appraisal: {
+        Args: { p_employee_id: string };
+        Returns: { last_promotion_date: string | null; last_title_change_date: string | null; last_salary_change_date: string | null }[];
       };
     };
     Enums: {

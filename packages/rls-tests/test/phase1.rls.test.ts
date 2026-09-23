@@ -66,6 +66,9 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
 
       insert into employee_insurance_policies (employee_id, insurance_name, policy_number, created_by)
         values ('${EMPLOYEE_REPORT}', 'Daman', 'POL-001', '${USER_HR_ADMIN}');
+
+      insert into employee_career_events (employee_id, event_type, effective_date, previous_job_title, new_job_title, previous_base_salary, new_base_salary, currency, created_by)
+        values ('${EMPLOYEE_REPORT}', 'promotion', '2026-01-01', 'Engineer', 'Senior Engineer', 8000, 9500, 'AED', '${USER_HR_ADMIN}');
     `);
   }, 30_000);
 
@@ -273,6 +276,79 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
         query("delete from employee_insurance_policies where employee_id = $1", [EMPLOYEE_REPORT]),
       );
       expect(allowedDelete.rowCount).toBe(1);
+    });
+  });
+
+  describe("employee_career_events", () => {
+    it("mirrors compensation_details' visibility: self, HR Admin, and Finance; never a manager, CEO, or a peer", async () => {
+      const own = await db.asUser(USER_REPORT, (query) => query("select new_job_title, new_base_salary from employee_career_events"));
+      expect(own.rows).toEqual([{ new_job_title: "Senior Engineer", new_base_salary: "9500.00" }]);
+
+      const hr = await db.asUser(USER_HR_ADMIN, (query) => query("select id from employee_career_events"));
+      const finance = await db.asUser(USER_FINANCE, (query) => query("select id from employee_career_events"));
+      expect(hr.rows.length).toBe(1);
+      expect(finance.rows.length).toBe(1);
+
+      for (const user of [USER_MANAGER, USER_CEO, USER_OTHER_EMPLOYEE]) {
+        const { rows } = await db.asUser(user, (query) => query("select id from employee_career_events"));
+        expect(rows, `expected ${user} to see no career events`).toEqual([]);
+      }
+    });
+
+    it("only lets HR Admin record a career event — never Finance, even though Finance can edit plain compensation", async () => {
+      await expect(
+        db.asUser(USER_FINANCE, (query) =>
+          query(
+            "insert into employee_career_events (employee_id, event_type, effective_date, new_base_salary, created_by) values ($1, 'salary_change', '2026-02-01', 10000, $2)",
+            [EMPLOYEE_REPORT, USER_FINANCE],
+          ),
+        ),
+      ).rejects.toThrow(/row-level security/);
+
+      const { rows } = await db.asUser(USER_HR_ADMIN, (query) =>
+        query(
+          "insert into employee_career_events (employee_id, event_type, effective_date, new_job_title, created_by) values ($1, 'title_change', '2026-02-01', 'Staff Engineer', $2) returning id",
+          [EMPLOYEE_REPORT, USER_HR_ADMIN],
+        ),
+      );
+      expect(rows.length).toBe(1);
+    });
+
+    it("never lets anyone update or delete a career event — permanent history", async () => {
+      const { rows } = await db.asUser(USER_HR_ADMIN, (query) => query("select id from employee_career_events limit 1"));
+      const eventId = rows[0].id as string;
+
+      const update = await db.asUser(USER_HR_ADMIN, (query) => query("update employee_career_events set note = 'edited' where id = $1", [eventId]));
+      expect(update.rowCount).toBe(0);
+
+      const del = await db.asUser(USER_HR_ADMIN, (query) => query("delete from employee_career_events where id = $1", [eventId]));
+      expect(del.rowCount).toBe(0);
+    });
+  });
+
+  describe("get_career_summary_for_appraisal()", () => {
+    it("gives the manager dates only, matching what HR Admin/self sees, but never the salary figures", async () => {
+      const summarySql =
+        "select last_promotion_date::text, last_title_change_date::text, last_salary_change_date::text from get_career_summary_for_appraisal($1)";
+      const forManager = await db.asUser(USER_MANAGER, (query) => query(summarySql, [EMPLOYEE_REPORT]));
+      expect(forManager.rows).toEqual([
+        { last_promotion_date: "2026-01-01", last_title_change_date: null, last_salary_change_date: "2026-01-01" },
+      ]);
+      // The row shape itself proves it: no base_salary/allowances columns exist to leak in the first place.
+      expect(Object.keys(forManager.rows[0])).toEqual(["last_promotion_date", "last_title_change_date", "last_salary_change_date"]);
+
+      const forSelf = await db.asUser(USER_REPORT, (query) => query(summarySql, [EMPLOYEE_REPORT]));
+      expect(forSelf.rows).toEqual(forManager.rows);
+    });
+
+    it("returns all-null for a peer who is neither the employee, their manager, nor HR/Finance/CEO", async () => {
+      const { rows } = await db.asUser(USER_OTHER_EMPLOYEE, (query) =>
+        query(
+          "select last_promotion_date::text, last_title_change_date::text, last_salary_change_date::text from get_career_summary_for_appraisal($1)",
+          [EMPLOYEE_REPORT],
+        ),
+      );
+      expect(rows).toEqual([{ last_promotion_date: null, last_title_change_date: null, last_salary_change_date: null }]);
     });
   });
 
