@@ -5,10 +5,14 @@ import {
   canEditEmployeeCore,
   canManageContracts,
   canManageIdentityDocuments,
+  canManageInsurance,
+  canManageLoans,
   canViewCompensation,
   canViewContracts,
   canViewDeletedEmployees,
   canViewIdentityDocuments,
+  canViewInsurance,
+  canViewLoans,
 } from "../../src/permissions/employees";
 import type { RoleGrant } from "../../src/types";
 
@@ -49,6 +53,33 @@ describe("identity document permissions", () => {
     expect(canViewIdentityDocuments(managerA, COMPANY_A, false)).toBe(false);
     expect(canManageIdentityDocuments(hrAdminA, COMPANY_A)).toBe(true);
     expect(canManageIdentityDocuments(financeA, COMPANY_A)).toBe(false);
+  });
+});
+
+describe("loan/cash advance permissions", () => {
+  it("mirrors compensation's visibility tier — self, HR Admin, Finance; never a manager or CEO", () => {
+    expect(canViewLoans(employeeOnly, COMPANY_A, true)).toBe(true);
+    expect(canViewLoans(employeeOnly, COMPANY_A, false)).toBe(false);
+    expect(canViewLoans(hrAdminA, COMPANY_A, false)).toBe(true);
+    expect(canViewLoans(financeA, COMPANY_A, false)).toBe(true);
+    expect(canViewLoans(managerA, COMPANY_A, false)).toBe(false);
+    expect(canViewLoans(ceoA, COMPANY_A, false)).toBe(false);
+    expect(canViewLoans(hrAdminA, COMPANY_B, false)).toBe(false);
+    expect(canManageLoans(hrAdminA, COMPANY_A)).toBe(true);
+    expect(canManageLoans(financeA, COMPANY_A)).toBe(true);
+    expect(canManageLoans(employeeOnly, COMPANY_A)).toBe(false);
+  });
+});
+
+describe("insurance policy permissions", () => {
+  it("mirrors identity documents' visibility tier — self + HR Admin only", () => {
+    expect(canViewInsurance(employeeOnly, COMPANY_A, true)).toBe(true);
+    expect(canViewInsurance(hrAdminA, COMPANY_A, false)).toBe(true);
+    expect(canViewInsurance(financeA, COMPANY_A, false)).toBe(false);
+    expect(canViewInsurance(ceoA, COMPANY_A, false)).toBe(false);
+    expect(canViewInsurance(managerA, COMPANY_A, false)).toBe(false);
+    expect(canManageInsurance(hrAdminA, COMPANY_A)).toBe(true);
+    expect(canManageInsurance(financeA, COMPANY_A)).toBe(false);
   });
 });
 

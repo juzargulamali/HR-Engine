@@ -60,6 +60,12 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
 
       insert into identity_documents (employee_id, document_type, document_number, created_by)
         values ('${EMPLOYEE_REPORT}', 'passport', 'P1234567', '${USER_HR_ADMIN}');
+
+      insert into employee_loans (employee_id, loan_type, amount, currency, issued_date, created_by)
+        values ('${EMPLOYEE_REPORT}', 'loan', 5000, 'AED', '2026-01-01', '${USER_HR_ADMIN}');
+
+      insert into employee_insurance_policies (employee_id, insurance_name, policy_number, created_by)
+        values ('${EMPLOYEE_REPORT}', 'Daman', 'POL-001', '${USER_HR_ADMIN}');
     `);
   }, 30_000);
 
@@ -195,6 +201,78 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
           ]),
         ),
       ).rejects.toThrow(/row-level security/);
+    });
+  });
+
+  describe("employee_loans", () => {
+    it("mirrors compensation_details' visibility: self, HR Admin, and Finance; never a manager, CEO, or a peer", async () => {
+      const own = await db.asUser(USER_REPORT, (query) => query("select amount from employee_loans"));
+      expect(own.rows).toEqual([{ amount: "5000.00" }]);
+
+      const hr = await db.asUser(USER_HR_ADMIN, (query) => query("select amount from employee_loans"));
+      const finance = await db.asUser(USER_FINANCE, (query) => query("select amount from employee_loans"));
+      expect(hr.rows.length).toBe(1);
+      expect(finance.rows.length).toBe(1);
+
+      for (const user of [USER_MANAGER, USER_CEO, USER_OTHER_EMPLOYEE]) {
+        const { rows } = await db.asUser(user, (query) => query("select amount from employee_loans"));
+        expect(rows, `expected ${user} to see no loans`).toEqual([]);
+      }
+    });
+
+    it("blocks an ordinary employee from inserting their own loan record", async () => {
+      await expect(
+        db.asUser(USER_REPORT, (query) =>
+          query(
+            "insert into employee_loans (employee_id, loan_type, amount, currency, issued_date, created_by) values ($1, 'cash_advance', 100, 'AED', '2026-01-01', $2)",
+            [EMPLOYEE_REPORT, USER_REPORT],
+          ),
+        ),
+      ).rejects.toThrow(/row-level security/);
+    });
+
+    it("blocks the employee from deleting their own loan record, but lets Finance delete it", async () => {
+      const blocked = await db.asUser(USER_REPORT, (query) => query("delete from employee_loans where employee_id = $1", [EMPLOYEE_REPORT]));
+      expect(blocked.rowCount).toBe(0);
+
+      const allowed = await db.asUser(USER_FINANCE, (query) => query("delete from employee_loans where employee_id = $1", [EMPLOYEE_REPORT]));
+      expect(allowed.rowCount).toBe(1);
+    });
+  });
+
+  describe("employee_insurance_policies", () => {
+    it("mirrors identity_documents' visibility: self and HR Admin only — never Finance, CEO, or a manager", async () => {
+      const own = await db.asUser(USER_REPORT, (query) => query("select policy_number from employee_insurance_policies"));
+      expect(own.rows).toEqual([{ policy_number: "POL-001" }]);
+
+      const hr = await db.asUser(USER_HR_ADMIN, (query) => query("select policy_number from employee_insurance_policies"));
+      expect(hr.rows.length).toBe(1);
+
+      for (const user of [USER_FINANCE, USER_CEO, USER_MANAGER, USER_OTHER_EMPLOYEE]) {
+        const { rows } = await db.asUser(user, (query) => query("select policy_number from employee_insurance_policies"));
+        expect(rows, `expected ${user} to see no insurance policies`).toEqual([]);
+      }
+    });
+
+    it("only lets HR Admin insert or delete an insurance policy", async () => {
+      await expect(
+        db.asUser(USER_FINANCE, (query) =>
+          query(
+            "insert into employee_insurance_policies (employee_id, insurance_name, policy_number, created_by) values ($1, 'X', 'Y', $2)",
+            [EMPLOYEE_REPORT, USER_FINANCE],
+          ),
+        ),
+      ).rejects.toThrow(/row-level security/);
+
+      const blockedDelete = await db.asUser(USER_REPORT, (query) =>
+        query("delete from employee_insurance_policies where employee_id = $1", [EMPLOYEE_REPORT]),
+      );
+      expect(blockedDelete.rowCount).toBe(0);
+
+      const allowedDelete = await db.asUser(USER_HR_ADMIN, (query) =>
+        query("delete from employee_insurance_policies where employee_id = $1", [EMPLOYEE_REPORT]),
+      );
+      expect(allowedDelete.rowCount).toBe(1);
     });
   });
 

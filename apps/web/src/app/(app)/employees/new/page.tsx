@@ -13,7 +13,7 @@ export default async function NewEmployeePage() {
 
   const supabase = await createClient();
   const [{ data: companies }, { data: countries }] = await Promise.all([
-    supabase.from("companies").select("id, legal_name, country_code").order("legal_name"),
+    supabase.from("companies").select("id, legal_name, country_code, default_currency").order("legal_name"),
     supabase.from("countries").select("code, name").order("name"),
   ]);
 

@@ -13,18 +13,29 @@ export async function CompensationSection({
   const supabase = await createClient();
   const { data: current } = await supabase
     .from("compensation_details")
-    .select("id, effective_from, base_salary, currency, bank_iban")
+    .select("id, effective_from, base_salary, allowances, currency, bank_iban")
     .eq("employee_id", employeeId)
     .eq("is_current", true)
     .maybeSingle();
+
+  const otherAllowance = typeof current?.allowances?.other === "number" ? current.allowances.other : 0;
+  const total = current ? Number(current.base_salary) + otherAllowance : 0;
 
   return (
     <div className="space-y-4">
       {current ? (
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
-          <dt className="text-muted-foreground">Base salary</dt>
+          <dt className="text-muted-foreground">Basic salary</dt>
           <dd>
             {current.base_salary} {current.currency}
+          </dd>
+          <dt className="text-muted-foreground">Others</dt>
+          <dd>
+            {otherAllowance} {current.currency}
+          </dd>
+          <dt className="text-muted-foreground">Total</dt>
+          <dd className="font-medium">
+            {total} {current.currency}
           </dd>
           <dt className="text-muted-foreground">Effective from</dt>
           <dd>{current.effective_from}</dd>

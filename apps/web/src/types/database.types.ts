@@ -282,6 +282,31 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["compensation_details"]["Insert"]>;
         Relationships: [];
       };
+      employee_loans: {
+        Row: {
+          id: string;
+          employee_id: string;
+          loan_type: "loan" | "cash_advance";
+          amount: string;
+          currency: string;
+          issued_date: string;
+          note: string | null;
+          created_at: string;
+          created_by: string;
+        };
+        Insert: {
+          id?: string;
+          employee_id: string;
+          loan_type: "loan" | "cash_advance";
+          amount: number;
+          currency: string;
+          issued_date: string;
+          note?: string | null;
+          created_by: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_loans"]["Insert"]>;
+        Relationships: [];
+      };
       identity_documents: {
         Row: {
           id: string;
@@ -309,6 +334,29 @@ export interface Database {
           created_by: string;
         };
         Update: Partial<Database["public"]["Tables"]["identity_documents"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_insurance_policies: {
+        Row: {
+          id: string;
+          employee_id: string;
+          insurance_name: string;
+          policy_number: string;
+          expiry_date: string | null;
+          file_path: string | null;
+          created_at: string;
+          created_by: string;
+        };
+        Insert: {
+          id?: string;
+          employee_id: string;
+          insurance_name: string;
+          policy_number: string;
+          expiry_date?: string | null;
+          file_path?: string | null;
+          created_by: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_insurance_policies"]["Insert"]>;
         Relationships: [];
       };
       policy_versions: {

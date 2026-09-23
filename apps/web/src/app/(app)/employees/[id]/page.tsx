@@ -7,6 +7,8 @@ import {
   canManageContracts,
   canManageEmployeeDocuments,
   canManageIdentityDocuments,
+  canManageInsurance,
+  canManageLoans,
   canRateGoal,
   canViewAssetAssignments,
   canViewAttendance,
@@ -16,6 +18,8 @@ import {
   canViewFinalSettlement,
   canViewGoals,
   canViewIdentityDocuments,
+  canViewInsurance,
+  canViewLoans,
   resolveContractAsOf,
 } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
@@ -28,6 +32,8 @@ import { EditEmployeeForm } from "./edit-employee-form";
 import { ContractHistory } from "./contract-history";
 import { CompensationSection } from "./compensation-section";
 import { IdentityDocumentsSection } from "./identity-documents-section";
+import { InsuranceSection } from "./insurance-section";
+import { LoansSection } from "./loans-section";
 import { EmployeeDocumentsSection } from "./employee-documents-section";
 import { FinalSettlementSection } from "./final-settlement-section";
 import { AssetsSection } from "./assets-section";
@@ -66,7 +72,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
       .select("id, contract_type, start_date, end_date, notice_period_days, is_current, version_no")
       .eq("employee_id", employee.id)
       .order("version_no", { ascending: false }),
-    supabase.from("companies").select("legal_name").eq("id", employee.company_id).single(),
+    supabase.from("companies").select("legal_name, default_currency").eq("id", employee.company_id).single(),
     supabase.from("employees").select("id, first_name, last_name").eq("company_id", employee.company_id).is("deleted_at", null),
   ]);
 
@@ -81,6 +87,10 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   const canSeeComp = canViewCompensation(session.grants, employee.company_id, isSelf);
   const canSeeIdentity = canViewIdentityDocuments(session.grants, employee.company_id, isSelf);
   const canEditIdentity = canManageIdentityDocuments(session.grants, employee.company_id);
+  const canSeeInsurance = canViewInsurance(session.grants, employee.company_id, isSelf);
+  const canEditInsurance = canManageInsurance(session.grants, employee.company_id);
+  const canSeeLoans = canViewLoans(session.grants, employee.company_id, isSelf);
+  const canEditLoans = canManageLoans(session.grants, employee.company_id);
   const canSeeDocuments = canViewEmployeeDocuments(session.grants, employee.company_id, isSelf);
   const canEditDocuments = canManageEmployeeDocuments(session.grants, employee.company_id);
   const canSeeSettlement = canViewFinalSettlement(session.grants, employee.company_id);
@@ -165,6 +175,28 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           </CardHeader>
           <CardContent>
             <IdentityDocumentsSection employeeId={employee.id} canEdit={canEditIdentity} />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {canSeeInsurance ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Insurance</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <InsuranceSection employeeId={employee.id} canEdit={canEditInsurance} />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {canSeeLoans ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Loans & cash advances</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <LoansSection employeeId={employee.id} canEdit={canEditLoans} defaultCurrency={company?.default_currency ?? "AED"} />
           </CardContent>
         </Card>
       ) : null}

@@ -18,6 +18,12 @@ const createEmployeeSchema = z.object({
   contractType: z.enum(["permanent", "fixed_term", "probation", "contractor"]),
   contractStartDate: z.string().min(1),
   noticePeriodDays: z.coerce.number().int().min(0).default(30),
+  // Basic/Others breakdown — Others is a single lump allowance figure kept
+  // under the `allowances` jsonb column's "other" key, same convention
+  // addCompensationVersion() uses for a later promotion/appraisal update.
+  basicSalary: z.coerce.number().positive(),
+  otherAllowance: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().min(0).optional()),
+  salaryCurrency: z.string().length(3),
   // Opening balances an incoming employee already carries (a mid-year hire,
   // or a transfer from another entity) — optional, defaulting to none.
   openingAnnualLeaveDays: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().min(0).optional()),
@@ -74,16 +80,26 @@ export async function createEmployee(_prevState: ActionState, formData: FormData
     created_by: user.id,
   });
 
-  // Opening balances (a mid-year hire's carried-over annual leave, or comp
-  // days already earned elsewhere) — posted the same way any other manual
-  // ledger correction is (leave_ledger_insert_hr/comp_ledger_insert_hr
-  // already grant this to HR Admin directly, same RLS postLeaveLedgerAdjustment
-  // uses), just at onboarding time instead of via the AI-suggestions flow.
   const warnings: string[] = [];
   if (contractError) {
     warnings.push(`the initial contract couldn't be saved (${contractError.message})`);
   }
 
+  const { error: compensationError } = await supabase.from("compensation_details").insert({
+    employee_id: employee.id,
+    effective_from: d.hireDate,
+    base_salary: d.basicSalary,
+    allowances: d.otherAllowance ? { other: d.otherAllowance } : {},
+    currency: d.salaryCurrency.toUpperCase(),
+    created_by: user.id,
+  });
+  if (compensationError) warnings.push(`the salary record couldn't be saved (${compensationError.message})`);
+
+  // Opening balances (a mid-year hire's carried-over annual leave, or comp
+  // days already earned elsewhere) — posted the same way any other manual
+  // ledger correction is (leave_ledger_insert_hr/comp_ledger_insert_hr
+  // already grant this to HR Admin directly, same RLS postLeaveLedgerAdjustment
+  // uses), just at onboarding time instead of via the AI-suggestions flow.
   if (d.openingAnnualLeaveDays) {
     const { error: leaveError } = await supabase.from("leave_ledger").insert({
       employee_id: employee.id,
@@ -325,6 +341,12 @@ const addCompensationVersionSchema = z.object({
   currentCompensationId: z.string().uuid().optional().or(z.literal("")),
   effectiveFrom: z.string().min(1),
   baseSalary: z.coerce.number().positive(),
+  // "Others" is one lump allowance figure (housing/transport/etc. combined)
+  // rather than itemized — kept in the same `allowances` jsonb column
+  // resolve_policy-style features elsewhere use, under a single "other" key,
+  // since nothing downstream needs it broken out further than the
+  // Basic/Others/Total split requested for end-of-service settlement math.
+  otherAllowance: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().min(0).optional()),
   currency: z.string().length(3),
   bankIban: z.string().optional(),
 });
@@ -348,6 +370,7 @@ export async function addCompensationVersion(_prevState: ActionState, formData: 
       employee_id: d.employeeId,
       effective_from: d.effectiveFrom,
       base_salary: d.baseSalary,
+      allowances: d.otherAllowance ? { other: d.otherAllowance } : {},
       currency: d.currency.toUpperCase(),
       bank_iban: d.bankIban || null,
       created_by: user.id,
@@ -531,6 +554,134 @@ export async function deleteEmployeeDocument(documentId: string, employeeId: str
 export async function restoreEmployeeDocument(documentId: string, employeeId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
   const { error } = await supabase.from("employee_documents").update({ deleted_at: null }).eq("id", documentId);
+  revalidatePath(`/employees/${employeeId}`);
+  return { error: error?.message ?? null };
+}
+
+const addInsurancePolicySchema = z.object({
+  employeeId: z.string().uuid(),
+  insuranceName: z.string().min(1),
+  policyNumber: z.string().min(1),
+  expiryDate: z.string().optional(),
+});
+
+/** employee_insurance_policies — same visibility/write pattern as identity documents, HR Admin only. */
+export async function addInsurancePolicy(_prevState: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = addInsurancePolicySchema.safeParse({
+    employeeId: formData.get("employeeId"),
+    insuranceName: formData.get("insuranceName"),
+    policyNumber: formData.get("policyNumber"),
+    expiryDate: formData.get("expiryDate"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in." };
+
+  // Same reasoning as addIdentityDocument() above: derive the real company
+  // from the employee row rather than trusting a client-submitted one,
+  // since this bucket's storage RLS doesn't cross-check the two itself.
+  const { data: employee } = await supabase.from("employees").select("company_id").eq("id", d.employeeId).single();
+  if (!employee) return { error: "Employee not found." };
+
+  let filePath: string | null = null;
+  const file = formData.get("file");
+  if (file instanceof File && file.size > 0) {
+    const validationError = validateUploadFile(file);
+    if (validationError) return { error: validationError };
+
+    filePath = `${employee.company_id}/${d.employeeId}/${Date.now()}-${sanitizeForStoragePath(file.name)}`;
+    const { error: uploadError } = await supabase.storage
+      .from("insurance-documents")
+      .upload(filePath, file, { contentType: file.type });
+    if (uploadError) return { error: `Upload failed: ${uploadError.message}` };
+  }
+
+  const { error } = await supabase.from("employee_insurance_policies").insert({
+    employee_id: d.employeeId,
+    insurance_name: d.insuranceName,
+    policy_number: d.policyNumber,
+    expiry_date: d.expiryDate || null,
+    file_path: filePath,
+    created_by: user.id,
+  });
+
+  if (error) {
+    // The contract scan (if any) was already uploaded above — without
+    // this, a failed row insert leaves it orphaned in Storage with nothing
+    // ever pointing at it.
+    if (filePath) await supabase.storage.from("insurance-documents").remove([filePath]);
+    return { error: error.message };
+  }
+
+  revalidatePath(`/employees/${d.employeeId}`);
+  return { error: null };
+}
+
+/**
+ * Real delete, same remove-then-delete order as deleteIdentityDocument() so
+ * a failed storage remove still leaves the row (and its download link)
+ * rather than orphaning a file with nothing left to serve it.
+ */
+export async function deleteInsurancePolicy(policyId: string, employeeId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { data: policy } = await supabase.from("employee_insurance_policies").select("file_path").eq("id", policyId).maybeSingle();
+  if (policy?.file_path) {
+    await supabase.storage.from("insurance-documents").remove([policy.file_path]);
+  }
+
+  const { error } = await supabase.from("employee_insurance_policies").delete().eq("id", policyId);
+  revalidatePath(`/employees/${employeeId}`);
+  return { error: error?.message ?? null };
+}
+
+const addLoanSchema = z.object({
+  employeeId: z.string().uuid(),
+  loanType: z.enum(["loan", "cash_advance"]),
+  amount: z.coerce.number().positive(),
+  currency: z.string().length(3),
+  issuedDate: z.string().min(1),
+  note: z.string().optional(),
+});
+
+/** employee_loans — same visibility/write tier as compensation, HR Admin or Finance. */
+export async function addLoan(_prevState: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = addLoanSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in." };
+
+  const { error } = await supabase.from("employee_loans").insert({
+    employee_id: d.employeeId,
+    loan_type: d.loanType,
+    amount: d.amount,
+    currency: d.currency.toUpperCase(),
+    issued_date: d.issuedDate,
+    note: d.note || null,
+    created_by: user.id,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath(`/employees/${d.employeeId}`);
+  return { error: null };
+}
+
+export async function deleteLoan(loanId: string, employeeId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("employee_loans").delete().eq("id", loanId);
   revalidatePath(`/employees/${employeeId}`);
   return { error: error?.message ?? null };
 }

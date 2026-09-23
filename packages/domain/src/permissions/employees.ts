@@ -28,6 +28,24 @@ export function canManageIdentityDocuments(grants: readonly RoleGrant[], company
   return isHrAdmin(grants, { companyId });
 }
 
+/** Mirrors employee_loans_select/insert/delete — same visibility tier as compensation. */
+export function canViewLoans(grants: readonly RoleGrant[], companyId: string, isSelf: boolean): boolean {
+  return isSelf || isHrAdmin(grants, { companyId }) || isFinance(grants, { companyId });
+}
+
+export function canManageLoans(grants: readonly RoleGrant[], companyId: string): boolean {
+  return isHrAdmin(grants, { companyId }) || isFinance(grants, { companyId });
+}
+
+/** Mirrors insurance_policies_select/insert/delete — same visibility tier as identity documents. */
+export function canViewInsurance(grants: readonly RoleGrant[], companyId: string, isSelf: boolean): boolean {
+  return isSelf || isHrAdmin(grants, { companyId });
+}
+
+export function canManageInsurance(grants: readonly RoleGrant[], companyId: string): boolean {
+  return isHrAdmin(grants, { companyId });
+}
+
 /**
  * Whether this viewer can see contract history at all. A Line Manager's
  * result set is further restricted to the current version only by the RLS

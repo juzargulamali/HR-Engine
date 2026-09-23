@@ -15,7 +15,7 @@ export async function FinalSettlementSection({
 }) {
   const supabase = await createClient();
 
-  const [{ data: compensation }, { data: leaveBalance }, { data: approvedClaims }, { data: eosbPolicy }] = await Promise.all([
+  const [{ data: compensation }, { data: leaveBalance }, { data: approvedClaims }, { data: eosbPolicy }, { data: loans }] = await Promise.all([
     supabase
       .from("compensation_details")
       .select("base_salary, currency")
@@ -25,6 +25,11 @@ export async function FinalSettlementSection({
     supabase.from("leave_balances").select("balance_days").eq("employee_id", employeeId).eq("leave_type_code", "annual").maybeSingle(),
     supabase.from("reimbursement_claims").select("total_amount").eq("employee_id", employeeId).eq("status", "approved"),
     supabase.rpc("resolve_policy", { p_country_code: countryCode, p_policy_type: "end_of_service_benefit", p_as_of: terminationDate }),
+    // Every employee_loans row is treated as still outstanding — there's no
+    // "settled" status (HR deletes a record once it's repaid/netted, per
+    // that table's own add/delete-only design), so this is a live figure,
+    // not a point-in-time snapshot.
+    supabase.from("employee_loans").select("amount").eq("employee_id", employeeId),
   ]);
 
   if (!compensation) {
@@ -33,6 +38,7 @@ export async function FinalSettlementSection({
 
   const dailyRate = Number(compensation.base_salary) / 30; // simple monthly-to-daily approximation, not a country-specific working-day convention
   const pendingApprovedReimbursements = (approvedClaims ?? []).reduce((sum, c) => sum + Number(c.total_amount), 0);
+  const outstandingLoans = (loans ?? []).reduce((sum, l) => sum + Number(l.amount), 0);
 
   const result = computeFinalSettlement({
     hireDate,
@@ -40,6 +46,7 @@ export async function FinalSettlementSection({
     dailyRate,
     unusedLeaveDays: Number(leaveBalance?.balance_days ?? 0),
     pendingApprovedReimbursements,
+    outstandingLoans,
     eosbPolicy: (eosbPolicy as EosbPolicyPayload | null) ?? null,
   });
 
@@ -72,6 +79,12 @@ export async function FinalSettlementSection({
           <dt className="text-sm text-muted-foreground">Pending approved reimbursements</dt>
           <dd className="text-lg font-medium">
             {compensation.currency} {result.pendingReimbursementsAmount}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-sm text-muted-foreground">Outstanding loans / cash advances</dt>
+          <dd className="text-lg font-medium text-destructive">
+            −{compensation.currency} {result.loanDeductionsAmount}
           </dd>
         </div>
       </dl>

@@ -33,6 +33,8 @@ export interface FinalSettlementInput {
   unusedLeaveDays: number;
   /** Sum of reimbursement_claims.total_amount for claims already approved but not yet paid. */
   pendingApprovedReimbursements: number;
+  /** Sum of employee_loans.amount still outstanding — netted against the payout, not added to it. */
+  outstandingLoans: number;
   /** Resolved end_of_service_benefit policy payload as of terminationDate, or null if unconfigured. */
   eosbPolicy: EosbPolicyPayload | null;
 }
@@ -42,6 +44,7 @@ export interface FinalSettlementResult {
   leaveEncashmentAmount: number;
   eosbAmount: number;
   pendingReimbursementsAmount: number;
+  loanDeductionsAmount: number;
   totalAmount: number;
 }
 
@@ -80,12 +83,14 @@ export function computeFinalSettlement(input: FinalSettlementInput): FinalSettle
   const leaveEncashmentAmount = round2(Math.max(0, input.unusedLeaveDays) * input.dailyRate);
   const eosbAmount = computeEosbAmount(yearsOfService, input.dailyRate, input.eosbPolicy);
   const pendingReimbursementsAmount = round2(Math.max(0, input.pendingApprovedReimbursements));
+  const loanDeductionsAmount = round2(Math.max(0, input.outstandingLoans));
 
   return {
     yearsOfService: Math.round(yearsOfService * 100) / 100,
     leaveEncashmentAmount,
     eosbAmount,
     pendingReimbursementsAmount,
-    totalAmount: round2(leaveEncashmentAmount + eosbAmount + pendingReimbursementsAmount),
+    loanDeductionsAmount,
+    totalAmount: round2(leaveEncashmentAmount + eosbAmount + pendingReimbursementsAmount - loanDeductionsAmount),
   };
 }

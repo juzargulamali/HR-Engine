@@ -16,6 +16,7 @@ describe("computeFinalSettlement", () => {
       dailyRate: 100,
       unusedLeaveDays: 10,
       pendingApprovedReimbursements: 250,
+      outstandingLoans: 0,
       eosbPolicy: null,
     });
     expect(result.eosbAmount).toBe(0);
@@ -32,6 +33,7 @@ describe("computeFinalSettlement", () => {
       dailyRate: 100,
       unusedLeaveDays: 0,
       pendingApprovedReimbursements: 0,
+      outstandingLoans: 0,
       eosbPolicy: UAE_STYLE_TIERS,
     });
     // ~3 years * 21 days/year * 100/day
@@ -46,6 +48,7 @@ describe("computeFinalSettlement", () => {
       dailyRate: 100,
       unusedLeaveDays: 0,
       pendingApprovedReimbursements: 0,
+      outstandingLoans: 0,
       eosbPolicy: UAE_STYLE_TIERS,
     });
     const expected = (5 * 21 + 3 * 30) * 100;
@@ -59,6 +62,7 @@ describe("computeFinalSettlement", () => {
       dailyRate: 100,
       unusedLeaveDays: 0,
       pendingApprovedReimbursements: 0,
+      outstandingLoans: 0,
       eosbPolicy: UAE_STYLE_TIERS,
     });
     expect(result.eosbAmount).toBe(0);
@@ -72,6 +76,7 @@ describe("computeFinalSettlement", () => {
       dailyRate: 100,
       unusedLeaveDays: -5,
       pendingApprovedReimbursements: 0,
+      outstandingLoans: 0,
       eosbPolicy: null,
     });
     expect(result.leaveEncashmentAmount).toBe(0);
@@ -84,8 +89,45 @@ describe("computeFinalSettlement", () => {
       dailyRate: 50,
       unusedLeaveDays: 4,
       pendingApprovedReimbursements: 300,
+      outstandingLoans: 0,
       eosbPolicy: UAE_STYLE_TIERS,
     });
     expect(result.totalAmount).toBeCloseTo(result.leaveEncashmentAmount + result.eosbAmount + result.pendingReimbursementsAmount, 5);
+  });
+
+  it("nets outstanding loans/cash advances against the payout instead of adding them", () => {
+    const withoutLoan = computeFinalSettlement({
+      hireDate: "2020-01-01",
+      terminationDate: "2026-01-01",
+      dailyRate: 100,
+      unusedLeaveDays: 10,
+      pendingApprovedReimbursements: 0,
+      outstandingLoans: 0,
+      eosbPolicy: null,
+    });
+    const withLoan = computeFinalSettlement({
+      hireDate: "2020-01-01",
+      terminationDate: "2026-01-01",
+      dailyRate: 100,
+      unusedLeaveDays: 10,
+      pendingApprovedReimbursements: 0,
+      outstandingLoans: 400,
+      eosbPolicy: null,
+    });
+    expect(withLoan.loanDeductionsAmount).toBe(400);
+    expect(withLoan.totalAmount).toBe(withoutLoan.totalAmount - 400);
+  });
+
+  it("never lets a negative outstandingLoans value (data error) increase the payout", () => {
+    const result = computeFinalSettlement({
+      hireDate: "2020-01-01",
+      terminationDate: "2026-01-01",
+      dailyRate: 100,
+      unusedLeaveDays: 0,
+      pendingApprovedReimbursements: 0,
+      outstandingLoans: -100,
+      eosbPolicy: null,
+    });
+    expect(result.loanDeductionsAmount).toBe(0);
   });
 });

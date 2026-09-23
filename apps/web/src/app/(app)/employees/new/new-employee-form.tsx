@@ -16,7 +16,7 @@ export function NewEmployeeForm({
   companies,
   countries,
 }: {
-  companies: { id: string; legal_name: string; country_code: string }[];
+  companies: { id: string; legal_name: string; country_code: string; default_currency: string }[];
   countries: { code: string; name: string }[];
 }) {
   // On success, createEmployee redirects itself (Server Actions can call
@@ -26,6 +26,9 @@ export function NewEmployeeForm({
   const [state, formAction, pending] = useActionState(createEmployee, initialState);
   const [companyId, setCompanyId] = useState(companies[0]?.id ?? "");
   const selectedCompany = companies.find((c) => c.id === companyId);
+  const [basicSalary, setBasicSalary] = useState("");
+  const [otherAllowance, setOtherAllowance] = useState("");
+  const totalSalary = (Number(basicSalary) || 0) + (Number(otherAllowance) || 0);
 
   return (
     <form action={formAction} className="space-y-5">
@@ -105,6 +108,55 @@ export function NewEmployeeForm({
           <Label htmlFor="contractStartDate">Contract start date</Label>
           <Input id="contractStartDate" name="contractStartDate" type="date" required />
         </div>
+      </fieldset>
+
+      <fieldset className="space-y-4 rounded-md border border-border p-4">
+        <legend className="px-1 text-sm font-medium">Salary</legend>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="basicSalary">Basic salary</Label>
+            <Input
+              id="basicSalary"
+              name="basicSalary"
+              type="number"
+              min={0}
+              step={0.01}
+              value={basicSalary}
+              onChange={(e) => setBasicSalary(e.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="otherAllowance">Others</Label>
+            <Input
+              id="otherAllowance"
+              name="otherAllowance"
+              type="number"
+              min={0}
+              step={0.01}
+              placeholder="0"
+              value={otherAllowance}
+              onChange={(e) => setOtherAllowance(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="salaryCurrency">Currency</Label>
+            <Input
+              id="salaryCurrency"
+              name="salaryCurrency"
+              maxLength={3}
+              defaultValue={selectedCompany?.default_currency ?? ""}
+              key={selectedCompany?.id}
+              required
+            />
+          </div>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Total: <span className="font-medium text-foreground">{totalSalary.toFixed(2)}</span>
+        </p>
+        <p className="text-xs text-muted-foreground">
+          This breakdown (Basic / Others / Total) is what an end-of-service settlement calculates from later.
+        </p>
       </fieldset>
 
       <fieldset className="space-y-4 rounded-md border border-border p-4">
