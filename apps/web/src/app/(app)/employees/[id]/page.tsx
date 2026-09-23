@@ -127,7 +127,13 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="secondary">{employee.employment_status}</Badge>
-          {canDelete ? <RestoreOrRemoveEmployeeButton employeeId={employee.id} deleted={Boolean(employee.deleted_at)} /> : null}
+          {canDelete ? (
+            <RestoreOrRemoveEmployeeButton
+              employeeId={employee.id}
+              employeeName={`${employee.first_name} ${employee.last_name}`}
+              deleted={Boolean(employee.deleted_at)}
+            />
+          ) : null}
         </div>
       </div>
 

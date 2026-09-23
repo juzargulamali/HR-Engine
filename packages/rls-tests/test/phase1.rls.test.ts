@@ -571,4 +571,150 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
       expect(check.rows).toEqual([{ company_id: companyB, job_title: null }]);
     });
   });
+
+  describe("employee_number reuse after soft-delete", () => {
+    it("blocks a duplicate number while both rows are live, but frees it as soon as the original is soft-deleted", async () => {
+      const scratchId = randomUUID();
+      await db.seed(`
+        insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date)
+          values ('${scratchId}', 'REUSE-01', '${COMPANY_HQ}', 'AE', 'To', 'Delete', '2024-01-01');
+      `);
+
+      // Blocked while both rows would be live.
+      await expect(
+        db.asUser(USER_HR_ADMIN, (query) =>
+          query(
+            "insert into employees (employee_number, company_id, country_code, first_name, last_name, hire_date) values ('REUSE-01', $1, 'AE', 'Still', 'Blocked', '2024-01-01')",
+            [COMPANY_HQ],
+          ),
+        ),
+      ).rejects.toThrow(/duplicate key value violates unique constraint/);
+
+      // A soft-delete (not a permanent one) already frees the number up.
+      await db.seed(`update employees set deleted_at = now() where id = '${scratchId}';`);
+
+      const { rows } = await db.asUser(USER_HR_ADMIN, (query) =>
+        query(
+          "insert into employees (employee_number, company_id, country_code, first_name, last_name, hire_date) values ('REUSE-01', $1, 'AE', 'New', 'Hire', '2024-01-01') returning id",
+          [COMPANY_HQ],
+        ),
+      );
+      expect(rows.length).toBe(1);
+    });
+  });
+
+  describe("permanently_delete_employee()", () => {
+    async function seedScratchEmployee(numberSuffix: string) {
+      const employeeId = randomUUID();
+      await db.seed(`
+        insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date)
+          values ('${employeeId}', 'PD-${numberSuffix}', '${COMPANY_HQ}', 'AE', 'Purge', 'Me-${numberSuffix}', '2024-01-01');
+        insert into employment_contracts (employee_id, contract_type, start_date, version_no, is_current, created_by)
+          values ('${employeeId}', 'permanent', '2024-01-01', 1, true, '${USER_HR_ADMIN}');
+        insert into compensation_details (employee_id, effective_from, base_salary, currency, created_by)
+          values ('${employeeId}', '2024-01-01', 5000, 'AED', '${USER_HR_ADMIN}');
+        insert into identity_documents (employee_id, document_type, document_number, created_by)
+          values ('${employeeId}', 'passport', 'PD-PASSPORT-${numberSuffix}', '${USER_HR_ADMIN}');
+        insert into employee_loans (employee_id, loan_type, amount, currency, issued_date, created_by)
+          values ('${employeeId}', 'loan', 1000, 'AED', '2026-01-01', '${USER_HR_ADMIN}');
+        insert into employee_insurance_policies (employee_id, insurance_name, policy_number, created_by)
+          values ('${employeeId}', 'Daman', 'PD-POL-${numberSuffix}', '${USER_HR_ADMIN}');
+        insert into employee_career_events (employee_id, event_type, effective_date, new_job_title, new_base_salary, currency, created_by)
+          values ('${employeeId}', 'promotion', '2026-01-01', 'Engineer', 5500, 'AED', '${USER_HR_ADMIN}');
+      `);
+      return employeeId;
+    }
+
+    it("blocks permanent delete of an employee who hasn't been removed first", async () => {
+      const employeeId = await seedScratchEmployee("1");
+      await expect(db.asUser(USER_HR_ADMIN, (query) => query("select permanently_delete_employee($1)", [employeeId]))).rejects.toThrow(
+        /Remove the employee first/,
+      );
+    });
+
+    it("blocks anyone other than HR Admin from calling it", async () => {
+      const employeeId = await seedScratchEmployee("2");
+      await db.seed(`update employees set deleted_at = now() where id = '${employeeId}';`);
+
+      await expect(
+        db.asUser(USER_MANAGER, (query) => query("select permanently_delete_employee($1)", [employeeId])),
+      ).rejects.toThrow(/Only HR Admin may permanently delete/);
+      await expect(
+        db.asUser(USER_SYS_ADMIN, (query) => query("select permanently_delete_employee($1)", [employeeId])),
+      ).rejects.toThrow(/Only HR Admin may permanently delete/);
+
+      const stillThere = await db.asUser(USER_HR_ADMIN, (query) => query("select id from employees where id = $1", [employeeId]));
+      expect(stillThere.rows.length).toBe(1);
+    });
+
+    it("blocks an HR Admin of a different company", async () => {
+      const otherCompany = "00000000-0000-0000-0000-0000000001d3";
+      const otherHrUser = "00000000-0000-0000-0000-0000000001b9";
+      await db.seed(`
+        insert into auth.users (id, email) values ('${otherHrUser}', 'other-hr@enginious.ae');
+        insert into companies (id, legal_name, country_code, default_currency) values ('${otherCompany}', 'Other Co', 'AE', 'AED');
+        insert into user_roles (user_id, role, company_id) values ('${otherHrUser}', 'hr_admin', '${otherCompany}');
+      `);
+      const employeeId = await seedScratchEmployee("3");
+      await db.seed(`update employees set deleted_at = now() where id = '${employeeId}';`);
+
+      await expect(
+        db.asUser(otherHrUser, (query) => query("select permanently_delete_employee($1)", [employeeId])),
+      ).rejects.toThrow(/Only HR Admin may permanently delete/);
+    });
+
+    it("cascades the delete across every related table, and nulls out a report's manager_id instead of blocking", async () => {
+      const employeeId = await seedScratchEmployee("4");
+      const reportId = randomUUID();
+      await db.seed(`
+        insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date, manager_id)
+          values ('${reportId}', 'PD-4-REPORT', '${COMPANY_HQ}', 'AE', 'Reports', 'ToDeleted', '2024-01-01', '${employeeId}');
+        update employees set deleted_at = now(), deleted_by = '${USER_HR_ADMIN}' where id = '${employeeId}';
+      `);
+
+      // All in one transaction — asUser() rolls back at the end of each
+      // call, so a separate later call would never see this delete at all
+      // (same reason the payroll-rejection regression test above stays in
+      // one asUser block).
+      await db.asUser(USER_HR_ADMIN, async (query) => {
+        await query("select permanently_delete_employee($1)", [employeeId]);
+
+        const employeeRow = await query("select id from employees where id = $1", [employeeId]);
+        expect(employeeRow.rows).toEqual([]);
+
+        for (const table of [
+          "employment_contracts",
+          "compensation_details",
+          "identity_documents",
+          "employee_loans",
+          "employee_insurance_policies",
+          "employee_career_events",
+        ]) {
+          const remaining = await query(`select 1 from ${table} where employee_id = $1`, [employeeId]);
+          expect(remaining.rows).toEqual([]);
+        }
+
+        const reportRow = await query("select manager_id from employees where id = $1", [reportId]);
+        expect(reportRow.rows[0]?.manager_id).toBeNull();
+      });
+    });
+
+    it("frees the employee number immediately upon permanent delete, in the same transaction", async () => {
+      const employeeId = await seedScratchEmployee("5");
+      await db.seed(`update employees set deleted_at = now() where id = '${employeeId}';`);
+
+      await db.asUser(USER_HR_ADMIN, async (query) => {
+        await query("select permanently_delete_employee($1)", [employeeId]);
+
+        const employeeRow = await query("select id from employees where id = $1", [employeeId]);
+        expect(employeeRow.rows).toEqual([]);
+
+        const { rows } = await query(
+          "insert into employees (employee_number, company_id, country_code, first_name, last_name, hire_date) values ('PD-5', $1, 'AE', 'Reused', 'Number', '2024-01-01') returning id",
+          [COMPANY_HQ],
+        );
+        expect(rows.length).toBe(1);
+      });
+    });
+  });
 });

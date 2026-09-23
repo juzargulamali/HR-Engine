@@ -1223,6 +1223,10 @@ export interface Database {
         Args: { p_employee_id: string };
         Returns: { last_promotion_date: string | null; last_title_change_date: string | null; last_salary_change_date: string | null }[];
       };
+      permanently_delete_employee: {
+        Args: { p_employee_id: string };
+        Returns: undefined;
+      };
     };
     Enums: {
       app_role: AppRole;

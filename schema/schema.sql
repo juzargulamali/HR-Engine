@@ -213,12 +213,17 @@ create table employees (
   updated_at          timestamptz not null default now(),
   updated_by          uuid,
   deleted_at          timestamptz,
-  deleted_by          uuid,
-  unique (company_id, employee_number)
+  deleted_by          uuid
 );
 
 create index idx_employees_manager on employees(manager_id) where deleted_at is null;
 create index idx_employees_company on employees(company_id) where deleted_at is null;
+-- Partial, not a plain (company_id, employee_number) unique constraint: a
+-- soft-deleted employee's number should never permanently block reissuing
+-- it to a new hire — only the currently-live employees in a company need
+-- to have distinct numbers.
+create unique index employees_company_employee_number_unique
+  on employees(company_id, employee_number) where deleted_at is null;
 -- Partial (non-null values only) so any number of not-yet-linked employees
 -- can coexist, but a login can never be attached to two employee rows —
 -- current_employee_id()'s `limit 1` would otherwise pick an arbitrary one.
@@ -2198,6 +2203,105 @@ $$;
 create trigger employees_guard_self_update
   before update on employees
   for each row execute function guard_employee_self_update();
+
+-- Genuinely destroys an employee record and every row across the schema
+-- that references it — contracts, compensation history, leave/comp-day
+-- ledgers, reimbursements, timesheets, attendance, goals, appraisals,
+-- documents, identity documents, insurance, loans, career events, asset
+-- assignments, checklist items, generated letters, payroll lines — in
+-- dependency order (children before the employees row itself, which every
+-- write_audit_log() lookup above depends on: it resolves a child row's
+-- company_id via `select company_id from employees where id = employee_id`,
+-- which would silently return null if the employees row were already gone).
+--
+-- Deliberately does NOT touch:
+--   - audit_log: record_id carries no FK to any table on purpose, so this
+--     function never has to (or gets to) delete from it — "this employee
+--     existed and was permanently deleted by X at time Y" stays visible
+--     after the fact, exactly what an audit trail is for.
+--   - Storage objects named by a file_path column (identity/insurance/
+--     employee documents) — same limitation every other soft-delete-only
+--     document feature in this app already has; the object is orphaned,
+--     not cleaned up here.
+--   - auth.users / user_roles for the employee's linked login — a separate
+--     concern owned by the Users & Roles admin surface, not this function.
+--
+-- Irreversible, and only ever valid on an employee already soft-deleted via
+-- softDeleteEmployee() ("Remove") — permanent delete is a deliberate SECOND
+-- step from that state, never a shortcut around it. HR Admin only
+-- (canDeleteOrRestoreEmployee's own scope); SECURITY DEFINER because most
+-- of the tables touched below have no DELETE policy for anyone at all
+-- (this system is soft-delete-first everywhere else) — the check below is
+-- the only gate standing in for all of them at once.
+create or replace function permanently_delete_employee(p_employee_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_company_id uuid;
+  v_deleted_at timestamptz;
+begin
+  select company_id, deleted_at into v_company_id, v_deleted_at
+  from employees where id = p_employee_id;
+
+  if v_company_id is null then
+    raise exception 'Employee not found';
+  end if;
+
+  if auth.uid() is null or not has_role('hr_admin', v_company_id) then
+    raise exception 'Only HR Admin may permanently delete an employee';
+  end if;
+
+  if v_deleted_at is null then
+    raise exception 'Remove the employee first — permanent delete is only available for an already-removed employee';
+  end if;
+
+  -- Any other employee who lists this one as their manager must not be
+  -- deleted along with them — null the reference, same as a real
+  -- offboarding would require anyway (reassign their reports).
+  update employees set manager_id = null where manager_id = p_employee_id;
+
+  -- approvals is polymorphic (entity_type/entity_id, no FK) — clean up
+  -- rows belonging to this employee's own entities while those source
+  -- tables still exist to identify them, before deleting the sources below.
+  delete from approvals a using leave_requests r
+    where a.entity_type = 'leave_request' and a.entity_id = r.id and r.employee_id = p_employee_id;
+  delete from approvals a using reimbursement_claims c
+    where a.entity_type = 'reimbursement_claim' and a.entity_id = c.id and c.employee_id = p_employee_id;
+  delete from approvals a using timesheets t
+    where a.entity_type = 'timesheet' and a.entity_id = t.id and t.employee_id = p_employee_id;
+  delete from approvals a using generated_letters l
+    where a.entity_type = 'generated_letter' and a.entity_id = l.id and l.employee_id = p_employee_id;
+
+  delete from document_expiry_reminders_sent d using employee_documents ed
+    where d.employee_document_id = ed.id and ed.employee_id = p_employee_id;
+
+  delete from employee_documents where employee_id = p_employee_id;
+  delete from asset_assignments where employee_id = p_employee_id;
+  delete from employee_checklist_items where employee_id = p_employee_id;
+  delete from generated_letters where employee_id = p_employee_id;
+  delete from appraisals where employee_id = p_employee_id;
+  delete from goals where employee_id = p_employee_id;
+  delete from timesheets where employee_id = p_employee_id;
+  delete from attendance_records where employee_id = p_employee_id;
+  delete from reimbursement_claims where employee_id = p_employee_id;
+  delete from project_allocations where employee_id = p_employee_id;
+  delete from comp_day_ledger where employee_id = p_employee_id;
+  delete from leave_ledger where employee_id = p_employee_id;
+  delete from leave_requests where employee_id = p_employee_id;
+  delete from employee_insurance_policies where employee_id = p_employee_id;
+  delete from identity_documents where employee_id = p_employee_id;
+  delete from employee_loans where employee_id = p_employee_id;
+  delete from employee_career_events where employee_id = p_employee_id;
+  delete from compensation_details where employee_id = p_employee_id;
+  delete from employment_contracts where employee_id = p_employee_id;
+  delete from payroll_export_lines where employee_id = p_employee_id;
+
+  delete from employees where id = p_employee_id;
+end;
+$$;
 
 -- ---- employment_contracts: employee (own, every version), Line Manager (team,
 --      current version only — historical terms aren't a manager's business),

@@ -276,6 +276,19 @@ export async function restoreEmployee(employeeId: string): Promise<{ error: stri
   return { error: error?.message ?? null };
 }
 
+/**
+ * Irreversible — see permanently_delete_employee() in schema.sql for the
+ * full cascade and its rationale. The employee page itself is gone after
+ * this succeeds, so the caller redirects rather than staying on a 404.
+ */
+export async function permanentlyDeleteEmployee(employeeId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("permanently_delete_employee", { p_employee_id: employeeId });
+  if (error) return { error: error.message };
+  revalidatePath("/employees");
+  redirect("/employees");
+}
+
 const addContractVersionSchema = z.object({
   employeeId: z.string().uuid(),
   currentContractId: z.string().uuid().optional().or(z.literal("")),
