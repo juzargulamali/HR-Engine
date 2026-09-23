@@ -2204,25 +2204,33 @@ create trigger employees_guard_self_update
   before update on employees
   for each row execute function guard_employee_self_update();
 
--- Genuinely destroys an employee record and every row across the schema
--- that references it — contracts, compensation history, leave/comp-day
--- ledgers, reimbursements, timesheets, attendance, goals, appraisals,
--- documents, identity documents, insurance, loans, career events, asset
--- assignments, checklist items, generated letters, payroll lines — in
--- dependency order (children before the employees row itself, which every
--- write_audit_log() lookup above depends on: it resolves a child row's
--- company_id via `select company_id from employees where id = employee_id`,
--- which would silently return null if the employees row were already gone).
+-- Permanently destroys an employee record that has NO real history —
+-- correcting a mistaken or duplicate "test" entry, never a way to erase
+-- genuine activity. Every category below that has at least one row BLOCKS
+-- the whole delete (nothing is removed, not even partially) and is named
+-- in the error so the caller sees exactly what's in the way instead of a
+-- generic refusal.
+--
+-- employment_contracts/compensation_details are deliberately NOT part of
+-- the blocker list — every employee gets exactly one of each the moment
+-- they're created (see createEmployee()), so treating those as "history"
+-- would make this function permanently unusable for its actual purpose;
+-- they're part of the employee's own record, not a downstream transaction
+-- against it, and are removed along with the row itself once every real
+-- blocker category above has come back empty. employee_checklist_items
+-- (onboarding/offboarding to-dos) are the same — cleaned up silently, not
+-- treated as history worth blocking on.
 --
 -- Deliberately does NOT touch:
 --   - audit_log: record_id carries no FK to any table on purpose, so this
 --     function never has to (or gets to) delete from it — "this employee
 --     existed and was permanently deleted by X at time Y" stays visible
 --     after the fact, exactly what an audit trail is for.
---   - Storage objects named by a file_path column (identity/insurance/
---     employee documents) — same limitation every other soft-delete-only
---     document feature in this app already has; the object is orphaned,
---     not cleaned up here.
+--   - Storage objects named by a file_path column — same limitation every
+--     other soft-delete-only document feature in this app already has;
+--     moot in practice here since identity/employee documents are
+--     themselves a blocker (see below), so this only ever fires on a
+--     record that never had any uploaded either.
 --   - auth.users / user_roles for the employee's linked login — a separate
 --     concern owned by the Users & Roles admin surface, not this function.
 --
@@ -2242,6 +2250,8 @@ as $$
 declare
   v_company_id uuid;
   v_deleted_at timestamptz;
+  v_blockers text[] := '{}';
+  v_count bigint;
 begin
   select company_id, deleted_at into v_company_id, v_deleted_at
   from employees where id = p_employee_id;
@@ -2258,47 +2268,80 @@ begin
     raise exception 'Remove the employee first — permanent delete is only available for an already-removed employee';
   end if;
 
-  -- Any other employee who lists this one as their manager must not be
-  -- deleted along with them — null the reference, same as a real
-  -- offboarding would require anyway (reassign their reports).
+  select count(*) into v_count from attendance_records where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s attendance record(s)', v_count); end if;
+
+  select count(*) into v_count from leave_requests where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s leave request(s)', v_count); end if;
+
+  select count(*) into v_count from leave_ledger where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s leave ledger entr%s', v_count, case when v_count = 1 then 'y' else 'ies' end); end if;
+
+  select count(*) into v_count from comp_day_ledger where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s comp-day ledger entr%s', v_count, case when v_count = 1 then 'y' else 'ies' end); end if;
+
+  select count(*) into v_count from reimbursement_claims where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s reimbursement claim(s)', v_count); end if;
+
+  select count(*) into v_count from project_allocations where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s project allocation(s)', v_count); end if;
+
+  select count(*) into v_count from timesheets where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s timesheet(s)', v_count); end if;
+
+  select count(*) into v_count from goals where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s performance goal(s)', v_count); end if;
+
+  select count(*) into v_count from appraisals where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s appraisal(s)', v_count); end if;
+
+  select count(*) into v_count from payroll_export_lines where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s payroll export line(s)', v_count); end if;
+
+  select count(*) into v_count from generated_letters where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s generated letter(s)', v_count); end if;
+
+  select count(*) into v_count from employee_career_events where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s career event(s) (promotion/salary history)', v_count); end if;
+
+  select count(*) into v_count from asset_assignments where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s asset assignment(s)', v_count); end if;
+
+  select count(*) into v_count from employee_documents where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s document(s)', v_count); end if;
+
+  select count(*) into v_count from identity_documents where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s identity document(s)', v_count); end if;
+
+  select count(*) into v_count from employee_insurance_policies where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s insurance polic%s', v_count, case when v_count = 1 then 'y' else 'ies' end); end if;
+
+  select count(*) into v_count from employee_loans where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s loan(s)', v_count); end if;
+
+  -- approvals is polymorphic (entity_type/entity_id, no FK) — checked via
+  -- the same source tables above, since an approval can only exist for an
+  -- entity that still exists.
+  select count(*) into v_count
+  from approvals a
+  where (a.entity_type = 'leave_request' and exists (select 1 from leave_requests r where r.id = a.entity_id and r.employee_id = p_employee_id))
+     or (a.entity_type = 'reimbursement_claim' and exists (select 1 from reimbursement_claims c where c.id = a.entity_id and c.employee_id = p_employee_id))
+     or (a.entity_type = 'timesheet' and exists (select 1 from timesheets t where t.id = a.entity_id and t.employee_id = p_employee_id))
+     or (a.entity_type = 'generated_letter' and exists (select 1 from generated_letters l where l.id = a.entity_id and l.employee_id = p_employee_id));
+  if v_count > 0 then v_blockers := v_blockers || format('%s approval record(s)', v_count); end if;
+
+  if array_length(v_blockers, 1) > 0 then
+    raise exception 'Cannot permanently delete: this employee has real history — %. Permanent delete is only for a mistaken or duplicate record with no activity; use Remove (soft delete) instead.', array_to_string(v_blockers, ', ');
+  end if;
+
+  -- No blocking history — safe to remove. Every table checked above is
+  -- now guaranteed empty for this employee; only the two deliberately
+  -- unchecked categories (contracts/compensation, which every employee
+  -- has) and the harmless checklist scaffolding still need cleaning up.
   update employees set manager_id = null where manager_id = p_employee_id;
-
-  -- approvals is polymorphic (entity_type/entity_id, no FK) — clean up
-  -- rows belonging to this employee's own entities while those source
-  -- tables still exist to identify them, before deleting the sources below.
-  delete from approvals a using leave_requests r
-    where a.entity_type = 'leave_request' and a.entity_id = r.id and r.employee_id = p_employee_id;
-  delete from approvals a using reimbursement_claims c
-    where a.entity_type = 'reimbursement_claim' and a.entity_id = c.id and c.employee_id = p_employee_id;
-  delete from approvals a using timesheets t
-    where a.entity_type = 'timesheet' and a.entity_id = t.id and t.employee_id = p_employee_id;
-  delete from approvals a using generated_letters l
-    where a.entity_type = 'generated_letter' and a.entity_id = l.id and l.employee_id = p_employee_id;
-
-  delete from document_expiry_reminders_sent d using employee_documents ed
-    where d.employee_document_id = ed.id and ed.employee_id = p_employee_id;
-
-  delete from employee_documents where employee_id = p_employee_id;
-  delete from asset_assignments where employee_id = p_employee_id;
   delete from employee_checklist_items where employee_id = p_employee_id;
-  delete from generated_letters where employee_id = p_employee_id;
-  delete from appraisals where employee_id = p_employee_id;
-  delete from goals where employee_id = p_employee_id;
-  delete from timesheets where employee_id = p_employee_id;
-  delete from attendance_records where employee_id = p_employee_id;
-  delete from reimbursement_claims where employee_id = p_employee_id;
-  delete from project_allocations where employee_id = p_employee_id;
-  delete from comp_day_ledger where employee_id = p_employee_id;
-  delete from leave_ledger where employee_id = p_employee_id;
-  delete from leave_requests where employee_id = p_employee_id;
-  delete from employee_insurance_policies where employee_id = p_employee_id;
-  delete from identity_documents where employee_id = p_employee_id;
-  delete from employee_loans where employee_id = p_employee_id;
-  delete from employee_career_events where employee_id = p_employee_id;
   delete from compensation_details where employee_id = p_employee_id;
   delete from employment_contracts where employee_id = p_employee_id;
-  delete from payroll_export_lines where employee_id = p_employee_id;
-
   delete from employees where id = p_employee_id;
 end;
 $$;
