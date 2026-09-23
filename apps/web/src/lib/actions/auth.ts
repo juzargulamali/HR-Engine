@@ -27,12 +27,7 @@ export async function signIn(_prevState: SignInState, formData: FormData): Promi
   });
 
   if (error) {
-    // TEMPORARY — surfacing the real Supabase error (code + message) while
-    // diagnosing the Tokyo->Mumbai migration: the generic message above
-    // was indistinguishable whether the cause was a wrong password, a
-    // misconfigured API key, or anything else. Revert to the generic
-    // message once the migration is confirmed working.
-    return { error: `That email/password combination wasn't recognized. [debug: ${error.code ?? "no-code"} / ${error.status ?? "no-status"} / ${error.message}]` };
+    return { error: "That email/password combination wasn't recognized." };
   }
 
   redirect(parsed.data.next && parsed.data.next.startsWith("/") ? parsed.data.next : "/");
