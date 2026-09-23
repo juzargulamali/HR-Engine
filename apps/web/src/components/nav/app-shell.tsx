@@ -1,12 +1,32 @@
-import Image from "next/image";
+import {
+  BellRing,
+  Building,
+  BookOpen,
+  CalendarCheck,
+  CalendarDays,
+  ClipboardCheck,
+  FileText,
+  Landmark,
+  LayoutDashboard,
+  Package,
+  Receipt,
+  ScrollText,
+  Sparkles,
+  TrendingUp,
+  User,
+  UserCog,
+  Users,
+  Wallet,
+} from "lucide-react";
 import Link from "next/link";
 import { canViewHrAlerts, hasRoleAnyScope, isSysAdmin, ROLE_LABELS } from "@enginious-hr/domain";
 import type { CurrentSession } from "@/lib/auth/session";
 import { signOut } from "@/lib/actions/auth";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { cn } from "@/lib/utils";
 import { SidebarNav, type NavGroup } from "./sidebar-nav";
+import { CommandPalette } from "./command-palette";
 
 export function AppShell({ session, children }: { session: CurrentSession; children: React.ReactNode }) {
   const roleLabels = [...new Set(session.grants.map((g) => ROLE_LABELS[g.role]))];
@@ -19,30 +39,36 @@ export function AppShell({ session, children }: { session: CurrentSession; child
     {
       label: "Overview",
       links: [
-        { href: "/", label: "Dashboard" },
-        { href: "/profile", label: "My Profile" },
+        { href: "/", label: "Dashboard", icon: LayoutDashboard },
+        { href: "/profile", label: "My Profile", icon: User },
       ],
     },
     {
       label: "People",
       links: [
-        { href: "/employees", label: "Employees" },
-        ...(showAlertsLink ? [{ href: "/alerts", label: "Alerts" }] : []),
-        { href: "/attendance", label: "Attendance" },
-        { href: "/leave", label: "Leave" },
-        { href: "/reimbursements", label: "Reimbursements" },
-        { href: "/performance", label: "Performance" },
-        { href: "/approvals", label: "Approvals" },
+        { href: "/employees", label: "Employees", icon: Users },
+        { href: "/attendance", label: "Attendance", icon: CalendarCheck },
+        { href: "/leave", label: "Leave", icon: CalendarDays },
+        { href: "/reimbursements", label: "Reimbursements", icon: Receipt },
+        { href: "/performance", label: "Performance", icon: TrendingUp },
       ],
     },
     {
-      label: "Operations",
+      label: "Workflow",
       links: [
-        { href: "/letters", label: "Letters" },
-        { href: "/payroll", label: "Payroll" },
-        ...(showAssetsLink ? [{ href: "/assets", label: "Assets" }] : []),
-        { href: "/policies", label: "Policies" },
-        { href: "/holidays", label: "Holidays" },
+        { href: "/approvals", label: "Approvals", icon: ClipboardCheck },
+        ...(showAlertsLink ? [{ href: "/alerts", label: "Alerts", icon: BellRing }] : []),
+        { href: "/letters", label: "Letters", icon: FileText },
+        { href: "/payroll", label: "Payroll", icon: Wallet },
+      ],
+    },
+    {
+      label: "Organisation",
+      links: [
+        ...(showAssetsLink ? [{ href: "/assets", label: "Assets", icon: Package }] : []),
+        { href: "/policies", label: "Policies", icon: BookOpen },
+        { href: "/holidays", label: "Holidays", icon: Landmark },
+        ...(showAdminLink ? [{ href: "/admin/companies", label: "Companies", icon: Building }] : []),
       ],
     },
     ...(showInsightsLinks
@@ -50,8 +76,8 @@ export function AppShell({ session, children }: { session: CurrentSession; child
           {
             label: "Insights",
             links: [
-              { href: "/ai-suggestions", label: "AI Suggestions" },
-              { href: "/audit-log", label: "Audit Log" },
+              { href: "/ai-suggestions", label: "AI Suggestions", icon: Sparkles },
+              { href: "/audit-log", label: "Audit Log", icon: ScrollText },
             ],
           },
         ]
@@ -60,37 +86,15 @@ export function AppShell({ session, children }: { session: CurrentSession; child
       ? [
           {
             label: "System",
-            links: [
-              { href: "/admin/companies", label: "Companies" },
-              { href: "/admin/users", label: "Users & Roles" },
-            ],
+            links: [{ href: "/admin/users", label: "Users & Roles", icon: UserCog }],
           },
         ]
       : []),
   ];
 
-  const userSummary = (
-    <div className="text-right">
-      <div className="text-sm font-medium">{session.fullName ?? session.email}</div>
-      <div className="mt-0.5 flex justify-end gap-1">
-        {roleLabels.length > 0 ? (
-          roleLabels.map((label) => (
-            <Badge key={label} variant="brand" className="text-[10px]">
-              {label}
-            </Badge>
-          ))
-        ) : (
-          <Badge variant="outline" className="text-[10px]">
-            No role assigned yet
-          </Badge>
-        )}
-      </div>
-    </div>
-  );
-
-  const signOutButton = (
+  const signOutSlot = (
     <form action={signOut}>
-      <Button variant="outline" size="sm" type="submit">
+      <Button variant="ghost" size="sm" type="submit" className="justify-start text-muted-foreground hover:text-destructive">
         Sign out
       </Button>
     </form>
@@ -98,22 +102,18 @@ export function AppShell({ session, children }: { session: CurrentSession; child
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <SidebarNav groups={groups} userSummary={userSummary} signOutButton={signOutButton} themeToggle={<ThemeToggle />} />
+      <SidebarNav groups={groups} fullName={session.fullName ?? session.email ?? "Signed in"} email={session.email} roleLabels={roleLabels} signOutSlot={signOutSlot} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="hidden items-center justify-between gap-4 border-b border-border bg-card px-8 py-3 md:flex">
-          <Link href="/" className="flex items-center gap-2.5">
-            <Image src="/brand/enginious-icon.png" alt="Enginious" width={28} height={28} priority />
-            <div className="leading-tight">
-              <div className="font-heading text-sm font-bold tracking-tight">ENGINIOUS</div>
-              <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">HR Engine</div>
-            </div>
-          </Link>
-
-          <div className="ml-auto flex items-center gap-3">
-            {userSummary}
+        <header className="sticky top-0 z-40 hidden items-center gap-4 border-b border-border bg-card/95 px-6 py-2.5 backdrop-blur md:flex">
+          <CommandPalette groups={groups} />
+          <div className="ml-auto flex items-center gap-1.5">
+            {showAlertsLink ? (
+              <Link href="/alerts" aria-label="Alerts" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "h-9 w-9 px-0")}>
+                <BellRing className="h-4 w-4" aria-hidden />
+              </Link>
+            ) : null}
             <ThemeToggle />
-            {signOutButton}
           </div>
         </header>
 

@@ -15,6 +15,10 @@
   --color-accent-foreground: hsl(var(--accent-foreground));
   --color-destructive: hsl(var(--destructive));
   --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
@@ -50,6 +54,10 @@
   --accent-foreground: 196 45% 7%;
   --destructive: 355 72% 56%;
   --destructive-foreground: 0 0% 100%;
+  --success: 152 55% 46%;
+  --success-foreground: 0 0% 100%;
+  --warning: 38 92% 50%;
+  --warning-foreground: 38 92% 10%;
   --border: 195 24% 17%;
   --input: 195 24% 17%;
   --ring: 187 85% 58%;
@@ -58,7 +66,9 @@
   --brand-glow: 187 85% 55%;
   --brand-deep: 178 78% 34%;
   --brand-grid-line: 190 45% 20%;
-  --brand-grid-opacity: 0.55;
+  /* Kept low and used only in confined hero/empty-state surfaces — never
+     behind dense nav or table content (see .brand-grid's comment below). */
+  --brand-grid-opacity: 0.35;
 }
 
 :root[data-theme="light"] {
@@ -76,6 +86,10 @@
   --accent-foreground: 0 0% 100%;
   --destructive: 355 68% 46%;
   --destructive-foreground: 0 0% 100%;
+  --success: 152 60% 30%;
+  --success-foreground: 0 0% 100%;
+  --warning: 38 88% 40%;
+  --warning-foreground: 0 0% 100%;
   --border: 190 20% 87%;
   --input: 190 20% 87%;
   --ring: 178 82% 32%;
@@ -83,7 +97,7 @@
   --brand-glow: 187 76% 42%;
   --brand-deep: 178 82% 27%;
   --brand-grid-line: 190 30% 82%;
-  --brand-grid-opacity: 0.6;
+  --brand-grid-opacity: 0.4;
 }
 
 body {
@@ -119,13 +133,37 @@ input:-webkit-autofill:focus {
   transition: background-color 9999s ease-in-out 0s;
 }
 
-/* A faint circuit-board grid, the brand deck's own background texture —
-   used behind the sidebar and page heroes, never behind dense tables. */
+/* A faint circuit-board grid, the brand deck's own background texture.
+   Confined to hero panels, empty states, and small brand-mark surfaces —
+   deliberately NOT applied behind nav lists, tables, or other dense
+   content, where it competes with what people are trying to read. */
 .brand-grid {
   background-image:
     linear-gradient(hsl(var(--brand-grid-line) / var(--brand-grid-opacity)) 1px, transparent 1px),
     linear-gradient(90deg, hsl(var(--brand-grid-line) / var(--brand-grid-opacity)) 1px, transparent 1px);
   background-size: 28px 28px;
+}
+
+/* Same motif at a tighter pitch, for small surfaces (sidebar brand block)
+   where the 28px grid would only ever show one or two lines. */
+.brand-grid-tight {
+  background-image:
+    linear-gradient(hsl(var(--brand-grid-line) / var(--brand-grid-opacity)) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--brand-grid-line) / var(--brand-grid-opacity)) 1px, transparent 1px);
+  background-size: 14px 14px;
+}
+
+/* Respect a user's reduced-motion preference across every transition/
+   animation utility Tailwind generates, app-wide, in one place. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 .brand-gradient {
