@@ -329,7 +329,7 @@ describe("GET /api/cron/leave-accrual — legacy accrual baseline safety (Blocke
   });
 });
 
-describe("GET /api/cron/leave-accrual — Poland entitlement configuration requirement (Blocker 4)", () => {
+describe("GET /api/cron/leave-accrual — Poland flat 26-day Enginious company benefit (supersedes the statutory threshold/first-employment rules)", () => {
   const PL_POLICY_VERSION_ID = "33333333-3333-3333-3333-333333333333";
   const PL_POLICY_VERSIONS = { data: [{ id: PL_POLICY_VERSION_ID, country_code: "PL" }], error: null };
   const PL_LEAVE_TYPES = {
@@ -346,44 +346,33 @@ describe("GET /api/cron/leave-accrual — Poland entitlement configuration requi
     error: null,
   };
 
-  function plEmployeeStep(hireDate: string, isFirstEverEmployment: boolean | null) {
+  function plEmployeeStep(hireDate: string, legacyFields: { recognised_prior_service_years?: number | null; is_first_ever_employment?: boolean | null } = {}) {
     return {
-      data: [{ id: EMPLOYEE_ID, country_code: "PL", hire_date: hireDate, recognised_prior_service_years: null, is_first_ever_employment: isFirstEverEmployment }],
+      data: [{ id: EMPLOYEE_ID, country_code: "PL", hire_date: hireDate, ...legacyFields }],
       error: null,
     };
   }
 
-  it("blocks accrual and reports the requirement when is_first_ever_employment has not been confirmed by HR", async () => {
-    const hireDate = isoDateYearsAgo(2);
-    const admin = createFakeAdmin([PL_POLICY_VERSIONS, PL_LEAVE_TYPES, plEmployeeStep(hireDate, null), EMPTY, EMPTY, EMPTY, EMPTY]);
-    vi.mocked(createAdminClient).mockReturnValue(admin as never);
-
-    const res = await GET(authorizedRequest());
-    const body = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(body.entriesPosted).toBe(0);
-    expect(body.blockedEntitlementConfig).toEqual([
-      expect.objectContaining({ employeeId: EMPLOYEE_ID, leaveTypeCode: "annual", reason: expect.stringContaining("is_first_ever_employment") }),
-    ]);
-  });
-
-  it("computes and posts the correct entitlement once is_first_ever_employment and FTE history are both confirmed", async () => {
+  it("computes and posts 26 days for every full year, unaffected by recognised_prior_service_years/is_first_ever_employment — legacy reference fields no longer gate or change Poland accrual", async () => {
     // A clean 1 January hire exactly two calendar years before the current
     // one, so the expected total is deterministic regardless of which exact
-    // day this test runs on: hire year (Art. 153, 12 months) = 20, then the
-    // full annual entitlement immediately from each of the two subsequent
-    // 1 Januaries already reached (this test's own year, and the one
-    // before it) = 20 + 20 -> 60 total. See annualLeaveEntitlement.test.ts
-    // in packages/domain for the exhaustive verification of this math —
-    // this route test only proves the cron is WIRED to it correctly.
+    // day this test runs on: hire year + the two subsequent 1 Januaries
+    // already reached (this test's own year, and the one before it) = three
+    // full years at the flat 26-day company benefit -> 78 total. See
+    // annualLeaveEntitlement.test.ts in packages/domain for the exhaustive
+    // verification of this math — this route test only proves the cron is
+    // WIRED to it correctly, and that it no longer even reads (let alone
+    // requires) is_first_ever_employment / recognised_prior_service_years.
     const hireDate = `${new Date().getUTCFullYear() - 2}-01-01`;
     const contractsStep = { data: [{ employee_id: EMPLOYEE_ID, start_date: hireDate, fte_fraction: 1 }], error: null };
     const captured: { upsertRows?: Array<{ amount_days: number }> } = {};
     const admin = createFakeAdmin([
       PL_POLICY_VERSIONS,
       PL_LEAVE_TYPES,
-      plEmployeeStep(hireDate, true),
+      // Legacy fields left populated (as they would be on a real employee
+      // row this select() no longer even queries) to prove they have zero
+      // effect on the computed amount.
+      plEmployeeStep(hireDate, { recognised_prior_service_years: 4, is_first_ever_employment: false }),
       contractsStep,
       EMPTY,
       EMPTY,
@@ -401,38 +390,46 @@ describe("GET /api/cron/leave-accrual — Poland entitlement configuration requi
     expect(res.status).toBe(200);
     expect(body.entriesPosted).toBe(1);
     expect(body.blockedEntitlementConfig).toEqual([]);
-    expect(captured.upsertRows?.[0]?.amount_days).toBe(60);
+    expect(captured.upsertRows?.[0]?.amount_days).toBe(78);
   });
 
-  it("blocks and reports the specific reason for a non-zero recognisedPriorServiceYears (HR reference data only, never used for automatic posting)", async () => {
-    const hireDate = `${new Date().getUTCFullYear() - 2}-01-01`;
+  it("a brand-new starter is prorated by whole calendar months of the hire year, not blocked pending is_first_ever_employment confirmation (that gate no longer exists)", async () => {
+    // Hired 1 January of the current year: the full calendar year isn't
+    // complete yet if asOfDate falls mid-year, but Art. 1551's "immediately
+    // available, not accrued progressively" proration still prices the
+    // whole remaining-of-hire-year range in full as soon as the year has
+    // started — so this posts the full 26 on day one of employment.
+    const hireDate = `${new Date().getUTCFullYear()}-01-01`;
     const contractsStep = { data: [{ employee_id: EMPLOYEE_ID, start_date: hireDate, fte_fraction: 1 }], error: null };
+    const captured: { upsertRows?: Array<{ amount_days: number }> } = {};
     const admin = createFakeAdmin([
       PL_POLICY_VERSIONS,
       PL_LEAVE_TYPES,
-      {
-        data: [{ id: EMPLOYEE_ID, country_code: "PL", hire_date: hireDate, recognised_prior_service_years: 4, is_first_ever_employment: true }],
-        error: null,
-      },
+      plEmployeeStep(hireDate),
       contractsStep,
       EMPTY,
       EMPTY,
       EMPTY,
+      (call: { upsertRows?: Array<{ amount_days: number }> }) => {
+        captured.upsertRows = call.upsertRows;
+        return { error: null, count: call.upsertRows?.length ?? 0 };
+      },
     ]);
     vi.mocked(createAdminClient).mockReturnValue(admin as never);
 
     const res = await GET(authorizedRequest());
     const body = await res.json();
 
-    expect(body.entriesPosted).toBe(0);
-    expect(body.blockedEntitlementConfig).toEqual([expect.objectContaining({ employeeId: EMPLOYEE_ID, leaveTypeCode: "annual", reason: expect.stringContaining("reference data only") })]);
+    expect(res.status).toBe(200);
+    expect(body.entriesPosted).toBe(1);
+    expect(captured.upsertRows?.[0]?.amount_days).toBe(26);
   });
 
-  it("blocks and reports the specific reason for a gap in employment_contracts history (the first contract starts after hireDate)", async () => {
+  it("blocks and reports the specific reason for a gap in employment_contracts history (the first contract starts after hireDate) — contract-history ambiguity still blocks", async () => {
     const hireYear = new Date().getUTCFullYear() - 2;
     const hireDate = `${hireYear}-01-01`;
     const contractsStep = { data: [{ employee_id: EMPLOYEE_ID, start_date: `${hireYear}-06-01`, fte_fraction: 1 }], error: null }; // starts AFTER hireDate
-    const admin = createFakeAdmin([PL_POLICY_VERSIONS, PL_LEAVE_TYPES, plEmployeeStep(hireDate, true), contractsStep, EMPTY, EMPTY, EMPTY]);
+    const admin = createFakeAdmin([PL_POLICY_VERSIONS, PL_LEAVE_TYPES, plEmployeeStep(hireDate), contractsStep, EMPTY, EMPTY, EMPTY]);
     vi.mocked(createAdminClient).mockReturnValue(admin as never);
 
     const res = await GET(authorizedRequest());
@@ -442,7 +439,7 @@ describe("GET /api/cron/leave-accrual — Poland entitlement configuration requi
     expect(body.blockedEntitlementConfig).toEqual([expect.objectContaining({ employeeId: EMPLOYEE_ID, leaveTypeCode: "annual", reason: expect.stringContaining("no contract covers") })]);
   });
 
-  it("blocks and reports the specific reason when FTE changes during the calculated year — never splits and prices a mixed-FTE period", async () => {
+  it("blocks and reports the specific reason when FTE changes during the calculated year — still requires an audited HR adjustment; never splits and prices a mixed-FTE period", async () => {
     const hireYear = new Date().getUTCFullYear() - 2;
     const hireDate = `${hireYear}-01-01`;
     const contractsStep = {
@@ -452,7 +449,7 @@ describe("GET /api/cron/leave-accrual — Poland entitlement configuration requi
       ],
       error: null,
     };
-    const admin = createFakeAdmin([PL_POLICY_VERSIONS, PL_LEAVE_TYPES, plEmployeeStep(hireDate, true), contractsStep, EMPTY, EMPTY, EMPTY]);
+    const admin = createFakeAdmin([PL_POLICY_VERSIONS, PL_LEAVE_TYPES, plEmployeeStep(hireDate), contractsStep, EMPTY, EMPTY, EMPTY]);
     vi.mocked(createAdminClient).mockReturnValue(admin as never);
 
     const res = await GET(authorizedRequest());
@@ -460,5 +457,18 @@ describe("GET /api/cron/leave-accrual — Poland entitlement configuration requi
 
     expect(body.entriesPosted).toBe(0);
     expect(body.blockedEntitlementConfig).toEqual([expect.objectContaining({ employeeId: EMPLOYEE_ID, leaveTypeCode: "annual", reason: expect.stringContaining("FTE changes during") })]);
+  });
+
+  it("never mentions is_first_ever_employment or recognisedPriorServiceYears in a block reason — those gates were removed", async () => {
+    const admin = createFakeAdmin([PL_POLICY_VERSIONS, PL_LEAVE_TYPES, plEmployeeStep(`${new Date().getUTCFullYear()}-01-01`), EMPTY, EMPTY, EMPTY, EMPTY]);
+    vi.mocked(createAdminClient).mockReturnValue(admin as never);
+
+    const res = await GET(authorizedRequest());
+    const body = await res.json();
+
+    expect(body.entriesPosted).toBe(0);
+    const reason = body.blockedEntitlementConfig?.[0]?.reason ?? "";
+    expect(reason).not.toMatch(/is_first_ever_employment/);
+    expect(reason).not.toMatch(/recognisedPriorServiceYears/);
   });
 });

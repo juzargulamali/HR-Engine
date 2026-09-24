@@ -159,20 +159,20 @@ const updateEmployeeSchema = z.object({
   managerId: z.string().uuid().optional().or(z.literal("")),
   dateOfBirth: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()),
   terminationDate: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()),
-  // Poland's 10-year Annual Leave threshold counts recognised prior
-  // service/education toward tenure — an explicit, HR-controlled input this
-  // system has no way to compute (Kodeks pracy Art. 154). Irrelevant
-  // (harmlessly stored as null) for any employee outside Poland.
+  // Optional HR reference data only — NOT used by
+  // computeAnnualLeaveEntitlementToDate. Enginious grants every Poland
+  // employee a flat 26 working days of Annual Leave per calendar year as a
+  // company benefit, regardless of recognised prior service. Kept on the
+  // schema to avoid an unnecessary reversal, not because anything reads it.
+  // Irrelevant (harmlessly stored as null) for any employee outside Poland.
   recognisedPriorServiceYears: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().min(0).optional()),
-  // Whether this is the employee's first-ever job (Kodeks pracy Art. 153
-  // §1, progressive first-year proration) versus someone who has worked
-  // before, anywhere, at any point (Art. 1551, calendar-year proportional
-  // entitlement instead) — a DIFFERENT fact from "first year at
-  // Enginious" and never inferred from hire_date. Poland's Annual Leave
-  // accrual cron blocks automatic accrual entirely for an employee until
-  // this is set (see computeAnnualLeaveEntitlementToDate); "" (unset) is
-  // preserved as null, not defaulted to either answer. Irrelevant
-  // (harmlessly stored as null) for any employee outside Poland.
+  // Optional HR reference data only — NOT used by
+  // computeAnnualLeaveEntitlementToDate. Whether this is the employee's
+  // first-ever job has no effect on Poland's flat 26-day/year Annual Leave
+  // benefit; kept on the schema to avoid an unnecessary reversal, not
+  // because anything reads it. "" (unset) is preserved as null, not
+  // defaulted to either answer. Irrelevant (harmlessly stored as null) for
+  // any employee outside Poland.
   isFirstEverEmployment: z.preprocess((v) => (v === "" ? undefined : v), z.enum(["true", "false"]).optional()),
 });
 

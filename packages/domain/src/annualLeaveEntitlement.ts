@@ -13,56 +13,51 @@
  * only for pure calendar arithmetic — days-in-month, adding a day — never
  * to read a local-timezone "now").
  *
- * POLAND (Kodeks pracy) — sources cited inline throughout this file:
- *   - Art. 153 §1: an employee's first-ever job (in their life) accrues
- *     leave progressively, 1/12 per completed month, but ONLY within the
- *     calendar year they took up work.
- *   - "Prawo do kolejnych urlopów pracownik nabywa w każdym następnym roku
- *     kalendarzowym" (general rule, applying from Art. 153 §1's own second
- *     sentence onward): from 1 January of the FOLLOWING calendar year, the
- *     employee is on ordinary "kolejny urlop" (subsequent leave) rules —
- *     the full annual entitlement becomes available at the start of that
- *     year, regardless of whether their personal 12-month anniversary has
- *     occurred yet.
- *   - Art. 1551 + Art. 1553 §1: an employee who has worked before (at any
- *     point, anywhere — Art. 1551 is not about "first year at Enginious")
- *     gets a proportional entitlement for the remainder of their hire's
- *     calendar year, immediately, not accrued progressively; each
- *     incomplete calendar month of that period is rounded UP to a full
- *     month, and the resulting fractional day count is rounded UP to a
- *     full day (mandatory — Art. 1553 §1 names this explicitly for Art.
- *     1551/1552 calculations).
- *   - Art. 154 §2 + established rounding practice: a part-time employee's
- *     FTE-prorated entitlement is always rounded UP to a full day, never
- *     to the nearest day.
- *   - GIP (Główny Inspektorat Pracy) guidance: Art. 153's own progressive
- *     1/12 monthly figure has NO statutory whole-day rounding requirement
- *     (unlike Art. 1551/1552/154) — rounding up there is a permitted,
- *     more-generous EMPLOYER CHOICE this system does not currently
- *     implement, so this calculator reports the precise (2-decimal-place
- *     storage precision) fractional value for that specific figure only.
- *   - This system does NOT implement Art. 154's "urlop uzupełniający"
- *     (supplementary leave granted immediately upon crossing the 10-year
- *     threshold mid-calendar-year) — a period whose recognised-service
- *     threshold would cross mid-period is detected and BLOCKS automatic
- *     accrual for that employee rather than approximate it.
+ * POLAND — Enginious company benefit (supersedes the statutory Kodeks pracy
+ * Art. 153/154 tiered-threshold rules this file previously implemented):
+ *   - Every Poland employee, regardless of tenure, prior service, or
+ *     whether this is their first-ever job, receives POLAND_ANNUAL_LEAVE_
+ *     BASE_DAYS (26) working days of Annual Leave for a complete calendar
+ *     year, full-time. This is a flat company benefit decision, not a
+ *     computation of the statutory 20-or-26-day threshold — the 10-year
+ *     recognised-service threshold, the Art. 153 §1 first-ever-employment
+ *     progressive-monthly-accrual mechanism, and Art. 154's mid-year
+ *     "urlop uzupełniający" supplementary-leave mechanic are NOT
+ *     implemented or relied upon anywhere in this file.
+ *   - The PRORATION METHOD for a new starter's or leaver's partial year is
+ *     retained from Art. 1551 + Art. 1553 §1 established practice: the
+ *     remaining WHOLE calendar months of the hire year (a partial month
+ *     counts in full) are priced against the full annual rate, rounded UP
+ *     to a whole day; the full annual amount is available immediately from
+ *     each subsequent 1 January, also rounded up. Only the BASE RATE
+ *     changed (flat 26 instead of a threshold-dependent 20-or-26) — the
+ *     rounding/proration mechanics themselves are unchanged.
+ *   - A part-time employee's FTE-prorated entitlement is always rounded UP
+ *     to a full day, never to the nearest day (established rounding
+ *     practice, same as before).
+ *   - This calculator only ever computes automatically when a period (the
+ *     hire year, or a subsequent full calendar year) is covered by a
+ *     SINGLE, constant FTE fraction throughout. A period where FTE changes
+ *     at all — whatever the split would otherwise work out to — BLOCKS
+ *     automatic accrual entirely, the same as a data gap or ambiguous
+ *     contract history: HR must post the confirmed amount through the
+ *     existing audited postLeaveLedgerAdjustment() path instead. This
+ *     system does not attempt to compute or approximate a mid-year,
+ *     mixed-FTE figure under any circumstance.
+ *   - employees.recognised_prior_service_years and
+ *     employees.is_first_ever_employment are kept as optional HR reference
+ *     fields only (avoiding an unnecessary schema reversal) — neither is
+ *     read by, nor has any effect on, Poland's Annual Leave computation.
  *   - Hours-based leave-taking accounting (Art. 1542, "1 day = 8 hours") is
  *     a DEDUCTION-side concern, already handled by
  *     computePolandLeaveDaysFromHours below; it does not affect how
  *     entitlement itself accrues, so it is unaffected by this file.
- *
- * DELIBERATELY KEPT MINIMAL (per this branch's second correction round):
- * this calculator only ever computes automatically when a period (the hire
- * year, or a subsequent full calendar year) is covered by a SINGLE,
- * constant FTE fraction throughout and does not cross the 10-year
- * recognised-service threshold. A period where FTE changes at all —
- * whatever the split would otherwise work out to — BLOCKS automatic
- * accrual entirely, the same as a threshold crossing, a data gap, or an
- * unconfirmed fact: HR must post the confirmed statutory amount through
- * the existing audited postLeaveLedgerAdjustment() path instead. This
- * system does not attempt to compute or approximate a mid-year, mixed-FTE,
- * or mixed-rate figure under any circumstance.
  */
+
+/** Flat Enginious company benefit: every full-time Poland employee receives
+ * this many working days of Annual Leave per complete calendar year,
+ * regardless of tenure, prior service, or first-ever-employment status. */
+export const POLAND_ANNUAL_LEAVE_BASE_DAYS = 26;
 
 function dateParts(iso: string): { year: number; month: number; day: number } {
   const [year, month, day] = iso.split("-").map(Number);
@@ -92,9 +87,7 @@ function addOneDay(iso: string): string {
  * Number of full calendar months between two dates — a month only counts
  * once `asOf`'s day-of-month has reached `from`'s (e.g. hired on the 15th,
  * "one completed month" is the 15th of the next month, not the 1st). Used
- * for actual tenure (staż pracy) throughout this file, and unchanged for
- * AE/SA — NOT used directly for Poland's Art. 153 first-year month count,
- * which has its own, separately-sourced day-counting convention below.
+ * for actual tenure throughout this file, for AE/SA's own accrual rules.
  */
 export function completedMonthsBetween(from: string, asOf: string): number {
   const f = dateParts(from);
@@ -209,11 +202,10 @@ function validateFteFractionHistory(history: readonly FteFractionPeriod[]): { ok
  * [startISO, endISO] (inclusive). Blocks (returns ok:false) rather than
  * guess or split when: no contract covers any part of the interval, the
  * first contract starts after the interval, a gap exists inside the
- * interval, or — deliberately, per this branch's second correction round —
- * the FTE fraction actually changes ANYWHERE within the interval. This
- * system does not compute a mixed-FTE period at all; a change mid-period
- * always blocks automatic accrual for that whole period, however small the
- * change or however the days would otherwise split.
+ * interval, or the FTE fraction actually changes ANYWHERE within the
+ * interval. This system does not compute a mixed-FTE period at all; a
+ * change mid-period always blocks automatic accrual for that whole period,
+ * however small the change or however the days would otherwise split.
  */
 function resolveConstantFteForInterval(sortedHistory: readonly FteFractionPeriod[], startISO: string, endISO: string): { ok: true; fte: number } | PolandEntitlementBlocked {
   if (sortedHistory.length === 0) {
@@ -286,7 +278,7 @@ function round2(value: number): number {
 // -----------------------------------------------------------------------------
 // Poland: a whole period (the hire year, or one subsequent calendar year),
 // priced only when a SINGLE FTE fraction covers it throughout
-// (Art. 154 §2 / Art. 1551 / established rounding practice)
+// (established rounding practice, Art. 1551 proration method)
 // -----------------------------------------------------------------------------
 
 /** Prices a whole-calendar-months range [trueRangeStartISO, firstOfEndMonth]
@@ -314,45 +306,6 @@ function priceWholePeriod(
   return { ok: true, days: Math.ceil((totalMonths / 12) * baseDaysForYear * resolved.fte) };
 }
 
-/** True if the 20-vs-26-day recognised-service threshold (Art. 154 §1-2)
- * would cross somewhere strictly inside [startISO, endISO] — this system
- * does not implement Art. 154's mid-calendar-year "urlop uzupełniający"
- * (supplementary leave granted immediately on crossing), so such a period
- * is blocked rather than priced at either the pre- or post-threshold rate,
- * either of which would misstate the employee's actual entitlement. */
-function baseDaysFor(recognisedServiceYears: number): 20 | 26 {
-  return recognisedServiceYears >= 10 ? 26 : 20;
-}
-
-function thresholdCrossesWithin(hireDate: string, recognisedPriorServiceYears: number, startISO: string, endISO: string): boolean {
-  const atStart = baseDaysFor(completedYearsBetween(hireDate, startISO) + recognisedPriorServiceYears);
-  const atEnd = baseDaysFor(completedYearsBetween(hireDate, endISO) + recognisedPriorServiceYears);
-  return atStart !== atEnd;
-}
-
-// -----------------------------------------------------------------------------
-// Poland: Art. 153 §1 first-ever-employment month count (hire calendar year only)
-// -----------------------------------------------------------------------------
-
-/**
- * Completed months of work for Art. 153 §1's progressive 1/12 accrual, per
- * GIP/PIP worked-example guidance: a period starting on day D of a month
- * completes its "first month" the day BEFORE day D of the following month
- * (e.g. hired 15 October -> first month completes 14 November; hired
- * 1 October -> first month completes 31 October) — i.e. the hire day
- * itself counts as day 1 of employment, one day earlier than a plain
- * "same day next month" anniversary would give. Implemented as
- * completedMonthsBetween measured one day further forward than the actual
- * asOfDate, which reproduces exactly this day-before-the-anniversary
- * boundary. This is DELIBERATELY NOT the same function used for actual
- * tenure/staż pracy elsewhere in this file (completedMonthsBetween) — see
- * this file's own header for why that distinction is a documented, scoped
- * decision for this specific Art. 153 calculation only.
- */
-function completedArt153Months(hireDate: string, asOfDate: string): number {
-  return completedMonthsBetween(hireDate, addOneDay(asOfDate));
-}
-
 // -----------------------------------------------------------------------------
 // Poland: single dispatcher
 // -----------------------------------------------------------------------------
@@ -361,38 +314,6 @@ export interface AnnualLeaveEntitlementToDateInput {
   countryCode: "AE" | "SA" | "PL";
   hireDate: string;
   asOfDate: string;
-  /**
-   * Poland only. HR REFERENCE DATA ONLY — deliberately never applied to
-   * automatic accrual (see this file's header). This system keeps this
-   * field as a single, non-effective-dated scalar (employees.
-   * recognised_prior_service_years); using it to compute automatically
-   * would mean applying whichever value happens to be current across an
-   * employee's entire multi-year history, silently restating years
-   * already granted whenever it changes and possibly missing a 10-year
-   * threshold crossing it would have caused earlier. ANY non-zero value
-   * here therefore BLOCKS the Poland calculation entirely (returns null):
-   * HR must confirm and post the correct statutory entitlement manually,
-   * through the existing leave-ledger adjustment process, for any Poland
-   * employee with recognised prior service. recognisedPriorServiceYears
-   * === 0 (or omitted) is unaffected — there is only one possible value
-   * for all of history — and computes normally.
-   */
-  recognisedPriorServiceYears?: number;
-  /**
-   * Poland only — REQUIRED for a Poland calculation to run at all.
-   * An explicit HR-confirmed fact (employees.is_first_ever_employment):
-   *   true  = this is the employee's first job of their working life, ever
-   *           — Kodeks pracy Art. 153 §1's progressive monthly-proration
-   *           applies, but ONLY within the calendar year they were hired.
-   *   false = they have worked before — anywhere, at any employer, at any
-   *           point in their life — even if this is their first year AT
-   *           ENGINIOUS specifically. Art. 1551's calendar-year
-   *           proportional entitlement applies instead.
-   * NEVER inferred from hireDate, and NEVER inferred from
-   * recognisedPriorServiceYears being zero/unset. undefined/null means HR
-   * has not yet confirmed this: the calculation returns `null` (blocked).
-   */
-  isFirstEverEmployment?: boolean | null;
   /**
    * Poland only — REQUIRED for a Poland calculation to run at all (a
    * missing or empty history returns `null`, blocked; so does any gap,
@@ -439,114 +360,38 @@ export function explainPolandEntitlementBlock(input: AnnualLeaveEntitlementToDat
 }
 
 function computePolandEntitlementOrDispatch(input: AnnualLeaveEntitlementToDateInput): number | PolandEntitlementResult {
-  const { countryCode, hireDate, asOfDate, recognisedPriorServiceYears = 0 } = input;
+  const { countryCode, hireDate, asOfDate } = input;
 
   if (asOfDate < hireDate) return 0;
   if (countryCode === "AE") return computeUaeAnnualLeaveEntitlementDays(hireDate, asOfDate);
   if (countryCode === "SA") return computeSaudiAnnualLeaveEntitlementDays(hireDate, asOfDate);
 
-  const { isFirstEverEmployment, fteFractionHistory } = input;
-  if (isFirstEverEmployment === undefined || isFirstEverEmployment === null) {
-    return { ok: false, reason: "employees.is_first_ever_employment has not been confirmed by HR yet" };
-  }
+  const { fteFractionHistory } = input;
   if (!fteFractionHistory) {
     return { ok: false, reason: "no employment_contracts history is available to resolve an FTE fraction from" };
-  }
-  if (recognisedPriorServiceYears !== 0) {
-    return {
-      ok: false,
-      reason:
-        "recognisedPriorServiceYears is non-zero — this field is retained as HR reference data only and is never applied to automatic accrual, since a single current value has no effective date and could change (or already have changed) the 10-year threshold for years already granted. HR must confirm and post the statutory Annual Leave entitlement for this employee manually via the existing leave-ledger adjustment process.",
-    };
   }
 
   const validated = validateFteFractionHistory(fteFractionHistory);
   if (!validated.ok) return validated;
 
-  return isFirstEverEmployment
-    ? computePolandFirstEverEmploymentEntitlementToDate(hireDate, asOfDate, recognisedPriorServiceYears, validated.sorted)
-    : computePolandExperiencedHireEntitlementToDate(hireDate, asOfDate, recognisedPriorServiceYears, validated.sorted);
+  return computePolandEntitlementToDate(hireDate, asOfDate, validated.sorted);
 }
 
 /**
- * Kodeks pracy Art. 153 §1: within the calendar year the employee is hired
- * in, 1/12 of the annual entitlement per completed month (per
- * completedArt153Months' own day-counting convention above), NOT rounded
- * up to a whole day (GIP: optional, not mandatory, for this specific
- * figure). From 1 January of the FOLLOWING calendar year onward, ordinary
- * "kolejny urlop" rules apply — the full annual entitlement is available
- * from the start of each calendar year, computed and rounded exactly like
- * the experienced-hire case below (this system's Art. 153 accrual NEVER
- * continues past the hire's own calendar year, regardless of whether the
- * employee's personal 12-month anniversary has occurred yet).
+ * Poland Annual Leave — flat Enginious company benefit of
+ * POLAND_ANNUAL_LEAVE_BASE_DAYS per complete calendar year, for every
+ * employee regardless of tenure or first-ever-employment status. A new
+ * starter receives, immediately from their hire date, a proportional
+ * entitlement for the remaining WHOLE calendar months of that hire year (a
+ * partial month counts in full — "niepełny miesiąc... nie jest
+ * zaokrąglany w dół"), rounded up, then the full annual entitlement from
+ * each subsequent 1 January, priced and rounded the same way — but only
+ * when a single, constant FTE covers each such period throughout; a change
+ * anywhere within it blocks that period (see this file's header).
  */
-function computePolandFirstEverEmploymentEntitlementToDate(
-  hireDate: string,
-  asOfDate: string,
-  recognisedPriorServiceYears: number,
-  sortedFteHistory: readonly FteFractionPeriod[],
-): PolandEntitlementResult {
+function computePolandEntitlementToDate(hireDate: string, asOfDate: string, sortedFteHistory: readonly FteFractionPeriod[]): PolandEntitlementResult {
   const hireYear = dateParts(hireDate).year;
   const asOfYear = dateParts(asOfDate).year;
-  const hireYearEnd = formatDate(hireYear, 12, 31);
-
-  // Art. 153 §1's base rate is fixed at hire (0 completed service years)
-  // for the whole of this special first-year mechanism — a threshold
-  // crossing occurring later only ever matters from year 2 onward, checked
-  // in the shared subsequent-years loop below.
-
-  if (asOfYear === hireYear) {
-    const months = completedArt153Months(hireDate, asOfDate);
-    // A single, constant FTE must cover the whole hire-to-date span — any
-    // change within the hire year at all blocks this period entirely (see
-    // this file's header and resolveConstantFteForInterval).
-    const fteResolved = resolveConstantFteForInterval(sortedFteHistory, hireDate, asOfDate);
-    if (!fteResolved.ok) return fteResolved;
-    const annualAtHire = computePolandAnnualLeaveEntitlementDays({ completedServiceYears: 0, recognisedPriorServiceYears, fteFraction: fteResolved.fte });
-    return { ok: true, days: computePolandFirstYearAccruedDays(annualAtHire, months) };
-  }
-
-  // Past the hire's own calendar year: the Art. 153 phase is over. Its
-  // FINAL, fixed contribution is whatever had accrued by 31 December of
-  // the hire year (never re-derived from the personal anniversary) — again
-  // requiring a single, constant FTE for that whole hire-year span.
-  const monthsInHireYear = completedArt153Months(hireDate, hireYearEnd);
-  const fteResolved = resolveConstantFteForInterval(sortedFteHistory, hireDate, hireYearEnd);
-  if (!fteResolved.ok) return fteResolved;
-  const annualAtHire = computePolandAnnualLeaveEntitlementDays({ completedServiceYears: 0, recognisedPriorServiceYears, fteFraction: fteResolved.fte });
-  const hireYearFinal = computePolandFirstYearAccruedDays(annualAtHire, monthsInHireYear);
-
-  const subsequent = priceSubsequentCalendarYears(hireDate, hireYear, asOfYear, recognisedPriorServiceYears, sortedFteHistory);
-  if (!subsequent.ok) return subsequent;
-  return { ok: true, days: round2(hireYearFinal) + subsequent.days };
-}
-
-/**
- * Kodeks pracy Art. 1551 + Art. 1553 §1: an employee who has worked before
- * (at any point, ever) is not subject to Art. 153's progressive first-year
- * proration. They receive, immediately from their hire date, a
- * proportional entitlement for the remaining WHOLE calendar months of that
- * hire year (a partial month counts in full — "niepełny miesiąc... nie
- * jest zaokrąglany w dół"), rounded up, then the full annual entitlement
- * from each subsequent 1 January, priced and rounded the same way — but
- * only when a single, constant FTE covers each such period throughout; a
- * change anywhere within it blocks that period (see this file's header).
- */
-function computePolandExperiencedHireEntitlementToDate(
-  hireDate: string,
-  asOfDate: string,
-  recognisedPriorServiceYears: number,
-  sortedFteHistory: readonly FteFractionPeriod[],
-): PolandEntitlementResult {
-  const hireYear = dateParts(hireDate).year;
-  const asOfYear = dateParts(asOfDate).year;
-  const hireYearEnd = formatDate(hireYear, 12, 31);
-  const asOfOrYearEnd = asOfYear === hireYear ? asOfDate : hireYearEnd;
-
-  if (thresholdCrossesWithin(hireDate, recognisedPriorServiceYears, hireDate, asOfOrYearEnd)) {
-    return { ok: false, reason: `the 10-year recognised-service threshold crosses during the hire calendar year (${hireYear}) — Art. 154's mid-year "urlop uzupełniający" is not implemented` };
-  }
-  const baseDaysHireYear = baseDaysFor(completedYearsBetween(hireDate, hireDate) + recognisedPriorServiceYears);
 
   // Art. 1551: the proportional entitlement for the remainder of the hire
   // year is available IMMEDIATELY at hire, not accrued progressively
@@ -555,44 +400,32 @@ function computePolandExperiencedHireEntitlementToDate(
   // hireYear, already established by the caller), regardless of exactly
   // which day within it asOfDate falls on.
   const firstOfDecemberHireYear = formatDate(hireYear, 12, 1);
-  const hireYearPriced = priceWholePeriod(hireDate, firstOfDecemberHireYear, sortedFteHistory, baseDaysHireYear);
+  const hireYearPriced = priceWholePeriod(hireDate, firstOfDecemberHireYear, sortedFteHistory, POLAND_ANNUAL_LEAVE_BASE_DAYS);
   if (!hireYearPriced.ok) return hireYearPriced;
 
   if (asOfYear === hireYear) return { ok: true, days: hireYearPriced.days };
 
-  const subsequent = priceSubsequentCalendarYears(hireDate, hireYear, asOfYear, recognisedPriorServiceYears, sortedFteHistory);
+  const subsequent = priceSubsequentCalendarYears(hireYear, asOfYear, sortedFteHistory);
   if (!subsequent.ok) return subsequent;
   return { ok: true, days: hireYearPriced.days + subsequent.days };
 }
 
 /**
- * Full calendar years hireYear+1..asOfYear — shared by both the first-ever
- * and experienced paths, since from the year after hire onward their rules
- * are identical: the FULL annual entitlement is available from 1 January
- * of each such year, immediately, not accrued progressively through it —
- * so every year in this range (asOfYear included) is priced in full,
- * regardless of which month of asOfYear we're actually being asked about.
- * (This function assumes continued employment through the full calendar
- * year being priced; it is NOT the right tool for a terminating employee's
- * own final, prorated exit-year entitlement — that is a separate
+ * Full calendar years hireYear+1..asOfYear: the FULL annual entitlement
+ * (POLAND_ANNUAL_LEAVE_BASE_DAYS) is available from 1 January of each such
+ * year, immediately, not accrued progressively through it — so every year
+ * in this range (asOfYear included) is priced in full, regardless of which
+ * month of asOfYear we're actually being asked about. (This function
+ * assumes continued employment through the full calendar year being
+ * priced; it is NOT the right tool for a terminating employee's own final,
+ * prorated exit-year entitlement — that is a separate
  * proportional-termination calculation this function does not perform.)
  */
-function priceSubsequentCalendarYears(
-  hireDate: string,
-  hireYear: number,
-  asOfYear: number,
-  recognisedPriorServiceYears: number,
-  sortedFteHistory: readonly FteFractionPeriod[],
-): PolandEntitlementResult {
+function priceSubsequentCalendarYears(hireYear: number, asOfYear: number, sortedFteHistory: readonly FteFractionPeriod[]): PolandEntitlementResult {
   let total = 0;
   for (let year = hireYear + 1; year <= asOfYear; year++) {
     const yearStart = formatDate(year, 1, 1);
-    const yearEnd = formatDate(year, 12, 31);
-    if (thresholdCrossesWithin(hireDate, recognisedPriorServiceYears, yearStart, yearEnd)) {
-      return { ok: false, reason: `the 10-year recognised-service threshold crosses during calendar year ${year} — Art. 154's mid-year "urlop uzupełniający" is not implemented` };
-    }
-    const baseDaysThisYear = baseDaysFor(completedYearsBetween(hireDate, yearStart) + recognisedPriorServiceYears);
-    const priced = priceWholePeriod(yearStart, formatDate(year, 12, 1), sortedFteHistory, baseDaysThisYear);
+    const priced = priceWholePeriod(yearStart, formatDate(year, 12, 1), sortedFteHistory, POLAND_ANNUAL_LEAVE_BASE_DAYS);
     if (!priced.ok) return priced;
     total += priced.days;
   }
@@ -600,46 +433,22 @@ function priceSubsequentCalendarYears(
 }
 
 export interface PolandAnnualLeaveInput {
-  /** Actual tenure with Enginious, in completed years, as of the date being evaluated. */
-  completedServiceYears: number;
-  /**
-   * HR-controlled input: prior service/education years the company has
-   * recognised toward the statutory threshold (Kodeks pracy Art. 154 —
-   * education can count toward the service-length calculation). Never
-   * computed automatically. Defaults to 0 (no recognised prior service) if
-   * not supplied.
-   */
-  recognisedPriorServiceYears?: number;
   /** 1.0 for full-time; a fraction (e.g. 0.5) for part-time, prorating the result. Defaults to 1.0. */
   fteFraction?: number;
 }
 
 /**
- * Poland Annual Leave: 20 working days/year under 10 years of legally
- * recognised service (actual tenure + any HR-recognised prior service),
- * 26 working days/year at 10+ years. Prorated for part-time by
- * `fteFraction`, rounded UP to a whole day (Art. 154 §2 + established
- * rounding practice — a part-time entitlement is never rounded to the
- * nearest day, only ever up). Use with computeLeaveDays({ deductionMode:
- * "workingDays" }) (the existing default) for deducting an actual request.
+ * Poland Annual Leave: POLAND_ANNUAL_LEAVE_BASE_DAYS (26) working days/year,
+ * flat, as an Enginious company benefit — regardless of tenure or
+ * first-ever-employment status. Prorated for part-time by `fteFraction`,
+ * rounded UP to a whole day (established rounding practice — a part-time
+ * entitlement is never rounded to the nearest day, only ever up). Use with
+ * computeLeaveDays({ deductionMode: "workingDays" }) (the existing default)
+ * for deducting an actual request.
  */
-export function computePolandAnnualLeaveEntitlementDays(input: PolandAnnualLeaveInput): number {
-  const { completedServiceYears, recognisedPriorServiceYears = 0, fteFraction = 1 } = input;
-  const recognisedServiceYears = completedServiceYears + Math.max(0, recognisedPriorServiceYears);
-  const baseDays = baseDaysFor(recognisedServiceYears);
-  return Math.ceil(baseDays * clampFraction(fteFraction));
-}
-
-/**
- * Poland first-time employee accrual: 1/12 of the annual entitlement after
- * each completed month of the first calendar year (Kodeks pracy Art. 153
- * §1), capped at the full annual amount once 12 months have passed. NOT
- * rounded up to a whole day — see this file's header (GIP: optional here,
- * unlike every other Poland rounding in this file).
- */
-export function computePolandFirstYearAccruedDays(annualEntitlementDays: number, completedMonthsOfService: number): number {
-  const months = Math.max(0, Math.min(12, Math.floor(completedMonthsOfService)));
-  return round2((annualEntitlementDays / 12) * months);
+export function computePolandAnnualLeaveEntitlementDays(input: PolandAnnualLeaveInput = {}): number {
+  const { fteFraction = 1 } = input;
+  return Math.ceil(POLAND_ANNUAL_LEAVE_BASE_DAYS * clampFraction(fteFraction));
 }
 
 /**

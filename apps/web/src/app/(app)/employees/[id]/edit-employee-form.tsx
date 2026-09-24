@@ -123,7 +123,9 @@ export function EditEmployeeForm({
                 defaultValue={employee.recognised_prior_service_years ?? ""}
               />
               <p className="text-xs text-muted-foreground">
-                Poland only — prior service/education counted toward the 10-year Annual Leave threshold.
+                Poland only — optional HR reference data. Enginious grants every Poland employee a flat 26 working
+                days of Annual Leave per calendar year as a company benefit; this field does not affect that
+                calculation.
               </p>
             </div>
             <div className="space-y-1.5">
@@ -138,8 +140,8 @@ export function EditEmployeeForm({
                 <option value="false">No — they have worked before</option>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Poland only — NOT whether this is their first year at Enginious. Annual Leave will not accrue
-                automatically for a Poland employee until this is confirmed.
+                Poland only — optional HR reference data. It does not gate or change Annual Leave accrual, which is
+                a flat 26-day/year company benefit for every Poland employee regardless of this field.
               </p>
             </div>
           </div>

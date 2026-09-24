@@ -122,16 +122,17 @@ export function classifyLedgerRows(rows: AnnualLeaveLedgerRow[]): {
  * 'per_service_year' (UAE/Saudi) and 'annual_grant' (Poland) are
  * delta-based: each run computes the employee's cumulative Annual Leave
  * entitlement AS OF TODAY via computeAnnualLeaveEntitlementToDate (the
- * regional tiered/first-year rules in packages/domain), compares it against
- * an unambiguous inventory of every historical Annual Leave grant ever
- * posted for that employee/leave type — not just this cron's own
- * 'policy_run' entries, and never inferred from the net balance, which
- * deductions and reversals would make unreliable (see classifyLedgerRows) —
- * and posts only the positive difference. This reproduces UAE's "2 days per
- * completed month between 6-12 months, then 30 at each anniversary" and
- * Poland's first-year monthly proration naturally, as whatever the
- * calculator's month-over-month delta implies, without this cron needing
- * its own anniversary-detection logic. Only implemented for AE/SA/PL
+ * regional rules in packages/domain — for Poland, a flat 26-working-day/year
+ * Enginious company benefit, calendar-month-prorated for a partial hire
+ * year), compares it against an unambiguous inventory of every historical
+ * Annual Leave grant ever posted for that employee/leave type — not just
+ * this cron's own 'policy_run' entries, and never inferred from the net
+ * balance, which deductions and reversals would make unreliable (see
+ * classifyLedgerRows) — and posts only the positive difference. This
+ * reproduces UAE's "2 days per completed month between 6-12 months, then 30
+ * at each anniversary" naturally, as whatever the calculator's month-over-
+ * month delta implies, without this cron needing its own
+ * anniversary-detection logic. Only implemented for AE/SA/PL
  * specifically (the three countries this rule set targets) — any other
  * country using these accrual methods is skipped with a review flag rather
  * than guessing a formula for it.
@@ -205,7 +206,7 @@ export async function GET(request: Request) {
 
   const { data: employees, error: employeesError } = await admin
     .from("employees")
-    .select("id, country_code, hire_date, recognised_prior_service_years, is_first_ever_employment")
+    .select("id, country_code, hire_date")
     .eq("employment_status", "active")
     .is("deleted_at", null);
   if (employeesError) return NextResponse.json({ error: employeesError.message }, { status: 500 });
@@ -282,10 +283,11 @@ export async function GET(request: Request) {
     idempotency_key: string;
   }[] = [];
   let skipped = 0;
-  // Poland-only: employees whose entitlement can't be computed because HR
-  // hasn't confirmed is_first_ever_employment (or there's no FTE history at
-  // all) — a distinct, separately-reported reason from ambiguousReport
-  // above (which is about historical ledger provenance, not configuration).
+  // Poland-only: employees whose entitlement can't be computed because
+  // there's no FTE history at all, or their contract history is ambiguous
+  // (a gap, an overlapping/conflicting row, or an FTE change mid-period) —
+  // a distinct, separately-reported reason from ambiguousReport above
+  // (which is about historical ledger provenance, not configuration).
   const blockedEntitlementConfig: AmbiguousBaseline[] = [];
 
   for (const employee of employees ?? []) {
@@ -330,19 +332,19 @@ export async function GET(request: Request) {
           countryCode: employee.country_code as "AE" | "SA" | "PL",
           hireDate: employee.hire_date,
           asOfDate: today,
-          recognisedPriorServiceYears: employee.recognised_prior_service_years ?? undefined,
-          isFirstEverEmployment: employee.is_first_ever_employment,
           fteFractionHistory: fteFractionHistoryByEmployee.get(employee.id),
         };
         const entitlementToDate = computeAnnualLeaveEntitlementToDate(entitlementInput);
         if (entitlementToDate === null) {
-          // Poland only — the specific reason (HR hasn't confirmed
-          // is_first_ever_employment, no FTE history, a non-zero
-          // recognisedPriorServiceYears this system can't apply
-          // effective-dated, a gap/overlap/invalid fraction in the
-          // employment_contracts history, or a 10-year threshold crossing
-          // mid-calendar-year) comes straight from the domain calculator
-          // that actually detected it — never guessed here.
+          // Poland only — the specific reason (no FTE history at all, a
+          // gap/overlap/invalid fraction in the employment_contracts
+          // history, or an FTE change mid-period) comes straight from the
+          // domain calculator that actually detected it — never guessed
+          // here. Poland's Annual Leave is now a flat 26-day/year Enginious
+          // company benefit for every employee (see
+          // packages/domain/src/annualLeaveEntitlement.ts) — it no longer
+          // depends on recognised prior service or first-ever-employment
+          // status, so neither can block accrual any more.
           skipped += 1;
           blockedEntitlementConfig.push({
             employeeId: employee.id,
