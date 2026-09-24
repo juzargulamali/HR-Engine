@@ -3,24 +3,16 @@ import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { CancelRequestButton } from "./cancel-request-button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
 import type { RequestStatus } from "@/types/database.types";
 
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
-  submitted: "secondary",
-  pending_approval: "secondary",
-  approved: "default",
-  rejected: "destructive",
-  cancelled: "outline",
-};
-
-const STATUS_VALUES = Object.keys(STATUS_VARIANT);
+const STATUS_VALUES: RequestStatus[] = ["submitted", "pending_approval", "approved", "rejected", "cancelled"];
 
 export default async function LeavePage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
   const { status: statusParam } = await searchParams;
@@ -41,7 +33,7 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const status = statusParam && STATUS_VALUES.includes(statusParam) ? statusParam : "";
+  const status = statusParam && (STATUS_VALUES as string[]).includes(statusParam) ? (statusParam as RequestStatus) : "";
   const supabase = await createClient();
 
   let requestsQuery = supabase
@@ -49,7 +41,7 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
     .select("id, leave_type_code, start_date, end_date, total_days, status, reason")
     .eq("employee_id", session.employeeId)
     .order("start_date", { ascending: false });
-  if (status) requestsQuery = requestsQuery.eq("status", status as RequestStatus);
+  if (status) requestsQuery = requestsQuery.eq("status", status);
 
   const [{ data: leaveBalances }, { data: compBalance }, { data: requests }] = await Promise.all([
     supabase.from("leave_balances").select("leave_type_code, balance_days").eq("employee_id", session.employeeId),
@@ -133,7 +125,10 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
                   </TableCell>
                   <TableCell>{r.total_days}</TableCell>
                   <TableCell>
-                    <Badge variant={STATUS_VARIANT[r.status] ?? "outline"}>{r.status.replace(/_/g, " ")}</Badge>
+                    <div className="space-y-0.5">
+                      <StatusBadge status={r.status} />
+                      <p className="text-xs text-muted-foreground">{statusNextAction(r.status)}</p>
+                    </div>
                   </TableCell>
                   <TableCell>
                     {r.status === "submitted" || r.status === "pending_approval" || (r.status === "approved" && r.start_date > today) ? (

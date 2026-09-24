@@ -4,11 +4,11 @@ import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { AddLineForm } from "./add-line-form";
 import { DeleteLineButton } from "./delete-line-button";
 import { ClaimActions } from "./claim-actions";
 import { EmptyState } from "@/components/ui/empty-state";
+import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
 
 export default async function ClaimDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -53,7 +53,10 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
           </h1>
           <p className="text-muted-foreground">{claim.claim_date}</p>
         </div>
-        <Badge>{claim.status.replace(/_/g, " ")}</Badge>
+        <div className="space-y-0.5 text-right">
+          <StatusBadge status={claim.status} />
+          <p className="text-xs text-muted-foreground">{statusNextAction(claim.status)}</p>
+        </div>
       </div>
 
       <Card>

@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
 import { DecisionButtons } from "./decision-buttons";
 
 export default async function ApprovalsPage() {
@@ -148,6 +149,7 @@ export default async function ApprovalsPage() {
                   <TableHead>Dates</TableHead>
                   <TableHead>Days</TableHead>
                   <TableHead>Reason</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
@@ -174,6 +176,12 @@ export default async function ApprovalsPage() {
                       </TableCell>
                       <TableCell className="max-w-xs truncate text-muted-foreground">{request.reason ?? "—"}</TableCell>
                       <TableCell>
+                        <div className="space-y-0.5">
+                          <StatusBadge status="pending_approval" />
+                          <p className="text-xs text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
                         <DecisionButtons approvalId={a.id} />
                       </TableCell>
                     </TableRow>
@@ -197,6 +205,7 @@ export default async function ApprovalsPage() {
                   <TableHead>Employee</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead>Amount</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
@@ -209,6 +218,12 @@ export default async function ApprovalsPage() {
                       <TableCell>{claim.claim_date}</TableCell>
                       <TableCell>
                         {claim.currency} {claim.total_amount}
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-0.5">
+                          <StatusBadge status="pending_approval" />
+                          <p className="text-xs text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                        </div>
                       </TableCell>
                       <TableCell>
                         <DecisionButtons approvalId={a.id} />
@@ -233,6 +248,7 @@ export default async function ApprovalsPage() {
                 <TableRow>
                   <TableHead>Employee</TableHead>
                   <TableHead>Period</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
@@ -244,6 +260,12 @@ export default async function ApprovalsPage() {
                       <TableCell>{employeeName(timesheet.employee_id)}</TableCell>
                       <TableCell>
                         {timesheet.period_start} – {timesheet.period_end}
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-0.5">
+                          <StatusBadge status="pending_approval" />
+                          <p className="text-xs text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                        </div>
                       </TableCell>
                       <TableCell>
                         <DecisionButtons approvalId={a.id} />
@@ -268,6 +290,7 @@ export default async function ApprovalsPage() {
                 <TableRow>
                   <TableHead>Employee</TableHead>
                   <TableHead>Template</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
@@ -278,6 +301,12 @@ export default async function ApprovalsPage() {
                     <TableRow key={a.id}>
                       <TableCell>{employeeName(letter.employee_id)}</TableCell>
                       <TableCell>{templateName.get(letter.template_id) ?? "—"}</TableCell>
+                      <TableCell>
+                        <div className="space-y-0.5">
+                          <StatusBadge status="pending_approval" />
+                          <p className="text-xs text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                        </div>
+                      </TableCell>
                       <TableCell>
                         <DecisionButtons approvalId={a.id} />
                       </TableCell>
@@ -300,6 +329,7 @@ export default async function ApprovalsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Period</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
@@ -310,6 +340,12 @@ export default async function ApprovalsPage() {
                     <TableRow key={a.id}>
                       <TableCell>
                         {run.period_month}/{run.period_year}
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-0.5">
+                          <StatusBadge status="pending_approval" />
+                          <p className="text-xs text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                        </div>
                       </TableCell>
                       <TableCell>
                         <DecisionButtons approvalId={a.id} />

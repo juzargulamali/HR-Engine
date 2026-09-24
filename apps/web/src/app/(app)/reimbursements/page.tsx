@@ -3,19 +3,10 @@ import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { NewClaimForm } from "./new-claim-form";
 import { DeleteDraftClaimButton } from "./delete-draft-claim-button";
 import { EmptyState } from "@/components/ui/empty-state";
-
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
-  draft: "outline",
-  submitted: "secondary",
-  pending_approval: "secondary",
-  approved: "default",
-  rejected: "destructive",
-  cancelled: "outline",
-};
+import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
 
 export default async function ReimbursementsPage() {
   const session = await getCurrentSession();
@@ -90,7 +81,10 @@ export default async function ReimbursementsPage() {
                     </Link>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={STATUS_VARIANT[c.status] ?? "outline"}>{c.status.replace(/_/g, " ")}</Badge>
+                    <div className="space-y-0.5">
+                      <StatusBadge status={c.status} />
+                      <p className="text-xs text-muted-foreground">{statusNextAction(c.status)}</p>
+                    </div>
                   </TableCell>
                   <TableCell>{c.status === "draft" ? <DeleteDraftClaimButton claimId={c.id} /> : null}</TableCell>
                 </TableRow>
