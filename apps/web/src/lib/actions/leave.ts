@@ -56,7 +56,7 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
   // type code was posted.
   const { data: policyVersions } = await supabase
     .from("policy_versions")
-    .select("id, status, effective_from, effective_to, version_no")
+    .select("id, status, effective_from, effective_to, version_no, payload")
     .eq("country_code", employee.country_code)
     .eq("policy_type", "leave_rules");
   const activePolicy = resolvePolicyVersionAsOf(
@@ -66,6 +66,7 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
       effectiveTo: v.effective_to,
       versionNo: v.version_no,
       status: v.status,
+      payload: v.payload as Record<string, unknown> | null,
     })),
     d.startDate,
   );
@@ -106,6 +107,17 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
     .gte("holiday_date", d.startDate)
     .lte("holiday_date", d.endDate);
 
+  // The resolved policy's deduction_mode/extend_for_holidays (set by the
+  // regional Annual Leave rules — UAE/Saudi calendar-day deduction, Saudi's
+  // holiday-extends-leave rule) apply to every leave type under it,
+  // Recovery Leave included, so the same day count always matches what
+  // decide_leave_approval() will actually deduct. Both default to
+  // computeLeaveDays' own pre-existing defaults (workingDays, no holiday
+  // extension) when a policy doesn't set them, so a country with no
+  // deduction_mode configured behaves exactly as before this field existed.
+  const deductionMode = activePolicy.payload?.deduction_mode === "calendarDays" ? "calendarDays" : "workingDays";
+  const extendForHolidays = activePolicy.payload?.extend_for_holidays === true;
+
   const totalDays = computeLeaveDays({
     startDate: d.startDate,
     endDate: d.endDate,
@@ -113,6 +125,8 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
     holidays: (holidayRows ?? []).map((h) => h.holiday_date),
     halfDayStart: d.halfDayStart,
     halfDayEnd: d.halfDayEnd,
+    deductionMode,
+    extendForHolidays,
   });
   if (totalDays <= 0) {
     return { error: "That date range has no working days (weekends/holidays only)." };
