@@ -1,6 +1,13 @@
 import { computeFinalSettlement, type EosbPolicyPayload } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import { Alert } from "@/components/ui/alert";
+import { SettlementRateForm } from "./settlement-rate-form";
+
+// UAE settles at basic salary (computeFinalSettlement's default — no
+// override needed). Saudi and Poland require a different, statutory wage
+// basis this system has no way to compute automatically; §5 of the Phase 2b
+// correction round requires blocking rather than guessing it.
+const COUNTRIES_REQUIRING_STATUTORY_RATE = new Set(["SA", "PL"]);
 
 export async function FinalSettlementSection({
   employeeId,
@@ -15,7 +22,16 @@ export async function FinalSettlementSection({
 }) {
   const supabase = await createClient();
 
-  const [{ data: compensation }, { data: leaveBalance }, { data: approvedClaims }, { data: eosbPolicy }, { data: loans }] = await Promise.all([
+  const needsStatutoryRate = COUNTRIES_REQUIRING_STATUTORY_RATE.has(countryCode);
+
+  const [
+    { data: compensation },
+    { data: leaveBalance },
+    { data: approvedClaims },
+    { data: eosbPolicy },
+    { data: loans },
+    { data: settlementInput },
+  ] = await Promise.all([
     supabase
       .from("compensation_details")
       .select("base_salary, currency")
@@ -30,13 +46,35 @@ export async function FinalSettlementSection({
     // that table's own add/delete-only design), so this is a live figure,
     // not a point-in-time snapshot.
     supabase.from("employee_loans").select("amount").eq("employee_id", employeeId),
+    // Recovery Leave never appears here — leaveBalance above is scoped to
+    // leave_type_code = 'annual' only, and Recovery Leave has no leave_ledger
+    // row at all (it's comp_day_ledger-only), so it was already excluded
+    // from cash settlement before this correction; forfeit_recovery_leave_on_termination()
+    // (via terminate_employee()) is what actually clears its balance,
+    // without cash conversion, at termination.
+    needsStatutoryRate
+      ? supabase.from("termination_settlement_inputs").select("leave_encashment_daily_rate").eq("employee_id", employeeId).maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   if (!compensation) {
     return <Alert>No current compensation record on file — can&apos;t compute a settlement figure.</Alert>;
   }
 
+  if (needsStatutoryRate && !settlementInput) {
+    return (
+      <div className="space-y-3">
+        <Alert variant="destructive">
+          This country requires a statutory leave-encashment wage basis for final settlement — Enginious cannot compute it
+          automatically. Settlement preparation is blocked until HR/Finance enters it below.
+        </Alert>
+        <SettlementRateForm employeeId={employeeId} />
+      </div>
+    );
+  }
+
   const dailyRate = Number(compensation.base_salary) / 30; // simple monthly-to-daily approximation, not a country-specific working-day convention
+  const leaveEncashmentDailyRate = needsStatutoryRate ? Number(settlementInput?.leave_encashment_daily_rate) : undefined;
   const pendingApprovedReimbursements = (approvedClaims ?? []).reduce((sum, c) => sum + Number(c.total_amount), 0);
   const outstandingLoans = (loans ?? []).reduce((sum, l) => sum + Number(l.amount), 0);
 
@@ -44,6 +82,7 @@ export async function FinalSettlementSection({
     hireDate,
     terminationDate,
     dailyRate,
+    leaveEncashmentDailyRate,
     unusedLeaveDays: Number(leaveBalance?.balance_days ?? 0),
     pendingApprovedReimbursements,
     outstandingLoans,

@@ -56,7 +56,7 @@ export default async function EmployeeDetailPage({
   const { data: employee } = await supabase
     .from("employees")
     .select(
-      "id, first_name, last_name, job_title, employment_status, company_id, country_code, manager_id, hire_date, date_of_birth, termination_date, deleted_at, personal_email, phone, user_id",
+      "id, first_name, last_name, job_title, employment_status, company_id, country_code, manager_id, hire_date, date_of_birth, termination_date, deleted_at, personal_email, phone, user_id, recognised_prior_service_years",
     )
     .eq("id", id)
     .maybeSingle();
@@ -182,7 +182,9 @@ export default async function EmployeeDetailPage({
         />
       ) : null}
 
-      {activeTab === "leave" ? <LeaveSection employeeId={employee.id} /> : null}
+      {activeTab === "leave" ? (
+        <LeaveSection employeeId={employee.id} canRecordOvernightRecovery={canEditCore || isManager} />
+      ) : null}
 
       {activeTab === "attendance" ? <AttendanceSection employeeId={employee.id} canManage={canEditAttendance} /> : null}
 

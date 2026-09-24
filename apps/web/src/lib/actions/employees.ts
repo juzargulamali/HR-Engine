@@ -150,9 +150,24 @@ const updateEmployeeSchema = z.object({
   employmentStatus: z.enum(["active", "on_leave", "suspended", "terminated"]),
   managerId: z.string().uuid().optional().or(z.literal("")),
   dateOfBirth: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()),
+  terminationDate: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()),
+  // Poland's 10-year Annual Leave threshold counts recognised prior
+  // service/education toward tenure — an explicit, HR-controlled input this
+  // system has no way to compute (Kodeks pracy Art. 154). Irrelevant
+  // (harmlessly stored as null) for any employee outside Poland.
+  recognisedPriorServiceYears: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().min(0).optional()),
 });
 
-/** HR Admin editing an employee's core record — see employees_update_hr. */
+/**
+ * HR Admin editing an employee's core record — see employees_update_hr.
+ *
+ * The '-> terminated' transition specifically goes through terminate_employee()
+ * instead of this plain table update: that RPC atomically forfeits any
+ * unused internal Recovery Leave in the SAME transaction as the status
+ * change, so forfeiture is never a separate step HR could forget to run.
+ * Every other status transition is unaffected — still the direct update
+ * employees_update_hr already allows.
+ */
 export async function updateEmployee(_prevState: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = updateEmployeeSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -161,16 +176,71 @@ export async function updateEmployee(_prevState: ActionState, formData: FormData
   const d = parsed.data;
 
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("employees")
-    .update({
-      job_title: d.jobTitle || null,
-      employment_status: d.employmentStatus,
-      manager_id: d.managerId || null,
-      date_of_birth: d.dateOfBirth || null,
-    })
-    .eq("id", d.employeeId);
 
+  if (d.employmentStatus === "terminated") {
+    const { error } = await supabase.rpc("terminate_employee", {
+      p_employee_id: d.employeeId,
+      p_termination_date: d.terminationDate || undefined,
+    });
+    if (error) return { error: error.message };
+
+    // job_title/manager_id/date_of_birth aren't part of terminate_employee()
+    // (a termination shouldn't silently also change unrelated fields) — a
+    // second, ordinary update covers anything else this form submitted
+    // alongside the status change.
+    const { error: fieldsError } = await supabase
+      .from("employees")
+      .update({
+        job_title: d.jobTitle || null,
+        manager_id: d.managerId || null,
+        date_of_birth: d.dateOfBirth || null,
+        recognised_prior_service_years: d.recognisedPriorServiceYears ?? null,
+      })
+      .eq("id", d.employeeId);
+    if (fieldsError) return { error: fieldsError.message };
+  } else {
+    const { error } = await supabase
+      .from("employees")
+      .update({
+        job_title: d.jobTitle || null,
+        employment_status: d.employmentStatus,
+        manager_id: d.managerId || null,
+        date_of_birth: d.dateOfBirth || null,
+        recognised_prior_service_years: d.recognisedPriorServiceYears ?? null,
+      })
+      .eq("id", d.employeeId);
+    if (error) return { error: error.message };
+  }
+
+  revalidatePath(`/employees/${d.employeeId}`);
+  return { error: null };
+}
+
+const setTerminationSettlementRateSchema = z.object({
+  employeeId: z.string().uuid(),
+  leaveEncashmentDailyRate: z.coerce.number().positive(),
+});
+
+/**
+ * HR/Finance-provided statutory leave-encashment wage basis for a Saudi or
+ * Poland termination — final-settlement-section.tsx blocks its leave
+ * encashment figure until this exists, rather than guessing basic salary
+ * for a country where that would be legally wrong. RLS (termination_settlement_inputs_write)
+ * is the real enforcement of who may call this; the trigger-stamped
+ * entered_by/entered_at make it auditable regardless of what this form
+ * sends.
+ */
+export async function setTerminationSettlementRate(_prevState: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = setTerminationSettlementRateSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("termination_settlement_inputs")
+    .upsert({ employee_id: d.employeeId, leave_encashment_daily_rate: d.leaveEncashmentDailyRate });
   if (error) return { error: error.message };
 
   revalidatePath(`/employees/${d.employeeId}`);
@@ -301,6 +371,10 @@ const addContractVersionSchema = z.object({
   startDate: z.string().min(1),
   endDate: z.string().optional(),
   noticePeriodDays: z.coerce.number().int().min(0).default(30),
+  // Poland Annual Leave entitlement is prorated by this fraction (1.0 =
+  // full-time). Harmless for every other country — the domain calculators
+  // only read it for Poland.
+  fteFraction: z.coerce.number().gt(0).max(1).default(1),
 });
 
 /**
@@ -333,6 +407,7 @@ export async function addContractVersion(_prevState: ActionState, formData: Form
       end_date: d.endDate || null,
       notice_period_days: d.noticePeriodDays,
       version_no: d.nextVersionNo,
+      fte_fraction: d.fteFraction,
       created_by: user.id,
     })
     .select("id")
