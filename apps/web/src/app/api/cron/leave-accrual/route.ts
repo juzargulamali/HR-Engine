@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { computeAnnualLeaveEntitlementToDate, type FteFractionPeriod } from "@enginious-hr/domain";
+import { computeAnnualLeaveEntitlementToDate, explainPolandEntitlementBlock, type FteFractionPeriod } from "@enginious-hr/domain";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAuthorizedCronRequest, SYSTEM_ACTOR_ID } from "@/lib/cron/auth";
 import { chunk } from "@/lib/cron/batch";
@@ -326,27 +326,28 @@ export async function GET(request: Request) {
           skipped += 1;
           continue;
         }
-        const entitlementToDate = computeAnnualLeaveEntitlementToDate({
+        const entitlementInput = {
           countryCode: employee.country_code as "AE" | "SA" | "PL",
           hireDate: employee.hire_date,
           asOfDate: today,
           recognisedPriorServiceYears: employee.recognised_prior_service_years ?? undefined,
           isFirstEverEmployment: employee.is_first_ever_employment,
           fteFractionHistory: fteFractionHistoryByEmployee.get(employee.id),
-        });
+        };
+        const entitlementToDate = computeAnnualLeaveEntitlementToDate(entitlementInput);
         if (entitlementToDate === null) {
-          // Poland only: HR hasn't confirmed is_first_ever_employment (or
-          // there's no employment_contracts history at all to resolve FTE
-          // from) — block automatic accrual for this employee rather than
-          // guess, and surface exactly that configuration requirement.
+          // Poland only — the specific reason (HR hasn't confirmed
+          // is_first_ever_employment, no FTE history, a non-zero
+          // recognisedPriorServiceYears this system can't apply
+          // effective-dated, a gap/overlap/invalid fraction in the
+          // employment_contracts history, or a 10-year threshold crossing
+          // mid-calendar-year) comes straight from the domain calculator
+          // that actually detected it — never guessed here.
           skipped += 1;
           blockedEntitlementConfig.push({
             employeeId: employee.id,
             leaveTypeCode: leaveType.leave_type_code,
-            reason:
-              employee.is_first_ever_employment === null || employee.is_first_ever_employment === undefined
-                ? "employees.is_first_ever_employment has not been confirmed by HR yet"
-                : "no employment_contracts history exists to resolve an FTE fraction from",
+            reason: explainPolandEntitlementBlock(entitlementInput) ?? "entitlement could not be determined",
           });
           continue;
         }

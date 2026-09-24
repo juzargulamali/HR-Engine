@@ -8,6 +8,7 @@ import {
   computeSaudiAnnualLeaveEntitlementDays,
   computeSaudiAnnualLeaveRateDaysPerYear,
   computeUaeAnnualLeaveEntitlementDays,
+  explainPolandEntitlementBlock,
 } from "../src/annualLeaveEntitlement";
 
 describe("completedMonthsBetween", () => {
@@ -114,6 +115,20 @@ describe("computeAnnualLeaveEntitlementToDate — the real accrual cron's single
     expect(computeAnnualLeaveEntitlementToDate({ countryCode: "SA", hireDate: "2018-01-01", asOfDate: "2026-01-01" })).toBe(5 * 21 + 3 * 30);
   });
 
+  it("returns 0 (never negative, never an error) for every country when asOfDate is before hireDate", () => {
+    expect(computeAnnualLeaveEntitlementToDate({ countryCode: "AE", hireDate: "2026-06-01", asOfDate: "2026-01-01" })).toBe(0);
+    expect(computeAnnualLeaveEntitlementToDate({ countryCode: "SA", hireDate: "2026-06-01", asOfDate: "2026-01-01" })).toBe(0);
+    expect(
+      computeAnnualLeaveEntitlementToDate({
+        countryCode: "PL",
+        hireDate: "2026-06-01",
+        asOfDate: "2026-01-01",
+        isFirstEverEmployment: true,
+        fteFractionHistory: [{ effectiveFrom: "2026-06-01", fteFraction: 1 }],
+      }),
+    ).toBe(0);
+  });
+
   describe("Poland — blocked (never guessed) when HR hasn't confirmed the required facts", () => {
     it("returns null when isFirstEverEmployment is undefined or null, even with a full FTE history", () => {
       const fteFractionHistory = [{ effectiveFrom: "2023-01-01", fteFraction: 1 }];
@@ -129,12 +144,76 @@ describe("computeAnnualLeaveEntitlementToDate — the real accrual cron's single
         computeAnnualLeaveEntitlementToDate({ countryCode: "PL", hireDate: "2023-01-01", asOfDate: "2026-01-01", isFirstEverEmployment: true, fteFractionHistory: [] }),
       ).toBeNull();
     });
+
+    it("blocks on any non-zero recognisedPriorServiceYears — this system has no effective-dated record of it yet, so applying one current value across multi-year history is exactly the guess this correction round forbids", () => {
+      expect(
+        computeAnnualLeaveEntitlementToDate({
+          countryCode: "PL",
+          hireDate: "2023-01-01",
+          asOfDate: "2026-01-01",
+          recognisedPriorServiceYears: 3,
+          isFirstEverEmployment: true,
+          fteFractionHistory: [{ effectiveFrom: "2023-01-01", fteFraction: 1 }],
+        }),
+      ).toBeNull();
+    });
+
+    it("blocks when no contract covers the required period (the first known contract starts after hireDate)", () => {
+      expect(
+        computeAnnualLeaveEntitlementToDate({
+          countryCode: "PL",
+          hireDate: "2024-01-01",
+          asOfDate: "2024-06-01",
+          isFirstEverEmployment: true,
+          fteFractionHistory: [{ effectiveFrom: "2024-06-01", fteFraction: 1 }], // starts AFTER hireDate
+        }),
+      ).toBeNull();
+    });
+
+    it("blocks on overlapping/conflicting employment_contracts rows (same effectiveFrom, different FTE)", () => {
+      expect(
+        computeAnnualLeaveEntitlementToDate({
+          countryCode: "PL",
+          hireDate: "2023-01-01",
+          asOfDate: "2024-01-01",
+          isFirstEverEmployment: true,
+          fteFractionHistory: [
+            { effectiveFrom: "2023-01-01", fteFraction: 1 },
+            { effectiveFrom: "2023-01-01", fteFraction: 0.5 },
+          ],
+        }),
+      ).toBeNull();
+    });
+
+    it("blocks on an invalid FTE fraction — zero, negative, or above 1", () => {
+      const base = { countryCode: "PL" as const, hireDate: "2023-01-01", asOfDate: "2023-06-01", isFirstEverEmployment: true };
+      expect(computeAnnualLeaveEntitlementToDate({ ...base, fteFractionHistory: [{ effectiveFrom: "2023-01-01", fteFraction: 0 }] })).toBeNull();
+      expect(computeAnnualLeaveEntitlementToDate({ ...base, fteFractionHistory: [{ effectiveFrom: "2023-01-01", fteFraction: -0.5 }] })).toBeNull();
+      expect(computeAnnualLeaveEntitlementToDate({ ...base, fteFractionHistory: [{ effectiveFrom: "2023-01-01", fteFraction: 1.5 }] })).toBeNull();
+    });
+
+    it("blocks when the 10-year recognised-service threshold crosses mid-calendar-year — this system does not implement Art. 154's mid-year 'urlop uzupełniający'", () => {
+      // Hired 2015-06-01 with 5 recognised prior years: completedYearsBetween
+      // reaches 5 (=10 total with recognised) exactly at the 2020-06-01
+      // anniversary, so calendar year 2020 itself starts under the
+      // threshold (Jan 1: 4+5=9) and ends over it (Dec 31: 5+5=10) — a
+      // genuine mid-year crossing, not a boundary-aligned one.
+      expect(
+        computeAnnualLeaveEntitlementToDate({
+          countryCode: "PL",
+          hireDate: "2015-06-01",
+          asOfDate: "2026-01-01",
+          isFirstEverEmployment: false,
+          fteFractionHistory: [{ effectiveFrom: "2015-06-01", fteFraction: 1 }],
+        }),
+      ).toBeNull();
+    });
   });
 
-  describe("Poland — first-ever employment (Art. 153 §1: progressive monthly proration)", () => {
+  describe("Poland — first-ever employment (Art. 153 §1: progressive monthly proration, hire-calendar-year only)", () => {
     const fullTimeFromHire = (hireDate: string) => [{ effectiveFrom: hireDate, fteFraction: 1 }];
 
-    it("prorates 1/12 per completed month within the first year", () => {
+    it("first-ever job beginning in January: prorates 1/12 per completed month within the first year", () => {
       expect(
         computeAnnualLeaveEntitlementToDate({
           countryCode: "PL",
@@ -143,29 +222,67 @@ describe("computeAnnualLeaveEntitlementToDate — the real accrual cron's single
           isFirstEverEmployment: true,
           fteFractionHistory: fullTimeFromHire("2026-01-01"),
         }),
-      ).toBe(5); // 20/12*3
+      ).toBe(5); // 20/12*3 = 5 exactly. NOT rounded up to a whole day (GIP: optional here, unlike every other Poland rounding in this file).
     });
 
-    it("credits each subsequent completed year in full, at that year's own (here, unchanging) rate", () => {
+    it("first-ever job beginning 1 October: accrues through October-December, then transitions to full subsequent-year treatment on 1 January — never continuing first-job monthly accrual until the personal anniversary in October", () => {
+      // The exact scenario this correction round's QA specified. Per
+      // GIP/PIP worked-example guidance, a period starting 1 October
+      // completes its first "miesiąc pracy" on 31 October (the hire day
+      // counts as day 1) — three such months (Oct, Nov, Dec) complete by
+      // 31 December.
+      const input = {
+        countryCode: "PL" as const,
+        hireDate: "2026-10-01",
+        isFirstEverEmployment: true,
+        fteFractionHistory: fullTimeFromHire("2026-10-01"),
+      };
+      expect(computeAnnualLeaveEntitlementToDate({ ...input, asOfDate: "2026-12-31" })).toBe(5); // 3 months * 20/12 = 5
+      // 1 January: the hire-year's Art. 153 contribution is now FIXED at 5
+      // (never re-derived from the personal Oct anniversary), PLUS the full
+      // 2027 annual entitlement, available immediately from 1 January.
+      expect(computeAnnualLeaveEntitlementToDate({ ...input, asOfDate: "2027-01-01" })).toBe(25); // 5 + 20
+      // Still 25 months later in 2027 — proves 2027's grant was NOT accrued
+      // progressively (which would still be climbing toward 20 by October
+      // 2027 under the old, incorrect anniversary-continuous model).
+      expect(computeAnnualLeaveEntitlementToDate({ ...input, asOfDate: "2027-06-01" })).toBe(25);
+    });
+
+    it("first-ever job beginning 15 December: zero months complete in the hire year, then the full transition still happens on 1 January", () => {
+      const input = {
+        countryCode: "PL" as const,
+        hireDate: "2026-12-15",
+        isFirstEverEmployment: true,
+        fteFractionHistory: fullTimeFromHire("2026-12-15"),
+      };
+      expect(computeAnnualLeaveEntitlementToDate({ ...input, asOfDate: "2026-12-31" })).toBe(0); // less than 1 completed "miesiąc pracy" by year end
+      expect(computeAnnualLeaveEntitlementToDate({ ...input, asOfDate: "2027-01-01" })).toBe(20); // 0 (locked in) + full 2027 grant
+    });
+
+    it("credits each subsequent completed calendar year in full, at that year's own (here, unchanging) rate", () => {
+      // Hired 2023-01-01: 2023 (Art. 153, 12 months) = 20; 2024, 2025, 2026
+      // each get the FULL annual entitlement immediately from their own
+      // 1 January — 2026 counts in full because asOfDate has reached it,
+      // even though asOfDate is 2026's very first day.
       expect(
         computeAnnualLeaveEntitlementToDate({
           countryCode: "PL",
           hireDate: "2023-01-01",
-          asOfDate: "2026-01-01", // 3 completed years
+          asOfDate: "2026-01-01",
           isFirstEverEmployment: true,
           fteFractionHistory: fullTimeFromHire("2023-01-01"),
         }),
-      ).toBe(60); // 20 (year 1) + 20 (year 2) + 20 (year 3)
+      ).toBe(80); // 20 (2023) + 20 (2024) + 20 (2025) + 20 (2026)
     });
 
     it("10-year threshold: only the years actually at/after the threshold are credited at 26 — earlier years are never restated at the later rate", () => {
-      // Hired 2015-01-01, evaluated 2026-01-01 -> 11 completed years, no
-      // recognised prior service. Years 1-10 (completedServiceYears 0-9)
-      // are all still under the 10-year threshold (20/year); only year 11
-      // (completedServiceYears=10) crosses it. The OLD "deliberate
+      // Hired 2015-01-01 (so every anniversary aligns exactly with a
+      // calendar year, avoiding a mid-year crossing): 2015 (Art. 153) = 20;
+      // 2016-2024 (completedServiceYears 1-9, all <10) = 20 each; 2025-2026
+      // (completedServiceYears 10-11) = 26 each. The OLD "deliberate
       // simplification" this replaces would have wrongly applied 26 to
-      // years 2-11 just because the CURRENT completedYears (11) is over
-      // the threshold.
+      // every year just because the CURRENT completedYears is over the
+      // threshold.
       expect(
         computeAnnualLeaveEntitlementToDate({
           countryCode: "PL",
@@ -174,50 +291,40 @@ describe("computeAnnualLeaveEntitlementToDate — the real accrual cron's single
           isFirstEverEmployment: true,
           fteFractionHistory: fullTimeFromHire("2015-01-01"),
         }),
-      ).toBe(226); // 10 years * 20 (years 1-10) + 1 year * 26 (year 11)
+      ).toBe(252); // 20 (2015) + 9*20 (2016-2024) + 2*26 (2025-2026)
     });
 
-    it("FTE change mid-tenure: only the years after the change are prorated at the new fraction", () => {
-      // Full-time for years 1-2, drops to half-time from the year-3
-      // anniversary onward. The OLD version would have applied whichever
-      // FTE was passed in (a single scalar) to every year uniformly.
+    it("mid-tenure FTE decrease at a year boundary: only the years after the change are prorated at the new fraction", () => {
+      // Full-time through 2024, drops to half-time from 2025-01-01. The OLD
+      // version would have applied whichever FTE was passed in (a single
+      // scalar) to every year uniformly.
       expect(
         computeAnnualLeaveEntitlementToDate({
           countryCode: "PL",
           hireDate: "2023-01-01",
-          asOfDate: "2026-01-01", // 3 completed years
+          asOfDate: "2026-01-01",
           isFirstEverEmployment: true,
           fteFractionHistory: [
             { effectiveFrom: "2023-01-01", fteFraction: 1 },
             { effectiveFrom: "2025-01-01", fteFraction: 0.5 },
           ],
         }),
-      ).toBe(50); // year1: 20*1=20, year2: 20*1=20, year3: 20*0.5=10
-    });
-
-    it("calendar-year transition: the anniversary-based math is continuous across a Dec-to-Jan boundary, with no special-casing needed", () => {
-      const input = {
-        countryCode: "PL" as const,
-        hireDate: "2025-02-01",
-        isFirstEverEmployment: true,
-        fteFractionHistory: fullTimeFromHire("2025-02-01"),
-      };
-      // 10 completed months, still mid-first-year, evaluated just before the calendar year turns over.
-      expect(computeAnnualLeaveEntitlementToDate({ ...input, asOfDate: "2025-12-01" })).toBe(16.67);
-      // Exactly 12 completed months, evaluated just after the calendar year turns over: full year-1 amount, no discontinuity.
-      expect(computeAnnualLeaveEntitlementToDate({ ...input, asOfDate: "2026-02-01" })).toBe(20);
+      ).toBe(60); // 20 (2023) + 20 (2024) + 10 (2025, half-time) + 10 (2026, half-time)
     });
   });
 
-  describe("Poland — prior employment (Art. 1551: calendar-year proportional entitlement, no Art. 153 proration)", () => {
-    it("prorates only the remaining months of the hire's calendar year, then grants the full amount from each following 1 January", () => {
-      // Hired mid-March 2024 (10 months remaining that calendar year:
-      // Mar-Dec inclusive), evaluated 2026-01-01. Even though this is only
-      // the employee's SECOND year at Enginious, they are NOT subject to
-      // Art. 153's progressive monthly proration at all, because they have
-      // worked before (isFirstEverEmployment: false) — distinguishing this
-      // from "first year at Enginious" is exactly what this correction
-      // round's new explicit field is for.
+  describe("Poland — prior employment (Art. 1551 + Art. 1553 §1: calendar-year proportional entitlement, mandatory whole-day rounding UP, no Art. 153 proration)", () => {
+    it("prorates only the remaining WHOLE calendar months of the hire's calendar year (rounded UP to a whole day), then grants the full amount from each following 1 January", () => {
+      // Hired mid-March 2024 (10 whole calendar months remaining: Mar-Dec
+      // inclusive — the partial hire month counts in full), evaluated
+      // 2026-01-01. Even though this is only the employee's SECOND year at
+      // Enginious, they are NOT subject to Art. 153's progressive monthly
+      // proration at all, because they have worked before
+      // (isFirstEverEmployment: false) — distinguishing this from "first
+      // year at Enginious" is exactly what this correction round's
+      // explicit field is for. ceil(20/12*10) = ceil(16.667) = 17, NOT the
+      // 16.67 a generic round-to-2-decimals would give — Art. 1553 §1
+      // requires whole-day rounding up here, unlike Art. 153.
       expect(
         computeAnnualLeaveEntitlementToDate({
           countryCode: "PL",
@@ -226,21 +333,104 @@ describe("computeAnnualLeaveEntitlementToDate — the real accrual cron's single
           isFirstEverEmployment: false,
           fteFractionHistory: [{ effectiveFrom: "2024-03-15", fteFraction: 1 }],
         }),
-      ).toBe(56.67); // 16.67 (10/12 of the 2024 hire-year) + 20 (2025) + 20 (2026)
+      ).toBe(57); // 17 (2024 hire-year, ceiling-rounded) + 20 (2025) + 20 (2026)
     });
 
-    it("10-year threshold: crosses partway through the calendar-year loop, affecting only years from that point on", () => {
+    it("10-year threshold, no mid-year crossing (hired 1 January so every anniversary aligns with a calendar year): computes normally", () => {
       expect(
         computeAnnualLeaveEntitlementToDate({
           countryCode: "PL",
-          hireDate: "2015-06-01",
+          hireDate: "2015-01-01",
           asOfDate: "2026-01-01",
-          recognisedPriorServiceYears: 5,
           isFirstEverEmployment: false,
-          fteFractionHistory: [{ effectiveFrom: "2015-06-01", fteFraction: 1 }],
+          fteFractionHistory: [{ effectiveFrom: "2015-01-01", fteFraction: 1 }],
         }),
-      ).toBe(267.67); // 11.67 (2015 hire-year) + 5*20 (2016-2020) + 6*26 (2021-2026)
+      ).toBe(252); // identical structure to the first-ever case above once the hire month is January — 20 (2015) + 9*20 + 2*26
     });
+
+    it("mid-calendar-year FTE change: that year is split into FTE-consistent runs, each rounded UP individually, then summed (the documented 'more favourable to the employee' method)", () => {
+      // Hired 2023-01-01 full-time; evaluated 2024-12-31, with FTE dropping
+      // to a quarter from 2024-07-01. 2023 = ceil(20) = 20. 2024 splits into
+      // Jan-Jun (6 months, full-time) and Jul-Dec (6 months, quarter-time):
+      // ceil(6/12*20*1)=10, ceil(6/12*20*0.25)=ceil(2.5)=3 -> 13. This is
+      // the same per-run-ceiling-then-sum method the official
+      // "2 months @ 1/4 etat + 10 months @ full etat = 24 days (for a
+      // 26-day base)" worked example demonstrates.
+      expect(
+        computeAnnualLeaveEntitlementToDate({
+          countryCode: "PL",
+          hireDate: "2023-01-01",
+          asOfDate: "2024-12-31",
+          isFirstEverEmployment: false,
+          fteFractionHistory: [
+            { effectiveFrom: "2023-01-01", fteFraction: 1 },
+            { effectiveFrom: "2024-07-01", fteFraction: 0.25 },
+          ],
+        }),
+      ).toBe(33); // 20 (2023) + 13 (2024: 10 + 3)
+    });
+
+    it("termination-adjacent boundary: a mid-year asOfDate in a later, fully-reached calendar year still returns that whole year's entitlement, already fully credited — this function assumes continued employment and must NOT be used directly for a terminating employee's own prorated exit-year settlement", () => {
+      // Same scenario as the 10-year-threshold test above, but asOfDate is
+      // 2026-03-15 (e.g. a hypothetical last working day) instead of
+      // 2026-01-01 — the total is identical, because 2026's full
+      // entitlement was already available from 2026-01-01, per Art. 1551's
+      // "immediately, not accrued progressively" principle for a
+      // continuing employee. A REAL termination settlement needs its own,
+      // separate proportional-exit-year calculation (see terminate_employee()
+      // / forfeit_recovery_leave_on_termination elsewhere in this codebase);
+      // this calculator does not perform one.
+      expect(
+        computeAnnualLeaveEntitlementToDate({
+          countryCode: "PL",
+          hireDate: "2015-01-01",
+          asOfDate: "2026-03-15",
+          isFirstEverEmployment: false,
+          fteFractionHistory: [{ effectiveFrom: "2015-01-01", fteFraction: 1 }],
+        }),
+      ).toBe(252);
+    });
+  });
+});
+
+describe("explainPolandEntitlementBlock — surfaces the specific HR configuration requirement behind a null result", () => {
+  it("returns null (not blocked) for AE/SA and for a Poland calculation that completes successfully", () => {
+    expect(explainPolandEntitlementBlock({ countryCode: "AE", hireDate: "2020-01-01", asOfDate: "2026-01-01" })).toBeNull();
+    expect(
+      explainPolandEntitlementBlock({
+        countryCode: "PL",
+        hireDate: "2023-01-01",
+        asOfDate: "2026-01-01",
+        isFirstEverEmployment: true,
+        fteFractionHistory: [{ effectiveFrom: "2023-01-01", fteFraction: 1 }],
+      }),
+    ).toBeNull();
+  });
+
+  it("names the specific reason for each distinct block condition", () => {
+    expect(explainPolandEntitlementBlock({ countryCode: "PL", hireDate: "2023-01-01", asOfDate: "2026-01-01" })).toMatch(/is_first_ever_employment/);
+    expect(
+      explainPolandEntitlementBlock({ countryCode: "PL", hireDate: "2023-01-01", asOfDate: "2026-01-01", isFirstEverEmployment: true }),
+    ).toMatch(/employment_contracts history/);
+    expect(
+      explainPolandEntitlementBlock({
+        countryCode: "PL",
+        hireDate: "2023-01-01",
+        asOfDate: "2026-01-01",
+        recognisedPriorServiceYears: 2,
+        isFirstEverEmployment: true,
+        fteFractionHistory: [{ effectiveFrom: "2023-01-01", fteFraction: 1 }],
+      }),
+    ).toMatch(/effective-dated/);
+    expect(
+      explainPolandEntitlementBlock({
+        countryCode: "PL",
+        hireDate: "2015-06-01",
+        asOfDate: "2026-01-01",
+        isFirstEverEmployment: false,
+        fteFractionHistory: [{ effectiveFrom: "2015-06-01", fteFraction: 1 }],
+      }),
+    ).toMatch(/urlop uzupełniający/);
   });
 });
 

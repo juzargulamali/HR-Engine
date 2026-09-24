@@ -369,7 +369,15 @@ describe("GET /api/cron/leave-accrual — Poland entitlement configuration requi
   });
 
   it("computes and posts the correct entitlement once is_first_ever_employment and FTE history are both confirmed", async () => {
-    const hireDate = isoDateYearsAgo(2); // first-ever employment, full-time, no recognised prior service: year 1 = 20, year 2 = 20
+    // A clean 1 January hire exactly two calendar years before the current
+    // one, so the expected total is deterministic regardless of which exact
+    // day this test runs on: hire year (Art. 153, 12 months) = 20, then the
+    // full annual entitlement immediately from each of the two subsequent
+    // 1 Januaries already reached (this test's own year, and the one
+    // before it) = 20 + 20 -> 60 total. See annualLeaveEntitlement.test.ts
+    // in packages/domain for the exhaustive verification of this math —
+    // this route test only proves the cron is WIRED to it correctly.
+    const hireDate = `${new Date().getUTCFullYear() - 2}-01-01`;
     const contractsStep = { data: [{ employee_id: EMPLOYEE_ID, start_date: hireDate, fte_fraction: 1 }], error: null };
     const captured: { upsertRows?: Array<{ amount_days: number }> } = {};
     const admin = createFakeAdmin([
@@ -393,6 +401,44 @@ describe("GET /api/cron/leave-accrual — Poland entitlement configuration requi
     expect(res.status).toBe(200);
     expect(body.entriesPosted).toBe(1);
     expect(body.blockedEntitlementConfig).toEqual([]);
-    expect(captured.upsertRows?.[0]?.amount_days).toBe(40);
+    expect(captured.upsertRows?.[0]?.amount_days).toBe(60);
+  });
+
+  it("blocks and reports the specific reason for a non-zero recognisedPriorServiceYears (no effective-dated record of it exists yet)", async () => {
+    const hireDate = `${new Date().getUTCFullYear() - 2}-01-01`;
+    const contractsStep = { data: [{ employee_id: EMPLOYEE_ID, start_date: hireDate, fte_fraction: 1 }], error: null };
+    const admin = createFakeAdmin([
+      PL_POLICY_VERSIONS,
+      PL_LEAVE_TYPES,
+      {
+        data: [{ id: EMPLOYEE_ID, country_code: "PL", hire_date: hireDate, recognised_prior_service_years: 4, is_first_ever_employment: true }],
+        error: null,
+      },
+      contractsStep,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+    ]);
+    vi.mocked(createAdminClient).mockReturnValue(admin as never);
+
+    const res = await GET(authorizedRequest());
+    const body = await res.json();
+
+    expect(body.entriesPosted).toBe(0);
+    expect(body.blockedEntitlementConfig).toEqual([expect.objectContaining({ employeeId: EMPLOYEE_ID, leaveTypeCode: "annual", reason: expect.stringContaining("effective-dated") })]);
+  });
+
+  it("blocks and reports the specific reason for a gap in employment_contracts history (the first contract starts after hireDate)", async () => {
+    const hireYear = new Date().getUTCFullYear() - 2;
+    const hireDate = `${hireYear}-01-01`;
+    const contractsStep = { data: [{ employee_id: EMPLOYEE_ID, start_date: `${hireYear}-06-01`, fte_fraction: 1 }], error: null }; // starts AFTER hireDate
+    const admin = createFakeAdmin([PL_POLICY_VERSIONS, PL_LEAVE_TYPES, plEmployeeStep(hireDate, true), contractsStep, EMPTY, EMPTY, EMPTY]);
+    vi.mocked(createAdminClient).mockReturnValue(admin as never);
+
+    const res = await GET(authorizedRequest());
+    const body = await res.json();
+
+    expect(body.entriesPosted).toBe(0);
+    expect(body.blockedEntitlementConfig).toEqual([expect.objectContaining({ employeeId: EMPLOYEE_ID, leaveTypeCode: "annual", reason: expect.stringContaining("no contract covers") })]);
   });
 });
