@@ -67,7 +67,7 @@ describe("Phase 3 row-level security: leave, ledgers, deduction priority, approv
         ('${USER_CEO}', 'ceo@enginious.ae'),
         ('${USER_PEER}', 'peer@enginious.ae');
 
-      insert into countries (code, name, default_currency) values ('AE', 'United Arab Emirates', 'AED');
+      insert into countries (code, name, default_currency) values ('AE', 'United Arab Emirates', 'AED') on conflict do nothing;
       insert into companies (id, legal_name, country_code, default_currency)
         values ('${COMPANY_A}', 'Enginious LLC FZ', 'AE', 'AED');
 

@@ -47,7 +47,7 @@ describe("Phase 2 row-level security: country policy engine", () => {
         ('${USER_COMPANY_HR}', 'company-hr@enginious.ae'),
         ('${USER_MANAGER}', 'manager@enginious.ae');
 
-      insert into countries (code, name, default_currency) values ('AE', 'United Arab Emirates', 'AED');
+      insert into countries (code, name, default_currency) values ('AE', 'United Arab Emirates', 'AED') on conflict do nothing;
       insert into companies (id, legal_name, country_code, default_currency)
         values ('${COMPANY_A}', 'Enginious LLC FZ', 'AE', 'AED');
 
@@ -68,7 +68,7 @@ describe("Phase 2 row-level security: country policy engine", () => {
         ('${PV_DRAFT_NONOVERLAPPING}', 'AE', 'leave_rules', 3, '2026-01-01', null, 'draft', '{"note":"draft v3, does not overlap v1"}', '${USER_HR1}', null, null),
         ('${PV_DRAFT_NOTICE}', 'AE', 'notice_period', 1, '2026-01-01', null, 'draft', '{"default_days":30}', '${USER_HR1}', null, null);
 
-      insert into public_holidays (country_code, holiday_date, name) values ('AE', '2026-01-01', 'New Year''s Day');
+      insert into public_holidays (country_code, holiday_date, name) values ('AE', '2026-01-01', 'New Year''s Day') on conflict do nothing;
     `);
   }, 30_000);
 
@@ -322,7 +322,13 @@ describe("Phase 2 row-level security: country policy engine", () => {
 
   describe("public_holidays", () => {
     it("is readable by any signed-in user, and invisible when signed out", async () => {
-      const manager = await db.asUser(USER_MANAGER, (query) => query("select name from public_holidays"));
+      // Scoped to this fixture's own row rather than a total count: a later
+      // migration (Phase 2b) idempotently seeds its own additional 2026
+      // holiday rows for AE/SA/PL into every fresh test database, so the
+      // total public_holidays row count is no longer a fixed number here.
+      const manager = await db.asUser(USER_MANAGER, (query) =>
+        query("select name from public_holidays where country_code = 'AE' and holiday_date = '2026-01-01'"),
+      );
       expect(manager.rows.length).toBe(1);
 
       const anon = await db.asUser(null, (query) => query("select name from public_holidays"));
