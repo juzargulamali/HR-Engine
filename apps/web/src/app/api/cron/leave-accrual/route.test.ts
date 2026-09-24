@@ -328,3 +328,71 @@ describe("GET /api/cron/leave-accrual — legacy accrual baseline safety (Blocke
     expect(committedKeys.size).toBe(1);
   });
 });
+
+describe("GET /api/cron/leave-accrual — Poland entitlement configuration requirement (Blocker 4)", () => {
+  const PL_POLICY_VERSION_ID = "33333333-3333-3333-3333-333333333333";
+  const PL_POLICY_VERSIONS = { data: [{ id: PL_POLICY_VERSION_ID, country_code: "PL" }], error: null };
+  const PL_LEAVE_TYPES = {
+    data: [
+      {
+        policy_version_id: PL_POLICY_VERSION_ID,
+        leave_type_code: "annual",
+        accrual_method: "annual_grant",
+        accrual_rate_per_period: null,
+        max_balance_days: null,
+        min_service_days_to_accrue: 0,
+      },
+    ],
+    error: null,
+  };
+
+  function plEmployeeStep(hireDate: string, isFirstEverEmployment: boolean | null) {
+    return {
+      data: [{ id: EMPLOYEE_ID, country_code: "PL", hire_date: hireDate, recognised_prior_service_years: null, is_first_ever_employment: isFirstEverEmployment }],
+      error: null,
+    };
+  }
+
+  it("blocks accrual and reports the requirement when is_first_ever_employment has not been confirmed by HR", async () => {
+    const hireDate = isoDateYearsAgo(2);
+    const admin = createFakeAdmin([PL_POLICY_VERSIONS, PL_LEAVE_TYPES, plEmployeeStep(hireDate, null), EMPTY, EMPTY, EMPTY, EMPTY]);
+    vi.mocked(createAdminClient).mockReturnValue(admin as never);
+
+    const res = await GET(authorizedRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.entriesPosted).toBe(0);
+    expect(body.blockedEntitlementConfig).toEqual([
+      expect.objectContaining({ employeeId: EMPLOYEE_ID, leaveTypeCode: "annual", reason: expect.stringContaining("is_first_ever_employment") }),
+    ]);
+  });
+
+  it("computes and posts the correct entitlement once is_first_ever_employment and FTE history are both confirmed", async () => {
+    const hireDate = isoDateYearsAgo(2); // first-ever employment, full-time, no recognised prior service: year 1 = 20, year 2 = 20
+    const contractsStep = { data: [{ employee_id: EMPLOYEE_ID, start_date: hireDate, fte_fraction: 1 }], error: null };
+    const captured: { upsertRows?: Array<{ amount_days: number }> } = {};
+    const admin = createFakeAdmin([
+      PL_POLICY_VERSIONS,
+      PL_LEAVE_TYPES,
+      plEmployeeStep(hireDate, true),
+      contractsStep,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      (call: { upsertRows?: Array<{ amount_days: number }> }) => {
+        captured.upsertRows = call.upsertRows;
+        return { error: null, count: call.upsertRows?.length ?? 0 };
+      },
+    ]);
+    vi.mocked(createAdminClient).mockReturnValue(admin as never);
+
+    const res = await GET(authorizedRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.entriesPosted).toBe(1);
+    expect(body.blockedEntitlementConfig).toEqual([]);
+    expect(captured.upsertRows?.[0]?.amount_days).toBe(40);
+  });
+});

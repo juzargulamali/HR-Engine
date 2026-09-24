@@ -164,6 +164,16 @@ const updateEmployeeSchema = z.object({
   // system has no way to compute (Kodeks pracy Art. 154). Irrelevant
   // (harmlessly stored as null) for any employee outside Poland.
   recognisedPriorServiceYears: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().min(0).optional()),
+  // Whether this is the employee's first-ever job (Kodeks pracy Art. 153
+  // §1, progressive first-year proration) versus someone who has worked
+  // before, anywhere, at any point (Art. 1551, calendar-year proportional
+  // entitlement instead) — a DIFFERENT fact from "first year at
+  // Enginious" and never inferred from hire_date. Poland's Annual Leave
+  // accrual cron blocks automatic accrual entirely for an employee until
+  // this is set (see computeAnnualLeaveEntitlementToDate); "" (unset) is
+  // preserved as null, not defaulted to either answer. Irrelevant
+  // (harmlessly stored as null) for any employee outside Poland.
+  isFirstEverEmployment: z.preprocess((v) => (v === "" ? undefined : v), z.enum(["true", "false"]).optional()),
 });
 
 /**
@@ -203,6 +213,7 @@ export async function updateEmployee(_prevState: ActionState, formData: FormData
         manager_id: d.managerId || null,
         date_of_birth: d.dateOfBirth || null,
         recognised_prior_service_years: d.recognisedPriorServiceYears ?? null,
+        is_first_ever_employment: d.isFirstEverEmployment === undefined ? null : d.isFirstEverEmployment === "true",
       })
       .eq("id", d.employeeId);
     if (fieldsError) return { error: fieldsError.message };
@@ -215,6 +226,7 @@ export async function updateEmployee(_prevState: ActionState, formData: FormData
         manager_id: d.managerId || null,
         date_of_birth: d.dateOfBirth || null,
         recognised_prior_service_years: d.recognisedPriorServiceYears ?? null,
+        is_first_ever_employment: d.isFirstEverEmployment === undefined ? null : d.isFirstEverEmployment === "true",
       })
       .eq("id", d.employeeId);
     if (error) return { error: error.message };

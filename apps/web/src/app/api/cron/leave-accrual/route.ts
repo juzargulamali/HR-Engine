@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { computeAnnualLeaveEntitlementToDate } from "@enginious-hr/domain";
+import { computeAnnualLeaveEntitlementToDate, type FteFractionPeriod } from "@enginious-hr/domain";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAuthorizedCronRequest, SYSTEM_ACTOR_ID } from "@/lib/cron/auth";
 import { chunk } from "@/lib/cron/batch";
@@ -205,16 +205,23 @@ export async function GET(request: Request) {
 
   const { data: employees, error: employeesError } = await admin
     .from("employees")
-    .select("id, country_code, hire_date, recognised_prior_service_years")
+    .select("id, country_code, hire_date, recognised_prior_service_years, is_first_ever_employment")
     .eq("employment_status", "active")
     .is("deleted_at", null);
   if (employeesError) return NextResponse.json({ error: employeesError.message }, { status: 500 });
 
-  // Poland's entitlement proration needs the CURRENT contract's FTE
-  // fraction — employment_contracts is append-only version history, so
-  // is_current is the only reliable way to pick the one that applies now.
-  const { data: currentContracts } = await admin.from("employment_contracts").select("employee_id, fte_fraction").eq("is_current", true);
-  const fteFractionByEmployee = new Map((currentContracts ?? []).map((c) => [c.employee_id, Number(c.fte_fraction)]));
+  // Poland's entitlement calculation needs the employee's WHOLE effective-
+  // dated FTE history (every employment_contracts row's start_date +
+  // fte_fraction, not just is_current's single current value) so a
+  // mid-service FTE change prices only the years it actually affects — see
+  // computeAnnualLeaveEntitlementToDate's fteFractionHistory input.
+  const { data: allContracts } = await admin.from("employment_contracts").select("employee_id, start_date, fte_fraction");
+  const fteFractionHistoryByEmployee = new Map<string, FteFractionPeriod[]>();
+  for (const contract of allContracts ?? []) {
+    const periods = fteFractionHistoryByEmployee.get(contract.employee_id) ?? [];
+    periods.push({ effectiveFrom: contract.start_date, fteFraction: Number(contract.fte_fraction) });
+    fteFractionHistoryByEmployee.set(contract.employee_id, periods);
+  }
 
   const { data: alreadyAccrued } = await admin
     .from("leave_ledger")
@@ -275,6 +282,11 @@ export async function GET(request: Request) {
     idempotency_key: string;
   }[] = [];
   let skipped = 0;
+  // Poland-only: employees whose entitlement can't be computed because HR
+  // hasn't confirmed is_first_ever_employment (or there's no FTE history at
+  // all) — a distinct, separately-reported reason from ambiguousReport
+  // above (which is about historical ledger provenance, not configuration).
+  const blockedEntitlementConfig: AmbiguousBaseline[] = [];
 
   for (const employee of employees ?? []) {
     const leaveTypes = leaveTypesByCountry.get(employee.country_code) ?? [];
@@ -319,8 +331,25 @@ export async function GET(request: Request) {
           hireDate: employee.hire_date,
           asOfDate: today,
           recognisedPriorServiceYears: employee.recognised_prior_service_years ?? undefined,
-          fteFraction: fteFractionByEmployee.get(employee.id) ?? undefined,
+          isFirstEverEmployment: employee.is_first_ever_employment,
+          fteFractionHistory: fteFractionHistoryByEmployee.get(employee.id),
         });
+        if (entitlementToDate === null) {
+          // Poland only: HR hasn't confirmed is_first_ever_employment (or
+          // there's no employment_contracts history at all to resolve FTE
+          // from) — block automatic accrual for this employee rather than
+          // guess, and surface exactly that configuration requirement.
+          skipped += 1;
+          blockedEntitlementConfig.push({
+            employeeId: employee.id,
+            leaveTypeCode: leaveType.leave_type_code,
+            reason:
+              employee.is_first_ever_employment === null || employee.is_first_ever_employment === undefined
+                ? "employees.is_first_ever_employment has not been confirmed by HR yet"
+                : "no employment_contracts history exists to resolve an FTE fraction from",
+          });
+          continue;
+        }
         const alreadyGranted = grantTotalByKey.get(key) ?? 0;
         const delta = entitlementToDate - alreadyGranted;
         // Capped the same way a monthly_accrual amount is: never post past
@@ -369,6 +398,7 @@ export async function GET(request: Request) {
       wouldPost: rows.length,
       skipped,
       ambiguousBaselines: ambiguousReport,
+      blockedEntitlementConfig,
     });
   }
 
@@ -393,7 +423,7 @@ export async function GET(request: Request) {
   // own monitoring/alerting — returning 200 while `failures` is non-empty
   // would report this run as healthy even though it dropped rows.
   return NextResponse.json(
-    { ranAt: today, entriesPosted: posted, skipped, ambiguousBaselines: ambiguousReport, failures },
+    { ranAt: today, entriesPosted: posted, skipped, ambiguousBaselines: ambiguousReport, blockedEntitlementConfig, failures },
     { status: failures.length > 0 ? 500 : 200 },
   );
 }

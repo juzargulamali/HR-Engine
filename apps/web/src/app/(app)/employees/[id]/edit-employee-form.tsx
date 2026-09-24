@@ -20,6 +20,7 @@ interface EmployeeCore {
   phone: string | null;
   date_of_birth: string | null;
   recognised_prior_service_years: number | null;
+  is_first_ever_employment: boolean | null;
 }
 
 export function EditEmployeeForm({
@@ -123,6 +124,22 @@ export function EditEmployeeForm({
               />
               <p className="text-xs text-muted-foreground">
                 Poland only — prior service/education counted toward the 10-year Annual Leave threshold.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="isFirstEverEmployment">First-ever job?</Label>
+              <Select
+                id="isFirstEverEmployment"
+                name="isFirstEverEmployment"
+                defaultValue={employee.is_first_ever_employment === null ? "" : String(employee.is_first_ever_employment)}
+              >
+                <option value="">Not yet confirmed</option>
+                <option value="true">Yes — this is their first job ever</option>
+                <option value="false">No — they have worked before</option>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Poland only — NOT whether this is their first year at Enginious. Annual Leave will not accrue
+                automatically for a Poland employee until this is confirmed.
               </p>
             </div>
           </div>

@@ -72,6 +72,24 @@ alter table employees
   add column if not exists recognised_prior_service_years numeric(4,2)
     check (recognised_prior_service_years is null or recognised_prior_service_years >= 0);
 
+-- SECOND CORRECTION ROUND: Poland's Annual Leave first-year rule (Kodeks
+-- pracy Art. 153 §1, progressive monthly proration) applies ONLY to an
+-- employee's first-ever job of their working life — NOT merely their first
+-- year at Enginious, and recognised_prior_service_years above cannot
+-- represent this fact unambiguously (it can be zero/unset either because an
+-- employee genuinely has no recognised prior service, or simply because HR
+-- hasn't recorded any — those are different facts). This is the smallest
+-- additional explicit HR-controlled field needed to tell them apart:
+-- true = genuinely first-ever employment (Art. 153 applies); false = has
+-- worked before, anywhere, ever (Art. 1551's calendar-year proportional
+-- entitlement applies instead, even if this is their first year here);
+-- null (every existing employee, and every new one until HR sets it) means
+-- "not yet confirmed" — the accrual cron treats null as a hard block on
+-- automatic Poland Annual Leave accrual for that employee rather than
+-- guessing either answer. See computeAnnualLeaveEntitlementToDate.
+alter table employees
+  add column if not exists is_first_ever_employment boolean;
+
 -- Overnight recovery eligibility must be derived from verified working-time
 -- information, never a browser-supplied flag — but attendance_records'
 -- existing clock_in/clock_out (timestamptz) columns are never populated or

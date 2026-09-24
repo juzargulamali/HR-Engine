@@ -182,6 +182,7 @@ export interface Database {
           cost_center: string | null;
           work_location: string | null;
           recognised_prior_service_years: number | null;
+          is_first_ever_employment: boolean | null;
           created_at: string;
           created_by: string | null;
           updated_at: string;
@@ -212,6 +213,7 @@ export interface Database {
           cost_center?: string | null;
           work_location?: string | null;
           recognised_prior_service_years?: number | null;
+          is_first_ever_employment?: boolean | null;
         };
         Update: Partial<Database["public"]["Tables"]["employees"]["Insert"]> & {
           deleted_at?: string | null;

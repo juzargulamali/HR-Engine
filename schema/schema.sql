@@ -287,7 +287,16 @@ create table employees (
   -- default for every existing employee) means "no recognised prior
   -- service", identical to today's behavior.
   recognised_prior_service_years numeric(4,2)
-    check (recognised_prior_service_years is null or recognised_prior_service_years >= 0)
+    check (recognised_prior_service_years is null or recognised_prior_service_years >= 0),
+  -- Whether this is the employee's first-ever job of their working life
+  -- (Kodeks pracy Art. 153 §1's progressive first-year proration) versus
+  -- someone who has worked before, anywhere, ever (Art. 1551's
+  -- calendar-year proportional entitlement instead) — a DIFFERENT fact
+  -- from "first year at Enginious", and never inferred from hire_date.
+  -- Null (every employee until HR confirms it) blocks automatic Poland
+  -- Annual Leave accrual for that employee rather than guessing either
+  -- answer — see computeAnnualLeaveEntitlementToDate.
+  is_first_ever_employment boolean
 );
 
 create index idx_employees_manager on employees(manager_id) where deleted_at is null;

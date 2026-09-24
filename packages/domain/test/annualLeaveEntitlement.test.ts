@@ -114,30 +114,133 @@ describe("computeAnnualLeaveEntitlementToDate — the real accrual cron's single
     expect(computeAnnualLeaveEntitlementToDate({ countryCode: "SA", hireDate: "2018-01-01", asOfDate: "2026-01-01" })).toBe(5 * 21 + 3 * 30);
   });
 
-  it("routes Poland through first-year monthly proration, ignoring recognised prior service/FTE parameters given for other countries", () => {
-    // 3 completed months of a full-time, no-prior-service first year -> 20/12*3.
-    expect(computeAnnualLeaveEntitlementToDate({ countryCode: "PL", hireDate: "2026-01-01", asOfDate: "2026-04-01" })).toBe(5);
+  describe("Poland — blocked (never guessed) when HR hasn't confirmed the required facts", () => {
+    it("returns null when isFirstEverEmployment is undefined or null, even with a full FTE history", () => {
+      const fteFractionHistory = [{ effectiveFrom: "2023-01-01", fteFraction: 1 }];
+      expect(computeAnnualLeaveEntitlementToDate({ countryCode: "PL", hireDate: "2023-01-01", asOfDate: "2026-01-01", fteFractionHistory })).toBeNull();
+      expect(
+        computeAnnualLeaveEntitlementToDate({ countryCode: "PL", hireDate: "2023-01-01", asOfDate: "2026-01-01", isFirstEverEmployment: null, fteFractionHistory }),
+      ).toBeNull();
+    });
+
+    it("returns null when fteFractionHistory is missing or empty, even with isFirstEverEmployment confirmed", () => {
+      expect(computeAnnualLeaveEntitlementToDate({ countryCode: "PL", hireDate: "2023-01-01", asOfDate: "2026-01-01", isFirstEverEmployment: true })).toBeNull();
+      expect(
+        computeAnnualLeaveEntitlementToDate({ countryCode: "PL", hireDate: "2023-01-01", asOfDate: "2026-01-01", isFirstEverEmployment: true, fteFractionHistory: [] }),
+      ).toBeNull();
+    });
   });
 
-  it("routes Poland through the full annual grant plus one fresh grant per completed year after the first", () => {
-    // 3 years full-time, no recognised prior service: year 1 fully vests at 20,
-    // then 2 more full years at the (still 20, under-10-year) current rate.
-    expect(computeAnnualLeaveEntitlementToDate({ countryCode: "PL", hireDate: "2023-01-01", asOfDate: "2026-01-01" })).toBe(60);
+  describe("Poland — first-ever employment (Art. 153 §1: progressive monthly proration)", () => {
+    const fullTimeFromHire = (hireDate: string) => [{ effectiveFrom: hireDate, fteFraction: 1 }];
+
+    it("prorates 1/12 per completed month within the first year", () => {
+      expect(
+        computeAnnualLeaveEntitlementToDate({
+          countryCode: "PL",
+          hireDate: "2026-01-01",
+          asOfDate: "2026-04-01", // 3 completed months
+          isFirstEverEmployment: true,
+          fteFractionHistory: fullTimeFromHire("2026-01-01"),
+        }),
+      ).toBe(5); // 20/12*3
+    });
+
+    it("credits each subsequent completed year in full, at that year's own (here, unchanging) rate", () => {
+      expect(
+        computeAnnualLeaveEntitlementToDate({
+          countryCode: "PL",
+          hireDate: "2023-01-01",
+          asOfDate: "2026-01-01", // 3 completed years
+          isFirstEverEmployment: true,
+          fteFractionHistory: fullTimeFromHire("2023-01-01"),
+        }),
+      ).toBe(60); // 20 (year 1) + 20 (year 2) + 20 (year 3)
+    });
+
+    it("10-year threshold: only the years actually at/after the threshold are credited at 26 — earlier years are never restated at the later rate", () => {
+      // Hired 2015-01-01, evaluated 2026-01-01 -> 11 completed years, no
+      // recognised prior service. Years 1-10 (completedServiceYears 0-9)
+      // are all still under the 10-year threshold (20/year); only year 11
+      // (completedServiceYears=10) crosses it. The OLD "deliberate
+      // simplification" this replaces would have wrongly applied 26 to
+      // years 2-11 just because the CURRENT completedYears (11) is over
+      // the threshold.
+      expect(
+        computeAnnualLeaveEntitlementToDate({
+          countryCode: "PL",
+          hireDate: "2015-01-01",
+          asOfDate: "2026-01-01",
+          isFirstEverEmployment: true,
+          fteFractionHistory: fullTimeFromHire("2015-01-01"),
+        }),
+      ).toBe(226); // 10 years * 20 (years 1-10) + 1 year * 26 (year 11)
+    });
+
+    it("FTE change mid-tenure: only the years after the change are prorated at the new fraction", () => {
+      // Full-time for years 1-2, drops to half-time from the year-3
+      // anniversary onward. The OLD version would have applied whichever
+      // FTE was passed in (a single scalar) to every year uniformly.
+      expect(
+        computeAnnualLeaveEntitlementToDate({
+          countryCode: "PL",
+          hireDate: "2023-01-01",
+          asOfDate: "2026-01-01", // 3 completed years
+          isFirstEverEmployment: true,
+          fteFractionHistory: [
+            { effectiveFrom: "2023-01-01", fteFraction: 1 },
+            { effectiveFrom: "2025-01-01", fteFraction: 0.5 },
+          ],
+        }),
+      ).toBe(50); // year1: 20*1=20, year2: 20*1=20, year3: 20*0.5=10
+    });
+
+    it("calendar-year transition: the anniversary-based math is continuous across a Dec-to-Jan boundary, with no special-casing needed", () => {
+      const input = {
+        countryCode: "PL" as const,
+        hireDate: "2025-02-01",
+        isFirstEverEmployment: true,
+        fteFractionHistory: fullTimeFromHire("2025-02-01"),
+      };
+      // 10 completed months, still mid-first-year, evaluated just before the calendar year turns over.
+      expect(computeAnnualLeaveEntitlementToDate({ ...input, asOfDate: "2025-12-01" })).toBe(16.67);
+      // Exactly 12 completed months, evaluated just after the calendar year turns over: full year-1 amount, no discontinuity.
+      expect(computeAnnualLeaveEntitlementToDate({ ...input, asOfDate: "2026-02-01" })).toBe(20);
+    });
   });
 
-  it("applies Poland's recognised prior service and FTE fraction to the cumulative total", () => {
-    // 6 years actual + 4 recognised prior service crosses the 10-year threshold at part-time 0.5 FTE:
-    // year 1 vests at 20*0.5=10 (not yet over the threshold with 0 completed years + 4 recognised = 4 < 10),
-    // years 2-6 (5 more completed years) vest at the CURRENT (26*0.5=13) rate each.
-    expect(
-      computeAnnualLeaveEntitlementToDate({
-        countryCode: "PL",
-        hireDate: "2020-01-01",
-        asOfDate: "2026-01-01",
-        recognisedPriorServiceYears: 4,
-        fteFraction: 0.5,
-      }),
-    ).toBe(10 + 5 * 13);
+  describe("Poland — prior employment (Art. 1551: calendar-year proportional entitlement, no Art. 153 proration)", () => {
+    it("prorates only the remaining months of the hire's calendar year, then grants the full amount from each following 1 January", () => {
+      // Hired mid-March 2024 (10 months remaining that calendar year:
+      // Mar-Dec inclusive), evaluated 2026-01-01. Even though this is only
+      // the employee's SECOND year at Enginious, they are NOT subject to
+      // Art. 153's progressive monthly proration at all, because they have
+      // worked before (isFirstEverEmployment: false) — distinguishing this
+      // from "first year at Enginious" is exactly what this correction
+      // round's new explicit field is for.
+      expect(
+        computeAnnualLeaveEntitlementToDate({
+          countryCode: "PL",
+          hireDate: "2024-03-15",
+          asOfDate: "2026-01-01",
+          isFirstEverEmployment: false,
+          fteFractionHistory: [{ effectiveFrom: "2024-03-15", fteFraction: 1 }],
+        }),
+      ).toBe(56.67); // 16.67 (10/12 of the 2024 hire-year) + 20 (2025) + 20 (2026)
+    });
+
+    it("10-year threshold: crosses partway through the calendar-year loop, affecting only years from that point on", () => {
+      expect(
+        computeAnnualLeaveEntitlementToDate({
+          countryCode: "PL",
+          hireDate: "2015-06-01",
+          asOfDate: "2026-01-01",
+          recognisedPriorServiceYears: 5,
+          isFirstEverEmployment: false,
+          fteFractionHistory: [{ effectiveFrom: "2015-06-01", fteFraction: 1 }],
+        }),
+      ).toBe(267.67); // 11.67 (2015 hire-year) + 5*20 (2016-2020) + 6*26 (2021-2026)
+    });
   });
 });
 
