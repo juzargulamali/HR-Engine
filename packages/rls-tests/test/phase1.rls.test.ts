@@ -793,6 +793,44 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
       expect(stillThere.rows.length).toBe(1);
     });
 
+    // Phase 1 correction (4): employment_contracts/compensation_details used
+    // to be excluded from the blocker list entirely — every employee gets
+    // exactly one of each at creation, but a SECOND row of either (a
+    // renewal, a salary change) is real employment history, not a mistaken
+    // test record, and should block the same way attendance/leave/etc. do.
+    it("blocks permanent delete when a renewed contract left more than the initial employment_contracts row, even with no other history", async () => {
+      const employeeId = await seedEmptyScratchEmployee("8");
+      await db.seed(`
+        update employees set deleted_at = now(), deleted_by = '${USER_HR_ADMIN}' where id = '${employeeId}';
+        update employment_contracts set is_current = false where employee_id = '${employeeId}';
+        insert into employment_contracts (employee_id, contract_type, start_date, version_no, is_current, created_by)
+          values ('${employeeId}', 'permanent', '2025-01-01', 2, true, '${USER_HR_ADMIN}');
+      `);
+
+      await expect(
+        db.asUser(USER_HR_ADMIN, (query) => query("select permanently_delete_employee($1)", [employeeId])),
+      ).rejects.toThrow(/2 employment contract version\(s\)/);
+
+      const stillThere = await db.asUser(USER_HR_ADMIN, (query) => query("select id from employees where id = $1", [employeeId]));
+      expect(stillThere.rows.length).toBe(1);
+    });
+
+    it("blocks permanent delete when a salary change left more than the initial compensation_details row, even with no other history", async () => {
+      const employeeId = await seedEmptyScratchEmployee("9");
+      await db.seed(`
+        update employees set deleted_at = now(), deleted_by = '${USER_HR_ADMIN}' where id = '${employeeId}';
+        insert into compensation_details (employee_id, effective_from, base_salary, currency, created_by)
+          values ('${employeeId}', '2025-06-01', 6000, 'AED', '${USER_HR_ADMIN}');
+      `);
+
+      await expect(
+        db.asUser(USER_HR_ADMIN, (query) => query("select permanently_delete_employee($1)", [employeeId])),
+      ).rejects.toThrow(/2 compensation version\(s\)/);
+
+      const stillThere = await db.asUser(USER_HR_ADMIN, (query) => query("select id from employees where id = $1", [employeeId]));
+      expect(stillThere.rows.length).toBe(1);
+    });
+
     it("successfully deletes a genuinely empty record and nulls out a report's manager_id", async () => {
       const employeeId = await seedEmptyScratchEmployee("7");
       const reportId = randomUUID();

@@ -2656,15 +2656,17 @@ create trigger employees_guard_self_update
 -- in the error so the caller sees exactly what's in the way instead of a
 -- generic refusal.
 --
--- employment_contracts/compensation_details are deliberately NOT part of
--- the blocker list — every employee gets exactly one of each the moment
--- they're created (see createEmployee()), so treating those as "history"
--- would make this function permanently unusable for its actual purpose;
--- they're part of the employee's own record, not a downstream transaction
--- against it, and are removed along with the row itself once every real
--- blocker category above has come back empty. employee_checklist_items
--- (onboarding/offboarding to-dos) are the same — cleaned up silently, not
--- treated as history worth blocking on.
+-- employment_contracts/compensation_details are blockers only once there's
+-- MORE than the single initial row every employee gets the moment they're
+-- created (see createEmployee()) — a lone contract/compensation row is
+-- part of the employee's own record, not history, so permanent delete
+-- would otherwise be unusable for its actual purpose (a mistaken/draft
+-- test employee). A SECOND row of either — a renewed contract, a salary
+-- change — is real employment history exactly like the other categories
+-- below, and blocks the delete the same way (Phase 1 correction (4)).
+-- employee_checklist_items (onboarding/offboarding to-dos) has no such
+-- exception — cleaned up silently regardless of count, never treated as
+-- history worth blocking on.
 --
 -- Deliberately does NOT touch:
 --   - audit_log: record_id carries no FK to any table on purpose, so this
@@ -2764,6 +2766,14 @@ begin
   select count(*) into v_count from employee_loans where employee_id = p_employee_id;
   if v_count > 0 then v_blockers := v_blockers || format('%s loan(s)', v_count); end if;
 
+  -- More than the single initial row means real history — a renewed
+  -- contract or a salary change — not a mistaken/draft test employee.
+  select count(*) into v_count from employment_contracts where employee_id = p_employee_id;
+  if v_count > 1 then v_blockers := v_blockers || format('%s employment contract version(s) (renewed/amended)', v_count); end if;
+
+  select count(*) into v_count from compensation_details where employee_id = p_employee_id;
+  if v_count > 1 then v_blockers := v_blockers || format('%s compensation version(s) (salary change history)', v_count); end if;
+
   -- approvals is polymorphic (entity_type/entity_id, no FK) — checked via
   -- the same source tables above, since an approval can only exist for an
   -- entity that still exists.
@@ -2779,10 +2789,10 @@ begin
     raise exception 'Cannot permanently delete: this employee has real history — %. Permanent delete is only for a mistaken or duplicate record with no activity; use Remove (soft delete) instead.', array_to_string(v_blockers, ', ');
   end if;
 
-  -- No blocking history — safe to remove. Every table checked above is
-  -- now guaranteed empty for this employee; only the two deliberately
-  -- unchecked categories (contracts/compensation, which every employee
-  -- has) and the harmless checklist scaffolding still need cleaning up.
+  -- No blocking history — safe to remove. Every table checked above is now
+  -- guaranteed empty (or, for contracts/compensation, guaranteed to hold at
+  -- most the one initial row) for this employee; only that single row of
+  -- each, plus the harmless checklist scaffolding, still need cleaning up.
   update employees set manager_id = null where manager_id = p_employee_id;
   delete from employee_checklist_items where employee_id = p_employee_id;
   delete from compensation_details where employee_id = p_employee_id;

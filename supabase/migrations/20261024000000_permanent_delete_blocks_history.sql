@@ -10,12 +10,16 @@
 -- records that need to go away belong to a real archival/retention policy,
 -- not this function.
 --
--- employment_contracts/compensation_details stay excluded from the blocker
--- list and are still deleted unconditionally: every employee gets exactly
--- one of each at creation (see createEmployee()), so they're part of the
--- employee's own record, not downstream history. employee_checklist_items
--- (onboarding/offboarding to-dos) is the same — harmless scaffolding,
--- cleaned up silently rather than blocked on.
+-- employment_contracts/compensation_details are blockers only once there's
+-- MORE than the single initial row every employee gets at creation (see
+-- createEmployee()) — a lone contract/compensation row is part of the
+-- employee's own record, not history, so permanent delete would otherwise
+-- be unusable for its actual purpose (a mistaken/draft test employee). A
+-- SECOND row of either — a renewed contract, a salary change — is real
+-- employment history exactly like the other categories above, and blocks
+-- the delete the same way (Phase 1 correction (4)). employee_checklist_items
+-- (onboarding/offboarding to-dos) has no such exception — cleaned up
+-- silently regardless of count, never treated as history worth blocking on.
 --
 -- Function signature is unchanged (permanently_delete_employee(uuid) returns
 -- void), so the calling Server Action (permanentlyDeleteEmployee in
@@ -99,6 +103,14 @@ begin
   select count(*) into v_count from employee_loans where employee_id = p_employee_id;
   if v_count > 0 then v_blockers := v_blockers || format('%s loan(s)', v_count); end if;
 
+  -- More than the single initial row means real history — a renewed
+  -- contract or a salary change — not a mistaken/draft test employee.
+  select count(*) into v_count from employment_contracts where employee_id = p_employee_id;
+  if v_count > 1 then v_blockers := v_blockers || format('%s employment contract version(s) (renewed/amended)', v_count); end if;
+
+  select count(*) into v_count from compensation_details where employee_id = p_employee_id;
+  if v_count > 1 then v_blockers := v_blockers || format('%s compensation version(s) (salary change history)', v_count); end if;
+
   -- approvals is polymorphic (entity_type/entity_id, no FK) — checked via
   -- the same source tables above, since an approval can only exist for an
   -- entity that still exists.
@@ -114,10 +126,10 @@ begin
     raise exception 'Cannot permanently delete: this employee has real history — %. Permanent delete is only for a mistaken or duplicate record with no activity; use Remove (soft delete) instead.', array_to_string(v_blockers, ', ');
   end if;
 
-  -- No blocking history — safe to remove. Every table checked above is
-  -- now guaranteed empty for this employee; only the two deliberately
-  -- unchecked categories (contracts/compensation, which every employee
-  -- has) and the harmless checklist scaffolding still need cleaning up.
+  -- No blocking history — safe to remove. Every table checked above is now
+  -- guaranteed empty (or, for contracts/compensation, guaranteed to hold at
+  -- most the one initial row) for this employee; only that single row of
+  -- each, plus the harmless checklist scaffolding, still need cleaning up.
   update employees set manager_id = null where manager_id = p_employee_id;
   delete from employee_checklist_items where employee_id = p_employee_id;
   delete from compensation_details where employee_id = p_employee_id;
