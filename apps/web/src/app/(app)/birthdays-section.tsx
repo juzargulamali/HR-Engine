@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { daysUntilNextBirthday } from "@enginious-hr/domain";
+import { daysUntilNextBirthday, getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -26,13 +26,13 @@ function dayLabel(days: number): string {
  */
 export async function BirthdaysSection() {
   const supabase = await createClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
 
-  let employees: { id: string; first_name: string; last_name: string; date_of_birth: string | null }[] = [];
+  let employees: { id: string; first_name: string; last_name: string; date_of_birth: string | null; country_code: string }[] = [];
   try {
     const { data, error } = await supabase
       .from("employees")
-      .select("id, first_name, last_name, date_of_birth")
+      .select("id, first_name, last_name, date_of_birth, country_code")
       .is("deleted_at", null)
       .not("date_of_birth", "is", null);
     if (error) throw error;
@@ -46,8 +46,12 @@ export async function BirthdaysSection() {
     return null;
   }
 
+  // Each employee's OWN business-local date — not one shared "today" across
+  // every company/country this cross-company widget spans, which would
+  // wrongly show "Today"/"Tomorrow" a day off for whichever countries
+  // happen to be on the other side of a midnight boundary from the rest.
   const upcoming = employees
-    .map((e) => ({ ...e, daysUntil: daysUntilNextBirthday(e.date_of_birth!, today) }))
+    .map((e) => ({ ...e, daysUntil: daysUntilNextBirthday(e.date_of_birth!, getBusinessDateString(resolveCountryTimeZone(e.country_code), now)) }))
     .filter((e) => e.daysUntil <= WINDOW_DAYS)
     .sort((a, b) => a.daysUntil - b.daysUntil);
 

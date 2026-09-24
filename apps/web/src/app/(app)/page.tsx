@@ -1,9 +1,21 @@
 import Link from "next/link";
 import { CalendarDays, ClipboardCheck, ReceiptText, UserPlus, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { canCreateEmployee, canViewCompanyOverview, canViewHrAlerts, isBirthdayToday } from "@enginious-hr/domain";
+import {
+  canCreateEmployee,
+  canViewCompanyOverview,
+  canViewHrAlerts,
+  isBirthdayToday,
+  getBusinessDateString,
+  getBusinessHour,
+  formatBusinessDateLong,
+  formatBusinessTime,
+  resolveCountryTimeZone,
+  DASHBOARD_TIMEZONE,
+} from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentWeather } from "@/lib/weather";
 import { Alert } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -15,16 +27,40 @@ import { CompanyComparisonTable } from "./company-comparison-table";
 import { ActionCentre } from "./action-centre";
 import { AttendanceCompletionBar } from "./attendance-completion-bar";
 import { UpcomingSection } from "./upcoming-section";
+import { DashboardHeader } from "./dashboard-header";
 
 const HORIZON_DAYS = 30;
 const ROUTE = "/";
+
+// Presentation-only, specific to this one dashboard header — not business
+// logic, so kept local rather than in packages/domain alongside
+// COUNTRY_TIMEZONES.
+const COUNTRY_LOCATION_LABELS: Record<string, string> = {
+  AE: "Dubai, UAE",
+  SA: "Riyadh, Saudi Arabia",
+  PL: "Warsaw, Poland",
+};
+const COUNTRY_COORDINATES: Record<string, { lat: number; lon: number }> = {
+  AE: { lat: 25.2048, lon: 55.2708 },
+  SA: { lat: 24.7136, lon: 46.6753 },
+  PL: { lat: 52.2297, lon: 21.0122 },
+};
+const DUBAI_LOCATION_LABEL = "Dubai, UAE";
+const DUBAI_COORDINATES = COUNTRY_COORDINATES.AE!;
 
 export default async function DashboardPage() {
   const session = await getCurrentSession();
   if (!session) return null; // guarded by the layout above
 
   const firstName = session.fullName ? session.fullName.split(" ")[0] : null;
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  // Anchors every CROSS-COMPANY aggregate below (upcoming holidays, who's on
+  // leave today, the 30-day lookahead horizon) to Dubai — Enginious's own
+  // reference timezone for anything that isn't scoped to one specific
+  // company/country. Each company's OWN attendance/holiday/Recovery-day
+  // snapshot (getCompanySnapshot) derives its own business-local date
+  // internally instead of using this one.
+  const today = getBusinessDateString(DASHBOARD_TIMEZONE, now);
   const supabase = await createClient();
 
   const showHrView = canViewHrAlerts(session.grants);
@@ -57,11 +93,21 @@ export default async function DashboardPage() {
   }
 
   let isMyBirthdayToday = false;
+  // Also drives the employee-only dashboard header's own timezone/location
+  // below — a null country_code (no linked employee, or the lookup failed)
+  // falls back to Dubai via resolveCountryTimeZone/COUNTRY_LOCATION_LABELS.
+  let myCountryCode: string | null = null;
   if (session.employeeId) {
     try {
-      const { data: me, error } = await supabase.from("employees").select("date_of_birth").eq("id", session.employeeId).maybeSingle();
+      const { data: me, error } = await supabase.from("employees").select("date_of_birth, country_code").eq("id", session.employeeId).maybeSingle();
       if (error) throw error;
-      isMyBirthdayToday = !!me?.date_of_birth && isBirthdayToday(me.date_of_birth, today);
+      myCountryCode = me?.country_code ?? null;
+      // The employee's OWN business-local date, not the Dubai-anchored
+      // `today` above — a UAE employee's birthday should show as "Today"
+      // exactly at their own local midnight, not Dubai's (which happens to
+      // be the same for AE, but must not be assumed for SA/PL).
+      const myToday = getBusinessDateString(resolveCountryTimeZone(myCountryCode), now);
+      isMyBirthdayToday = !!me?.date_of_birth && isBirthdayToday(me.date_of_birth, myToday);
     } catch (error) {
       logServerError({ route: ROUTE, operation: "check own birthday" }, error);
     }
@@ -83,12 +129,16 @@ export default async function DashboardPage() {
 
   if (showHrView) {
     try {
-      const horizonDate = new Date();
-      horizonDate.setDate(horizonDate.getDate() + HORIZON_DAYS);
+      // Anchored on the Dubai `today` string above (calendar-day arithmetic
+      // on the business date, not a fresh `new Date()`) so this lookahead
+      // window stays consistent with the same reference date the holidays/
+      // onLeaveToday queries below use.
+      const horizonDate = new Date(`${today}T00:00:00Z`);
+      horizonDate.setUTCDate(horizonDate.getUTCDate() + HORIZON_DAYS);
       const horizon = horizonDate.toISOString().slice(0, 10);
 
       const [snapshotResults, contractResult, probationResult, docResult, identityResult] = await Promise.all([
-        Promise.all(overviewCompanies.map((c) => getCompanySnapshot(supabase, c, today))),
+        Promise.all(overviewCompanies.map((c) => getCompanySnapshot(supabase, c))),
         supabase.from("employment_contracts").select("id", { count: "exact", head: true }).eq("is_current", true).lte("end_date", horizon),
         supabase.from("employment_contracts").select("id", { count: "exact", head: true }).eq("is_current", true).lte("probation_end_date", horizon),
         supabase.from("employee_documents").select("id", { count: "exact", head: true }).in("status", ["expiring_soon", "expired"]),
@@ -193,6 +243,22 @@ export default async function DashboardPage() {
         ? `${myPendingApprovals} approval${myPendingApprovals === 1 ? "" : "s"} ${myPendingApprovals === 1 ? "is" : "are"} waiting on your decision.`
         : "Nothing is waiting on you right now.";
 
+  // Cross-company CEO/HR view -> Dubai; an employee-only view -> that
+  // employee's own company's country (myCountryCode, resolved above
+  // alongside the birthday check). Weather is fetched once, server-side,
+  // here — never in the client header component itself (see
+  // lib/weather.ts and dashboard-header.tsx's own doc comments) — and a
+  // failure resolves to `null` rather than throwing, so it can never delay
+  // or break this page.
+  const dashboardTimeZone = showHrView ? DASHBOARD_TIMEZONE : resolveCountryTimeZone(myCountryCode);
+  const headerLocationLabel = showHrView
+    ? DUBAI_LOCATION_LABEL
+    : (myCountryCode && COUNTRY_LOCATION_LABELS[myCountryCode]) || DUBAI_LOCATION_LABEL;
+  const headerCoordinates = showHrView ? DUBAI_COORDINATES : (myCountryCode && COUNTRY_COORDINATES[myCountryCode]) || DUBAI_COORDINATES;
+  const headerWeather = await getCurrentWeather(headerCoordinates.lat, headerCoordinates.lon);
+  const headerInitialDateLabel = formatBusinessDateLong(dashboardTimeZone, now);
+  const headerInitialTimeLabel = formatBusinessTime(dashboardTimeZone, now);
+
   return (
     <div className="space-y-8">
       {isMyBirthdayToday ? (
@@ -207,11 +273,22 @@ export default async function DashboardPage() {
           <div>
             <span className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">Driven by innovation</span>
             <h1 className="mt-2 font-heading text-2xl font-bold sm:text-3xl">
-              Good {greetingPeriod()}{firstName ? <>, <span className="brand-gradient-text">{firstName}</span></> : null}
+              Good {greetingPeriod(getBusinessHour(DASHBOARD_TIMEZONE, now))}
+              {firstName ? (
+                <>
+                  , <span className="brand-gradient-text">{firstName}</span>
+                </>
+              ) : null}
             </h1>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {new Date().toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
-            </p>
+            <div className="mt-1">
+              <DashboardHeader
+                timeZone={dashboardTimeZone}
+                locationLabel={headerLocationLabel}
+                initialDateLabel={headerInitialDateLabel}
+                initialTimeLabel={headerInitialTimeLabel}
+                weather={headerWeather}
+              />
+            </div>
             <p className="mt-2 max-w-xl text-sm text-muted-foreground sm:text-base">{summarySentence}</p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -275,8 +352,10 @@ export default async function DashboardPage() {
   );
 }
 
-function greetingPeriod(): string {
-  const hour = new Date().getHours();
+// Always Dubai's local hour, regardless of viewer or view mode — Enginious's
+// own reference time, not the server's UTC clock or the visiting browser's
+// device time.
+function greetingPeriod(hour: number): string {
   if (hour < 12) return "morning";
   if (hour < 17) return "afternoon";
   return "evening";

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAuthorizedCronRequest } from "@/lib/cron/auth";
 
@@ -26,7 +27,12 @@ export async function GET(request: Request) {
   }
 
   const admin = createAdminClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  // Used only for the response payload's `ranAt` — an approximate "when did
+  // this run happen" figure, never a per-employee calculation input (each
+  // document's own daysRemaining below uses that employee's own
+  // country-local date, since employee_documents spans every country).
+  const today = getBusinessDateString(resolveCountryTimeZone(null), now);
 
   const { data: documents, error: documentsError } = await admin
     .from("employee_documents")
@@ -65,7 +71,8 @@ export async function GET(request: Request) {
     const thresholdDays =
       applicableRules.length > 0 ? Math.max(...applicableRules.map((r) => r.lead_days)) : FALLBACK_EXPIRING_SOON_DAYS;
 
-    const daysRemaining = daysUntil(today, doc.expiry_date);
+    const employeeToday = getBusinessDateString(resolveCountryTimeZone(employee.country_code), now);
+    const daysRemaining = daysUntil(employeeToday, doc.expiry_date);
     const newStatus = daysRemaining < 0 ? "expired" : daysRemaining <= thresholdDays ? "expiring_soon" : "valid";
 
     if (newStatus !== doc.status) {

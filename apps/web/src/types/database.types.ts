@@ -888,6 +888,31 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["termination_settlement_inputs"]["Insert"]>;
         Relationships: [];
       };
+      poland_termination_leave_reconciliations: {
+        Row: {
+          employee_id: string;
+          termination_date: string;
+          raw_delta_days: string;
+          applied_days: string;
+          excess_requiring_review_days: string;
+          excess_reviewed_at: string | null;
+          excess_reviewed_by: string | null;
+          note: string | null;
+          created_by: string;
+          created_at: string;
+        };
+        Insert: {
+          employee_id: string;
+          termination_date: string;
+          raw_delta_days: number;
+          applied_days: number;
+          excess_requiring_review_days?: number;
+          note?: string | null;
+          created_by: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["poland_termination_leave_reconciliations"]["Insert"]>;
+        Relationships: [];
+      };
       performance_cycles: {
         Row: { id: string; company_id: string; name: string; period_start: string; period_end: string; status: string };
         Insert: { id?: string; company_id: string; name: string; period_start: string; period_end: string; status?: string };
@@ -1286,6 +1311,10 @@ export interface Database {
       post_poland_termination_leave_adjustment: {
         Args: { p_employee_id: string; p_amount_days: number; p_note?: string | null };
         Returns: { applied_days: number; excess_requiring_review: number; already_posted: boolean }[];
+      };
+      acknowledge_poland_termination_leave_excess: {
+        Args: { p_employee_id: string };
+        Returns: undefined;
       };
       preflight_country_schedule_config: {
         Args: Record<string, never>;

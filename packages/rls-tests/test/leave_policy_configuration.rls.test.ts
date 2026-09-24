@@ -720,6 +720,44 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
         expect(posted.rows).toEqual([
           { entry_type: "adjustment", reference_type: "termination_settlement", reference_id: employeeId, idempotency_key: `termination_settlement:${employeeId}` },
         ]);
+
+        // A3: the completion marker itself — Final Settlement's readiness
+        // check reads exactly this row, not a recomputed entitlement.
+        const marker = await query(
+          "select termination_date, raw_delta_days, applied_days, excess_requiring_review_days, excess_reviewed_at from poland_termination_leave_reconciliations where employee_id = $1",
+          [employeeId],
+        );
+        expect(marker.rows).toHaveLength(1);
+        expect(Number(marker.rows[0]?.raw_delta_days)).toBe(-13);
+        expect(Number(marker.rows[0]?.applied_days)).toBe(-13);
+        expect(Number(marker.rows[0]?.excess_requiring_review_days)).toBe(0);
+        expect(marker.rows[0]?.excess_reviewed_at).toBeNull();
+        expect(new Date(marker.rows[0]?.termination_date as string).toISOString().slice(0, 10)).toBe("2026-06-30");
+      });
+    });
+
+    it("applies a POSITIVE true-up correctly when the cron under-granted relative to the true entitlement", async () => {
+      // Entitled to 13, but the cron only ever granted 10 (e.g. a policy
+      // configuration gap corrected before termination) — a +3 true-up.
+      const employeeId = await seedTerminatedPolandEmployee([{ entry_type: "accrual", amount_days: 10, reference_type: "policy_run" }]);
+
+      await db.asUser(USER_HR, async (query) => {
+        const { rows } = await query("select * from post_poland_termination_leave_adjustment($1, $2)", [employeeId, 3]);
+        expect(Number(rows[0]?.applied_days)).toBe(3);
+        expect(Number(rows[0]?.excess_requiring_review)).toBe(0);
+        expect(rows[0]?.already_posted).toBe(false);
+
+        const balance = await query("select coalesce(sum(amount_days), 0) as balance from leave_ledger where employee_id = $1", [employeeId]);
+        expect(Number(balance.rows[0]?.balance)).toBe(13);
+
+        const marker = await query(
+          "select raw_delta_days, applied_days, excess_requiring_review_days from poland_termination_leave_reconciliations where employee_id = $1",
+          [employeeId],
+        );
+        expect(marker.rows).toHaveLength(1);
+        expect(Number(marker.rows[0]?.raw_delta_days)).toBe(3);
+        expect(Number(marker.rows[0]?.applied_days)).toBe(3);
+        expect(Number(marker.rows[0]?.excess_requiring_review_days)).toBe(0);
       });
     });
 
@@ -768,7 +806,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
       });
     });
 
-    it("does nothing (no row posted) when the computed amount is exactly zero — the cron already granted the correct prorated amount", async () => {
+    it("does nothing to leave_ledger, but STILL records a completion marker, when the computed amount is exactly zero — a zero-delta reconciliation must not look like 'never ran'", async () => {
       const employeeId = await seedTerminatedPolandEmployee([{ entry_type: "accrual", amount_days: 13, reference_type: "policy_run" }]);
 
       await db.asUser(USER_HR, async (query) => {
@@ -781,6 +819,19 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
           employeeId,
         ]);
         expect(Number(postedCount.rows[0]?.count)).toBe(0);
+
+        // A3: absence of a leave_ledger row must NOT be ambiguous — the
+        // reconciliation marker is created unconditionally, proving the
+        // true-up actually ran (and found nothing to adjust), never
+        // conflated with "it never ran at all".
+        const marker = await query(
+          "select raw_delta_days, applied_days, excess_requiring_review_days from poland_termination_leave_reconciliations where employee_id = $1",
+          [employeeId],
+        );
+        expect(marker.rows).toHaveLength(1);
+        expect(Number(marker.rows[0]?.raw_delta_days)).toBe(0);
+        expect(Number(marker.rows[0]?.applied_days)).toBe(0);
+        expect(Number(marker.rows[0]?.excess_requiring_review_days)).toBe(0);
       });
     });
 
@@ -864,6 +915,89 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
         const leaveBalance = await query("select coalesce(sum(amount_days), 0) as balance from leave_ledger where employee_id = $1", [employeeId]);
         expect(Number(leaveBalance.rows[0]?.balance)).toBe(13);
       });
+    });
+
+    it("acknowledge_poland_termination_leave_excess() clears the pending excess, idempotently, and only for HR Admin", async () => {
+      const employeeId = await seedTerminatedPolandEmployee([
+        { entry_type: "accrual", amount_days: 26, reference_type: "policy_run" },
+        { entry_type: "deduction", amount_days: -20, reference_type: "leave_request" },
+      ]);
+
+      // asUserCommit (not asUser): the reconciliation row must persist past
+      // this call so the separate asUser() calls below (each its own
+      // transaction) can see it.
+      await db.asUserCommit(USER_HR, (query) => query("select * from post_poland_termination_leave_adjustment($1, $2)", [employeeId, -13]));
+
+      const beforeAck = await db.asUser(USER_HR, (query) =>
+        query("select excess_requiring_review_days, excess_reviewed_at from poland_termination_leave_reconciliations where employee_id = $1", [
+          employeeId,
+        ]),
+      );
+      expect(Number(beforeAck.rows[0]?.excess_requiring_review_days)).toBe(7);
+      expect(beforeAck.rows[0]?.excess_reviewed_at).toBeNull();
+
+      // A rejected query aborts the rest of ITS OWN transaction (same
+      // convention as every other "blocks X" test in this file) — a
+      // separate asUser() call, not continued after the assertion above.
+      await expect(
+        db.asUser(USER_MANAGER, (query) => query("select acknowledge_poland_termination_leave_excess($1)", [employeeId])),
+      ).rejects.toThrow(/Only HR Admin/);
+
+      // asUserCommit again: the acknowledgment itself must persist so the
+      // idempotent-repeat check and the final read both see it.
+      const firstAckAt = await db.asUserCommit(USER_HR, async (query) => {
+        await query("select acknowledge_poland_termination_leave_excess($1)", [employeeId]);
+        const afterAck = await query(
+          "select excess_requiring_review_days, excess_reviewed_at, excess_reviewed_by from poland_termination_leave_reconciliations where employee_id = $1",
+          [employeeId],
+        );
+        expect(Number(afterAck.rows[0]?.excess_requiring_review_days)).toBe(7); // the figure itself is never erased — only marked reviewed
+        expect(afterAck.rows[0]?.excess_reviewed_at).not.toBeNull();
+        expect(afterAck.rows[0]?.excess_reviewed_by).toBe(USER_HR);
+        return afterAck.rows[0]?.excess_reviewed_at as string;
+      });
+
+      // Idempotent: acknowledging again is a silent no-op, not an error, and
+      // never re-stamps the timestamp.
+      await db.asUser(USER_HR, (query) => query("select acknowledge_poland_termination_leave_excess($1)", [employeeId]));
+      const secondAck = await db.asUser(USER_HR, (query) =>
+        query("select excess_reviewed_at from poland_termination_leave_reconciliations where employee_id = $1", [employeeId]),
+      );
+      expect(secondAck.rows[0]?.excess_reviewed_at).toEqual(firstAckAt);
+    });
+
+    it("refuses to acknowledge an excess for an employee with no reconciliation on record at all", async () => {
+      const employeeId = randomUUID();
+      await db.seed(`
+        insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date, employment_status)
+          values ('${employeeId}', 'P2B-NOREC-${employeeId.slice(0, 8)}', '${COMPANY_A}', 'PL', 'No', 'Reconciliation', '2023-01-01', 'active');
+      `);
+      await expect(
+        db.asUser(USER_HR, (query) => query("select acknowledge_poland_termination_leave_excess($1)", [employeeId])),
+      ).rejects.toThrow(/No termination Annual Leave reconciliation exists/);
+    });
+
+    it("poland_termination_leave_reconciliations is readable by HR Admin but not by an unrelated manager/peer (SELECT RLS)", async () => {
+      const employeeId = await seedTerminatedPolandEmployee([{ entry_type: "accrual", amount_days: 26, reference_type: "policy_run" }]);
+      // asUserCommit (not asUser): the reconciliation row must actually
+      // persist so the separate asUser() reads below (each its own
+      // transaction) can see it — asUser() always rolls back at the end.
+      await db.asUserCommit(USER_HR, (query) => query("select * from post_poland_termination_leave_adjustment($1, $2)", [employeeId, -13]));
+
+      const hrVisible = await db.asUser(USER_HR, (query) =>
+        query("select employee_id from poland_termination_leave_reconciliations where employee_id = $1", [employeeId]),
+      );
+      expect(hrVisible.rows).toHaveLength(1);
+
+      const managerVisible = await db.asUser(USER_MANAGER, (query) =>
+        query("select employee_id from poland_termination_leave_reconciliations where employee_id = $1", [employeeId]),
+      );
+      expect(managerVisible.rows).toHaveLength(0);
+
+      const peerVisible = await db.asUser(USER_PEER, (query) =>
+        query("select employee_id from poland_termination_leave_reconciliations where employee_id = $1", [employeeId]),
+      );
+      expect(peerVisible.rows).toHaveLength(0);
     });
   });
 

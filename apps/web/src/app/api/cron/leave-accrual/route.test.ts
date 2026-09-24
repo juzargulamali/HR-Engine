@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // This route (and the cron/auth + cron/batch helpers it imports) are marked
 // "server-only" so an accidental Client Component import fails at build
@@ -108,9 +108,26 @@ function employeesStep(hireDate: string) {
 }
 const EMPTY = { data: [], error: null };
 
+// Pinned to a safe midday UTC instant — comfortably mid-day in every one of
+// AE/SA/PL's own business-local timezones too, so none of this file's
+// date-derived expectations (isoDateYearsAgo, the hire-year literals below)
+// can flake depending on which side of a country's own midnight boundary
+// the real wall clock happened to be on when the suite runs. The route's
+// own per-country business-date derivation (getBusinessDateString) is
+// exercised precisely, and separately, in packages/domain's own
+// businessTime.test.ts fixed-instant suite — this file only needs a stable
+// "now" so ITS OWN date literals stay internally consistent.
+const FIXED_NOW = new Date("2026-06-15T12:00:00.000Z");
+
 beforeEach(() => {
   vi.stubEnv("CRON_SECRET", CRON_SECRET);
   vi.mocked(createAdminClient).mockReset();
+  vi.useFakeTimers();
+  vi.setSystemTime(FIXED_NOW);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("GET /api/cron/leave-accrual — authorization", () => {

@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server";
-import { computeAnnualLeaveEntitlementToDate, explainPolandEntitlementBlock, type FteFractionPeriod } from "@enginious-hr/domain";
+import {
+  computeAnnualLeaveEntitlementToDate,
+  explainPolandEntitlementBlock,
+  getBusinessDateString,
+  getBusinessMonthStartString,
+  resolveCountryTimeZone,
+  COUNTRY_TIMEZONES,
+  type FteFractionPeriod,
+} from "@enginious-hr/domain";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAuthorizedCronRequest, SYSTEM_ACTOR_ID } from "@/lib/cron/auth";
 import { chunk } from "@/lib/cron/batch";
@@ -73,8 +81,26 @@ export async function GET(request: Request) {
 
   const isPreflight = new URL(request.url).searchParams.get("mode") === "preflight";
   const admin = createAdminClient();
-  const today = new Date().toISOString().slice(0, 10);
-  const monthStart = `${today.slice(0, 7)}-01`;
+  const now = new Date();
+  // A single UTC "today" wrongly treats a UAE (UTC+4) employee's calendar
+  // month as still last month for up to 4 hours after UTC midnight, and a
+  // Poland (UTC+1/+2) employee's as already next month up to 2 hours before
+  // it — this cron processes AE/SA/PL together every run, so it needs each
+  // employee's OWN business-local date, not one global instant. `today` and
+  // `monthStart` below are used only for the two country-agnostic bulk
+  // query windows (the active-policy filter, and the "already accrued"
+  // lookup) — deliberately widened to the OUTER bound across all three
+  // known timezones so neither window can ever exclude a country whose
+  // local day has (or hasn't) rolled over yet; every actual per-employee
+  // calculation and idempotency key uses businessDateForCountry/
+  // businessMonthStartForCountry below instead.
+  const zones = Object.values(COUNTRY_TIMEZONES);
+  const candidateDates = zones.map((tz) => getBusinessDateString(tz, now)).sort();
+  const candidateMonthStarts = zones.map((tz) => getBusinessMonthStartString(tz, now)).sort();
+  const today = candidateDates.at(-1)!;
+  const monthStart = candidateMonthStarts[0]!;
+  const businessDateForCountry = (countryCode: string) => getBusinessDateString(resolveCountryTimeZone(countryCode), now);
+  const businessMonthStartForCountry = (countryCode: string) => getBusinessMonthStartString(resolveCountryTimeZone(countryCode), now);
 
   // Mirrors resolve_policy()'s own filter (schema.sql): 'active' status
   // alone isn't enough — a policy can be activated ahead of time with a
@@ -131,14 +157,20 @@ export async function GET(request: Request) {
     fteFractionHistoryByEmployee.set(contract.employee_id, periods);
   }
 
+  // Keyed by employee:leaveType:YYYY-MM (not just employee:leaveType) — the
+  // query window above is deliberately widened across every known timezone,
+  // so a row's own txn_date month is what actually decides "already accrued
+  // THIS employee's business-local month," checked per employee below via
+  // businessMonthStartForCountry rather than trusting the query window's
+  // country-agnostic bounds.
   const { data: alreadyAccrued } = await admin
     .from("leave_ledger")
-    .select("employee_id, leave_type_code")
+    .select("employee_id, leave_type_code, txn_date")
     .eq("entry_type", "accrual")
     .eq("reference_type", "policy_run")
     .gte("txn_date", monthStart)
     .lte("txn_date", today);
-  const alreadyAccruedKeys = new Set((alreadyAccrued ?? []).map((r) => `${r.employee_id}:${r.leave_type_code}`));
+  const alreadyAccruedKeys = new Set((alreadyAccrued ?? []).map((r) => `${r.employee_id}:${r.leave_type_code}:${String(r.txn_date).slice(0, 7)}`));
 
   const { data: balances } = await admin.from("leave_balances").select("employee_id, leave_type_code, balance_days");
   const balanceByKey = new Map((balances ?? []).map((b) => [`${b.employee_id}:${b.leave_type_code}`, Number(b.balance_days)]));
@@ -178,7 +210,6 @@ export async function GET(request: Request) {
   // per-row insert risks a serverless function timeout; a single batched
   // insert keeps this a constant number of round trips regardless of
   // headcount.
-  const accrualMonth = today.slice(0, 7); // YYYY-MM
   const rows: {
     employee_id: string;
     leave_type_code: string;
@@ -198,16 +229,22 @@ export async function GET(request: Request) {
   const blockedEntitlementConfig: AmbiguousBaseline[] = [];
 
   for (const employee of employees ?? []) {
+    // Each employee's OWN business-local "today"/accrual month — never the
+    // single global `today`/`monthStart` above, which exist only to bound
+    // the two bulk queries. This is what actually decides which calendar
+    // day/month this employee's accrual is computed and posted against.
+    const employeeToday = businessDateForCountry(employee.country_code);
+    const employeeAccrualMonth = businessMonthStartForCountry(employee.country_code).slice(0, 7);
     const leaveTypes = leaveTypesByCountry.get(employee.country_code) ?? [];
     for (const leaveType of leaveTypes) {
       const key = `${employee.id}:${leaveType.leave_type_code}`;
-      if (alreadyAccruedKeys.has(key)) {
+      if (alreadyAccruedKeys.has(`${key}:${employeeAccrualMonth}`)) {
         skipped += 1;
         continue;
       }
 
       const minServiceDays = leaveType.min_service_days_to_accrue;
-      if (minServiceDays !== null && daysBetween(employee.hire_date, today) < minServiceDays) {
+      if (minServiceDays !== null && daysBetween(employee.hire_date, employeeToday) < minServiceDays) {
         skipped += 1;
         continue;
       }
@@ -238,7 +275,7 @@ export async function GET(request: Request) {
         const entitlementInput = {
           countryCode: employee.country_code as "AE" | "SA" | "PL",
           hireDate: employee.hire_date,
-          asOfDate: today,
+          asOfDate: employeeToday,
           fteFractionHistory: fteFractionHistoryByEmployee.get(employee.id),
         };
         const entitlementToDate = computeAnnualLeaveEntitlementToDate(entitlementInput);
@@ -287,12 +324,12 @@ export async function GET(request: Request) {
       rows.push({
         employee_id: employee.id,
         leave_type_code: leaveType.leave_type_code,
-        txn_date: today,
+        txn_date: employeeToday,
         entry_type: "accrual",
         amount_days: amount,
         reference_type: "policy_run",
         created_by: SYSTEM_ACTOR_ID,
-        idempotency_key: `accrual:${employee.id}:${leaveType.leave_type_code}:${accrualMonth}`,
+        idempotency_key: `accrual:${employee.id}:${leaveType.leave_type_code}:${employeeAccrualMonth}`,
       });
     }
   }

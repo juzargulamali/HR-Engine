@@ -1,5 +1,5 @@
 import "server-only";
-import { isWeekend } from "@enginious-hr/domain";
+import { isWeekend, getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import type { createClient } from "@/lib/supabase/server";
 import { logServerError } from "@/lib/log";
 
@@ -58,8 +58,12 @@ function emptySnapshot(company: { id: string; legal_name: string; country_code: 
 export async function getCompanySnapshot(
   supabase: SupabaseServerClient,
   company: { id: string; legal_name: string; country_code: string },
-  today: string,
 ): Promise<CompanySnapshot> {
+  // This company's OWN business-local date — not a single global `today`
+  // shared across every company on the dashboard, which would wrongly show
+  // yesterday's (or tomorrow's) attendance/holiday/Recovery-day state for
+  // up to a few hours around this specific country's own midnight.
+  const today = getBusinessDateString(resolveCountryTimeZone(company.country_code));
   try {
     const { data: employees, error: employeesError } = await supabase
       .from("employees")

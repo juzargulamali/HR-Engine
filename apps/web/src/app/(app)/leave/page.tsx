@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,9 +33,14 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
     );
   }
 
-  const today = new Date().toISOString().slice(0, 10);
   const status = statusParam && (STATUS_VALUES as string[]).includes(statusParam) ? (statusParam as RequestStatus) : "";
   const supabase = await createClient();
+
+  // This employee's own business-local date — "is this request still
+  // upcoming" must use their own country's calendar day, not the server's
+  // UTC one.
+  const { data: me } = await supabase.from("employees").select("country_code").eq("id", session.employeeId).maybeSingle();
+  const today = getBusinessDateString(resolveCountryTimeZone(me?.country_code));
 
   let requestsQuery = supabase
     .from("leave_requests")

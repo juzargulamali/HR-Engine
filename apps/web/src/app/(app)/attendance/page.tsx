@@ -1,4 +1,4 @@
-import { canManageAttendance, isWeekend } from "@enginious-hr/domain";
+import { canManageAttendance, isWeekend, getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,10 +19,6 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
   leave: "secondary",
   partial_day: "secondary",
 };
-
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export default async function AttendancePage({
   searchParams,
@@ -99,9 +95,12 @@ export default async function AttendancePage({
     );
   }
 
-  const workDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : todayISO();
   const companyId = companyIdParam && manageableCompanies.some((c) => c.id === companyIdParam) ? companyIdParam : manageableCompanies[0]!.id;
   const company = manageableCompanies.find((c) => c.id === companyId)!;
+  // Default date is this company's own business-local "today" — not the
+  // server's UTC one — since this page is always scoped to exactly one
+  // company at a time.
+  const workDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : getBusinessDateString(resolveCountryTimeZone(company.country_code));
   const q = (qParam ?? "").trim().slice(0, 100);
 
   let employeesQuery = supabase

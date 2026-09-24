@@ -26,11 +26,14 @@ import { createClient } from "@/lib/supabase/server";
  *
  * Never blocks the termination itself — only the automatic Annual Leave
  * true-up. When the entitlement can't be determined (no/gappy/ambiguous FTE
- * history, an FTE change mid-period, or an unclassifiable historical ledger
- * row), returns a warning telling HR to review and post the correct amount
- * manually instead; Final Settlement's own live recheck (see
- * final-settlement-section.tsx) independently refuses to show a settlement
- * figure in that same situation, so the two can never silently disagree.
+ * history, an FTE change mid-period, an unclassifiable historical ledger
+ * row, or either lookup query itself failing — never silently treated as an
+ * empty/clean history), returns a warning telling HR to review and post the
+ * correct amount manually instead. Final Settlement's own independent
+ * readiness check (checkPolandTerminationSettlementReadiness below) is what
+ * actually blocks settlement preparation in every one of these cases — it
+ * reads the completion marker this function's own RPC call writes, not a
+ * recomputation, so the two can never silently disagree.
  *
  * Returns null (no warning) when everything posted cleanly or there was
  * nothing to post (the cron had already granted exactly the right amount).
@@ -41,15 +44,24 @@ export async function applyPolandTerminationLeaveTrueUp(
   hireDate: string,
   terminationDate: string,
 ): Promise<string | null> {
-  const { data: contracts } = await supabase.from("employment_contracts").select("start_date, fte_fraction").eq("employee_id", employeeId);
-  const fteFractionHistory: FteFractionPeriod[] = (contracts ?? []).map((c) => ({ effectiveFrom: c.start_date, fteFraction: Number(c.fte_fraction) }));
+  const { data: contracts, error: contractsError } = await supabase
+    .from("employment_contracts")
+    .select("start_date, fte_fraction")
+    .eq("employee_id", employeeId);
+  if (contractsError) {
+    return `Poland Annual Leave could not be automatically trued up for termination — the employment contract history couldn't be read (${contractsError.message}). Post the confirmed amount manually via a leave-ledger adjustment before preparing Final Settlement.`;
+  }
 
-  const { data: ledgerRows } = await supabase
+  const { data: ledgerRows, error: ledgerError } = await supabase
     .from("leave_ledger")
     .select("id, employee_id, leave_type_code, entry_type, amount_days, reference_type, reversal_of_id")
     .eq("employee_id", employeeId)
     .eq("leave_type_code", "annual");
+  if (ledgerError) {
+    return `Poland Annual Leave could not be automatically trued up for termination — the existing Annual Leave ledger history couldn't be read (${ledgerError.message}). Post the confirmed amount manually via a leave-ledger adjustment before preparing Final Settlement.`;
+  }
 
+  const fteFractionHistory: FteFractionPeriod[] = (contracts ?? []).map((c) => ({ effectiveFrom: c.start_date, fteFraction: Number(c.fte_fraction) }));
   const input = { hireDate, terminationDate, fteFractionHistory };
   const entitlementThroughTermination = computePolandAnnualLeaveEntitlementAtTermination(input);
 
@@ -80,8 +92,69 @@ export async function applyPolandTerminationLeaveTrueUp(
 
   const excess = Number(result?.excess_requiring_review ?? 0);
   if (excess > 0) {
-    return `This employee had already used ${excess} day(s) more Annual Leave than their corrected termination entitlement allows. The automatic adjustment was capped rather than driving the balance further negative — the excess requires HR review (a possible overpayment).`;
+    return `This employee had already used ${excess} day(s) more Annual Leave than their corrected termination entitlement allows. The automatic adjustment was capped rather than driving the balance further negative — the excess requires HR review and acknowledgment (see Final Settlement) before settlement can be prepared.`;
   }
 
   return null;
+}
+
+export interface PolandSettlementReadiness {
+  ready: boolean;
+  reason: string | null;
+  excessRequiringReview: number;
+}
+
+/**
+ * The actual gate Final Settlement (final-settlement-section.tsx) uses to
+ * decide whether it's safe to render a Poland settlement figure. Reads the
+ * poland_termination_leave_reconciliations completion marker
+ * post_poland_termination_leave_adjustment() writes UNCONDITIONALLY
+ * (including a zero-delta outcome) — never infers completion from a
+ * successful recomputation of the entitlement (explainPolandTerminationEntitlementBlock
+ * returning null proves the CALCULATION is possible, not that the RPC above
+ * ever ran, or ran successfully, for this employee).
+ *
+ * Blocks whenever: the query itself fails; no marker exists yet (the
+ * true-up has never completed, whether because it was blocked, errored, or
+ * simply hasn't run); the marker is for a different termination_date than
+ * the one Final Settlement is being asked to render (a stale/mismatched
+ * reconciliation); or the marker has a positive, still-unacknowledged
+ * excess_requiring_review_days (HR must explicitly acknowledge it via
+ * acknowledgePolandTerminationLeaveExcess() first — see that table's own
+ * migration header comment for why this can never be inferred or automatic).
+ */
+export async function checkPolandTerminationSettlementReadiness(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  employeeId: string,
+  terminationDate: string,
+): Promise<PolandSettlementReadiness> {
+  const { data, error } = await supabase
+    .from("poland_termination_leave_reconciliations")
+    .select("termination_date, excess_requiring_review_days, excess_reviewed_at")
+    .eq("employee_id", employeeId)
+    .maybeSingle();
+
+  if (error) {
+    return { ready: false, reason: `Could not verify the Poland Annual Leave termination reconciliation (${error.message}).`, excessRequiringReview: 0 };
+  }
+
+  if (!data || data.termination_date !== terminationDate) {
+    return {
+      ready: false,
+      reason:
+        "The Poland Annual Leave termination true-up has not completed for this exact termination date yet. Run or retry the termination workflow, or post a manual leave-ledger adjustment, before preparing Final Settlement.",
+      excessRequiringReview: 0,
+    };
+  }
+
+  const excess = Number(data.excess_requiring_review_days ?? 0);
+  if (excess > 0 && !data.excess_reviewed_at) {
+    return {
+      ready: false,
+      reason: `This employee had already used ${excess} day(s) more Annual Leave than their corrected termination entitlement allows. HR must review and acknowledge this before Final Settlement can be prepared.`,
+      excessRequiringReview: excess,
+    };
+  }
+
+  return { ready: true, reason: null, excessRequiringReview: 0 };
 }

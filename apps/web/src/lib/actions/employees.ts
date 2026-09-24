@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
 import { validateUploadFile, sanitizeForStoragePath } from "@/lib/uploads";
@@ -200,9 +201,24 @@ export async function updateEmployee(_prevState: ActionState, formData: FormData
     // Needed for the Poland leave true-up below, and to pin the exact same
     // termination date into both terminate_employee() and this system's
     // own entitlement calculation — never let the two drift apart by one
-    // resolving "today" a moment later than the other.
-    const { data: employeeForTermination } = await supabase.from("employees").select("country_code, hire_date").eq("id", d.employeeId).single();
-    const terminationDate = d.terminationDate || new Date().toISOString().slice(0, 10);
+    // resolving "today" a moment later than the other. Checked and stopped
+    // on BEFORE calling terminate_employee(): if this lookup fails, we
+    // cannot know whether the employee is in Poland, so proceeding would
+    // risk silently skipping the Annual Leave true-up for a Poland
+    // employee with no warning at all, rather than an explicit error.
+    const { data: employeeForTermination, error: employeeLookupError } = await supabase
+      .from("employees")
+      .select("country_code, hire_date")
+      .eq("id", d.employeeId)
+      .single();
+    if (employeeLookupError || !employeeForTermination) {
+      return { error: employeeLookupError?.message ?? "Could not look up this employee before termination." };
+    }
+    // This employee's own business-local date when HR leaves the
+    // termination date blank — the recorded date (and everything the
+    // Poland true-up below derives from it) must reflect their own
+    // country's calendar day, not the server's UTC one.
+    const terminationDate = d.terminationDate || getBusinessDateString(resolveCountryTimeZone(employeeForTermination.country_code));
 
     const { error } = await supabase.rpc("terminate_employee", {
       p_employee_id: d.employeeId,
@@ -231,7 +247,7 @@ export async function updateEmployee(_prevState: ActionState, formData: FormData
     // termination itself, only surfaces a warning when the Annual Leave
     // true-up couldn't be posted automatically.
     let warning: string | null = null;
-    if (employeeForTermination?.country_code === "PL") {
+    if (employeeForTermination.country_code === "PL") {
       warning = await applyPolandTerminationLeaveTrueUp(supabase, d.employeeId, employeeForTermination.hire_date, terminationDate);
     }
 
@@ -254,6 +270,24 @@ export async function updateEmployee(_prevState: ActionState, formData: FormData
 
   revalidatePath(`/employees/${d.employeeId}`);
   return { error: null };
+}
+
+/**
+ * The one, explicit, audited HR action that clears a pending
+ * excess_requiring_review_days flag on a Poland termination reconciliation
+ * — see poland_termination_leave_reconciliations' own migration header
+ * comment (supabase/migrations/20261102000000_poland_termination_leave_true_up.sql)
+ * for why this can never be inferred or automatic. RLS/the underlying
+ * acknowledge_poland_termination_leave_excess() RPC (HR Admin only) is the
+ * real enforcement; this action just relays the call and refreshes the
+ * employee page so Final Settlement's readiness check re-reads the updated
+ * marker immediately.
+ */
+export async function acknowledgePolandTerminationLeaveExcess(employeeId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("acknowledge_poland_termination_leave_excess", { p_employee_id: employeeId });
+  revalidatePath(`/employees/${employeeId}`);
+  return { error: error?.message ?? null };
 }
 
 const setTerminationSettlementRateSchema = z.object({
