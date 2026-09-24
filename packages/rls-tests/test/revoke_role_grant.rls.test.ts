@@ -76,6 +76,28 @@ describe("revoke_role_grant()", () => {
         "Only a System Administrator",
       );
     });
+
+    // The two tests above already prove revoke_role_grant() still works for
+    // a permitted revocation ("lets one Sys Admin revoke another's grant…"
+    // and "revokes an ordinary…role grant normally"). These two prove the
+    // direct-write bypass this correction closes: user_roles has no UPDATE
+    // or DELETE policy left at all — so even a genuine Sys Admin's direct
+    // UPDATE/DELETE affects zero rows under RLS (silently, not an error;
+    // same pattern already relied on for approvals/leave_ledger/
+    // comp_day_ledger's own "revoke ... from authenticated" — see
+    // phase3.rls.test.ts's "never lets a client directly insert or update a
+    // decided approval row..."), not through that guarded RPC.
+    it("blocks a Sys Admin from directly UPDATEing revoked_at, bypassing the RPC", async () => {
+      const { rowCount } = await db.asUser(USER_ADMIN_A, (query) =>
+        query("update user_roles set revoked_at = now() where id = $1", [GRANT_HR]),
+      );
+      expect(rowCount).toBe(0); // no UPDATE policy exists at all for user_roles
+    });
+
+    it("blocks a Sys Admin from directly DELETEing a role grant, bypassing the RPC", async () => {
+      const { rowCount } = await db.asUser(USER_ADMIN_A, (query) => query("delete from user_roles where id = $1", [GRANT_HR]));
+      expect(rowCount).toBe(0); // no DELETE policy exists at all for user_roles
+    });
   });
 
   describe("with a single System Administrator", () => {
@@ -140,6 +162,40 @@ describe("revoke_role_grant()", () => {
 
       const { rows } = await db.seed("select count(*)::int as count from user_roles where role = 'sys_admin' and revoked_at is null");
       expect(rows[0].count).toBe(1);
+    });
+  });
+
+  describe("service-role / test-seeding access", () => {
+    const db = new RlsTestDatabase();
+    const USER_SEED = "00000000-0000-0000-0000-00000000b101";
+    const GRANT_SEED = "00000000-0000-0000-0000-00000000b102";
+
+    beforeAll(async () => {
+      await db.setup();
+      await db.seed(`insert into auth.users (id, email) values ('${USER_SEED}', 'rrg-seed@enginious.ae');`);
+    }, 30_000);
+
+    afterAll(() => db.teardown());
+
+    // db.seed() runs as the unrestricted admin connection, standing in here
+    // for the real service-role client deleteUserAccount() uses — the
+    // `revoke update, delete on user_roles from authenticated, anon` above
+    // deliberately names only those two roles, so this direct INSERT,
+    // UPDATE, and DELETE (the shape of every phaseN test's own fixture
+    // setup/teardown, and of deleteUserAccount()'s cleanup) must all keep
+    // working exactly as before.
+    it("lets the admin/service-role connection insert, update, and delete user_roles rows directly", async () => {
+      await db.seed(`insert into user_roles (id, user_id, role) values ('${GRANT_SEED}', '${USER_SEED}', 'hr_admin');`);
+      const { rows: afterInsert } = await db.seed(`select revoked_at from user_roles where id = '${GRANT_SEED}'`);
+      expect(afterInsert[0].revoked_at).toBeNull();
+
+      await db.seed(`update user_roles set revoked_at = now() where id = '${GRANT_SEED}'`);
+      const { rows: afterUpdate } = await db.seed(`select revoked_at from user_roles where id = '${GRANT_SEED}'`);
+      expect(afterUpdate[0].revoked_at).not.toBeNull();
+
+      await db.seed(`delete from user_roles where id = '${GRANT_SEED}'`);
+      const { rows: afterDelete } = await db.seed(`select id from user_roles where id = '${GRANT_SEED}'`);
+      expect(afterDelete).toHaveLength(0);
     });
   });
 });

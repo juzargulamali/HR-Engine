@@ -3792,15 +3792,14 @@ create policy user_roles_select_own on user_roles for select
 create policy user_roles_insert_sysadmin on user_roles for insert
   with check (has_role('sys_admin'));
 
-create policy user_roles_delete_sysadmin on user_roles for delete
-  using (has_role('sys_admin'));
-
--- No UPDATE policy at all, and UPDATE is explicitly revoked below —
--- revoking a grant (the only update this table ever needs) must go through
--- revoke_role_grant(), which enforces the self-revocation and
--- last-System-Administrator protections atomically. See
--- 20261030000000_guard_role_grant_revocation.sql.
-revoke update on user_roles from authenticated, anon;
+-- No UPDATE or DELETE policy at all, and both are explicitly revoked below —
+-- a grant must be retained and revoked only through revoke_role_grant(),
+-- which enforces the self-revocation and last-System-Administrator
+-- protections atomically; a direct DELETE would destroy the row (and its
+-- revoked_at history) without going through either check. See
+-- 20261030000000_guard_role_grant_revocation.sql. deleteUserAccount()'s own
+-- user_roles cleanup runs via the service-role client, so it's unaffected.
+revoke update, delete on user_roles from authenticated, anon;
 
 create or replace function revoke_role_grant(p_role_grant_id uuid)
 returns void

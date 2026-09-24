@@ -16,24 +16,27 @@
 --     of two DIFFERENT sys_admin grants can't each read "2 remaining" before
 --     either commits and both proceed — the second call's count check runs
 --     only after the first's write has committed and become visible.
---   - The old FOR ALL policy is split into insert/delete-only for
---     `authenticated`; there is deliberately no UPDATE policy left at all,
---     and UPDATE is explicitly revoked from `authenticated`/`anon` too
---     (belt-and-braces, same pattern as audit_log's own revoke below it) —
---     a direct authenticated UPDATE of user_roles.revoked_at is now denied
---     outright, not merely discouraged. revoke_role_grant() itself runs as
---     SECURITY DEFINER and is unaffected by this, same as every other
---     guarded write in this schema (e.g. permanently_delete_employee()).
+--   - The old FOR ALL policy is split down to insert-only for
+--     `authenticated`; there is deliberately no UPDATE or DELETE policy left
+--     at all, and both privileges are explicitly revoked from
+--     `authenticated`/`anon` too (belt-and-braces, same pattern as
+--     audit_log's own revoke below it) — a direct authenticated UPDATE of
+--     user_roles.revoked_at, or a DELETE of the row outright (which would
+--     destroy it, and its history, without going through either check at
+--     all), are now both denied outright, not merely discouraged.
+--     revoke_role_grant() itself runs as SECURITY DEFINER and is unaffected
+--     by this, same as every other guarded write in this schema (e.g.
+--     permanently_delete_employee()) — as is deleteUserAccount()'s own
+--     user_roles cleanup, which runs via the service-role client and so
+--     never goes through `authenticated`/`anon` privileges at all.
 
 drop policy if exists user_roles_write_sysadmin on user_roles;
+drop policy if exists user_roles_delete_sysadmin on user_roles;
 
 create policy user_roles_insert_sysadmin on user_roles for insert
   with check (has_role('sys_admin'));
 
-create policy user_roles_delete_sysadmin on user_roles for delete
-  using (has_role('sys_admin'));
-
-revoke update on user_roles from authenticated, anon;
+revoke update, delete on user_roles from authenticated, anon;
 
 create or replace function revoke_role_grant(p_role_grant_id uuid)
 returns void
