@@ -1239,7 +1239,11 @@ export interface Database {
           p_work_date: string;
           p_rows: { employee_id: string; status: string; work_mode: string | null; hours_worked: number | null }[];
         };
-        Returns: { employee_id: string; credited: boolean; reversed: boolean }[];
+        Returns: { attendance_employee_id: string; credited: boolean; reversed: boolean; needs_policy_review: boolean }[];
+      };
+      delete_attendance_record: {
+        Args: { p_record_id: string };
+        Returns: undefined;
       };
     };
     Enums: {
