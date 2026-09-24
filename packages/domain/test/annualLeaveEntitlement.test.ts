@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   completedMonthsBetween,
+  computeAnnualLeaveEntitlementToDate,
   computePolandAnnualLeaveEntitlementDays,
   computePolandFirstYearAccruedDays,
   computePolandLeaveDaysFromHours,
+  computeSaudiAnnualLeaveEntitlementDays,
   computeSaudiAnnualLeaveRateDaysPerYear,
   computeUaeAnnualLeaveEntitlementDays,
 } from "../src/annualLeaveEntitlement";
@@ -89,6 +91,53 @@ describe("computePolandFirstYearAccruedDays", () => {
 
   it("accrues nothing before the first completed month", () => {
     expect(computePolandFirstYearAccruedDays(20, 0)).toBe(0);
+  });
+});
+
+describe("computeSaudiAnnualLeaveEntitlementDays — cumulative, not just the current rate", () => {
+  it("credits each of the first five years at 21 days/year", () => {
+    expect(computeSaudiAnnualLeaveEntitlementDays("2023-01-01", "2026-01-01")).toBe(63); // 3 years * 21
+  });
+
+  it("credits years beyond the fifth at 30 days/year, on top of 5*21 for the first five", () => {
+    expect(computeSaudiAnnualLeaveEntitlementDays("2018-01-01", "2026-01-01")).toBe(5 * 21 + 3 * 30); // 8 years
+  });
+});
+
+describe("computeAnnualLeaveEntitlementToDate — the real accrual cron's single dispatcher", () => {
+  it("routes UAE through the tiered calendar-day calculator", () => {
+    expect(computeAnnualLeaveEntitlementToDate({ countryCode: "AE", hireDate: "2025-01-01", asOfDate: "2026-01-01" })).toBe(30);
+    expect(computeAnnualLeaveEntitlementToDate({ countryCode: "AE", hireDate: "2026-01-01", asOfDate: "2026-06-30" })).toBe(0);
+  });
+
+  it("routes Saudi through the cumulative (not just current-rate) calculator", () => {
+    expect(computeAnnualLeaveEntitlementToDate({ countryCode: "SA", hireDate: "2018-01-01", asOfDate: "2026-01-01" })).toBe(5 * 21 + 3 * 30);
+  });
+
+  it("routes Poland through first-year monthly proration, ignoring recognised prior service/FTE parameters given for other countries", () => {
+    // 3 completed months of a full-time, no-prior-service first year -> 20/12*3.
+    expect(computeAnnualLeaveEntitlementToDate({ countryCode: "PL", hireDate: "2026-01-01", asOfDate: "2026-04-01" })).toBe(5);
+  });
+
+  it("routes Poland through the full annual grant plus one fresh grant per completed year after the first", () => {
+    // 3 years full-time, no recognised prior service: year 1 fully vests at 20,
+    // then 2 more full years at the (still 20, under-10-year) current rate.
+    expect(computeAnnualLeaveEntitlementToDate({ countryCode: "PL", hireDate: "2023-01-01", asOfDate: "2026-01-01" })).toBe(60);
+  });
+
+  it("applies Poland's recognised prior service and FTE fraction to the cumulative total", () => {
+    // 6 years actual + 4 recognised prior service crosses the 10-year threshold at part-time 0.5 FTE:
+    // year 1 vests at 20*0.5=10 (not yet over the threshold with 0 completed years + 4 recognised = 4 < 10),
+    // years 2-6 (5 more completed years) vest at the CURRENT (26*0.5=13) rate each.
+    expect(
+      computeAnnualLeaveEntitlementToDate({
+        countryCode: "PL",
+        hireDate: "2020-01-01",
+        asOfDate: "2026-01-01",
+        recognisedPriorServiceYears: 4,
+        fteFraction: 0.5,
+      }),
+    ).toBe(10 + 5 * 13);
   });
 });
 

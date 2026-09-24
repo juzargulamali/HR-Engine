@@ -15,6 +15,8 @@ export interface ComputeLeaveDaysParams {
   startDate: string;
   endDate: string;
   weekStartDay: number;
+  /** See isWorkingDay's comment — explicit override for a schedule a single weekStartDay can't describe. Optional; omit for the existing contiguous-5-day derivation. */
+  workingWeekdays?: readonly number[] | null;
   holidays: readonly string[];
   halfDayStart?: boolean;
   halfDayEnd?: boolean;
@@ -43,14 +45,25 @@ export interface ComputeLeaveDaysParams {
   extendForHolidays?: boolean;
 }
 
-function isWorkingDay(date: Date, weekStartDay: number): boolean {
+function isWorkingDay(date: Date, weekStartDay: number, workingWeekdays?: readonly number[] | null): boolean {
+  // A single "week starts here" integer can only ever describe a
+  // contiguous 5-day work week — it cannot represent a schedule that
+  // isn't 5 contiguous days, and it forces UAE/Saudi/Poland's real
+  // weekends to be inferred rather than stated. `workingWeekdays` (0 =
+  // Sunday .. 6 = Saturday), when provided, is the explicit, authoritative
+  // set of scheduled working days and takes precedence; every existing
+  // caller passes only `weekStartDay`, so omitting it is fully backward
+  // compatible with the contiguous-5-day derivation below.
+  if (workingWeekdays && workingWeekdays.length > 0) {
+    return workingWeekdays.includes(date.getUTCDay());
+  }
   const dayOfWeek = date.getUTCDay();
   return (dayOfWeek - weekStartDay + 7) % 7 < 5;
 }
 
 /** Same weekend/work-week rule as computeLeaveDays, exposed for callers that just need a yes/no for one date (e.g. flagging attendance). */
-export function isWeekend(dateISO: string, weekStartDay: number): boolean {
-  return !isWorkingDay(new Date(`${dateISO}T00:00:00Z`), weekStartDay);
+export function isWeekend(dateISO: string, weekStartDay: number, workingWeekdays?: readonly number[] | null): boolean {
+  return !isWorkingDay(new Date(`${dateISO}T00:00:00Z`), weekStartDay, workingWeekdays);
 }
 
 export function computeLeaveDays(params: ComputeLeaveDaysParams): number {
@@ -58,6 +71,7 @@ export function computeLeaveDays(params: ComputeLeaveDaysParams): number {
     startDate,
     endDate,
     weekStartDay,
+    workingWeekdays,
     holidays,
     halfDayStart = false,
     halfDayEnd = false,
@@ -73,7 +87,8 @@ export function computeLeaveDays(params: ComputeLeaveDaysParams): number {
   while (cursor.getTime() <= end.getTime()) {
     const iso = cursor.toISOString().slice(0, 10);
     const excludedAsHoliday = holidaySet.has(iso) && (deductionMode === "workingDays" || extendForHolidays);
-    const counted = deductionMode === "workingDays" ? isWorkingDay(cursor, weekStartDay) && !excludedAsHoliday : !excludedAsHoliday;
+    const counted =
+      deductionMode === "workingDays" ? isWorkingDay(cursor, weekStartDay, workingWeekdays) && !excludedAsHoliday : !excludedAsHoliday;
 
     if (counted) {
       const isFirst = iso === startDate;

@@ -66,6 +66,67 @@ export function computeSaudiAnnualLeaveRateDaysPerYear(hireDate: string, asOfDat
   return completedYearsBetween(hireDate, asOfDate) >= 5 ? 30 : 21;
 }
 
+/**
+ * Saudi Arabia Annual Leave: cumulative entitlement earned to date (not
+ * just the current rate) — each completed year is credited at whatever
+ * rate applied for THAT year (21/year for the first five, 30/year from the
+ * sixth year on), summed. This is what the real accrual cron needs to
+ * compute a delta against what has already been posted; the plain rate
+ * function above stays as the "what applies right now" figure used
+ * elsewhere.
+ */
+export function computeSaudiAnnualLeaveEntitlementDays(hireDate: string, asOfDate: string): number {
+  const years = completedYearsBetween(hireDate, asOfDate);
+  const yearsAtBaseRate = Math.min(years, 5);
+  const yearsAtHigherRate = Math.max(0, years - 5);
+  return yearsAtBaseRate * 21 + yearsAtHigherRate * 30;
+}
+
+export interface AnnualLeaveEntitlementToDateInput {
+  countryCode: "AE" | "SA" | "PL";
+  hireDate: string;
+  asOfDate: string;
+  /** Poland only — see PolandAnnualLeaveInput. Ignored for AE/SA. */
+  recognisedPriorServiceYears?: number;
+  /** Poland only — see PolandAnnualLeaveInput. Ignored for AE/SA. */
+  fteFraction?: number;
+}
+
+/**
+ * Single dispatcher the real accrual cron calls: cumulative Annual Leave
+ * entitlement earned to date, in the resolved country's own rule shape.
+ * The cron posts the ledger a running total's worth of accrual entries by
+ * diffing this against what it already posted — see
+ * apps/web/src/app/api/cron/leave-accrual/route.ts.
+ */
+export function computeAnnualLeaveEntitlementToDate(input: AnnualLeaveEntitlementToDateInput): number {
+  const { countryCode, hireDate, asOfDate, recognisedPriorServiceYears = 0, fteFraction = 1 } = input;
+
+  if (countryCode === "AE") return computeUaeAnnualLeaveEntitlementDays(hireDate, asOfDate);
+  if (countryCode === "SA") return computeSaudiAnnualLeaveEntitlementDays(hireDate, asOfDate);
+
+  // Poland: a fresh annual grant vests at each completed-year anniversary;
+  // the first year instead vests proportionally per completed month
+  // (Kodeks pracy Art. 153 §1). Years after the first reuse the CURRENT
+  // rate for every completed year since — a deliberate simplification
+  // given recognised prior service and FTE rarely change mid-service; a
+  // rate change from crossing the 10-year threshold only affects years
+  // from that point forward under this approximation, not a full
+  // historical recompute of every prior year at its own then-current rate.
+  const completedMonths = completedMonthsBetween(hireDate, asOfDate);
+  const completedYears = Math.floor(completedMonths / 12);
+  const annualAtHire = computePolandAnnualLeaveEntitlementDays({ completedServiceYears: 0, recognisedPriorServiceYears, fteFraction });
+  if (completedYears < 1) {
+    return computePolandFirstYearAccruedDays(annualAtHire, completedMonths);
+  }
+  const currentAnnual = computePolandAnnualLeaveEntitlementDays({
+    completedServiceYears: completedYears,
+    recognisedPriorServiceYears,
+    fteFraction,
+  });
+  return round2(annualAtHire + Math.max(0, completedYears - 1) * currentAnnual);
+}
+
 export interface PolandAnnualLeaveInput {
   /** Actual tenure with Enginious, in completed years, as of the date being evaluated. */
   completedServiceYears: number;

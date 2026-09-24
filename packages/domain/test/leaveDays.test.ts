@@ -118,4 +118,17 @@ describe("isWeekend", () => {
     expect(isWeekend("2026-03-08", 1)).toBe(true); // Sunday
     expect(isWeekend("2026-03-06", 1)).toBe(false); // Friday
   });
+
+  it("uses an explicit workingWeekdays set instead of weekStartDay when given, even if it disagrees with weekStartDay", () => {
+    const mondayToFriday = [1, 2, 3, 4, 5];
+    expect(isWeekend("2026-03-06", 0, mondayToFriday)).toBe(false); // Friday, day 5, is in the set
+    expect(isWeekend("2026-03-07", 0, mondayToFriday)).toBe(true); // Saturday, day 6, not in the set
+    expect(isWeekend("2026-03-08", 0, mondayToFriday)).toBe(true); // Sunday, day 0, not in the set
+    expect(isWeekend("2026-03-02", 0, mondayToFriday)).toBe(false); // Monday, day 1, in the set
+  });
+
+  it("falls back to weekStartDay when workingWeekdays is null or empty", () => {
+    expect(isWeekend("2026-03-06", 0, null)).toBe(true); // Friday, Sun-Thu week
+    expect(isWeekend("2026-03-06", 0, [])).toBe(true);
+  });
 });
