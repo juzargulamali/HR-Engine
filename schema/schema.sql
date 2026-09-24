@@ -109,27 +109,30 @@ create table countries (
   -- A single "week starts here" integer can only describe a CONTIGUOUS
   -- 5-day work week — this is the explicit, authoritative override for a
   -- schedule it can't represent (0=Sunday..6=Saturday, the exact days
-  -- worked). Null (every country today) falls back to the week_start_day
-  -- derivation above unchanged; see preflight_country_schedule_config().
+  -- worked). Resolved (per the final business decision) for AE/SA/PL —
+  -- {1,2,3,4,5}/{0,1,2,3,4}/{1,2,3,4,5} respectively — by the leave-policy-
+  -- configuration migration; null for every other country, which falls back
+  -- to the week_start_day derivation above; see
+  -- preflight_country_schedule_config().
   working_weekdays integer[],
   created_at      timestamptz not null default now()
 );
 
--- Read-only. Compares each of AE/SA/PL's CURRENT derived working week (from
--- week_start_day, the only thing actually in effect until working_weekdays
--- is explicitly configured) against the approved Monday-Friday(AE/PL)/
+-- Read-only audit tool: reports each of AE/SA/PL's ACTUAL EFFECTIVE
+-- schedule (working_weekdays when set, else the value derived from
+-- week_start_day) against the resolved Monday-Friday(AE/PL)/
 -- Sunday-Thursday(SA) convention, flagging any country where the two
--- disagree — as of this schema, only the UAE's existing configuration
--- (week_start_day = 0, a real Friday/Saturday weekend) conflicts with that
--- convention; this function only reports the conflict, it never resolves
--- it. Callable by any authenticated user, same openness as resolve_policy()
--- — this is aggregate configuration, not employee data.
+-- disagree — expected to always report no conflicts once working_weekdays
+-- is set for all three (kept as a live regression check, e.g. if it were
+-- ever cleared again, rather than removed now that the conflict is
+-- resolved). Callable by any authenticated user, same openness as
+-- resolve_policy() — this is aggregate configuration, not employee data.
 create or replace function preflight_country_schedule_config()
 returns table(
   country_code text,
   week_start_day smallint,
   working_weekdays integer[],
-  derived_working_days_from_week_start_day integer[],
+  effective_working_days integer[],
   requested_convention text,
   conflicts_with_requested_convention boolean
 )
@@ -142,9 +145,9 @@ as $$
     c.code,
     c.week_start_day,
     c.working_weekdays,
-    derived.days,
+    coalesce(c.working_weekdays, derived.days),
     req.convention,
-    (req.expected is not null and derived.days is distinct from req.expected)
+    (req.expected is not null and coalesce(c.working_weekdays, derived.days) is distinct from req.expected)
   from countries c
   cross join lateral (
     select array_agg(d order by d) as days

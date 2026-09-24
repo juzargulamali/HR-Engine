@@ -85,7 +85,7 @@ export async function getCompanySnapshot(
             .in("status", ["submitted", "pending_approval"])
         : Promise.resolve({ count: 0, error: null }),
       supabase.from("public_holidays").select("name").eq("country_code", company.country_code).eq("holiday_date", today).maybeSingle(),
-      supabase.from("countries").select("week_start_day").eq("code", company.country_code).single(),
+      supabase.from("countries").select("week_start_day, working_weekdays").eq("code", company.country_code).single(),
     ]);
 
     // countryResult intentionally not checked for `.error` here — a
@@ -108,7 +108,10 @@ export async function getCompanySnapshot(
     // once an admin could actually save that status.
     const recordedCount = attendance.filter((a) => a.status !== "not_recorded").length;
     const notRecordedCount = Math.max(0, totalEmployees - recordedCount);
-    const isRecoveryDay = !!holidayResult.data || isWeekend(today, countryResult.data?.week_start_day ?? 1);
+    // Prefers working_weekdays (AE/SA/PL's resolved schedule) over the
+    // week_start_day-derived contiguous work week — same precedence
+    // record_attendance_and_recovery() uses server-side.
+    const isRecoveryDay = !!holidayResult.data || isWeekend(today, countryResult.data?.week_start_day ?? 1, countryResult.data?.working_weekdays);
 
     return {
       companyId: company.id,

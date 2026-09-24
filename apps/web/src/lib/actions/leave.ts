@@ -41,7 +41,7 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
     .maybeSingle();
   if (!employee) return { error: "No employee record is linked to your account." };
 
-  const { data: country } = await supabase.from("countries").select("week_start_day").eq("code", employee.country_code).single();
+  const { data: country } = await supabase.from("countries").select("week_start_day, working_weekdays").eq("code", employee.country_code).single();
   if (!country) return { error: "Could not resolve your country's working week." };
 
   // No uncontrolled leave-type strings: the form no longer offers a
@@ -122,6 +122,10 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
     startDate: d.startDate,
     endDate: d.endDate,
     weekStartDay: country.week_start_day,
+    // Prefers working_weekdays (AE/SA/PL's resolved schedule) over the
+    // week_start_day-derived contiguous work week — same precedence
+    // record_attendance_and_recovery() uses server-side.
+    workingWeekdays: country.working_weekdays,
     holidays: (holidayRows ?? []).map((h) => h.holiday_date),
     halfDayStart: d.halfDayStart,
     halfDayEnd: d.halfDayEnd,

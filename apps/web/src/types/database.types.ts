@@ -1287,7 +1287,7 @@ export interface Database {
           country_code: string;
           week_start_day: number;
           working_weekdays: number[] | null;
-          derived_working_days_from_week_start_day: number[];
+          effective_working_days: number[];
           requested_convention: string | null;
           conflicts_with_requested_convention: boolean | null;
         }[];

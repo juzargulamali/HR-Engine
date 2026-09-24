@@ -26,11 +26,14 @@
 --     Leave earning or consumption. Both reuse the existing
 --     approval_workflows/approval_workflow_steps/approvals machinery,
 --     extended with one new approvable_entity value.
---   - It does not touch or overwrite countries.week_start_day, or set any
---     value into the new working_weekdays column, for AE, SA or PL. See
---     the "UAE/Saudi/Poland workweek" section below.
 --   - It does not insert draft policies with an unattributed placeholder
 --     actor. See the "Migration safety" section below.
+--
+-- SECOND CORRECTION ROUND (independent QA inspected the actual code): this
+-- version resolves AE/SA/PL's working_weekdays per the final business
+-- decision (see "1b. UAE/Saudi/Poland workweek" below) instead of leaving it
+-- an unresolved conflict, and no longer uses the UAE legacy week_start_day
+-- fallback for these three countries.
 
 -- -----------------------------------------------------------------------------
 -- 0. Ensure AE/SA/PL exist before anything below references them.
@@ -86,37 +89,78 @@ alter table attendance_records
     check (active_hours_after_midnight is null or active_hours_after_midnight >= 0);
 
 -- -----------------------------------------------------------------------------
--- 1b. UAE/Saudi/Poland workweek — read-only preflight, no data written
+-- 1b. UAE/Saudi/Poland workweek — resolved per the final business decision
 -- -----------------------------------------------------------------------------
--- A single week_start_day integer can only ever describe a CONTIGUOUS
--- 5-day work week — it cannot represent an arbitrary set of working
--- weekdays, and (more importantly here) this correction brief's stated
--- convention for the UAE ("Monday-Friday") does not match this system's
--- existing UAE country row (week_start_day = 0, i.e. Sunday-start, which
--- derives a Friday/Saturday weekend — the real-world UAE working week, and
--- the value seed.sql has always used). That is a genuine conflict between
--- this brief and the system's existing, deliberately-chosen configuration,
--- not a bug to silently "fix" in either direction — so this migration adds
--- ONLY the additive representation and a read-only preflight function that
--- reports the conflict; it does not write working_weekdays for AE, SA or
--- PL, and does not touch week_start_day. HR/engineering must decide and
--- apply that change explicitly and separately, after reviewing
--- preflight_country_schedule_config()'s output — see this migration's
--- accompanying report for the exact call to run.
+-- A single week_start_day integer can only ever describe a CONTIGUOUS 5-day
+-- work week — it cannot represent an arbitrary set of working weekdays,
+-- which is exactly why this system needed working_weekdays (a PostgreSQL
+-- day-of-week array, 0=Sunday..6=Saturday) at all. An earlier version of
+-- this migration treated this brief's requested convention ("UAE
+-- Monday-Friday") as an unresolved conflict against the UAE's existing
+-- week_start_day = 0 (Sunday-start) and left working_weekdays unset for all
+-- three countries pending a decision.
+--
+-- The business decision is now final and is applied here, deterministically
+-- and idempotently, for exactly these three countries — no other country's
+-- schedule is touched, and week_start_day itself is left alone (it is
+-- superseded for schedule-eligibility purposes by working_weekdays wherever
+-- a country has one set, which record_attendance_and_recovery() and
+-- record_overnight_recovery_credit() already prefer — see section 7 below —
+-- so this is the only change needed to make the decision take effect; no
+-- UAE legacy week_start_day fallback is used for these three countries once
+-- this runs):
+--   UAE (AE):    Monday-Friday  -> working_weekdays = {1,2,3,4,5}
+--   Saudi (SA):  Sunday-Thursday -> working_weekdays = {0,1,2,3,4}
+--   Poland (PL): Monday-Friday  -> working_weekdays = {1,2,3,4,5}
 alter table countries
   add column if not exists working_weekdays integer[];
 
--- Read-only. Compares each of AE/SA/PL's CURRENT derived working week
--- (from week_start_day, the only thing actually in effect today) against
--- this brief's requested convention, and flags any country where the two
--- disagree. Callable by any authenticated user, same openness as
+-- Preflight: confirm all three target countries exist before writing
+-- anything (section 0 above already guarantees this via its own
+-- `on conflict do nothing` insert, but this is the explicit, auditable
+-- check this brief asks for rather than relying on that side effect).
+-- Deterministic and idempotent: re-running this migration always sets the
+-- same three values, never conditionally, never based on the column's
+-- current contents.
+do $$
+declare
+  v_target record;
+  v_missing text[];
+begin
+  select array_agg(t.code) into v_missing
+  from (values ('AE'), ('SA'), ('PL')) as t(code)
+  where not exists (select 1 from countries c where c.code = t.code);
+
+  if v_missing is not null then
+    raise exception 'Cannot set the resolved workweek: countries % do not exist yet.', v_missing;
+  end if;
+
+  for v_target in
+    select * from (values
+      ('AE', array[1,2,3,4,5]::integer[]),
+      ('SA', array[0,1,2,3,4]::integer[]),
+      ('PL', array[1,2,3,4,5]::integer[])
+    ) as t(code, dow)
+  loop
+    update countries set working_weekdays = v_target.dow where code = v_target.code;
+  end loop;
+end $$;
+
+-- Read-only audit tool: reports each of AE/SA/PL's ACTUAL EFFECTIVE
+-- schedule (working_weekdays when set, else the value derived from
+-- week_start_day — the same coalesce order record_attendance_and_recovery()
+-- uses) against the resolved convention above, and flags any country where
+-- the two disagree. Should always report no conflicts after this migration
+-- runs; kept as a live regression check (e.g. if working_weekdays were ever
+-- cleared again) rather than removed now that the conflict itself is
+-- resolved. Callable by any authenticated user, same openness as
 -- resolve_policy() — this is aggregate configuration, not employee data.
 create or replace function preflight_country_schedule_config()
 returns table(
   country_code text,
   week_start_day smallint,
   working_weekdays integer[],
-  derived_working_days_from_week_start_day integer[],
+  effective_working_days integer[],
   requested_convention text,
   conflicts_with_requested_convention boolean
 )
@@ -129,9 +173,9 @@ as $$
     c.code,
     c.week_start_day,
     c.working_weekdays,
-    derived.days,
+    coalesce(c.working_weekdays, derived.days),
     req.convention,
-    (req.expected is not null and derived.days is distinct from req.expected)
+    (req.expected is not null and coalesce(c.working_weekdays, derived.days) is distinct from req.expected)
   from countries c
   cross join lateral (
     select array_agg(d order by d) as days
@@ -141,9 +185,9 @@ as $$
   cross join lateral (
     select
       case c.code
-        when 'AE' then 'Monday-Friday (per this correction brief)'
-        when 'SA' then 'Sunday-Thursday (per this correction brief)'
-        when 'PL' then 'Monday-Friday (per this correction brief)'
+        when 'AE' then 'Monday-Friday'
+        when 'SA' then 'Sunday-Thursday'
+        when 'PL' then 'Monday-Friday'
         else null
       end as convention,
       case c.code

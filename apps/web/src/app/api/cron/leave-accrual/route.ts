@@ -249,8 +249,12 @@ export async function GET(request: Request) {
 
   const { grantTotalByKey, ambiguousKeys } = classifyLedgerRows((historyRows ?? []) as AnnualLeaveLedgerRow[]);
   const ambiguousReport: AmbiguousBaseline[] = [...ambiguousKeys].map((key) => {
-    const [employeeId, leaveTypeCode] = key.split(":");
-    return { employeeId, leaveTypeCode, reason: "an 'adjustment' ledger row exists for this employee/leave-type that isn't tagged 'opening_balance' — the historical baseline can't be trusted, so automatic accrual is blocked until HR confirms it" };
+    const separatorIndex = key.indexOf(":");
+    return {
+      employeeId: key.slice(0, separatorIndex),
+      leaveTypeCode: key.slice(separatorIndex + 1),
+      reason: "an 'adjustment' ledger row exists for this employee/leave-type that isn't tagged 'opening_balance' — the historical baseline can't be trusted, so automatic accrual is blocked until HR confirms it",
+    };
   });
 
   // Collect rows and insert them in one bulk call at the end rather than

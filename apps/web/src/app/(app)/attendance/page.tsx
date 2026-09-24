@@ -119,7 +119,7 @@ export default async function AttendancePage({
   }
 
   const [{ data: country }, { data: employees }, { data: holiday }] = await Promise.all([
-    supabase.from("countries").select("week_start_day").eq("code", company.country_code).single(),
+    supabase.from("countries").select("week_start_day, working_weekdays").eq("code", company.country_code).single(),
     employeesQuery,
     supabase.from("public_holidays").select("name").eq("country_code", company.country_code).eq("holiday_date", workDate).maybeSingle(),
   ]);
@@ -137,7 +137,12 @@ export default async function AttendancePage({
 
   const weekStartDay = country?.week_start_day ?? 1;
   const isHolidayDate = !!holiday;
-  const isRecoveryDay = isHolidayDate || isWeekend(workDate, weekStartDay);
+  // Prefers working_weekdays (AE/SA/PL's resolved schedule) over the
+  // week_start_day-derived contiguous work week, same precedence
+  // record_attendance_and_recovery() uses server-side — otherwise this
+  // register would keep showing the legacy UAE Fri/Sat weekend even after
+  // the migration resolves it to Sat/Sun.
+  const isRecoveryDay = isHolidayDate || isWeekend(workDate, weekStartDay, country?.working_weekdays);
 
   // A day with no saved row is genuinely unrecorded — never preselected as
   // Present (or as a synthetic "holiday"/"weekend" status) just because

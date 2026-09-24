@@ -670,28 +670,134 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     });
   });
 
-  describe("preflight_country_schedule_config() — UAE/Saudi/Poland workweek", () => {
-    it("flags the UAE's existing configuration as conflicting with this brief's requested Monday-Friday convention", async () => {
+  describe("preflight_country_schedule_config() — UAE/Saudi/Poland workweek (Blocker 3: resolved, not left conflicting)", () => {
+    it("sets AE's working_weekdays to the resolved Monday-Friday convention, superseding the legacy Sunday-start week_start_day", async () => {
       // AE/SA/PL are seeded (idempotently) by the migration itself before
-      // this test runs — see section 0 of the migration file.
+      // this test runs — see section 0 of the migration file. The
+      // migration's own idempotent `do $$ ... $$` block (section 1b) is
+      // what sets working_weekdays here, not this test.
       const { rows } = await db.asUser(USER_HR, (query) =>
         query("select * from preflight_country_schedule_config() where country_code = 'AE'"),
       );
       expect(rows).toHaveLength(1);
-      expect(rows[0]?.week_start_day).toBe(0);
-      expect(rows[0]?.working_weekdays).toBeNull(); // never written by this migration
-      expect(rows[0]?.derived_working_days_from_week_start_day).toEqual([0, 1, 2, 3, 4]); // Sun-Thu, real UAE practice
-      expect(rows[0]?.conflicts_with_requested_convention).toBe(true); // brief asked for Monday-Friday
+      expect(rows[0]?.week_start_day).toBe(0); // the legacy value — left untouched, but no longer authoritative
+      expect(rows[0]?.working_weekdays).toEqual([1, 2, 3, 4, 5]); // Monday-Friday, resolved by this correction round
+      expect(rows[0]?.effective_working_days).toEqual([1, 2, 3, 4, 5]);
+      expect(rows[0]?.conflicts_with_requested_convention).toBe(false); // no longer an unresolved conflict
     });
 
-    it("does not flag Saudi or Poland — their existing configuration already matches the requested convention", async () => {
+    it("sets Saudi to Sunday-Thursday and Poland to Monday-Friday, with no conflicts remaining for either", async () => {
       const { rows } = await db.asUser(USER_HR, (query) =>
-        query("select country_code, conflicts_with_requested_convention from preflight_country_schedule_config() where country_code in ('SA', 'PL') order by country_code"),
+        query(
+          "select country_code, working_weekdays, effective_working_days, conflicts_with_requested_convention from preflight_country_schedule_config() where country_code in ('SA', 'PL') order by country_code",
+        ),
       );
       expect(rows).toEqual([
-        { country_code: "PL", conflicts_with_requested_convention: false },
-        { country_code: "SA", conflicts_with_requested_convention: false },
+        { country_code: "PL", working_weekdays: [1, 2, 3, 4, 5], effective_working_days: [1, 2, 3, 4, 5], conflicts_with_requested_convention: false },
+        { country_code: "SA", working_weekdays: [0, 1, 2, 3, 4], effective_working_days: [0, 1, 2, 3, 4], conflicts_with_requested_convention: false },
       ]);
+    });
+
+    it("is idempotent — the migration having already run once (as it does for every test in this file) never leaves a different result on a second application", async () => {
+      // Re-running the exact same idempotent update the migration's section
+      // 1b applies must be a no-op, never additive/conditional.
+      await db.seed(`
+        update countries set working_weekdays = array[1,2,3,4,5] where code = 'AE';
+        update countries set working_weekdays = array[0,1,2,3,4] where code = 'SA';
+        update countries set working_weekdays = array[1,2,3,4,5] where code = 'PL';
+      `);
+      const { rows } = await db.asUser(USER_HR, (query) =>
+        query(
+          "select country_code, working_weekdays from preflight_country_schedule_config() where country_code in ('AE', 'SA', 'PL') order by country_code",
+        ),
+      );
+      expect(rows).toEqual([
+        { country_code: "AE", working_weekdays: [1, 2, 3, 4, 5] },
+        { country_code: "PL", working_weekdays: [1, 2, 3, 4, 5] },
+        { country_code: "SA", working_weekdays: [0, 1, 2, 3, 4] },
+      ]);
+    });
+  });
+
+  // Blocker 3's explicit ask: prove Friday/Saturday/Sunday eligibility for
+  // every region, exercised through the real RPC
+  // (record_attendance_and_recovery), not just the raw column values above.
+  // Each region gets its own minimal company/employee/manager/HR-admin —
+  // companies' own after-insert trigger auto-provisions the
+  // 'recovery_credit' approval workflow, so no extra setup is needed for
+  // that. 2026-09-04/05/06 is a real, consecutive Friday/Saturday/Sunday.
+  describe("regional workweek eligibility matrix (Blocker 3)", () => {
+    const FRIDAY = "2026-09-04";
+    const SATURDAY = "2026-09-05";
+    const SUNDAY = "2026-09-06";
+
+    interface RegionOrg {
+      companyId: string;
+      hrUserId: string;
+      reportEmployeeId: string;
+    }
+
+    async function seedRegionOrg(countryCode: string, idSuffix: string): Promise<RegionOrg> {
+      const companyId = `00000000-0000-0000-0000-00000000${idSuffix}0`;
+      const managerUserId = `00000000-0000-0000-0000-00000000${idSuffix}1`;
+      const reportUserId = `00000000-0000-0000-0000-00000000${idSuffix}2`;
+      const hrUserId = `00000000-0000-0000-0000-00000000${idSuffix}3`;
+      const managerEmployeeId = `00000000-0000-0000-0000-00000000${idSuffix}4`;
+      const reportEmployeeId = `00000000-0000-0000-0000-00000000${idSuffix}5`;
+
+      await db.seed(`
+        insert into auth.users (id, email) values
+          ('${managerUserId}', 'p2b-${idSuffix}-manager@enginious.ae'),
+          ('${reportUserId}', 'p2b-${idSuffix}-report@enginious.ae'),
+          ('${hrUserId}', 'p2b-${idSuffix}-hr@enginious.ae');
+
+        insert into companies (id, legal_name, country_code, default_currency)
+          values ('${companyId}', 'Phase 2b Workweek Co ${idSuffix}', '${countryCode}', 'USD');
+
+        insert into employees (id, user_id, employee_number, company_id, country_code, first_name, last_name, hire_date) values
+          ('${managerEmployeeId}', '${managerUserId}', 'WW-${idSuffix}-01', '${companyId}', '${countryCode}', 'Mona', 'Manager', '2024-01-01'),
+          ('${reportEmployeeId}', '${reportUserId}', 'WW-${idSuffix}-02', '${companyId}', '${countryCode}', 'Remy', 'Report', '2024-02-01');
+        update employees set manager_id = '${managerEmployeeId}' where id = '${reportEmployeeId}';
+
+        insert into user_roles (user_id, role, company_id) values ('${hrUserId}', 'hr_admin', '${companyId}');
+      `);
+
+      return { companyId, hrUserId, reportEmployeeId };
+    }
+
+    async function isRecoveryEligible(org: RegionOrg, workDate: string): Promise<boolean> {
+      const { rows } = await db.asUser(org.hrUserId, (query) =>
+        query("select * from record_attendance_and_recovery($1, $2::jsonb)", [
+          workDate,
+          JSON.stringify([{ employee_id: org.reportEmployeeId, status: "present", hours_worked: 8 }]),
+        ]),
+      );
+      // credited=true only ever happens for a genuine recovery day (see
+      // record_attendance_and_recovery's is_recovery_day branch) — a
+      // working day falls through to the "not eligible" else-branch and
+      // reports credited=false, reversed=false, needs_policy_review=false.
+      return rows[0]?.credited === true;
+    }
+
+    it("UAE (Monday-Friday): Friday is a working day, Saturday and Sunday are recovery-eligible", async () => {
+      const org = await seedRegionOrg("AE", "c1a");
+      expect(await isRecoveryEligible(org, FRIDAY)).toBe(false);
+      expect(await isRecoveryEligible(org, SATURDAY)).toBe(true);
+      expect(await isRecoveryEligible(org, SUNDAY)).toBe(true);
+    });
+
+    it("Saudi Arabia (Sunday-Thursday): Friday and Saturday are recovery-eligible, Sunday is a working day", async () => {
+      const org = await seedRegionOrg("SA", "c2a");
+      expect(await isRecoveryEligible(org, FRIDAY)).toBe(true);
+      expect(await isRecoveryEligible(org, SATURDAY)).toBe(true);
+      expect(await isRecoveryEligible(org, SUNDAY)).toBe(false);
+    });
+
+    it("Poland (Monday-Friday): Friday is a working day, Saturday and Sunday are recovery-eligible", async () => {
+      const org = await seedRegionOrg("PL", "c3a");
+      expect(await isRecoveryEligible(org, FRIDAY)).toBe(false);
+      expect(await isRecoveryEligible(org, SATURDAY)).toBe(true);
+      expect(await isRecoveryEligible(org, SUNDAY)).toBe(true);
     });
   });
 });
