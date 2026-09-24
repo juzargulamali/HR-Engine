@@ -10,6 +10,13 @@ import { useFocusTrap } from "@/lib/use-focus-trap";
  * for e.g. a mobile filter panel. Always mounted (never unmounted while
  * `open` is false) so the close transition can actually play; visibility
  * is toggled via opacity/transform + pointer-events instead.
+ *
+ * `inert` (native, no library) is what actually keeps a closed-but-still-
+ * mounted drawer out of the keyboard tab sequence — `aria-hidden`,
+ * `opacity-0`, and `pointer-events-none` all affect how the drawer is
+ * perceived or clicked, but none of them stop Tab from reaching its links
+ * and buttons while it's closed. Applied on the outer wrapper (not just the
+ * dialog panel) so it also covers the backdrop.
  */
 export function Drawer({
   open,
@@ -45,7 +52,7 @@ export function Drawer({
   }, [open, onClose]);
 
   return (
-    <div className={cn("fixed inset-0 z-50", open ? "" : "pointer-events-none")} aria-hidden={!open}>
+    <div className={cn("fixed inset-0 z-50", open ? "" : "pointer-events-none")} aria-hidden={!open} inert={!open}>
       <div
         className={cn("absolute inset-0 bg-black/50 transition-opacity duration-200", open ? "opacity-100" : "opacity-0")}
         onClick={onClose}

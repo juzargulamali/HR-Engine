@@ -82,12 +82,18 @@ export function CommandPalette({ groups }: { groups: NavGroupData[] }) {
         <kbd className="hidden flex-none rounded border border-border bg-secondary px-1.5 py-0.5 text-[10px] font-medium sm:inline">⌘K</kbd>
       </button>
 
+      {/* Always mounted (never unmounted while closed) so the close
+          transition can play; `inert` (native, no library) is what
+          actually keeps it out of the keyboard tab sequence while closed —
+          aria-hidden/opacity-0/pointer-events-none affect perception and
+          clicking, not Tab. */}
       <div
         className={cn(
           "fixed inset-0 z-[60] flex items-start justify-center px-4 pt-[12vh] transition-opacity duration-150",
           open ? "opacity-100" : "pointer-events-none opacity-0",
         )}
         aria-hidden={!open}
+        inert={!open}
       >
         <div className="absolute inset-0 bg-black/60" onClick={() => setOpen(false)} />
         <div
