@@ -20,6 +20,13 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
   const [edits, setEdits] = useState(
     () => new Map(rows.map((r) => [r.employeeId, { status: r.status, workMode: r.workMode ?? "", hoursWorked: r.hoursWorked ?? "" }])),
   );
+  // Which employees the admin actually touched this session — Save All only
+  // sends these, never every row in the register. Without this, opening a
+  // day and clicking Save without changing anything wrote a 'not_recorded'
+  // attendance_records row for every single employee, even ones nobody
+  // looked at, contradicting the "not recorded" default's own meaning
+  // (no row at all).
+  const [touched, setTouched] = useState<Set<string>>(new Set());
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<{ error: string | null; creditedCount: number } | null>(null);
 
@@ -29,9 +36,16 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
       next.set(employeeId, { ...next.get(employeeId)!, ...patch });
       return next;
     });
+    setTouched((prev) => new Set(prev).add(employeeId));
   }
 
   function handleSave() {
+    const touchedRows = rows.filter((r) => touched.has(r.employeeId));
+    if (touchedRows.length === 0) {
+      setResult({ error: "Nothing to save — no rows were changed.", creditedCount: 0 });
+      return;
+    }
+
     startTransition(async () => {
       // isRecoveryDay is only ever used here to explain the badge in the
       // table below — record_attendance_and_recovery() re-derives whether
@@ -40,7 +54,7 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
       // form never asserts either one.
       const outcome = await bulkRecordAttendance({
         workDate,
-        rows: rows.map((r) => {
+        rows: touchedRows.map((r) => {
           const edit = edits.get(r.employeeId)!;
           return {
             employeeId: r.employeeId,
@@ -51,6 +65,7 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
         }),
       });
       setResult(outcome);
+      if (!outcome.error) setTouched(new Set());
     });
   }
 
