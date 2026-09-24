@@ -217,7 +217,14 @@ create table employees (
   updated_at          timestamptz not null default now(),
   updated_by          uuid,
   deleted_at          timestamptz,
-  deleted_by          uuid
+  deleted_by          uuid,
+  -- Poland Annual Leave's 10-year service threshold counts recognised
+  -- prior service/education toward tenure, which this system has no way
+  -- to compute — it is an explicit, HR-controlled input. Null (the
+  -- default for every existing employee) means "no recognised prior
+  -- service", identical to today's behavior.
+  recognised_prior_service_years numeric(4,2)
+    check (recognised_prior_service_years is null or recognised_prior_service_years >= 0)
 );
 
 create index idx_employees_manager on employees(manager_id) where deleted_at is null;
@@ -248,7 +255,12 @@ create table employment_contracts (
   superseded_by        uuid references employment_contracts(id),
   version_no           int not null,
   created_at           timestamptz not null default now(),
-  created_by           uuid not null
+  created_by           uuid not null,
+  -- Poland Annual Leave entitlement must be prorated for part-time
+  -- contracts. Every existing row defaults to 1.0 (full-time), so nothing
+  -- existing changes meaning.
+  fte_fraction         numeric(4,3) not null default 1.0
+    check (fte_fraction > 0 and fte_fraction <= 1)
 );
 
 create index idx_contracts_employee_current
@@ -781,6 +793,15 @@ create table attendance_records (
   work_mode     text
                   check (work_mode in ('office', 'client_site', 'work_from_home', 'field_work', 'business_travel')),
   source        text not null default 'manual',   -- 'manual'|'biometric'|'import'
+  -- Recovery Leave's exceptional-overnight-extension rule needs verified
+  -- working-time facts, never a browser-supplied flag — but clock_in/
+  -- clock_out above are never populated or read anywhere in this codebase,
+  -- so trusting them would mean trusting invented values. These two
+  -- columns are the smallest safe addition: HR/manager-attested facts,
+  -- same trust model as status/hours_worked above.
+  completed_normal_scheduled_day boolean,
+  active_hours_after_midnight    numeric(4,2)
+    check (active_hours_after_midnight is null or active_hours_after_midnight >= 0),
   unique (employee_id, work_date)
 );
 
@@ -1564,6 +1585,134 @@ begin
   end if;
 
   delete from attendance_records where id = p_record_id;
+end;
+$$;
+
+-- Phase 2b: Recovery Leave's exceptional-overnight-extension credit. Mirrors
+-- packages/domain/src/recoveryCredit.ts's computeOvernightRecoveryCredit
+-- exactly (0.5 day up to and including 4 active hours after midnight, 1 day
+-- beyond that; nothing unless the normal scheduled day was completed AND
+-- work genuinely continued past midnight). Posts into the SAME comp_day_ledger
+-- row record_attendance_and_recovery() uses, so
+-- guard_comp_day_ledger_single_active_credit already prevents a day from
+-- ever earning both a standard and an overnight credit.
+create or replace function record_overnight_recovery_credit(
+  p_employee_id uuid,
+  p_work_date date,
+  p_completed_normal_scheduled_day boolean,
+  p_active_hours_after_midnight numeric
+)
+returns table(credited boolean, credit_days numeric)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_company_id uuid;
+  v_record_id uuid;
+  v_was_credited comp_day_ledger%rowtype;
+  v_credit_days numeric;
+  v_expiry_date date;
+begin
+  select company_id into v_company_id from employees where id = p_employee_id and deleted_at is null;
+  if v_company_id is null then
+    raise exception 'Employee % not found', p_employee_id;
+  end if;
+
+  if not (has_role('hr_admin', v_company_id) or is_manager_of(p_employee_id)) then
+    raise exception 'Only HR Admin or this employee''s manager may record an overnight recovery credit';
+  end if;
+
+  if p_active_hours_after_midnight is null or p_active_hours_after_midnight < 0 then
+    raise exception 'active_hours_after_midnight must be a non-negative number';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || p_employee_id::text));
+
+  select id into v_record_id from attendance_records where employee_id = p_employee_id and work_date = p_work_date;
+  if v_record_id is null then
+    raise exception 'Record ordinary attendance for % on % first', p_employee_id, p_work_date;
+  end if;
+
+  update attendance_records
+  set completed_normal_scheduled_day = p_completed_normal_scheduled_day,
+      active_hours_after_midnight = p_active_hours_after_midnight
+  where id = v_record_id;
+
+  select cl.* into v_was_credited from comp_day_ledger cl
+  where cl.reference_type = 'attendance_record' and cl.reference_id = v_record_id and cl.entry_type = 'earned'
+    and not exists (select 1 from comp_day_ledger r where r.reversal_of_id = cl.id);
+  if v_was_credited.id is not null then
+    credited := false;
+    credit_days := 0;
+    return next;
+    return;
+  end if;
+
+  if not p_completed_normal_scheduled_day or p_active_hours_after_midnight <= 0 then
+    credited := false;
+    credit_days := 0;
+    return next;
+    return;
+  end if;
+
+  v_credit_days := case when p_active_hours_after_midnight > 4 then 1 else 0.5 end;
+  v_expiry_date := p_work_date + interval '180 days';
+
+  insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, expiry_date, reference_type, reference_id, created_by)
+  values (p_employee_id, p_work_date, 'earned', v_credit_days, 'overnight_extension', v_expiry_date, 'attendance_record', v_record_id, auth.uid());
+
+  credited := true;
+  credit_days := v_credit_days;
+  return next;
+end;
+$$;
+
+-- Phase 2b: Recovery Leave forfeiture on termination — no cash conversion,
+-- an auditable 'reversal' row (source = 'termination_forfeiture') rather
+-- than a silent delete. Idempotent: does nothing if there's no positive
+-- balance left, so a retried or double-triggered call never double-forfeits
+-- or drives the balance negative.
+create or replace function forfeit_recovery_leave_on_termination(p_employee_id uuid)
+returns table(forfeited_days numeric)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_company_id uuid;
+  v_employment_status employment_status;
+  v_balance numeric;
+begin
+  select company_id, employment_status into v_company_id, v_employment_status
+  from employees where id = p_employee_id;
+  if v_company_id is null then
+    raise exception 'Employee % not found', p_employee_id;
+  end if;
+
+  if not has_role('hr_admin', v_company_id) then
+    raise exception 'Only HR Admin may forfeit recovery leave on termination';
+  end if;
+
+  if v_employment_status is distinct from 'terminated' then
+    raise exception 'Employee % is not marked terminated', p_employee_id;
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || p_employee_id::text));
+
+  select coalesce(sum(days), 0) into v_balance from comp_day_ledger where employee_id = p_employee_id;
+
+  if v_balance <= 0 then
+    forfeited_days := 0;
+    return next;
+    return;
+  end if;
+
+  insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, reference_type, reference_id, created_by)
+  values (p_employee_id, current_date, 'reversal', -v_balance, 'termination_forfeiture', 'employee', p_employee_id, auth.uid());
+
+  forfeited_days := v_balance;
+  return next;
 end;
 $$;
 
