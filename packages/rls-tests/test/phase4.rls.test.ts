@@ -14,6 +14,30 @@ async function actAs(query: Client["query"], userId: string) {
   await query("SELECT set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: userId, role: "authenticated" })]);
 }
 
+// Recovery Leave earning is approval-gated (Line Manager, then HR Admin) —
+// this walks a standard/overnight recovery_credit_requests row all the way
+// to its final, ledger-posting approval. Must run inside ONE asUser() call
+// (started as the manager, the first step's approver), switching to USER_HR
+// with actAs() for the second — same reason as every other multi-step chain
+// in this file.
+async function fullyApproveRecoveryCredit(query: Client["query"], attendanceRecordId: string, managerUserId: string, hrUserId: string) {
+  const request = await query(
+    "select id from recovery_credit_requests where attendance_record_id = $1 and status not in ('cancelled', 'rejected')",
+    [attendanceRecordId],
+  );
+  const requestId = request.rows[0]?.id;
+
+  await actAs(query, managerUserId);
+  const step1 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 1", [requestId]);
+  await query("select decide_leave_approval($1, 'approved', null)", [step1.rows[0]?.id]);
+
+  await actAs(query, hrUserId);
+  const step2 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 2", [requestId]);
+  await query("select decide_leave_approval($1, 'approved', null)", [step2.rows[0]?.id]);
+
+  return requestId;
+}
+
 const COMPANY_A = "00000000-0000-0000-0000-0000000004a1";
 
 const USER_MANAGER = "00000000-0000-0000-0000-0000000004b1";
@@ -685,12 +709,22 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
 
   // 2026-04-04 is a Saturday and 2026-04-06 a Monday — ZZ took the default
   // week_start_day (1, Monday), so Sat/Sun are its weekend.
+  // Phase 2b correction: earning a recovery credit is now approval-gated
+  // (Line Manager, then HR Admin) — record_attendance_and_recovery() only
+  // ever CREATES a recovery_credit_requests row and routes it through
+  // create_initial_approval(); the actual comp_day_ledger 'earned' row is
+  // posted only once decide_leave_approval() finalizes the HR Admin step
+  // (see the "recovery_credit approval chain" describe block below). The
+  // old country-configured flat recovery_credit_days amount is retired
+  // entirely in favor of a deterministic hour-threshold rule, so it no
+  // longer needs any active overtime_rules policy at all to compute a
+  // credit amount.
   describe("record_attendance_and_recovery()", () => {
-    it("credits a comp day for present on a weekend, re-deriving the day itself rather than trusting the caller", async () => {
+    it("creates a recovery credit REQUEST (not an immediate ledger credit) for present on a weekend, re-deriving the day itself", async () => {
       await db.asUser(USER_HR, async (query) => {
         const { rows } = await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-04-04", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }])],
+          ["2026-04-04", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }])],
         );
         expect(rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: true, reversed: false, needs_policy_review: false }]);
 
@@ -701,10 +735,16 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
         expect(record.rows).toEqual([{ status: "present", work_mode: null }]);
 
         const ledger = await query(
-          "select entry_type, days from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-04')",
+          "select entry_type from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-04')",
           [EMPLOYEE_REPORT],
         );
-        expect(ledger.rows).toEqual([{ entry_type: "earned", days: "1.00" }]);
+        expect(ledger.rows).toEqual([]); // nothing posted yet — awaiting approval
+
+        const request = await query(
+          "select event_type, proposed_days, status from recovery_credit_requests where attendance_record_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-04')",
+          [EMPLOYEE_REPORT],
+        );
+        expect(request.rows).toEqual([{ event_type: "standard", proposed_days: "1.0", status: "submitted" }]);
       });
     });
 
@@ -712,221 +752,168 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       await db.asUser(USER_HR, async (query) => {
         const { rows } = await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-04-06", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", work_mode: "office" }])],
+          ["2026-04-06", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", work_mode: "office", hours_worked: 8 }])],
         );
         expect(rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: false, reversed: false, needs_policy_review: false }]);
 
-        const ledger = await query(
-          "select id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-06')",
+        const request = await query(
+          "select id from recovery_credit_requests where attendance_record_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-06')",
           [EMPLOYEE_REPORT],
         );
-        expect(ledger.rows).toEqual([]);
+        expect(request.rows).toEqual([]);
       });
     });
 
-    it("is idempotent under a repeated (e.g. double-clicked) save — never double-credits the same day", async () => {
+    it("flags needs_policy_review, without guessing an amount, when a recovery-eligible day has no hours_worked recorded yet", async () => {
       await db.asUser(USER_HR, async (query) => {
-        const payload = JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }]);
-        const first = await query("select * from record_attendance_and_recovery($1, $2::jsonb)", ["2026-04-11", payload]);
+        const { rows } = await query(
+          "select * from record_attendance_and_recovery($1, $2::jsonb)",
+          ["2026-04-05", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }])],
+        );
+        expect(rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: false, reversed: false, needs_policy_review: true }]);
+
+        const request = await query(
+          "select id from recovery_credit_requests where attendance_record_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-05')",
+          [EMPLOYEE_REPORT],
+        );
+        expect(request.rows).toEqual([]);
+      });
+    });
+
+    it("uses the hour-threshold rule: up to and including 4 active hours -> 0.5 day, more than 4 -> 1 day", async () => {
+      await db.asUser(USER_HR, async (query) => {
+        // 2026-04-11 is a Saturday, 2026-04-12 a Sunday — both within ZZ's weekend.
+        const half = await query(
+          "select * from record_attendance_and_recovery($1, $2::jsonb)",
+          ["2026-04-11", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 4 }])],
+        );
+        expect(half.rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: true, reversed: false, needs_policy_review: false }]);
+        const halfRequest = await query(
+          "select proposed_days from recovery_credit_requests where attendance_record_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-11')",
+          [EMPLOYEE_REPORT],
+        );
+        expect(halfRequest.rows).toEqual([{ proposed_days: "0.5" }]);
+
+        const full = await query(
+          "select * from record_attendance_and_recovery($1, $2::jsonb)",
+          ["2026-04-12", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 4.5 }])],
+        );
+        expect(full.rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: true, reversed: false, needs_policy_review: false }]);
+        const fullRequest = await query(
+          "select proposed_days from recovery_credit_requests where attendance_record_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-12')",
+          [EMPLOYEE_REPORT],
+        );
+        expect(fullRequest.rows).toEqual([{ proposed_days: "1.0" }]);
+      });
+    });
+
+    it("is idempotent under a repeated (e.g. double-clicked) save — never creates a second request for the same day", async () => {
+      await db.asUser(USER_HR, async (query) => {
+        const payload = JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }]);
+        const first = await query("select * from record_attendance_and_recovery($1, $2::jsonb)", ["2026-04-18", payload]);
         expect(first.rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: true, reversed: false, needs_policy_review: false }]);
 
-        const second = await query("select * from record_attendance_and_recovery($1, $2::jsonb)", ["2026-04-11", payload]);
+        const second = await query("select * from record_attendance_and_recovery($1, $2::jsonb)", ["2026-04-18", payload]);
         expect(second.rows).toEqual([
           { attendance_employee_id: EMPLOYEE_REPORT, credited: false, reversed: false, needs_policy_review: false },
         ]);
 
-        const ledger = await query(
-          "select entry_type from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-11')",
+        const requests = await query(
+          "select status from recovery_credit_requests where attendance_record_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-18')",
           [EMPLOYEE_REPORT],
         );
-        expect(ledger.rows).toEqual([{ entry_type: "earned" }]);
+        expect(requests.rows).toEqual([{ status: "submitted" }]);
       });
     });
 
-    it("reverses (never deletes) an already-earned credit when the day is corrected away from present", async () => {
+    it("reverses (never deletes) an already-earned credit when the day is corrected away from present, and a later re-correction earns a genuinely fresh request", async () => {
       await db.asUser(USER_HR, async (query) => {
         await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-04-18", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }])],
+          ["2026-04-25", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }])],
         );
+        const recordId = (
+          await query("select id from attendance_records where employee_id = $1 and work_date = '2026-04-25'", [EMPLOYEE_REPORT])
+        ).rows[0]?.id;
+
+        // Fully approve it first, so there's an actual earned ledger credit to reverse.
+        await fullyApproveRecoveryCredit(query, recordId, USER_MANAGER, USER_HR);
+        await actAs(query, USER_HR);
+        const activeLedger = await query(
+          "select entry_type from comp_day_ledger where reference_type = 'attendance_record' and reference_id = $1",
+          [recordId],
+        );
+        expect(activeLedger.rows).toEqual([{ entry_type: "earned" }]);
 
         const correction = await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-04-18", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "absent" }])],
+          ["2026-04-25", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "absent" }])],
         );
         expect(correction.rows).toEqual([
           { attendance_employee_id: EMPLOYEE_REPORT, credited: false, reversed: true, needs_policy_review: false },
         ]);
 
-        const record = await query("select status from attendance_records where employee_id = $1 and work_date = '2026-04-18'", [
+        const record = await query("select status from attendance_records where employee_id = $1 and work_date = '2026-04-25'", [
           EMPLOYEE_REPORT,
         ]);
         expect(record.rows).toEqual([{ status: "absent" }]);
 
         const ledger = await query(
-          "select entry_type, days, reversal_of_id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-18') order by created_at",
-          [EMPLOYEE_REPORT],
+          "select entry_type, days, reversal_of_id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = $1 order by created_at",
+          [recordId],
         );
         expect(ledger.rows).toHaveLength(2);
         expect(ledger.rows[0]).toMatchObject({ entry_type: "earned", days: "1.00", reversal_of_id: null });
         expect(ledger.rows[1]).toMatchObject({ entry_type: "reversal", days: "-1.00" });
         expect(ledger.rows[1]?.reversal_of_id).toBeTruthy();
 
-        // Correcting it back to present earns a fresh credit — the
-        // original (now-reversed) earned row must not permanently block
-        // this day from ever qualifying again.
+        const requestAfterReversal = await query("select status from recovery_credit_requests where attendance_record_id = $1", [recordId]);
+        expect(requestAfterReversal.rows).toEqual([{ status: "cancelled" }]);
+
+        // Correcting it back to present earns a FRESH request — the
+        // original (now-cancelled) request must not permanently block this
+        // day from ever qualifying again (the partial unique index only
+        // enforces uniqueness among non-cancelled/non-rejected requests).
         const restored = await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-04-18", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }])],
+          ["2026-04-25", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }])],
         );
         expect(restored.rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: true, reversed: false, needs_policy_review: false }]);
 
-        const finalLedger = await query(
-          "select entry_type from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-04-18') order by created_at",
-          [EMPLOYEE_REPORT],
+        const requestsAfterRestore = await query(
+          "select status from recovery_credit_requests where attendance_record_id = $1 order by created_at",
+          [recordId],
         );
-        expect(finalLedger.rows.map((r) => r.entry_type)).toEqual(["earned", "reversal", "earned"]);
+        expect(requestsAfterRestore.rows.map((r) => r.status)).toEqual(["cancelled", "submitted"]);
       });
     });
 
     it("blocks anyone other than HR Admin from recording attendance", async () => {
-      const payload = JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }]);
+      const payload = JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }]);
       await expect(
-        db.asUser(USER_MANAGER, (query) => query("select * from record_attendance_and_recovery($1, $2::jsonb)", ["2026-04-25", payload])),
+        db.asUser(USER_MANAGER, (query) => query("select * from record_attendance_and_recovery($1, $2::jsonb)", ["2026-04-27", payload])),
       ).rejects.toThrow(/Only HR Admin/);
       await expect(
-        db.asUser(USER_REPORT, (query) => query("select * from record_attendance_and_recovery($1, $2::jsonb)", ["2026-04-25", payload])),
+        db.asUser(USER_REPORT, (query) => query("select * from record_attendance_and_recovery($1, $2::jsonb)", ["2026-04-27", payload])),
       ).rejects.toThrow(/Only HR Admin/);
-    });
-
-    // ZZ's one active overtime_rules policy is shared, persistent state
-    // (seeded by the "approving a timesheet..." test above) — every test
-    // below that mutates its payload restores it in a finally block so it
-    // doesn't leak into later tests.
-    async function withMutatedOvertimePolicy(mutate: (payload: unknown) => unknown, run: () => Promise<void>) {
-      const original = await db.asUser(USER_HR, (query) =>
-        query("select id, payload from policy_versions where country_code = 'ZZ' and policy_type = 'overtime_rules' and status = 'active'"),
-      );
-      const policyId = original.rows[0]?.id;
-      expect(policyId).toBeTruthy();
-      const originalPayload = original.rows[0]?.payload;
-
-      await db.seed(`update policy_versions set payload = '${JSON.stringify(mutate(originalPayload))}'::jsonb where id = '${policyId}';`);
-      try {
-        await run();
-      } finally {
-        await db.seed(`update policy_versions set payload = '${JSON.stringify(originalPayload)}'::jsonb where id = '${policyId}';`);
-      }
-    }
-
-    it("honors a country's configured recovery_credit_days, including zero and half-day", async () => {
-      await withMutatedOvertimePolicy(
-        (p) => ({ ...(p as Record<string, unknown>), recovery_credit_days: 0 }),
-        async () => {
-          await db.asUser(USER_HR, async (query) => {
-            const { rows } = await query(
-              "select * from record_attendance_and_recovery($1, $2::jsonb)",
-              ["2026-05-02", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }])],
-            );
-            expect(rows).toEqual([
-              { attendance_employee_id: EMPLOYEE_REPORT, credited: false, reversed: false, needs_policy_review: false },
-            ]);
-
-            const ledger = await query(
-              "select id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-05-02')",
-              [EMPLOYEE_REPORT],
-            );
-            expect(ledger.rows).toEqual([]);
-          });
-        },
-      );
-
-      await withMutatedOvertimePolicy(
-        (p) => ({ ...(p as Record<string, unknown>), recovery_credit_days: 0.5 }),
-        async () => {
-          await db.asUser(USER_HR, async (query) => {
-            const { rows } = await query(
-              "select * from record_attendance_and_recovery($1, $2::jsonb)",
-              ["2026-05-09", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }])],
-            );
-            expect(rows).toEqual([
-              { attendance_employee_id: EMPLOYEE_REPORT, credited: true, reversed: false, needs_policy_review: false },
-            ]);
-
-            const ledger = await query(
-              "select days from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-05-09')",
-              [EMPLOYEE_REPORT],
-            );
-            expect(ledger.rows).toEqual([{ days: "0.50" }]);
-          });
-        },
-      );
-    });
-
-    // Regression test for this correction: a country with no
-    // recovery-credit configuration at all used to silently award a full
-    // day. It must now award 0 and flag the gap instead of guessing.
-    it("awards 0 days and flags needs_policy_review when no active overtime_rules policy exists for the country", async () => {
-      const noPolicyCompanyId = randomUUID();
-      const noPolicyEmployeeId = randomUUID();
-      await db.seed(`
-        insert into countries (code, name, default_currency) values ('YY', 'Yland', 'YYD') on conflict do nothing;
-        insert into companies (id, legal_name, country_code, default_currency) values ('${noPolicyCompanyId}', 'No Policy Co', 'YY', 'YYD');
-        insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date)
-          values ('${noPolicyEmployeeId}', 'NP-01', '${noPolicyCompanyId}', 'YY', 'No', 'Policy', '2024-01-01');
-        insert into user_roles (user_id, role, company_id) values ('${USER_HR}', 'hr_admin', '${noPolicyCompanyId}');
-      `);
-
-      await db.asUser(USER_HR, async (query) => {
-        // 2026-05-16 is also a Saturday.
-        const { rows } = await query(
-          "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-05-16", JSON.stringify([{ employee_id: noPolicyEmployeeId, status: "present" }])],
-        );
-        expect(rows).toEqual([{ attendance_employee_id: noPolicyEmployeeId, credited: false, reversed: false, needs_policy_review: true }]);
-
-        const ledger = await query(
-          "select id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-05-16')",
-          [noPolicyEmployeeId],
-        );
-        expect(ledger.rows).toEqual([]);
-      });
-    });
-
-    // Regression test: a misconfigured value (anything other than exactly
-    // 0, 0.5, or 1) must never be silently accepted — same "0 days + flag
-    // for review" treatment as no policy at all.
-    it("awards 0 days and flags needs_policy_review when recovery_credit_days is configured but not exactly 0, 0.5, or 1", async () => {
-      await withMutatedOvertimePolicy(
-        (p) => ({ ...(p as Record<string, unknown>), recovery_credit_days: 2 }),
-        async () => {
-          await db.asUser(USER_HR, async (query) => {
-            const { rows } = await query(
-              "select * from record_attendance_and_recovery($1, $2::jsonb)",
-              ["2026-05-23", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }])],
-            );
-            expect(rows).toEqual([
-              { attendance_employee_id: EMPLOYEE_REPORT, credited: false, reversed: false, needs_policy_review: true },
-            ]);
-          });
-        },
-      );
     });
 
     // Restores a real database-level guarantee against double-crediting —
-    // record_attendance_and_recovery()'s advisory lock closes the race for
-    // the sanctioned path, but a raw insert bypassing it entirely (or a
-    // bug that reintroduces the old check-then-insert race) is still
-    // caught here.
+    // the guard trigger closes this for a raw insert bypassing the whole
+    // approval flow entirely (or a bug that reintroduces the old
+    // check-then-insert race).
     it("rejects a second active earned credit for the same attendance record, even via a raw insert", async () => {
       await db.asUser(USER_HR, async (query) => {
         await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-05-30", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }])],
+          ["2026-05-30", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }])],
         );
         const recordId = (
           await query("select id from attendance_records where employee_id = $1 and work_date = '2026-05-30'", [EMPLOYEE_REPORT])
         ).rows[0]?.id;
+
+        await fullyApproveRecoveryCredit(query, recordId, USER_MANAGER, USER_HR);
+        await actAs(query, USER_HR);
 
         await expect(
           query(
@@ -936,39 +923,110 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
         ).rejects.toThrow(/active \(unreversed\) earned comp-day credit already exists/);
       });
     });
+  });
 
-    it("honors a country's configured recovery_credit_days, including zero", async () => {
-      // ZZ already has an active, open-ended overtime_rules policy from the
-      // "approving a timesheet..." test above (policy_versions' exclusion
-      // constraint allows only one active row per country/date range, so
-      // this test has to reuse and restore it rather than insert its own).
-      const original = await db.asUser(USER_HR, (query) =>
-        query("select id, payload from policy_versions where country_code = 'ZZ' and policy_type = 'overtime_rules' and status = 'active'"),
-      );
-      const policyId = original.rows[0]?.id;
-      expect(policyId).toBeTruthy();
+  describe("recovery_credit approval chain (decide_leave_approval)", () => {
+    async function submitStandardRequest(query: Client["query"], workDate: string, hours = 8) {
+      await query("select * from record_attendance_and_recovery($1, $2::jsonb)", [
+        workDate,
+        JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: hours }]),
+      ]);
+      const record = await query("select id from attendance_records where employee_id = $1 and work_date = $2", [EMPLOYEE_REPORT, workDate]);
+      const recordId = record.rows[0]?.id;
+      const request = await query("select id from recovery_credit_requests where attendance_record_id = $1", [recordId]);
+      return { recordId, requestId: request.rows[0]?.id };
+    }
 
-      try {
-        await db.seed(`update policy_versions set payload = payload || '{"recovery_credit_days": 0}'::jsonb where id = '${policyId}';`);
+    it("manager approval alone (step 1) never posts a ledger credit — only marks the request pending HR", async () => {
+      await db.asUser(USER_HR, async (query) => {
+        const { recordId, requestId } = await submitStandardRequest(query, "2026-06-13");
 
-        await db.asUser(USER_HR, async (query) => {
-          const { rows } = await query(
-            "select * from record_attendance_and_recovery($1, $2::jsonb)",
-            ["2026-06-06", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }])],
-          );
-          expect(rows).toEqual([
-            { attendance_employee_id: EMPLOYEE_REPORT, credited: false, reversed: false, needs_policy_review: false },
-          ]);
+        await actAs(query, USER_MANAGER);
+        const step1 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 1", [
+          requestId,
+        ]);
+        await query("select decide_leave_approval($1, 'approved', null)", [step1.rows[0]?.id]);
 
-          const ledger = await query(
-            "select id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = (select id from attendance_records where employee_id = $1 and work_date = '2026-06-06')",
-            [EMPLOYEE_REPORT],
-          );
-          expect(ledger.rows).toEqual([]);
-        });
-      } finally {
-        await db.seed(`update policy_versions set payload = '${JSON.stringify(original.rows[0]?.payload)}'::jsonb where id = '${policyId}';`);
-      }
+        await actAs(query, USER_HR);
+        const request = await query("select status from recovery_credit_requests where id = $1", [requestId]);
+        expect(request.rows).toEqual([{ status: "pending_approval" }]);
+
+        const ledger = await query("select id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = $1", [recordId]);
+        expect(ledger.rows).toEqual([]);
+      });
+    });
+
+    it("HR Admin's final approval (step 2) credits exactly once, with the correct source and 180-day expiry", async () => {
+      await db.asUser(USER_HR, async (query) => {
+        const { recordId, requestId } = await submitStandardRequest(query, "2026-06-20");
+        await fullyApproveRecoveryCredit(query, recordId, USER_MANAGER, USER_HR);
+
+        const request = await query("select status, comp_day_ledger_id from recovery_credit_requests where id = $1", [requestId]);
+        expect(request.rows[0]?.status).toBe("approved");
+        expect(request.rows[0]?.comp_day_ledger_id).toBeTruthy();
+
+        const ledger = await query(
+          "select entry_type, days, source, expiry_date, txn_date from comp_day_ledger where reference_type = 'attendance_record' and reference_id = $1",
+          [recordId],
+        );
+        expect(ledger.rows).toEqual([{ entry_type: "earned", days: "1.00", source: "holiday_worked", expiry_date: expect.anything(), txn_date: expect.anything() }]);
+        const expiry = new Date(ledger.rows[0]?.expiry_date as string);
+        const txn = new Date(ledger.rows[0]?.txn_date as string);
+        expect(Math.round((expiry.getTime() - txn.getTime()) / (24 * 60 * 60 * 1000))).toBe(180);
+      });
+    });
+
+    it("rejection at either step never posts a credit, and closes the chain", async () => {
+      await db.asUser(USER_HR, async (query) => {
+        const { recordId, requestId } = await submitStandardRequest(query, "2026-06-27");
+
+        await actAs(query, USER_MANAGER);
+        const step1 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 1", [
+          requestId,
+        ]);
+        await query("select decide_leave_approval($1, 'rejected', 'not eligible')", [step1.rows[0]?.id]);
+
+        await actAs(query, USER_HR);
+        const request = await query("select status from recovery_credit_requests where id = $1", [requestId]);
+        expect(request.rows).toEqual([{ status: "rejected" }]);
+
+        const ledger = await query("select id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = $1", [recordId]);
+        expect(ledger.rows).toEqual([]);
+
+        const step2 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 2", [
+          requestId,
+        ]);
+        expect(step2.rows).toEqual([]);
+      });
+    });
+
+    it("blocks the employee from approving their own recovery credit request", async () => {
+      await db.asUser(USER_HR, async (query) => {
+        const { requestId } = await submitStandardRequest(query, "2026-07-04");
+        const step1 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 1", [
+          requestId,
+        ]);
+
+        await actAs(query, USER_REPORT);
+        await expect(query("select decide_leave_approval($1, 'approved', null)", [step1.rows[0]?.id])).rejects.toThrow(
+          /Only the assigned approver/,
+        );
+      });
+    });
+
+    it("rejects a repeated decision on the same approval (idempotency/duplicate-decision guard)", async () => {
+      await db.asUser(USER_HR, async (query) => {
+        const { requestId } = await submitStandardRequest(query, "2026-07-11");
+        await actAs(query, USER_MANAGER);
+        const step1 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 1", [
+          requestId,
+        ]);
+        await query("select decide_leave_approval($1, 'approved', null)", [step1.rows[0]?.id]);
+
+        await expect(query("select decide_leave_approval($1, 'approved', null)", [step1.rows[0]?.id])).rejects.toThrow(
+          /already been decided/,
+        );
+      });
     });
   });
 
@@ -981,11 +1039,12 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       await db.asUser(USER_HR, async (query) => {
         await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-06-13", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }])],
+          ["2026-08-01", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }])],
         );
         const recordId = (
-          await query("select id from attendance_records where employee_id = $1 and work_date = '2026-06-13'", [EMPLOYEE_REPORT])
+          await query("select id from attendance_records where employee_id = $1 and work_date = '2026-08-01'", [EMPLOYEE_REPORT])
         ).rows[0]?.id;
+        await fullyApproveRecoveryCredit(query, recordId, USER_MANAGER, USER_HR);
 
         const activeBefore = await query(
           "select id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = $1 and entry_type = 'earned' and not exists (select 1 from comp_day_ledger r where r.reversal_of_id = comp_day_ledger.id)",
@@ -1030,6 +1089,34 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
 
         const recordAfter = await query("select id from attendance_records where id = $1", [recordId]);
         expect(recordAfter.rows).toEqual([]);
+      });
+    });
+
+    // recovery_credit_requests.attendance_record_id has no ON DELETE
+    // action — a still-pending request (never decided at all) would
+    // otherwise block this delete outright with a foreign key violation.
+    it("deletes cleanly even when a recovery credit request is still pending (never approved) for that day", async () => {
+      await db.asUser(USER_HR, async (query) => {
+        await query(
+          "select * from record_attendance_and_recovery($1, $2::jsonb)",
+          ["2026-08-08", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }])],
+        );
+        const recordId = (
+          await query("select id from attendance_records where employee_id = $1 and work_date = '2026-08-08'", [EMPLOYEE_REPORT])
+        ).rows[0]?.id;
+        const requestBefore = await query("select id from recovery_credit_requests where attendance_record_id = $1", [recordId]);
+        expect(requestBefore.rows.length).toBe(1);
+
+        await query("select delete_attendance_record($1)", [recordId]);
+
+        const recordAfter = await query("select id from attendance_records where id = $1", [recordId]);
+        expect(recordAfter.rows).toEqual([]);
+        const requestAfter = await query("select id from recovery_credit_requests where attendance_record_id = $1", [recordId]);
+        expect(requestAfter.rows).toEqual([]);
+        const approvalsAfter = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1", [
+          requestBefore.rows[0]?.id,
+        ]);
+        expect(approvalsAfter.rows).toEqual([]);
       });
     });
 
