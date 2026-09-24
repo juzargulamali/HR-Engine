@@ -1,5 +1,5 @@
 import type { RoleGrant } from "../types";
-import { isHrAdmin } from "./core";
+import { isCLevel, isFinance, isHrAdmin } from "./core";
 
 /**
  * Mirrors the RLS policies in
@@ -21,4 +21,17 @@ export function canManageApprovalWorkflows(grants: readonly RoleGrant[], company
 /** Mirrors leave_requests_update_hr — corrections/cancellations by HR, distinct from the requester's own cancel. */
 export function canManageAnyLeaveRequest(grants: readonly RoleGrant[], companyId: string): boolean {
   return isHrAdmin(grants, { companyId });
+}
+
+/**
+ * Mirrors leave_requests_select exactly (self, manager, HR Admin, Finance,
+ * CEO/CTO — no narrower "just self" carve-out) — used to gate the employee
+ * profile's Leave tab, which previously didn't exist as a section at all.
+ */
+export function canViewEmployeeLeave(
+  grants: readonly RoleGrant[],
+  companyId: string,
+  { isSelf, isManager }: { isSelf: boolean; isManager: boolean },
+): boolean {
+  return isSelf || isManager || isHrAdmin(grants, { companyId }) || isFinance(grants, { companyId }) || isCLevel(grants, { companyId });
 }
