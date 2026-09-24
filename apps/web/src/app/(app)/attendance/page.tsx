@@ -27,9 +27,9 @@ function todayISO(): string {
 export default async function AttendancePage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; companyId?: string }>;
+  searchParams: Promise<{ date?: string; companyId?: string; q?: string }>;
 }) {
-  const { date, companyId: companyIdParam } = await searchParams;
+  const { date, companyId: companyIdParam, q: qParam } = await searchParams;
   const session = await getCurrentSession();
   if (!session) return null;
 
@@ -102,16 +102,25 @@ export default async function AttendancePage({
   const workDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : todayISO();
   const companyId = companyIdParam && manageableCompanies.some((c) => c.id === companyIdParam) ? companyIdParam : manageableCompanies[0]!.id;
   const company = manageableCompanies.find((c) => c.id === companyId)!;
+  const q = (qParam ?? "").trim().slice(0, 100);
+
+  let employeesQuery = supabase
+    .from("employees")
+    .select("id, first_name, last_name")
+    .eq("company_id", companyId)
+    .eq("employment_status", "active")
+    .is("deleted_at", null)
+    .order("first_name");
+  if (q) {
+    // Same PostgREST-filter-injection guard as the Employees list page: strip
+    // the characters the .or() mini-language treats specially before use.
+    const safeQ = q.replace(/[,()]/g, "");
+    employeesQuery = employeesQuery.or(`first_name.ilike.%${safeQ}%,last_name.ilike.%${safeQ}%`);
+  }
 
   const [{ data: country }, { data: employees }, { data: holiday }] = await Promise.all([
     supabase.from("countries").select("week_start_day").eq("code", company.country_code).single(),
-    supabase
-      .from("employees")
-      .select("id, first_name, last_name")
-      .eq("company_id", companyId)
-      .eq("employment_status", "active")
-      .is("deleted_at", null)
-      .order("first_name"),
+    employeesQuery,
     supabase.from("public_holidays").select("name").eq("country_code", company.country_code).eq("holiday_date", workDate).maybeSingle(),
   ]);
 
@@ -174,6 +183,10 @@ export default async function AttendancePage({
               <Label htmlFor="date">Date</Label>
               <Input id="date" name="date" type="date" defaultValue={workDate} />
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="q">Search name</Label>
+              <Input id="q" name="q" placeholder="Employee name" defaultValue={q} />
+            </div>
             <Button type="submit" variant="outline">
               Load
             </Button>
@@ -198,7 +211,9 @@ export default async function AttendancePage({
           {rows.length > 0 ? (
             <BulkAttendanceForm workDate={workDate} rows={rows} isRecoveryDay={isRecoveryDay} />
           ) : (
-            <p className="text-muted-foreground">No active employees in this company yet.</p>
+            <p className="text-muted-foreground">
+              {q ? "No active employees match that search." : "No active employees in this company yet."}
+            </p>
           )}
         </CardContent>
       </Card>

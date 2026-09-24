@@ -5,9 +5,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { CancelRequestButton } from "./cancel-request-button";
 import { EmptyState } from "@/components/ui/empty-state";
+import type { RequestStatus } from "@/types/database.types";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   submitted: "secondary",
@@ -17,7 +20,10 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
   cancelled: "outline",
 };
 
-export default async function LeavePage() {
+const STATUS_VALUES = Object.keys(STATUS_VARIANT);
+
+export default async function LeavePage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
+  const { status: statusParam } = await searchParams;
   const session = await getCurrentSession();
   if (!session) return null;
 
@@ -35,15 +41,20 @@ export default async function LeavePage() {
   }
 
   const today = new Date().toISOString().slice(0, 10);
+  const status = statusParam && STATUS_VALUES.includes(statusParam) ? statusParam : "";
   const supabase = await createClient();
+
+  let requestsQuery = supabase
+    .from("leave_requests")
+    .select("id, leave_type_code, start_date, end_date, total_days, status, reason")
+    .eq("employee_id", session.employeeId)
+    .order("start_date", { ascending: false });
+  if (status) requestsQuery = requestsQuery.eq("status", status as RequestStatus);
+
   const [{ data: leaveBalances }, { data: compBalance }, { data: requests }] = await Promise.all([
     supabase.from("leave_balances").select("leave_type_code, balance_days").eq("employee_id", session.employeeId),
     supabase.from("comp_day_balances").select("balance_days").eq("employee_id", session.employeeId).maybeSingle(),
-    supabase
-      .from("leave_requests")
-      .select("id, leave_type_code, start_date, end_date, total_days, status, reason")
-      .eq("employee_id", session.employeeId)
-      .order("start_date", { ascending: false }),
+    requestsQuery,
   ]);
 
   return (
@@ -81,7 +92,28 @@ export default async function LeavePage() {
         <CardHeader>
           <CardTitle>My requests</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <form method="get" className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="status">Status</Label>
+              <Select id="status" name="status" defaultValue={status}>
+                <option value="">All</option>
+                {STATUS_VALUES.map((s) => (
+                  <option key={s} value={s}>
+                    {s.replace(/_/g, " ")}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <button type="submit" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+              Apply
+            </button>
+            {status ? (
+              <Link href="/leave" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+                Reset
+              </Link>
+            ) : null}
+          </form>
           <Table>
             <TableHeader>
               <TableRow>
@@ -113,7 +145,7 @@ export default async function LeavePage() {
               {(requests ?? []).length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5}>
-                    <EmptyState dense title="No leave requests yet." />
+                    <EmptyState dense title={status ? "No leave requests with that status." : "No leave requests yet."} />
                   </TableCell>
                 </TableRow>
               ) : null}
