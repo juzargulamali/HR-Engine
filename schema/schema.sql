@@ -3789,9 +3789,66 @@ revoke insert, update, delete on audit_log from authenticated, anon;
 create policy user_roles_select_own on user_roles for select
   using (user_id = auth.uid() or has_role('sys_admin'));
 
-create policy user_roles_write_sysadmin on user_roles for all
-  using (has_role('sys_admin'))
+create policy user_roles_insert_sysadmin on user_roles for insert
   with check (has_role('sys_admin'));
+
+create policy user_roles_delete_sysadmin on user_roles for delete
+  using (has_role('sys_admin'));
+
+-- No UPDATE policy at all, and UPDATE is explicitly revoked below —
+-- revoking a grant (the only update this table ever needs) must go through
+-- revoke_role_grant(), which enforces the self-revocation and
+-- last-System-Administrator protections atomically. See
+-- 20261030000000_guard_role_grant_revocation.sql.
+revoke update on user_roles from authenticated, anon;
+
+create or replace function revoke_role_grant(p_role_grant_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid;
+  v_role app_role;
+  v_active_sysadmins bigint;
+begin
+  if auth.uid() is null or not has_role('sys_admin') then
+    raise exception 'Only a System Administrator may revoke a role grant';
+  end if;
+
+  -- Held until this transaction ends (commit or rollback) — a concurrent
+  -- call blocks here until the first one is fully done, so its count check
+  -- below always sees the first call's committed result, never a stale
+  -- pre-commit snapshot.
+  perform pg_advisory_xact_lock(hashtext('user_roles:revoke_role_grant'));
+
+  select user_id, role into v_user_id, v_role
+  from user_roles
+  where id = p_role_grant_id and revoked_at is null;
+
+  if v_user_id is null then
+    raise exception 'This role grant no longer exists';
+  end if;
+
+  -- Checked before the self-revocation guard below: when there's only one
+  -- active sys_admin left, revoking it is necessarily a self-revoke (no
+  -- other caller could pass the sys_admin check above), and the more
+  -- specific "last admin" reason is the more useful one to surface.
+  if v_role = 'sys_admin' then
+    select count(*) into v_active_sysadmins from user_roles where role = 'sys_admin' and revoked_at is null;
+    if v_active_sysadmins <= 1 then
+      raise exception 'Can''t revoke the last System Administrator — the system would have nobody left to manage users or roles';
+    end if;
+  end if;
+
+  if v_user_id = auth.uid() then
+    raise exception 'You can''t revoke your own role — ask another System Administrator to do it';
+  end if;
+
+  update user_roles set revoked_at = now() where id = p_role_grant_id;
+end;
+$$;
 
 -- =============================================================================
 -- 15. Audit trigger wiring (generic before/after capture on guarded tables)

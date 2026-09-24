@@ -130,41 +130,16 @@ export async function assignRole(_prevState: ActionState, formData: FormData): P
 }
 
 /**
- * Two guards beyond RLS (which only checks "is this caller a Sys Admin at
- * all", not which grant or whose): never let anyone revoke their own role
- * grant — the accidental-self-lockout case — and never let the last active
- * sys_admin grant be revoked by anyone, since that would leave nobody able
- * to manage users or roles at all, including via this same page.
+ * The self-revocation and last-System-Administrator guards now live in the
+ * database (revoke_role_grant(), see
+ * supabase/migrations/20261030000000_guard_role_grant_revocation.sql) as one
+ * atomic, advisory-locked operation — not here. `user_roles` has no UPDATE
+ * policy at all any more, so this RPC is the only way to revoke a grant;
+ * this action is just the thin client-facing wrapper around it.
  */
 export async function revokeRole(roleGrantId: string): Promise<{ error: string | null }> {
-  const session = await getCurrentSession();
-  if (!session) return { error: "Not signed in." };
-
   const supabase = await createClient();
-  const { data: grant } = await supabase
-    .from("user_roles")
-    .select("user_id, role")
-    .eq("id", roleGrantId)
-    .is("revoked_at", null)
-    .maybeSingle();
-  if (!grant) return { error: "This role grant no longer exists." };
-
-  if (grant.user_id === session.userId) {
-    return { error: "You can't revoke your own role — ask another System Administrator to do it." };
-  }
-
-  if (grant.role === "sys_admin") {
-    const { count } = await supabase
-      .from("user_roles")
-      .select("id", { count: "exact", head: true })
-      .eq("role", "sys_admin")
-      .is("revoked_at", null);
-    if ((count ?? 0) <= 1) {
-      return { error: "Can't revoke the last System Administrator — the system would have nobody left to manage users or roles." };
-    }
-  }
-
-  const { error } = await supabase.from("user_roles").update({ revoked_at: new Date().toISOString() }).eq("id", roleGrantId);
+  const { error } = await supabase.rpc("revoke_role_grant", { p_role_grant_id: roleGrantId });
   revalidatePath("/admin/users");
   return { error: error?.message ?? null };
 }

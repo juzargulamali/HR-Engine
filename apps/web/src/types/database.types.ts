@@ -1257,6 +1257,10 @@ export interface Database {
         };
         Returns: string;
       };
+      revoke_role_grant: {
+        Args: { p_role_grant_id: string };
+        Returns: undefined;
+      };
     };
     Enums: {
       app_role: AppRole;
