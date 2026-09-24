@@ -102,6 +102,14 @@ export async function createEmployee(_prevState: ActionState, formData: FormData
   // ledger correction is (leave_ledger_insert_hr/comp_ledger_insert_hr
   // already grant this to HR Admin directly, same RLS postLeaveLedgerAdjustment
   // uses), just at onboarding time instead of via the AI-suggestions flow.
+  //
+  // reference_type is deliberately 'opening_balance', not the generic
+  // 'manual_adjustment' postLeaveLedgerAdjustment() uses for an arbitrary
+  // correction — the leave-accrual cron's historical-entitlement baseline
+  // (Phase 2b) needs to tell "this row IS the employee's carried-over
+  // opening grant" apart from "this row is some other unclassified manual
+  // correction, don't guess what it means." Mirrors comp_day_ledger's
+  // existing source: 'opening_balance' convention for the same distinction.
   if (d.openingAnnualLeaveDays) {
     const { error: leaveError } = await supabase.from("leave_ledger").insert({
       employee_id: employee.id,
@@ -109,7 +117,7 @@ export async function createEmployee(_prevState: ActionState, formData: FormData
       txn_date: d.hireDate,
       entry_type: "adjustment",
       amount_days: d.openingAnnualLeaveDays,
-      reference_type: "manual_adjustment",
+      reference_type: "opening_balance",
       note: "Opening annual leave balance recorded at onboarding",
       created_by: user.id,
     });

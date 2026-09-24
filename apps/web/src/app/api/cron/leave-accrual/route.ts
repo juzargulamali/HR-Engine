@@ -12,6 +12,107 @@ function daysBetween(from: string, to: string): number {
 
 const ENTITLEMENT_TO_DATE_COUNTRIES = new Set(["AE", "SA", "PL"]);
 
+// The only leave_ledger entry_types that may ever unambiguously count toward
+// an employee's lifetime Annual Leave "already granted" baseline. 'accrual'
+// and 'carryover' are exclusively written by automated, self-describing
+// mechanisms (this cron; a future carryover-expiry cron), so their presence
+// alone is proof of a grant. 'adjustment' is NOT in this set — it's also
+// used for arbitrary, unclassified manual corrections (postLeaveLedgerAdjustment),
+// so an 'adjustment' row only counts when its reference_type says specifically
+// 'opening_balance' (see isUnambiguousGrantRow below). 'deduction' and
+// 'encashment' are consumption, never a grant. 'reversal' is resolved by
+// looking up what it reverses (see classifyLedgerRows).
+const UNCONDITIONAL_GRANT_ENTRY_TYPES = new Set(["accrual", "carryover"]);
+
+export interface AnnualLeaveLedgerRow {
+  id: string;
+  employee_id: string;
+  leave_type_code: string;
+  entry_type: string;
+  amount_days: number;
+  reference_type: string | null;
+  reversal_of_id: string | null;
+}
+
+export interface AmbiguousBaseline {
+  employeeId: string;
+  leaveTypeCode: string;
+  reason: string;
+}
+
+function isUnambiguousGrantRow(row: AnnualLeaveLedgerRow): boolean {
+  if (UNCONDITIONAL_GRANT_ENTRY_TYPES.has(row.entry_type)) return true;
+  return row.entry_type === "adjustment" && row.reference_type === "opening_balance";
+}
+
+function isAmbiguousGrantCandidateRow(row: AnnualLeaveLedgerRow): boolean {
+  // Any 'adjustment' NOT tagged 'opening_balance' could be a genuine opening
+  // grant recorded before that tag existed, or could be a wholly unrelated
+  // correction (a mistake fix, a policy-transition true-up, anything) —
+  // there is no way to tell which from the stored schema, so it can never
+  // safely be counted as a grant, but its mere existence also means the
+  // employee's true lifetime baseline can't be trusted either way.
+  return row.entry_type === "adjustment" && row.reference_type !== "opening_balance";
+}
+
+/**
+ * Inventories every historical Annual Leave ledger row for the given
+ * employee/leave-type keys and classifies each one as: an unambiguous grant
+ * (counts toward the "already granted" baseline), an ambiguous candidate
+ * (the whole key is flagged and excluded from automatic accrual), or
+ * irrelevant (deduction/encashment — consumption, never a grant).
+ *
+ * 'reversal' rows are resolved by looking up the entry_type of the row they
+ * reverse (via reversal_of_id): reversing a grant nets out of that grant's
+ * total (e.g. an accrual posted then corrected); reversing a deduction is a
+ * consumption-side correction (e.g. cancel_leave_request restoring a used
+ * day) and must NOT inflate the grant baseline; reversing an ambiguous
+ * adjustment, or a reversal whose target can't be found, flags the key
+ * ambiguous rather than guessing.
+ *
+ * Never infers a baseline from the net balance (leave_balances) — deductions
+ * and reversals make that unreliable per Phase 2b's correction brief.
+ */
+export function classifyLedgerRows(rows: AnnualLeaveLedgerRow[]): {
+  grantTotalByKey: Map<string, number>;
+  ambiguousKeys: Set<string>;
+} {
+  const rowsById = new Map(rows.map((r) => [r.id, r]));
+  const grantTotalByKey = new Map<string, number>();
+  const ambiguousKeys = new Set<string>();
+
+  const addGrant = (key: string, amount: number) => grantTotalByKey.set(key, (grantTotalByKey.get(key) ?? 0) + amount);
+
+  for (const row of rows) {
+    const key = `${row.employee_id}:${row.leave_type_code}`;
+
+    if (row.entry_type === "reversal") {
+      const original = row.reversal_of_id ? rowsById.get(row.reversal_of_id) : undefined;
+      if (!original) {
+        // An orphan reversal (target not found in this fetch) can't be
+        // classified safely — treat the key as ambiguous rather than assume
+        // either direction.
+        ambiguousKeys.add(key);
+      } else if (isUnambiguousGrantRow(original)) {
+        addGrant(key, Number(row.amount_days));
+      } else if (isAmbiguousGrantCandidateRow(original)) {
+        ambiguousKeys.add(key);
+      }
+      // else: reverses a deduction/encashment — consumption-side, correctly excluded.
+      continue;
+    }
+
+    if (isUnambiguousGrantRow(row)) {
+      addGrant(key, Number(row.amount_days));
+    } else if (isAmbiguousGrantCandidateRow(row)) {
+      ambiguousKeys.add(key);
+    }
+    // else: deduction/encashment — consumption, not a grant, ignored.
+  }
+
+  return { grantTotalByKey, ambiguousKeys };
+}
+
 /**
  * Monthly leave accrual run (docs/05-automation-rules.md §5.1).
  *
@@ -22,16 +123,31 @@ const ENTITLEMENT_TO_DATE_COUNTRIES = new Set(["AE", "SA", "PL"]);
  * delta-based: each run computes the employee's cumulative Annual Leave
  * entitlement AS OF TODAY via computeAnnualLeaveEntitlementToDate (the
  * regional tiered/first-year rules in packages/domain), compares it against
- * the TOTAL of every 'accrual' entry ever posted for that employee/leave
- * type (not the net balance, which consumption would otherwise wrongly
- * suppress), and posts only the positive difference. This reproduces UAE's
- * "2 days per completed month between 6-12 months, then 30 at each
- * anniversary" and Poland's first-year monthly proration naturally, as
- * whatever the calculator's month-over-month delta implies, without this
- * cron needing its own anniversary-detection logic. Only implemented for
- * AE/SA/PL specifically (the three countries this rule set targets) —
- * any other country using these accrual methods is skipped with a review
- * flag rather than guessing a formula for it.
+ * an unambiguous inventory of every historical Annual Leave grant ever
+ * posted for that employee/leave type — not just this cron's own
+ * 'policy_run' entries, and never inferred from the net balance, which
+ * deductions and reversals would make unreliable (see classifyLedgerRows) —
+ * and posts only the positive difference. This reproduces UAE's "2 days per
+ * completed month between 6-12 months, then 30 at each anniversary" and
+ * Poland's first-year monthly proration naturally, as whatever the
+ * calculator's month-over-month delta implies, without this cron needing
+ * its own anniversary-detection logic. Only implemented for AE/SA/PL
+ * specifically (the three countries this rule set targets) — any other
+ * country using these accrual methods is skipped with a review flag rather
+ * than guessing a formula for it.
+ *
+ * If an employee/leave-type's historical baseline can't be determined
+ * unambiguously (an 'adjustment' row exists that isn't tagged
+ * 'opening_balance' — e.g. a legacy opening-balance grant recorded before
+ * that tag existed, or any other unclassified manual correction), that key
+ * is skipped entirely and reported rather than guessed. Existing balances
+ * are never rewritten by this cron either way.
+ *
+ * Call with ?mode=preflight to run the full computation read-only: no rows
+ * are inserted, and the response reports how many would post, how many
+ * would be skipped, and exactly which employee/leave-type keys have an
+ * ambiguous baseline so HR/engineering can review before it ever blocks (or
+ * silently would have mis-posted) real accrual.
  *
  * Idempotent per calendar month: an employee/leave-type pair that already
  * has a 'policy_run' accrual posted this month is skipped, so a retried or
@@ -47,6 +163,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const isPreflight = new URL(request.url).searchParams.get("mode") === "preflight";
   const admin = createAdminClient();
   const today = new Date().toISOString().slice(0, 10);
   const monthStart = `${today.slice(0, 7)}-01`;
@@ -111,20 +228,30 @@ export async function GET(request: Request) {
   const { data: balances } = await admin.from("leave_balances").select("employee_id, leave_type_code, balance_days");
   const balanceByKey = new Map((balances ?? []).map((b) => [`${b.employee_id}:${b.leave_type_code}`, Number(b.balance_days)]));
 
-  // The TOTAL ever accrued (not the net balance, which consumption would
-  // wrongly suppress) — computeAnnualLeaveEntitlementToDate's result is
-  // cumulative-to-date, so the delta this run posts must be measured
-  // against everything already granted, not what's left unspent.
-  const { data: accrualHistory } = await admin
-    .from("leave_ledger")
-    .select("employee_id, leave_type_code, amount_days")
-    .eq("entry_type", "accrual")
-    .eq("reference_type", "policy_run");
-  const totalAccruedByKey = new Map<string, number>();
-  for (const row of accrualHistory ?? []) {
-    const key = `${row.employee_id}:${row.leave_type_code}`;
-    totalAccruedByKey.set(key, (totalAccruedByKey.get(key) ?? 0) + Number(row.amount_days));
-  }
+  // Every historical Annual Leave ledger row for the leave-type codes that
+  // use entitlement-to-date accrual — not just this cron's own 'policy_run'
+  // accruals — so the "already granted" baseline reflects EVERY grant
+  // mechanism that has ever posted to this employee (onboarding opening
+  // balances, this cron, any future carryover run), never just a slice of
+  // them. Never inferred from leave_balances (the net balance): deductions
+  // and reversals make a net figure unusable as a lifetime grant total.
+  const entitlementToDateLeaveTypeCodes = [
+    ...new Set((leaveTypeRows ?? []).filter((t) => t.accrual_method === "per_service_year" || t.accrual_method === "annual_grant").map((t) => t.leave_type_code)),
+  ];
+  const { data: historyRows, error: historyError } =
+    entitlementToDateLeaveTypeCodes.length > 0
+      ? await admin
+          .from("leave_ledger")
+          .select("id, employee_id, leave_type_code, entry_type, amount_days, reference_type, reversal_of_id")
+          .in("leave_type_code", entitlementToDateLeaveTypeCodes)
+      : { data: [] as AnnualLeaveLedgerRow[], error: null };
+  if (historyError) return NextResponse.json({ error: historyError.message }, { status: 500 });
+
+  const { grantTotalByKey, ambiguousKeys } = classifyLedgerRows((historyRows ?? []) as AnnualLeaveLedgerRow[]);
+  const ambiguousReport: AmbiguousBaseline[] = [...ambiguousKeys].map((key) => {
+    const [employeeId, leaveTypeCode] = key.split(":");
+    return { employeeId, leaveTypeCode, reason: "an 'adjustment' ledger row exists for this employee/leave-type that isn't tagged 'opening_balance' — the historical baseline can't be trusted, so automatic accrual is blocked until HR confirms it" };
+  });
 
   // Collect rows and insert them in one bulk call at the end rather than
   // one round trip per employee/leave-type pair — at realistic headcount
@@ -175,6 +302,14 @@ export async function GET(request: Request) {
         (leaveType.accrual_method === "per_service_year" || leaveType.accrual_method === "annual_grant") &&
         ENTITLEMENT_TO_DATE_COUNTRIES.has(employee.country_code)
       ) {
+        if (ambiguousKeys.has(key)) {
+          // This employee/leave-type has at least one historical ledger row
+          // whose grant-or-not status can't be determined unambiguously —
+          // never guess an accrual against an unknown baseline. Reported in
+          // ambiguousReport (always) and surfaced prominently in preflight mode.
+          skipped += 1;
+          continue;
+        }
         const entitlementToDate = computeAnnualLeaveEntitlementToDate({
           countryCode: employee.country_code as "AE" | "SA" | "PL",
           hireDate: employee.hire_date,
@@ -182,8 +317,8 @@ export async function GET(request: Request) {
           recognisedPriorServiceYears: employee.recognised_prior_service_years ?? undefined,
           fteFraction: fteFractionByEmployee.get(employee.id) ?? undefined,
         });
-        const totalAccruedSoFar = totalAccruedByKey.get(key) ?? 0;
-        const delta = entitlementToDate - totalAccruedSoFar;
+        const alreadyGranted = grantTotalByKey.get(key) ?? 0;
+        const delta = entitlementToDate - alreadyGranted;
         // Capped the same way a monthly_accrual amount is: never post past
         // max_balance_days regardless of what the entitlement curve implies.
         amount = maxBalance !== null ? Math.min(delta, Math.max(0, maxBalance - currentBalance)) : delta;
@@ -219,6 +354,20 @@ export async function GET(request: Request) {
     }
   }
 
+  // Read-only mode: report exactly what a real run would do — including
+  // every ambiguous-baseline employee/leave-type it would refuse to touch —
+  // without inserting anything. Lets HR/engineering review before (or
+  // instead of) ever running for real.
+  if (isPreflight) {
+    return NextResponse.json({
+      ranAt: today,
+      mode: "preflight",
+      wouldPost: rows.length,
+      skipped,
+      ambiguousBaselines: ambiguousReport,
+    });
+  }
+
   // One chunk at a time (not one giant insert): a single bad row rejected
   // by the database — a stale employee_id, say — would otherwise fail the
   // entire run's insert and post nothing at all, for anyone. Chunking
@@ -239,5 +388,8 @@ export async function GET(request: Request) {
   // A non-2xx status is what makes a real failure visible to Vercel Cron's
   // own monitoring/alerting — returning 200 while `failures` is non-empty
   // would report this run as healthy even though it dropped rows.
-  return NextResponse.json({ ranAt: today, entriesPosted: posted, skipped, failures }, { status: failures.length > 0 ? 500 : 200 });
+  return NextResponse.json(
+    { ranAt: today, entriesPosted: posted, skipped, ambiguousBaselines: ambiguousReport, failures },
+    { status: failures.length > 0 ? 500 : 200 },
+  );
 }
