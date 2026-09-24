@@ -3802,6 +3802,19 @@ create policy user_roles_write_sysadmin on user_roles for all
 -- company_id directly, so it's derived: a direct column if present, else
 -- via the row's employee_id, else (approvals, which is entity-type-generic)
 -- by resolving the approved entity the same way is_entity_owner() does.
+--
+-- Phase 1 correction (5): before_data/after_data used to store the row's
+-- COMPLETE column set verbatim, forever — for compensation_details, that
+-- means every bank_iban/bank_swift/bank_name value the employee has ever
+-- had stays in an append-only audit trail indefinitely, readable by any
+-- HR Admin of the company, well beyond what the live table exposes (which
+-- only ever shows the CURRENT value). None of that is what an audit trail
+-- is actually for — "who changed the banking details, and when" doesn't
+-- require replaying the old and new account numbers themselves — so these
+-- specific fields are redacted before the snapshot is stored, on whichever
+-- audited table they happen to appear on. Everything else (including
+-- base_salary/allowances, which HR Admin's own compensation-change review
+-- genuinely needs) is left intact.
 create or replace function write_audit_log()
 returns trigger
 language plpgsql
@@ -3814,6 +3827,10 @@ declare
   v_row jsonb := to_jsonb(coalesce(new, old));
   v_employee_id uuid;
   v_company_id uuid;
+  v_before jsonb;
+  v_after jsonb;
+  v_sensitive_keys constant text[] := array['bank_iban', 'bank_swift', 'bank_name', 'document_number', 'policy_number'];
+  v_key text;
 begin
   -- A multi-role user (e.g. a Line Manager also granted Finance) must never
   -- be recorded as if they only held one role — every currently-held,
@@ -3847,6 +3864,13 @@ begin
     end if;
   end if;
 
+  v_before := case when TG_OP in ('UPDATE', 'DELETE') then to_jsonb(old) else null end;
+  v_after := case when TG_OP in ('UPDATE', 'INSERT') then to_jsonb(new) else null end;
+  foreach v_key in array v_sensitive_keys loop
+    if v_before ? v_key then v_before := jsonb_set(v_before, array[v_key], '"[redacted]"'::jsonb); end if;
+    if v_after ? v_key then v_after := jsonb_set(v_after, array[v_key], '"[redacted]"'::jsonb); end if;
+  end loop;
+
   insert into audit_log(table_name, record_id, action, actor_id, actor_role, actor_roles, company_id, before_data, after_data)
   values (
     TG_TABLE_NAME,
@@ -3856,8 +3880,8 @@ begin
     v_actor_role,
     v_actor_roles,
     v_company_id,
-    case when TG_OP in ('UPDATE', 'DELETE') then to_jsonb(old) else null end,
-    case when TG_OP in ('UPDATE', 'INSERT') then to_jsonb(new) else null end
+    v_before,
+    v_after
   );
   return coalesce(new, old);
 end;

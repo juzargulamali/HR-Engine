@@ -952,6 +952,59 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
         expect(rows[0]?.actor_roles).toContain(rows[0]?.actor_role);
       });
     });
+
+    // Phase 1 correction (5): before_data/after_data used to store a
+    // compensation_details row's complete column set verbatim, including
+    // banking fields — an append-only trail of every IBAN the employee has
+    // ever had, well beyond what the live table exposes (only the current
+    // value). write_audit_log() now redacts bank_iban/bank_swift/bank_name
+    // specifically, leaving the rest of the snapshot (base_salary,
+    // currency, allowances) intact for HR Admin's legitimate compensation-
+    // change review.
+    it("redacts banking fields from a compensation_details audit snapshot, while leaving salary intact", async () => {
+      const compId = randomUUID();
+      await db.asUser(USER_HR, async (query) => {
+        await query(
+          `insert into compensation_details (id, employee_id, effective_from, base_salary, currency, bank_name, bank_iban, bank_swift, created_by)
+           values ($1, $2, '2026-08-01', 9000, 'AED', 'Emirates NBD', 'AE070331234567890123456', 'EBILAEAD', $3)`,
+          [compId, EMPLOYEE_REPORT, USER_HR],
+        );
+
+        const { rows } = await query("select after_data from audit_log where table_name = 'compensation_details' and record_id = $1", [
+          compId,
+        ]);
+        expect(rows.length).toBe(1);
+        const snapshot = rows[0]?.after_data;
+        expect(snapshot.bank_name).toBe("[redacted]");
+        expect(snapshot.bank_iban).toBe("[redacted]");
+        expect(snapshot.bank_swift).toBe("[redacted]");
+        expect(snapshot.base_salary).toBe(9000);
+        expect(snapshot.currency).toBe("AED");
+      });
+    });
+
+    // Regression test for the unauthorized-role half of the same
+    // correction: Finance can read compensation_details directly (see
+    // compensation_select), but audit_log_select_hr only ever grants
+    // hr_admin access — Finance must not be able to read this audit row
+    // through the back door, redacted or not.
+    it("blocks Finance from reading a compensation_details audit row, even though Finance can read compensation_details directly", async () => {
+      const compId = randomUUID();
+      await db.seed(`
+        insert into compensation_details (id, employee_id, effective_from, base_salary, currency, created_by)
+        values ('${compId}', '${EMPLOYEE_REPORT}', '2026-08-02', 9500, 'AED', '${USER_HR}');
+      `);
+
+      const directRead = await db.asUser(USER_FINANCE, (query) =>
+        query("select id from compensation_details where id = $1", [compId]),
+      );
+      expect(directRead.rows.length).toBe(1);
+
+      const auditRead = await db.asUser(USER_FINANCE, (query) =>
+        query("select id from audit_log where table_name = 'compensation_details' and record_id = $1", [compId]),
+      );
+      expect(auditRead.rows).toEqual([]);
+    });
   });
 
   describe("ai_drafts: the one table an AI service identity may write to, and nothing else", () => {
