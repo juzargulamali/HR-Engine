@@ -7,5 +7,7 @@ export * from "./leaveDeduction";
 export * from "./compDayExpiry";
 export * from "./addMonthsClamped";
 export * from "./finalSettlement";
+export * from "./annualLeaveEntitlement";
+export * from "./recoveryCredit";
 export * from "./birthdays";
 export * from "./permissions/index";

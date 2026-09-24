@@ -29,6 +29,17 @@ export interface FinalSettlementInput {
   terminationDate: string;
   /** One day's pay, derived from compensation_details.base_salary by the caller. */
   dailyRate: number;
+  /**
+   * The wage basis used for unused-leave encashment specifically. Enginious
+   * settles unused Annual Leave using basic salary where legally
+   * permitted (UAE); where mandatory local law requires another wage
+   * basis or statutory formula (e.g. Poland's pecuniary-equivalent
+   * calculation, or Saudi's statutory wage basis), the caller resolves
+   * that figure and passes it here instead. Defaults to `dailyRate` —
+   * every existing call site (basic-salary-only) is unaffected by this
+   * field's addition.
+   */
+  leaveEncashmentDailyRate?: number;
   /** Unused leave balance at termination (leave_balances), in days. */
   unusedLeaveDays: number;
   /** Sum of reimbursement_claims.total_amount for claims already approved but not yet paid. */
@@ -80,7 +91,7 @@ function round2(amount: number): number {
 
 export function computeFinalSettlement(input: FinalSettlementInput): FinalSettlementResult {
   const yearsOfService = computeYearsOfService(input.hireDate, input.terminationDate);
-  const leaveEncashmentAmount = round2(Math.max(0, input.unusedLeaveDays) * input.dailyRate);
+  const leaveEncashmentAmount = round2(Math.max(0, input.unusedLeaveDays) * (input.leaveEncashmentDailyRate ?? input.dailyRate));
   const eosbAmount = computeEosbAmount(yearsOfService, input.dailyRate, input.eosbPolicy);
   const pendingReimbursementsAmount = round2(Math.max(0, input.pendingApprovedReimbursements));
   const loanDeductionsAmount = round2(Math.max(0, input.outstandingLoans));
