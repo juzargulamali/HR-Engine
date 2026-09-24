@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import type { ActionState } from "./companies";
 
 /**
  * Deletes/corrects a single day's attendance record — recording it now
@@ -80,7 +81,57 @@ export async function bulkRecordAttendance(input: {
   if (error) return { error: "Could not save attendance. Please try again.", creditedCount: 0, needsPolicyReviewCount: 0 };
 
   revalidatePath("/attendance");
+  // 'credited' now means "a recovery credit request was submitted for
+  // Line-Manager-then-HR-Admin approval" — record_attendance_and_recovery()
+  // no longer posts an immediate comp_day_ledger row itself (see the
+  // Phase 2b correction round); bulk-attendance-form.tsx's copy reflects
+  // this, not "comp day(s) credited".
   const creditedCount = (data ?? []).filter((r) => r.credited).length;
   const needsPolicyReviewCount = (data ?? []).filter((r) => r.needs_policy_review).length;
   return { error: null, creditedCount, needsPolicyReviewCount };
+}
+
+const recordOvernightRecoveryCreditSchema = z.object({
+  employeeId: z.string().uuid(),
+  workDate: z.string().min(1),
+  completedNormalScheduledDay: z.coerce.boolean().optional(),
+  activeHoursAfterMidnight: z.coerce.number().min(0),
+});
+
+export interface RecoveryCreditActionState extends ActionState {
+  submitted?: boolean;
+}
+
+/**
+ * HR Admin/manager attestation for Recovery Leave's exceptional overnight
+ * extension — see record_overnight_recovery_credit() (SECURITY DEFINER;
+ * RLS-equivalent authorization enforced there, not here). Only ever creates
+ * a recovery_credit_requests row pending approval; never posts a ledger
+ * credit directly.
+ */
+export async function recordOvernightRecoveryCredit(
+  _prevState: RecoveryCreditActionState,
+  formData: FormData,
+): Promise<RecoveryCreditActionState> {
+  const parsed = recordOvernightRecoveryCreditSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("record_overnight_recovery_credit", {
+    p_employee_id: d.employeeId,
+    p_work_date: d.workDate,
+    p_completed_normal_scheduled_day: d.completedNormalScheduledDay ?? false,
+    p_active_hours_after_midnight: d.activeHoursAfterMidnight,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath(`/employees/${d.employeeId}`);
+  const credited = data?.[0]?.credited ?? false;
+  return {
+    error: null,
+    submitted: credited,
+  };
 }

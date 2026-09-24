@@ -102,6 +102,11 @@ export function ContractHistory({
               <Label htmlFor="noticePeriodDays">Notice (days)</Label>
               <Input id="noticePeriodDays" name="noticePeriodDays" type="number" defaultValue={30} min={0} />
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="fteFraction">FTE fraction</Label>
+              <Input id="fteFraction" name="fteFraction" type="number" defaultValue={1} step="0.05" min="0.05" max="1" />
+              <p className="text-xs text-muted-foreground">1.0 = full-time. Prorates Poland Annual Leave for part-time contracts.</p>
+            </div>
           </div>
           {state.error ? <Alert variant="destructive">{state.error}</Alert> : null}
           <Button type="submit" size="sm" disabled={pending}>

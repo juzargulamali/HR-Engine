@@ -3,9 +3,19 @@ import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Alert } from "@/components/ui/alert";
 import { AddHolidayForm } from "./add-holiday-form";
 import { DeleteHolidayButton } from "./delete-holiday-button";
 import { EmptyState } from "@/components/ui/empty-state";
+
+// 2026 dates deliberately left unconfirmed (never guessed) by the Phase 2b
+// leave-policy-configuration migration — each row's date isn't added until
+// HR enters it below, once officially announced/decided.
+const PENDING_2026_HOLIDAYS: { countryCode: string; label: string }[] = [
+  { countryCode: "AE", label: "Islamic New Year, Prophet Muhammad's Birthday, Eid Al Etihad/National Day — exact Gregorian dates pending" },
+  { countryCode: "SA", label: "Eid Al Fitr, Eid Al Adha — exact Gregorian dates pending official Umm Al-Qura/HRSD announcement" },
+  { countryCode: "PL", label: "Replacement days for 15 Aug and 26 Dec (both fall on a Saturday in 2026) — HR must decide and enter the dates" },
+];
 
 export default async function HolidaysPage() {
   const session = await getCurrentSession();
@@ -29,6 +39,19 @@ export default async function HolidaysPage() {
           (Islamic-calendar) holidays are added each year once officially confirmed, not predicted in advance.
         </p>
       </div>
+
+      {PENDING_2026_HOLIDAYS.some((p) => manageableCountries.some((c) => c.code === p.countryCode)) ? (
+        <Alert>
+          <p className="font-medium">2026 holidays pending confirmation</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
+            {PENDING_2026_HOLIDAYS.filter((p) => manageableCountries.some((c) => c.code === p.countryCode)).map((p) => (
+              <li key={p.countryCode}>
+                <span className="font-medium">{countryName.get(p.countryCode) ?? p.countryCode}:</span> {p.label}
+              </li>
+            ))}
+          </ul>
+        </Alert>
+      ) : null}
 
       {manageableCountries.length > 0 ? (
         <Card>

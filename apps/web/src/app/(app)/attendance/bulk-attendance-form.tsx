@@ -140,7 +140,7 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
       {result?.error ? <Alert variant="destructive">{result.error}</Alert> : null}
       {result && !result.error ? (
         <Alert variant="success">
-          Saved.{result.creditedCount > 0 ? ` ${result.creditedCount} comp day(s) credited.` : ""}
+          Saved.{result.creditedCount > 0 ? ` ${result.creditedCount} recovery credit request(s) submitted for approval.` : ""}
         </Alert>
       ) : null}
 
