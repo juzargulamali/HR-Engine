@@ -2110,6 +2110,60 @@ begin
 end;
 $$;
 
+-- Phase 1 correction (2): submitLeaveRequest() used to INSERT into
+-- leave_requests and then, as a separate RPC round trip, call
+-- create_initial_approval() — two independent transactions. If the second
+-- call never reached the database at all (a network drop, the server
+-- process dying between the two calls), the leave request was left
+-- permanently "submitted" with no approvals row and no one able to act on
+-- it; the app's own best-effort "cancel it if routing fails" only covers
+-- the case where the SECOND call itself returns an error, not the case
+-- where it never runs. This function makes both writes one statement, and
+-- therefore one transaction: create_initial_approval() raising for any
+-- reason (no workflow configured, no approver resolvable, self-approval)
+-- rolls back the leave_requests insert along with it, so a caller only
+-- ever observes "fully submitted" or "not submitted at all" — never an
+-- orphan request or an orphan approval.
+create or replace function submit_leave_request(
+  p_leave_type_code text,
+  p_start_date date,
+  p_end_date date,
+  p_half_day_start boolean,
+  p_half_day_end boolean,
+  p_total_days numeric,
+  p_reason text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_employee_id uuid;
+  v_request_id uuid;
+begin
+  select id into v_employee_id from employees where user_id = auth.uid() and deleted_at is null;
+  if v_employee_id is null then
+    raise exception 'No employee record is linked to your account.';
+  end if;
+
+  insert into leave_requests (employee_id, leave_type_code, start_date, end_date, half_day_start, half_day_end, total_days, reason)
+  values (v_employee_id, p_leave_type_code, p_start_date, p_end_date, coalesce(p_half_day_start, false), coalesce(p_half_day_end, false), p_total_days, p_reason)
+  returning id into v_request_id;
+
+  -- Same function the old two-call path used for its second call — reused
+  -- here rather than duplicated, so routing stays the single implementation
+  -- every other entity type (reimbursement_claim, timesheet, ...) shares.
+  -- Calling it from inside this function, rather than as a separate RPC,
+  -- is what makes the two writes atomic: a plpgsql function body runs
+  -- inside the same transaction as its own invoking statement, so an
+  -- exception raised here unwinds the insert above too.
+  perform create_initial_approval('leave_request', v_request_id);
+
+  return v_request_id;
+end;
+$$;
+
 -- The approval state machine — SECURITY DEFINER so it can read/write across
 -- leave/reimbursement/timesheet/generated_letter/payroll_export_run tables
 -- plus the ledgers atomically inside one transaction (with row locks, so

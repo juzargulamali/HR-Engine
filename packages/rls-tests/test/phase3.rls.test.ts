@@ -311,6 +311,67 @@ describe("Phase 3 row-level security: leave, ledgers, deduction priority, approv
     });
   });
 
+  // Phase 1 correction (2): submitLeaveRequest() used to INSERT into
+  // leave_requests and then, as a SEPARATE round trip, call
+  // create_initial_approval() — if that second call never reached the
+  // database at all, the request was left permanently stuck "submitted"
+  // with no approval and no one able to act on it. submit_leave_request()
+  // does both writes inside one plpgsql function body, which Postgres
+  // treats as a single statement: if create_initial_approval() raises for
+  // any reason, the leave_requests insert made earlier in the SAME function
+  // call is undone too (statement-level atomicity — this holds even before
+  // the test harness's own outer ROLLBACK), so a caller only ever observes
+  // "fully submitted and routed" or "nothing written at all".
+  describe("submit_leave_request() atomicity", () => {
+    it("creates the leave request and its initial approval in one atomic call", async () => {
+      const { rows } = await db.asUser(USER_REPORT, async (query) => {
+        const { rows: created } = await query("select submit_leave_request($1, $2, $3, $4, $5, $6, $7) as id", [
+          "annual",
+          "2026-07-10",
+          "2026-07-10",
+          false,
+          false,
+          1,
+          null,
+        ]);
+        return query(
+          `select lr.id is not null as has_request, a.decision, a.step_order from leave_requests lr
+           join approvals a on a.entity_type = 'leave_request' and a.entity_id = lr.id
+           where lr.id = $1`,
+          [created[0]?.id],
+        );
+      });
+      expect(rows).toEqual([{ has_request: true, decision: "pending", step_order: 1 }]);
+    });
+
+    // Temporarily deactivates the company's only leave_request workflow so
+    // create_initial_approval() has nothing to route to and raises — the
+    // failure path this correction was specifically meant to make safe.
+    // Restored in `finally` since this workflow row is shared, persistent
+    // fixture state other tests in this file also depend on.
+    it("leaves neither an orphan leave request nor an orphan approval when routing fails", async () => {
+      await db.seed(`update approval_workflows set is_active = false where id = '${defaultWorkflowId}'`);
+      try {
+        await expect(
+          db.asUser(USER_PEER, (query) =>
+            query("select submit_leave_request($1, $2, $3, $4, $5, $6, $7)", ["annual", "2026-07-11", "2026-07-11", false, false, 1, null]),
+          ),
+        ).rejects.toThrow(/No approval workflow is configured/);
+      } finally {
+        await db.seed(`update approval_workflows set is_active = true where id = '${defaultWorkflowId}'`);
+      }
+
+      // A fresh call sees the real, committed state — no leave_requests row
+      // survived, proving Postgres's per-statement atomicity rolled back
+      // submit_leave_request()'s own insert along with the routing failure,
+      // not just the test harness's outer transaction.
+      const after = await db.asUser(USER_HR, (query) =>
+        query("select id from leave_requests where employee_id = $1 and start_date = '2026-07-11'", [EMPLOYEE_PEER]),
+      );
+      expect(after.rows).toEqual([]);
+    });
+  });
+
   describe("approving and rejecting", () => {
     it("approves a single-step request and posts the ledger deduction atomically", async () => {
       const { approvalId, requestId } = await seedPendingRequest({

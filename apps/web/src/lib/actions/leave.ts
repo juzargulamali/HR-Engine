@@ -115,37 +115,35 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
     return { error: "That date range has no working days (weekends/holidays only)." };
   }
 
+  // Purely an early, friendly check — its result isn't used below.
+  // submit_leave_request() re-resolves the workflow/approver itself, inside
+  // the same transaction as the insert, which is what actually guarantees
+  // correctness; this just avoids making the employee wait on a real insert
+  // attempt for the common, easily-detected case (no workflow configured,
+  // no approver resolvable, self-approval).
   const resolved = await resolveInitialApprover(supabase, "leave_request", employee.company_id, employee.id, user.id);
   if ("error" in resolved) return resolved;
 
-  const { data: request, error: insertError } = await supabase
-    .from("leave_requests")
-    .insert({
-      employee_id: employee.id,
-      leave_type_code: d.leaveTypeCode,
-      start_date: d.startDate,
-      end_date: d.endDate,
-      half_day_start: d.halfDayStart ?? false,
-      half_day_end: d.halfDayEnd ?? false,
-      total_days: totalDays,
-      reason: d.reason || null,
-    })
-    .select("id")
-    .single();
-  if (insertError || !request) return { error: insertError?.message ?? "Could not submit the leave request." };
-
-  const { error: approvalError } = await supabase.rpc("create_initial_approval", {
-    p_entity_type: "leave_request",
-    p_entity_id: request.id,
+  // The insert and its initial approval routing used to be two separate
+  // round trips (an insert, then a create_initial_approval RPC, with a
+  // best-effort cancel if only the SECOND call came back with an error) —
+  // if the second call never reached the database at all, the request was
+  // left permanently stuck "submitted" with no approval and no one able to
+  // act on it. submit_leave_request() does both writes in one transaction,
+  // so a failure at any point (no workflow configured, no approver
+  // resolvable, self-approval) rolls back the insert too: either the
+  // request is fully submitted and routed, or nothing was written at all.
+  const { data: requestId, error: submitError } = await supabase.rpc("submit_leave_request", {
+    p_leave_type_code: d.leaveTypeCode,
+    p_start_date: d.startDate,
+    p_end_date: d.endDate,
+    p_half_day_start: d.halfDayStart ?? false,
+    p_half_day_end: d.halfDayEnd ?? false,
+    p_total_days: totalDays,
+    p_reason: d.reason || null,
   });
-  if (approvalError) {
-    // Without this, a failure here (network blip, the resolved approver's
-    // role getting revoked in the split second since resolveInitialApprover
-    // checked) leaves the request permanently stuck "submitted" with no
-    // approvals row and no one able to act on it — cancelling it here means
-    // the failure is visible and the employee can just resubmit.
-    await supabase.from("leave_requests").update({ status: "cancelled" }).eq("id", request.id);
-    return { error: `Could not route this request for approval, so it was cancelled: ${approvalError.message}. Please try submitting again.` };
+  if (submitError || !requestId) {
+    return { error: "Could not submit the leave request. Please try again, or contact HR Admin if the problem continues." };
   }
 
   await notifyLeaveSubmitted(supabase, {

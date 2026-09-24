@@ -1245,6 +1245,18 @@ export interface Database {
         Args: { p_record_id: string };
         Returns: undefined;
       };
+      submit_leave_request: {
+        Args: {
+          p_leave_type_code: string;
+          p_start_date: string;
+          p_end_date: string;
+          p_half_day_start: boolean;
+          p_half_day_end: boolean;
+          p_total_days: number;
+          p_reason: string | null;
+        };
+        Returns: string;
+      };
     };
     Enums: {
       app_role: AppRole;
