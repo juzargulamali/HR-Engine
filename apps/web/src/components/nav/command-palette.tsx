@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useFocusTrap } from "@/lib/use-focus-trap";
 import type { NavGroupData } from "./nav-groups";
 import { NAV_ICONS } from "./nav-icons";
 
@@ -18,7 +19,9 @@ export function CommandPalette({ groups }: { groups: NavGroupData[] }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+  useFocusTrap(dialogRef, open);
 
   const flatLinks = useMemo(() => groups.flatMap((g) => g.links.map((l) => ({ ...l, group: g.label }))), [groups]);
 
@@ -88,6 +91,7 @@ export function CommandPalette({ groups }: { groups: NavGroupData[] }) {
       >
         <div className="absolute inset-0 bg-black/60" onClick={() => setOpen(false)} />
         <div
+          ref={dialogRef}
           role="dialog"
           aria-modal="true"
           aria-label="Search navigation"

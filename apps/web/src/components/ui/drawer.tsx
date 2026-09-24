@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useFocusTrap } from "@/lib/use-focus-trap";
 
 /**
  * Generic slide-in panel — used for the mobile nav today, reusable later
@@ -23,6 +24,10 @@ export function Drawer({
   side?: "left" | "right";
   title: string;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  useFocusTrap(panelRef, open);
+
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
@@ -31,9 +36,11 @@ export function Drawer({
     document.addEventListener("keydown", onKey);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    const raf = requestAnimationFrame(() => closeButtonRef.current?.focus());
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = previousOverflow;
+      cancelAnimationFrame(raf);
     };
   }, [open, onClose]);
 
@@ -44,6 +51,7 @@ export function Drawer({
         onClick={onClose}
       />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -56,6 +64,7 @@ export function Drawer({
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <span className="font-heading text-sm font-semibold">{title}</span>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             aria-label="Close menu"
