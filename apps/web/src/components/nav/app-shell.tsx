@@ -1,6 +1,6 @@
 import { BellRing } from "lucide-react";
 import Link from "next/link";
-import { canViewHrAlerts, ROLE_LABELS } from "@enginious-hr/domain";
+import { canViewHrAlerts, roleLabelsFor } from "@enginious-hr/domain";
 import type { CurrentSession } from "@/lib/auth/session";
 import { signOut } from "@/lib/actions/auth";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { CommandPalette } from "./command-palette";
 import { buildNavGroups } from "./nav-groups";
 
 export function AppShell({ session, children }: { session: CurrentSession; children: React.ReactNode }) {
-  const roleLabels = [...new Set(session.grants.map((g) => ROLE_LABELS[g.role]))];
+  const roleLabels = roleLabelsFor(session.grants);
   const showAlertsLink = canViewHrAlerts(session.grants);
   const groups = buildNavGroups(session.grants);
 
