@@ -670,6 +670,203 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     });
   });
 
+  describe("post_poland_termination_leave_adjustment() — Poland leaver Annual Leave true-up", () => {
+    // The FTE-interval resolution and ledger-grant classification that
+    // decide WHAT amount to post (including detecting an ambiguous/mid-
+    // period FTE change and refusing to guess) live entirely in TypeScript
+    // — packages/domain/test/annualLeaveEntitlement.test.ts's own
+    // "computePolandAnnualLeaveEntitlementAtTermination" suite exhaustively
+    // covers that blocking behavior, and
+    // apps/web/src/lib/actions/polandTermination.test.ts covers the
+    // orchestration that refuses to call this function at all when blocked
+    // (mocked, since it needs a live Supabase client). This function's own
+    // job is narrower and purely mechanical — given an already-computed
+    // amount, post it safely — so these RLS tests exercise exactly that
+    // mechanical contract: idempotency, the never-claw-back-below-zero
+    // floor, and the HR-Admin/Poland/terminated guard rails a direct SQL
+    // caller could otherwise bypass.
+    async function seedTerminatedPolandEmployee(ledgerRows: { entry_type: string; amount_days: number; reference_type: string }[] = []) {
+      const employeeId = randomUUID();
+      await db.seed(`
+        insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date, employment_status, termination_date)
+          values ('${employeeId}', 'P2B-PLT-${employeeId.slice(0, 8)}', '${COMPANY_A}', 'PL', 'Pola', 'Leaver', '2023-01-01', 'terminated', '2026-06-30');
+      `);
+      for (const row of ledgerRows) {
+        await db.seed(
+          `insert into leave_ledger (employee_id, leave_type_code, txn_date, entry_type, amount_days, reference_type, created_by) values ('${employeeId}', 'annual', '2026-01-01', '${row.entry_type}', ${row.amount_days}, '${row.reference_type}', '${USER_HR}');`,
+        );
+      }
+      return employeeId;
+    }
+
+    it("applies a negative true-up correctly when there's enough unused balance to absorb it (mid-year leaver after the cron already granted a full year)", async () => {
+      // The cron already posted the full 26 for this year; the true
+      // prorated entitlement through termination is 13 — a -13 true-up.
+      const employeeId = await seedTerminatedPolandEmployee([{ entry_type: "accrual", amount_days: 26, reference_type: "policy_run" }]);
+
+      await db.asUser(USER_HR, async (query) => {
+        const { rows } = await query("select * from post_poland_termination_leave_adjustment($1, $2, $3)", [employeeId, -13, "test true-up"]);
+        expect(Number(rows[0]?.applied_days)).toBe(-13);
+        expect(Number(rows[0]?.excess_requiring_review)).toBe(0);
+        expect(rows[0]?.already_posted).toBe(false);
+
+        const balance = await query("select coalesce(sum(amount_days), 0) as balance from leave_ledger where employee_id = $1", [employeeId]);
+        expect(Number(balance.rows[0]?.balance)).toBe(13);
+
+        const posted = await query(
+          "select entry_type, reference_type, reference_id, idempotency_key from leave_ledger where employee_id = $1 and reference_type = 'termination_settlement'",
+          [employeeId],
+        );
+        expect(posted.rows).toEqual([
+          { entry_type: "adjustment", reference_type: "termination_settlement", reference_id: employeeId, idempotency_key: `termination_settlement:${employeeId}` },
+        ]);
+      });
+    });
+
+    it("caps the clawback at a zero balance and reports the excess for HR review when the employee already used more than the corrected entitlement", async () => {
+      // Granted 26, but 20 already taken -> balance 6. The true-up would
+      // need to claw back 13 (26 entitled -> 13 corrected), but only 6 is
+      // actually unused — never drive the balance to -7; cap at 0 and flag
+      // the other 7 days for HR review instead.
+      const employeeId = await seedTerminatedPolandEmployee([
+        { entry_type: "accrual", amount_days: 26, reference_type: "policy_run" },
+        { entry_type: "deduction", amount_days: -20, reference_type: "leave_request" },
+      ]);
+
+      await db.asUser(USER_HR, async (query) => {
+        const { rows } = await query("select * from post_poland_termination_leave_adjustment($1, $2)", [employeeId, -13]);
+        expect(Number(rows[0]?.applied_days)).toBe(-6);
+        expect(Number(rows[0]?.excess_requiring_review)).toBe(7);
+        expect(rows[0]?.already_posted).toBe(false);
+
+        const balance = await query("select coalesce(sum(amount_days), 0) as balance from leave_ledger where employee_id = $1", [employeeId]);
+        expect(Number(balance.rows[0]?.balance)).toBe(0);
+      });
+    });
+
+    it("is idempotent — a repeated (retried termination) call never posts the adjustment twice", async () => {
+      const employeeId = await seedTerminatedPolandEmployee([{ entry_type: "accrual", amount_days: 26, reference_type: "policy_run" }]);
+
+      await db.asUser(USER_HR, async (query) => {
+        const first = await query("select * from post_poland_termination_leave_adjustment($1, $2)", [employeeId, -13]);
+        expect(Number(first.rows[0]?.applied_days)).toBe(-13);
+        expect(Number(first.rows[0]?.excess_requiring_review)).toBe(0);
+        expect(first.rows[0]?.already_posted).toBe(false);
+
+        const second = await query("select * from post_poland_termination_leave_adjustment($1, $2)", [employeeId, -13]);
+        expect(Number(second.rows[0]?.applied_days)).toBe(0);
+        expect(Number(second.rows[0]?.excess_requiring_review)).toBe(0);
+        expect(second.rows[0]?.already_posted).toBe(true);
+
+        const balance = await query("select coalesce(sum(amount_days), 0) as balance from leave_ledger where employee_id = $1", [employeeId]);
+        expect(Number(balance.rows[0]?.balance)).toBe(13);
+
+        const postedCount = await query("select count(*) from leave_ledger where employee_id = $1 and reference_type = 'termination_settlement'", [
+          employeeId,
+        ]);
+        expect(Number(postedCount.rows[0]?.count)).toBe(1);
+      });
+    });
+
+    it("does nothing (no row posted) when the computed amount is exactly zero — the cron already granted the correct prorated amount", async () => {
+      const employeeId = await seedTerminatedPolandEmployee([{ entry_type: "accrual", amount_days: 13, reference_type: "policy_run" }]);
+
+      await db.asUser(USER_HR, async (query) => {
+        const { rows } = await query("select * from post_poland_termination_leave_adjustment($1, $2)", [employeeId, 0]);
+        expect(Number(rows[0]?.applied_days)).toBe(0);
+        expect(Number(rows[0]?.excess_requiring_review)).toBe(0);
+        expect(rows[0]?.already_posted).toBe(false);
+
+        const postedCount = await query("select count(*) from leave_ledger where employee_id = $1 and reference_type = 'termination_settlement'", [
+          employeeId,
+        ]);
+        expect(Number(postedCount.rows[0]?.count)).toBe(0);
+      });
+    });
+
+    it("blocks a non-Poland employee outright, even if HR Admin and terminated", async () => {
+      const employeeId = randomUUID();
+      await db.seed(`
+        insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date, employment_status, termination_date)
+          values ('${employeeId}', 'P2B-NOTPL-${employeeId.slice(0, 8)}', '${COMPANY_A}', 'ZZ', 'Not', 'Poland', '2023-01-01', 'terminated', '2026-06-30');
+      `);
+      await expect(
+        db.asUser(USER_HR, (query) => query("select * from post_poland_termination_leave_adjustment($1, $2)", [employeeId, -13])),
+      ).rejects.toThrow(/only applies to Poland employees/);
+    });
+
+    it("refuses to post for a Poland employee who is not marked terminated", async () => {
+      const employeeId = randomUUID();
+      await db.seed(`
+        insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date, employment_status)
+          values ('${employeeId}', 'P2B-ACTIVEPL-${employeeId.slice(0, 8)}', '${COMPANY_A}', 'PL', 'Still', 'Active', '2023-01-01', 'active');
+      `);
+      await expect(
+        db.asUser(USER_HR, (query) => query("select * from post_poland_termination_leave_adjustment($1, $2)", [employeeId, -13])),
+      ).rejects.toThrow(/not marked terminated/);
+    });
+
+    it("blocks anyone other than HR Admin from posting a termination Annual Leave adjustment", async () => {
+      const employeeId = await seedTerminatedPolandEmployee([{ entry_type: "accrual", amount_days: 26, reference_type: "policy_run" }]);
+      await expect(
+        db.asUser(USER_MANAGER, (query) => query("select * from post_poland_termination_leave_adjustment($1, $2)", [employeeId, -13])),
+      ).rejects.toThrow(/Only HR Admin/);
+
+      const balance = await db.asUser(USER_HR, (query) =>
+        query("select coalesce(sum(amount_days), 0) as balance from leave_ledger where employee_id = $1", [employeeId]),
+      );
+      expect(Number(balance.rows[0]?.balance)).toBe(26);
+    });
+
+    it("never rewrites or deletes existing ledger history — the true-up is an additional row, and prior grants/deductions stay exactly as they were", async () => {
+      const employeeId = await seedTerminatedPolandEmployee([
+        { entry_type: "accrual", amount_days: 26, reference_type: "policy_run" },
+        { entry_type: "deduction", amount_days: -5, reference_type: "leave_request" },
+      ]);
+
+      await db.asUser(USER_HR, async (query) => {
+        await query("select * from post_poland_termination_leave_adjustment($1, $2)", [employeeId, -13]);
+
+        const rows = await query("select entry_type, amount_days, reference_type from leave_ledger where employee_id = $1 order by created_at", [
+          employeeId,
+        ]);
+        expect(rows.rows).toEqual([
+          { entry_type: "accrual", amount_days: "26.00", reference_type: "policy_run" },
+          { entry_type: "deduction", amount_days: "-5.00", reference_type: "leave_request" },
+          { entry_type: "adjustment", amount_days: "-13.00", reference_type: "termination_settlement" },
+        ]);
+      });
+    });
+
+    it("Annual Leave remains payable while Recovery Leave remains non-cash, even for the same terminating Poland employee", async () => {
+      const employeeId = randomUUID();
+      await db.seed(`
+        insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date, employment_status)
+          values ('${employeeId}', 'P2B-BOTH-${employeeId.slice(0, 8)}', '${COMPANY_A}', 'PL', 'Both', 'Ledgers', '2023-01-01', 'active');
+        insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, created_by)
+          values ('${employeeId}', '2026-01-01', 'earned', 2, 'holiday_worked', '${USER_HR}');
+        insert into leave_ledger (employee_id, leave_type_code, txn_date, entry_type, amount_days, reference_type, created_by)
+          values ('${employeeId}', 'annual', '2026-01-01', 'accrual', 26, 'policy_run', '${USER_HR}');
+      `);
+
+      await db.asUser(USER_HR, async (query) => {
+        await query("select terminate_employee($1, $2)", [employeeId, "2026-06-30"]);
+        await query("select * from post_poland_termination_leave_adjustment($1, $2)", [employeeId, -13]);
+
+        // Recovery Leave: forfeited to zero, no cash conversion — the
+        // existing forfeit_recovery_leave_on_termination() mechanic,
+        // untouched by this correction.
+        const compBalance = await query("select coalesce(sum(days), 0) as balance from comp_day_ledger where employee_id = $1", [employeeId]);
+        expect(Number(compBalance.rows[0]?.balance)).toBe(0);
+
+        // Annual Leave: still a real, payable ledger balance — trued up,
+        // never forfeited or zeroed out by termination itself.
+        const leaveBalance = await query("select coalesce(sum(amount_days), 0) as balance from leave_ledger where employee_id = $1", [employeeId]);
+        expect(Number(leaveBalance.rows[0]?.balance)).toBe(13);
+      });
+    });
+  });
+
   describe("preflight_country_schedule_config() — UAE/Saudi/Poland workweek (Blocker 3: resolved, not left conflicting)", () => {
     it("sets AE's working_weekdays to the resolved Monday-Friday convention, superseding the legacy Sunday-start week_start_day", async () => {
       // AE/SA/PL are seeded (idempotently) by the migration itself before

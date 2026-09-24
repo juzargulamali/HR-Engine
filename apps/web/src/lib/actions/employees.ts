@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
 import { validateUploadFile, sanitizeForStoragePath } from "@/lib/uploads";
+import { applyPolandTerminationLeaveTrueUp } from "./polandTermination";
 
 const createEmployeeSchema = z.object({
   companyId: z.string().uuid(),
@@ -196,9 +197,16 @@ export async function updateEmployee(_prevState: ActionState, formData: FormData
   const supabase = await createClient();
 
   if (d.employmentStatus === "terminated") {
+    // Needed for the Poland leave true-up below, and to pin the exact same
+    // termination date into both terminate_employee() and this system's
+    // own entitlement calculation — never let the two drift apart by one
+    // resolving "today" a moment later than the other.
+    const { data: employeeForTermination } = await supabase.from("employees").select("country_code, hire_date").eq("id", d.employeeId).single();
+    const terminationDate = d.terminationDate || new Date().toISOString().slice(0, 10);
+
     const { error } = await supabase.rpc("terminate_employee", {
       p_employee_id: d.employeeId,
-      p_termination_date: d.terminationDate || undefined,
+      p_termination_date: terminationDate,
     });
     if (error) return { error: error.message };
 
@@ -217,6 +225,18 @@ export async function updateEmployee(_prevState: ActionState, formData: FormData
       })
       .eq("id", d.employeeId);
     if (fieldsError) return { error: fieldsError.message };
+
+    // Poland only — see polandTermination.ts's own header for why this runs
+    // as a separate, deliberately non-blocking step: it never fails the
+    // termination itself, only surfaces a warning when the Annual Leave
+    // true-up couldn't be posted automatically.
+    let warning: string | null = null;
+    if (employeeForTermination?.country_code === "PL") {
+      warning = await applyPolandTerminationLeaveTrueUp(supabase, d.employeeId, employeeForTermination.hire_date, terminationDate);
+    }
+
+    revalidatePath(`/employees/${d.employeeId}`);
+    return { error: null, warning };
   } else {
     const { error } = await supabase
       .from("employees")

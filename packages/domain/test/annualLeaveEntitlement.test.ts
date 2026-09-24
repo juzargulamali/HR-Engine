@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   completedMonthsBetween,
   computeAnnualLeaveEntitlementToDate,
+  computePolandAnnualLeaveEntitlementAtTermination,
   computePolandAnnualLeaveEntitlementDays,
   computePolandLeaveDaysFromHours,
   computeSaudiAnnualLeaveEntitlementDays,
   computeSaudiAnnualLeaveRateDaysPerYear,
   computeUaeAnnualLeaveEntitlementDays,
   explainPolandEntitlementBlock,
+  explainPolandTerminationEntitlementBlock,
 } from "../src/annualLeaveEntitlement";
 
 describe("completedMonthsBetween", () => {
@@ -334,6 +336,116 @@ describe("explainPolandEntitlementBlock — surfaces the specific HR configurati
         ],
       }),
     ).toMatch(/FTE changes during/);
+  });
+});
+
+describe("computePolandAnnualLeaveEntitlementAtTermination — a leaver's prorated exit-year entitlement (used by the termination true-up, never the ongoing-accrual cron)", () => {
+  it("prorates the exit year by whole calendar months through the termination date, when hire and termination fall in the same calendar year", () => {
+    // Hired 1 January, terminated 30 June: 6 whole calendar months.
+    // ceil(26/12*6) = ceil(13) = 13.
+    expect(
+      computePolandAnnualLeaveEntitlementAtTermination({
+        hireDate: "2023-01-01",
+        terminationDate: "2023-06-30",
+        fteFractionHistory: [{ effectiveFrom: "2023-01-01", fteFraction: 1 }],
+      }),
+    ).toBe(13);
+  });
+
+  it("credits every full calendar year between hire and exit in full, then prorates only the final (exit) year", () => {
+    // Hired 2023-01-01, terminated 2025-06-15: 2023 (full year) = 26,
+    // 2024 (full year) = 26, 2025 (Jan-Jun, 6 whole months) = ceil(26/12*6) = 13.
+    // Total = 65 — NOT the 65+13=78 an ongoing-employee calculation (which
+    // prices 2025 in full) would wrongly give a leaving employee.
+    expect(
+      computePolandAnnualLeaveEntitlementAtTermination({
+        hireDate: "2023-01-01",
+        terminationDate: "2025-06-15",
+        fteFractionHistory: [{ effectiveFrom: "2023-01-01", fteFraction: 1 }],
+      }),
+    ).toBe(65);
+  });
+
+  it("a new starter who also leaves within their hire year is prorated for that single partial year only", () => {
+    // Hired 15 March, terminated 20 August, same year: March-August
+    // inclusive is 6 whole calendar months (the partial hire AND exit
+    // months each count in full, per established Poland rounding
+    // practice). ceil(26/12*6) = 13.
+    expect(
+      computePolandAnnualLeaveEntitlementAtTermination({
+        hireDate: "2024-03-15",
+        terminationDate: "2024-08-20",
+        fteFractionHistory: [{ effectiveFrom: "2024-03-15", fteFraction: 1 }],
+      }),
+    ).toBe(13);
+  });
+
+  it("prorates a stable part-time employee's exit year by both the calendar-month remainder and the FTE fraction", () => {
+    expect(
+      computePolandAnnualLeaveEntitlementAtTermination({
+        hireDate: "2023-01-01",
+        terminationDate: "2023-12-31",
+        fteFractionHistory: [{ effectiveFrom: "2023-01-01", fteFraction: 0.5 }],
+      }),
+    ).toBe(13); // ceil(26 * 0.5) for a full stable-FTE year
+  });
+
+  it("returns 0 (never negative) when the termination date is before the hire date", () => {
+    expect(
+      computePolandAnnualLeaveEntitlementAtTermination({
+        hireDate: "2024-06-01",
+        terminationDate: "2024-01-01",
+        fteFractionHistory: [{ effectiveFrom: "2024-06-01", fteFraction: 1 }],
+      }),
+    ).toBe(0);
+  });
+
+  it("blocks (never guesses) when no FTE history is available at all", () => {
+    expect(computePolandAnnualLeaveEntitlementAtTermination({ hireDate: "2023-01-01", terminationDate: "2024-06-01" })).toBeNull();
+    expect(explainPolandTerminationEntitlementBlock({ hireDate: "2023-01-01", terminationDate: "2024-06-01" })).toMatch(/employment_contracts history/);
+  });
+
+  it("blocks when the FTE changes during the exit year — never splits and prices a mixed-FTE final year", () => {
+    const input = {
+      hireDate: "2023-01-01",
+      terminationDate: "2024-12-31",
+      fteFractionHistory: [
+        { effectiveFrom: "2023-01-01", fteFraction: 1 },
+        { effectiveFrom: "2024-07-01", fteFraction: 0.5 },
+      ],
+    };
+    expect(computePolandAnnualLeaveEntitlementAtTermination(input)).toBeNull();
+    expect(explainPolandTerminationEntitlementBlock(input)).toMatch(/FTE changes during/);
+  });
+
+  it("blocks when the FTE changes during a same-year hire-and-exit period", () => {
+    const input = {
+      hireDate: "2024-01-01",
+      terminationDate: "2024-12-31",
+      fteFractionHistory: [
+        { effectiveFrom: "2024-01-01", fteFraction: 1 },
+        { effectiveFrom: "2024-07-01", fteFraction: 0.5 },
+      ],
+    };
+    expect(computePolandAnnualLeaveEntitlementAtTermination(input)).toBeNull();
+    expect(explainPolandTerminationEntitlementBlock(input)).toMatch(/FTE changes during/);
+  });
+
+  it("does NOT block on an FTE change confined to an earlier, already-fully-priced full calendar year — only a change inside the priced final year matters", () => {
+    // Full-time in 2023, half-time from 2024-01-01 (a year-boundary change,
+    // not mid-year) onward, terminated mid-2025: 2023 = 26 (full-time),
+    // 2024 = 13 (full year, half-time), 2025 (Jan-Mar, 3 months, half-time)
+    // = ceil(26/12*3*0.5) = ceil(3.25) = 4. Total = 43.
+    expect(
+      computePolandAnnualLeaveEntitlementAtTermination({
+        hireDate: "2023-01-01",
+        terminationDate: "2025-03-31",
+        fteFractionHistory: [
+          { effectiveFrom: "2023-01-01", fteFraction: 1 },
+          { effectiveFrom: "2024-01-01", fteFraction: 0.5 },
+        ],
+      }),
+    ).toBe(43);
   });
 });
 

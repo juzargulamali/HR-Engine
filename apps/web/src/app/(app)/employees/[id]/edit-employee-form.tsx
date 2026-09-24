@@ -146,6 +146,7 @@ export function EditEmployeeForm({
             </div>
           </div>
           {coreState.error ? <Alert variant="destructive">{coreState.error}</Alert> : null}
+          {!coreState.error && coreState.warning ? <Alert>{coreState.warning}</Alert> : null}
           <Button type="submit" size="sm" disabled={corePending}>
             {corePending ? "Saving…" : "Save profile"}
           </Button>

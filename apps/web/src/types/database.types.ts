@@ -1283,6 +1283,10 @@ export interface Database {
         Args: { p_employee_id: string };
         Returns: { forfeited_days: number }[];
       };
+      post_poland_termination_leave_adjustment: {
+        Args: { p_employee_id: string; p_amount_days: number; p_note?: string | null };
+        Returns: { applied_days: number; excess_requiring_review: number; already_posted: boolean }[];
+      };
       preflight_country_schedule_config: {
         Args: Record<string, never>;
         Returns: {

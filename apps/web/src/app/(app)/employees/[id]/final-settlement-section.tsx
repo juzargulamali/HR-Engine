@@ -1,4 +1,4 @@
-import { computeFinalSettlement, type EosbPolicyPayload } from "@enginious-hr/domain";
+import { computeFinalSettlement, explainPolandTerminationEntitlementBlock, type EosbPolicyPayload, type FteFractionPeriod } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import { Alert } from "@/components/ui/alert";
 import { SettlementRateForm } from "./settlement-rate-form";
@@ -23,6 +23,7 @@ export async function FinalSettlementSection({
   const supabase = await createClient();
 
   const needsStatutoryRate = COUNTRIES_REQUIRING_STATUTORY_RATE.has(countryCode);
+  const isPoland = countryCode === "PL";
 
   const [
     { data: compensation },
@@ -31,6 +32,7 @@ export async function FinalSettlementSection({
     { data: eosbPolicy },
     { data: loans },
     { data: settlementInput },
+    { data: polandContracts },
   ] = await Promise.all([
     supabase
       .from("compensation_details")
@@ -55,7 +57,28 @@ export async function FinalSettlementSection({
     needsStatutoryRate
       ? supabase.from("termination_settlement_inputs").select("leave_encashment_daily_rate").eq("employee_id", employeeId).maybeSingle()
       : Promise.resolve({ data: null }),
+    // Poland only — a live recheck of the SAME calculation the termination
+    // workflow uses to true up leave_ledger (lib/actions/polandTermination.ts).
+    // Deliberately independent of whether that true-up actually ran or
+    // succeeded: this refuses to show a settlement figure whenever the
+    // entitlement itself can't be determined automatically (an FTE change,
+    // gap, or ambiguous contract history), never trusting a balance that
+    // might not reflect the employee's real, prorated exit-year entitlement.
+    isPoland ? supabase.from("employment_contracts").select("start_date, fte_fraction").eq("employee_id", employeeId) : Promise.resolve({ data: null }),
   ]);
+
+  if (isPoland) {
+    const fteFractionHistory: FteFractionPeriod[] = (polandContracts ?? []).map((c) => ({ effectiveFrom: c.start_date, fteFraction: Number(c.fte_fraction) }));
+    const blockReason = explainPolandTerminationEntitlementBlock({ hireDate, terminationDate, fteFractionHistory });
+    if (blockReason) {
+      return (
+        <Alert variant="destructive">
+          Poland&apos;s Annual Leave entitlement through this employee&apos;s termination date could not be automatically determined ({blockReason}). A
+          manual, audited HR adjustment is required before Final Settlement can be prepared.
+        </Alert>
+      );
+    }
+  }
 
   if (!compensation) {
     return <Alert>No current compensation record on file — can&apos;t compute a settlement figure.</Alert>;

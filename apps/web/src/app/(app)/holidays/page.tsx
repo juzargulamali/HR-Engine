@@ -35,7 +35,10 @@ export default async function HolidaysPage() {
       <div>
         <h1 className="text-2xl font-semibold">Public holidays</h1>
         <p className="text-muted-foreground">
-          Used by the leave day-count calculator so a holiday inside a leave request never consumes a day. Lunar
+          Used by the leave day-count calculator, whose effect on a leave request differs by country: in the UAE, a
+          public holiday within Annual Leave counts as part of the calendar-day leave period; in Saudi Arabia, an
+          overlapping official holiday extends Annual Leave instead of consuming a day of it; in Poland, holidays and
+          other non-working days never consume Annual Leave, since only working days are deducted. Lunar
           (Islamic-calendar) holidays are added each year once officially confirmed, not predicted in advance.
         </p>
       </div>

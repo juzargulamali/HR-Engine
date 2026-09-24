@@ -432,6 +432,101 @@ function priceSubsequentCalendarYears(hireYear: number, asOfYear: number, sorted
   return { ok: true, days: total };
 }
 
+// -----------------------------------------------------------------------------
+// Poland: entitlement through an employee's actual LEAVING date (termination)
+// -----------------------------------------------------------------------------
+
+export interface PolandTerminationEntitlementInput {
+  hireDate: string;
+  terminationDate: string;
+  /** See AnnualLeaveEntitlementToDateInput's own field of the same name — identical contract. */
+  fteFractionHistory?: readonly FteFractionPeriod[];
+}
+
+/**
+ * Single dispatcher for a Poland employee's cumulative Annual Leave
+ * entitlement through their actual termination date — used by the
+ * termination workflow to true up the leave_ledger balance before Final
+ * Settlement reads it (apps/web/src/lib/actions/polandTermination.ts),
+ * NEVER by the ongoing-accrual cron (see computeAnnualLeaveEntitlementToDate
+ * for that — it deliberately prices the current/asOfYear in FULL because an
+ * ongoing employee's full annual entitlement is available from 1 January
+ * regardless of the month; a LEAVING employee's final, partial year must
+ * instead be prorated through their actual last day, which is exactly what
+ * this function does and that one explicitly does not).
+ *
+ * Returns `null` under the same conditions as computeAnnualLeaveEntitlementToDate
+ * (missing/gappy/overlapping/invalid FTE history, or an FTE change within a
+ * priced period) — see explainPolandTerminationEntitlementBlock for the
+ * reason. The caller must treat `null` as "block automatic final-settlement
+ * preparation; require an audited HR adjustment," never substitute a
+ * guessed default.
+ */
+export function computePolandAnnualLeaveEntitlementAtTermination(input: PolandTerminationEntitlementInput): number | null {
+  const result = computePolandTerminationEntitlementOrDispatch(input);
+  return typeof result === "number" ? result : result.ok ? result.days : null;
+}
+
+/** Companion to computePolandAnnualLeaveEntitlementAtTermination — see explainPolandEntitlementBlock's own doc comment for the identical contract. */
+export function explainPolandTerminationEntitlementBlock(input: PolandTerminationEntitlementInput): string | null {
+  const result = computePolandTerminationEntitlementOrDispatch(input);
+  return typeof result === "number" ? null : result.ok ? null : result.reason;
+}
+
+function computePolandTerminationEntitlementOrDispatch(input: PolandTerminationEntitlementInput): number | PolandEntitlementResult {
+  const { hireDate, terminationDate, fteFractionHistory } = input;
+
+  if (terminationDate < hireDate) return 0;
+  if (!fteFractionHistory) {
+    return { ok: false, reason: "no employment_contracts history is available to resolve an FTE fraction from" };
+  }
+
+  const validated = validateFteFractionHistory(fteFractionHistory);
+  if (!validated.ok) return validated;
+
+  return computePolandEntitlementThroughExitDate(hireDate, terminationDate, validated.sorted);
+}
+
+/**
+ * Kodeks pracy Art. 1551 §1 point 2 / Art. 155 §1's proportional-leave
+ * mechanic applies symmetrically at BOTH ends of employment — the same
+ * whole-calendar-month, round-up-a-partial-month convention this file
+ * already uses for a new starter's hire year applies to a leaver's final
+ * (exit) year too: the months from 1 January (or the hire date, if hire and
+ * termination fall in the same calendar year) through the termination date
+ * are priced, with a partial final month still counting as a whole month.
+ * Every full calendar year strictly between the hire year and the exit year
+ * is priced in full, exactly as computePolandEntitlementToDate does for an
+ * ongoing employee — only the LAST year differs, prorated through the exit
+ * month instead of priced in full.
+ */
+function computePolandEntitlementThroughExitDate(hireDate: string, exitDate: string, sortedFteHistory: readonly FteFractionPeriod[]): PolandEntitlementResult {
+  const hireYear = dateParts(hireDate).year;
+  const exitYear = dateParts(exitDate).year;
+  const exitDateParts = dateParts(exitDate);
+  const firstOfExitMonth = formatDate(exitDateParts.year, exitDateParts.month, 1);
+
+  if (exitYear === hireYear) {
+    return priceWholePeriod(hireDate, firstOfExitMonth, sortedFteHistory, POLAND_ANNUAL_LEAVE_BASE_DAYS);
+  }
+
+  const hireYearPriced = priceWholePeriod(hireDate, formatDate(hireYear, 12, 1), sortedFteHistory, POLAND_ANNUAL_LEAVE_BASE_DAYS);
+  if (!hireYearPriced.ok) return hireYearPriced;
+
+  let total = hireYearPriced.days;
+  for (let year = hireYear + 1; year < exitYear; year++) {
+    const priced = priceWholePeriod(formatDate(year, 1, 1), formatDate(year, 12, 1), sortedFteHistory, POLAND_ANNUAL_LEAVE_BASE_DAYS);
+    if (!priced.ok) return priced;
+    total += priced.days;
+  }
+
+  const exitYearPriced = priceWholePeriod(formatDate(exitYear, 1, 1), firstOfExitMonth, sortedFteHistory, POLAND_ANNUAL_LEAVE_BASE_DAYS);
+  if (!exitYearPriced.ok) return exitYearPriced;
+  total += exitYearPriced.days;
+
+  return { ok: true, days: total };
+}
+
 export interface PolandAnnualLeaveInput {
   /** 1.0 for full-time; a fraction (e.g. 0.5) for part-time, prorating the result. Defaults to 1.0. */
   fteFraction?: number;
