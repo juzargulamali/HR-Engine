@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { cancelLeaveRequest } from "@/lib/actions/leave";
 import { Button } from "@/components/ui/button";
 
-export function CancelRequestButton({ requestId }: { requestId: string }) {
+export function CancelRequestButton({ requestId, restoresBalance = false }: { requestId: string; restoresBalance?: boolean }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -15,7 +15,10 @@ export function CancelRequestButton({ requestId }: { requestId: string }) {
         variant="outline"
         disabled={pending}
         onClick={() => {
-          if (!window.confirm("Cancel this leave request?")) return;
+          const confirmMessage = restoresBalance
+            ? "Cancel this approved leave request? Any leave balance it deducted will be restored."
+            : "Cancel this leave request?";
+          if (!window.confirm(confirmMessage)) return;
           startTransition(async () => {
             const result = await cancelLeaveRequest(requestId);
             setError(result.error);

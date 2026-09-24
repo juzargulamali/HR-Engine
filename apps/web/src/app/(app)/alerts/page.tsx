@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const HORIZON_DAYS = 30;
 
@@ -25,7 +26,7 @@ export default async function AlertsPage() {
   if (!session) return null;
 
   if (!canViewHrAlerts(session.grants)) {
-    return <Alert variant="destructive">Alerts are restricted to HR Admin and CEO.</Alert>;
+    return <Alert variant="destructive">Alerts are restricted to HR Admin, CEO, and CTO.</Alert>;
   }
 
   const supabase = await createClient();
@@ -34,8 +35,8 @@ export default async function AlertsPage() {
   const todayStr = today.toISOString().slice(0, 10);
 
   // No explicit company filter on any of these — like employees/page.tsx,
-  // RLS alone decides what's visible (every company an HR Admin/CEO grant
-  // covers), never re-derived here.
+  // RLS alone decides what's visible (every company an HR Admin/CEO/CTO
+  // grant covers), never re-derived here.
   const [{ data: employees }, { data: contracts }, { data: employeeDocs }, { data: identityDocs }] = await Promise.all([
     supabase.from("employees").select("id, first_name, last_name").is("deleted_at", null),
     supabase
@@ -89,7 +90,9 @@ export default async function AlertsPage() {
 
       {nothingFlagged ? (
         <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">Nothing needs attention right now.</CardContent>
+          <CardContent>
+            <EmptyState dense title="Nothing needs attention right now." description="No contracts, documents, or probation periods are due within the next 30 days." />
+          </CardContent>
         </Card>
       ) : null}
 

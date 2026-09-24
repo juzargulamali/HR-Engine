@@ -9,6 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { GoalForm } from "./goal-form";
 import { GoalRowControls } from "./goal-row-controls";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   in_progress: "secondary",
@@ -114,8 +115,8 @@ export default async function PerformancePage() {
               ))}
               {(goals ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    No goals yet.
+                  <TableCell colSpan={6}>
+                    <EmptyState dense title="No goals yet." />
                   </TableCell>
                 </TableRow>
               ) : null}
@@ -159,8 +160,8 @@ export default async function PerformancePage() {
               ))}
               {(appraisals ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground">
-                    No appraisals yet — draft ones aren&apos;t shown until your appraiser submits them.
+                  <TableCell colSpan={4}>
+                    <EmptyState dense title="No appraisals yet — draft ones aren't shown until your appraiser submits them." />
                   </TableCell>
                 </TableRow>
               ) : null}

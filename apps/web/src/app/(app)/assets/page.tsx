@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { NewAssetForm } from "./new-asset-form";
 import { RetireAssetButton } from "./retire-asset-button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   in_stock: "outline",
@@ -107,8 +108,8 @@ export default async function AssetsPage() {
               })}
               {(assets ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground">
-                    No assets on file yet.
+                  <TableCell colSpan={7}>
+                    <EmptyState dense title="No assets on file yet." />
                   </TableCell>
                 </TableRow>
               ) : null}

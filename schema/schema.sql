@@ -66,7 +66,11 @@ create type request_status as enum (
   'draft', 'submitted', 'pending_approval', 'approved', 'rejected', 'cancelled'
 );
 
-create type approval_decision as enum ('pending', 'approved', 'rejected', 'skipped');
+-- 'cancelled' is distinct from 'skipped': skipped means a step was never
+-- exercised because workflow routing bypassed it (a threshold condition,
+-- self-approval); cancelled means the underlying request was withdrawn by
+-- its own requester while a real decision was still outstanding.
+create type approval_decision as enum ('pending', 'approved', 'rejected', 'skipped', 'cancelled');
 
 create type approvable_entity as enum (
   'leave_request', 'reimbursement_claim', 'timesheet', 'generated_letter',
@@ -460,10 +464,74 @@ create table leave_requests (
   -- posted at all -- unaccounted, unlimited "free" leave. total_days is
   -- always server-computed at submission (never client-editable after), so
   -- this only rejects the exploit path, not any legitimate value.
-  check (total_days > 0)
+  check (total_days > 0),
+  -- Same backstop role as the total_days check above, for a different
+  -- loophole: submitLeaveRequest() already checks for an overlapping
+  -- request before inserting, but that check-then-insert has the same
+  -- TOCTOU shape as bulkRecordAttendance()'s comp-day race, and a raw
+  -- insert bypassing the app layer entirely skips it altogether. One
+  -- employee may not hold two overlapping requests that are still live
+  -- (not yet rejected/cancelled) — cancelled/rejected requests are
+  -- deliberately excluded so a withdrawn request never blocks a new one
+  -- for the same dates.
+  exclude using gist (
+    employee_id with =,
+    daterange(start_date, end_date, '[]') with &&
+  ) where (status in ('submitted', 'pending_approval', 'approved'))
 );
 
 create index idx_leave_requests_employee on leave_requests(employee_id);
+
+-- Backstop for the same loophole as leave/new/page.tsx's leave-type
+-- allowlist: the app no longer offers a free-text leave type field, but a
+-- raw insert bypassing it entirely could still write any string. Requires
+-- an active leave_rules policy for the employee's country that actually
+-- defines this leave_type_code, resolved as of the request's OWN
+-- start_date rather than current_date — same rule submitLeaveRequest() and
+-- the leave/new page's leave-type dropdown apply, so a request starting
+-- after a newer policy takes effect is checked against that policy here
+-- too, not whichever one happens to be active on the day it's submitted.
+-- The "no covering policy" case submitLeaveRequest() blocks with a
+-- friendly message surfaces here as a generic exception for anything that
+-- reaches this trigger without going through the app layer first.
+-- SECURITY DEFINER: the app inserts leave_requests for the requester
+-- themselves, but this check must resolve the SAME way regardless of who's
+-- inserting or which other rows they can see — a plain employee's own
+-- employees_select policy doesn't even cover an unrelated peer's row, and
+-- this check has nothing to do with row ownership anyway (only whether an
+-- active policy defines this leave type for this employee's country), so
+-- it must not be gated by the inserting user's own RLS visibility.
+create or replace function guard_leave_request_type()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_valid boolean;
+begin
+  select exists (
+    select 1
+    from policy_leave_types plt
+    join policy_versions pv on pv.id = plt.policy_version_id
+    join employees e on e.country_code = pv.country_code
+    where e.id = new.employee_id
+      and pv.policy_type = 'leave_rules'
+      and pv.status = 'active'
+      and new.start_date between pv.effective_from and coalesce(pv.effective_to, 'infinity'::date)
+      and plt.leave_type_code = new.leave_type_code
+  ) into v_valid;
+
+  if not v_valid then
+    raise exception 'No active leave policy for this employee''s country defines leave type "%" — HR must activate a leave policy with this leave type first', new.leave_type_code;
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger leave_requests_guard_type before insert on leave_requests
+  for each row execute function guard_leave_request_type();
 
 -- Append-only, immutable. Balance = SUM(amount_days), never a stored mutable field.
 create table leave_ledger (
@@ -521,14 +589,6 @@ create table comp_day_ledger (
 
 create index idx_comp_ledger_employee on comp_day_ledger(employee_id, txn_date);
 
--- bulkRecordAttendance()'s "already credited" check (a SELECT immediately
--- followed by an INSERT, no lock in between) is a TOCTOU race: two
--- concurrent saves for the same attendance record (a double-clicked "Save"
--- on the daily register, or two admins editing the same date) can both
--- pass the check and both insert an 'earned' comp-day credit for it,
--- doubling the day. This backs that check with a real constraint so the
--- second racer's insert fails loudly instead of silently double-crediting.
-create unique index comp_day_ledger_attendance_uniq on comp_day_ledger(reference_id) where reference_type = 'attendance_record';
 
 create view comp_day_balances as
   select employee_id, sum(days) as balance_days
@@ -708,7 +768,18 @@ create table attendance_records (
   clock_in      timestamptz,
   clock_out     timestamptz,
   hours_worked  numeric(5,2),
-  status        text not null default 'present', -- 'present'|'absent'|'leave'|'holiday'|'weekend'
+  -- Status is what the employee actually did that day; work_mode (below) is
+  -- WHERE they did it — two independent facts that used to be conflated
+  -- into one field (a "holiday"/"weekend" status described the CALENDAR,
+  -- not the employee, and a manager working from a client site on an
+  -- ordinary Tuesday had no way to record that at all). Never trust a
+  -- browser-supplied default for this: a day with no saved row is
+  -- genuinely unknown, not "present" — 'not_recorded' is the real default,
+  -- enforced here, not just in the UI.
+  status        text not null default 'not_recorded'
+                  check (status in ('not_recorded', 'present', 'absent', 'leave', 'partial_day')),
+  work_mode     text
+                  check (work_mode in ('office', 'client_site', 'work_from_home', 'field_work', 'business_travel')),
   source        text not null default 'manual',   -- 'manual'|'biometric'|'import'
   unique (employee_id, work_date)
 );
@@ -1129,7 +1200,8 @@ create table audit_log (
   record_id     uuid,
   action        text not null,   -- 'insert'|'update'|'delete'|'approve'|'reject'|'status_change'
   actor_id      uuid,
-  actor_role    app_role,
+  actor_role    app_role,   -- kept for backward compatibility: the same "most recently granted" role write_audit_log() always resolved here
+  actor_roles   app_role[], -- every role the actor held (unrevoked) at the moment of the action — a multi-role user must never be flattened to just one
   company_id    uuid references companies(id), -- resolved by write_audit_log() so HR Admin's view scopes to their own company
   before_data   jsonb,
   after_data    jsonb,
@@ -1256,6 +1328,243 @@ as $$
     and status = 'active'
     and p_as_of between effective_from and coalesce(effective_to, 'infinity'::date)
   limit 1;
+$$;
+
+-- Records one day's attendance for a batch of employees and, where earned,
+-- credits (or reverses) the recovery/comp-day it produces — all as one
+-- atomic transaction per call, so a save can never leave the attendance row
+-- written but the ledger untouched (or vice versa). Recovery-day
+-- eligibility (weekend/public holiday) is re-derived here from
+-- countries.week_start_day and public_holidays, exactly the same
+-- isWeekend() rule packages/domain uses — the caller may not assert it,
+-- unlike the bulkRecordAttendance() this replaces, which trusted a
+-- browser-computed isRecoveryEligible boolean outright.
+--
+-- p_rows is a jsonb array of {employee_id, status, work_mode, hours_worked}
+-- objects — a single round trip for the whole daily register, same shape
+-- the app already saves in one page.
+--
+-- Correcting a day away from 'present' (or a day that's no longer flagged
+-- as a recovery day) never deletes an already-earned comp_day_ledger
+-- entry — it posts a linked reversal row (reversal_of_id), same
+-- append-and-classify approach the leave ledgers use, so both the original
+-- credit and who reversed it stay on the record.
+--
+-- The output column is attendance_employee_id, not employee_id — every
+-- table this function touches (employees, attendance_records,
+-- comp_day_ledger) has a real column literally named employee_id, and
+-- PL/pgSQL raises "ambiguous column reference" if an OUT parameter shares
+-- a name with a column referenced anywhere in the function body (it bit
+-- the ON CONFLICT target list here specifically).
+--
+-- needs_policy_review is true whenever a day would otherwise have earned a
+-- credit (recovery day + present) but no active overtime_rules policy
+-- defines a valid recovery_credit_days for this country, or the value
+-- configured isn't exactly 0, 0.5, or 1 — the credit is 0 in that case,
+-- never silently 1. This is a real gap in HR configuration, not a
+-- non-event, so the caller surfaces it rather than swallowing it.
+create or replace function record_attendance_and_recovery(p_work_date date, p_rows jsonb)
+returns table(attendance_employee_id uuid, credited boolean, reversed boolean, needs_policy_review boolean)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_row jsonb;
+  v_employee_id uuid;
+  v_status text;
+  v_work_mode text;
+  v_hours numeric;
+  v_company_id uuid;
+  v_country_code text;
+  v_week_start_day smallint;
+  v_holiday_name text;
+  v_is_recovery_day boolean;
+  v_record_id uuid;
+  v_was_credited comp_day_ledger%rowtype;
+  v_credit_days numeric;
+  v_expiry_months int;
+  v_expiry_date date;
+  v_overtime_policy jsonb;
+  v_credited boolean;
+  v_reversed boolean;
+  v_needs_review boolean;
+begin
+  for v_row in select * from jsonb_array_elements(p_rows)
+  loop
+    v_employee_id := (v_row ->> 'employee_id')::uuid;
+    v_status := v_row ->> 'status';
+    v_work_mode := nullif(v_row ->> 'work_mode', '');
+    v_hours := nullif(v_row ->> 'hours_worked', '')::numeric;
+    v_credited := false;
+    v_reversed := false;
+    v_needs_review := false;
+
+    select e.company_id, e.country_code into v_company_id, v_country_code
+    from employees e where e.id = v_employee_id;
+    if v_company_id is null then
+      raise exception 'Employee % not found', v_employee_id;
+    end if;
+    if not has_role('hr_admin', v_company_id) then
+      raise exception 'Only HR Admin may record attendance for this employee';
+    end if;
+
+    -- Same advisory lock decide_leave_approval() takes before touching an
+    -- employee's comp-day balance, for the same reason: without it, two
+    -- concurrent saves for this employee (a double-clicked Save, or two
+    -- admins editing the same date) could both read "not yet credited"
+    -- before either has committed its insert, and both credit it.
+    perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || v_employee_id::text));
+
+    select week_start_day into v_week_start_day from countries where code = v_country_code;
+    select name into v_holiday_name from public_holidays where country_code = v_country_code and holiday_date = p_work_date;
+    v_is_recovery_day := v_holiday_name is not null
+      or ((extract(dow from p_work_date)::int - coalesce(v_week_start_day, 1) + 7) % 7) >= 5;
+
+    -- One atomic upsert rather than a check-then-branch — the latter has
+    -- the same TOCTOU shape as the race bulkRecordAttendance()'s old
+    -- "already credited?" check had (two concurrent saves for the same
+    -- employee/date, e.g. a double-clicked Save, could otherwise both see
+    -- "no existing row" and both attempt an insert).
+    insert into attendance_records (employee_id, work_date, status, work_mode, hours_worked, source)
+    values (v_employee_id, p_work_date, v_status, v_work_mode, v_hours, 'manual')
+    on conflict (employee_id, work_date) do update
+    set status = excluded.status, work_mode = excluded.work_mode, hours_worked = excluded.hours_worked
+    returning id into v_record_id;
+
+    -- The CURRENTLY ACTIVE credit for this record, if any — an 'earned' row
+    -- that hasn't itself already been reversed. Without the "not reversed"
+    -- exclusion, correcting a day away from present (posting a reversal)
+    -- and then correcting it back to present later would see the original
+    -- (now-reversed) earned row and wrongly treat it as still active,
+    -- permanently blocking that day from ever earning a fresh credit again.
+    select cl.* into v_was_credited from comp_day_ledger cl
+    where cl.reference_type = 'attendance_record' and cl.reference_id = v_record_id and cl.entry_type = 'earned'
+      and not exists (select 1 from comp_day_ledger r where r.reversal_of_id = cl.id);
+
+    if v_is_recovery_day and v_status = 'present' then
+      if v_was_credited.id is null then
+        select resolve_policy(v_country_code, 'overtime_rules', p_work_date) into v_overtime_policy;
+        -- recovery_credit_days must be exactly 0, 0.5, or 1 — HR-configurable
+        -- per country via the overtime_rules policy payload, same
+        -- field-within-payload convention comp_day_expiry_months already
+        -- established. No active policy, a missing field, or any other
+        -- value is treated as unconfigured: 0 days credited, never a
+        -- silent default to 1 — this is a gap in HR setup that needs
+        -- review, not a free day.
+        if v_overtime_policy is null or not (v_overtime_policy ? 'recovery_credit_days') then
+          v_credit_days := 0;
+          v_needs_review := true;
+        else
+          v_credit_days := (v_overtime_policy ->> 'recovery_credit_days')::numeric;
+          if v_credit_days is distinct from 0 and v_credit_days is distinct from 0.5 and v_credit_days is distinct from 1 then
+            v_credit_days := 0;
+            v_needs_review := true;
+          end if;
+        end if;
+
+        if v_credit_days > 0 then
+          v_expiry_months := nullif(v_overtime_policy ->> 'comp_day_expiry_months', '')::int;
+          v_expiry_date := case when v_expiry_months is not null then (p_work_date + (v_expiry_months || ' months')::interval)::date else null end;
+          insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, expiry_date, reference_type, reference_id, created_by)
+          values (v_employee_id, p_work_date, 'earned', v_credit_days, 'holiday_worked', v_expiry_date, 'attendance_record', v_record_id, auth.uid());
+          v_credited := true;
+        end if;
+      end if;
+    elsif v_was_credited.id is not null then
+      insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, reference_type, reference_id, reversal_of_id, created_by)
+      values (v_was_credited.employee_id, p_work_date, 'reversal', -v_was_credited.days, 'holiday_worked', 'attendance_record', v_record_id, v_was_credited.id, auth.uid());
+      v_reversed := true;
+    end if;
+
+    attendance_employee_id := v_employee_id;
+    credited := v_credited;
+    reversed := v_reversed;
+    needs_policy_review := v_needs_review;
+    return next;
+  end loop;
+end;
+$$;
+
+-- Backstop for the same class of loophole guard_leave_request_type()
+-- closes for leave requests: record_attendance_and_recovery()'s own
+-- "already credited?" check (backed by the advisory lock above) is the
+-- sanctioned path, but a raw insert bypassing it entirely could still post
+-- a second active 'earned' credit for the same attendance record. This
+-- trigger makes that a real database invariant: after any 'earned' insert,
+-- at most one *unreversed* 'earned' row may reference a given
+-- attendance_record. A plain partial unique index can't express "not yet
+-- reversed" (that depends on whether another row's reversal_of_id points
+-- at this one, not on this row's own columns), so this is a trigger
+-- rather than an index — and it must allow a later, genuine
+-- earn-reverse-earn-again cycle to keep working, which a naive
+-- unique-on-reference_id index (the one this replaces) did not.
+create or replace function guard_comp_day_ledger_single_active_credit()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_active_count int;
+begin
+  if new.reference_type = 'attendance_record' and new.entry_type = 'earned' then
+    select count(*) into v_active_count
+    from comp_day_ledger cl
+    where cl.reference_type = 'attendance_record' and cl.reference_id = new.reference_id and cl.entry_type = 'earned'
+      and not exists (select 1 from comp_day_ledger r where r.reversal_of_id = cl.id);
+    if v_active_count > 1 then
+      raise exception 'An active (unreversed) earned comp-day credit already exists for attendance record %', new.reference_id;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger comp_day_ledger_single_active_credit after insert on comp_day_ledger
+  for each row execute function guard_comp_day_ledger_single_active_credit();
+
+-- Deletes one attendance record — the correction path for a mistaken
+-- manual entry, distinct from record_attendance_and_recovery()'s upsert
+-- (which corrects a day by changing its status, not removing the row).
+-- A bare `delete from attendance_records` used to leave any active
+-- comp_day_ledger 'earned' credit for that record orphaned forever,
+-- referencing a row that no longer exists — this reverses it first, in
+-- the same transaction, via the same linked-reversal pattern
+-- record_attendance_and_recovery() already uses, so deleting a day can
+-- never leave an active recovery credit with nothing behind it.
+create or replace function delete_attendance_record(p_record_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_employee_id uuid;
+  v_company_id uuid;
+  v_was_credited comp_day_ledger%rowtype;
+begin
+  select employee_id into v_employee_id from attendance_records where id = p_record_id;
+  if v_employee_id is null then
+    raise exception 'Attendance record not found';
+  end if;
+
+  select company_id into v_company_id from employees where id = v_employee_id;
+  if not has_role('hr_admin', v_company_id) then
+    raise exception 'Only HR Admin may delete an attendance record';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || v_employee_id::text));
+
+  select cl.* into v_was_credited from comp_day_ledger cl
+  where cl.reference_type = 'attendance_record' and cl.reference_id = p_record_id and cl.entry_type = 'earned'
+    and not exists (select 1 from comp_day_ledger r where r.reversal_of_id = cl.id);
+
+  if v_was_credited.id is not null then
+    insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, reference_type, reference_id, reversal_of_id, created_by)
+    values (v_was_credited.employee_id, current_date, 'reversal', -v_was_credited.days, 'holiday_worked', 'attendance_record', p_record_id, v_was_credited.id, auth.uid());
+  end if;
+
+  delete from attendance_records where id = p_record_id;
+end;
 $$;
 
 -- -----------------------------------------------------------------------------
@@ -1805,6 +2114,60 @@ begin
 end;
 $$;
 
+-- Phase 1 correction (2): submitLeaveRequest() used to INSERT into
+-- leave_requests and then, as a separate RPC round trip, call
+-- create_initial_approval() — two independent transactions. If the second
+-- call never reached the database at all (a network drop, the server
+-- process dying between the two calls), the leave request was left
+-- permanently "submitted" with no approvals row and no one able to act on
+-- it; the app's own best-effort "cancel it if routing fails" only covers
+-- the case where the SECOND call itself returns an error, not the case
+-- where it never runs. This function makes both writes one statement, and
+-- therefore one transaction: create_initial_approval() raising for any
+-- reason (no workflow configured, no approver resolvable, self-approval)
+-- rolls back the leave_requests insert along with it, so a caller only
+-- ever observes "fully submitted" or "not submitted at all" — never an
+-- orphan request or an orphan approval.
+create or replace function submit_leave_request(
+  p_leave_type_code text,
+  p_start_date date,
+  p_end_date date,
+  p_half_day_start boolean,
+  p_half_day_end boolean,
+  p_total_days numeric,
+  p_reason text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_employee_id uuid;
+  v_request_id uuid;
+begin
+  select id into v_employee_id from employees where user_id = auth.uid() and deleted_at is null;
+  if v_employee_id is null then
+    raise exception 'No employee record is linked to your account.';
+  end if;
+
+  insert into leave_requests (employee_id, leave_type_code, start_date, end_date, half_day_start, half_day_end, total_days, reason)
+  values (v_employee_id, p_leave_type_code, p_start_date, p_end_date, coalesce(p_half_day_start, false), coalesce(p_half_day_end, false), p_total_days, p_reason)
+  returning id into v_request_id;
+
+  -- Same function the old two-call path used for its second call — reused
+  -- here rather than duplicated, so routing stays the single implementation
+  -- every other entity type (reimbursement_claim, timesheet, ...) shares.
+  -- Calling it from inside this function, rather than as a separate RPC,
+  -- is what makes the two writes atomic: a plpgsql function body runs
+  -- inside the same transaction as its own invoking statement, so an
+  -- exception raised here unwinds the insert above too.
+  perform create_initial_approval('leave_request', v_request_id);
+
+  return v_request_id;
+end;
+$$;
+
 -- The approval state machine — SECURITY DEFINER so it can read/write across
 -- leave/reimbursement/timesheet/generated_letter/payroll_export_run tables
 -- plus the ledgers atomically inside one transaction (with row locks, so
@@ -2032,6 +2395,88 @@ begin
 end;
 $$;
 
+-- Withdraws a leave request — the requester's own action, distinct from
+-- decide_leave_approval() above (an approver's action). Two cases:
+--   - Still awaiting a decision (submitted/pending_approval): just closes
+--     out the chain. Without this, cancelling used to be a bare
+--     `update leave_requests set status = 'cancelled'` from the app that
+--     never touched the approvals table (which has no UPDATE grant for
+--     authenticated anyway — see the revoke below) — the approver's now-moot
+--     approvals row stayed 'pending' forever, still counting toward their
+--     pending-approvals total and still listed on their Approvals page for
+--     a decision that no longer mattered.
+--   - Already approved, but hasn't started yet: also reverses every ledger
+--     entry that approval posted (leave_ledger deduction, and any
+--     comp_day_ledger redemption from the deduction-priority routing) —
+--     never by deleting them, by the same linked-reversal pattern the
+--     ledgers already use elsewhere (reversal_of_id), so the original
+--     entries and who reversed them both stay on the record. Once a
+--     request's start date has passed, it's cancel-only-going-forward: no
+--     way to know from here how much of it was actually taken, so the
+--     ledger is left alone and the change has to go through a manual
+--     adjustment instead.
+create or replace function cancel_leave_request(p_request_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_request leave_requests%rowtype;
+  v_ledger_row record;
+  v_comp_row record;
+begin
+  select lr.* into v_request
+  from leave_requests lr
+  join employees e on e.id = lr.employee_id
+  where lr.id = p_request_id and e.user_id = auth.uid()
+  for update of lr;
+
+  if v_request.id is null then
+    raise exception 'Leave request not found, or it is not yours to cancel';
+  end if;
+
+  if v_request.status not in ('submitted', 'pending_approval', 'approved') then
+    raise exception 'This request can no longer be cancelled (status: %)', v_request.status;
+  end if;
+
+  if v_request.status = 'approved' and v_request.start_date <= current_date then
+    raise exception 'An approved request can only be cancelled before it starts — once it has started, ask HR for a manual adjustment instead';
+  end if;
+
+  update leave_requests set status = 'cancelled', decided_at = now() where id = p_request_id;
+
+  update approvals
+  set decision = 'cancelled', decided_at = now(), comments = coalesce(comments, 'Cancelled by requester')
+  where entity_type = 'leave_request' and entity_id = p_request_id and decision = 'pending';
+
+  if v_request.status = 'approved' then
+    -- Same advisory lock decide_leave_approval() takes before touching this
+    -- employee's comp-day balance, for the same reason: serialize concurrent
+    -- reads+writes of a SUM-derived balance against this employee.
+    perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || v_request.employee_id::text));
+
+    for v_ledger_row in
+      select l.* from leave_ledger l
+      where l.reference_type = 'leave_request' and l.reference_id = p_request_id and l.amount_days < 0
+        and not exists (select 1 from leave_ledger r where r.reversal_of_id = l.id)
+    loop
+      insert into leave_ledger (employee_id, leave_type_code, txn_date, entry_type, amount_days, reference_type, reference_id, reversal_of_id, note, created_by)
+      values (v_ledger_row.employee_id, v_ledger_row.leave_type_code, current_date, 'reversal', -v_ledger_row.amount_days, 'leave_request', p_request_id, v_ledger_row.id, 'Reversed: leave request cancelled before it started', auth.uid());
+    end loop;
+
+    for v_comp_row in
+      select c.* from comp_day_ledger c
+      where c.reference_type = 'leave_request' and c.reference_id = p_request_id and c.days < 0
+        and not exists (select 1 from comp_day_ledger r where r.reversal_of_id = c.id)
+    loop
+      insert into comp_day_ledger (employee_id, txn_date, entry_type, days, reference_type, reference_id, reversal_of_id, note, created_by)
+      values (v_comp_row.employee_id, current_date, 'reversal', -v_comp_row.days, 'leave_request', p_request_id, v_comp_row.id, 'Reversed: leave request cancelled before it started', auth.uid());
+    end loop;
+  end if;
+end;
+$$;
+
 -- =============================================================================
 -- 14. Row-Level Security
 -- =============================================================================
@@ -2204,25 +2649,35 @@ create trigger employees_guard_self_update
   before update on employees
   for each row execute function guard_employee_self_update();
 
--- Genuinely destroys an employee record and every row across the schema
--- that references it — contracts, compensation history, leave/comp-day
--- ledgers, reimbursements, timesheets, attendance, goals, appraisals,
--- documents, identity documents, insurance, loans, career events, asset
--- assignments, checklist items, generated letters, payroll lines — in
--- dependency order (children before the employees row itself, which every
--- write_audit_log() lookup above depends on: it resolves a child row's
--- company_id via `select company_id from employees where id = employee_id`,
--- which would silently return null if the employees row were already gone).
+-- Permanently destroys an employee record that has NO real history —
+-- correcting a mistaken or duplicate "test" entry, never a way to erase
+-- genuine activity. Every category below that has at least one row BLOCKS
+-- the whole delete (nothing is removed, not even partially) and is named
+-- in the error so the caller sees exactly what's in the way instead of a
+-- generic refusal.
+--
+-- employment_contracts/compensation_details are blockers only once there's
+-- MORE than the single initial row every employee gets the moment they're
+-- created (see createEmployee()) — a lone contract/compensation row is
+-- part of the employee's own record, not history, so permanent delete
+-- would otherwise be unusable for its actual purpose (a mistaken/draft
+-- test employee). A SECOND row of either — a renewed contract, a salary
+-- change — is real employment history exactly like the other categories
+-- below, and blocks the delete the same way (Phase 1 correction (4)).
+-- employee_checklist_items (onboarding/offboarding to-dos) has no such
+-- exception — cleaned up silently regardless of count, never treated as
+-- history worth blocking on.
 --
 -- Deliberately does NOT touch:
 --   - audit_log: record_id carries no FK to any table on purpose, so this
 --     function never has to (or gets to) delete from it — "this employee
 --     existed and was permanently deleted by X at time Y" stays visible
 --     after the fact, exactly what an audit trail is for.
---   - Storage objects named by a file_path column (identity/insurance/
---     employee documents) — same limitation every other soft-delete-only
---     document feature in this app already has; the object is orphaned,
---     not cleaned up here.
+--   - Storage objects named by a file_path column — same limitation every
+--     other soft-delete-only document feature in this app already has;
+--     moot in practice here since identity/employee documents are
+--     themselves a blocker (see below), so this only ever fires on a
+--     record that never had any uploaded either.
 --   - auth.users / user_roles for the employee's linked login — a separate
 --     concern owned by the Users & Roles admin surface, not this function.
 --
@@ -2242,6 +2697,8 @@ as $$
 declare
   v_company_id uuid;
   v_deleted_at timestamptz;
+  v_blockers text[] := '{}';
+  v_count bigint;
 begin
   select company_id, deleted_at into v_company_id, v_deleted_at
   from employees where id = p_employee_id;
@@ -2258,47 +2715,88 @@ begin
     raise exception 'Remove the employee first — permanent delete is only available for an already-removed employee';
   end if;
 
-  -- Any other employee who lists this one as their manager must not be
-  -- deleted along with them — null the reference, same as a real
-  -- offboarding would require anyway (reassign their reports).
+  select count(*) into v_count from attendance_records where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s attendance record(s)', v_count); end if;
+
+  select count(*) into v_count from leave_requests where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s leave request(s)', v_count); end if;
+
+  select count(*) into v_count from leave_ledger where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s leave ledger entr%s', v_count, case when v_count = 1 then 'y' else 'ies' end); end if;
+
+  select count(*) into v_count from comp_day_ledger where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s comp-day ledger entr%s', v_count, case when v_count = 1 then 'y' else 'ies' end); end if;
+
+  select count(*) into v_count from reimbursement_claims where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s reimbursement claim(s)', v_count); end if;
+
+  select count(*) into v_count from project_allocations where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s project allocation(s)', v_count); end if;
+
+  select count(*) into v_count from timesheets where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s timesheet(s)', v_count); end if;
+
+  select count(*) into v_count from goals where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s performance goal(s)', v_count); end if;
+
+  select count(*) into v_count from appraisals where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s appraisal(s)', v_count); end if;
+
+  select count(*) into v_count from payroll_export_lines where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s payroll export line(s)', v_count); end if;
+
+  select count(*) into v_count from generated_letters where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s generated letter(s)', v_count); end if;
+
+  select count(*) into v_count from employee_career_events where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s career event(s) (promotion/salary history)', v_count); end if;
+
+  select count(*) into v_count from asset_assignments where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s asset assignment(s)', v_count); end if;
+
+  select count(*) into v_count from employee_documents where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s document(s)', v_count); end if;
+
+  select count(*) into v_count from identity_documents where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s identity document(s)', v_count); end if;
+
+  select count(*) into v_count from employee_insurance_policies where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s insurance polic%s', v_count, case when v_count = 1 then 'y' else 'ies' end); end if;
+
+  select count(*) into v_count from employee_loans where employee_id = p_employee_id;
+  if v_count > 0 then v_blockers := v_blockers || format('%s loan(s)', v_count); end if;
+
+  -- More than the single initial row means real history — a renewed
+  -- contract or a salary change — not a mistaken/draft test employee.
+  select count(*) into v_count from employment_contracts where employee_id = p_employee_id;
+  if v_count > 1 then v_blockers := v_blockers || format('%s employment contract version(s) (renewed/amended)', v_count); end if;
+
+  select count(*) into v_count from compensation_details where employee_id = p_employee_id;
+  if v_count > 1 then v_blockers := v_blockers || format('%s compensation version(s) (salary change history)', v_count); end if;
+
+  -- approvals is polymorphic (entity_type/entity_id, no FK) — checked via
+  -- the same source tables above, since an approval can only exist for an
+  -- entity that still exists.
+  select count(*) into v_count
+  from approvals a
+  where (a.entity_type = 'leave_request' and exists (select 1 from leave_requests r where r.id = a.entity_id and r.employee_id = p_employee_id))
+     or (a.entity_type = 'reimbursement_claim' and exists (select 1 from reimbursement_claims c where c.id = a.entity_id and c.employee_id = p_employee_id))
+     or (a.entity_type = 'timesheet' and exists (select 1 from timesheets t where t.id = a.entity_id and t.employee_id = p_employee_id))
+     or (a.entity_type = 'generated_letter' and exists (select 1 from generated_letters l where l.id = a.entity_id and l.employee_id = p_employee_id));
+  if v_count > 0 then v_blockers := v_blockers || format('%s approval record(s)', v_count); end if;
+
+  if array_length(v_blockers, 1) > 0 then
+    raise exception 'Cannot permanently delete: this employee has real history — %. Permanent delete is only for a mistaken or duplicate record with no activity; use Remove (soft delete) instead.', array_to_string(v_blockers, ', ');
+  end if;
+
+  -- No blocking history — safe to remove. Every table checked above is now
+  -- guaranteed empty (or, for contracts/compensation, guaranteed to hold at
+  -- most the one initial row) for this employee; only that single row of
+  -- each, plus the harmless checklist scaffolding, still need cleaning up.
   update employees set manager_id = null where manager_id = p_employee_id;
-
-  -- approvals is polymorphic (entity_type/entity_id, no FK) — clean up
-  -- rows belonging to this employee's own entities while those source
-  -- tables still exist to identify them, before deleting the sources below.
-  delete from approvals a using leave_requests r
-    where a.entity_type = 'leave_request' and a.entity_id = r.id and r.employee_id = p_employee_id;
-  delete from approvals a using reimbursement_claims c
-    where a.entity_type = 'reimbursement_claim' and a.entity_id = c.id and c.employee_id = p_employee_id;
-  delete from approvals a using timesheets t
-    where a.entity_type = 'timesheet' and a.entity_id = t.id and t.employee_id = p_employee_id;
-  delete from approvals a using generated_letters l
-    where a.entity_type = 'generated_letter' and a.entity_id = l.id and l.employee_id = p_employee_id;
-
-  delete from document_expiry_reminders_sent d using employee_documents ed
-    where d.employee_document_id = ed.id and ed.employee_id = p_employee_id;
-
-  delete from employee_documents where employee_id = p_employee_id;
-  delete from asset_assignments where employee_id = p_employee_id;
   delete from employee_checklist_items where employee_id = p_employee_id;
-  delete from generated_letters where employee_id = p_employee_id;
-  delete from appraisals where employee_id = p_employee_id;
-  delete from goals where employee_id = p_employee_id;
-  delete from timesheets where employee_id = p_employee_id;
-  delete from attendance_records where employee_id = p_employee_id;
-  delete from reimbursement_claims where employee_id = p_employee_id;
-  delete from project_allocations where employee_id = p_employee_id;
-  delete from comp_day_ledger where employee_id = p_employee_id;
-  delete from leave_ledger where employee_id = p_employee_id;
-  delete from leave_requests where employee_id = p_employee_id;
-  delete from employee_insurance_policies where employee_id = p_employee_id;
-  delete from identity_documents where employee_id = p_employee_id;
-  delete from employee_loans where employee_id = p_employee_id;
-  delete from employee_career_events where employee_id = p_employee_id;
   delete from compensation_details where employee_id = p_employee_id;
   delete from employment_contracts where employee_id = p_employee_id;
-  delete from payroll_export_lines where employee_id = p_employee_id;
-
   delete from employees where id = p_employee_id;
 end;
 $$;
@@ -3291,9 +3789,65 @@ revoke insert, update, delete on audit_log from authenticated, anon;
 create policy user_roles_select_own on user_roles for select
   using (user_id = auth.uid() or has_role('sys_admin'));
 
-create policy user_roles_write_sysadmin on user_roles for all
-  using (has_role('sys_admin'))
+create policy user_roles_insert_sysadmin on user_roles for insert
   with check (has_role('sys_admin'));
+
+-- No UPDATE or DELETE policy at all, and both are explicitly revoked below —
+-- a grant must be retained and revoked only through revoke_role_grant(),
+-- which enforces the self-revocation and last-System-Administrator
+-- protections atomically; a direct DELETE would destroy the row (and its
+-- revoked_at history) without going through either check. See
+-- 20261030000000_guard_role_grant_revocation.sql. deleteUserAccount()'s own
+-- user_roles cleanup runs via the service-role client, so it's unaffected.
+revoke update, delete on user_roles from authenticated, anon;
+
+create or replace function revoke_role_grant(p_role_grant_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid;
+  v_role app_role;
+  v_active_sysadmins bigint;
+begin
+  if auth.uid() is null or not has_role('sys_admin') then
+    raise exception 'Only a System Administrator may revoke a role grant';
+  end if;
+
+  -- Held until this transaction ends (commit or rollback) — a concurrent
+  -- call blocks here until the first one is fully done, so its count check
+  -- below always sees the first call's committed result, never a stale
+  -- pre-commit snapshot.
+  perform pg_advisory_xact_lock(hashtext('user_roles:revoke_role_grant'));
+
+  select user_id, role into v_user_id, v_role
+  from user_roles
+  where id = p_role_grant_id and revoked_at is null;
+
+  if v_user_id is null then
+    raise exception 'This role grant no longer exists';
+  end if;
+
+  -- Checked before the self-revocation guard below: when there's only one
+  -- active sys_admin left, revoking it is necessarily a self-revoke (no
+  -- other caller could pass the sys_admin check above), and the more
+  -- specific "last admin" reason is the more useful one to surface.
+  if v_role = 'sys_admin' then
+    select count(*) into v_active_sysadmins from user_roles where role = 'sys_admin' and revoked_at is null;
+    if v_active_sysadmins <= 1 then
+      raise exception 'Can''t revoke the last System Administrator — the system would have nobody left to manage users or roles';
+    end if;
+  end if;
+
+  if v_user_id = auth.uid() then
+    raise exception 'You can''t revoke your own role — ask another System Administrator to do it';
+  end if;
+
+  update user_roles set revoked_at = now() where id = p_role_grant_id;
+end;
+$$;
 
 -- =============================================================================
 -- 15. Audit trigger wiring (generic before/after capture on guarded tables)
@@ -3304,6 +3858,19 @@ create policy user_roles_write_sysadmin on user_roles for all
 -- company_id directly, so it's derived: a direct column if present, else
 -- via the row's employee_id, else (approvals, which is entity-type-generic)
 -- by resolving the approved entity the same way is_entity_owner() does.
+--
+-- Phase 1 correction (5): before_data/after_data used to store the row's
+-- COMPLETE column set verbatim, forever — for compensation_details, that
+-- means every bank_iban/bank_swift/bank_name value the employee has ever
+-- had stays in an append-only audit trail indefinitely, readable by any
+-- HR Admin of the company, well beyond what the live table exposes (which
+-- only ever shows the CURRENT value). None of that is what an audit trail
+-- is actually for — "who changed the banking details, and when" doesn't
+-- require replaying the old and new account numbers themselves — so these
+-- specific fields are redacted before the snapshot is stored, on whichever
+-- audited table they happen to appear on. Everything else (including
+-- base_salary/allowances, which HR Admin's own compensation-change review
+-- genuinely needs) is left intact.
 create or replace function write_audit_log()
 returns trigger
 language plpgsql
@@ -3312,12 +3879,23 @@ set search_path = public
 as $$
 declare
   v_actor_role app_role;
+  v_actor_roles app_role[];
   v_row jsonb := to_jsonb(coalesce(new, old));
   v_employee_id uuid;
   v_company_id uuid;
+  v_before jsonb;
+  v_after jsonb;
+  v_sensitive_keys constant text[] := array['bank_iban', 'bank_swift', 'bank_name', 'document_number', 'policy_number'];
+  v_key text;
 begin
-  select role into v_actor_role from user_roles
-  where user_id = auth.uid() and revoked_at is null order by granted_at desc limit 1;
+  -- A multi-role user (e.g. a Line Manager also granted Finance) must never
+  -- be recorded as if they only held one role — every currently-held,
+  -- unrevoked role is captured. actor_role is kept alongside for backward
+  -- compatibility with anything still reading the single-value column;
+  -- it's always the same "most recently granted" choice it always was.
+  select array_agg(role order by granted_at desc) into v_actor_roles
+  from user_roles where user_id = auth.uid() and revoked_at is null;
+  v_actor_role := v_actor_roles[1];
 
   if v_row ? 'company_id' then
     v_company_id := (v_row ->> 'company_id')::uuid;
@@ -3342,16 +3920,24 @@ begin
     end if;
   end if;
 
-  insert into audit_log(table_name, record_id, action, actor_id, actor_role, company_id, before_data, after_data)
+  v_before := case when TG_OP in ('UPDATE', 'DELETE') then to_jsonb(old) else null end;
+  v_after := case when TG_OP in ('UPDATE', 'INSERT') then to_jsonb(new) else null end;
+  foreach v_key in array v_sensitive_keys loop
+    if v_before ? v_key then v_before := jsonb_set(v_before, array[v_key], '"[redacted]"'::jsonb); end if;
+    if v_after ? v_key then v_after := jsonb_set(v_after, array[v_key], '"[redacted]"'::jsonb); end if;
+  end loop;
+
+  insert into audit_log(table_name, record_id, action, actor_id, actor_role, actor_roles, company_id, before_data, after_data)
   values (
     TG_TABLE_NAME,
     coalesce(new.id, old.id),
     lower(TG_OP),
     auth.uid(),
     v_actor_role,
+    v_actor_roles,
     v_company_id,
-    case when TG_OP in ('UPDATE', 'DELETE') then to_jsonb(old) else null end,
-    case when TG_OP in ('UPDATE', 'INSERT') then to_jsonb(new) else null end
+    v_before,
+    v_after
   );
   return coalesce(new, old);
 end;

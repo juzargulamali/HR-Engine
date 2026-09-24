@@ -50,7 +50,7 @@ export function NewTemplateForm({ companyId }: { companyId: string }) {
         />
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="requiresApproval">Requires CEO sign-off</Label>
+        <Label htmlFor="requiresApproval">Requires CEO/CTO sign-off</Label>
         <Select id="requiresApproval" name="requiresApproval" defaultValue="true">
           <option value="true">Yes</option>
           <option value="false">No — issue immediately</option>

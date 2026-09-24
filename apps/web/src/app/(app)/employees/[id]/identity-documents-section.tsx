@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AddIdentityDocumentForm } from "./add-identity-document-form";
 import { DeleteIdentityDocumentButton } from "./delete-identity-document-button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export async function IdentityDocumentsSection({
   employeeId,
@@ -61,8 +62,8 @@ export async function IdentityDocumentsSection({
           ))}
           {documentsWithUrl.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={4} className="text-center text-muted-foreground">
-                No identity documents on file.
+              <TableCell colSpan={4}>
+                <EmptyState dense title="No identity documents on file." />
               </TableCell>
             </TableRow>
           ) : null}

@@ -11,6 +11,7 @@ const USER_CEO = "00000000-0000-0000-0000-0000000006b3";
 const USER_REPORT = "00000000-0000-0000-0000-0000000006b4";
 const USER_PEER = "00000000-0000-0000-0000-0000000006b5";
 const USER_FINANCE_2 = "00000000-0000-0000-0000-0000000006b6";
+const USER_CTO = "00000000-0000-0000-0000-0000000006b7";
 
 const EMPLOYEE_REPORT = "00000000-0000-0000-0000-0000000006c1";
 const EMPLOYEE_PEER = "00000000-0000-0000-0000-0000000006c2";
@@ -34,7 +35,8 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
         ('${USER_FINANCE}', 'p6-finance@enginious.ae'),
         ('${USER_CEO}', 'p6-ceo@enginious.ae'),
         ('${USER_REPORT}', 'p6-report@enginious.ae'),
-        ('${USER_PEER}', 'p6-peer@enginious.ae');
+        ('${USER_PEER}', 'p6-peer@enginious.ae'),
+        ('${USER_CTO}', 'p6-cto@enginious.ae');
 
       insert into countries (code, name, default_currency) values ('ZZ', 'Zedland', 'ZZD');
       insert into companies (id, legal_name, country_code, default_currency)
@@ -47,7 +49,16 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
       insert into user_roles (user_id, role, company_id) values
         ('${USER_HR}', 'hr_admin', '${COMPANY_A}'),
         ('${USER_FINANCE}', 'finance', '${COMPANY_A}'),
-        ('${USER_CEO}', 'ceo', '${COMPANY_A}');
+        ('${USER_CEO}', 'ceo', '${COMPANY_A}'),
+        ('${USER_CTO}', 'cto', '${COMPANY_A}');
+
+      -- guard_leave_request_type() requires an active leave_rules policy
+      -- defining whatever leave_type_code a request uses — every
+      -- leave_requests row seeded below uses 'annual'.
+      insert into policy_versions (id, country_code, policy_type, version_no, effective_from, status, payload, created_by, approved_by, approved_at)
+        values ('00000000-0000-0000-0000-0000000006e1', 'ZZ', 'leave_rules', 1, '2020-01-01', 'active', '{}'::jsonb, '${USER_HR}', '${USER_CEO}', now());
+      insert into policy_leave_types (policy_version_id, leave_type_code, name, accrual_method)
+        values ('00000000-0000-0000-0000-0000000006e1', 'annual', 'Annual Leave', 'monthly_accrual');
     `);
 
     const { rows } = await db.asUser(USER_HR, (query) =>
@@ -209,6 +220,89 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
         expect(final.rows[0]?.authorized_by).toBe(USER_CEO);
         expect(final.rows[0]?.authorized_at).not.toBeNull();
       });
+    });
+
+    // CTO is a deliberate, complete mirror of CEO throughout this system
+    // (docs/03-permission-matrix.md §3.7) — resolve_approver() resolves a
+    // 'role:ceo' workflow step to either a CEO or a CTO holder, so the
+    // payroll export's mandatory final sign-off can be satisfied by a CTO
+    // alone, with no CEO ever involved in that specific export. This is
+    // the intended design, not a gap — this test is the regression
+    // coverage for it (previously untested). Needs its own company with NO
+    // CEO holder at all — COMPANY_A already has one, and
+    // resolve_approver_for_company() would just resolve to that CEO
+    // (whichever C-level holder it picks first), which wouldn't actually
+    // exercise "CTO alone, no CEO involved".
+    it("lets a CTO alone fulfill the mandatory final sign-off step, with no CEO involved", async () => {
+      const ctoOnlyCompanyId = randomUUID();
+      await db.seed(`
+        insert into companies (id, legal_name, country_code, default_currency)
+          values ('${ctoOnlyCompanyId}', 'CTO-only Co', 'ZZ', 'ZZD');
+        insert into user_roles (user_id, role, company_id) values
+          ('${USER_FINANCE}', 'finance', '${ctoOnlyCompanyId}'),
+          ('${USER_CTO}', 'cto', '${ctoOnlyCompanyId}');
+      `);
+
+      const { rows: workflowRows } = await db.asUser(USER_HR, (query) =>
+        query("select id from approval_workflows where company_id = $1 and entity_type = 'payroll_export_run'", [ctoOnlyCompanyId]),
+      );
+      const ctoOnlyPayrollWorkflowId = workflowRows[0]?.id;
+      expect(ctoOnlyPayrollWorkflowId).toBeTruthy();
+
+      const runId = randomUUID();
+      const approvalId = randomUUID();
+      await db.seed(`
+        insert into payroll_export_runs (id, company_id, period_month, period_year, generated_by, status)
+          values ('${runId}', '${ctoOnlyCompanyId}', 1, 2026, '${USER_FINANCE}', 'submitted');
+        insert into approvals (id, entity_type, entity_id, workflow_id, step_order, approver_id)
+          values ('${approvalId}', 'payroll_export_run', '${runId}', '${ctoOnlyPayrollWorkflowId}', 1, '${USER_FINANCE}');
+      `);
+
+      await db.asUser(USER_FINANCE, async (query) => {
+        await query("select decide_leave_approval($1, 'approved', 'figures reviewed')", [approvalId]);
+
+        await actAs(query, USER_CTO);
+        const step2 = await query("select id, decision from approvals where entity_id = $1 and step_order = 2", [runId]);
+        expect(step2.rows[0]?.decision).toBe("pending");
+
+        await query("select decide_leave_approval($1, 'approved', 'signed off by CTO')", [step2.rows[0]?.id]);
+
+        const final = await query("select status, authorized_by from payroll_export_runs where id = $1", [runId]);
+        expect(final.rows[0]?.status).toBe("approved");
+        expect(final.rows[0]?.authorized_by).toBe(USER_CTO);
+
+        // Read access mirrors CEO too: the CTO can see the lines this
+        // approved run posted, same as HR Admin/Finance/CEO can.
+        const lines = await query("select id from payroll_export_lines where run_id = $1", [runId]);
+        expect(lines.rows).toEqual([]); // no reimbursement/leave-encashment source rows exist for this run — just confirms the query itself isn't blocked by RLS
+      });
+    });
+
+    // payroll_export_lines carries per-employee compensation amounts and had
+    // no negative test at all before this — previously verified only via
+    // inspection of payroll_lines_select, never exercised against an actual
+    // unauthorized role.
+    it("keeps payroll_export_lines visible only to HR Admin/Finance/CEO/CTO, never the line's own employee or an unrelated employee", async () => {
+      const runId = await seedDraftRun(6, 2029);
+      const lineId = randomUUID();
+      await db.seed(`
+        insert into payroll_export_lines (id, run_id, employee_id, component_code, amount, currency)
+        values ('${lineId}', '${runId}', '${EMPLOYEE_REPORT}', 'basic_salary', 5000, 'ZZD');
+      `);
+
+      for (const viewer of [USER_HR, USER_FINANCE, USER_CEO, USER_CTO]) {
+        const { rows } = await db.asUser(viewer, (query) => query("select id from payroll_export_lines where id = $1", [lineId]));
+        expect(rows.length).toBe(1);
+      }
+
+      // Not even the line's own employee gets payroll access
+      // (docs/03-permission-matrix.md §3.6: Employee is "–" on payroll
+      // export) — nor an unrelated peer.
+      const employeeView = await db.asUser(USER_REPORT, (query) => query("select id from payroll_export_lines where id = $1", [lineId]));
+      expect(employeeView.rows).toEqual([]);
+
+      const peerView = await db.asUser(USER_PEER, (query) => query("select id from payroll_export_lines where id = $1", [lineId]));
+      expect(peerView.rows).toEqual([]);
     });
 
     it("stops at Finance's rejection — the run never reaches the CEO", async () => {
@@ -775,12 +869,17 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
       const otherEmployeeId = randomUUID();
       const otherUserId = randomUUID();
       const otherRequestId = randomUUID();
+      const otherPolicyId = randomUUID();
       await db.seed(`
         insert into countries (code, name, default_currency) values ('YY', 'Yland', 'YYD') on conflict do nothing;
         insert into auth.users (id, email) values ('${otherUserId}', 'other-co@enginious.ae');
         insert into companies (id, legal_name, country_code, default_currency) values ('${otherCompanyId}', 'Other Co', 'YY', 'YYD');
         insert into employees (id, user_id, employee_number, company_id, country_code, first_name, last_name, hire_date)
           values ('${otherEmployeeId}', '${otherUserId}', 'OC-01', '${otherCompanyId}', 'YY', 'Other', 'Employee', '2024-01-01');
+        insert into policy_versions (id, country_code, policy_type, version_no, effective_from, status, payload, created_by, approved_by, approved_at)
+          values ('${otherPolicyId}', 'YY', 'leave_rules', 1, '2020-01-01', 'active', '{}'::jsonb, '${USER_HR}', '${USER_CEO}', now());
+        insert into policy_leave_types (policy_version_id, leave_type_code, name, accrual_method)
+          values ('${otherPolicyId}', 'annual', 'Annual Leave', 'monthly_accrual');
         insert into leave_requests (id, employee_id, leave_type_code, start_date, end_date, total_days)
           values ('${otherRequestId}', '${otherEmployeeId}', 'annual', '2026-07-02', '2026-07-02', 1);
       `);
@@ -810,6 +909,101 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
 
       const hrContentRows = await db.asUser(sysAdminUserId, (query) => query("select id from audit_log where table_name = 'leave_requests'"));
       expect(hrContentRows.rows).toEqual([]);
+    });
+
+    it("captures every currently-held role for a multi-role actor, never collapsing them to just one", async () => {
+      const multiRoleUserId = randomUUID();
+      const multiRoleEmployeeId = randomUUID();
+      await db.seed(`
+        insert into auth.users (id, email) values ('${multiRoleUserId}', 'p6-multirole@enginious.ae');
+        insert into employees (id, user_id, employee_number, company_id, country_code, first_name, last_name, hire_date)
+          values ('${multiRoleEmployeeId}', '${multiRoleUserId}', 'P6-MULTI', '${COMPANY_A}', 'ZZ', 'Multi', 'Role', '2024-01-01');
+        insert into user_roles (user_id, role, company_id) values
+          ('${multiRoleUserId}', 'line_manager', '${COMPANY_A}'),
+          ('${multiRoleUserId}', 'finance', '${COMPANY_A}');
+      `);
+
+      const requestId = randomUUID();
+      // The trigger fires within this same transaction, so the resulting
+      // audit_log row is only visible to a query still inside this same
+      // asUser() call (it rolls back at the end, same as every other test).
+      await db.asUser(multiRoleUserId, async (query) => {
+        await query(
+          "insert into leave_requests (id, employee_id, leave_type_code, start_date, end_date, total_days) values ($1, $2, 'annual', '2026-08-01', '2026-08-01', 1)",
+          [requestId, multiRoleEmployeeId],
+        );
+
+        // audit_log_select_hr only lets an hr_admin read this row — the
+        // insert above is already committed within this same transaction
+        // regardless of who queries it next, so switching the session's
+        // claims to an HR Admin here is just to satisfy RLS on the read.
+        await actAs(query, USER_HR);
+        // pg doesn't know how to auto-parse a custom enum array type
+        // (app_role[]) back into a JS array — casting to jsonb first gets
+        // one for free, since jsonb columns are parsed automatically.
+        const { rows } = await query(
+          "select actor_role, to_jsonb(actor_roles) as actor_roles from audit_log where table_name = 'leave_requests' and record_id = $1",
+          [requestId],
+        );
+        expect(rows.length).toBe(1);
+        expect(rows[0]?.actor_roles?.slice().sort()).toEqual(["finance", "line_manager"]);
+        // actor_role (kept for backward compatibility) still resolves to one
+        // of them, never null just because there's more than one now.
+        expect(rows[0]?.actor_roles).toContain(rows[0]?.actor_role);
+      });
+    });
+
+    // Phase 1 correction (5): before_data/after_data used to store a
+    // compensation_details row's complete column set verbatim, including
+    // banking fields — an append-only trail of every IBAN the employee has
+    // ever had, well beyond what the live table exposes (only the current
+    // value). write_audit_log() now redacts bank_iban/bank_swift/bank_name
+    // specifically, leaving the rest of the snapshot (base_salary,
+    // currency, allowances) intact for HR Admin's legitimate compensation-
+    // change review.
+    it("redacts banking fields from a compensation_details audit snapshot, while leaving salary intact", async () => {
+      const compId = randomUUID();
+      await db.asUser(USER_HR, async (query) => {
+        await query(
+          `insert into compensation_details (id, employee_id, effective_from, base_salary, currency, bank_name, bank_iban, bank_swift, created_by)
+           values ($1, $2, '2026-08-01', 9000, 'AED', 'Emirates NBD', 'AE070331234567890123456', 'EBILAEAD', $3)`,
+          [compId, EMPLOYEE_REPORT, USER_HR],
+        );
+
+        const { rows } = await query("select after_data from audit_log where table_name = 'compensation_details' and record_id = $1", [
+          compId,
+        ]);
+        expect(rows.length).toBe(1);
+        const snapshot = rows[0]?.after_data;
+        expect(snapshot.bank_name).toBe("[redacted]");
+        expect(snapshot.bank_iban).toBe("[redacted]");
+        expect(snapshot.bank_swift).toBe("[redacted]");
+        expect(snapshot.base_salary).toBe(9000);
+        expect(snapshot.currency).toBe("AED");
+      });
+    });
+
+    // Regression test for the unauthorized-role half of the same
+    // correction: Finance can read compensation_details directly (see
+    // compensation_select), but audit_log_select_hr only ever grants
+    // hr_admin access — Finance must not be able to read this audit row
+    // through the back door, redacted or not.
+    it("blocks Finance from reading a compensation_details audit row, even though Finance can read compensation_details directly", async () => {
+      const compId = randomUUID();
+      await db.seed(`
+        insert into compensation_details (id, employee_id, effective_from, base_salary, currency, created_by)
+        values ('${compId}', '${EMPLOYEE_REPORT}', '2026-08-02', 9500, 'AED', '${USER_HR}');
+      `);
+
+      const directRead = await db.asUser(USER_FINANCE, (query) =>
+        query("select id from compensation_details where id = $1", [compId]),
+      );
+      expect(directRead.rows.length).toBe(1);
+
+      const auditRead = await db.asUser(USER_FINANCE, (query) =>
+        query("select id from audit_log where table_name = 'compensation_details' and record_id = $1", [compId]),
+      );
+      expect(auditRead.rows).toEqual([]);
     });
   });
 

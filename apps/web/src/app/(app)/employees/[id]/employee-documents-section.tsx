@@ -3,6 +3,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { AddEmployeeDocumentForm } from "./add-employee-document-form";
 import { DeleteEmployeeDocumentButton } from "./delete-employee-document-button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
   valid: "default",
@@ -76,8 +77,8 @@ export async function EmployeeDocumentsSection({
           ))}
           {documentsWithUrl.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={4} className="text-center text-muted-foreground">
-                No documents on file.
+              <TableCell colSpan={4}>
+                <EmptyState dense title="No documents on file." />
               </TableCell>
             </TableRow>
           ) : null}

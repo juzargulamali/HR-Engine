@@ -15,7 +15,7 @@ export interface CompanySnapshot {
   leaveCount: number;
   absentCount: number;
   notRecordedCount: number;
-  pendingLeaveApprovals: number;
+  leaveRequestsAwaitingDecision: number;
   isRecoveryDay: boolean;
   holidayName: string | null;
   /** Set when this company's own data couldn't be loaded — every count
@@ -35,7 +35,7 @@ function emptySnapshot(company: { id: string; legal_name: string; country_code: 
     leaveCount: 0,
     absentCount: 0,
     notRecordedCount: 0,
-    pendingLeaveApprovals: 0,
+    leaveRequestsAwaitingDecision: 0,
     isRecoveryDay: false,
     holidayName: null,
     error,
@@ -96,10 +96,18 @@ export async function getCompanySnapshot(
     if (leaveApprovalsResult.error) throw leaveApprovalsResult.error;
 
     const attendance = attendanceResult.data ?? [];
-    const presentCount = attendance.filter((a) => a.status === "present").length;
+    // partial_day counts alongside present for this summary — both mean
+    // "showed up that day" for headcount purposes; the daily register
+    // itself still distinguishes them.
+    const presentCount = attendance.filter((a) => a.status === "present" || a.status === "partial_day").length;
     const leaveCount = attendance.filter((a) => a.status === "leave").length;
     const absentCount = attendance.filter((a) => a.status === "absent").length;
-    const notRecordedCount = Math.max(0, totalEmployees - attendance.length);
+    // A day with no saved row at all, AND a day explicitly saved as
+    // 'not_recorded', both mean the same thing: nobody said what happened
+    // that day. Counting only missing rows (as this used to) undercounted
+    // once an admin could actually save that status.
+    const recordedCount = attendance.filter((a) => a.status !== "not_recorded").length;
+    const notRecordedCount = Math.max(0, totalEmployees - recordedCount);
     const isRecoveryDay = !!holidayResult.data || isWeekend(today, countryResult.data?.week_start_day ?? 1);
 
     return {
@@ -112,7 +120,7 @@ export async function getCompanySnapshot(
       leaveCount,
       absentCount,
       notRecordedCount,
-      pendingLeaveApprovals: leaveApprovalsResult.count ?? 0,
+      leaveRequestsAwaitingDecision: leaveApprovalsResult.count ?? 0,
       isRecoveryDay,
       holidayName: holidayResult.data?.name ?? null,
     };

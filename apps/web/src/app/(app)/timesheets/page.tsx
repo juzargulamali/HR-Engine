@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { NewTimesheetForm } from "./new-timesheet-form";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   draft: "outline",
@@ -92,8 +93,8 @@ export default async function TimesheetsPage() {
               ))}
               {(timesheets ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="text-center text-muted-foreground">
-                    No timesheets yet.
+                  <TableCell colSpan={3}>
+                    <EmptyState dense title="No timesheets yet." />
                   </TableCell>
                 </TableRow>
               ) : null}

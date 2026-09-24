@@ -3,6 +3,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { AddLoanForm } from "./add-loan-form";
 import { DeleteLoanButton } from "./delete-loan-button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export async function LoansSection({
   employeeId,
@@ -50,8 +51,8 @@ export async function LoansSection({
           ))}
           {(loans ?? []).length === 0 ? (
             <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
-                No loans or cash advances on record.
+              <TableCell colSpan={5}>
+                <EmptyState dense title="No loans or cash advances on record." />
               </TableCell>
             </TableRow>
           ) : null}

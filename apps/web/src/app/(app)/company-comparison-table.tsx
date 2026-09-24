@@ -37,7 +37,7 @@ export function CompanyComparisonTable({
           <span className="text-right">Present</span>
           <span className="text-right">On leave</span>
           <span className="text-right">Missing</span>
-          <span className="text-right">Pending</span>
+          <span className="text-right">In review</span>
           <span />
         </div>
         {snapshots.map((s) => {
@@ -93,7 +93,7 @@ export function CompanyComparisonTable({
                 <span className="text-right text-success">{s.presentCount}</span>
                 <span className="text-right">{s.leaveCount}</span>
                 <span className={cn("text-right", s.notRecordedCount > 0 && "text-warning")}>{s.notRecordedCount}</span>
-                <span className={cn("text-right", s.pendingLeaveApprovals > 0 && "text-accent")}>{s.pendingLeaveApprovals}</span>
+                <span className={cn("text-right", s.leaveRequestsAwaitingDecision > 0 && "text-accent")}>{s.leaveRequestsAwaitingDecision}</span>
                 <ChevronDown className={cn("hidden h-4 w-4 justify-self-end text-muted-foreground transition-transform duration-150 sm:block", isOpen && "rotate-180")} aria-hidden />
               </button>
               {isOpen ? (

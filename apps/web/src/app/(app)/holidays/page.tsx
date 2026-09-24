@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AddHolidayForm } from "./add-holiday-form";
 import { DeleteHolidayButton } from "./delete-holiday-button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function HolidaysPage() {
   const session = await getCurrentSession();
@@ -65,8 +66,8 @@ export default async function HolidaysPage() {
               ))}
               {(holidays ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground">
-                    No holidays on the calendar yet.
+                  <TableCell colSpan={4}>
+                    <EmptyState dense title="No holidays on the calendar yet." />
                   </TableCell>
                 </TableRow>
               ) : null}

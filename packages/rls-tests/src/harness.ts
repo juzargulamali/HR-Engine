@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Client, Pool } from "pg";
+import { Client, Pool, type QueryResult } from "pg";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
@@ -72,9 +72,14 @@ export class RlsTestDatabase {
     return this.pool;
   }
 
-  /** Run arbitrary setup/seed SQL as the unrestricted admin connection. */
-  async seed(sql: string): Promise<void> {
-    await this.requirePool().query(sql);
+  /**
+   * Run arbitrary setup/seed SQL as the unrestricted admin connection.
+   * Returns the query result so a test can also use this for a read-only
+   * assertion (e.g. checking committed state after a asUserCommit race) —
+   * existing callers that only await it for its side effect are unaffected.
+   */
+  async seed(sql: string): Promise<QueryResult> {
+    return this.requirePool().query(sql);
   }
 
   /**
@@ -102,6 +107,38 @@ export class RlsTestDatabase {
       return result;
     } finally {
       await client.query("ROLLBACK");
+      client.release();
+    }
+  }
+
+  /**
+   * Like asUser, but COMMITs on success instead of always rolling back.
+   * Needed only for testing genuine cross-transaction races: asUser's
+   * automatic rollback means a "successful" call's writes never actually
+   * become visible to a second, concurrently-running call, so it can't
+   * exercise a case where the second call's own logic must see the first
+   * call's committed result. Leaves real rows behind on success — use only
+   * against rows the test doesn't otherwise depend on afterward.
+   */
+  async asUserCommit<T>(userId: string | null, fn: (query: Client["query"]) => Promise<T>): Promise<T> {
+    const client = await this.requirePool().connect();
+    try {
+      await client.query("BEGIN");
+      if (userId) {
+        await client.query("SET LOCAL ROLE authenticated");
+        await client.query("SELECT set_config('request.jwt.claims', $1, true)", [
+          JSON.stringify({ sub: userId, role: "authenticated" }),
+        ]);
+      } else {
+        await client.query("SET LOCAL ROLE anon");
+      }
+      const result = await fn(client.query.bind(client));
+      await client.query("COMMIT");
+      return result;
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
       client.release();
     }
   }

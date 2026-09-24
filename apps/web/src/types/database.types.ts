@@ -32,7 +32,7 @@ export type PolicyStatus = "draft" | "active" | "superseded";
 export type LeaveLedgerEntryType = "accrual" | "deduction" | "adjustment" | "carryover" | "encashment" | "reversal";
 export type CompDayEntryType = "earned" | "redeemed" | "expired" | "adjustment" | "reversal";
 export type RequestStatus = "draft" | "submitted" | "pending_approval" | "approved" | "rejected" | "cancelled";
-export type ApprovalDecision = "pending" | "approved" | "rejected" | "skipped";
+export type ApprovalDecision = "pending" | "approved" | "rejected" | "skipped" | "cancelled";
 export type ApprovableEntity =
   | "leave_request"
   | "reimbursement_claim"
@@ -811,6 +811,7 @@ export interface Database {
           clock_out: string | null;
           hours_worked: string | null;
           status: string;
+          work_mode: string | null;
           source: string;
         };
         Insert: {
@@ -821,6 +822,7 @@ export interface Database {
           clock_out?: string | null;
           hours_worked?: number | null;
           status?: string;
+          work_mode?: string | null;
           source?: string;
         };
         Update: Partial<Database["public"]["Tables"]["attendance_records"]["Insert"]>;
@@ -1129,6 +1131,7 @@ export interface Database {
           action: string;
           actor_id: string | null;
           actor_role: AppRole | null;
+          actor_roles: AppRole[] | null;
           company_id: string | null;
           before_data: Record<string, unknown> | null;
           after_data: Record<string, unknown> | null;
@@ -1225,6 +1228,37 @@ export interface Database {
       };
       permanently_delete_employee: {
         Args: { p_employee_id: string };
+        Returns: undefined;
+      };
+      cancel_leave_request: {
+        Args: { p_request_id: string };
+        Returns: undefined;
+      };
+      record_attendance_and_recovery: {
+        Args: {
+          p_work_date: string;
+          p_rows: { employee_id: string; status: string; work_mode: string | null; hours_worked: number | null }[];
+        };
+        Returns: { attendance_employee_id: string; credited: boolean; reversed: boolean; needs_policy_review: boolean }[];
+      };
+      delete_attendance_record: {
+        Args: { p_record_id: string };
+        Returns: undefined;
+      };
+      submit_leave_request: {
+        Args: {
+          p_leave_type_code: string;
+          p_start_date: string;
+          p_end_date: string;
+          p_half_day_start: boolean;
+          p_half_day_end: boolean;
+          p_total_days: number;
+          p_reason: string | null;
+        };
+        Returns: string;
+      };
+      revoke_role_grant: {
+        Args: { p_role_grant_id: string };
         Returns: undefined;
       };
     };

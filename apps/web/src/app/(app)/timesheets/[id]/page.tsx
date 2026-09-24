@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { AddEntryForm } from "./add-entry-form";
 import { DeleteEntryButton } from "./delete-entry-button";
 import { TimesheetActions } from "./timesheet-actions";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function TimesheetDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -90,8 +91,8 @@ export default async function TimesheetDetailPage({ params }: { params: Promise<
               ))}
               {(entries ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    No entries yet.
+                  <TableCell colSpan={6}>
+                    <EmptyState dense title="No entries yet." />
                   </TableCell>
                 </TableRow>
               ) : null}

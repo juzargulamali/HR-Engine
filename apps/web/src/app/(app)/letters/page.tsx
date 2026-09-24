@@ -8,6 +8,7 @@ import { IssueLetterForm } from "./issue-letter-form";
 import { NewTemplateForm } from "./new-template-form";
 import { DeleteLetterButton } from "./delete-letter-button";
 import { DeleteTemplateButton } from "./delete-template-button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   draft: "outline",
@@ -80,7 +81,7 @@ export default async function LettersPage() {
         <h1 className="text-2xl font-semibold">Letters</h1>
         <p className="text-muted-foreground">
           {canManage
-            ? "Issue employment letters from templates; some require CEO sign-off before they're issued."
+            ? "Issue employment letters from templates; some require CEO/CTO sign-off before they're issued."
             : "Letters HR has issued for you."}
         </p>
       </div>
@@ -139,8 +140,8 @@ export default async function LettersPage() {
                 ))}
                 {(templates ?? []).length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
-                      No templates yet.
+                    <TableCell colSpan={4}>
+                      <EmptyState dense title="No templates yet." />
                     </TableCell>
                   </TableRow>
                 ) : null}
@@ -188,8 +189,8 @@ export default async function LettersPage() {
               ))}
               {(letters ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={canManage ? 5 : 4} className="text-center text-muted-foreground">
-                    No letters yet.
+                  <TableCell colSpan={canManage ? 5 : 4}>
+                    <EmptyState dense title="No letters yet." />
                   </TableCell>
                 </TableRow>
               ) : null}

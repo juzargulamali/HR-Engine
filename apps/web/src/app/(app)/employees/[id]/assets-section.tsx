@@ -3,6 +3,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { AssignAssetForm } from "./assign-asset-form";
 import { ReturnAssetControl } from "./return-asset-control";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export async function AssetsSection({
   employeeId,
@@ -71,8 +72,8 @@ export async function AssetsSection({
           })}
           {(assignments ?? []).length === 0 ? (
             <TableRow>
-              <TableCell colSpan={4} className="text-center text-muted-foreground">
-                No assets assigned.
+              <TableCell colSpan={4}>
+                <EmptyState dense title="No assets assigned." />
               </TableCell>
             </TableRow>
           ) : null}

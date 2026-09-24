@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { NewPayrollRunForm } from "./new-payroll-run-form";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   draft: "outline",
@@ -30,7 +31,7 @@ export default async function PayrollPage() {
   const canView = employee ? canViewPayrollExport(session.grants, employee.company_id) : false;
 
   if (!canView) {
-    return <Alert variant="destructive">Payroll export is restricted to HR Admin, Finance, and CEO.</Alert>;
+    return <Alert variant="destructive">Payroll export is restricted to HR Admin, Finance, CEO, and CTO.</Alert>;
   }
 
   const { data: runs } = await supabase
@@ -90,8 +91,8 @@ export default async function PayrollPage() {
               ))}
               {(runs ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="text-center text-muted-foreground">
-                    No export runs yet.
+                  <TableCell colSpan={3}>
+                    <EmptyState dense title="No export runs yet." />
                   </TableCell>
                 </TableRow>
               ) : null}

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { NewCycleForm } from "./new-cycle-form";
 import { CloseCycleButton } from "./close-cycle-button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function PerformanceCyclesPage() {
   const session = await getCurrentSession();
@@ -85,8 +86,8 @@ export default async function PerformanceCyclesPage() {
               ))}
               {(cycles ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    No cycles yet.
+                  <TableCell colSpan={5}>
+                    <EmptyState dense title="No cycles yet." />
                   </TableCell>
                 </TableRow>
               ) : null}

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ActivateButton } from "../activate-button";
 import { AddLeaveTypeForm } from "./add-leave-type-form";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -59,7 +60,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
 
       {policy.status === "draft" && isDrafter ? (
         <p className="text-sm text-muted-foreground">
-          You drafted this version — a different HR Admin or the CEO for {country?.name} needs to activate it.
+          You drafted this version — a different HR Admin or the CEO/CTO for {country?.name} needs to activate it.
         </p>
       ) : null}
 
@@ -102,8 +103,8 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                 ))}
                 {(leaveTypes ?? []).length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground">
-                      No leave types added yet.
+                    <TableCell colSpan={6}>
+                      <EmptyState dense title="No leave types added yet." />
                     </TableCell>
                   </TableRow>
                 ) : null}

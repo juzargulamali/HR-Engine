@@ -97,4 +97,46 @@ describe("buildNavGroups", () => {
     const allHrefs = groups.flatMap((g) => g.links.map((l) => l.href));
     expect(allHrefs).toEqual(expect.arrayContaining(["/", "/profile", "/employees", "/attendance", "/leave"]));
   });
+
+  it("hides Payroll from a plain employee with no other role", () => {
+    const groups = buildNavGroups([grant("employee")]);
+    const allHrefs = groups.flatMap((g) => g.links.map((l) => l.href));
+    expect(allHrefs).not.toContain("/payroll");
+  });
+
+  it("hides Approvals from an employee who holds no approval-capable role", () => {
+    const groups = buildNavGroups([grant("employee")]);
+    const allHrefs = groups.flatMap((g) => g.links.map((l) => l.href));
+    expect(allHrefs).not.toContain("/approvals");
+  });
+
+  it("shows Approvals but hides Payroll for a Line Manager", () => {
+    const groups = buildNavGroups([grant("line_manager")]);
+    const allHrefs = groups.flatMap((g) => g.links.map((l) => l.href));
+    expect(allHrefs).toContain("/approvals");
+    expect(allHrefs).not.toContain("/payroll");
+  });
+
+  it("hides Payroll and Approvals from a Sys Admin who holds no other role", () => {
+    const groups = buildNavGroups([grant("sys_admin", null)]);
+    const allHrefs = groups.flatMap((g) => g.links.map((l) => l.href));
+    expect(allHrefs).not.toContain("/payroll");
+    expect(allHrefs).not.toContain("/approvals");
+    // ...but its own admin-only links are untouched by this change.
+    expect(allHrefs).toContain("/admin/companies");
+    expect(allHrefs).toContain("/admin/users");
+    expect(allHrefs).toContain("/audit-log");
+  });
+
+  it.each([
+    { name: "hr_admin", role: "hr_admin" as const },
+    { name: "finance", role: "finance" as const },
+    { name: "ceo", role: "ceo" as const },
+    { name: "cto", role: "cto" as const },
+  ])("keeps both Approvals and Payroll visible for $name, unchanged", ({ role }) => {
+    const groups = buildNavGroups([grant(role)]);
+    const allHrefs = groups.flatMap((g) => g.links.map((l) => l.href));
+    expect(allHrefs).toContain("/approvals");
+    expect(allHrefs).toContain("/payroll");
+  });
 });

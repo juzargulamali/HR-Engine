@@ -1,3 +1,4 @@
+import { resolvePolicyVersionAsOf } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +15,7 @@ export default async function NewLeaveRequestPage() {
     );
   }
 
+  const today = new Date().toISOString().slice(0, 10);
   const supabase = await createClient();
   const { data: employee } = await supabase
     .from("employees")
@@ -21,28 +23,46 @@ export default async function NewLeaveRequestPage() {
     .eq("id", session.employeeId)
     .single();
 
-  // Leave types come from the active leave_rules policy for the employee's
-  // country (docs/09-extending-the-system.md) — nothing here is hard-coded
-  // per country. If HR Admin hasn't activated one yet, the form falls back
-  // to a free-text leave type code rather than blocking submission.
-  let leaveTypes: { code: string; name: string }[] = [];
+  // The leave type list is resolved against the policy version in effect on
+  // the leave's start_date — not today — the same rule submitLeaveRequest()
+  // and guard_leave_request_type() apply, so a request that starts after a
+  // newer policy takes effect sees that policy's leave types, not today's.
+  // Every version (not just whichever is active today) is sent down so the
+  // form can re-resolve as the employee changes the start date, entirely
+  // client-side. Uncontrolled free-text leave types used to be allowed as a
+  // fallback when none was configured; now submission is blocked outright
+  // with a clear HR-configuration message instead, both here and
+  // (authoritatively) in submitLeaveRequest() itself.
+  let versions: { id: string; effectiveFrom: string; effectiveTo: string | null; versionNo: number; status: "draft" | "active" | "superseded" }[] = [];
+  let leaveTypesByVersion: Record<string, { code: string; name: string }[]> = {};
   if (employee) {
-    const { data: activePolicy } = await supabase
+    const { data: versionRows } = await supabase
       .from("policy_versions")
-      .select("id")
+      .select("id, status, effective_from, effective_to, version_no")
       .eq("country_code", employee.country_code)
-      .eq("policy_type", "leave_rules")
-      .eq("status", "active")
-      .maybeSingle();
+      .eq("policy_type", "leave_rules");
+    versions = (versionRows ?? []).map((v) => ({
+      id: v.id,
+      effectiveFrom: v.effective_from,
+      effectiveTo: v.effective_to,
+      versionNo: v.version_no,
+      status: v.status,
+    }));
 
-    if (activePolicy) {
-      const { data: rows } = await supabase
+    const versionIds = versions.map((v) => v.id);
+    if (versionIds.length > 0) {
+      const { data: leaveTypeRows } = await supabase
         .from("policy_leave_types")
-        .select("leave_type_code, name")
-        .eq("policy_version_id", activePolicy.id);
-      leaveTypes = (rows ?? []).map((r) => ({ code: r.leave_type_code, name: r.name }));
+        .select("policy_version_id, leave_type_code, name")
+        .in("policy_version_id", versionIds);
+      leaveTypesByVersion = {};
+      for (const row of leaveTypeRows ?? []) {
+        (leaveTypesByVersion[row.policy_version_id] ??= []).push({ code: row.leave_type_code, name: row.name });
+      }
     }
   }
+
+  const hasAnyActivePolicy = resolvePolicyVersionAsOf(versions, today) !== null;
 
   return (
     <Card className="max-w-2xl">
@@ -50,13 +70,14 @@ export default async function NewLeaveRequestPage() {
         <CardTitle>Request leave</CardTitle>
       </CardHeader>
       <CardContent>
-        {leaveTypes.length === 0 ? (
-          <Alert className="mb-4">
-            No leave types are configured for your country yet — enter one manually below. Ask HR Admin to activate a
-            leave policy so this becomes a dropdown.
+        {!hasAnyActivePolicy ? (
+          <Alert variant="destructive">
+            HR hasn&apos;t activated a leave policy for your country yet. Leave requests can&apos;t be submitted until
+            one is active — ask HR Admin to activate one.
           </Alert>
-        ) : null}
-        <LeaveRequestForm leaveTypes={leaveTypes} />
+        ) : (
+          <LeaveRequestForm versions={versions} leaveTypesByVersion={leaveTypesByVersion} today={today} />
+        )}
       </CardContent>
     </Card>
   );

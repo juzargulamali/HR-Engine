@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { computeLeaveDays } from "@enginious-hr/domain";
+import { computeLeaveDays, resolvePolicyVersionAsOf } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
 import { resolveInitialApprover } from "./approvals";
@@ -44,6 +44,61 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
   const { data: country } = await supabase.from("countries").select("week_start_day").eq("code", employee.country_code).single();
   if (!country) return { error: "Could not resolve your country's working week." };
 
+  // No uncontrolled leave-type strings: the form no longer offers a
+  // free-text fallback, but this is the authoritative check regardless of
+  // what the request actually sends. Resolved as of the leave's OWN
+  // start_date, not today — the same rule the leave/new page's leave-type
+  // dropdown and guard_leave_request_type() apply — so a request starting
+  // after a newer policy takes effect is validated against that policy, not
+  // whichever one happens to be active right now. If no leave_rules policy
+  // covers the start date, submission is blocked outright with a clear
+  // HR-configuration message rather than silently accepting whatever leave
+  // type code was posted.
+  const { data: policyVersions } = await supabase
+    .from("policy_versions")
+    .select("id, status, effective_from, effective_to, version_no")
+    .eq("country_code", employee.country_code)
+    .eq("policy_type", "leave_rules");
+  const activePolicy = resolvePolicyVersionAsOf(
+    (policyVersions ?? []).map((v) => ({
+      id: v.id,
+      effectiveFrom: v.effective_from,
+      effectiveTo: v.effective_to,
+      versionNo: v.version_no,
+      status: v.status,
+    })),
+    d.startDate,
+  );
+  if (!activePolicy) {
+    return { error: "No active leave policy covers this start date for your country yet — pick a different date or ask HR Admin to activate one." };
+  }
+
+  const { data: leaveTypeRows } = await supabase
+    .from("policy_leave_types")
+    .select("leave_type_code")
+    .eq("policy_version_id", activePolicy.id);
+  const validLeaveTypeCodes = new Set((leaveTypeRows ?? []).map((r) => r.leave_type_code));
+  if (!validLeaveTypeCodes.has(d.leaveTypeCode)) {
+    return { error: "That isn't a valid leave type under your country's active leave policy." };
+  }
+
+  // Two overlapping requests for the same employee is a data-integrity
+  // problem regardless of business judgment (unlike balance, where the
+  // system already lets an approver knowingly approve past a warning) —
+  // block it outright rather than letting it through for the approver to
+  // notice.
+  const { data: overlapping } = await supabase
+    .from("leave_requests")
+    .select("id")
+    .eq("employee_id", employee.id)
+    .in("status", ["submitted", "pending_approval", "approved"])
+    .lte("start_date", d.endDate)
+    .gte("end_date", d.startDate)
+    .limit(1);
+  if (overlapping && overlapping.length > 0) {
+    return { error: "You already have a leave request that overlaps these dates." };
+  }
+
   const { data: holidayRows } = await supabase
     .from("public_holidays")
     .select("holiday_date")
@@ -63,37 +118,35 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
     return { error: "That date range has no working days (weekends/holidays only)." };
   }
 
+  // Purely an early, friendly check — its result isn't used below.
+  // submit_leave_request() re-resolves the workflow/approver itself, inside
+  // the same transaction as the insert, which is what actually guarantees
+  // correctness; this just avoids making the employee wait on a real insert
+  // attempt for the common, easily-detected case (no workflow configured,
+  // no approver resolvable, self-approval).
   const resolved = await resolveInitialApprover(supabase, "leave_request", employee.company_id, employee.id, user.id);
   if ("error" in resolved) return resolved;
 
-  const { data: request, error: insertError } = await supabase
-    .from("leave_requests")
-    .insert({
-      employee_id: employee.id,
-      leave_type_code: d.leaveTypeCode,
-      start_date: d.startDate,
-      end_date: d.endDate,
-      half_day_start: d.halfDayStart ?? false,
-      half_day_end: d.halfDayEnd ?? false,
-      total_days: totalDays,
-      reason: d.reason || null,
-    })
-    .select("id")
-    .single();
-  if (insertError || !request) return { error: insertError?.message ?? "Could not submit the leave request." };
-
-  const { error: approvalError } = await supabase.rpc("create_initial_approval", {
-    p_entity_type: "leave_request",
-    p_entity_id: request.id,
+  // The insert and its initial approval routing used to be two separate
+  // round trips (an insert, then a create_initial_approval RPC, with a
+  // best-effort cancel if only the SECOND call came back with an error) —
+  // if the second call never reached the database at all, the request was
+  // left permanently stuck "submitted" with no approval and no one able to
+  // act on it. submit_leave_request() does both writes in one transaction,
+  // so a failure at any point (no workflow configured, no approver
+  // resolvable, self-approval) rolls back the insert too: either the
+  // request is fully submitted and routed, or nothing was written at all.
+  const { data: requestId, error: submitError } = await supabase.rpc("submit_leave_request", {
+    p_leave_type_code: d.leaveTypeCode,
+    p_start_date: d.startDate,
+    p_end_date: d.endDate,
+    p_half_day_start: d.halfDayStart ?? false,
+    p_half_day_end: d.halfDayEnd ?? false,
+    p_total_days: totalDays,
+    p_reason: d.reason || null,
   });
-  if (approvalError) {
-    // Without this, a failure here (network blip, the resolved approver's
-    // role getting revoked in the split second since resolveInitialApprover
-    // checked) leaves the request permanently stuck "submitted" with no
-    // approvals row and no one able to act on it — cancelling it here means
-    // the failure is visible and the employee can just resubmit.
-    await supabase.from("leave_requests").update({ status: "cancelled" }).eq("id", request.id);
-    return { error: `Could not route this request for approval, so it was cancelled: ${approvalError.message}. Please try submitting again.` };
+  if (submitError || !requestId) {
+    return { error: "Could not submit the leave request. Please try again, or contact HR Admin if the problem continues." };
   }
 
   await notifyLeaveSubmitted(supabase, {
@@ -114,8 +167,13 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
 
 export async function cancelLeaveRequest(requestId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
-  const { error } = await supabase.from("leave_requests").update({ status: "cancelled" }).eq("id", requestId);
+  // A plain table update can't touch approvals (no UPDATE grant for
+  // authenticated at all) — cancel_leave_request() closes out any
+  // still-pending approval step atomically with the status change, so a
+  // withdrawn request stops showing up in the approver's queue and count.
+  const { error } = await supabase.rpc("cancel_leave_request", { p_request_id: requestId });
   revalidatePath("/leave");
+  revalidatePath("/approvals");
   return { error: error?.message ?? null };
 }
 

@@ -49,6 +49,15 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
         ('${USER_CEO}', 'ceo', '${COMPANY_HQ}');
       insert into user_roles (user_id, role) values ('${USER_SYS_ADMIN}', 'sys_admin');
 
+      -- guard_leave_request_type() requires an active leave_rules policy
+      -- defining whatever leave_type_code a request uses — the
+      -- permanently_delete_employee() history seed below inserts a
+      -- leave_requests row using 'annual'.
+      insert into policy_versions (id, country_code, policy_type, version_no, effective_from, status, payload, created_by, approved_by, approved_at)
+        values ('00000000-0000-0000-0000-0000000001e1', 'AE', 'leave_rules', 1, '2020-01-01', 'active', '{}'::jsonb, '${USER_HR_ADMIN}', '${USER_CEO}', now());
+      insert into policy_leave_types (policy_version_id, leave_type_code, name, accrual_method)
+        values ('00000000-0000-0000-0000-0000000001e1', 'annual', 'Annual Leave', 'monthly_accrual');
+
       -- two contract versions for Ravi: a closed probation period, then permanent
       insert into employment_contracts (employee_id, contract_type, start_date, end_date, version_no, is_current, created_by)
         values ('${EMPLOYEE_REPORT}', 'probation', '2024-02-01', '2024-07-31', 1, false, '${USER_HR_ADMIN}');
@@ -430,17 +439,19 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
     });
   });
 
-  describe("storage: employee-documents and identity-documents buckets", () => {
+  describe("storage: employee-documents, identity-documents, and insurance-documents buckets", () => {
     const CONTRACT_FILE = `${COMPANY_HQ}/${EMPLOYEE_REPORT}/contract/v2.pdf`;
     const PASSPORT_FILE = `${COMPANY_HQ}/${EMPLOYEE_REPORT}/passport/scan.pdf`;
+    const INSURANCE_FILE = `${COMPANY_HQ}/${EMPLOYEE_REPORT}/insurance/policy.pdf`;
 
     beforeAll(async () => {
       await db.seed(`
-        insert into storage.buckets (id, name, public) values ('employee-documents','employee-documents',false), ('identity-documents','identity-documents',false)
+        insert into storage.buckets (id, name, public) values ('employee-documents','employee-documents',false), ('identity-documents','identity-documents',false), ('insurance-documents','insurance-documents',false)
         on conflict (id) do nothing;
         insert into storage.objects (bucket_id, name) values
           ('employee-documents', '${CONTRACT_FILE}'),
-          ('identity-documents', '${PASSPORT_FILE}');
+          ('identity-documents', '${PASSPORT_FILE}'),
+          ('insurance-documents', '${INSURANCE_FILE}');
       `);
     });
 
@@ -468,6 +479,30 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
         db.asUser(USER_REPORT, (query) =>
           query("insert into storage.objects (bucket_id, name) values ('identity-documents', $1)", [
             `${COMPANY_HQ}/${EMPLOYEE_REPORT}/passport/self-upload.pdf`,
+          ]),
+        ),
+      ).rejects.toThrow(/row-level security/);
+    });
+
+    // Previously untested — same shape as identity-documents (owner + HR
+    // Admin only), verified separately since it's its own bucket with its
+    // own policy set.
+    it("keeps insurance-documents restricted to the owner and HR Admin only — never Finance, manager, or CEO", async () => {
+      const owner = await db.asUser(USER_REPORT, (query) => query("select name from storage.objects where bucket_id = 'insurance-documents'"));
+      expect(owner.rows.length).toBe(1);
+
+      const hr = await db.asUser(USER_HR_ADMIN, (query) => query("select name from storage.objects where bucket_id = 'insurance-documents'"));
+      expect(hr.rows.length).toBe(1);
+
+      for (const viewer of [USER_FINANCE, USER_MANAGER, USER_CEO]) {
+        const view = await db.asUser(viewer, (query) => query("select name from storage.objects where bucket_id = 'insurance-documents'"));
+        expect(view.rows).toEqual([]);
+      }
+
+      await expect(
+        db.asUser(USER_REPORT, (query) =>
+          query("insert into storage.objects (bucket_id, name) values ('insurance-documents', $1)", [
+            `${COMPANY_HQ}/${EMPLOYEE_REPORT}/insurance/self-upload.pdf`,
           ]),
         ),
       ).rejects.toThrow(/row-level security/);
@@ -604,8 +639,13 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
   });
 
   describe("permanently_delete_employee()", () => {
-    async function seedScratchEmployee(numberSuffix: string) {
+    // Every employee gets employment_contracts + compensation_details at
+    // creation — those two are deliberately NOT blockers (see schema.sql),
+    // so this seed represents "real history" via every OTHER category that
+    // permanently_delete_employee now checks.
+    async function seedScratchEmployeeWithHistory(numberSuffix: string) {
       const employeeId = randomUUID();
+      const projectId = randomUUID();
       await db.seed(`
         insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date)
           values ('${employeeId}', 'PD-${numberSuffix}', '${COMPANY_HQ}', 'AE', 'Purge', 'Me-${numberSuffix}', '2024-01-01');
@@ -621,19 +661,42 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
           values ('${employeeId}', 'Daman', 'PD-POL-${numberSuffix}', '${USER_HR_ADMIN}');
         insert into employee_career_events (employee_id, event_type, effective_date, new_job_title, new_base_salary, currency, created_by)
           values ('${employeeId}', 'promotion', '2026-01-01', 'Engineer', 5500, 'AED', '${USER_HR_ADMIN}');
+        insert into attendance_records (employee_id, work_date, status)
+          values ('${employeeId}', '2026-01-05', 'present');
+        insert into leave_requests (employee_id, leave_type_code, start_date, end_date, total_days, status)
+          values ('${employeeId}', 'annual', '2026-02-01', '2026-02-02', 2, 'submitted');
+        insert into projects (id, company_id, code, name) values ('${projectId}', '${COMPANY_HQ}', 'PD-PROJ-${numberSuffix}', 'Scratch project');
+        insert into project_allocations (employee_id, project_id, allocation_percent, start_date)
+          values ('${employeeId}', '${projectId}', 50, '2026-01-01');
+      `);
+      return employeeId;
+    }
+
+    // A genuinely empty record — only the two categories every employee
+    // gets at creation and never blocks on. This is the only shape
+    // permanently_delete_employee should ever actually succeed against.
+    async function seedEmptyScratchEmployee(numberSuffix: string) {
+      const employeeId = randomUUID();
+      await db.seed(`
+        insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date)
+          values ('${employeeId}', 'PD-EMPTY-${numberSuffix}', '${COMPANY_HQ}', 'AE', 'Empty', 'Scratch-${numberSuffix}', '2024-01-01');
+        insert into employment_contracts (employee_id, contract_type, start_date, version_no, is_current, created_by)
+          values ('${employeeId}', 'permanent', '2024-01-01', 1, true, '${USER_HR_ADMIN}');
+        insert into compensation_details (employee_id, effective_from, base_salary, currency, created_by)
+          values ('${employeeId}', '2024-01-01', 5000, 'AED', '${USER_HR_ADMIN}');
       `);
       return employeeId;
     }
 
     it("blocks permanent delete of an employee who hasn't been removed first", async () => {
-      const employeeId = await seedScratchEmployee("1");
+      const employeeId = await seedEmptyScratchEmployee("1");
       await expect(db.asUser(USER_HR_ADMIN, (query) => query("select permanently_delete_employee($1)", [employeeId]))).rejects.toThrow(
         /Remove the employee first/,
       );
     });
 
     it("blocks anyone other than HR Admin from calling it", async () => {
-      const employeeId = await seedScratchEmployee("2");
+      const employeeId = await seedEmptyScratchEmployee("2");
       await db.seed(`update employees set deleted_at = now() where id = '${employeeId}';`);
 
       await expect(
@@ -655,7 +718,7 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
         insert into companies (id, legal_name, country_code, default_currency) values ('${otherCompany}', 'Other Co', 'AE', 'AED');
         insert into user_roles (user_id, role, company_id) values ('${otherHrUser}', 'hr_admin', '${otherCompany}');
       `);
-      const employeeId = await seedScratchEmployee("3");
+      const employeeId = await seedEmptyScratchEmployee("3");
       await db.seed(`update employees set deleted_at = now() where id = '${employeeId}';`);
 
       await expect(
@@ -663,12 +726,117 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
       ).rejects.toThrow(/Only HR Admin may permanently delete/);
     });
 
-    it("cascades the delete across every related table, and nulls out a report's manager_id instead of blocking", async () => {
-      const employeeId = await seedScratchEmployee("4");
+    it("blocks the delete entirely (nothing removed) when the employee has real history, and names every blocking category", async () => {
+      const employeeId = await seedScratchEmployeeWithHistory("4");
+      await db.seed(`update employees set deleted_at = now(), deleted_by = '${USER_HR_ADMIN}' where id = '${employeeId}';`);
+
+      // A RAISE EXCEPTION aborts the whole Postgres transaction — since
+      // asUser() wraps each call in one BEGIN/ROLLBACK, the error has to be
+      // caught *inside* fn (not via expect().rejects) to run further
+      // queries afterward on the same connection, and any check of
+      // remaining rows needs its own separate asUser() call.
+      let message = "";
+      await db.asUser(USER_HR_ADMIN, async (query) => {
+        try {
+          await query("select permanently_delete_employee($1)", [employeeId]);
+        } catch (err) {
+          message = err instanceof Error ? err.message : String(err);
+        }
+      });
+      expect(message).toMatch(/Cannot permanently delete: this employee has real history/);
+      for (const fragment of [
+        "attendance record",
+        "leave request",
+        "project allocation",
+        "career event",
+        "identity document",
+        "insurance polic",
+        "loan",
+      ]) {
+        expect(message).toContain(fragment);
+      }
+
+      // Nothing was removed — the whole delete is atomic, not partial.
+      await db.asUser(USER_HR_ADMIN, async (query) => {
+        const employeeRow = await query("select id from employees where id = $1", [employeeId]);
+        expect(employeeRow.rows.length).toBe(1);
+
+        for (const table of [
+          "employment_contracts",
+          "compensation_details",
+          "identity_documents",
+          "employee_loans",
+          "employee_insurance_policies",
+          "employee_career_events",
+          "attendance_records",
+          "leave_requests",
+          "project_allocations",
+        ]) {
+          const remaining = await query(`select 1 from ${table} where employee_id = $1`, [employeeId]);
+          expect(remaining.rows.length).toBe(1);
+        }
+      });
+    });
+
+    it("blocks on a single history category too — e.g. attendance alone is enough", async () => {
+      const employeeId = await seedEmptyScratchEmployee("6");
+      await db.seed(`
+        update employees set deleted_at = now(), deleted_by = '${USER_HR_ADMIN}' where id = '${employeeId}';
+        insert into attendance_records (employee_id, work_date, status) values ('${employeeId}', '2026-01-05', 'present');
+      `);
+
+      await expect(
+        db.asUser(USER_HR_ADMIN, (query) => query("select permanently_delete_employee($1)", [employeeId])),
+      ).rejects.toThrow(/1 attendance record\(s\)/);
+
+      const stillThere = await db.asUser(USER_HR_ADMIN, (query) => query("select id from employees where id = $1", [employeeId]));
+      expect(stillThere.rows.length).toBe(1);
+    });
+
+    // Phase 1 correction (4): employment_contracts/compensation_details used
+    // to be excluded from the blocker list entirely — every employee gets
+    // exactly one of each at creation, but a SECOND row of either (a
+    // renewal, a salary change) is real employment history, not a mistaken
+    // test record, and should block the same way attendance/leave/etc. do.
+    it("blocks permanent delete when a renewed contract left more than the initial employment_contracts row, even with no other history", async () => {
+      const employeeId = await seedEmptyScratchEmployee("8");
+      await db.seed(`
+        update employees set deleted_at = now(), deleted_by = '${USER_HR_ADMIN}' where id = '${employeeId}';
+        update employment_contracts set is_current = false where employee_id = '${employeeId}';
+        insert into employment_contracts (employee_id, contract_type, start_date, version_no, is_current, created_by)
+          values ('${employeeId}', 'permanent', '2025-01-01', 2, true, '${USER_HR_ADMIN}');
+      `);
+
+      await expect(
+        db.asUser(USER_HR_ADMIN, (query) => query("select permanently_delete_employee($1)", [employeeId])),
+      ).rejects.toThrow(/2 employment contract version\(s\)/);
+
+      const stillThere = await db.asUser(USER_HR_ADMIN, (query) => query("select id from employees where id = $1", [employeeId]));
+      expect(stillThere.rows.length).toBe(1);
+    });
+
+    it("blocks permanent delete when a salary change left more than the initial compensation_details row, even with no other history", async () => {
+      const employeeId = await seedEmptyScratchEmployee("9");
+      await db.seed(`
+        update employees set deleted_at = now(), deleted_by = '${USER_HR_ADMIN}' where id = '${employeeId}';
+        insert into compensation_details (employee_id, effective_from, base_salary, currency, created_by)
+          values ('${employeeId}', '2025-06-01', 6000, 'AED', '${USER_HR_ADMIN}');
+      `);
+
+      await expect(
+        db.asUser(USER_HR_ADMIN, (query) => query("select permanently_delete_employee($1)", [employeeId])),
+      ).rejects.toThrow(/2 compensation version\(s\)/);
+
+      const stillThere = await db.asUser(USER_HR_ADMIN, (query) => query("select id from employees where id = $1", [employeeId]));
+      expect(stillThere.rows.length).toBe(1);
+    });
+
+    it("successfully deletes a genuinely empty record and nulls out a report's manager_id", async () => {
+      const employeeId = await seedEmptyScratchEmployee("7");
       const reportId = randomUUID();
       await db.seed(`
         insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date, manager_id)
-          values ('${reportId}', 'PD-4-REPORT', '${COMPANY_HQ}', 'AE', 'Reports', 'ToDeleted', '2024-01-01', '${employeeId}');
+          values ('${reportId}', 'PD-7-REPORT', '${COMPANY_HQ}', 'AE', 'Reports', 'ToDeleted', '2024-01-01', '${employeeId}');
         update employees set deleted_at = now(), deleted_by = '${USER_HR_ADMIN}' where id = '${employeeId}';
       `);
 
@@ -682,14 +850,7 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
         const employeeRow = await query("select id from employees where id = $1", [employeeId]);
         expect(employeeRow.rows).toEqual([]);
 
-        for (const table of [
-          "employment_contracts",
-          "compensation_details",
-          "identity_documents",
-          "employee_loans",
-          "employee_insurance_policies",
-          "employee_career_events",
-        ]) {
+        for (const table of ["employment_contracts", "compensation_details"]) {
           const remaining = await query(`select 1 from ${table} where employee_id = $1`, [employeeId]);
           expect(remaining.rows).toEqual([]);
         }
@@ -700,7 +861,7 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
     });
 
     it("frees the employee number immediately upon permanent delete, in the same transaction", async () => {
-      const employeeId = await seedScratchEmployee("5");
+      const employeeId = await seedEmptyScratchEmployee("5");
       await db.seed(`update employees set deleted_at = now() where id = '${employeeId}';`);
 
       await db.asUser(USER_HR_ADMIN, async (query) => {

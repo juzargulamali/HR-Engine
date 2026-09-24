@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useFocusTrap } from "@/lib/use-focus-trap";
 
 /**
  * Generic slide-in panel — used for the mobile nav today, reusable later
  * for e.g. a mobile filter panel. Always mounted (never unmounted while
  * `open` is false) so the close transition can actually play; visibility
  * is toggled via opacity/transform + pointer-events instead.
+ *
+ * `inert` (native, no library) is what actually keeps a closed-but-still-
+ * mounted drawer out of the keyboard tab sequence — `aria-hidden`,
+ * `opacity-0`, and `pointer-events-none` all affect how the drawer is
+ * perceived or clicked, but none of them stop Tab from reaching its links
+ * and buttons while it's closed. Applied on the outer wrapper (not just the
+ * dialog panel) so it also covers the backdrop.
  */
 export function Drawer({
   open,
@@ -23,6 +31,10 @@ export function Drawer({
   side?: "left" | "right";
   title: string;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  useFocusTrap(panelRef, open);
+
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
@@ -31,19 +43,22 @@ export function Drawer({
     document.addEventListener("keydown", onKey);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    const raf = requestAnimationFrame(() => closeButtonRef.current?.focus());
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = previousOverflow;
+      cancelAnimationFrame(raf);
     };
   }, [open, onClose]);
 
   return (
-    <div className={cn("fixed inset-0 z-50", open ? "" : "pointer-events-none")} aria-hidden={!open}>
+    <div className={cn("fixed inset-0 z-50", open ? "" : "pointer-events-none")} aria-hidden={!open} inert={!open}>
       <div
         className={cn("absolute inset-0 bg-black/50 transition-opacity duration-200", open ? "opacity-100" : "opacity-0")}
         onClick={onClose}
       />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -56,6 +71,7 @@ export function Drawer({
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <span className="font-heading text-sm font-semibold">{title}</span>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             aria-label="Close menu"

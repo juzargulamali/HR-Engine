@@ -129,9 +129,17 @@ export async function assignRole(_prevState: ActionState, formData: FormData): P
   return { error: null };
 }
 
+/**
+ * The self-revocation and last-System-Administrator guards now live in the
+ * database (revoke_role_grant(), see
+ * supabase/migrations/20261030000000_guard_role_grant_revocation.sql) as one
+ * atomic, advisory-locked operation — not here. `user_roles` has no UPDATE
+ * policy at all any more, so this RPC is the only way to revoke a grant;
+ * this action is just the thin client-facing wrapper around it.
+ */
 export async function revokeRole(roleGrantId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
-  const { error } = await supabase.from("user_roles").update({ revoked_at: new Date().toISOString() }).eq("id", roleGrantId);
+  const { error } = await supabase.rpc("revoke_role_grant", { p_role_grant_id: roleGrantId });
   revalidatePath("/admin/users");
   return { error: error?.message ?? null };
 }

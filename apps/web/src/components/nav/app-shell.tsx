@@ -1,6 +1,6 @@
 import { BellRing } from "lucide-react";
 import Link from "next/link";
-import { canViewHrAlerts, ROLE_LABELS } from "@enginious-hr/domain";
+import { canViewHrAlerts, roleLabelsFor } from "@enginious-hr/domain";
 import type { CurrentSession } from "@/lib/auth/session";
 import { signOut } from "@/lib/actions/auth";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { CommandPalette } from "./command-palette";
 import { buildNavGroups } from "./nav-groups";
 
 export function AppShell({ session, children }: { session: CurrentSession; children: React.ReactNode }) {
-  const roleLabels = [...new Set(session.grants.map((g) => ROLE_LABELS[g.role]))];
+  const roleLabels = roleLabelsFor(session.grants);
   const showAlertsLink = canViewHrAlerts(session.grants);
   const groups = buildNavGroups(session.grants);
 
@@ -25,6 +25,13 @@ export function AppShell({ session, children }: { session: CurrentSession; child
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      >
+        Skip to main content
+      </a>
+
       <SidebarNav groups={groups} fullName={session.fullName ?? session.email ?? "Signed in"} email={session.email} roleLabels={roleLabels} signOutSlot={signOutSlot} />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -40,7 +47,7 @@ export function AppShell({ session, children }: { session: CurrentSession; child
           </div>
         </header>
 
-        <main className="flex-1 px-4 py-8 md:px-8">
+        <main id="main-content" tabIndex={-1} className="flex-1 px-4 py-8 outline-none md:px-8">
           <div className="mx-auto max-w-6xl">{children}</div>
         </main>
       </div>

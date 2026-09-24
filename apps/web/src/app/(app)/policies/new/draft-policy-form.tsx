@@ -86,7 +86,7 @@ export function DraftPolicyForm({ countries }: { countries: { code: string; name
         </Link>
       </div>
       <p className="text-xs text-muted-foreground">
-        This saves as a draft. A <em>different</em> HR Admin or the CEO for this country must activate it before it
+        This saves as a draft. A <em>different</em> HR Admin or the CEO/CTO for this country must activate it before it
         takes effect.
       </p>
     </form>

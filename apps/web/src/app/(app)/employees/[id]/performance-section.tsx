@@ -4,6 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { RateGoalForm } from "./rate-goal-form";
 import { StartAppraisalForm } from "./start-appraisal-form";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   in_progress: "secondary",
@@ -71,8 +72,8 @@ export async function PerformanceSection({
             ))}
             {(goals ?? []).length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
-                  No goals yet.
+                <TableCell colSpan={4}>
+                  <EmptyState dense title="No goals yet." />
                 </TableCell>
               </TableRow>
             ) : null}
@@ -108,8 +109,8 @@ export async function PerformanceSection({
             ))}
             {(appraisals ?? []).length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
-                  No appraisals yet.
+                <TableCell colSpan={4}>
+                  <EmptyState dense title="No appraisals yet." />
                 </TableCell>
               </TableRow>
             ) : null}
