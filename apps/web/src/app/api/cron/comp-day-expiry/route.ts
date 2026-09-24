@@ -32,7 +32,12 @@ export async function GET(request: Request) {
   // sensitive "has this day already passed?" check — a single UTC `today`
   // wrongly treats it as not-yet-expired (or already-expired) for up to a
   // few hours around a country's own midnight, depending on the direction.
-  const { data: employeeCountries } = await admin.from("employees").select("id, country_code");
+  const { data: employeeCountries, error: employeeCountriesError } = await admin.from("employees").select("id, country_code");
+  // A failed query here must never fall through to an empty map — every
+  // employee would then silently resolve to DASHBOARD_TIMEZONE (Dubai) via
+  // resolveCountryTimeZone's unrecognised-country fallback, which is wrong
+  // for every non-UAE employee rather than a visible failure.
+  if (employeeCountriesError) return NextResponse.json({ error: employeeCountriesError.message }, { status: 500 });
   const countryByEmployee = new Map((employeeCountries ?? []).map((e) => [e.id, e.country_code]));
   const businessDateForCountry = (countryCode: string | null | undefined) => getBusinessDateString(resolveCountryTimeZone(countryCode), now);
   // Used only for the response payload's `ranAt` — an approximate,

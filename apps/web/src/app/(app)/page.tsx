@@ -273,7 +273,7 @@ export default async function DashboardPage() {
           <div>
             <span className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">Driven by innovation</span>
             <h1 className="mt-2 font-heading text-2xl font-bold sm:text-3xl">
-              Good {greetingPeriod(getBusinessHour(DASHBOARD_TIMEZONE, now))}
+              Good {greetingPeriod(getBusinessHour(dashboardTimeZone, now))}
               {firstName ? (
                 <>
                   , <span className="brand-gradient-text">{firstName}</span>
@@ -352,10 +352,12 @@ export default async function DashboardPage() {
   );
 }
 
-// Always Dubai's local hour, regardless of viewer or view mode — Enginious's
-// own reference time, not the server's UTC clock or the visiting browser's
-// device time.
-function greetingPeriod(hour: number): string {
+// Takes the dashboard's own resolved business-local hour (dashboardTimeZone
+// above — Dubai for the cross-company CEO/HR view, the viewer's own
+// company's country for an employee-only view), never the server's UTC
+// clock or the visiting browser's device time, so the greeting always
+// matches the clock the dashboard header displays right next to it.
+export function greetingPeriod(hour: number): string {
   if (hour < 12) return "morning";
   if (hour < 17) return "afternoon";
   return "evening";

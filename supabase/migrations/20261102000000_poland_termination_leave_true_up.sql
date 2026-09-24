@@ -220,3 +220,73 @@ begin
   where employee_id = p_employee_id and excess_reviewed_at is null;
 end;
 $$;
+
+-- The escape hatch for when applyPolandTerminationLeaveTrueUp() (lib/actions/
+-- polandTermination.ts) could NOT automatically determine/post the true-up
+-- (no/gappy/ambiguous FTE history, an unclassifiable historical ledger row,
+-- a query failure, or the RPC call itself failing) — every one of those
+-- cases already tells HR, in the warning it returns, to post the correct
+-- amount manually via a leave-ledger adjustment instead. Until now nothing
+-- ever created the poland_termination_leave_reconciliations marker for that
+-- path, so Final Settlement stayed blocked forever even after HR did
+-- exactly what it was told to do — this function is HR's explicit,
+-- audited confirmation that they've done so, closing that gap.
+--
+-- Deliberately posts NOTHING to leave_ledger itself (that's what the manual
+-- adjustment HR already posted was for) — it only writes the completion
+-- marker, with raw_delta_days/applied_days recorded as 0 so the row reads
+-- unambiguously as "resolved manually, not by the automatic true-up," never
+-- confused with a genuine zero-delta automatic outcome (which carries its
+-- own note text). Same idempotent, advisory-lock-protected,
+-- "the marker's existence is terminal" pattern as
+-- post_poland_termination_leave_adjustment above — a second confirmation
+-- call is a silent no-op, never an error.
+create or replace function confirm_poland_termination_leave_manually_reconciled(
+  p_employee_id uuid,
+  p_note text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_company_id uuid;
+  v_country_code text;
+  v_employment_status employment_status;
+  v_termination_date date;
+begin
+  select company_id, country_code, employment_status, termination_date
+    into v_company_id, v_country_code, v_employment_status, v_termination_date
+    from employees where id = p_employee_id;
+  if v_company_id is null then
+    raise exception 'Employee % not found', p_employee_id;
+  end if;
+
+  if not has_role('hr_admin', v_company_id) then
+    raise exception 'Only HR Admin may confirm a manual termination Annual Leave reconciliation';
+  end if;
+
+  if v_country_code is distinct from 'PL' then
+    raise exception 'confirm_poland_termination_leave_manually_reconciled only applies to Poland employees';
+  end if;
+
+  if v_employment_status is distinct from 'terminated' then
+    raise exception 'Employee % is not marked terminated', p_employee_id;
+  end if;
+
+  if v_termination_date is null then
+    raise exception 'Employee % has no termination_date recorded', p_employee_id;
+  end if;
+
+  -- Same lock key as post_poland_termination_leave_adjustment — the two
+  -- functions are mutually exclusive ways of reaching the same one-time
+  -- completion marker for this employee, so they must not be allowed to
+  -- race each other either.
+  perform pg_advisory_xact_lock(hashtext('leave_ledger_annual:' || p_employee_id::text));
+
+  insert into poland_termination_leave_reconciliations (employee_id, termination_date, raw_delta_days, applied_days, excess_requiring_review_days, note, created_by)
+  values (p_employee_id, v_termination_date, 0, 0, 0, coalesce(p_note, 'Confirmed by HR Admin: Annual Leave ledger manually reconciled for this termination.'), auth.uid())
+  on conflict (employee_id) do nothing;
+end;
+$$;

@@ -28,6 +28,7 @@ const USER_MANAGER = "00000000-0000-0000-0000-00000000ab11";
 const USER_REPORT = "00000000-0000-0000-0000-00000000ab12";
 const USER_HR = "00000000-0000-0000-0000-00000000ab13";
 const USER_PEER = "00000000-0000-0000-0000-00000000ab14";
+const USER_FINANCE = "00000000-0000-0000-0000-00000000ab15";
 
 const EMPLOYEE_MANAGER = "00000000-0000-0000-0000-00000000ab21";
 const EMPLOYEE_REPORT = "00000000-0000-0000-0000-00000000ab22";
@@ -44,7 +45,8 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
         ('${USER_MANAGER}', 'p2b-manager@enginious.ae'),
         ('${USER_REPORT}', 'p2b-report@enginious.ae'),
         ('${USER_HR}', 'p2b-hr@enginious.ae'),
-        ('${USER_PEER}', 'p2b-peer@enginious.ae');
+        ('${USER_PEER}', 'p2b-peer@enginious.ae'),
+        ('${USER_FINANCE}', 'p2b-finance@enginious.ae');
 
       insert into countries (code, name, default_currency) values ('ZZ', 'Zedland', 'ZZD')
       on conflict (code) do nothing;
@@ -59,7 +61,8 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
 
       insert into user_roles (user_id, role, company_id) values
         ('${USER_MANAGER}', 'line_manager', '${COMPANY_A}'),
-        ('${USER_HR}', 'hr_admin', '${COMPANY_A}');
+        ('${USER_HR}', 'hr_admin', '${COMPANY_A}'),
+        ('${USER_FINANCE}', 'finance', '${COMPANY_A}');
 
       -- An active leave_rules policy defining 'recovery' as a valid leave
       -- type for 'ZZ' — guard_leave_request_type() requires this before any
@@ -998,6 +1001,66 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
         query("select employee_id from poland_termination_leave_reconciliations where employee_id = $1", [employeeId]),
       );
       expect(peerVisible.rows).toHaveLength(0);
+    });
+
+    describe("confirm_poland_termination_leave_manually_reconciled() — manual reconciliation escape hatch", () => {
+      // When the automatic true-up above couldn't run, HR is told (by
+      // applyPolandTerminationLeaveTrueUp's own warning) to post the
+      // correct amount manually via a leave-ledger adjustment — but that
+      // manual adjustment alone never creates a poland_termination_leave_
+      // reconciliations marker, so Final Settlement stayed blocked forever
+      // even after HR did exactly what it was told. This is HR's explicit,
+      // audited confirmation that closes that gap; these tests cover only
+      // its own narrow contract: it creates the marker, posts no ledger
+      // amount itself, is idempotent, and only HR Admin may call it.
+      it("creates the completion marker for HR's exact termination_date, without posting any leave_ledger row", async () => {
+        const employeeId = await seedTerminatedPolandEmployee();
+
+        await db.asUser(USER_HR, async (query) => {
+          await query("select confirm_poland_termination_leave_manually_reconciled($1, $2)", [employeeId, "manually reconciled by HR"]);
+
+          const ledgerCount = await query("select count(*) from leave_ledger where employee_id = $1", [employeeId]);
+          expect(Number(ledgerCount.rows[0]?.count)).toBe(0);
+
+          const marker = await query(
+            "select termination_date, raw_delta_days, applied_days, excess_requiring_review_days, note from poland_termination_leave_reconciliations where employee_id = $1",
+            [employeeId],
+          );
+          expect(marker.rows).toHaveLength(1);
+          expect(Number(marker.rows[0]?.raw_delta_days)).toBe(0);
+          expect(Number(marker.rows[0]?.applied_days)).toBe(0);
+          expect(Number(marker.rows[0]?.excess_requiring_review_days)).toBe(0);
+          expect(marker.rows[0]?.note).toBe("manually reconciled by HR");
+          expect(new Date(marker.rows[0]?.termination_date as string).toISOString().slice(0, 10)).toBe("2026-06-30");
+        });
+      });
+
+      it("is idempotent — a repeated confirmation never errors and never overwrites the existing marker", async () => {
+        const employeeId = await seedTerminatedPolandEmployee();
+
+        await db.asUser(USER_HR, async (query) => {
+          await query("select confirm_poland_termination_leave_manually_reconciled($1)", [employeeId]);
+          await query("select confirm_poland_termination_leave_manually_reconciled($1, $2)", [employeeId, "a different note, should be ignored"]);
+
+          const marker = await query("select note from poland_termination_leave_reconciliations where employee_id = $1", [employeeId]);
+          expect(marker.rows).toHaveLength(1);
+          expect(marker.rows[0]?.note).not.toBe("a different note, should be ignored");
+        });
+      });
+
+      it("blocks Finance from confirming a manual reconciliation", async () => {
+        const employeeId = await seedTerminatedPolandEmployee();
+        await expect(
+          db.asUser(USER_FINANCE, (query) => query("select confirm_poland_termination_leave_manually_reconciled($1)", [employeeId])),
+        ).rejects.toThrow(/Only HR Admin/);
+      });
+
+      it("blocks an ordinary employee (line manager/peer) from confirming a manual reconciliation", async () => {
+        const employeeId = await seedTerminatedPolandEmployee();
+        await expect(
+          db.asUser(USER_MANAGER, (query) => query("select confirm_poland_termination_leave_manually_reconciled($1)", [employeeId])),
+        ).rejects.toThrow(/Only HR Admin/);
+      });
     });
   });
 

@@ -1316,6 +1316,10 @@ export interface Database {
         Args: { p_employee_id: string };
         Returns: undefined;
       };
+      confirm_poland_termination_leave_manually_reconciled: {
+        Args: { p_employee_id: string; p_note?: string | null };
+        Returns: undefined;
+      };
       preflight_country_schedule_config: {
         Args: Record<string, never>;
         Returns: {

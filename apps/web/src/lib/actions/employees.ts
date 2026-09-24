@@ -290,6 +290,25 @@ export async function acknowledgePolandTerminationLeaveExcess(employeeId: string
   return { error: error?.message ?? null };
 }
 
+/**
+ * The escape hatch for when the automatic Poland Annual Leave termination
+ * true-up (applyPolandTerminationLeaveTrueUp) couldn't run — HR has already
+ * been told, in that warning, to post the correct amount manually via a
+ * leave-ledger adjustment; this is HR's explicit, audited confirmation that
+ * they've done so for this employee's exact termination_date. RLS/the
+ * underlying confirm_poland_termination_leave_manually_reconciled() RPC (HR
+ * Admin only) is the real enforcement — this action just relays the call
+ * and refreshes the employee page so Final Settlement's readiness check
+ * re-reads the newly-created marker immediately. Posts nothing to
+ * leave_ledger itself — only the completion marker.
+ */
+export async function confirmPolandTerminationLeaveManuallyReconciled(employeeId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("confirm_poland_termination_leave_manually_reconciled", { p_employee_id: employeeId });
+  revalidatePath(`/employees/${employeeId}`);
+  return { error: error?.message ?? null };
+}
+
 const setTerminationSettlementRateSchema = z.object({
   employeeId: z.string().uuid(),
   leaveEncashmentDailyRate: z.coerce.number().positive(),

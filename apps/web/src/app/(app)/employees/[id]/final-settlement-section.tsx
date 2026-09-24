@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Alert } from "@/components/ui/alert";
 import { SettlementRateForm } from "./settlement-rate-form";
 import { AcknowledgePolandExcessButton } from "./acknowledge-poland-excess-button";
+import { ConfirmPolandManualReconciliationButton } from "./confirm-poland-manual-reconciliation-button";
 
 // UAE settles at basic salary (computeFinalSettlement's default — no
 // override needed). Saudi and Poland require a different, statutory wage
@@ -40,7 +41,11 @@ export async function FinalSettlementSection({
     return (
       <div className="space-y-3">
         <Alert variant="destructive">{readiness.reason}</Alert>
-        {readiness.excessRequiringReview > 0 ? <AcknowledgePolandExcessButton employeeId={employeeId} /> : null}
+        {readiness.excessRequiringReview > 0 ? (
+          <AcknowledgePolandExcessButton employeeId={employeeId} />
+        ) : (
+          <ConfirmPolandManualReconciliationButton employeeId={employeeId} />
+        )}
       </div>
     );
   }
