@@ -348,14 +348,15 @@ describe("computeAnnualLeaveEntitlementToDate — the real accrual cron's single
       ).toBe(252); // identical structure to the first-ever case above once the hire month is January — 20 (2015) + 9*20 + 2*26
     });
 
-    it("mid-calendar-year FTE change: that year is split into FTE-consistent runs, each rounded UP individually, then summed (the documented 'more favourable to the employee' method)", () => {
+    it("mid-calendar-year FTE change: BLOCKS the year it falls in, rather than splitting and pricing it — this system deliberately does not compute a mixed-FTE period", () => {
       // Hired 2023-01-01 full-time; evaluated 2024-12-31, with FTE dropping
-      // to a quarter from 2024-07-01. 2023 = ceil(20) = 20. 2024 splits into
-      // Jan-Jun (6 months, full-time) and Jul-Dec (6 months, quarter-time):
-      // ceil(6/12*20*1)=10, ceil(6/12*20*0.25)=ceil(2.5)=3 -> 13. This is
-      // the same per-run-ceiling-then-sum method the official
-      // "2 months @ 1/4 etat + 10 months @ full etat = 24 days (for a
-      // 26-day base)" worked example demonstrates.
+      // to a quarter from 2024-07-01. 2023 (constant FTE throughout) would
+      // still compute fine on its own, but the cumulative entitlement-to-
+      // date this function returns is a single figure for the whole
+      // tenure, and 2024 (the year actually being priced as of asOfDate)
+      // has two different FTE fractions within it — HR must post the
+      // confirmed 2024 amount manually via postLeaveLedgerAdjustment()
+      // instead of this system computing (or approximating) it.
       expect(
         computeAnnualLeaveEntitlementToDate({
           countryCode: "PL",
@@ -367,7 +368,51 @@ describe("computeAnnualLeaveEntitlementToDate — the real accrual cron's single
             { effectiveFrom: "2024-07-01", fteFraction: 0.25 },
           ],
         }),
-      ).toBe(33); // 20 (2023) + 13 (2024: 10 + 3)
+      ).toBeNull();
+      expect(
+        explainPolandEntitlementBlock({
+          countryCode: "PL",
+          hireDate: "2023-01-01",
+          asOfDate: "2024-12-31",
+          isFirstEverEmployment: false,
+          fteFractionHistory: [
+            { effectiveFrom: "2023-01-01", fteFraction: 1 },
+            { effectiveFrom: "2024-07-01", fteFraction: 0.25 },
+          ],
+        }),
+      ).toMatch(/FTE changes during/);
+    });
+
+    it("mid-calendar-year FTE increase also blocks that year, symmetrically with a decrease", () => {
+      expect(
+        computeAnnualLeaveEntitlementToDate({
+          countryCode: "PL",
+          hireDate: "2023-01-01",
+          asOfDate: "2024-12-31",
+          isFirstEverEmployment: false,
+          fteFractionHistory: [
+            { effectiveFrom: "2023-01-01", fteFraction: 0.5 },
+            { effectiveFrom: "2024-04-01", fteFraction: 1 },
+          ],
+        }),
+      ).toBeNull();
+    });
+
+    it("an FTE change effective exactly on 1 January (a year boundary, not mid-year) does NOT block — each year individually still has one constant FTE throughout", () => {
+      // Full-time in 2023, half-time from 2024-01-01 onward — every
+      // calendar year on its own has exactly one FTE for its entire span.
+      expect(
+        computeAnnualLeaveEntitlementToDate({
+          countryCode: "PL",
+          hireDate: "2023-01-01",
+          asOfDate: "2024-12-31",
+          isFirstEverEmployment: false,
+          fteFractionHistory: [
+            { effectiveFrom: "2023-01-01", fteFraction: 1 },
+            { effectiveFrom: "2024-01-01", fteFraction: 0.5 },
+          ],
+        }),
+      ).toBe(30); // 20 (2023, full-time) + 10 (2024, half-time)
     });
 
     it("termination-adjacent boundary: a mid-year asOfDate in a later, fully-reached calendar year still returns that whole year's entitlement, already fully credited — this function assumes continued employment and must NOT be used directly for a terminating employee's own prorated exit-year settlement", () => {
@@ -421,7 +466,7 @@ describe("explainPolandEntitlementBlock — surfaces the specific HR configurati
         isFirstEverEmployment: true,
         fteFractionHistory: [{ effectiveFrom: "2023-01-01", fteFraction: 1 }],
       }),
-    ).toMatch(/effective-dated/);
+    ).toMatch(/reference data only/);
     expect(
       explainPolandEntitlementBlock({
         countryCode: "PL",

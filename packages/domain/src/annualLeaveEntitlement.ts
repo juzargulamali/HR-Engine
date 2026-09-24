@@ -34,13 +34,7 @@
  *     1551/1552 calculations).
  *   - Art. 154 §2 + established rounding practice: a part-time employee's
  *     FTE-prorated entitlement is always rounded UP to a full day, never
- *     to the nearest day. When FTE changes during a calendar year, the
- *     entitlement is computed SEPARATELY for each FTE sub-period (whole
- *     calendar months under each fraction), each sub-period's fractional
- *     result rounded up individually, then summed — this is the documented
- *     "more favourable to the employee" method payroll guidance endorses.
- *     A mid-month FTE change assigns that WHOLE calendar month to whichever
- *     FTE covered the majority of its days.
+ *     to the nearest day.
  *   - GIP (Główny Inspektorat Pracy) guidance: Art. 153's own progressive
  *     1/12 monthly figure has NO statutory whole-day rounding requirement
  *     (unlike Art. 1551/1552/154) — rounding up there is a permitted,
@@ -56,6 +50,18 @@
  *     a DEDUCTION-side concern, already handled by
  *     computePolandLeaveDaysFromHours below; it does not affect how
  *     entitlement itself accrues, so it is unaffected by this file.
+ *
+ * DELIBERATELY KEPT MINIMAL (per this branch's second correction round):
+ * this calculator only ever computes automatically when a period (the hire
+ * year, or a subsequent full calendar year) is covered by a SINGLE,
+ * constant FTE fraction throughout and does not cross the 10-year
+ * recognised-service threshold. A period where FTE changes at all —
+ * whatever the split would otherwise work out to — BLOCKS automatic
+ * accrual entirely, the same as a threshold crossing, a data gap, or an
+ * unconfirmed fact: HR must post the confirmed statutory amount through
+ * the existing audited postLeaveLedgerAdjustment() path instead. This
+ * system does not attempt to compute or approximate a mid-year, mixed-FTE,
+ * or mixed-rate figure under any circumstance.
  */
 
 function dateParts(iso: string): { year: number; month: number; day: number } {
@@ -199,16 +205,17 @@ function validateFteFractionHistory(history: readonly FteFractionPeriod[]): { ok
 }
 
 /**
- * Resolves the FTE fraction that covers the MAJORITY of days in
- * [startISO, endISO] (inclusive) — the documented rule for a mid-month FTE
- * change ("przy ustalaniu uprawnień urlopowych za ten miesiąc przyjmuje się
- * taki wymiar etatu, w którym pracownik przepracuje większość dni"). Blocks
- * (returns ok:false) rather than guess when: no contract covers any part of
- * the interval, the first contract starts after the interval, a gap exists
- * inside the interval, or no single fraction covers a strict majority
- * (including an exact tie).
+ * Resolves the SINGLE, constant FTE fraction that covers the whole of
+ * [startISO, endISO] (inclusive). Blocks (returns ok:false) rather than
+ * guess or split when: no contract covers any part of the interval, the
+ * first contract starts after the interval, a gap exists inside the
+ * interval, or — deliberately, per this branch's second correction round —
+ * the FTE fraction actually changes ANYWHERE within the interval. This
+ * system does not compute a mixed-FTE period at all; a change mid-period
+ * always blocks automatic accrual for that whole period, however small the
+ * change or however the days would otherwise split.
  */
-function resolveMajorityFteForInterval(sortedHistory: readonly FteFractionPeriod[], startISO: string, endISO: string): { ok: true; fte: number } | PolandEntitlementBlocked {
+function resolveConstantFteForInterval(sortedHistory: readonly FteFractionPeriod[], startISO: string, endISO: string): { ok: true; fte: number } | PolandEntitlementBlocked {
   if (sortedHistory.length === 0) {
     return { ok: false, reason: `no employment_contracts history at all to resolve an FTE fraction for ${startISO}..${endISO}` };
   }
@@ -217,10 +224,11 @@ function resolveMajorityFteForInterval(sortedHistory: readonly FteFractionPeriod
     return { ok: false, reason: `no contract covers ${startISO} — the first known contract starts ${firstPeriod.effectiveFrom}` };
   }
 
-  const daysByFte = new Map<number, number>();
   let cursor = startISO;
   let coveredDays = 0;
   const totalDays = dayCount(startISO, endISO);
+  let resultFte: number | null = null;
+  let change: { from: number; to: number; effectiveFrom: string } | null = null;
 
   for (let i = 0; i < sortedHistory.length && cursor <= endISO; i++) {
     const period = sortedHistory[i]!;
@@ -234,32 +242,25 @@ function resolveMajorityFteForInterval(sortedHistory: readonly FteFractionPeriod
     const segmentStart = cursor;
     const segmentEnd = periodEnd < endISO ? periodEnd : endISO;
     if (segmentEnd < segmentStart) continue; // this contract ends before our interval starts covering
-    const segmentDays = dayCount(segmentStart, segmentEnd);
-    daysByFte.set(period.fteFraction, (daysByFte.get(period.fteFraction) ?? 0) + segmentDays);
-    coveredDays += segmentDays;
+    coveredDays += dayCount(segmentStart, segmentEnd);
+    if (resultFte === null) {
+      resultFte = period.fteFraction;
+    } else if (period.fteFraction !== resultFte && !change) {
+      change = { from: resultFte, to: period.fteFraction, effectiveFrom: period.effectiveFrom };
+    }
     cursor = addOneDay(segmentEnd);
   }
 
   if (coveredDays < totalDays) {
     return { ok: false, reason: `gap in employment_contracts history covering part of ${startISO}..${endISO}` };
   }
-
-  let bestFte: number | null = null;
-  let bestDays = -1;
-  let tie = false;
-  for (const [fte, days] of daysByFte) {
-    if (days > bestDays) {
-      bestFte = fte;
-      bestDays = days;
-      tie = false;
-    } else if (days === bestDays) {
-      tie = true;
-    }
+  if (change) {
+    return {
+      ok: false,
+      reason: `FTE changes during ${startISO}..${endISO} (from ${change.from} to ${change.to} effective ${change.effectiveFrom}) — automatic accrual for a period whose FTE isn't constant throughout is not computed; post the confirmed amount manually instead`,
+    };
   }
-  if (bestFte === null || tie || bestDays * 2 <= totalDays) {
-    return { ok: false, reason: `no single FTE fraction covers a majority of days in ${startISO}..${endISO} — ambiguous` };
-  }
-  return { ok: true, fte: bestFte };
+  return { ok: true, fte: resultFte! };
 }
 
 function addOneDay2Before(iso: string): string {
@@ -283,17 +284,19 @@ function round2(value: number): number {
 }
 
 // -----------------------------------------------------------------------------
-// Poland: calendar-month runs, each priced and rounded UP individually
+// Poland: a whole period (the hire year, or one subsequent calendar year),
+// priced only when a SINGLE FTE fraction covers it throughout
 // (Art. 154 §2 / Art. 1551 / established rounding practice)
 // -----------------------------------------------------------------------------
 
-/** Prices a whole-calendar-months range [firstOfStartMonth, firstOfEndMonth]
- * (both the 1st of their respective months) at `baseDaysForYear`, splitting
- * into FTE-consistent runs and rounding EACH run's fractional result UP to
- * a whole day individually before summing (the documented "more favourable
- * to the employee" method) — never a single round applied to the whole
- * range, and never one FTE value blanket-applied across a change. */
-function priceCalendarMonthRange(
+/** Prices a whole-calendar-months range [trueRangeStartISO, firstOfEndMonth]
+ * at `baseDaysForYear` (a partial first month, e.g. the hire month, still
+ * counts as one whole month — "niepełny miesiąc... nie jest zaokrąglany w
+ * dół") — but ONLY when a single, constant FTE fraction covers the whole
+ * range: any FTE change anywhere inside it blocks the whole period rather
+ * than being split and priced (see resolveConstantFteForInterval, and this
+ * file's header). */
+function priceWholePeriod(
   trueRangeStartISO: string,
   firstOfEndMonthISO: string,
   sortedFteHistory: readonly FteFractionPeriod[],
@@ -304,48 +307,11 @@ function priceCalendarMonthRange(
   const totalMonths = (end.year - start.year) * 12 + (end.month - start.month) + 1;
   if (totalMonths <= 0) return { ok: true, days: 0 };
 
-  let runFte: number | null = null;
-  let runMonths = 0;
-  let total = 0;
+  const periodEndISO = formatDate(end.year, end.month, daysInMonth(end.year, end.month));
+  const resolved = resolveConstantFteForInterval(sortedFteHistory, trueRangeStartISO, periodEndISO);
+  if (!resolved.ok) return resolved;
 
-  const flushRun = () => {
-    if (runFte === null || runMonths === 0) return;
-    total += Math.ceil((runMonths / 12) * baseDaysForYear * runFte);
-  };
-
-  let y = start.year;
-  let m = start.month;
-  for (let i = 0; i < totalMonths; i++) {
-    // The FIRST month priced may be a genuine partial calendar month (the
-    // hire month itself) — days before employment began are neither
-    // covered by a contract nor relevant to "majority of days worked",
-    // so the interval floors at trueRangeStartISO, not the 1st of that
-    // month, for that one month only. Every later month is a full
-    // calendar month (the "incomplete month rounds up to a full month"
-    // rule is already satisfied by counting this first month as 1 whole
-    // month in runMonths, regardless of how many of its days this
-    // interval actually covers).
-    const monthStart = i === 0 ? trueRangeStartISO : formatDate(y, m, 1);
-    const monthEnd = formatDate(y, m, daysInMonth(y, m));
-    const resolved = resolveMajorityFteForInterval(sortedFteHistory, monthStart, monthEnd);
-    if (!resolved.ok) return resolved;
-
-    if (runFte !== null && resolved.fte !== runFte) {
-      flushRun();
-      runMonths = 0;
-    }
-    runFte = resolved.fte;
-    runMonths += 1;
-
-    if (m === 12) {
-      m = 1;
-      y += 1;
-    } else {
-      m += 1;
-    }
-  }
-  flushRun();
-  return { ok: true, days: total };
+  return { ok: true, days: Math.ceil((totalMonths / 12) * baseDaysForYear * resolved.fte) };
 }
 
 /** True if the 20-vs-26-day recognised-service threshold (Art. 154 §1-2)
@@ -396,18 +362,20 @@ export interface AnnualLeaveEntitlementToDateInput {
   hireDate: string;
   asOfDate: string;
   /**
-   * Poland only. A single current value — see this file's header and the
-   * open design question in this branch's correction report: this system
-   * does not yet have an effective-dated, audited representation of
-   * recognised prior service (unlike FTE, which is effective-dated via
-   * fteFractionHistory below). Applying one current value across an
-   * employee's ENTIRE multi-year history would silently restate years
-   * already granted under a possibly-different value, which this
-   * correction round's QA explicitly rejected. Until that representation
-   * exists, ANY non-zero value here BLOCKS the Poland calculation entirely
-   * (returns null) — recognisedPriorServiceYears === 0 (or omitted) is
-   * unaffected by the missing effective-dating (there is only one possible
-   * value, 0, for all of history) and computes normally.
+   * Poland only. HR REFERENCE DATA ONLY — deliberately never applied to
+   * automatic accrual (see this file's header). This system keeps this
+   * field as a single, non-effective-dated scalar (employees.
+   * recognised_prior_service_years); using it to compute automatically
+   * would mean applying whichever value happens to be current across an
+   * employee's entire multi-year history, silently restating years
+   * already granted whenever it changes and possibly missing a 10-year
+   * threshold crossing it would have caused earlier. ANY non-zero value
+   * here therefore BLOCKS the Poland calculation entirely (returns null):
+   * HR must confirm and post the correct statutory entitlement manually,
+   * through the existing leave-ledger adjustment process, for any Poland
+   * employee with recognised prior service. recognisedPriorServiceYears
+   * === 0 (or omitted) is unaffected — there is only one possible value
+   * for all of history — and computes normally.
    */
   recognisedPriorServiceYears?: number;
   /**
@@ -428,10 +396,11 @@ export interface AnnualLeaveEntitlementToDateInput {
   /**
    * Poland only — REQUIRED for a Poland calculation to run at all (a
    * missing or empty history returns `null`, blocked; so does any gap,
-   * gap-at-start, overlap, or out-of-range fraction found in it). See
-   * resolveMajorityFteForInterval — a mid-service FTE change prices only
-   * the calendar months it actually covers, resolved by which fraction
-   * applied for the MAJORITY of a given month's days.
+   * gap-at-start, overlapping/conflicting row, or out-of-range fraction
+   * found in it). See resolveConstantFteForInterval — deliberately, an FTE
+   * change ANYWHERE within a period being priced (the hire year, or a
+   * subsequent calendar year) blocks that whole period; this calculator
+   * never splits or approximates a mixed-FTE period.
    */
   fteFractionHistory?: readonly FteFractionPeriod[];
 }
@@ -487,7 +456,7 @@ function computePolandEntitlementOrDispatch(input: AnnualLeaveEntitlementToDateI
     return {
       ok: false,
       reason:
-        "recognisedPriorServiceYears is non-zero, but this system has no effective-dated, audited record of it yet — applying one current value across multi-year history would silently restate years already granted (see this branch's correction report for the proposed employee_recognised_service_periods design)",
+        "recognisedPriorServiceYears is non-zero — this field is retained as HR reference data only and is never applied to automatic accrual, since a single current value has no effective date and could change (or already have changed) the 10-year threshold for years already granted. HR must confirm and post the statutory Annual Leave entitlement for this employee manually via the existing leave-ledger adjustment process.",
     };
   }
 
@@ -525,38 +494,26 @@ function computePolandFirstEverEmploymentEntitlementToDate(
   // for the whole of this special first-year mechanism — a threshold
   // crossing occurring later only ever matters from year 2 onward, checked
   // in the shared subsequent-years loop below.
-  const fteAtHire = resolveMajorityFteForInterval(sortedFteHistory, hireDate, hireDate);
-  if (!fteAtHire.ok) return fteAtHire;
-
-  const annualAtHire = computePolandAnnualLeaveEntitlementDays({ completedServiceYears: 0, recognisedPriorServiceYears, fteFraction: fteAtHire.fte });
 
   if (asOfYear === hireYear) {
     const months = completedArt153Months(hireDate, asOfDate);
-    // The hire's own calendar-year FTE is used throughout this phase — a
-    // mid-year FTE change within the hire year itself, for a genuine
-    // first-ever hire, is rare enough (a brand-new employee's contract
-    // changing within months of joining) that this system blocks rather
-    // than approximate it: detect it explicitly rather than silently use
-    // only the hire-date FTE for the whole span.
-    if (months > 0) {
-      const monthEndCheck = resolveMajorityFteForInterval(sortedFteHistory, hireDate, asOfDate);
-      if (!monthEndCheck.ok) return monthEndCheck;
-      if (monthEndCheck.fte !== fteAtHire.fte) {
-        return { ok: false, reason: `FTE changed within the hire's own calendar year (${hireYear}) — Art. 153's first-year proration for a mid-hire-year FTE change is not implemented` };
-      }
-    }
+    // A single, constant FTE must cover the whole hire-to-date span — any
+    // change within the hire year at all blocks this period entirely (see
+    // this file's header and resolveConstantFteForInterval).
+    const fteResolved = resolveConstantFteForInterval(sortedFteHistory, hireDate, asOfDate);
+    if (!fteResolved.ok) return fteResolved;
+    const annualAtHire = computePolandAnnualLeaveEntitlementDays({ completedServiceYears: 0, recognisedPriorServiceYears, fteFraction: fteResolved.fte });
     return { ok: true, days: computePolandFirstYearAccruedDays(annualAtHire, months) };
   }
 
   // Past the hire's own calendar year: the Art. 153 phase is over. Its
   // FINAL, fixed contribution is whatever had accrued by 31 December of
-  // the hire year (never re-derived from the personal anniversary).
+  // the hire year (never re-derived from the personal anniversary) — again
+  // requiring a single, constant FTE for that whole hire-year span.
   const monthsInHireYear = completedArt153Months(hireDate, hireYearEnd);
-  const hireYearFinalCheck = monthsInHireYear > 0 ? resolveMajorityFteForInterval(sortedFteHistory, hireDate, hireYearEnd) : fteAtHire;
-  if (!hireYearFinalCheck.ok) return hireYearFinalCheck;
-  if (monthsInHireYear > 0 && hireYearFinalCheck.fte !== fteAtHire.fte) {
-    return { ok: false, reason: `FTE changed within the hire's own calendar year (${hireYear}) — Art. 153's first-year proration for a mid-hire-year FTE change is not implemented` };
-  }
+  const fteResolved = resolveConstantFteForInterval(sortedFteHistory, hireDate, hireYearEnd);
+  if (!fteResolved.ok) return fteResolved;
+  const annualAtHire = computePolandAnnualLeaveEntitlementDays({ completedServiceYears: 0, recognisedPriorServiceYears, fteFraction: fteResolved.fte });
   const hireYearFinal = computePolandFirstYearAccruedDays(annualAtHire, monthsInHireYear);
 
   const subsequent = priceSubsequentCalendarYears(hireDate, hireYear, asOfYear, recognisedPriorServiceYears, sortedFteHistory);
@@ -570,9 +527,10 @@ function computePolandFirstEverEmploymentEntitlementToDate(
  * proration. They receive, immediately from their hire date, a
  * proportional entitlement for the remaining WHOLE calendar months of that
  * hire year (a partial month counts in full — "niepełny miesiąc... nie
- * jest zaokrąglany w dół"), split into FTE-consistent runs and rounded up
- * per run, then the full annual entitlement from each subsequent
- * 1 January, priced and rounded the same way.
+ * jest zaokrąglany w dół"), rounded up, then the full annual entitlement
+ * from each subsequent 1 January, priced and rounded the same way — but
+ * only when a single, constant FTE covers each such period throughout; a
+ * change anywhere within it blocks that period (see this file's header).
  */
 function computePolandExperiencedHireEntitlementToDate(
   hireDate: string,
@@ -597,7 +555,7 @@ function computePolandExperiencedHireEntitlementToDate(
   // hireYear, already established by the caller), regardless of exactly
   // which day within it asOfDate falls on.
   const firstOfDecemberHireYear = formatDate(hireYear, 12, 1);
-  const hireYearPriced = priceCalendarMonthRange(hireDate, firstOfDecemberHireYear, sortedFteHistory, baseDaysHireYear);
+  const hireYearPriced = priceWholePeriod(hireDate, firstOfDecemberHireYear, sortedFteHistory, baseDaysHireYear);
   if (!hireYearPriced.ok) return hireYearPriced;
 
   if (asOfYear === hireYear) return { ok: true, days: hireYearPriced.days };
@@ -634,7 +592,7 @@ function priceSubsequentCalendarYears(
       return { ok: false, reason: `the 10-year recognised-service threshold crosses during calendar year ${year} — Art. 154's mid-year "urlop uzupełniający" is not implemented` };
     }
     const baseDaysThisYear = baseDaysFor(completedYearsBetween(hireDate, yearStart) + recognisedPriorServiceYears);
-    const priced = priceCalendarMonthRange(yearStart, formatDate(year, 12, 1), sortedFteHistory, baseDaysThisYear);
+    const priced = priceWholePeriod(yearStart, formatDate(year, 12, 1), sortedFteHistory, baseDaysThisYear);
     if (!priced.ok) return priced;
     total += priced.days;
   }

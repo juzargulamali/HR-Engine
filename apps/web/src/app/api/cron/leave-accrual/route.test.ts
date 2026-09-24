@@ -404,7 +404,7 @@ describe("GET /api/cron/leave-accrual — Poland entitlement configuration requi
     expect(captured.upsertRows?.[0]?.amount_days).toBe(60);
   });
 
-  it("blocks and reports the specific reason for a non-zero recognisedPriorServiceYears (no effective-dated record of it exists yet)", async () => {
+  it("blocks and reports the specific reason for a non-zero recognisedPriorServiceYears (HR reference data only, never used for automatic posting)", async () => {
     const hireDate = `${new Date().getUTCFullYear() - 2}-01-01`;
     const contractsStep = { data: [{ employee_id: EMPLOYEE_ID, start_date: hireDate, fte_fraction: 1 }], error: null };
     const admin = createFakeAdmin([
@@ -425,7 +425,7 @@ describe("GET /api/cron/leave-accrual — Poland entitlement configuration requi
     const body = await res.json();
 
     expect(body.entriesPosted).toBe(0);
-    expect(body.blockedEntitlementConfig).toEqual([expect.objectContaining({ employeeId: EMPLOYEE_ID, leaveTypeCode: "annual", reason: expect.stringContaining("effective-dated") })]);
+    expect(body.blockedEntitlementConfig).toEqual([expect.objectContaining({ employeeId: EMPLOYEE_ID, leaveTypeCode: "annual", reason: expect.stringContaining("reference data only") })]);
   });
 
   it("blocks and reports the specific reason for a gap in employment_contracts history (the first contract starts after hireDate)", async () => {
@@ -440,5 +440,25 @@ describe("GET /api/cron/leave-accrual — Poland entitlement configuration requi
 
     expect(body.entriesPosted).toBe(0);
     expect(body.blockedEntitlementConfig).toEqual([expect.objectContaining({ employeeId: EMPLOYEE_ID, leaveTypeCode: "annual", reason: expect.stringContaining("no contract covers") })]);
+  });
+
+  it("blocks and reports the specific reason when FTE changes during the calculated year — never splits and prices a mixed-FTE period", async () => {
+    const hireYear = new Date().getUTCFullYear() - 2;
+    const hireDate = `${hireYear}-01-01`;
+    const contractsStep = {
+      data: [
+        { employee_id: EMPLOYEE_ID, start_date: hireDate, fte_fraction: 1 },
+        { employee_id: EMPLOYEE_ID, start_date: `${hireYear + 1}-07-01`, fte_fraction: 0.5 }, // mid-year change in the currently-being-priced year
+      ],
+      error: null,
+    };
+    const admin = createFakeAdmin([PL_POLICY_VERSIONS, PL_LEAVE_TYPES, plEmployeeStep(hireDate, true), contractsStep, EMPTY, EMPTY, EMPTY]);
+    vi.mocked(createAdminClient).mockReturnValue(admin as never);
+
+    const res = await GET(authorizedRequest());
+    const body = await res.json();
+
+    expect(body.entriesPosted).toBe(0);
+    expect(body.blockedEntitlementConfig).toEqual([expect.objectContaining({ employeeId: EMPLOYEE_ID, leaveTypeCode: "annual", reason: expect.stringContaining("FTE changes during") })]);
   });
 });
