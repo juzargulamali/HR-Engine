@@ -372,6 +372,77 @@ describe("Phase 3 row-level security: leave, ledgers, deduction priority, approv
     });
   });
 
+  // Phase 1 correction (3): guard_leave_request_type() used to resolve the
+  // applicable leave_rules policy as of current_date, not the request's own
+  // start_date — the same mismatch submitLeaveRequest() and the leave/new
+  // page's leave-type dropdown had. A newer policy that only takes effect
+  // in the future was invisible to a request that starts after it becomes
+  // effective (rejecting a leave type the correct, future-dated policy
+  // actually defines), and a request starting after a superseding policy's
+  // cutover could still be validated against whatever's active today.
+  describe("effective-dated leave policy resolution (correction 3)", () => {
+    // A country of its own (policy_versions has a GiST exclusion constraint
+    // forbidding two overlapping ACTIVE ranges per country+policy_type, and
+    // AE's own leave_rules policy — seeded in the outer beforeAll — is
+    // already open-ended from 2020 onward, so a future-dated policy for AE
+    // would collide with it). Isolating this scenario in its own country
+    // also means no policy is active for it TODAY at all, which is the
+    // clearest possible demonstration that start_date, not current_date, is
+    // what the guard actually resolves against.
+    const COUNTRY_FUTURE = "ZZ";
+    const COMPANY_FUTURE = "00000000-0000-0000-0000-0000000003e0";
+    const EMPLOYEE_FUTURE = "00000000-0000-0000-0000-0000000003e1";
+    const FUTURE_POLICY_ID = "00000000-0000-0000-0000-0000000003d2";
+
+    beforeAll(async () => {
+      // A leave_rules policy that only becomes effective 30 days from
+      // whenever this suite actually runs — computed relative to
+      // current_date, not a fixed literal, so the test is meaningful
+      // regardless of what today happens to be when it runs.
+      await db.seed(`
+        insert into countries (code, name, default_currency) values ('${COUNTRY_FUTURE}', 'Future-land', 'ZZD');
+        insert into companies (id, legal_name, country_code, default_currency)
+          values ('${COMPANY_FUTURE}', 'Future Co', '${COUNTRY_FUTURE}', 'ZZD');
+        insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date)
+          values ('${EMPLOYEE_FUTURE}', 'EF01', '${COMPANY_FUTURE}', '${COUNTRY_FUTURE}', 'Fara', 'Future', '2024-01-01');
+        -- USER_HR already exists as an auth user; granting them hr_admin
+        -- for this second company too just lets the test below read back
+        -- what it seeded, via the existing leave_requests_select policy.
+        insert into user_roles (user_id, role, company_id) values ('${USER_HR}', 'hr_admin', '${COMPANY_FUTURE}');
+
+        insert into policy_versions (id, country_code, policy_type, version_no, effective_from, status, payload, created_by, approved_by, approved_at)
+          values ('${FUTURE_POLICY_ID}', '${COUNTRY_FUTURE}', 'leave_rules', 1, current_date + 30, 'active', '{}'::jsonb, '${USER_HR}', '${USER_CEO}', now());
+        insert into policy_leave_types (policy_version_id, leave_type_code, name, accrual_method)
+          values ('${FUTURE_POLICY_ID}', 'sabbatical', 'Sabbatical', 'monthly_accrual');
+      `);
+    });
+
+    // Seeded directly (admin connection) rather than via asUser(), since
+    // EMPLOYEE_FUTURE has no linked auth user for leave_requests_insert's
+    // "employee_id = current_employee_id()" check to satisfy — these tests
+    // are only exercising guard_leave_request_type() itself, which fires as
+    // a trigger regardless of who (or what) performs the insert.
+    it("rejects a request starting today when the only leave_rules policy for its country isn't effective until later", async () => {
+      await expect(
+        db.seed(
+          `insert into leave_requests (employee_id, leave_type_code, start_date, end_date, total_days)
+           values ('${EMPLOYEE_FUTURE}', 'sabbatical', current_date, current_date, 1)`,
+        ),
+      ).rejects.toThrow(/No active leave policy.*defines leave type/);
+    });
+
+    it("accepts a request whose start_date falls after a policy becomes effective, even though it isn't active yet today", async () => {
+      await db.seed(
+        `insert into leave_requests (employee_id, leave_type_code, start_date, end_date, total_days)
+         values ('${EMPLOYEE_FUTURE}', 'sabbatical', current_date + 30, current_date + 30, 1)`,
+      );
+      const { rows } = await db.asUser(USER_HR, (query) =>
+        query("select id from leave_requests where employee_id = $1 and leave_type_code = 'sabbatical'", [EMPLOYEE_FUTURE]),
+      );
+      expect(rows.length).toBe(1);
+    });
+  });
+
   describe("approving and rejecting", () => {
     it("approves a single-step request and posts the ledger deduction atomically", async () => {
       const { approvalId, requestId } = await seedPendingRequest({

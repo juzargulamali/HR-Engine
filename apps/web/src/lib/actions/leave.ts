@@ -46,11 +46,14 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
 
   // No uncontrolled leave-type strings: the form no longer offers a
   // free-text fallback, but this is the authoritative check regardless of
-  // what the request actually sends. If no leave_rules policy is in effect
-  // today for this employee's country, submission is blocked outright with
-  // a clear HR-configuration message rather than silently accepting
-  // whatever leave type code was posted.
-  const today = new Date().toISOString().slice(0, 10);
+  // what the request actually sends. Resolved as of the leave's OWN
+  // start_date, not today — the same rule the leave/new page's leave-type
+  // dropdown and guard_leave_request_type() apply — so a request starting
+  // after a newer policy takes effect is validated against that policy, not
+  // whichever one happens to be active right now. If no leave_rules policy
+  // covers the start date, submission is blocked outright with a clear
+  // HR-configuration message rather than silently accepting whatever leave
+  // type code was posted.
   const { data: policyVersions } = await supabase
     .from("policy_versions")
     .select("id, status, effective_from, effective_to, version_no")
@@ -64,10 +67,10 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
       versionNo: v.version_no,
       status: v.status,
     })),
-    today,
+    d.startDate,
   );
   if (!activePolicy) {
-    return { error: "HR hasn't activated a leave policy for your country yet — leave requests can't be submitted until one is active." };
+    return { error: "No active leave policy covers this start date for your country yet — pick a different date or ask HR Admin to activate one." };
   }
 
   const { data: leaveTypeRows } = await supabase

@@ -486,10 +486,14 @@ create index idx_leave_requests_employee on leave_requests(employee_id);
 -- allowlist: the app no longer offers a free-text leave type field, but a
 -- raw insert bypassing it entirely could still write any string. Requires
 -- an active leave_rules policy for the employee's country that actually
--- defines this leave_type_code, as of today — the same "no active policy"
--- case submitLeaveRequest() blocks with a friendly message surfaces here
--- as a generic exception for anything that reaches this trigger without
--- going through the app layer first.
+-- defines this leave_type_code, resolved as of the request's OWN
+-- start_date rather than current_date — same rule submitLeaveRequest() and
+-- the leave/new page's leave-type dropdown apply, so a request starting
+-- after a newer policy takes effect is checked against that policy here
+-- too, not whichever one happens to be active on the day it's submitted.
+-- The "no covering policy" case submitLeaveRequest() blocks with a
+-- friendly message surfaces here as a generic exception for anything that
+-- reaches this trigger without going through the app layer first.
 -- SECURITY DEFINER: the app inserts leave_requests for the requester
 -- themselves, but this check must resolve the SAME way regardless of who's
 -- inserting or which other rows they can see — a plain employee's own
@@ -514,7 +518,7 @@ begin
     where e.id = new.employee_id
       and pv.policy_type = 'leave_rules'
       and pv.status = 'active'
-      and current_date between pv.effective_from and coalesce(pv.effective_to, 'infinity'::date)
+      and new.start_date between pv.effective_from and coalesce(pv.effective_to, 'infinity'::date)
       and plt.leave_type_code = new.leave_type_code
   ) into v_valid;
 

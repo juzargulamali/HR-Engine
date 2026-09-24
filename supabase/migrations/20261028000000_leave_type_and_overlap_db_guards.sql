@@ -45,6 +45,12 @@ alter table leave_requests add constraint leave_requests_no_overlap
 -- this check has nothing to do with row ownership anyway (only whether an
 -- active policy defines this leave type for this employee's country), so
 -- it must not be gated by the inserting user's own RLS visibility.
+--
+-- Resolved as of the request's OWN start_date, not current_date (Phase 1
+-- correction (3)) — same rule submitLeaveRequest() and the leave/new
+-- page's leave-type dropdown apply, so a request starting after a newer
+-- policy takes effect is checked against that policy here too, not
+-- whichever one happens to be active on the day it's submitted.
 create or replace function guard_leave_request_type()
 returns trigger
 language plpgsql
@@ -62,7 +68,7 @@ begin
     where e.id = new.employee_id
       and pv.policy_type = 'leave_rules'
       and pv.status = 'active'
-      and current_date between pv.effective_from and coalesce(pv.effective_to, 'infinity'::date)
+      and new.start_date between pv.effective_from and coalesce(pv.effective_to, 'infinity'::date)
       and plt.leave_type_code = new.leave_type_code
   ) into v_valid;
 
