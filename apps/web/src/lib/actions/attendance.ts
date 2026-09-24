@@ -14,14 +14,19 @@ import type { ActionState } from "./companies";
  * Goes through delete_attendance_record() rather than a bare table delete:
  * a plain delete would leave any active comp_day_ledger 'earned' credit for
  * this record orphaned (referencing a row that no longer exists) instead of
- * reversing it atomically first.
+ * reversing it atomically first. It also now REFUSES to delete a record
+ * that has a recovery credit request on file at all (Phase 2b correction
+ * round — that history is never destroyed), so the RPC's own message is
+ * surfaced verbatim rather than a generic failure string: it tells the
+ * caller exactly why, and that correcting the day's status instead is the
+ * right next step.
  */
 export async function deleteAttendanceRecord(recordId: string, employeeId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
   const { error } = await supabase.rpc("delete_attendance_record", { p_record_id: recordId });
   revalidatePath(`/employees/${employeeId}`);
   revalidatePath("/attendance");
-  return { error: error ? "Could not delete this attendance record. Please try again." : null };
+  return { error: error?.message ?? null };
 }
 
 const bulkRowSchema = z.object({

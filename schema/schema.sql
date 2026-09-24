@@ -1686,13 +1686,24 @@ create trigger comp_day_ledger_single_active_credit after insert on comp_day_led
 -- the same transaction, via the same linked-reversal pattern
 -- record_attendance_and_recovery() already uses, so deleting a day can
 -- never leave an active recovery credit with nothing behind it.
--- recovery_credit_requests.attendance_record_id has no ON DELETE action, so
--- a request referencing this record (at any status) would otherwise block
--- this delete with a foreign key violation — undone the same way an active
--- ledger credit already is, since the attendance record is being fully
--- removed as a mistaken entry. approvals has no foreign key of its own (it
--- is generic across every approvable entity type), so it needs the same
--- explicit cleanup.
+--
+-- recovery_credit_requests.attendance_record_id is NOT NULL with no ON
+-- DELETE action, so a request referencing this record (at ANY status,
+-- including a terminal cancelled/rejected one — it is still workflow
+-- history) blocks a physical delete of the parent attendance_records row
+-- at the database level. This function REFUSES the physical delete
+-- outright whenever any recovery_credit_requests row exists for it, rather
+-- than deleting or cascading approvals/recovery_credit_requests to work
+-- around the constraint — that would destroy Recovery Leave earning's
+-- audit trail. record_attendance_and_recovery() is the correct path for a
+-- mistaken/no-longer-eligible day instead: correcting that day's status
+-- there already cancels a pending request and reverses an approved credit
+-- in place, preserving every row, without ever touching this primary key.
+--
+-- A comp_day_ledger 'earned' credit with NO recovery_credit_requests row at
+-- all can still exist — from the pre-Phase-2b immediate-credit mechanism
+-- this migration retires, predating recovery_credit_requests entirely —
+-- and is still reversed-then-deleted exactly as before.
 create or replace function delete_attendance_record(p_record_id uuid)
 returns void
 language plpgsql
@@ -1703,7 +1714,7 @@ declare
   v_employee_id uuid;
   v_company_id uuid;
   v_was_credited comp_day_ledger%rowtype;
-  v_request_id uuid;
+  v_has_recovery_request boolean;
 begin
   select employee_id into v_employee_id from attendance_records where id = p_record_id;
   if v_employee_id is null then
@@ -1715,6 +1726,11 @@ begin
     raise exception 'Only HR Admin may delete an attendance record';
   end if;
 
+  select exists(select 1 from recovery_credit_requests where attendance_record_id = p_record_id) into v_has_recovery_request;
+  if v_has_recovery_request then
+    raise exception 'This attendance record has a recovery credit request on file (submitted, approved, or otherwise) and cannot be deleted, to preserve that workflow''s history. Correct the day''s status instead (e.g. mark it absent) via the attendance register — that cancels a pending request or reverses an approved credit in place, without deleting anything.';
+  end if;
+
   perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || v_employee_id::text));
 
   select cl.* into v_was_credited from comp_day_ledger cl
@@ -1724,12 +1740,6 @@ begin
   if v_was_credited.id is not null then
     insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, reference_type, reference_id, reversal_of_id, created_by)
     values (v_was_credited.employee_id, current_date, 'reversal', -v_was_credited.days, 'holiday_worked', 'attendance_record', p_record_id, v_was_credited.id, auth.uid());
-  end if;
-
-  select id into v_request_id from recovery_credit_requests where attendance_record_id = p_record_id;
-  if v_request_id is not null then
-    delete from approvals where entity_type = 'recovery_credit' and entity_id = v_request_id;
-    delete from recovery_credit_requests where id = v_request_id;
   end if;
 
   delete from attendance_records where id = p_record_id;

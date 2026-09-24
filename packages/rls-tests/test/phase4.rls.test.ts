@@ -1031,47 +1031,68 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
   });
 
   describe("delete_attendance_record()", () => {
-    // The primary regression test this correction round asked for:
-    // deleting (or correcting away) an attendance record must never leave
-    // an active, orphaned recovery credit referencing a row that no
-    // longer exists.
-    it("reverses an active earned credit before deleting the record, leaving no active orphan credit", async () => {
-      await db.asUser(USER_HR, async (query) => {
+    // Blocker 2 of this correction round: an earlier version of this
+    // function deleted the approvals and recovery_credit_requests rows for
+    // a record that had earned a credit, destroying that workflow's audit
+    // trail. It must now REFUSE the physical delete outright instead,
+    // preserving every row — record_attendance_and_recovery()'s
+    // correction-in-place path (already covered above) is how the credit
+    // itself gets reversed.
+    it("refuses to delete a record with an APPROVED recovery credit request, preserving the record, ledger, request, and approval history unchanged", async () => {
+      // Setup runs under asUserCommit (not asUser) so it actually persists:
+      // an uncaught exception (the rejection asserted next) poisons the
+      // REST of its own transaction, so the rejecting call must be the last
+      // statement of whichever asUser()/asUserCommit() call it runs in —
+      // the "before" state has to already be committed from a prior,
+      // separate call.
+      let recordId: string;
+      let requestId: string;
+      await db.asUserCommit(USER_HR, async (query) => {
         await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
           ["2026-08-01", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }])],
         );
-        const recordId = (
+        recordId = (
           await query("select id from attendance_records where employee_id = $1 and work_date = '2026-08-01'", [EMPLOYEE_REPORT])
         ).rows[0]?.id;
-        await fullyApproveRecoveryCredit(query, recordId, USER_MANAGER, USER_HR);
+        requestId = await fullyApproveRecoveryCredit(query, recordId, USER_MANAGER, USER_HR);
 
         const activeBefore = await query(
           "select id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = $1 and entry_type = 'earned' and not exists (select 1 from comp_day_ledger r where r.reversal_of_id = comp_day_ledger.id)",
           [recordId],
         );
         expect(activeBefore.rows.length).toBe(1);
+      });
 
-        await query("select delete_attendance_record($1)", [recordId]);
+      // The rejecting call, alone, as the last (only) statement of its own
+      // transaction.
+      await db.asUser(USER_HR, (query) =>
+        expect(query("select delete_attendance_record($1)", [recordId])).rejects.toThrow(/recovery credit request on file.*cannot be deleted/),
+      );
 
+      // Nothing was touched — not the record, not the ledger, not the
+      // request, not its approvals — checked from a fresh transaction.
+      await db.asUser(USER_HR, async (query) => {
         const recordAfter = await query("select id from attendance_records where id = $1", [recordId]);
-        expect(recordAfter.rows).toEqual([]);
+        expect(recordAfter.rows).toHaveLength(1);
 
-        // The original earned row is still on the record (never deleted)...
         const ledgerAfter = await query(
-          "select entry_type, days, reversal_of_id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = $1 order by created_at",
+          "select entry_type, days from comp_day_ledger where reference_type = 'attendance_record' and reference_id = $1",
           [recordId],
         );
-        expect(ledgerAfter.rows).toHaveLength(2);
-        expect(ledgerAfter.rows[0]).toMatchObject({ entry_type: "earned", days: "1.00", reversal_of_id: null });
-        expect(ledgerAfter.rows[1]).toMatchObject({ entry_type: "reversal", days: "-1.00" });
+        expect(ledgerAfter.rows).toEqual([{ entry_type: "earned", days: "1.00" }]);
 
-        // ...but no ACTIVE (unreversed) credit remains for this reference_id.
-        const activeAfter = await query(
-          "select id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = $1 and entry_type = 'earned' and not exists (select 1 from comp_day_ledger r where r.reversal_of_id = comp_day_ledger.id)",
-          [recordId],
+        const requestAfter = await query("select id, status from recovery_credit_requests where id = $1", [requestId]);
+        expect(requestAfter.rows).toEqual([{ id: requestId, status: "approved" }]);
+
+        const approvalsAfter = await query(
+          "select step_order, decision from approvals where entity_type = 'recovery_credit' and entity_id = $1 order by step_order",
+          [requestId],
         );
-        expect(activeAfter.rows).toEqual([]);
+        expect(approvalsAfter.rows).toEqual([
+          { step_order: 1, decision: "approved" },
+          { step_order: 2, decision: "approved" },
+        ]);
       });
     });
 
@@ -1092,32 +1113,61 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       });
     });
 
-    // recovery_credit_requests.attendance_record_id has no ON DELETE
-    // action — a still-pending request (never decided at all) would
-    // otherwise block this delete outright with a foreign key violation.
-    it("deletes cleanly even when a recovery credit request is still pending (never approved) for that day", async () => {
-      await db.asUser(USER_HR, async (query) => {
+    // recovery_credit_requests.attendance_record_id is NOT NULL with no ON
+    // DELETE action, and its request/approval history must never be
+    // destroyed — a still-pending (never decided) request blocks the
+    // delete just as an approved one does, for the same reason.
+    it("refuses to delete a record with a PENDING (never decided) recovery credit request, preserving the request and its approval", async () => {
+      // See the previous test's comment: setup that must survive into a
+      // later, separate call needs asUserCommit, and each rejecting call
+      // must be the last statement of its own transaction.
+      let recordId: string;
+      let requestId: string;
+      await db.asUserCommit(USER_HR, async (query) => {
         await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
           ["2026-08-08", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }])],
         );
-        const recordId = (
+        recordId = (
           await query("select id from attendance_records where employee_id = $1 and work_date = '2026-08-08'", [EMPLOYEE_REPORT])
         ).rows[0]?.id;
         const requestBefore = await query("select id from recovery_credit_requests where attendance_record_id = $1", [recordId]);
         expect(requestBefore.rows.length).toBe(1);
-
-        await query("select delete_attendance_record($1)", [recordId]);
-
-        const recordAfter = await query("select id from attendance_records where id = $1", [recordId]);
-        expect(recordAfter.rows).toEqual([]);
-        const requestAfter = await query("select id from recovery_credit_requests where attendance_record_id = $1", [recordId]);
-        expect(requestAfter.rows).toEqual([]);
-        const approvalsAfter = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1", [
-          requestBefore.rows[0]?.id,
-        ]);
-        expect(approvalsAfter.rows).toEqual([]);
+        requestId = requestBefore.rows[0]?.id;
       });
+
+      await db.asUser(USER_HR, (query) =>
+        expect(query("select delete_attendance_record($1)", [recordId])).rejects.toThrow(/recovery credit request on file.*cannot be deleted/),
+      );
+
+      // Nothing was touched, checked from a fresh transaction — then, still
+      // in this same (committing) call, correct the day away instead of
+      // deleting it: the correct path DOES preserve history (asserted in
+      // detail in the record_attendance_and_recovery describe block above)
+      // — the request survives, marked 'cancelled', not gone.
+      await db.asUserCommit(USER_HR, async (query) => {
+        const recordAfter = await query("select id from attendance_records where id = $1", [recordId]);
+        expect(recordAfter.rows).toHaveLength(1);
+        const requestAfter = await query("select id, status from recovery_credit_requests where attendance_record_id = $1", [recordId]);
+        expect(requestAfter.rows).toEqual([{ id: requestId, status: "submitted" }]);
+        const approvalsAfter = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1", [requestId]);
+        expect(approvalsAfter.rows.length).toBeGreaterThanOrEqual(1);
+
+        const corrected = await query(
+          "select * from record_attendance_and_recovery($1, $2::jsonb)",
+          ["2026-08-08", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "absent" }])],
+        );
+        expect(corrected.rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: false, reversed: false, needs_policy_review: false }]);
+        const requestAfterCorrection = await query("select status from recovery_credit_requests where id = $1", [requestId]);
+        expect(requestAfterCorrection.rows).toEqual([{ status: "cancelled" }]);
+      });
+
+      // NOW the record has no active-or-otherwise recovery request left to
+      // protect... except the (preserved, cancelled) one still references
+      // it, so the delete is still correctly refused.
+      await db.asUser(USER_HR, (query) =>
+        expect(query("select delete_attendance_record($1)", [recordId])).rejects.toThrow(/recovery credit request on file.*cannot be deleted/),
+      );
     });
 
     it("blocks anyone other than HR Admin from deleting an attendance record", async () => {
