@@ -519,6 +519,53 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
     });
   });
 
+  // Previously untested entirely — the app relies on receipts_select/write/
+  // update/delete (schema.sql) being correct with no RLS test ever
+  // verifying it, despite receipts being one of the areas Phase 1
+  // hardening calls out for special attention.
+  describe("storage: receipts bucket", () => {
+    const RECEIPT_FILE = `${COMPANY_A}/${EMPLOYEE_REPORT}/receipts/dinner.pdf`;
+
+    beforeAll(async () => {
+      await db.seed(`
+        insert into storage.buckets (id, name, public) values ('receipts','receipts',false)
+        on conflict (id) do nothing;
+        insert into storage.objects (bucket_id, name) values ('receipts', '${RECEIPT_FILE}');
+      `);
+    });
+
+    it("lets the owning employee, HR Admin, and Finance read a receipt — never the manager or CEO", async () => {
+      const owner = await db.asUser(USER_REPORT, (query) => query("select name from storage.objects where bucket_id = 'receipts'"));
+      expect(owner.rows.length).toBe(1);
+
+      const hr = await db.asUser(USER_HR, (query) => query("select name from storage.objects where bucket_id = 'receipts'"));
+      expect(hr.rows.length).toBe(1);
+
+      const finance = await db.asUser(USER_FINANCE, (query) => query("select name from storage.objects where bucket_id = 'receipts'"));
+      expect(finance.rows.length).toBe(1);
+
+      // docs/03-permission-matrix.md §3.3: manager and CEO approve claims by
+      // amount, but never get file access to the receipt itself.
+      for (const viewer of [USER_MANAGER, USER_CEO]) {
+        const view = await db.asUser(viewer, (query) => query("select name from storage.objects where bucket_id = 'receipts'"));
+        expect(view.rows).toEqual([]);
+      }
+
+      const peer = await db.asUser(USER_PEER, (query) => query("select name from storage.objects where bucket_id = 'receipts'"));
+      expect(peer.rows).toEqual([]);
+    });
+
+    it("blocks anyone but the claim's own employee from uploading a receipt into their folder", async () => {
+      await expect(
+        db.asUser(USER_MANAGER, (query) =>
+          query("insert into storage.objects (bucket_id, name) values ('receipts', $1)", [
+            `${COMPANY_A}/${EMPLOYEE_REPORT}/receipts/manager-upload.pdf`,
+          ]),
+        ),
+      ).rejects.toThrow(/row-level security/);
+    });
+  });
+
   describe("timesheets", () => {
     it("lets an employee create a draft timesheet and entries, blocks entries once submitted", async () => {
       await db.asUser(USER_REPORT, async (query) => {

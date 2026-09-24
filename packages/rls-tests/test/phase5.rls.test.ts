@@ -10,6 +10,8 @@ const USER_HR = "00000000-0000-0000-0000-0000000005b3";
 const USER_FINANCE = "00000000-0000-0000-0000-0000000005b4";
 const USER_PEER = "00000000-0000-0000-0000-0000000005b5";
 const USER_SYSADMIN = "00000000-0000-0000-0000-0000000005b6";
+const USER_CEO = "00000000-0000-0000-0000-0000000005b7";
+const USER_CTO = "00000000-0000-0000-0000-0000000005b8";
 
 const EMPLOYEE_MANAGER = "00000000-0000-0000-0000-0000000005c1";
 const EMPLOYEE_REPORT = "00000000-0000-0000-0000-0000000005c2";
@@ -38,7 +40,9 @@ describe("Phase 5 row-level security: performance, checklists, documents, assets
         ('${USER_HR}', 'p5-hr@enginious.ae'),
         ('${USER_FINANCE}', 'p5-finance@enginious.ae'),
         ('${USER_PEER}', 'p5-peer@enginious.ae'),
-        ('${USER_SYSADMIN}', 'p5-sysadmin@enginious.ae');
+        ('${USER_SYSADMIN}', 'p5-sysadmin@enginious.ae'),
+        ('${USER_CEO}', 'p5-ceo@enginious.ae'),
+        ('${USER_CTO}', 'p5-cto@enginious.ae');
 
       insert into countries (code, name, default_currency) values ('ZZ', 'Zedland', 'ZZD');
       insert into companies (id, legal_name, country_code, default_currency)
@@ -53,7 +57,9 @@ describe("Phase 5 row-level security: performance, checklists, documents, assets
       insert into user_roles (user_id, role, company_id) values
         ('${USER_MANAGER}', 'line_manager', '${COMPANY_A}'),
         ('${USER_HR}', 'hr_admin', '${COMPANY_A}'),
-        ('${USER_FINANCE}', 'finance', '${COMPANY_A}');
+        ('${USER_FINANCE}', 'finance', '${COMPANY_A}'),
+        ('${USER_CEO}', 'ceo', '${COMPANY_A}'),
+        ('${USER_CTO}', 'cto', '${COMPANY_A}');
       insert into user_roles (user_id, role) values ('${USER_SYSADMIN}', 'sys_admin');
 
       insert into performance_cycles (id, company_id, name, period_start, period_end)
@@ -130,6 +136,24 @@ describe("Phase 5 row-level security: performance, checklists, documents, assets
       `);
       const financeView = await db.asUser(USER_FINANCE, (query) => query("select id from appraisals where id = $1", [appraisalId]));
       expect(financeView.rows).toEqual([]);
+    });
+
+    // Regression/gap-coverage test: appraisals_select deliberately has no
+    // ceo/cto clause at all ("absence is the enforcement" per the schema
+    // comment) — the most fragile kind of access control, since it would
+    // regress silently if a future change ever added a broad read policy.
+    // This was previously untested for either role.
+    it("blocks CEO and CTO from seeing appraisal content, same as Finance", async () => {
+      const appraisalId = randomUUID();
+      await db.seed(`
+        insert into appraisals (id, employee_id, cycle_id, appraiser_id, overall_rating, strengths, status)
+        values ('${appraisalId}', '${EMPLOYEE_REPORT}', '${cycleId}', '${USER_MANAGER}', 4, 'Great work', 'submitted');
+      `);
+      const ceoView = await db.asUser(USER_CEO, (query) => query("select id from appraisals where id = $1", [appraisalId]));
+      expect(ceoView.rows).toEqual([]);
+
+      const ctoView = await db.asUser(USER_CTO, (query) => query("select id from appraisals where id = $1", [appraisalId]));
+      expect(ctoView.rows).toEqual([]);
     });
 
     it("hides a draft appraisal from the employee until it's submitted", async () => {

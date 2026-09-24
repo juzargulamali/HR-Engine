@@ -439,17 +439,19 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
     });
   });
 
-  describe("storage: employee-documents and identity-documents buckets", () => {
+  describe("storage: employee-documents, identity-documents, and insurance-documents buckets", () => {
     const CONTRACT_FILE = `${COMPANY_HQ}/${EMPLOYEE_REPORT}/contract/v2.pdf`;
     const PASSPORT_FILE = `${COMPANY_HQ}/${EMPLOYEE_REPORT}/passport/scan.pdf`;
+    const INSURANCE_FILE = `${COMPANY_HQ}/${EMPLOYEE_REPORT}/insurance/policy.pdf`;
 
     beforeAll(async () => {
       await db.seed(`
-        insert into storage.buckets (id, name, public) values ('employee-documents','employee-documents',false), ('identity-documents','identity-documents',false)
+        insert into storage.buckets (id, name, public) values ('employee-documents','employee-documents',false), ('identity-documents','identity-documents',false), ('insurance-documents','insurance-documents',false)
         on conflict (id) do nothing;
         insert into storage.objects (bucket_id, name) values
           ('employee-documents', '${CONTRACT_FILE}'),
-          ('identity-documents', '${PASSPORT_FILE}');
+          ('identity-documents', '${PASSPORT_FILE}'),
+          ('insurance-documents', '${INSURANCE_FILE}');
       `);
     });
 
@@ -477,6 +479,30 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
         db.asUser(USER_REPORT, (query) =>
           query("insert into storage.objects (bucket_id, name) values ('identity-documents', $1)", [
             `${COMPANY_HQ}/${EMPLOYEE_REPORT}/passport/self-upload.pdf`,
+          ]),
+        ),
+      ).rejects.toThrow(/row-level security/);
+    });
+
+    // Previously untested — same shape as identity-documents (owner + HR
+    // Admin only), verified separately since it's its own bucket with its
+    // own policy set.
+    it("keeps insurance-documents restricted to the owner and HR Admin only — never Finance, manager, or CEO", async () => {
+      const owner = await db.asUser(USER_REPORT, (query) => query("select name from storage.objects where bucket_id = 'insurance-documents'"));
+      expect(owner.rows.length).toBe(1);
+
+      const hr = await db.asUser(USER_HR_ADMIN, (query) => query("select name from storage.objects where bucket_id = 'insurance-documents'"));
+      expect(hr.rows.length).toBe(1);
+
+      for (const viewer of [USER_FINANCE, USER_MANAGER, USER_CEO]) {
+        const view = await db.asUser(viewer, (query) => query("select name from storage.objects where bucket_id = 'insurance-documents'"));
+        expect(view.rows).toEqual([]);
+      }
+
+      await expect(
+        db.asUser(USER_REPORT, (query) =>
+          query("insert into storage.objects (bucket_id, name) values ('insurance-documents', $1)", [
+            `${COMPANY_HQ}/${EMPLOYEE_REPORT}/insurance/self-upload.pdf`,
           ]),
         ),
       ).rejects.toThrow(/row-level security/);

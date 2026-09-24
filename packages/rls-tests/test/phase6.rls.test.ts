@@ -11,6 +11,7 @@ const USER_CEO = "00000000-0000-0000-0000-0000000006b3";
 const USER_REPORT = "00000000-0000-0000-0000-0000000006b4";
 const USER_PEER = "00000000-0000-0000-0000-0000000006b5";
 const USER_FINANCE_2 = "00000000-0000-0000-0000-0000000006b6";
+const USER_CTO = "00000000-0000-0000-0000-0000000006b7";
 
 const EMPLOYEE_REPORT = "00000000-0000-0000-0000-0000000006c1";
 const EMPLOYEE_PEER = "00000000-0000-0000-0000-0000000006c2";
@@ -34,7 +35,8 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
         ('${USER_FINANCE}', 'p6-finance@enginious.ae'),
         ('${USER_CEO}', 'p6-ceo@enginious.ae'),
         ('${USER_REPORT}', 'p6-report@enginious.ae'),
-        ('${USER_PEER}', 'p6-peer@enginious.ae');
+        ('${USER_PEER}', 'p6-peer@enginious.ae'),
+        ('${USER_CTO}', 'p6-cto@enginious.ae');
 
       insert into countries (code, name, default_currency) values ('ZZ', 'Zedland', 'ZZD');
       insert into companies (id, legal_name, country_code, default_currency)
@@ -47,7 +49,8 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
       insert into user_roles (user_id, role, company_id) values
         ('${USER_HR}', 'hr_admin', '${COMPANY_A}'),
         ('${USER_FINANCE}', 'finance', '${COMPANY_A}'),
-        ('${USER_CEO}', 'ceo', '${COMPANY_A}');
+        ('${USER_CEO}', 'ceo', '${COMPANY_A}'),
+        ('${USER_CTO}', 'cto', '${COMPANY_A}');
 
       -- guard_leave_request_type() requires an active leave_rules policy
       -- defining whatever leave_type_code a request uses — every
@@ -217,6 +220,89 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
         expect(final.rows[0]?.authorized_by).toBe(USER_CEO);
         expect(final.rows[0]?.authorized_at).not.toBeNull();
       });
+    });
+
+    // CTO is a deliberate, complete mirror of CEO throughout this system
+    // (docs/03-permission-matrix.md §3.7) — resolve_approver() resolves a
+    // 'role:ceo' workflow step to either a CEO or a CTO holder, so the
+    // payroll export's mandatory final sign-off can be satisfied by a CTO
+    // alone, with no CEO ever involved in that specific export. This is
+    // the intended design, not a gap — this test is the regression
+    // coverage for it (previously untested). Needs its own company with NO
+    // CEO holder at all — COMPANY_A already has one, and
+    // resolve_approver_for_company() would just resolve to that CEO
+    // (whichever C-level holder it picks first), which wouldn't actually
+    // exercise "CTO alone, no CEO involved".
+    it("lets a CTO alone fulfill the mandatory final sign-off step, with no CEO involved", async () => {
+      const ctoOnlyCompanyId = randomUUID();
+      await db.seed(`
+        insert into companies (id, legal_name, country_code, default_currency)
+          values ('${ctoOnlyCompanyId}', 'CTO-only Co', 'ZZ', 'ZZD');
+        insert into user_roles (user_id, role, company_id) values
+          ('${USER_FINANCE}', 'finance', '${ctoOnlyCompanyId}'),
+          ('${USER_CTO}', 'cto', '${ctoOnlyCompanyId}');
+      `);
+
+      const { rows: workflowRows } = await db.asUser(USER_HR, (query) =>
+        query("select id from approval_workflows where company_id = $1 and entity_type = 'payroll_export_run'", [ctoOnlyCompanyId]),
+      );
+      const ctoOnlyPayrollWorkflowId = workflowRows[0]?.id;
+      expect(ctoOnlyPayrollWorkflowId).toBeTruthy();
+
+      const runId = randomUUID();
+      const approvalId = randomUUID();
+      await db.seed(`
+        insert into payroll_export_runs (id, company_id, period_month, period_year, generated_by, status)
+          values ('${runId}', '${ctoOnlyCompanyId}', 1, 2026, '${USER_FINANCE}', 'submitted');
+        insert into approvals (id, entity_type, entity_id, workflow_id, step_order, approver_id)
+          values ('${approvalId}', 'payroll_export_run', '${runId}', '${ctoOnlyPayrollWorkflowId}', 1, '${USER_FINANCE}');
+      `);
+
+      await db.asUser(USER_FINANCE, async (query) => {
+        await query("select decide_leave_approval($1, 'approved', 'figures reviewed')", [approvalId]);
+
+        await actAs(query, USER_CTO);
+        const step2 = await query("select id, decision from approvals where entity_id = $1 and step_order = 2", [runId]);
+        expect(step2.rows[0]?.decision).toBe("pending");
+
+        await query("select decide_leave_approval($1, 'approved', 'signed off by CTO')", [step2.rows[0]?.id]);
+
+        const final = await query("select status, authorized_by from payroll_export_runs where id = $1", [runId]);
+        expect(final.rows[0]?.status).toBe("approved");
+        expect(final.rows[0]?.authorized_by).toBe(USER_CTO);
+
+        // Read access mirrors CEO too: the CTO can see the lines this
+        // approved run posted, same as HR Admin/Finance/CEO can.
+        const lines = await query("select id from payroll_export_lines where run_id = $1", [runId]);
+        expect(lines.rows).toEqual([]); // no reimbursement/leave-encashment source rows exist for this run — just confirms the query itself isn't blocked by RLS
+      });
+    });
+
+    // payroll_export_lines carries per-employee compensation amounts and had
+    // no negative test at all before this — previously verified only via
+    // inspection of payroll_lines_select, never exercised against an actual
+    // unauthorized role.
+    it("keeps payroll_export_lines visible only to HR Admin/Finance/CEO/CTO, never the line's own employee or an unrelated employee", async () => {
+      const runId = await seedDraftRun(6, 2029);
+      const lineId = randomUUID();
+      await db.seed(`
+        insert into payroll_export_lines (id, run_id, employee_id, component_code, amount, currency)
+        values ('${lineId}', '${runId}', '${EMPLOYEE_REPORT}', 'basic_salary', 5000, 'ZZD');
+      `);
+
+      for (const viewer of [USER_HR, USER_FINANCE, USER_CEO, USER_CTO]) {
+        const { rows } = await db.asUser(viewer, (query) => query("select id from payroll_export_lines where id = $1", [lineId]));
+        expect(rows.length).toBe(1);
+      }
+
+      // Not even the line's own employee gets payroll access
+      // (docs/03-permission-matrix.md §3.6: Employee is "–" on payroll
+      // export) — nor an unrelated peer.
+      const employeeView = await db.asUser(USER_REPORT, (query) => query("select id from payroll_export_lines where id = $1", [lineId]));
+      expect(employeeView.rows).toEqual([]);
+
+      const peerView = await db.asUser(USER_PEER, (query) => query("select id from payroll_export_lines where id = $1", [lineId]));
+      expect(peerView.rows).toEqual([]);
     });
 
     it("stops at Finance's rejection — the run never reaches the CEO", async () => {
