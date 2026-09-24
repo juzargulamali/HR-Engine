@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { isHrAdmin, isSysAdmin } from "@enginious-hr/domain";
+import { hasRoleAnyScope, isCLevel, isFinance, isSysAdmin } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,7 +17,19 @@ export default async function EmployeesPage({
   const session = await getCurrentSession();
   if (!session) return null;
 
-  const canManageAnyCompany = isHrAdmin(session.grants) || isSysAdmin(session.grants);
+  // hasRoleAnyScope, not a bare isHrAdmin(grants) — hr_admin is always
+  // company-scoped (a real grant's companyId is never null), so an unscoped
+  // isHrAdmin() check can never match a real HR Admin at all; this page
+  // spans however many companies the admin holds hr_admin on, so "in some
+  // company" (not a specific one) is the right question here, same as
+  // nav-groups.ts's own showInsightsLinks check.
+  const isHrAdminSomewhere = hasRoleAnyScope(session.grants, "hr_admin");
+  const canManageAnyCompany = isHrAdminSomewhere || isSysAdmin(session.grants);
+  // Finance/CEO/CTO see every employee in every company they hold that role
+  // on too (employees_select has no manager-chain restriction for them),
+  // but unlike HR Admin/Sys Admin they can't manage the roster — a distinct
+  // caption from both "you administer this" and "your reports only".
+  const isCompanyWideViewer = !canManageAnyCompany && (isFinance(session.grants) || isCLevel(session.grants));
   const showDeleted = canManageAnyCompany && deleted === "1";
 
   const supabase = await createClient();
@@ -42,8 +54,10 @@ export default async function EmployeesPage({
           <h1 className="text-2xl font-semibold">Employees</h1>
           <p className="text-muted-foreground">
             {canManageAnyCompany
-              ? "Everyone you administer, plus anyone in your reporting chain."
-              : "You and the people who report to you."}
+              ? "Everyone you administer."
+              : isCompanyWideViewer
+                ? "Everyone in your company."
+                : "You and the people who report to you."}
           </p>
         </div>
         <div className="flex gap-2">
@@ -60,7 +74,7 @@ export default async function EmployeesPage({
               Download CSV
             </a>
           ) : null}
-          {isHrAdmin(session.grants) ? (
+          {isHrAdminSomewhere ? (
             <Link href="/employees/new" className={cn(buttonVariants({ size: "sm" }))}>
               New employee
             </Link>

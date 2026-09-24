@@ -59,7 +59,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
 
       {policy.status === "draft" && isDrafter ? (
         <p className="text-sm text-muted-foreground">
-          You drafted this version — a different HR Admin or the CEO for {country?.name} needs to activate it.
+          You drafted this version — a different HR Admin or the CEO/CTO for {country?.name} needs to activate it.
         </p>
       ) : null}
 

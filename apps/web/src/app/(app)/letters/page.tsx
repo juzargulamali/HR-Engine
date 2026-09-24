@@ -80,7 +80,7 @@ export default async function LettersPage() {
         <h1 className="text-2xl font-semibold">Letters</h1>
         <p className="text-muted-foreground">
           {canManage
-            ? "Issue employment letters from templates; some require CEO sign-off before they're issued."
+            ? "Issue employment letters from templates; some require CEO/CTO sign-off before they're issued."
             : "Letters HR has issued for you."}
         </p>
       </div>

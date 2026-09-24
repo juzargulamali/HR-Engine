@@ -30,7 +30,7 @@ export default async function PayrollPage() {
   const canView = employee ? canViewPayrollExport(session.grants, employee.company_id) : false;
 
   if (!canView) {
-    return <Alert variant="destructive">Payroll export is restricted to HR Admin, Finance, and CEO.</Alert>;
+    return <Alert variant="destructive">Payroll export is restricted to HR Admin, Finance, CEO, and CTO.</Alert>;
   }
 
   const { data: runs } = await supabase

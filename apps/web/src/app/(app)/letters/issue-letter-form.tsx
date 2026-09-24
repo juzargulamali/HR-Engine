@@ -42,7 +42,7 @@ export function IssueLetterForm({
           </option>
           {templates.map((t) => (
             <option key={t.id} value={t.id}>
-              {t.name} {t.requires_approval ? "(needs CEO sign-off)" : ""}
+              {t.name} {t.requires_approval ? "(needs CEO/CTO sign-off)" : ""}
             </option>
           ))}
         </Select>

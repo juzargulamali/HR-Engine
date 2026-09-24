@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { canManagePayrollExport } from "@enginious-hr/domain";
+import { canManagePayrollExport, canViewPayrollExport } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Alert } from "@/components/ui/alert";
 import { RunActions } from "./run-actions";
 import { EditPayrollLineForm } from "./edit-payroll-line-form";
 import { DeletePayrollLineButton } from "./delete-payroll-line-button";
@@ -31,6 +32,15 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
     .eq("id", id)
     .maybeSingle();
   if (!run) notFound();
+
+  // The list page already blocks non-viewers outright; this detail page is
+  // reachable directly by URL regardless of whether a link to it was ever
+  // shown, so it needs the same gate — RLS alone (payroll_runs_select)
+  // would otherwise be the only thing standing between an unauthorized
+  // signed-in user and this run's full salary line items.
+  if (!canViewPayrollExport(session.grants, run.company_id)) {
+    return <Alert variant="destructive">Payroll export is restricted to HR Admin, Finance, CEO, and CTO.</Alert>;
+  }
 
   const [{ data: lines }, { data: employees }, { data: company }] = await Promise.all([
     supabase
