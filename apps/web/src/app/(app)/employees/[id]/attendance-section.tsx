@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { DeleteAttendanceButton } from "./delete-attendance-button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   not_recorded: "outline",
@@ -53,8 +54,8 @@ export async function AttendanceSection({ employeeId, canManage }: { employeeId:
           ))}
           {(records ?? []).length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground">
-                No attendance recorded yet.
+              <TableCell colSpan={6}>
+                <EmptyState dense title="No attendance recorded yet." />
               </TableCell>
             </TableRow>
           ) : null}

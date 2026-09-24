@@ -10,6 +10,7 @@ import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { BulkAttendanceForm } from "./bulk-attendance-form";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   not_recorded: "outline",
@@ -85,8 +86,8 @@ export default async function AttendancePage({
                 ))}
                 {(records ?? []).length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">
-                      No attendance recorded yet.
+                    <TableCell colSpan={3}>
+                      <EmptyState dense title="No attendance recorded yet." />
                     </TableCell>
                   </TableRow>
                 ) : null}

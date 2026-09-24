@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function EmployeesPage({
   searchParams,
@@ -118,8 +119,8 @@ export default async function EmployeesPage({
               ))}
               {(employees ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground">
-                    No employees to show.
+                  <TableCell colSpan={4}>
+                    <EmptyState dense title="No employees to show." />
                   </TableCell>
                 </TableRow>
               ) : null}

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
 import { DecisionButtons } from "./decision-buttons";
 
 export default async function ApprovalsPage() {
@@ -127,7 +128,9 @@ export default async function ApprovalsPage() {
 
       {nothingPending ? (
         <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">Nothing waiting on you right now.</CardContent>
+          <CardContent>
+            <EmptyState dense title="Nothing waiting on you right now." description="Requests routed to you for approval will show up here." />
+          </CardContent>
         </Card>
       ) : null}
 

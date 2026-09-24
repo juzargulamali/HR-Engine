@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { NewClaimForm } from "./new-claim-form";
 import { DeleteDraftClaimButton } from "./delete-draft-claim-button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   draft: "outline",
@@ -96,8 +97,8 @@ export default async function ReimbursementsPage() {
               ))}
               {(claims ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground">
-                    No claims yet.
+                  <TableCell colSpan={4}>
+                    <EmptyState dense title="No claims yet." />
                   </TableCell>
                 </TableRow>
               ) : null}

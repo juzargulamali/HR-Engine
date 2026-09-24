@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AddInsuranceForm } from "./add-insurance-form";
 import { DeleteInsurancePolicyButton } from "./delete-insurance-policy-button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export async function InsuranceSection({ employeeId, canEdit }: { employeeId: string; canEdit: boolean }) {
   const supabase = await createClient();
@@ -55,8 +56,8 @@ export async function InsuranceSection({ employeeId, canEdit }: { employeeId: st
           ))}
           {policiesWithUrl.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={4} className="text-center text-muted-foreground">
-                No insurance policies on file.
+              <TableCell colSpan={4}>
+                <EmptyState dense title="No insurance policies on file." />
               </TableCell>
             </TableRow>
           ) : null}

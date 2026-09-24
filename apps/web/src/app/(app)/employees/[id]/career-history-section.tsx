@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { RecordCareerEventForm } from "./record-career-event-form";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const EVENT_LABEL: Record<string, string> = {
   promotion: "Promotion",
@@ -83,8 +84,8 @@ export async function CareerHistorySection({
           ))}
           {(events ?? []).length === 0 ? (
             <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
-                No promotions, title changes, or salary changes recorded yet.
+              <TableCell colSpan={5}>
+                <EmptyState dense title="No promotions, title changes, or salary changes recorded yet." />
               </TableCell>
             </TableRow>
           ) : null}

@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CreateCompanyForm } from "./create-company-form";
 import { DeactivateOrRestoreCompanyButton } from "./deactivate-or-restore-company-button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function CompaniesPage() {
   const supabase = await createClient();
@@ -56,8 +57,8 @@ export default async function CompaniesPage() {
               ))}
               {(companies ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    No companies yet.
+                  <TableCell colSpan={5}>
+                    <EmptyState dense title="No companies yet." />
                   </TableCell>
                 </TableRow>
               ) : null}

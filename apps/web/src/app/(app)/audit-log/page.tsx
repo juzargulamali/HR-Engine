@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const PAGE_SIZE = 50;
 
@@ -211,8 +212,8 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
               ))}
               {(rows ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground">
-                    No activity matches these filters.
+                  <TableCell colSpan={7}>
+                    <EmptyState dense title="No activity matches these filters." />
                   </TableCell>
                 </TableRow>
               ) : null}

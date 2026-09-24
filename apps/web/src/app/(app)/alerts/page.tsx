@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const HORIZON_DAYS = 30;
 
@@ -89,7 +90,9 @@ export default async function AlertsPage() {
 
       {nothingFlagged ? (
         <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">Nothing needs attention right now.</CardContent>
+          <CardContent>
+            <EmptyState dense title="Nothing needs attention right now." description="No contracts, documents, or probation periods are due within the next 30 days." />
+          </CardContent>
         </Card>
       ) : null}
 

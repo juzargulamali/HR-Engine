@@ -9,6 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ActivateButton } from "./activate-button";
 import { DeletePolicyVersionButton } from "./delete-policy-version-button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function PoliciesPage() {
   const session = await getCurrentSession();
@@ -102,8 +103,8 @@ export default async function PoliciesPage() {
               })}
               {(policies ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    No policies yet.
+                  <TableCell colSpan={6}>
+                    <EmptyState dense title="No policies yet." />
                   </TableCell>
                 </TableRow>
               ) : null}

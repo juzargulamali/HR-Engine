@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CancelRequestButton } from "./cancel-request-button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   submitted: "secondary",
@@ -111,8 +112,8 @@ export default async function LeavePage() {
               ))}
               {(requests ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    No leave requests yet.
+                  <TableCell colSpan={5}>
+                    <EmptyState dense title="No leave requests yet." />
                   </TableCell>
                 </TableRow>
               ) : null}

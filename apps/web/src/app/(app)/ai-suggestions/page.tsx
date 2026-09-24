@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Alert } from "@/components/ui/alert";
 import { DraftDecisionButtons } from "./draft-decision-buttons";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function AiSuggestionsPage() {
   const session = await getCurrentSession();
@@ -65,8 +66,8 @@ export default async function AiSuggestionsPage() {
               ))}
               {(drafts ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    No pending AI suggestions.
+                  <TableCell colSpan={5}>
+                    <EmptyState dense title="No pending AI suggestions." />
                   </TableCell>
                 </TableRow>
               ) : null}

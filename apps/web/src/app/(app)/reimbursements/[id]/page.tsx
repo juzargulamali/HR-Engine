@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { AddLineForm } from "./add-line-form";
 import { DeleteLineButton } from "./delete-line-button";
 import { ClaimActions } from "./claim-actions";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function ClaimDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -92,8 +93,8 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
               ))}
               {linesWithReceiptUrl.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    No expense lines yet.
+                  <TableCell colSpan={6}>
+                    <EmptyState dense title="No expense lines yet." />
                   </TableCell>
                 </TableRow>
               ) : null}

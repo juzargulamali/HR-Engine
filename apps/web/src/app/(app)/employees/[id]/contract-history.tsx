@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Alert } from "@/components/ui/alert";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const initialState: ActionState = { error: null };
 
@@ -69,8 +70,8 @@ export function ContractHistory({
           ))}
           {contracts.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground">
-                No contract on record yet.
+              <TableCell colSpan={6}>
+                <EmptyState dense title="No contract on record yet." />
               </TableCell>
             </TableRow>
           ) : null}
