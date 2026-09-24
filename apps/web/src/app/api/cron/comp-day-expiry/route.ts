@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { computeCompDayExpiry } from "@enginious-hr/domain";
+import { computeCompDayExpiry, getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAuthorizedCronRequest, SYSTEM_ACTOR_ID } from "@/lib/cron/auth";
 import { chunk } from "@/lib/cron/batch";
@@ -27,7 +27,23 @@ export async function GET(request: Request) {
   }
 
   const admin = createAdminClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  // Recovery Leave (comp_day_ledger) expiry is a per-employee, country-
+  // sensitive "has this day already passed?" check — a single UTC `today`
+  // wrongly treats it as not-yet-expired (or already-expired) for up to a
+  // few hours around a country's own midnight, depending on the direction.
+  const { data: employeeCountries, error: employeeCountriesError } = await admin.from("employees").select("id, country_code");
+  // A failed query here must never fall through to an empty map — every
+  // employee would then silently resolve to DASHBOARD_TIMEZONE (Dubai) via
+  // resolveCountryTimeZone's unrecognised-country fallback, which is wrong
+  // for every non-UAE employee rather than a visible failure.
+  if (employeeCountriesError) return NextResponse.json({ error: employeeCountriesError.message }, { status: 500 });
+  const countryByEmployee = new Map((employeeCountries ?? []).map((e) => [e.id, e.country_code]));
+  const businessDateForCountry = (countryCode: string | null | undefined) => getBusinessDateString(resolveCountryTimeZone(countryCode), now);
+  // Used only for the response payload's `ranAt` — an approximate,
+  // human-readable "when did this run happen" figure, never a per-employee
+  // calculation input.
+  const today = getBusinessDateString(resolveCountryTimeZone(null), now);
 
   const { data: entries, error } = await admin
     .from("comp_day_ledger")
@@ -59,6 +75,7 @@ export async function GET(request: Request) {
   let skipped = 0;
 
   for (const [employeeId, employeeEntries] of byEmployee) {
+    const employeeToday = businessDateForCountry(countryByEmployee.get(employeeId));
     const postings = computeCompDayExpiry(
       employeeEntries.map((e) => ({
         id: e.id,
@@ -67,7 +84,7 @@ export async function GET(request: Request) {
         txnDate: e.txn_date,
         expiryDate: e.expiry_date,
       })),
-      today,
+      employeeToday,
     );
 
     for (const posting of postings) {
@@ -82,7 +99,7 @@ export async function GET(request: Request) {
       }
       rows.push({
         employee_id: employeeId,
-        txn_date: today,
+        txn_date: employeeToday,
         entry_type: "expired",
         days: -posting.expiredDays,
         reference_type: "comp_day_expiry_sweep",

@@ -5,7 +5,8 @@
  * 20260926000000_phase3_leave_and_approvals.sql,
  * 20260927000000_phase4_reimbursements_projects_timesheets.sql, and
  * 20260928000000_phase5_performance_onboarding_documents_assets.sql, and
- * 20260929000000_phase6_letters_payroll_audit_ai_drafts.sql exactly. Once a real
+ * 20260929000000_phase6_letters_payroll_audit_ai_drafts.sql, and
+ * 20261101000000_leave_policy_configuration.sql exactly. Once a real
  * Supabase project exists, regenerate this file with `npm run db:types`
  * (root package.json) instead of hand-editing it — see
  * docs/09-extending-the-system.md "adding a table" checklist, which ends
@@ -40,7 +41,9 @@ export type ApprovableEntity =
   | "generated_letter"
   | "onboarding_task"
   | "offboarding_task"
-  | "payroll_export_run";
+  | "payroll_export_run"
+  | "recovery_credit";
+export type RecoveryCreditEventType = "standard" | "overnight";
 export type DocumentStatus = "valid" | "expiring_soon" | "expired";
 export type AssetStatus = "in_stock" | "issued" | "under_repair" | "retired";
 export type LetterStatus = "draft" | "pending_approval" | "issued" | "void";
@@ -55,6 +58,7 @@ export interface Database {
           name: string;
           default_currency: string;
           week_start_day: number;
+          working_weekdays: number[] | null;
           created_at: string;
         };
         Insert: {
@@ -62,6 +66,7 @@ export interface Database {
           name: string;
           default_currency: string;
           week_start_day?: number;
+          working_weekdays?: number[] | null;
         };
         Update: Partial<Database["public"]["Tables"]["countries"]["Insert"]>;
         Relationships: [];
@@ -176,6 +181,8 @@ export interface Database {
           job_title: string | null;
           cost_center: string | null;
           work_location: string | null;
+          recognised_prior_service_years: number | null;
+          is_first_ever_employment: boolean | null;
           created_at: string;
           created_by: string | null;
           updated_at: string;
@@ -205,6 +212,8 @@ export interface Database {
           job_title?: string | null;
           cost_center?: string | null;
           work_location?: string | null;
+          recognised_prior_service_years?: number | null;
+          is_first_ever_employment?: boolean | null;
         };
         Update: Partial<Database["public"]["Tables"]["employees"]["Insert"]> & {
           deleted_at?: string | null;
@@ -225,6 +234,7 @@ export interface Database {
           is_current: boolean;
           superseded_by: string | null;
           version_no: number;
+          fte_fraction: number;
           created_at: string;
           created_by: string;
         };
@@ -240,6 +250,7 @@ export interface Database {
           is_current?: boolean;
           superseded_by?: string | null;
           version_no: number;
+          fte_fraction?: number;
           created_by: string;
         };
         Update: Partial<Database["public"]["Tables"]["employment_contracts"]["Insert"]>;
@@ -813,6 +824,8 @@ export interface Database {
           status: string;
           work_mode: string | null;
           source: string;
+          completed_normal_scheduled_day: boolean | null;
+          active_hours_after_midnight: string | null;
         };
         Insert: {
           id?: string;
@@ -824,8 +837,80 @@ export interface Database {
           status?: string;
           work_mode?: string | null;
           source?: string;
+          completed_normal_scheduled_day?: boolean | null;
+          active_hours_after_midnight?: number | null;
         };
         Update: Partial<Database["public"]["Tables"]["attendance_records"]["Insert"]>;
+        Relationships: [];
+      };
+      recovery_credit_requests: {
+        Row: {
+          id: string;
+          employee_id: string;
+          attendance_record_id: string;
+          work_date: string;
+          event_type: RecoveryCreditEventType;
+          proposed_days: string;
+          status: RequestStatus;
+          submitted_at: string;
+          decided_at: string | null;
+          created_by: string;
+          comp_day_ledger_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          employee_id: string;
+          attendance_record_id: string;
+          work_date: string;
+          event_type: RecoveryCreditEventType;
+          proposed_days: number;
+          status?: RequestStatus;
+          created_by: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["recovery_credit_requests"]["Insert"]> & {
+          decided_at?: string | null;
+          comp_day_ledger_id?: string | null;
+        };
+        Relationships: [];
+      };
+      termination_settlement_inputs: {
+        Row: {
+          employee_id: string;
+          leave_encashment_daily_rate: string;
+          entered_by: string;
+          entered_at: string;
+        };
+        Insert: {
+          employee_id: string;
+          leave_encashment_daily_rate: number;
+        };
+        Update: Partial<Database["public"]["Tables"]["termination_settlement_inputs"]["Insert"]>;
+        Relationships: [];
+      };
+      poland_termination_leave_reconciliations: {
+        Row: {
+          employee_id: string;
+          termination_date: string;
+          raw_delta_days: string;
+          applied_days: string;
+          excess_requiring_review_days: string;
+          excess_reviewed_at: string | null;
+          excess_reviewed_by: string | null;
+          note: string | null;
+          created_by: string;
+          created_at: string;
+        };
+        Insert: {
+          employee_id: string;
+          termination_date: string;
+          raw_delta_days: number;
+          applied_days: number;
+          excess_requiring_review_days?: number;
+          note?: string | null;
+          created_by: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["poland_termination_leave_reconciliations"]["Insert"]>;
         Relationships: [];
       };
       performance_cycles: {
@@ -1205,6 +1290,46 @@ export interface Database {
       create_initial_approval: {
         Args: { p_entity_type: ApprovableEntity; p_entity_id: string };
         Returns: string;
+      };
+      record_overnight_recovery_credit: {
+        Args: {
+          p_employee_id: string;
+          p_work_date: string;
+          p_completed_normal_scheduled_day: boolean;
+          p_active_hours_after_midnight: number;
+        };
+        Returns: { credited: boolean; credit_days: number }[];
+      };
+      terminate_employee: {
+        Args: { p_employee_id: string; p_termination_date?: string };
+        Returns: undefined;
+      };
+      forfeit_recovery_leave_on_termination: {
+        Args: { p_employee_id: string };
+        Returns: { forfeited_days: number }[];
+      };
+      post_poland_termination_leave_adjustment: {
+        Args: { p_employee_id: string; p_amount_days: number; p_note?: string | null };
+        Returns: { applied_days: number; excess_requiring_review: number; already_posted: boolean }[];
+      };
+      acknowledge_poland_termination_leave_excess: {
+        Args: { p_employee_id: string };
+        Returns: undefined;
+      };
+      confirm_poland_termination_leave_manually_reconciled: {
+        Args: { p_employee_id: string; p_note?: string | null };
+        Returns: undefined;
+      };
+      preflight_country_schedule_config: {
+        Args: Record<string, never>;
+        Returns: {
+          country_code: string;
+          week_start_day: number;
+          working_weekdays: number[] | null;
+          effective_working_days: number[];
+          requested_convention: string | null;
+          conflicts_with_requested_convention: boolean | null;
+        }[];
       };
       generate_checklist_items: {
         Args: { p_employee_id: string; p_template_id: string; p_anchor_date: string };

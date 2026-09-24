@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { OvernightRecoveryForm } from "./overnight-recovery-form";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   submitted: "secondary",
@@ -19,9 +20,9 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
  * leaving the employee's profile. Reuses the exact same queries and badge
  * mapping as /leave/page.tsx rather than introducing a new pattern.
  */
-export async function LeaveSection({ employeeId }: { employeeId: string }) {
+export async function LeaveSection({ employeeId, canRecordOvernightRecovery = false }: { employeeId: string; canRecordOvernightRecovery?: boolean }) {
   const supabase = await createClient();
-  const [{ data: leaveBalances }, { data: compBalance }, { data: requests }] = await Promise.all([
+  const [{ data: leaveBalances }, { data: compBalance }, { data: requests }, { data: recoveryCreditRequests }] = await Promise.all([
     supabase.from("leave_balances").select("leave_type_code, balance_days").eq("employee_id", employeeId),
     supabase.from("comp_day_balances").select("balance_days").eq("employee_id", employeeId).maybeSingle(),
     supabase
@@ -29,6 +30,16 @@ export async function LeaveSection({ employeeId }: { employeeId: string }) {
       .select("id, leave_type_code, start_date, end_date, total_days, status")
       .eq("employee_id", employeeId)
       .order("start_date", { ascending: false })
+      .limit(20),
+    // Recovery Leave EARNING status — a separate approval chain from the
+    // leave_requests table above (which only covers CONSUMING an
+    // already-earned day). RLS (recovery_credit_requests_select) already
+    // scopes this to the employee themselves, their manager, or HR Admin.
+    supabase
+      .from("recovery_credit_requests")
+      .select("id, work_date, event_type, proposed_days, status")
+      .eq("employee_id", employeeId)
+      .order("work_date", { ascending: false })
       .limit(20),
   ]);
 
@@ -82,6 +93,41 @@ export async function LeaveSection({ employeeId }: { employeeId: string }) {
           ) : null}
         </TableBody>
       </Table>
+
+      <div className="space-y-2 border-t border-border pt-4">
+        <h3 className="text-sm font-medium">Recovery Leave earning (Line Manager → HR Admin approval)</h3>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Date</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Days</TableHead>
+              <TableHead>Status</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {(recoveryCreditRequests ?? []).map((r) => (
+              <TableRow key={r.id}>
+                <TableCell>{r.work_date}</TableCell>
+                <TableCell className="capitalize">{r.event_type}</TableCell>
+                <TableCell>{r.proposed_days}</TableCell>
+                <TableCell>
+                  <Badge variant={STATUS_VARIANT[r.status] ?? "outline"}>{r.status.replace(/_/g, " ")}</Badge>
+                </TableCell>
+              </TableRow>
+            ))}
+            {(recoveryCreditRequests ?? []).length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={4}>
+                  <EmptyState dense title="No recovery credit requests yet." />
+                </TableCell>
+              </TableRow>
+            ) : null}
+          </TableBody>
+        </Table>
+      </div>
+
+      {canRecordOvernightRecovery ? <OvernightRecoveryForm employeeId={employeeId} /> : null}
     </div>
   );
 }

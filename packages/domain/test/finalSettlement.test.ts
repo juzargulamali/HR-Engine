@@ -130,4 +130,31 @@ describe("computeFinalSettlement", () => {
     });
     expect(result.loanDeductionsAmount).toBe(0);
   });
+
+  it("uses dailyRate (basic salary) for leave encashment when no override is given — UAE-style settlement", () => {
+    const result = computeFinalSettlement({
+      hireDate: "2020-01-01",
+      terminationDate: "2026-01-01",
+      dailyRate: 100,
+      unusedLeaveDays: 10,
+      pendingApprovedReimbursements: 0,
+      outstandingLoans: 0,
+      eosbPolicy: null,
+    });
+    expect(result.leaveEncashmentAmount).toBe(1000);
+  });
+
+  it("uses leaveEncashmentDailyRate instead of dailyRate when a statutory wage basis differs (Poland/Saudi-style settlement)", () => {
+    const result = computeFinalSettlement({
+      hireDate: "2020-01-01",
+      terminationDate: "2026-01-01",
+      dailyRate: 100, // e.g. basic salary — used for EOSB/gratuity tiers, if any
+      leaveEncashmentDailyRate: 130, // e.g. the statutory pecuniary-equivalent rate, inclusive of allowances
+      unusedLeaveDays: 10,
+      pendingApprovedReimbursements: 0,
+      outstandingLoans: 0,
+      eosbPolicy: null,
+    });
+    expect(result.leaveEncashmentAmount).toBe(1300);
+  });
 });

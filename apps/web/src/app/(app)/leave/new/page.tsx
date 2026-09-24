@@ -1,4 +1,4 @@
-import { resolvePolicyVersionAsOf } from "@enginious-hr/domain";
+import { resolvePolicyVersionAsOf, getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,13 +15,17 @@ export default async function NewLeaveRequestPage() {
     );
   }
 
-  const today = new Date().toISOString().slice(0, 10);
   const supabase = await createClient();
   const { data: employee } = await supabase
     .from("employees")
     .select("country_code")
     .eq("id", session.employeeId)
     .single();
+
+  // This employee's own business-local date — which leave policy is "in
+  // effect today" must resolve against their own country's calendar day,
+  // not the server's UTC one.
+  const today = getBusinessDateString(resolveCountryTimeZone(employee?.country_code));
 
   // The leave type list is resolved against the policy version in effect on
   // the leave's start_date — not today — the same rule submitLeaveRequest()

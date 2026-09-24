@@ -15,23 +15,69 @@ export interface ComputeLeaveDaysParams {
   startDate: string;
   endDate: string;
   weekStartDay: number;
+  /** See isWorkingDay's comment — explicit override for a schedule a single weekStartDay can't describe. Optional; omit for the existing contiguous-5-day derivation. */
+  workingWeekdays?: readonly number[] | null;
   holidays: readonly string[];
   halfDayStart?: boolean;
   halfDayEnd?: boolean;
+  /**
+   * 'workingDays' (default — unchanged from before this field existed):
+   * weekends and holidays are excluded from the count entirely, matching
+   * Poland's "20/26 working days" entitlement.
+   *
+   * 'calendarDays': every day in the range counts, including weekends —
+   * matching the UAE's "30 calendar days" and Saudi's "21/30 calendar
+   * days" entitlements. Combine with `extendForHolidays` for Saudi's rule
+   * that an official holiday inside the leave period doesn't consume a
+   * leave day.
+   */
+  deductionMode?: "workingDays" | "calendarDays";
+  /**
+   * calendarDays only. When true, a public holiday inside the range is
+   * excluded from the count (the same way a working-day calculation
+   * already excludes it) rather than counted as a leave day — Saudi's
+   * "official holidays falling inside annual leave extend the leave"
+   * rule. Ignored (has no effect) in 'workingDays' mode, since holidays
+   * are already excluded there. Defaults to false: plain calendar-day
+   * counting, matching the UAE rule set, which specifies no holiday
+   * interaction.
+   */
+  extendForHolidays?: boolean;
 }
 
-function isWorkingDay(date: Date, weekStartDay: number): boolean {
+function isWorkingDay(date: Date, weekStartDay: number, workingWeekdays?: readonly number[] | null): boolean {
+  // A single "week starts here" integer can only ever describe a
+  // contiguous 5-day work week — it cannot represent a schedule that
+  // isn't 5 contiguous days, and it forces UAE/Saudi/Poland's real
+  // weekends to be inferred rather than stated. `workingWeekdays` (0 =
+  // Sunday .. 6 = Saturday), when provided, is the explicit, authoritative
+  // set of scheduled working days and takes precedence; every existing
+  // caller passes only `weekStartDay`, so omitting it is fully backward
+  // compatible with the contiguous-5-day derivation below.
+  if (workingWeekdays && workingWeekdays.length > 0) {
+    return workingWeekdays.includes(date.getUTCDay());
+  }
   const dayOfWeek = date.getUTCDay();
   return (dayOfWeek - weekStartDay + 7) % 7 < 5;
 }
 
 /** Same weekend/work-week rule as computeLeaveDays, exposed for callers that just need a yes/no for one date (e.g. flagging attendance). */
-export function isWeekend(dateISO: string, weekStartDay: number): boolean {
-  return !isWorkingDay(new Date(`${dateISO}T00:00:00Z`), weekStartDay);
+export function isWeekend(dateISO: string, weekStartDay: number, workingWeekdays?: readonly number[] | null): boolean {
+  return !isWorkingDay(new Date(`${dateISO}T00:00:00Z`), weekStartDay, workingWeekdays);
 }
 
 export function computeLeaveDays(params: ComputeLeaveDaysParams): number {
-  const { startDate, endDate, weekStartDay, holidays, halfDayStart = false, halfDayEnd = false } = params;
+  const {
+    startDate,
+    endDate,
+    weekStartDay,
+    workingWeekdays,
+    holidays,
+    halfDayStart = false,
+    halfDayEnd = false,
+    deductionMode = "workingDays",
+    extendForHolidays = false,
+  } = params;
   const holidaySet = new Set(holidays);
 
   let total = 0;
@@ -40,7 +86,11 @@ export function computeLeaveDays(params: ComputeLeaveDaysParams): number {
 
   while (cursor.getTime() <= end.getTime()) {
     const iso = cursor.toISOString().slice(0, 10);
-    if (isWorkingDay(cursor, weekStartDay) && !holidaySet.has(iso)) {
+    const excludedAsHoliday = holidaySet.has(iso) && (deductionMode === "workingDays" || extendForHolidays);
+    const counted =
+      deductionMode === "workingDays" ? isWorkingDay(cursor, weekStartDay, workingWeekdays) && !excludedAsHoliday : !excludedAsHoliday;
+
+    if (counted) {
       const isFirst = iso === startDate;
       const isLast = iso === endDate;
       if (isFirst && isLast) {

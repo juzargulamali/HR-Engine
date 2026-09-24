@@ -19,6 +19,8 @@ interface EmployeeCore {
   personal_email: string | null;
   phone: string | null;
   date_of_birth: string | null;
+  recognised_prior_service_years: number | null;
+  is_first_ever_employment: boolean | null;
 }
 
 export function EditEmployeeForm({
@@ -91,6 +93,11 @@ export function EditEmployeeForm({
               </Select>
             </div>
             <div className="space-y-1.5">
+              <Label htmlFor="terminationDate">Termination date</Label>
+              <Input id="terminationDate" name="terminationDate" type="date" />
+              <p className="text-xs text-muted-foreground">Only used when setting status to Terminated — also forfeits unused internal Recovery Leave.</p>
+            </div>
+            <div className="space-y-1.5">
               <Label htmlFor="managerId">Manager</Label>
               <Select id="managerId" name="managerId" defaultValue={employee.manager_id ?? ""}>
                 <option value="">None</option>
@@ -105,8 +112,41 @@ export function EditEmployeeForm({
               <Label htmlFor="dateOfBirth">Date of birth</Label>
               <Input id="dateOfBirth" name="dateOfBirth" type="date" defaultValue={employee.date_of_birth ?? ""} />
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="recognisedPriorServiceYears">Recognised prior service (years)</Label>
+              <Input
+                id="recognisedPriorServiceYears"
+                name="recognisedPriorServiceYears"
+                type="number"
+                step="0.5"
+                min="0"
+                defaultValue={employee.recognised_prior_service_years ?? ""}
+              />
+              <p className="text-xs text-muted-foreground">
+                Poland only — optional HR reference data. Enginious grants every Poland employee a flat 26 working
+                days of Annual Leave per calendar year as a company benefit; this field does not affect that
+                calculation.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="isFirstEverEmployment">First-ever job?</Label>
+              <Select
+                id="isFirstEverEmployment"
+                name="isFirstEverEmployment"
+                defaultValue={employee.is_first_ever_employment === null ? "" : String(employee.is_first_ever_employment)}
+              >
+                <option value="">Not yet confirmed</option>
+                <option value="true">Yes — this is their first job ever</option>
+                <option value="false">No — they have worked before</option>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Poland only — optional HR reference data. It does not gate or change Annual Leave accrual, which is
+                a flat 26-day/year company benefit for every Poland employee regardless of this field.
+              </p>
+            </div>
           </div>
           {coreState.error ? <Alert variant="destructive">{coreState.error}</Alert> : null}
+          {!coreState.error && coreState.warning ? <Alert>{coreState.warning}</Alert> : null}
           <Button type="submit" size="sm" disabled={corePending}>
             {corePending ? "Saving…" : "Save profile"}
           </Button>

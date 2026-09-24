@@ -32,7 +32,7 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
         ('${USER_SYS_ADMIN}', 'admin@enginious.ae'),
         ('${USER_OTHER_EMPLOYEE}', 'peer@enginious.ae');
 
-      insert into countries (code, name, default_currency) values ('AE', 'United Arab Emirates', 'AED');
+      insert into countries (code, name, default_currency) values ('AE', 'United Arab Emirates', 'AED') on conflict do nothing;
       insert into companies (id, legal_name, country_code, default_currency)
         values ('${COMPANY_HQ}', 'Enginious LLC FZ', 'AE', 'AED');
 

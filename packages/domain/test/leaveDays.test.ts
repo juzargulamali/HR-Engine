@@ -52,6 +52,60 @@ describe("computeLeaveDays", () => {
   });
 });
 
+describe("computeLeaveDays — calendarDays mode (UAE/Saudi Annual Leave)", () => {
+  it("counts weekends as leave days, unlike workingDays mode", () => {
+    // 2026-03-01 (Sun) through 2026-03-07 (Sat), Sun-Thu work week: 7 calendar days total.
+    expect(
+      computeLeaveDays({ startDate: "2026-03-01", endDate: "2026-03-07", weekStartDay: 0, holidays: [], deductionMode: "calendarDays" }),
+    ).toBe(7);
+  });
+
+  it("counts a holiday inside the range as a leave day when extendForHolidays is not set (UAE rule)", () => {
+    expect(
+      computeLeaveDays({
+        startDate: "2026-03-01",
+        endDate: "2026-03-05",
+        weekStartDay: 0,
+        holidays: ["2026-03-03"],
+        deductionMode: "calendarDays",
+      }),
+    ).toBe(5);
+  });
+
+  it("excludes a holiday inside the range — extending the leave — when extendForHolidays is set (Saudi rule)", () => {
+    const withoutHoliday = computeLeaveDays({
+      startDate: "2026-03-01",
+      endDate: "2026-03-05",
+      weekStartDay: 0,
+      holidays: [],
+      deductionMode: "calendarDays",
+      extendForHolidays: true,
+    });
+    const withHoliday = computeLeaveDays({
+      startDate: "2026-03-01",
+      endDate: "2026-03-05",
+      weekStartDay: 0,
+      holidays: ["2026-03-03"],
+      deductionMode: "calendarDays",
+      extendForHolidays: true,
+    });
+    expect(withHoliday).toBe(withoutHoliday - 1);
+  });
+
+  it("still applies half-day discounts in calendarDays mode", () => {
+    expect(
+      computeLeaveDays({
+        startDate: "2026-03-01",
+        endDate: "2026-03-01",
+        weekStartDay: 0,
+        holidays: [],
+        deductionMode: "calendarDays",
+        halfDayStart: true,
+      }),
+    ).toBe(0.5);
+  });
+});
+
 describe("isWeekend", () => {
   it("flags Fri/Sat for a Sun-Thu work week (UAE/KSA, weekStartDay=0)", () => {
     expect(isWeekend("2026-03-06", 0)).toBe(true); // Friday
@@ -63,5 +117,18 @@ describe("isWeekend", () => {
     expect(isWeekend("2026-03-07", 1)).toBe(true); // Saturday
     expect(isWeekend("2026-03-08", 1)).toBe(true); // Sunday
     expect(isWeekend("2026-03-06", 1)).toBe(false); // Friday
+  });
+
+  it("uses an explicit workingWeekdays set instead of weekStartDay when given, even if it disagrees with weekStartDay", () => {
+    const mondayToFriday = [1, 2, 3, 4, 5];
+    expect(isWeekend("2026-03-06", 0, mondayToFriday)).toBe(false); // Friday, day 5, is in the set
+    expect(isWeekend("2026-03-07", 0, mondayToFriday)).toBe(true); // Saturday, day 6, not in the set
+    expect(isWeekend("2026-03-08", 0, mondayToFriday)).toBe(true); // Sunday, day 0, not in the set
+    expect(isWeekend("2026-03-02", 0, mondayToFriday)).toBe(false); // Monday, day 1, in the set
+  });
+
+  it("falls back to weekStartDay when workingWeekdays is null or empty", () => {
+    expect(isWeekend("2026-03-06", 0, null)).toBe(true); // Friday, Sun-Thu week
+    expect(isWeekend("2026-03-06", 0, [])).toBe(true);
   });
 });

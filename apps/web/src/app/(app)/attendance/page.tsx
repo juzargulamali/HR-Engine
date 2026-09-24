@@ -1,4 +1,4 @@
-import { canManageAttendance, isWeekend } from "@enginious-hr/domain";
+import { canManageAttendance, isWeekend, getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,10 +19,6 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
   leave: "secondary",
   partial_day: "secondary",
 };
-
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export default async function AttendancePage({
   searchParams,
@@ -99,9 +95,12 @@ export default async function AttendancePage({
     );
   }
 
-  const workDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : todayISO();
   const companyId = companyIdParam && manageableCompanies.some((c) => c.id === companyIdParam) ? companyIdParam : manageableCompanies[0]!.id;
   const company = manageableCompanies.find((c) => c.id === companyId)!;
+  // Default date is this company's own business-local "today" — not the
+  // server's UTC one — since this page is always scoped to exactly one
+  // company at a time.
+  const workDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : getBusinessDateString(resolveCountryTimeZone(company.country_code));
   const q = (qParam ?? "").trim().slice(0, 100);
 
   let employeesQuery = supabase
@@ -119,7 +118,7 @@ export default async function AttendancePage({
   }
 
   const [{ data: country }, { data: employees }, { data: holiday }] = await Promise.all([
-    supabase.from("countries").select("week_start_day").eq("code", company.country_code).single(),
+    supabase.from("countries").select("week_start_day, working_weekdays").eq("code", company.country_code).single(),
     employeesQuery,
     supabase.from("public_holidays").select("name").eq("country_code", company.country_code).eq("holiday_date", workDate).maybeSingle(),
   ]);
@@ -137,7 +136,12 @@ export default async function AttendancePage({
 
   const weekStartDay = country?.week_start_day ?? 1;
   const isHolidayDate = !!holiday;
-  const isRecoveryDay = isHolidayDate || isWeekend(workDate, weekStartDay);
+  // Prefers working_weekdays (AE/SA/PL's resolved schedule) over the
+  // week_start_day-derived contiguous work week, same precedence
+  // record_attendance_and_recovery() uses server-side — otherwise this
+  // register would keep showing the legacy UAE Fri/Sat weekend even after
+  // the migration resolves it to Sat/Sun.
+  const isRecoveryDay = isHolidayDate || isWeekend(workDate, weekStartDay, country?.working_weekdays);
 
   // A day with no saved row is genuinely unrecorded — never preselected as
   // Present (or as a synthetic "holiday"/"weekend" status) just because

@@ -3,9 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
 import { validateUploadFile, sanitizeForStoragePath } from "@/lib/uploads";
+import { applyPolandTerminationLeaveTrueUp } from "./polandTermination";
 
 const createEmployeeSchema = z.object({
   companyId: z.string().uuid(),
@@ -102,6 +104,14 @@ export async function createEmployee(_prevState: ActionState, formData: FormData
   // ledger correction is (leave_ledger_insert_hr/comp_ledger_insert_hr
   // already grant this to HR Admin directly, same RLS postLeaveLedgerAdjustment
   // uses), just at onboarding time instead of via the AI-suggestions flow.
+  //
+  // reference_type is deliberately 'opening_balance', not the generic
+  // 'manual_adjustment' postLeaveLedgerAdjustment() uses for an arbitrary
+  // correction — the leave-accrual cron's historical-entitlement baseline
+  // (Phase 2b) needs to tell "this row IS the employee's carried-over
+  // opening grant" apart from "this row is some other unclassified manual
+  // correction, don't guess what it means." Mirrors comp_day_ledger's
+  // existing source: 'opening_balance' convention for the same distinction.
   if (d.openingAnnualLeaveDays) {
     const { error: leaveError } = await supabase.from("leave_ledger").insert({
       employee_id: employee.id,
@@ -109,7 +119,7 @@ export async function createEmployee(_prevState: ActionState, formData: FormData
       txn_date: d.hireDate,
       entry_type: "adjustment",
       amount_days: d.openingAnnualLeaveDays,
-      reference_type: "manual_adjustment",
+      reference_type: "opening_balance",
       note: "Opening annual leave balance recorded at onboarding",
       created_by: user.id,
     });
@@ -150,9 +160,34 @@ const updateEmployeeSchema = z.object({
   employmentStatus: z.enum(["active", "on_leave", "suspended", "terminated"]),
   managerId: z.string().uuid().optional().or(z.literal("")),
   dateOfBirth: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()),
+  terminationDate: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()),
+  // Optional HR reference data only — NOT used by
+  // computeAnnualLeaveEntitlementToDate. Enginious grants every Poland
+  // employee a flat 26 working days of Annual Leave per calendar year as a
+  // company benefit, regardless of recognised prior service. Kept on the
+  // schema to avoid an unnecessary reversal, not because anything reads it.
+  // Irrelevant (harmlessly stored as null) for any employee outside Poland.
+  recognisedPriorServiceYears: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().min(0).optional()),
+  // Optional HR reference data only — NOT used by
+  // computeAnnualLeaveEntitlementToDate. Whether this is the employee's
+  // first-ever job has no effect on Poland's flat 26-day/year Annual Leave
+  // benefit; kept on the schema to avoid an unnecessary reversal, not
+  // because anything reads it. "" (unset) is preserved as null, not
+  // defaulted to either answer. Irrelevant (harmlessly stored as null) for
+  // any employee outside Poland.
+  isFirstEverEmployment: z.preprocess((v) => (v === "" ? undefined : v), z.enum(["true", "false"]).optional()),
 });
 
-/** HR Admin editing an employee's core record — see employees_update_hr. */
+/**
+ * HR Admin editing an employee's core record — see employees_update_hr.
+ *
+ * The '-> terminated' transition specifically goes through terminate_employee()
+ * instead of this plain table update: that RPC atomically forfeits any
+ * unused internal Recovery Leave in the SAME transaction as the status
+ * change, so forfeiture is never a separate step HR could forget to run.
+ * Every other status transition is unaffected — still the direct update
+ * employees_update_hr already allows.
+ */
 export async function updateEmployee(_prevState: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = updateEmployeeSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -161,16 +196,144 @@ export async function updateEmployee(_prevState: ActionState, formData: FormData
   const d = parsed.data;
 
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("employees")
-    .update({
-      job_title: d.jobTitle || null,
-      employment_status: d.employmentStatus,
-      manager_id: d.managerId || null,
-      date_of_birth: d.dateOfBirth || null,
-    })
-    .eq("id", d.employeeId);
 
+  if (d.employmentStatus === "terminated") {
+    // Needed for the Poland leave true-up below, and to pin the exact same
+    // termination date into both terminate_employee() and this system's
+    // own entitlement calculation — never let the two drift apart by one
+    // resolving "today" a moment later than the other. Checked and stopped
+    // on BEFORE calling terminate_employee(): if this lookup fails, we
+    // cannot know whether the employee is in Poland, so proceeding would
+    // risk silently skipping the Annual Leave true-up for a Poland
+    // employee with no warning at all, rather than an explicit error.
+    const { data: employeeForTermination, error: employeeLookupError } = await supabase
+      .from("employees")
+      .select("country_code, hire_date")
+      .eq("id", d.employeeId)
+      .single();
+    if (employeeLookupError || !employeeForTermination) {
+      return { error: employeeLookupError?.message ?? "Could not look up this employee before termination." };
+    }
+    // This employee's own business-local date when HR leaves the
+    // termination date blank — the recorded date (and everything the
+    // Poland true-up below derives from it) must reflect their own
+    // country's calendar day, not the server's UTC one.
+    const terminationDate = d.terminationDate || getBusinessDateString(resolveCountryTimeZone(employeeForTermination.country_code));
+
+    const { error } = await supabase.rpc("terminate_employee", {
+      p_employee_id: d.employeeId,
+      p_termination_date: terminationDate,
+    });
+    if (error) return { error: error.message };
+
+    // job_title/manager_id/date_of_birth aren't part of terminate_employee()
+    // (a termination shouldn't silently also change unrelated fields) — a
+    // second, ordinary update covers anything else this form submitted
+    // alongside the status change.
+    const { error: fieldsError } = await supabase
+      .from("employees")
+      .update({
+        job_title: d.jobTitle || null,
+        manager_id: d.managerId || null,
+        date_of_birth: d.dateOfBirth || null,
+        recognised_prior_service_years: d.recognisedPriorServiceYears ?? null,
+        is_first_ever_employment: d.isFirstEverEmployment === undefined ? null : d.isFirstEverEmployment === "true",
+      })
+      .eq("id", d.employeeId);
+    if (fieldsError) return { error: fieldsError.message };
+
+    // Poland only — see polandTermination.ts's own header for why this runs
+    // as a separate, deliberately non-blocking step: it never fails the
+    // termination itself, only surfaces a warning when the Annual Leave
+    // true-up couldn't be posted automatically.
+    let warning: string | null = null;
+    if (employeeForTermination.country_code === "PL") {
+      warning = await applyPolandTerminationLeaveTrueUp(supabase, d.employeeId, employeeForTermination.hire_date, terminationDate);
+    }
+
+    revalidatePath(`/employees/${d.employeeId}`);
+    return { error: null, warning };
+  } else {
+    const { error } = await supabase
+      .from("employees")
+      .update({
+        job_title: d.jobTitle || null,
+        employment_status: d.employmentStatus,
+        manager_id: d.managerId || null,
+        date_of_birth: d.dateOfBirth || null,
+        recognised_prior_service_years: d.recognisedPriorServiceYears ?? null,
+        is_first_ever_employment: d.isFirstEverEmployment === undefined ? null : d.isFirstEverEmployment === "true",
+      })
+      .eq("id", d.employeeId);
+    if (error) return { error: error.message };
+  }
+
+  revalidatePath(`/employees/${d.employeeId}`);
+  return { error: null };
+}
+
+/**
+ * The one, explicit, audited HR action that clears a pending
+ * excess_requiring_review_days flag on a Poland termination reconciliation
+ * — see poland_termination_leave_reconciliations' own migration header
+ * comment (supabase/migrations/20261102000000_poland_termination_leave_true_up.sql)
+ * for why this can never be inferred or automatic. RLS/the underlying
+ * acknowledge_poland_termination_leave_excess() RPC (HR Admin only) is the
+ * real enforcement; this action just relays the call and refreshes the
+ * employee page so Final Settlement's readiness check re-reads the updated
+ * marker immediately.
+ */
+export async function acknowledgePolandTerminationLeaveExcess(employeeId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("acknowledge_poland_termination_leave_excess", { p_employee_id: employeeId });
+  revalidatePath(`/employees/${employeeId}`);
+  return { error: error?.message ?? null };
+}
+
+/**
+ * The escape hatch for when the automatic Poland Annual Leave termination
+ * true-up (applyPolandTerminationLeaveTrueUp) couldn't run — HR has already
+ * been told, in that warning, to post the correct amount manually via a
+ * leave-ledger adjustment; this is HR's explicit, audited confirmation that
+ * they've done so for this employee's exact termination_date. RLS/the
+ * underlying confirm_poland_termination_leave_manually_reconciled() RPC (HR
+ * Admin only) is the real enforcement — this action just relays the call
+ * and refreshes the employee page so Final Settlement's readiness check
+ * re-reads the newly-created marker immediately. Posts nothing to
+ * leave_ledger itself — only the completion marker.
+ */
+export async function confirmPolandTerminationLeaveManuallyReconciled(employeeId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("confirm_poland_termination_leave_manually_reconciled", { p_employee_id: employeeId });
+  revalidatePath(`/employees/${employeeId}`);
+  return { error: error?.message ?? null };
+}
+
+const setTerminationSettlementRateSchema = z.object({
+  employeeId: z.string().uuid(),
+  leaveEncashmentDailyRate: z.coerce.number().positive(),
+});
+
+/**
+ * HR/Finance-provided statutory leave-encashment wage basis for a Saudi or
+ * Poland termination — final-settlement-section.tsx blocks its leave
+ * encashment figure until this exists, rather than guessing basic salary
+ * for a country where that would be legally wrong. RLS (termination_settlement_inputs_write)
+ * is the real enforcement of who may call this; the trigger-stamped
+ * entered_by/entered_at make it auditable regardless of what this form
+ * sends.
+ */
+export async function setTerminationSettlementRate(_prevState: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = setTerminationSettlementRateSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("termination_settlement_inputs")
+    .upsert({ employee_id: d.employeeId, leave_encashment_daily_rate: d.leaveEncashmentDailyRate });
   if (error) return { error: error.message };
 
   revalidatePath(`/employees/${d.employeeId}`);
@@ -301,6 +464,10 @@ const addContractVersionSchema = z.object({
   startDate: z.string().min(1),
   endDate: z.string().optional(),
   noticePeriodDays: z.coerce.number().int().min(0).default(30),
+  // Poland Annual Leave entitlement is prorated by this fraction (1.0 =
+  // full-time). Harmless for every other country — the domain calculators
+  // only read it for Poland.
+  fteFraction: z.coerce.number().gt(0).max(1).default(1),
 });
 
 /**
@@ -333,6 +500,7 @@ export async function addContractVersion(_prevState: ActionState, formData: Form
       end_date: d.endDate || null,
       notice_period_days: d.noticePeriodDays,
       version_no: d.nextVersionNo,
+      fte_fraction: d.fteFraction,
       created_by: user.id,
     })
     .select("id")

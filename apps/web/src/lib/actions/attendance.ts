@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import type { ActionState } from "./companies";
 
 /**
  * Deletes/corrects a single day's attendance record — recording it now
@@ -13,14 +14,19 @@ import { createClient } from "@/lib/supabase/server";
  * Goes through delete_attendance_record() rather than a bare table delete:
  * a plain delete would leave any active comp_day_ledger 'earned' credit for
  * this record orphaned (referencing a row that no longer exists) instead of
- * reversing it atomically first.
+ * reversing it atomically first. It also now REFUSES to delete a record
+ * that has a recovery credit request on file at all (Phase 2b correction
+ * round — that history is never destroyed), so the RPC's own message is
+ * surfaced verbatim rather than a generic failure string: it tells the
+ * caller exactly why, and that correcting the day's status instead is the
+ * right next step.
  */
 export async function deleteAttendanceRecord(recordId: string, employeeId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
   const { error } = await supabase.rpc("delete_attendance_record", { p_record_id: recordId });
   revalidatePath(`/employees/${employeeId}`);
   revalidatePath("/attendance");
-  return { error: error ? "Could not delete this attendance record. Please try again." : null };
+  return { error: error?.message ?? null };
 }
 
 const bulkRowSchema = z.object({
@@ -80,7 +86,57 @@ export async function bulkRecordAttendance(input: {
   if (error) return { error: "Could not save attendance. Please try again.", creditedCount: 0, needsPolicyReviewCount: 0 };
 
   revalidatePath("/attendance");
+  // 'credited' now means "a recovery credit request was submitted for
+  // Line-Manager-then-HR-Admin approval" — record_attendance_and_recovery()
+  // no longer posts an immediate comp_day_ledger row itself (see the
+  // Phase 2b correction round); bulk-attendance-form.tsx's copy reflects
+  // this, not "comp day(s) credited".
   const creditedCount = (data ?? []).filter((r) => r.credited).length;
   const needsPolicyReviewCount = (data ?? []).filter((r) => r.needs_policy_review).length;
   return { error: null, creditedCount, needsPolicyReviewCount };
+}
+
+const recordOvernightRecoveryCreditSchema = z.object({
+  employeeId: z.string().uuid(),
+  workDate: z.string().min(1),
+  completedNormalScheduledDay: z.coerce.boolean().optional(),
+  activeHoursAfterMidnight: z.coerce.number().min(0),
+});
+
+export interface RecoveryCreditActionState extends ActionState {
+  submitted?: boolean;
+}
+
+/**
+ * HR Admin/manager attestation for Recovery Leave's exceptional overnight
+ * extension — see record_overnight_recovery_credit() (SECURITY DEFINER;
+ * RLS-equivalent authorization enforced there, not here). Only ever creates
+ * a recovery_credit_requests row pending approval; never posts a ledger
+ * credit directly.
+ */
+export async function recordOvernightRecoveryCredit(
+  _prevState: RecoveryCreditActionState,
+  formData: FormData,
+): Promise<RecoveryCreditActionState> {
+  const parsed = recordOvernightRecoveryCreditSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("record_overnight_recovery_credit", {
+    p_employee_id: d.employeeId,
+    p_work_date: d.workDate,
+    p_completed_normal_scheduled_day: d.completedNormalScheduledDay ?? false,
+    p_active_hours_after_midnight: d.activeHoursAfterMidnight,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath(`/employees/${d.employeeId}`);
+  const credited = data?.[0]?.credited ?? false;
+  return {
+    error: null,
+    submitted: credited,
+  };
 }

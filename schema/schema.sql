@@ -74,7 +74,7 @@ create type approval_decision as enum ('pending', 'approved', 'rejected', 'skipp
 
 create type approvable_entity as enum (
   'leave_request', 'reimbursement_claim', 'timesheet', 'generated_letter',
-  'onboarding_task', 'offboarding_task', 'payroll_export_run'
+  'onboarding_task', 'offboarding_task', 'payroll_export_run', 'recovery_credit'
 );
 
 create type document_status as enum ('valid', 'expiring_soon', 'expired');
@@ -106,8 +106,71 @@ create table countries (
   name            text not null,
   default_currency text not null,                -- ISO 4217: 'AED', 'SAR', 'PLN'
   week_start_day  smallint not null default 1,    -- 0=Sunday .. 6=Saturday
+  -- A single "week starts here" integer can only describe a CONTIGUOUS
+  -- 5-day work week — this is the explicit, authoritative override for a
+  -- schedule it can't represent (0=Sunday..6=Saturday, the exact days
+  -- worked). Resolved (per the final business decision) for AE/SA/PL —
+  -- {1,2,3,4,5}/{0,1,2,3,4}/{1,2,3,4,5} respectively — by the leave-policy-
+  -- configuration migration; null for every other country, which falls back
+  -- to the week_start_day derivation above; see
+  -- preflight_country_schedule_config().
+  working_weekdays integer[],
   created_at      timestamptz not null default now()
 );
+
+-- Read-only audit tool: reports each of AE/SA/PL's ACTUAL EFFECTIVE
+-- schedule (working_weekdays when set, else the value derived from
+-- week_start_day) against the resolved Monday-Friday(AE/PL)/
+-- Sunday-Thursday(SA) convention, flagging any country where the two
+-- disagree — expected to always report no conflicts once working_weekdays
+-- is set for all three (kept as a live regression check, e.g. if it were
+-- ever cleared again, rather than removed now that the conflict is
+-- resolved). Callable by any authenticated user, same openness as
+-- resolve_policy() — this is aggregate configuration, not employee data.
+create or replace function preflight_country_schedule_config()
+returns table(
+  country_code text,
+  week_start_day smallint,
+  working_weekdays integer[],
+  effective_working_days integer[],
+  requested_convention text,
+  conflicts_with_requested_convention boolean
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    c.code,
+    c.week_start_day,
+    c.working_weekdays,
+    coalesce(c.working_weekdays, derived.days),
+    req.convention,
+    (req.expected is not null and coalesce(c.working_weekdays, derived.days) is distinct from req.expected)
+  from countries c
+  cross join lateral (
+    select array_agg(d order by d) as days
+    from generate_series(0, 6) as d
+    where ((d - coalesce(c.week_start_day, 1) + 7) % 7) < 5
+  ) as derived
+  cross join lateral (
+    select
+      case c.code
+        when 'AE' then 'Monday-Friday'
+        when 'SA' then 'Sunday-Thursday'
+        when 'PL' then 'Monday-Friday'
+        else null
+      end as convention,
+      case c.code
+        when 'AE' then array[1,2,3,4,5]
+        when 'SA' then array[0,1,2,3,4]
+        when 'PL' then array[1,2,3,4,5]
+        else null
+      end as expected
+  ) as req
+  where c.code in ('AE', 'SA', 'PL');
+$$;
 
 create table companies (
   id              uuid primary key default gen_random_uuid(),
@@ -217,7 +280,23 @@ create table employees (
   updated_at          timestamptz not null default now(),
   updated_by          uuid,
   deleted_at          timestamptz,
-  deleted_by          uuid
+  deleted_by          uuid,
+  -- Poland Annual Leave's 10-year service threshold counts recognised
+  -- prior service/education toward tenure, which this system has no way
+  -- to compute — it is an explicit, HR-controlled input. Null (the
+  -- default for every existing employee) means "no recognised prior
+  -- service", identical to today's behavior.
+  recognised_prior_service_years numeric(4,2)
+    check (recognised_prior_service_years is null or recognised_prior_service_years >= 0),
+  -- Whether this is the employee's first-ever job of their working life
+  -- (Kodeks pracy Art. 153 §1's progressive first-year proration) versus
+  -- someone who has worked before, anywhere, ever (Art. 1551's
+  -- calendar-year proportional entitlement instead) — a DIFFERENT fact
+  -- from "first year at Enginious", and never inferred from hire_date.
+  -- Null (every employee until HR confirms it) blocks automatic Poland
+  -- Annual Leave accrual for that employee rather than guessing either
+  -- answer — see computeAnnualLeaveEntitlementToDate.
+  is_first_ever_employment boolean
 );
 
 create index idx_employees_manager on employees(manager_id) where deleted_at is null;
@@ -248,7 +327,12 @@ create table employment_contracts (
   superseded_by        uuid references employment_contracts(id),
   version_no           int not null,
   created_at           timestamptz not null default now(),
-  created_by           uuid not null
+  created_by           uuid not null,
+  -- Poland Annual Leave entitlement must be prorated for part-time
+  -- contracts. Every existing row defaults to 1.0 (full-time), so nothing
+  -- existing changes meaning.
+  fte_fraction         numeric(4,3) not null default 1.0
+    check (fte_fraction > 0 and fte_fraction <= 1)
 );
 
 create index idx_contracts_employee_current
@@ -662,6 +746,94 @@ create table approvals (
 
 create index idx_approvals_entity on approvals(entity_type, entity_id);
 
+-- A recovery credit "earning" request — one active row per attendance
+-- record at a time (the partial unique index below is the natural key: a
+-- cancelled/rejected row never permanently blocks a later, genuinely fresh
+-- request for the same day). Routed through the SAME generic approval
+-- engine above via entity_type = 'recovery_credit' — manager approval
+-- (step 1) is the policy brief's "provisional release"; the actual earned
+-- comp_day_ledger row is posted only at HR Admin's final approval (step 2),
+-- inside decide_leave_approval().
+create table recovery_credit_requests (
+  id                    uuid primary key default gen_random_uuid(),
+  employee_id           uuid not null references employees(id),
+  attendance_record_id  uuid not null references attendance_records(id),
+  work_date             date not null,
+  event_type            text not null check (event_type in ('standard', 'overnight')),
+  proposed_days         numeric(3,1) not null check (proposed_days in (0.5, 1)),
+  status                request_status not null default 'submitted',
+  submitted_at          timestamptz not null default now(),
+  decided_at            timestamptz,
+  created_by            uuid not null,
+  comp_day_ledger_id    uuid references comp_day_ledger(id),
+  created_at            timestamptz not null default now()
+);
+
+create index idx_recovery_credit_requests_employee on recovery_credit_requests(employee_id);
+
+create unique index recovery_credit_requests_active_per_record
+  on recovery_credit_requests(attendance_record_id)
+  where status not in ('cancelled', 'rejected');
+
+-- HR/Finance-provided statutory wage basis for non-UAE leave encashment at
+-- termination — UAE settles at basic salary (computeFinalSettlement's
+-- default), but this system has no way to compute Saudi/Poland's statutory
+-- figure automatically; settlement preparation blocks with a clear message
+-- until this is present. entered_by/entered_at are stamped server-side by
+-- trigger (below), never trusted from the client.
+create table termination_settlement_inputs (
+  employee_id                  uuid primary key references employees(id),
+  leave_encashment_daily_rate  numeric(12,2) not null check (leave_encashment_daily_rate > 0),
+  entered_by                   uuid not null,
+  entered_at                   timestamptz not null default now()
+);
+
+create or replace function stamp_termination_settlement_input()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.entered_by := auth.uid();
+  new.entered_at := now();
+  return new;
+end;
+$$;
+
+create trigger termination_settlement_inputs_stamp
+  before insert or update on termination_settlement_inputs
+  for each row execute function stamp_termination_settlement_input();
+
+-- Records the outcome of exactly one Poland termination Annual Leave
+-- true-up per employee — including a ZERO-delta outcome (the cron had
+-- already granted the exact right amount) — so "no marker exists"
+-- unambiguously means "the true-up has never run for this employee," never
+-- conflated with "it ran and found nothing to adjust." Final Settlement
+-- (final-settlement-section.tsx) reads this table, not a recomputed
+-- entitlement, to decide whether it's safe to render a settlement figure —
+-- recomputing the entitlement successfully proves the CALCULATION is
+-- possible, not that post_poland_termination_leave_adjustment() (below)
+-- actually ran and posted/reconciled it.
+--
+-- excess_reviewed_at/excess_reviewed_by are set only by
+-- acknowledge_poland_termination_leave_excess() below — an explicit,
+-- audited HR action — never automatically. While a positive
+-- excess_requiring_review_days sits unacknowledged, Final Settlement stays
+-- blocked: the employee already took more Annual Leave than their
+-- corrected entitlement allows, and that's a human decision (write off?
+-- recover the overpayment?), not something this system resolves on its own.
+create table poland_termination_leave_reconciliations (
+  employee_id                    uuid primary key references employees(id),
+  termination_date               date not null,
+  raw_delta_days                 numeric not null,
+  applied_days                   numeric not null,
+  excess_requiring_review_days   numeric not null default 0,
+  excess_reviewed_at             timestamptz,
+  excess_reviewed_by             uuid,
+  note                            text,
+  created_by                     uuid not null,
+  created_at                     timestamptz not null default now()
+);
+
 -- -----------------------------------------------------------------------------
 -- 6. Reimbursements, projects, attendance/timesheets
 -- -----------------------------------------------------------------------------
@@ -781,6 +953,15 @@ create table attendance_records (
   work_mode     text
                   check (work_mode in ('office', 'client_site', 'work_from_home', 'field_work', 'business_travel')),
   source        text not null default 'manual',   -- 'manual'|'biometric'|'import'
+  -- Recovery Leave's exceptional-overnight-extension rule needs verified
+  -- working-time facts, never a browser-supplied flag — but clock_in/
+  -- clock_out above are never populated or read anywhere in this codebase,
+  -- so trusting them would mean trusting invented values. These two
+  -- columns are the smallest safe addition: HR/manager-attested facts,
+  -- same trust model as status/hours_worked above.
+  completed_normal_scheduled_day boolean,
+  active_hours_after_midnight    numeric(4,2)
+    check (active_hours_after_midnight is null or active_hours_after_midnight >= 0),
   unique (employee_id, work_date)
 );
 
@@ -1363,6 +1544,20 @@ $$;
 -- configured isn't exactly 0, 0.5, or 1 — the credit is 0 in that case,
 -- never silently 1. This is a real gap in HR configuration, not a
 -- non-event, so the caller surfaces it rather than swallowing it.
+-- Standard weekend/public-holiday Recovery Leave credit: a deterministic
+-- hour-threshold rule (up to and including 4 active hours worked -> 0.5
+-- day, more than 4 -> 1 day, from attendance_records.hours_worked, an
+-- existing HR/manager-attested field), needing no country policy
+-- configuration at all. Only ever CREATES a recovery_credit_requests row
+-- and routes it through create_initial_approval() — the actual earned
+-- comp_day_ledger row is posted solely at HR Admin's final approval, inside
+-- decide_leave_approval(). needs_policy_review now flags a recovery-eligible
+-- day with no hours_worked recorded yet (nothing to derive an amount from,
+-- so it's flagged rather than guessed) instead of a missing/misconfigured
+-- country policy, which no longer applies to this decision. Working-day/
+-- weekend derivation prefers countries.working_weekdays when a country has
+-- one configured, falling back to the week_start_day-derived formula
+-- otherwise (see preflight_country_schedule_config()).
 create or replace function record_attendance_and_recovery(p_work_date date, p_rows jsonb)
 returns table(attendance_employee_id uuid, credited boolean, reversed boolean, needs_policy_review boolean)
 language plpgsql
@@ -1378,14 +1573,14 @@ declare
   v_company_id uuid;
   v_country_code text;
   v_week_start_day smallint;
+  v_working_weekdays integer[];
   v_holiday_name text;
   v_is_recovery_day boolean;
   v_record_id uuid;
   v_was_credited comp_day_ledger%rowtype;
+  v_existing_request recovery_credit_requests%rowtype;
   v_credit_days numeric;
-  v_expiry_months int;
-  v_expiry_date date;
-  v_overtime_policy jsonb;
+  v_request_id uuid;
   v_credited boolean;
   v_reversed boolean;
   v_needs_review boolean;
@@ -1412,14 +1607,19 @@ begin
     -- Same advisory lock decide_leave_approval() takes before touching an
     -- employee's comp-day balance, for the same reason: without it, two
     -- concurrent saves for this employee (a double-clicked Save, or two
-    -- admins editing the same date) could both read "not yet credited"
-    -- before either has committed its insert, and both credit it.
+    -- admins editing the same date) could both read "not yet requested"
+    -- before either has committed its insert, and both request it.
     perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || v_employee_id::text));
 
-    select week_start_day into v_week_start_day from countries where code = v_country_code;
+    select week_start_day, working_weekdays into v_week_start_day, v_working_weekdays from countries where code = v_country_code;
     select name into v_holiday_name from public_holidays where country_code = v_country_code and holiday_date = p_work_date;
     v_is_recovery_day := v_holiday_name is not null
-      or ((extract(dow from p_work_date)::int - coalesce(v_week_start_day, 1) + 7) % 7) >= 5;
+      or (
+        case when v_working_weekdays is not null and array_length(v_working_weekdays, 1) > 0
+          then not (extract(dow from p_work_date)::int = any(v_working_weekdays))
+          else ((extract(dow from p_work_date)::int - coalesce(v_week_start_day, 1) + 7) % 7) >= 5
+        end
+      );
 
     -- One atomic upsert rather than a check-then-branch — the latter has
     -- the same TOCTOU shape as the race bulkRecordAttendance()'s old
@@ -1433,48 +1633,46 @@ begin
     returning id into v_record_id;
 
     -- The CURRENTLY ACTIVE credit for this record, if any — an 'earned' row
-    -- that hasn't itself already been reversed. Without the "not reversed"
-    -- exclusion, correcting a day away from present (posting a reversal)
-    -- and then correcting it back to present later would see the original
-    -- (now-reversed) earned row and wrongly treat it as still active,
-    -- permanently blocking that day from ever earning a fresh credit again.
+    -- that hasn't itself already been reversed — and any still-active
+    -- (non-cancelled/non-rejected) recovery_credit_requests row.
     select cl.* into v_was_credited from comp_day_ledger cl
     where cl.reference_type = 'attendance_record' and cl.reference_id = v_record_id and cl.entry_type = 'earned'
       and not exists (select 1 from comp_day_ledger r where r.reversal_of_id = cl.id);
+    select r.* into v_existing_request from recovery_credit_requests r
+    where r.attendance_record_id = v_record_id and r.status not in ('cancelled', 'rejected');
 
     if v_is_recovery_day and v_status = 'present' then
-      if v_was_credited.id is null then
-        select resolve_policy(v_country_code, 'overtime_rules', p_work_date) into v_overtime_policy;
-        -- recovery_credit_days must be exactly 0, 0.5, or 1 — HR-configurable
-        -- per country via the overtime_rules policy payload, same
-        -- field-within-payload convention comp_day_expiry_months already
-        -- established. No active policy, a missing field, or any other
-        -- value is treated as unconfigured: 0 days credited, never a
-        -- silent default to 1 — this is a gap in HR setup that needs
-        -- review, not a free day.
-        if v_overtime_policy is null or not (v_overtime_policy ? 'recovery_credit_days') then
-          v_credit_days := 0;
+      if v_was_credited.id is null and v_existing_request.id is null then
+        if v_hours is null then
           v_needs_review := true;
-        else
-          v_credit_days := (v_overtime_policy ->> 'recovery_credit_days')::numeric;
-          if v_credit_days is distinct from 0 and v_credit_days is distinct from 0.5 and v_credit_days is distinct from 1 then
-            v_credit_days := 0;
-            v_needs_review := true;
-          end if;
-        end if;
-
-        if v_credit_days > 0 then
-          v_expiry_months := nullif(v_overtime_policy ->> 'comp_day_expiry_months', '')::int;
-          v_expiry_date := case when v_expiry_months is not null then (p_work_date + (v_expiry_months || ' months')::interval)::date else null end;
-          insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, expiry_date, reference_type, reference_id, created_by)
-          values (v_employee_id, p_work_date, 'earned', v_credit_days, 'holiday_worked', v_expiry_date, 'attendance_record', v_record_id, auth.uid());
+        elsif v_hours > 0 then
+          v_credit_days := case when v_hours > 4 then 1 else 0.5 end;
+          insert into recovery_credit_requests (employee_id, attendance_record_id, work_date, event_type, proposed_days, created_by)
+          values (v_employee_id, v_record_id, p_work_date, 'standard', v_credit_days, auth.uid())
+          returning id into v_request_id;
+          perform create_initial_approval('recovery_credit', v_request_id);
           v_credited := true;
         end if;
       end if;
-    elsif v_was_credited.id is not null then
-      insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, reference_type, reference_id, reversal_of_id, created_by)
-      values (v_was_credited.employee_id, p_work_date, 'reversal', -v_was_credited.days, 'holiday_worked', 'attendance_record', v_record_id, v_was_credited.id, auth.uid());
-      v_reversed := true;
+    else
+      -- No longer an eligible day (corrected away from present, or no
+      -- longer a recovery day). Reverse an already-fully-approved credit
+      -- via the same linked-reversal pattern as before; ANY still-active
+      -- request (submitted, pending_approval, OR already approved) is
+      -- cancelled too — never deleted, same append-only convention
+      -- cancel_leave_request() uses for approvals — so a later correction
+      -- back to present can earn a genuinely fresh request for this day.
+      if v_was_credited.id is not null then
+        insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, reference_type, reference_id, reversal_of_id, created_by)
+        values (v_was_credited.employee_id, current_date, 'reversal', -v_was_credited.days, 'holiday_worked', 'attendance_record', v_record_id, v_was_credited.id, auth.uid());
+        v_reversed := true;
+      end if;
+      if v_existing_request.id is not null then
+        update recovery_credit_requests set status = 'cancelled', decided_at = now() where id = v_existing_request.id;
+        update approvals
+        set decision = 'cancelled', decided_at = now(), comments = coalesce(comments, 'Cancelled: attendance record no longer qualifies')
+        where entity_type = 'recovery_credit' and entity_id = v_existing_request.id and decision = 'pending';
+      end if;
     end if;
 
     attendance_employee_id := v_employee_id;
@@ -1531,6 +1729,24 @@ create trigger comp_day_ledger_single_active_credit after insert on comp_day_led
 -- the same transaction, via the same linked-reversal pattern
 -- record_attendance_and_recovery() already uses, so deleting a day can
 -- never leave an active recovery credit with nothing behind it.
+--
+-- recovery_credit_requests.attendance_record_id is NOT NULL with no ON
+-- DELETE action, so a request referencing this record (at ANY status,
+-- including a terminal cancelled/rejected one — it is still workflow
+-- history) blocks a physical delete of the parent attendance_records row
+-- at the database level. This function REFUSES the physical delete
+-- outright whenever any recovery_credit_requests row exists for it, rather
+-- than deleting or cascading approvals/recovery_credit_requests to work
+-- around the constraint — that would destroy Recovery Leave earning's
+-- audit trail. record_attendance_and_recovery() is the correct path for a
+-- mistaken/no-longer-eligible day instead: correcting that day's status
+-- there already cancels a pending request and reverses an approved credit
+-- in place, preserving every row, without ever touching this primary key.
+--
+-- A comp_day_ledger 'earned' credit with NO recovery_credit_requests row at
+-- all can still exist — from the pre-Phase-2b immediate-credit mechanism
+-- this migration retires, predating recovery_credit_requests entirely —
+-- and is still reversed-then-deleted exactly as before.
 create or replace function delete_attendance_record(p_record_id uuid)
 returns void
 language plpgsql
@@ -1541,6 +1757,7 @@ declare
   v_employee_id uuid;
   v_company_id uuid;
   v_was_credited comp_day_ledger%rowtype;
+  v_has_recovery_request boolean;
 begin
   select employee_id into v_employee_id from attendance_records where id = p_record_id;
   if v_employee_id is null then
@@ -1550,6 +1767,11 @@ begin
   select company_id into v_company_id from employees where id = v_employee_id;
   if not has_role('hr_admin', v_company_id) then
     raise exception 'Only HR Admin may delete an attendance record';
+  end if;
+
+  select exists(select 1 from recovery_credit_requests where attendance_record_id = p_record_id) into v_has_recovery_request;
+  if v_has_recovery_request then
+    raise exception 'This attendance record has a recovery credit request on file (submitted, approved, or otherwise) and cannot be deleted, to preserve that workflow''s history. Correct the day''s status instead (e.g. mark it absent) via the attendance register — that cancels a pending request or reverses an approved credit in place, without deleting anything.';
   end if;
 
   perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || v_employee_id::text));
@@ -1564,6 +1786,585 @@ begin
   end if;
 
   delete from attendance_records where id = p_record_id;
+end;
+$$;
+
+-- Phase 2b: Recovery Leave's exceptional-overnight-extension credit. Mirrors
+-- packages/domain/src/recoveryCredit.ts's computeOvernightRecoveryCredit
+-- exactly (0.5 day up to and including 4 active hours after midnight, 1 day
+-- beyond that; nothing unless the normal scheduled day was completed AND
+-- work genuinely continued past midnight). Only ever CREATES a
+-- recovery_credit_requests row and routes it through
+-- create_initial_approval() — never posts to comp_day_ledger directly; the
+-- actual earned row is posted solely at HR Admin's final approval, inside
+-- decide_leave_approval().
+create or replace function record_overnight_recovery_credit(
+  p_employee_id uuid,
+  p_work_date date,
+  p_completed_normal_scheduled_day boolean,
+  p_active_hours_after_midnight numeric
+)
+returns table(credited boolean, credit_days numeric)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_company_id uuid;
+  v_record_id uuid;
+  v_was_credited comp_day_ledger%rowtype;
+  v_existing_request recovery_credit_requests%rowtype;
+  v_credit_days numeric;
+  v_request_id uuid;
+begin
+  select company_id into v_company_id from employees where id = p_employee_id and deleted_at is null;
+  if v_company_id is null then
+    raise exception 'Employee % not found', p_employee_id;
+  end if;
+
+  if not (has_role('hr_admin', v_company_id) or is_manager_of(p_employee_id)) then
+    raise exception 'Only HR Admin or this employee''s manager may record an overnight recovery credit';
+  end if;
+
+  if p_active_hours_after_midnight is null or p_active_hours_after_midnight < 0 then
+    raise exception 'active_hours_after_midnight must be a non-negative number';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || p_employee_id::text));
+
+  select id into v_record_id from attendance_records where employee_id = p_employee_id and work_date = p_work_date;
+  if v_record_id is null then
+    raise exception 'Record ordinary attendance for % on % first', p_employee_id, p_work_date;
+  end if;
+
+  update attendance_records
+  set completed_normal_scheduled_day = p_completed_normal_scheduled_day,
+      active_hours_after_midnight = p_active_hours_after_midnight
+  where id = v_record_id;
+
+  select cl.* into v_was_credited from comp_day_ledger cl
+  where cl.reference_type = 'attendance_record' and cl.reference_id = v_record_id and cl.entry_type = 'earned'
+    and not exists (select 1 from comp_day_ledger r where r.reversal_of_id = cl.id);
+  select r.* into v_existing_request from recovery_credit_requests r
+  where r.attendance_record_id = v_record_id and r.status not in ('cancelled', 'rejected');
+
+  if v_was_credited.id is not null or v_existing_request.id is not null then
+    credited := false;
+    credit_days := 0;
+    return next;
+    return;
+  end if;
+
+  if not p_completed_normal_scheduled_day or p_active_hours_after_midnight <= 0 then
+    credited := false;
+    credit_days := 0;
+    return next;
+    return;
+  end if;
+
+  v_credit_days := case when p_active_hours_after_midnight > 4 then 1 else 0.5 end;
+
+  insert into recovery_credit_requests (employee_id, attendance_record_id, work_date, event_type, proposed_days, created_by)
+  values (p_employee_id, v_record_id, p_work_date, 'overnight', v_credit_days, auth.uid())
+  returning id into v_request_id;
+
+  perform create_initial_approval('recovery_credit', v_request_id);
+
+  credited := true;
+  credit_days := v_credit_days;
+  return next;
+end;
+$$;
+
+-- Phase 2b: Recovery Leave forfeiture on termination — no cash conversion,
+-- an auditable 'reversal' row (source = 'termination_forfeiture') rather
+-- than a silent delete. Idempotent: does nothing if there's no positive
+-- balance left, so a retried or double-triggered call never double-forfeits
+-- or drives the balance negative.
+create or replace function forfeit_recovery_leave_on_termination(p_employee_id uuid)
+returns table(forfeited_days numeric)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_company_id uuid;
+  v_employment_status employment_status;
+  v_balance numeric;
+begin
+  select company_id, employment_status into v_company_id, v_employment_status
+  from employees where id = p_employee_id;
+  if v_company_id is null then
+    raise exception 'Employee % not found', p_employee_id;
+  end if;
+
+  if not has_role('hr_admin', v_company_id) then
+    raise exception 'Only HR Admin may forfeit recovery leave on termination';
+  end if;
+
+  if v_employment_status is distinct from 'terminated' then
+    raise exception 'Employee % is not marked terminated', p_employee_id;
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || p_employee_id::text));
+
+  select coalesce(sum(days), 0) into v_balance from comp_day_ledger where employee_id = p_employee_id;
+
+  if v_balance <= 0 then
+    forfeited_days := 0;
+    return next;
+    return;
+  end if;
+
+  insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, reference_type, reference_id, created_by)
+  values (p_employee_id, current_date, 'reversal', -v_balance, 'termination_forfeiture', 'employee', p_employee_id, auth.uid());
+
+  forfeited_days := v_balance;
+  return next;
+end;
+$$;
+
+-- Phase 2b correction round: Poland's flat 26-day/year Annual Leave company
+-- benefit (see packages/domain/src/annualLeaveEntitlement.ts) was correctly
+-- connected to the monthly accrual cron, but NOT to termination — the
+-- monthly cron may already have posted a full calendar year's 26 days
+-- before a Poland employee actually leaves mid-year, and Final Settlement
+-- (final-settlement-section.tsx) reads the raw leave_ledger balance
+-- directly, with nothing ever re-deriving it against the employee's actual,
+-- prorated exit-year entitlement.
+--
+-- This function is the missing true-up: apps/web/src/lib/actions/
+-- polandTermination.ts computes, in TypeScript (reusing the same
+-- FTE-interval resolution and calendar-month rounding already implemented
+-- and tested in packages/domain, and the same ledger-grant classification
+-- the accrual cron uses — see lib/leaveLedger/classifyLedgerRows.ts), the
+-- RAW difference between the employee's entitlement through their actual
+-- termination date and what has already been unambiguously granted for
+-- 'annual' leave this employee's whole tenure. That raw figure is passed
+-- here as p_amount_days; this function's own job is deliberately narrow and
+-- purely mechanical — post it as an auditable, idempotent, non-destructive
+-- leave_ledger row (never rewriting or deleting existing history), record a
+-- poland_termination_leave_reconciliations completion marker (created
+-- UNCONDITIONALLY, even when there's nothing to post — see that table's own
+-- header comment), and enforce, as a HARD DATABASE-LEVEL INVARIANT
+-- independent of whatever the caller computed, that a negative true-up (an
+-- over-grant being clawed back) never drives the balance below where it
+-- already stood at or below zero. Days an employee has already taken can't
+-- be un-taken — any excess is reported back (excess_requiring_review) and
+-- recorded on the reconciliation row for HR to review and explicitly
+-- acknowledge (acknowledge_poland_termination_leave_excess below), never
+-- silently written off ledger-side.
+--
+-- Idempotent PER EMPLOYEE, permanently: once a reconciliation row exists,
+-- every subsequent call is a no-op (already_posted = true) regardless of
+-- what p_amount_days it's given — this true-up runs exactly once per
+-- employee's termination, the same way forfeit_recovery_leave_on_termination
+-- treats "already forfeited" as terminal, never something to redo.
+--
+-- Deliberately NOT folded into terminate_employee()'s own transaction: the
+-- calculation behind p_amount_days is complex, already independently
+-- tested TypeScript this system deliberately does not re-derive in
+-- PL/pgSQL (see this file's own header above and the domain package's
+-- header comment). "Atomic where feasible" is satisfied by each half being
+-- independently atomic, idempotent, and advisory-lock-protected —
+-- terminate_employee()'s own status-change-plus-forfeiture transaction is
+-- untouched — invoked back-to-back within one Server Action call, rather
+-- than forcing a single cross-language transaction.
+create or replace function post_poland_termination_leave_adjustment(
+  p_employee_id uuid,
+  p_amount_days numeric,
+  p_note text default null
+)
+returns table(applied_days numeric, excess_requiring_review numeric, already_posted boolean)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_company_id uuid;
+  v_country_code text;
+  v_employment_status employment_status;
+  v_termination_date date;
+  v_current_balance numeric;
+  v_floor numeric;
+  v_applied numeric;
+  v_excess numeric := 0;
+  v_key text;
+begin
+  select company_id, country_code, employment_status, termination_date
+    into v_company_id, v_country_code, v_employment_status, v_termination_date
+    from employees where id = p_employee_id;
+  if v_company_id is null then
+    raise exception 'Employee % not found', p_employee_id;
+  end if;
+
+  if not has_role('hr_admin', v_company_id) then
+    raise exception 'Only HR Admin may post a termination Annual Leave adjustment';
+  end if;
+
+  if v_country_code is distinct from 'PL' then
+    raise exception 'post_poland_termination_leave_adjustment only applies to Poland employees';
+  end if;
+
+  if v_employment_status is distinct from 'terminated' then
+    raise exception 'Employee % is not marked terminated', p_employee_id;
+  end if;
+
+  -- Locked before the idempotency check AND the balance read below, so a
+  -- concurrent/retried call can't race between "not yet posted" and the
+  -- insert, nor read a stale balance while another call is mid-write.
+  perform pg_advisory_xact_lock(hashtext('leave_ledger_annual:' || p_employee_id::text));
+
+  -- The completion marker — not the leave_ledger row, which a zero-delta
+  -- outcome never creates — is the single source of truth for "has this
+  -- already run for this employee."
+  if exists (select 1 from poland_termination_leave_reconciliations where employee_id = p_employee_id) then
+    applied_days := 0;
+    excess_requiring_review := 0;
+    already_posted := true;
+    return next;
+    return;
+  end if;
+
+  v_key := 'termination_settlement:' || p_employee_id::text;
+  v_applied := 0;
+
+  if p_amount_days <> 0 then
+    select coalesce(sum(amount_days), 0) into v_current_balance
+      from leave_ledger where employee_id = p_employee_id and leave_type_code = 'annual';
+
+    -- Never let this adjustment push the balance any lower than it already
+    -- stood at or below zero: the floor is the LESSER of the current
+    -- balance and zero — an already-non-negative balance floors at 0 (a
+    -- clawback may only remove what's genuinely unused), and an
+    -- already-negative balance (a prior advance-leave situation) floors at
+    -- exactly where it already was, so this adjustment never compounds a
+    -- pre-existing over-draw.
+    v_floor := least(v_current_balance, 0);
+    v_applied := p_amount_days;
+    if p_amount_days < 0 then
+      v_applied := greatest(p_amount_days, v_floor - v_current_balance);
+      v_excess := p_amount_days - v_applied;
+    end if;
+
+    if v_applied <> 0 then
+      insert into leave_ledger (employee_id, leave_type_code, txn_date, entry_type, amount_days, reference_type, reference_id, note, created_by, idempotency_key)
+      values (p_employee_id, 'annual', coalesce(v_termination_date, current_date), 'adjustment', v_applied, 'termination_settlement', p_employee_id, p_note, auth.uid(), v_key)
+      on conflict (idempotency_key) do nothing;
+    end if;
+  end if;
+
+  insert into poland_termination_leave_reconciliations (employee_id, termination_date, raw_delta_days, applied_days, excess_requiring_review_days, note, created_by)
+  values (p_employee_id, coalesce(v_termination_date, current_date), p_amount_days, v_applied, abs(v_excess), p_note, auth.uid())
+  on conflict (employee_id) do nothing;
+
+  applied_days := v_applied;
+  excess_requiring_review := abs(v_excess);
+  already_posted := false;
+  return next;
+end;
+$$;
+
+-- The one, explicit, audited HR action that clears a pending
+-- excess_requiring_review_days flag — see the table's own header comment
+-- for why this can never happen automatically. Idempotent: acknowledging an
+-- already-acknowledged (or never-flagged) reconciliation is a silent no-op,
+-- not an error, so a retried click can't fail or double-stamp the record.
+create or replace function acknowledge_poland_termination_leave_excess(p_employee_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_company_id uuid;
+begin
+  select company_id into v_company_id from employees where id = p_employee_id;
+  if v_company_id is null then
+    raise exception 'Employee % not found', p_employee_id;
+  end if;
+
+  if not has_role('hr_admin', v_company_id) then
+    raise exception 'Only HR Admin may acknowledge a termination Annual Leave excess';
+  end if;
+
+  if not exists (select 1 from poland_termination_leave_reconciliations where employee_id = p_employee_id) then
+    raise exception 'No termination Annual Leave reconciliation exists for employee %', p_employee_id;
+  end if;
+
+  update poland_termination_leave_reconciliations
+  set excess_reviewed_at = now(), excess_reviewed_by = auth.uid()
+  where employee_id = p_employee_id and excess_reviewed_at is null;
+end;
+$$;
+
+-- The escape hatch for when applyPolandTerminationLeaveTrueUp() (lib/actions/
+-- polandTermination.ts) could NOT automatically determine/post the true-up
+-- (no/gappy/ambiguous FTE history, an unclassifiable historical ledger row,
+-- a query failure, or the RPC call itself failing) — every one of those
+-- cases already tells HR, in the warning it returns, to post the correct
+-- amount manually via a leave-ledger adjustment instead. Until now nothing
+-- ever created the poland_termination_leave_reconciliations marker for that
+-- path, so Final Settlement stayed blocked forever even after HR did
+-- exactly what it was told to do — this function is HR's explicit,
+-- audited confirmation that they've done so, closing that gap.
+--
+-- Deliberately posts NOTHING to leave_ledger itself (that's what the manual
+-- adjustment HR already posted was for) — it only writes the completion
+-- marker, with raw_delta_days/applied_days recorded as 0 so the row reads
+-- unambiguously as "resolved manually, not by the automatic true-up," never
+-- confused with a genuine zero-delta automatic outcome (which carries its
+-- own note text). Same idempotent, advisory-lock-protected,
+-- "the marker's existence is terminal" pattern as
+-- post_poland_termination_leave_adjustment above — a second confirmation
+-- call is a silent no-op, never an error.
+create or replace function confirm_poland_termination_leave_manually_reconciled(
+  p_employee_id uuid,
+  p_note text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_company_id uuid;
+  v_country_code text;
+  v_employment_status employment_status;
+  v_termination_date date;
+begin
+  select company_id, country_code, employment_status, termination_date
+    into v_company_id, v_country_code, v_employment_status, v_termination_date
+    from employees where id = p_employee_id;
+  if v_company_id is null then
+    raise exception 'Employee % not found', p_employee_id;
+  end if;
+
+  if not has_role('hr_admin', v_company_id) then
+    raise exception 'Only HR Admin may confirm a manual termination Annual Leave reconciliation';
+  end if;
+
+  if v_country_code is distinct from 'PL' then
+    raise exception 'confirm_poland_termination_leave_manually_reconciled only applies to Poland employees';
+  end if;
+
+  if v_employment_status is distinct from 'terminated' then
+    raise exception 'Employee % is not marked terminated', p_employee_id;
+  end if;
+
+  if v_termination_date is null then
+    raise exception 'Employee % has no termination_date recorded', p_employee_id;
+  end if;
+
+  -- Same lock key as post_poland_termination_leave_adjustment — the two
+  -- functions are mutually exclusive ways of reaching the same one-time
+  -- completion marker for this employee, so they must not be allowed to
+  -- race each other either.
+  perform pg_advisory_xact_lock(hashtext('leave_ledger_annual:' || p_employee_id::text));
+
+  insert into poland_termination_leave_reconciliations (employee_id, termination_date, raw_delta_days, applied_days, excess_requiring_review_days, note, created_by)
+  values (p_employee_id, v_termination_date, 0, 0, 0, coalesce(p_note, 'Confirmed by HR Admin: Annual Leave ledger manually reconciled for this termination.'), auth.uid())
+  on conflict (employee_id) do nothing;
+end;
+$$;
+
+-- Wraps the termination status transition AND the forfeiture into one
+-- transaction, so forfeiture can never be skipped by mistake — it must be
+-- part of the authorised termination transaction, not an optional separate
+-- call HR can forget. Only ever touches employees.employment_status/
+-- termination_date and comp_day_ledger; never leave_ledger, so payable
+-- Annual Leave is unaffected and still settled separately (see
+-- post_poland_termination_leave_adjustment above for Poland's own,
+-- deliberately separate leave_ledger true-up).
+create or replace function terminate_employee(p_employee_id uuid, p_termination_date date default current_date)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_company_id uuid;
+begin
+  select company_id into v_company_id from employees where id = p_employee_id and deleted_at is null;
+  if v_company_id is null then
+    raise exception 'Employee % not found', p_employee_id;
+  end if;
+
+  if not has_role('hr_admin', v_company_id) then
+    raise exception 'Only HR Admin may terminate an employee';
+  end if;
+
+  update employees
+  set employment_status = 'terminated', termination_date = p_termination_date, updated_at = now(), updated_by = auth.uid()
+  where id = p_employee_id;
+
+  perform forfeit_recovery_leave_on_termination(p_employee_id);
+end;
+$$;
+
+-- Read-only. For each of AE/SA/PL and each of leave_rules/overtime_rules,
+-- reports every existing policy_versions row's version numbers/statuses,
+-- the next free version_no, whether a Phase 2b draft (tagged via the
+-- 'phase2b_seed_marker' payload key) has already been seeded, and how many
+-- 2026 public holidays already exist — everything an operator needs to
+-- review before calling seed_phase2b_policy_drafts() below.
+create or replace function preflight_policy_and_holiday_conflicts()
+returns table(
+  country_code text,
+  policy_type text,
+  existing_version_numbers int[],
+  existing_statuses text[],
+  next_free_version_no int,
+  already_seeded_by_this_migration boolean,
+  holiday_count_2026 bigint
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    cc.code,
+    pt.policy_type,
+    coalesce((select array_agg(pv.version_no order by pv.version_no) from policy_versions pv where pv.country_code = cc.code and pv.policy_type::text = pt.policy_type), array[]::int[]),
+    coalesce((select array_agg(distinct pv.status::text) from policy_versions pv where pv.country_code = cc.code and pv.policy_type::text = pt.policy_type), array[]::text[]),
+    coalesce((select max(pv.version_no) from policy_versions pv where pv.country_code = cc.code and pv.policy_type::text = pt.policy_type), 0) + 1,
+    exists (
+      select 1 from policy_versions pv
+      where pv.country_code = cc.code and pv.policy_type::text = pt.policy_type
+        and pv.payload ->> 'phase2b_seed_marker' = 'leave_policy_configuration'
+    ),
+    (select count(*) from public_holidays ph where ph.country_code = cc.code and ph.holiday_date between '2026-01-01' and '2026-12-31')
+  from (values ('AE'), ('SA'), ('PL')) as cc(code)
+  cross join (values ('leave_rules'), ('overtime_rules')) as pt(policy_type)
+  order by cc.code, pt.policy_type;
+$$;
+
+-- Creates the Phase 2b Annual Leave (leave_rules v-next) and Recovery Leave
+-- (overtime_rules v-next) draft policies for AE/SA/PL. Requires a REAL,
+-- verified actor — never an unattributed placeholder — and never overwrites
+-- an existing draft or active policy: it always computes the next free
+-- version_no from what is actually in the database at call time, and it is
+-- safely repeatable (a second call detects its own prior run per country/
+-- policy_type via the 'phase2b_seed_marker' payload tag and skips rather
+-- than creating a duplicate version). Not applied automatically by any
+-- migration; an authenticated HR Admin (or whoever is setting up the
+-- project) calls `select * from seed_phase2b_policy_drafts(auth.uid());`
+-- explicitly, after reviewing preflight_policy_and_holiday_conflicts().
+create or replace function seed_phase2b_policy_drafts(p_created_by uuid)
+returns table(country_code text, policy_type text, version_no int, action text)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_country text;
+  v_leave_version_no int;
+  v_overtime_version_no int;
+  v_leave_version_id uuid;
+  v_already_seeded boolean;
+  v_deduction_mode text;
+  v_extend_for_holidays boolean;
+  v_annual_name text;
+  v_annual_accrual_method text;
+  v_annual_max_balance numeric;
+  v_annual_carryover_max numeric;
+  v_annual_carryover_expiry_months int;
+begin
+  if p_created_by is null then
+    raise exception 'seed_phase2b_policy_drafts requires a real authenticated actor id (p_created_by) — refusing to create policy drafts with no attributable owner.';
+  end if;
+  if not exists (select 1 from auth.users where id = p_created_by) then
+    raise exception 'p_created_by (%) does not correspond to a real auth.users row.', p_created_by;
+  end if;
+
+  foreach v_country in array array['AE', 'SA', 'PL']
+  loop
+    select exists (
+      select 1 from policy_versions pv
+      where pv.country_code = v_country and pv.policy_type = 'leave_rules'
+        and pv.payload ->> 'phase2b_seed_marker' = 'leave_policy_configuration'
+    ) into v_already_seeded;
+
+    if v_already_seeded then
+      country_code := v_country; policy_type := 'leave_rules'; version_no := null; action := 'skipped_already_seeded';
+      return next;
+    else
+      select coalesce(max(pv.version_no), 0) + 1 into v_leave_version_no
+      from policy_versions pv where pv.country_code = v_country and pv.policy_type = 'leave_rules';
+
+      v_deduction_mode := case v_country when 'PL' then 'workingDays' else 'calendarDays' end;
+      v_extend_for_holidays := (v_country = 'SA');
+      v_annual_name := case v_country when 'PL' then 'Annual leave (urlop wypoczynkowy)' else 'Annual leave' end;
+      v_annual_accrual_method := case v_country when 'PL' then 'annual_grant' else 'per_service_year' end;
+      v_annual_max_balance := case v_country when 'PL' then 26 else 90 end;
+      v_annual_carryover_max := case v_country when 'PL' then 20 else 30 end;
+      v_annual_carryover_expiry_months := case v_country when 'PL' then 9 else 12 end;
+
+      insert into policy_versions (country_code, policy_type, version_no, effective_from, payload, created_by)
+      values (
+        v_country, 'leave_rules', v_leave_version_no, '2026-01-01',
+        jsonb_build_object(
+          'phase2b_seed_marker', 'leave_policy_configuration',
+          'summary', case v_country
+            when 'AE' then 'UAE Annual Leave: 30 calendar days per completed year; 2 calendar days per completed month after 6 months but before 1 year. Calendar-day deduction. Sequential approval: Line Manager then HR Admin. No deduction until the full chain approves.'
+            when 'SA' then 'Saudi Annual Leave: 21 calendar days/year under five consecutive years of service, 30 calendar days/year from the fifth year onward. Calendar-day deduction; an official holiday inside the leave period extends it rather than consuming a leave day. Sequential approval: Line Manager then HR Admin. Unused legally accrued leave is paid on termination using the statutory Saudi wage basis, not forced onto a basic-salary-only calculation.'
+            when 'PL' then 'Poland Annual Leave: 20 working days/year under 10 years of legally recognised service (actual tenure plus any HR-recognised prior service/education), 26 working days/year at 10+ years; prorated for part-time by contract FTE fraction. Deducted against scheduled working time (1 day = 8 hours). A first-time employee accrues 1/12 of the annual entitlement per completed month. Sequential approval: Line Manager then HR Admin. Unused leave payable on termination uses Poland''s statutory pecuniary-equivalent calculation, not a UAE-style basic-salary rule.'
+          end,
+          'settlement', 'Enginious settles unused Annual Leave upon resignation, termination or contract expiry using the employee''s basic salary where legally permitted. Where mandatory local law requires another wage basis or statutory calculation, the legally required method applies.',
+          'deduction_mode', v_deduction_mode,
+          'extend_for_holidays', v_extend_for_holidays,
+          'first_year_monthly_accrual_fraction', case when v_country = 'PL' then 0.0833 else null end
+        ),
+        p_created_by
+      )
+      returning id into v_leave_version_id;
+
+      insert into policy_leave_types (policy_version_id, leave_type_code, name, accrual_method, max_balance_days, carryover_max_days, carryover_expiry_months, min_service_days_to_accrue)
+      values
+        (v_leave_version_id, 'annual', v_annual_name, v_annual_accrual_method, v_annual_max_balance, v_annual_carryover_max, v_annual_carryover_expiry_months, 0),
+        (v_leave_version_id, 'recovery', 'Recovery Leave', 'annual_grant', null, 0, null, 0);
+
+      country_code := v_country; policy_type := 'leave_rules'; version_no := v_leave_version_no; action := 'created';
+      return next;
+    end if;
+
+    select exists (
+      select 1 from policy_versions pv
+      where pv.country_code = v_country and pv.policy_type = 'overtime_rules'
+        and pv.payload ->> 'phase2b_seed_marker' = 'leave_policy_configuration'
+    ) into v_already_seeded;
+
+    if v_already_seeded then
+      country_code := v_country; policy_type := 'overtime_rules'; version_no := null; action := 'skipped_already_seeded';
+      return next;
+    else
+      select coalesce(max(pv.version_no), 0) + 1 into v_overtime_version_no
+      from policy_versions pv where pv.country_code = v_country and pv.policy_type = 'overtime_rules';
+
+      insert into policy_versions (country_code, policy_type, version_no, effective_from, payload, created_by)
+      values (
+        v_country, 'overtime_rules', v_overtime_version_no, '2026-01-01',
+        jsonb_build_object(
+          'phase2b_seed_marker', 'leave_policy_configuration',
+          'policy_name', 'Enginious Recovery Leave',
+          'wording', 'Recovery Leave is a time-off benefit intended to provide rest during active employment. It is not salary, Annual Leave or a cash entitlement. Unused internal Recovery Leave expires 180 days after earning and is forfeited without cash conversion when employment ends, subject to mandatory local employment law.',
+          'statutory_safeguard', 'Enginious does not operate a general discretionary overtime-payment scheme. Working beyond normal hours does not automatically create Recovery Leave or an additional contractual payment. Where applicable employment law mandates overtime pay, holiday compensation, substitute rest or another minimum entitlement, Enginious will comply with that statutory requirement.',
+          'standard_threshold_hours', 4,
+          'standard_credit_below_threshold_days', 0.5,
+          'standard_credit_above_threshold_days', 1,
+          'overnight_threshold_hours', 4,
+          'expiry_days', 180,
+          'consumption_order', 'oldest_first',
+          'approval_chain', jsonb_build_array('direct_manager', 'role:hr_admin')
+        ),
+        p_created_by
+      );
+
+      country_code := v_country; policy_type := 'overtime_rules'; version_no := v_overtime_version_no; action := 'created';
+      return next;
+    end if;
+  end loop;
 end;
 $$;
 
@@ -1614,6 +2415,18 @@ begin
     (v_workflow_id, 1, 'role:finance'),
     (v_workflow_id, 2, 'role:ceo');
 
+  -- Recovery Leave earning: Line Manager approval (provisional release),
+  -- then HR Admin final approval (the only point that posts a ledger
+  -- credit) — its own insert, outside the loop above, because its step
+  -- count (2) differs from every other entity type there (1).
+  insert into approval_workflows (company_id, entity_type, name)
+  values (new.id, 'recovery_credit', 'Recovery Leave earning approval (Line Manager, then HR Admin)')
+  returning id into v_workflow_id;
+
+  insert into approval_workflow_steps (workflow_id, step_order, approver_type) values
+    (v_workflow_id, 1, 'direct_manager'),
+    (v_workflow_id, 2, 'role:hr_admin');
+
   return new;
 end;
 $$;
@@ -1646,6 +2459,12 @@ begin
       return exists (select 1 from generated_letters where id = p_entity_id and generated_by = auth.uid());
     when 'payroll_export_run' then
       return exists (select 1 from payroll_export_runs where id = p_entity_id and generated_by = auth.uid());
+    when 'recovery_credit' then
+      -- Manager/HR-initiated on the employee's behalf (they attest to a
+      -- fact, not submit their own request) — same "owner = initiator"
+      -- pattern generated_letter/payroll_export_run use via generated_by,
+      -- here via created_by.
+      return exists (select 1 from recovery_credit_requests where id = p_entity_id and created_by = auth.uid());
     else
       return false;
   end case;
@@ -2032,6 +2851,7 @@ declare
   v_approver_type text;
   v_approver_id uuid;
   v_approval_id uuid;
+  v_self_check_user_id uuid;
 begin
   if not is_entity_owner(p_entity_type, p_entity_id) then
     raise exception 'You do not own this % (or it does not exist)', p_entity_type;
@@ -2051,6 +2871,9 @@ begin
     from generated_letters l join employees e on e.id = l.employee_id where l.id = p_entity_id;
   elsif p_entity_type = 'payroll_export_run' then
     select company_id into v_company_id from payroll_export_runs where id = p_entity_id;
+  elsif p_entity_type = 'recovery_credit' then
+    select e.company_id, r.employee_id into v_company_id, v_employee_id
+    from recovery_credit_requests r join employees e on e.id = r.employee_id where r.id = p_entity_id;
   else
     raise exception 'Unsupported entity type: %', p_entity_type;
   end if;
@@ -2080,8 +2903,20 @@ begin
 
   -- Self-approval prevention for step 1 — decide_leave_approval() already
   -- refuses to route any LATER step back to the requester; this is the same
-  -- check for the first step, which that function never sees.
-  if v_approver_id = auth.uid() then
+  -- check for the first step, which that function never sees. Compares
+  -- against the ENTITY's own beneficiary, not always the caller: every
+  -- other entity type is self-submitted (the caller IS the requester, so
+  -- auth.uid() is correct), but recovery_credit is manager/HR-initiated ON
+  -- BEHALF OF the employee — the direct manager routinely is both the one
+  -- recording eligibility AND the resolved step-1 approver for their own
+  -- report, which is never "self-approval" (they aren't approving their
+  -- OWN leave). Only block if the resolved approver equals the beneficiary.
+  if p_entity_type = 'recovery_credit' then
+    select user_id into v_self_check_user_id from employees where id = v_employee_id;
+  else
+    v_self_check_user_id := auth.uid();
+  end if;
+  if v_approver_id = v_self_check_user_id then
     raise exception 'The resolved approver for this workflow''s first step (%) is you — you can''t approve your own request. Contact HR Admin to assign a different approver.', v_approver_type;
   end if;
 
@@ -2200,8 +3035,11 @@ declare
   v_rule record;
   v_available numeric(6,2);
   v_draw numeric(6,2);
+  v_had_configured_rule boolean;
   v_timesheet timesheets%rowtype;
   v_payroll_company_id uuid;
+  v_recovery_request recovery_credit_requests%rowtype;
+  v_comp_day_ledger_id uuid;
   v_step record;
   v_next_approver uuid;
   v_found_next boolean := false;
@@ -2241,6 +3079,10 @@ begin
   elsif v_approval.entity_type = 'payroll_export_run' then
     select company_id, generated_by into v_payroll_company_id, v_requester_user_id
     from payroll_export_runs where id = v_approval.entity_id for update;
+  elsif v_approval.entity_type = 'recovery_credit' then
+    select * into v_recovery_request from recovery_credit_requests where id = v_approval.entity_id for update;
+    v_employee_id := v_recovery_request.employee_id;
+    select user_id into v_requester_user_id from employees where id = v_employee_id;
   else
     return; -- reserved for future entity types; nothing further to do here
   end if;
@@ -2263,6 +3105,8 @@ begin
       -- source_reference_type/id, with no regard for the referencing run's
       -- status) would treat them as already exported, forever.
       delete from payroll_export_lines where run_id = v_approval.entity_id;
+    elsif v_approval.entity_type = 'recovery_credit' then
+      update recovery_credit_requests set status = 'rejected', decided_at = now() where id = v_approval.entity_id;
     end if;
     return; -- rejection stops the chain; earlier decisions in the log are untouched
   end if;
@@ -2315,6 +3159,9 @@ begin
       update timesheets set status = 'pending_approval' where id = v_approval.entity_id;
     elsif v_approval.entity_type = 'payroll_export_run' then
       update payroll_export_runs set status = 'pending_approval' where id = v_approval.entity_id;
+    elsif v_approval.entity_type = 'recovery_credit' then
+      -- The manager's "provisional release" — nothing is credited yet.
+      update recovery_credit_requests set status = 'pending_approval' where id = v_approval.entity_id;
     end if;
     -- generated_letter has only ever had one step (role:ceo) so it never reaches here
     return;
@@ -2336,6 +3183,7 @@ begin
     -- automatically at transaction end.
     perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || v_leave_request.employee_id::text));
 
+    v_had_configured_rule := false;
     for v_rule in
       select dpr.source_ledger
       from deduction_priority_rules dpr
@@ -2345,12 +3193,25 @@ begin
         and dpr.effective_from <= v_leave_request.start_date
       order by dpr.priority_order asc
     loop
+      v_had_configured_rule := true;
       exit when v_remaining <= 0;
 
       if v_rule.source_ledger = 'comp_day' then
+        -- coalesce(sum(days), 0) already nets out every prior redemption,
+        -- reversal AND expiry entry for this employee — the comp-day-expiry
+        -- cron posts a negative 'expired' row whenever an earned entry's
+        -- remaining balance lapses, so this sum is already the correct
+        -- CURRENTLY-AVAILABLE (unexpired) balance, not a raw lifetime total.
         select coalesce(sum(days), 0) into v_available from comp_day_ledger where employee_id = v_leave_request.employee_id;
         if v_available > 0 then
           v_draw := least(v_remaining, v_available);
+          -- A single aggregate 'redeemed' entry, not linked to one specific
+          -- earned row — oldest-expiring-first is a property of how the
+          -- expiry cron's pooling algorithm (computeCompDayExpiry) reads
+          -- the ledger afterward (it always consumes the earliest-expiring
+          -- surviving balance first), not of which earned row a redemption
+          -- names, so this draw participates correctly in FIFO consumption
+          -- without needing per-request linkage.
           insert into comp_day_ledger (employee_id, txn_date, entry_type, days, reference_type, reference_id, created_by)
           values (v_leave_request.employee_id, v_leave_request.start_date, 'redeemed', -v_draw, 'leave_request', v_leave_request.id, coalesce(auth.uid(), v_requester_user_id));
           v_remaining := v_remaining - v_draw;
@@ -2363,8 +3224,25 @@ begin
     end loop;
 
     if v_remaining > 0 then
-      insert into leave_ledger (employee_id, leave_type_code, txn_date, entry_type, amount_days, reference_type, reference_id, created_by)
-      values (v_leave_request.employee_id, v_leave_request.leave_type_code, v_leave_request.start_date, 'deduction', -v_remaining, 'leave_request', v_leave_request.id, coalesce(auth.uid(), v_requester_user_id));
+      if v_had_configured_rule then
+        -- At least one deduction_priority_rules row WAS configured for this
+        -- leave type (e.g. Recovery Leave's comp_day-only rule) and it
+        -- could not cover the full request — refuse outright rather than
+        -- falling through to an unconfigured leave_ledger balance that has
+        -- no real accrual behind it at all. This whole function call rolls
+        -- back on this exception (including the partial comp_day
+        -- 'redeemed' entry just above and the approvals row updated
+        -- earlier), so nothing is left half-applied.
+        raise exception 'Insufficient balance to approve this %: % day(s) requested, only % day(s) available from the configured funding source(s) for this leave type.',
+          v_leave_request.leave_type_code, v_leave_request.total_days, (v_leave_request.total_days - v_remaining);
+      else
+        -- No deduction_priority_rules row has ever been configured for
+        -- this leave type at all (true of every leave type this system
+        -- shipped with before Recovery Leave, e.g. annual/sick) — same
+        -- unconditional leave_ledger fallback as always, unchanged.
+        insert into leave_ledger (employee_id, leave_type_code, txn_date, entry_type, amount_days, reference_type, reference_id, created_by)
+        values (v_leave_request.employee_id, v_leave_request.leave_type_code, v_leave_request.start_date, 'deduction', -v_remaining, 'leave_request', v_leave_request.id, coalesce(auth.uid(), v_requester_user_id));
+      end if;
     end if;
 
     update leave_requests set status = 'approved', decided_at = now() where id = v_leave_request.id;
@@ -2391,6 +3269,42 @@ begin
     update payroll_export_runs
     set status = 'approved', authorized_by = coalesce(auth.uid(), v_requester_user_id), authorized_at = now()
     where id = v_approval.entity_id;
+
+  elsif v_approval.entity_type = 'recovery_credit' then
+    -- HR Admin's final approval — the ONLY point anywhere in this system
+    -- that posts the actual earned comp_day_ledger row for a recovery
+    -- credit. Defensively re-checks for an existing active credit first
+    -- (decide_leave_approval() already refuses to re-decide a
+    -- non-'pending' approval, so this can only run once per approvals row
+    -- in practice — this is a second, independent backstop, the same
+    -- "already credited?" check record_attendance_and_recovery() uses).
+    perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || v_recovery_request.employee_id::text));
+
+    if not exists (
+      select 1 from comp_day_ledger cl
+      where cl.reference_type = 'attendance_record' and cl.reference_id = v_recovery_request.attendance_record_id and cl.entry_type = 'earned'
+        and not exists (select 1 from comp_day_ledger r where r.reversal_of_id = cl.id)
+    ) then
+      insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, expiry_date, reference_type, reference_id, created_by)
+      values (
+        v_recovery_request.employee_id,
+        v_recovery_request.work_date,
+        'earned',
+        v_recovery_request.proposed_days,
+        case v_recovery_request.event_type when 'overnight' then 'overnight_extension' else 'holiday_worked' end,
+        v_recovery_request.work_date + interval '180 days',
+        'attendance_record',
+        v_recovery_request.attendance_record_id,
+        coalesce(auth.uid(), v_requester_user_id)
+      )
+      returning id into v_comp_day_ledger_id;
+
+      update recovery_credit_requests
+      set status = 'approved', decided_at = now(), comp_day_ledger_id = v_comp_day_ledger_id
+      where id = v_recovery_request.id;
+    else
+      update recovery_credit_requests set status = 'approved', decided_at = now() where id = v_recovery_request.id;
+    end if;
   end if;
 end;
 $$;
@@ -2528,6 +3442,8 @@ alter table payroll_export_lines enable row level security;
 alter table ai_drafts enable row level security;
 alter table audit_log enable row level security;
 alter table user_roles enable row level security;
+alter table recovery_credit_requests enable row level security;
+alter table termination_settlement_inputs enable row level security;
 
 -- ---- countries: reference data, readable by any signed-in user, written only
 --      by Sys Admin (structural — see permission matrix §3.6).
@@ -3509,11 +4425,20 @@ create policy approval_workflow_steps_write on approval_workflow_steps for all
 -- (section 13) closes this by re-resolving the workflow and approver
 -- itself rather than trusting anything client-supplied about an
 -- approval's routing.
+-- The extra recovery_credit branch widens visibility to the employee who
+-- BENEFITS from the request — is_entity_owner() for recovery_credit means
+-- "who initiated it" (the manager/HR who recorded eligibility, via
+-- created_by), correctly NOT the employee themselves; without this branch
+-- the employee could see neither their pending request nor its outcome.
 create policy approvals_select on approvals for select
   using (
     approver_id = auth.uid()
     or has_role('hr_admin')
     or is_entity_owner(entity_type, entity_id)
+    or (
+      entity_type = 'recovery_credit'
+      and exists (select 1 from recovery_credit_requests r where r.id = entity_id and r.employee_id = current_employee_id())
+    )
   );
 
 -- ---- projects: broad read (same "transparency" pattern as departments —
@@ -3645,6 +4570,64 @@ create policy attendance_select on attendance_records for select
 create policy attendance_write on attendance_records for all
   using (has_role('hr_admin', (select company_id from employees where id = employee_id)))
   with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
+
+-- ---- recovery_credit_requests: self/manager/HR Admin read (same shape as
+--      attendance_records, since each request is derived from one
+--      attendance record); no write policy at all — record_attendance_and_recovery(),
+--      record_overnight_recovery_credit(), and decide_leave_approval() (all
+--      SECURITY DEFINER) are the only mutation path, same design already
+--      used for the approvals table itself.
+create policy recovery_credit_requests_select on recovery_credit_requests for select
+  using (
+    employee_id = current_employee_id()
+    or is_manager_of(employee_id)
+    or has_role('hr_admin', (select company_id from employees where id = employee_id))
+  );
+
+create trigger audit_recovery_credit_requests after insert or update on recovery_credit_requests
+  for each row execute function write_audit_log();
+
+-- ---- termination_settlement_inputs: HR Admin/Finance read+write only —
+--      the HR/Finance-provided statutory wage basis final settlement
+--      preparation needs for Saudi/Poland leave encashment.
+create policy termination_settlement_inputs_select on termination_settlement_inputs for select
+  using (
+    has_role('hr_admin', (select company_id from employees where id = employee_id))
+    or has_role('finance', (select company_id from employees where id = employee_id))
+  );
+
+create policy termination_settlement_inputs_write on termination_settlement_inputs for all
+  using (
+    has_role('hr_admin', (select company_id from employees where id = employee_id))
+    or has_role('finance', (select company_id from employees where id = employee_id))
+  )
+  with check (
+    has_role('hr_admin', (select company_id from employees where id = employee_id))
+    or has_role('finance', (select company_id from employees where id = employee_id))
+  );
+
+create trigger audit_termination_settlement_inputs after insert or update on termination_settlement_inputs
+  for each row execute function write_audit_log();
+
+alter table poland_termination_leave_reconciliations enable row level security;
+
+-- Read-only from the ordinary authenticated role's perspective — every
+-- write happens inside post_poland_termination_leave_adjustment()/
+-- acknowledge_poland_termination_leave_excess() (both SECURITY DEFINER,
+-- like every other SECURITY DEFINER function in this schema, and therefore
+-- unaffected by RLS); there is deliberately no direct insert/update/delete
+-- policy for `authenticated` here.
+create policy poland_termination_leave_reconciliations_select on poland_termination_leave_reconciliations for select
+  using (
+    has_role('hr_admin', (select company_id from employees where id = employee_id))
+    or has_role('finance', (select company_id from employees where id = employee_id))
+  );
+
+-- No separate audit_log trigger: unlike most audited tables this one has no
+-- surrogate `id` column (write_audit_log()'s record_id lookup — `coalesce(new.id,
+-- old.id)` — requires one), and the row is already fully self-documenting
+-- (created_by/created_at for the true-up itself, excess_reviewed_by/
+-- excess_reviewed_at for the one explicit HR action that ever updates it).
 
 -- ---- letter_templates: readable by anyone signed in (an employee needs
 --      to see what they can request), HR Admin manages.

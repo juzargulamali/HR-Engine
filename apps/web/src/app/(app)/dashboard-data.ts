@@ -1,5 +1,5 @@
 import "server-only";
-import { isWeekend } from "@enginious-hr/domain";
+import { isWeekend, getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import type { createClient } from "@/lib/supabase/server";
 import { logServerError } from "@/lib/log";
 
@@ -58,8 +58,12 @@ function emptySnapshot(company: { id: string; legal_name: string; country_code: 
 export async function getCompanySnapshot(
   supabase: SupabaseServerClient,
   company: { id: string; legal_name: string; country_code: string },
-  today: string,
 ): Promise<CompanySnapshot> {
+  // This company's OWN business-local date — not a single global `today`
+  // shared across every company on the dashboard, which would wrongly show
+  // yesterday's (or tomorrow's) attendance/holiday/Recovery-day state for
+  // up to a few hours around this specific country's own midnight.
+  const today = getBusinessDateString(resolveCountryTimeZone(company.country_code));
   try {
     const { data: employees, error: employeesError } = await supabase
       .from("employees")
@@ -85,7 +89,7 @@ export async function getCompanySnapshot(
             .in("status", ["submitted", "pending_approval"])
         : Promise.resolve({ count: 0, error: null }),
       supabase.from("public_holidays").select("name").eq("country_code", company.country_code).eq("holiday_date", today).maybeSingle(),
-      supabase.from("countries").select("week_start_day").eq("code", company.country_code).single(),
+      supabase.from("countries").select("week_start_day, working_weekdays").eq("code", company.country_code).single(),
     ]);
 
     // countryResult intentionally not checked for `.error` here — a
@@ -108,7 +112,10 @@ export async function getCompanySnapshot(
     // once an admin could actually save that status.
     const recordedCount = attendance.filter((a) => a.status !== "not_recorded").length;
     const notRecordedCount = Math.max(0, totalEmployees - recordedCount);
-    const isRecoveryDay = !!holidayResult.data || isWeekend(today, countryResult.data?.week_start_day ?? 1);
+    // Prefers working_weekdays (AE/SA/PL's resolved schedule) over the
+    // week_start_day-derived contiguous work week — same precedence
+    // record_attendance_and_recovery() uses server-side.
+    const isRecoveryDay = !!holidayResult.data || isWeekend(today, countryResult.data?.week_start_day ?? 1, countryResult.data?.working_weekdays);
 
     return {
       companyId: company.id,

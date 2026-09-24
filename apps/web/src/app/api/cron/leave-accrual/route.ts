@@ -1,7 +1,24 @@
 import { NextResponse } from "next/server";
+import {
+  computeAnnualLeaveEntitlementToDate,
+  explainPolandEntitlementBlock,
+  getBusinessDateString,
+  getBusinessMonthStartString,
+  resolveCountryTimeZone,
+  COUNTRY_TIMEZONES,
+  type FteFractionPeriod,
+} from "@enginious-hr/domain";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAuthorizedCronRequest, SYSTEM_ACTOR_ID } from "@/lib/cron/auth";
 import { chunk } from "@/lib/cron/batch";
+import { classifyLedgerRows, type AnnualLeaveLedgerRow, type AmbiguousBaseline } from "@/lib/leaveLedger/classifyLedgerRows";
+
+// Re-exported for this route's own test file and any other existing
+// importer — the classification logic itself now lives in
+// lib/leaveLedger/classifyLedgerRows.ts, shared with the Poland termination
+// true-up (lib/actions/polandTermination.ts), so both stay byte-for-byte
+// consistent rather than drifting as two copies.
+export { classifyLedgerRows, type AnnualLeaveLedgerRow, type AmbiguousBaseline };
 
 const INSERT_BATCH_SIZE = 500;
 
@@ -9,15 +26,44 @@ function daysBetween(from: string, to: string): number {
   return Math.floor((Date.parse(to) - Date.parse(from)) / (24 * 60 * 60 * 1000));
 }
 
+const ENTITLEMENT_TO_DATE_COUNTRIES = new Set(["AE", "SA", "PL"]);
+
 /**
- * Monthly leave accrual run (docs/05-automation-rules.md §5.1). Only
- * accrual_method = 'monthly_accrual' is implemented — a fixed number of
- * days posted per run, respecting min_service_days_to_accrue and capped at
- * max_balance_days. 'annual_grant' and 'per_service_year' need an
- * anniversary/period concept this phase's policy data doesn't define yet
- * (docs/06-implementation-phases.md Phase 3 scope) — they're skipped, not
- * silently mis-accrued, and worth revisiting once a country's real policy
- * needs one of them.
+ * Monthly leave accrual run (docs/05-automation-rules.md §5.1).
+ *
+ * 'monthly_accrual' posts a fixed number of days per run, respecting
+ * min_service_days_to_accrue and capped at max_balance_days — unchanged.
+ *
+ * 'per_service_year' (UAE/Saudi) and 'annual_grant' (Poland) are
+ * delta-based: each run computes the employee's cumulative Annual Leave
+ * entitlement AS OF TODAY via computeAnnualLeaveEntitlementToDate (the
+ * regional rules in packages/domain — for Poland, a flat 26-working-day/year
+ * Enginious company benefit, calendar-month-prorated for a partial hire
+ * year), compares it against an unambiguous inventory of every historical
+ * Annual Leave grant ever posted for that employee/leave type — not just
+ * this cron's own 'policy_run' entries, and never inferred from the net
+ * balance, which deductions and reversals would make unreliable (see
+ * classifyLedgerRows) — and posts only the positive difference. This
+ * reproduces UAE's "2 days per completed month between 6-12 months, then 30
+ * at each anniversary" naturally, as whatever the calculator's month-over-
+ * month delta implies, without this cron needing its own
+ * anniversary-detection logic. Only implemented for AE/SA/PL
+ * specifically (the three countries this rule set targets) — any other
+ * country using these accrual methods is skipped with a review flag rather
+ * than guessing a formula for it.
+ *
+ * If an employee/leave-type's historical baseline can't be determined
+ * unambiguously (an 'adjustment' row exists that isn't tagged
+ * 'opening_balance' — e.g. a legacy opening-balance grant recorded before
+ * that tag existed, or any other unclassified manual correction), that key
+ * is skipped entirely and reported rather than guessed. Existing balances
+ * are never rewritten by this cron either way.
+ *
+ * Call with ?mode=preflight to run the full computation read-only: no rows
+ * are inserted, and the response reports how many would post, how many
+ * would be skipped, and exactly which employee/leave-type keys have an
+ * ambiguous baseline so HR/engineering can review before it ever blocks (or
+ * silently would have mis-posted) real accrual.
  *
  * Idempotent per calendar month: an employee/leave-type pair that already
  * has a 'policy_run' accrual posted this month is skipped, so a retried or
@@ -33,9 +79,28 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const isPreflight = new URL(request.url).searchParams.get("mode") === "preflight";
   const admin = createAdminClient();
-  const today = new Date().toISOString().slice(0, 10);
-  const monthStart = `${today.slice(0, 7)}-01`;
+  const now = new Date();
+  // A single UTC "today" wrongly treats a UAE (UTC+4) employee's calendar
+  // month as still last month for up to 4 hours after UTC midnight, and a
+  // Poland (UTC+1/+2) employee's as already next month up to 2 hours before
+  // it — this cron processes AE/SA/PL together every run, so it needs each
+  // employee's OWN business-local date, not one global instant. `today` and
+  // `monthStart` below are used only for the two country-agnostic bulk
+  // query windows (the active-policy filter, and the "already accrued"
+  // lookup) — deliberately widened to the OUTER bound across all three
+  // known timezones so neither window can ever exclude a country whose
+  // local day has (or hasn't) rolled over yet; every actual per-employee
+  // calculation and idempotency key uses businessDateForCountry/
+  // businessMonthStartForCountry below instead.
+  const zones = Object.values(COUNTRY_TIMEZONES);
+  const candidateDates = zones.map((tz) => getBusinessDateString(tz, now)).sort();
+  const candidateMonthStarts = zones.map((tz) => getBusinessMonthStartString(tz, now)).sort();
+  const today = candidateDates.at(-1)!;
+  const monthStart = candidateMonthStarts[0]!;
+  const businessDateForCountry = (countryCode: string) => getBusinessDateString(resolveCountryTimeZone(countryCode), now);
+  const businessMonthStartForCountry = (countryCode: string) => getBusinessMonthStartString(resolveCountryTimeZone(countryCode), now);
 
   // Mirrors resolve_policy()'s own filter (schema.sql): 'active' status
   // alone isn't enough — a policy can be activated ahead of time with a
@@ -79,17 +144,65 @@ export async function GET(request: Request) {
     .is("deleted_at", null);
   if (employeesError) return NextResponse.json({ error: employeesError.message }, { status: 500 });
 
+  // Poland's entitlement calculation needs the employee's WHOLE effective-
+  // dated FTE history (every employment_contracts row's start_date +
+  // fte_fraction, not just is_current's single current value) so a
+  // mid-service FTE change prices only the years it actually affects — see
+  // computeAnnualLeaveEntitlementToDate's fteFractionHistory input.
+  const { data: allContracts } = await admin.from("employment_contracts").select("employee_id, start_date, fte_fraction");
+  const fteFractionHistoryByEmployee = new Map<string, FteFractionPeriod[]>();
+  for (const contract of allContracts ?? []) {
+    const periods = fteFractionHistoryByEmployee.get(contract.employee_id) ?? [];
+    periods.push({ effectiveFrom: contract.start_date, fteFraction: Number(contract.fte_fraction) });
+    fteFractionHistoryByEmployee.set(contract.employee_id, periods);
+  }
+
+  // Keyed by employee:leaveType:YYYY-MM (not just employee:leaveType) — the
+  // query window above is deliberately widened across every known timezone,
+  // so a row's own txn_date month is what actually decides "already accrued
+  // THIS employee's business-local month," checked per employee below via
+  // businessMonthStartForCountry rather than trusting the query window's
+  // country-agnostic bounds.
   const { data: alreadyAccrued } = await admin
     .from("leave_ledger")
-    .select("employee_id, leave_type_code")
+    .select("employee_id, leave_type_code, txn_date")
     .eq("entry_type", "accrual")
     .eq("reference_type", "policy_run")
     .gte("txn_date", monthStart)
     .lte("txn_date", today);
-  const alreadyAccruedKeys = new Set((alreadyAccrued ?? []).map((r) => `${r.employee_id}:${r.leave_type_code}`));
+  const alreadyAccruedKeys = new Set((alreadyAccrued ?? []).map((r) => `${r.employee_id}:${r.leave_type_code}:${String(r.txn_date).slice(0, 7)}`));
 
   const { data: balances } = await admin.from("leave_balances").select("employee_id, leave_type_code, balance_days");
   const balanceByKey = new Map((balances ?? []).map((b) => [`${b.employee_id}:${b.leave_type_code}`, Number(b.balance_days)]));
+
+  // Every historical Annual Leave ledger row for the leave-type codes that
+  // use entitlement-to-date accrual — not just this cron's own 'policy_run'
+  // accruals — so the "already granted" baseline reflects EVERY grant
+  // mechanism that has ever posted to this employee (onboarding opening
+  // balances, this cron, any future carryover run), never just a slice of
+  // them. Never inferred from leave_balances (the net balance): deductions
+  // and reversals make a net figure unusable as a lifetime grant total.
+  const entitlementToDateLeaveTypeCodes = [
+    ...new Set((leaveTypeRows ?? []).filter((t) => t.accrual_method === "per_service_year" || t.accrual_method === "annual_grant").map((t) => t.leave_type_code)),
+  ];
+  const { data: historyRows, error: historyError } =
+    entitlementToDateLeaveTypeCodes.length > 0
+      ? await admin
+          .from("leave_ledger")
+          .select("id, employee_id, leave_type_code, entry_type, amount_days, reference_type, reversal_of_id")
+          .in("leave_type_code", entitlementToDateLeaveTypeCodes)
+      : { data: [] as AnnualLeaveLedgerRow[], error: null };
+  if (historyError) return NextResponse.json({ error: historyError.message }, { status: 500 });
+
+  const { grantTotalByKey, ambiguousKeys } = classifyLedgerRows((historyRows ?? []) as AnnualLeaveLedgerRow[]);
+  const ambiguousReport: AmbiguousBaseline[] = [...ambiguousKeys].map((key) => {
+    const separatorIndex = key.indexOf(":");
+    return {
+      employeeId: key.slice(0, separatorIndex),
+      leaveTypeCode: key.slice(separatorIndex + 1),
+      reason: "an 'adjustment' ledger row exists for this employee/leave-type that isn't tagged 'opening_balance' — the historical baseline can't be trusted, so automatic accrual is blocked until HR confirms it",
+    };
+  });
 
   // Collect rows and insert them in one bulk call at the end rather than
   // one round trip per employee/leave-type pair — at realistic headcount
@@ -97,7 +210,6 @@ export async function GET(request: Request) {
   // per-row insert risks a serverless function timeout; a single batched
   // insert keeps this a constant number of round trips regardless of
   // headcount.
-  const accrualMonth = today.slice(0, 7); // YYYY-MM
   const rows: {
     employee_id: string;
     leave_type_code: string;
@@ -109,33 +221,95 @@ export async function GET(request: Request) {
     idempotency_key: string;
   }[] = [];
   let skipped = 0;
+  // Poland-only: employees whose entitlement can't be computed because
+  // there's no FTE history at all, or their contract history is ambiguous
+  // (a gap, an overlapping/conflicting row, or an FTE change mid-period) —
+  // a distinct, separately-reported reason from ambiguousReport above
+  // (which is about historical ledger provenance, not configuration).
+  const blockedEntitlementConfig: AmbiguousBaseline[] = [];
 
   for (const employee of employees ?? []) {
+    // Each employee's OWN business-local "today"/accrual month — never the
+    // single global `today`/`monthStart` above, which exist only to bound
+    // the two bulk queries. This is what actually decides which calendar
+    // day/month this employee's accrual is computed and posted against.
+    const employeeToday = businessDateForCountry(employee.country_code);
+    const employeeAccrualMonth = businessMonthStartForCountry(employee.country_code).slice(0, 7);
     const leaveTypes = leaveTypesByCountry.get(employee.country_code) ?? [];
     for (const leaveType of leaveTypes) {
-      if (leaveType.accrual_method !== "monthly_accrual") continue;
-
       const key = `${employee.id}:${leaveType.leave_type_code}`;
-      if (alreadyAccruedKeys.has(key)) {
+      if (alreadyAccruedKeys.has(`${key}:${employeeAccrualMonth}`)) {
         skipped += 1;
         continue;
       }
 
       const minServiceDays = leaveType.min_service_days_to_accrue;
-      if (minServiceDays !== null && daysBetween(employee.hire_date, today) < minServiceDays) {
-        skipped += 1;
-        continue;
-      }
-
-      const rate = leaveType.accrual_rate_per_period ? Number(leaveType.accrual_rate_per_period) : 0;
-      if (rate <= 0) {
+      if (minServiceDays !== null && daysBetween(employee.hire_date, employeeToday) < minServiceDays) {
         skipped += 1;
         continue;
       }
 
       const maxBalance = leaveType.max_balance_days ? Number(leaveType.max_balance_days) : null;
       const currentBalance = balanceByKey.get(key) ?? 0;
-      const amount = maxBalance !== null ? Math.min(rate, Math.max(0, maxBalance - currentBalance)) : rate;
+
+      let amount: number;
+      if (leaveType.accrual_method === "monthly_accrual") {
+        const rate = leaveType.accrual_rate_per_period ? Number(leaveType.accrual_rate_per_period) : 0;
+        if (rate <= 0) {
+          skipped += 1;
+          continue;
+        }
+        amount = maxBalance !== null ? Math.min(rate, Math.max(0, maxBalance - currentBalance)) : rate;
+      } else if (
+        (leaveType.accrual_method === "per_service_year" || leaveType.accrual_method === "annual_grant") &&
+        ENTITLEMENT_TO_DATE_COUNTRIES.has(employee.country_code)
+      ) {
+        if (ambiguousKeys.has(key)) {
+          // This employee/leave-type has at least one historical ledger row
+          // whose grant-or-not status can't be determined unambiguously —
+          // never guess an accrual against an unknown baseline. Reported in
+          // ambiguousReport (always) and surfaced prominently in preflight mode.
+          skipped += 1;
+          continue;
+        }
+        const entitlementInput = {
+          countryCode: employee.country_code as "AE" | "SA" | "PL",
+          hireDate: employee.hire_date,
+          asOfDate: employeeToday,
+          fteFractionHistory: fteFractionHistoryByEmployee.get(employee.id),
+        };
+        const entitlementToDate = computeAnnualLeaveEntitlementToDate(entitlementInput);
+        if (entitlementToDate === null) {
+          // Poland only — the specific reason (no FTE history at all, a
+          // gap/overlap/invalid fraction in the employment_contracts
+          // history, or an FTE change mid-period) comes straight from the
+          // domain calculator that actually detected it — never guessed
+          // here. Poland's Annual Leave is now a flat 26-day/year Enginious
+          // company benefit for every employee (see
+          // packages/domain/src/annualLeaveEntitlement.ts) — it no longer
+          // depends on recognised prior service or first-ever-employment
+          // status, so neither can block accrual any more.
+          skipped += 1;
+          blockedEntitlementConfig.push({
+            employeeId: employee.id,
+            leaveTypeCode: leaveType.leave_type_code,
+            reason: explainPolandEntitlementBlock(entitlementInput) ?? "entitlement could not be determined",
+          });
+          continue;
+        }
+        const alreadyGranted = grantTotalByKey.get(key) ?? 0;
+        const delta = entitlementToDate - alreadyGranted;
+        // Capped the same way a monthly_accrual amount is: never post past
+        // max_balance_days regardless of what the entitlement curve implies.
+        amount = maxBalance !== null ? Math.min(delta, Math.max(0, maxBalance - currentBalance)) : delta;
+      } else {
+        // 'per_service_year'/'annual_grant' for a country outside AE/SA/PL,
+        // or any other accrual_method — not silently mis-accrued; skipped
+        // for HR/engineering to review, same as before this correction.
+        skipped += 1;
+        continue;
+      }
+
       // NaN fails every comparison (including `<= 0`), so a malformed
       // accrual_rate_per_period/max_balance_days would otherwise slip past
       // that check and reach the insert as a NaN amount_days — rejecting
@@ -150,14 +324,29 @@ export async function GET(request: Request) {
       rows.push({
         employee_id: employee.id,
         leave_type_code: leaveType.leave_type_code,
-        txn_date: today,
+        txn_date: employeeToday,
         entry_type: "accrual",
         amount_days: amount,
         reference_type: "policy_run",
         created_by: SYSTEM_ACTOR_ID,
-        idempotency_key: `accrual:${employee.id}:${leaveType.leave_type_code}:${accrualMonth}`,
+        idempotency_key: `accrual:${employee.id}:${leaveType.leave_type_code}:${employeeAccrualMonth}`,
       });
     }
+  }
+
+  // Read-only mode: report exactly what a real run would do — including
+  // every ambiguous-baseline employee/leave-type it would refuse to touch —
+  // without inserting anything. Lets HR/engineering review before (or
+  // instead of) ever running for real.
+  if (isPreflight) {
+    return NextResponse.json({
+      ranAt: today,
+      mode: "preflight",
+      wouldPost: rows.length,
+      skipped,
+      ambiguousBaselines: ambiguousReport,
+      blockedEntitlementConfig,
+    });
   }
 
   // One chunk at a time (not one giant insert): a single bad row rejected
@@ -180,5 +369,8 @@ export async function GET(request: Request) {
   // A non-2xx status is what makes a real failure visible to Vercel Cron's
   // own monitoring/alerting — returning 200 while `failures` is non-empty
   // would report this run as healthy even though it dropped rows.
-  return NextResponse.json({ ranAt: today, entriesPosted: posted, skipped, failures }, { status: failures.length > 0 ? 500 : 200 });
+  return NextResponse.json(
+    { ranAt: today, entriesPosted: posted, skipped, ambiguousBaselines: ambiguousReport, blockedEntitlementConfig, failures },
+    { status: failures.length > 0 ? 500 : 200 },
+  );
 }

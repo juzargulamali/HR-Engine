@@ -12,6 +12,15 @@ const createCompanySchema = z.object({
 
 export interface ActionState {
   error: string | null;
+  /**
+   * Non-blocking, HR-facing follow-up (e.g. updateEmployee()'s Poland
+   * termination true-up couldn't be posted automatically) — the action
+   * itself still succeeded (error is null), but something needs manual
+   * review. Optional and absent/undefined on every action that has no such
+   * follow-up to report, so this is backward compatible with every existing
+   * ActionState-returning action.
+   */
+  warning?: string | null;
 }
 
 /**
