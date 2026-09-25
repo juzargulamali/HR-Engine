@@ -9,6 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ActivateButton } from "./activate-button";
 import { DeletePolicyVersionButton } from "./delete-policy-version-button";
+import { CreatePhase2bDraftsButton } from "./create-phase2b-drafts-button";
 import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function PoliciesPage() {
@@ -16,7 +17,7 @@ export default async function PoliciesPage() {
   if (!session) return null;
 
   const supabase = await createClient();
-  const [{ data: policies }, { data: countries }] = await Promise.all([
+  const [{ data: policies }, { data: countries }, { data: phase2bStatus }] = await Promise.all([
     supabase
       .from("policy_versions")
       .select("id, country_code, policy_type, version_no, status, effective_from, effective_to, created_by")
@@ -24,10 +25,14 @@ export default async function PoliciesPage() {
       .order("policy_type")
       .order("version_no", { ascending: false }),
     supabase.from("countries").select("code, name").order("name"),
+    // Read-only — safe to call even for a viewer with no drafting rights;
+    // used only to decide whether the button below still has anything to do.
+    supabase.rpc("preflight_phase2b_v2_policy_status"),
   ]);
 
   const countryName = new Map((countries ?? []).map((c) => [c.code, c.name]));
   const canDraftAnywhere = (countries ?? []).some((c) => canDraftPolicy(session.grants, c.code));
+  const phase2bAllCreated = (phase2bStatus ?? []).length > 0 && (phase2bStatus ?? []).every((r) => r.status !== "not_created");
 
   return (
     <div className="space-y-6">
@@ -49,6 +54,8 @@ export default async function PoliciesPage() {
           ) : null}
         </div>
       </div>
+
+      {canDraftAnywhere ? <CreatePhase2bDraftsButton allCreated={phase2bAllCreated} /> : null}
 
       <Card>
         <CardHeader>
