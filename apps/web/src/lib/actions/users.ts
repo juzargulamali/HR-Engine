@@ -43,7 +43,7 @@ export async function inviteUser(_prevState: ActionState, formData: FormData): P
     // URL" for the invite email's redirect target. /set-password is a
     // public route (see proxy.ts) built to receive it and turn the
     // one-time invite token into a real password — see
-    // set-password-form.tsx for why that page parses the token itself
+    // components/auth/password-reset-form.tsx for why that page parses the token itself
     // instead of using the Supabase browser client's automatic detection.
     ...(siteUrl ? { redirectTo: `${siteUrl.replace(/\/$/, "")}/set-password` } : {}),
   });
@@ -68,7 +68,7 @@ const resendInviteSchema = z.object({ email: z.string().email() });
  * invited but hasn't finished setting a password). resetPasswordForEmail
  * sends the same kind of set-a-password email via the default "Reset
  * Password" template, and works regardless of whether the original invite
- * was ever completed — set-password-form.tsx handles either link the same
+ * was ever completed — components/auth/password-reset-form.tsx handles either link the same
  * way, since both deliver the same access_token/refresh_token-in-URL-hash
  * shape.
  */
@@ -88,8 +88,16 @@ export async function resendInvite(email: string): Promise<{ error: string | nul
   const { error } = await supabase.auth.resetPasswordForEmail(parsed.data.email, {
     ...(siteUrl ? { redirectTo: `${siteUrl.replace(/\/$/, "")}/set-password` } : {}),
   });
+  if (error) {
+    return { error: error.message };
+  }
 
-  return { error: error?.message ?? null };
+  const { data: profile } = await supabase.from("profiles").select("id").eq("email", parsed.data.email).maybeSingle();
+  if (profile) {
+    await supabase.rpc("log_security_event", { p_action: "invitation_resent", p_target_user_id: profile.id });
+  }
+
+  return { error: null };
 }
 
 const assignRoleSchema = z.object({

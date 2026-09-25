@@ -49,6 +49,36 @@ export class RlsTestDatabase {
     await this.runSqlFile(GRANT_AUTHENTICATED_ACCESS);
   }
 
+  /**
+   * Like setup(), but stops applying migrations strictly BEFORE
+   * `cutoffFilename` (alphabetical, matching migrationFiles()'s own sort —
+   * these are timestamp-prefixed, so that's also chronological). Deliberately
+   * skips GRANT_AUTHENTICATED_ACCESS too, since that's meant to run after
+   * every migration, not partway through. Pair with applyMigration() to test
+   * a specific migration's effect on data that existed BEFORE it ran — e.g.
+   * proving a backfill statement doesn't fire a trigger the same file
+   * creates later, which setup()'s all-at-once application can't exercise
+   * (a fresh database has no pre-existing rows for a backfill to touch).
+   */
+  async setupBefore(cutoffFilename: string): Promise<void> {
+    await this.adminPool.query(`CREATE DATABASE ${this.dbName}`);
+    const dbUrl = new URL(ADMIN_URL);
+    dbUrl.pathname = `/${this.dbName}`;
+    this.pool = new Pool({ connectionString: dbUrl.toString() });
+
+    await this.runSqlFile(STUB_AUTH_SCHEMA);
+    await this.runSqlFile(STUB_STORAGE_SCHEMA);
+    for (const file of this.migrationFiles()) {
+      if (path.basename(file) >= cutoffFilename) break;
+      await this.runSqlFile(file);
+    }
+  }
+
+  /** Applies exactly one migration file by basename — see setupBefore(). */
+  async applyMigration(filename: string): Promise<void> {
+    await this.runSqlFile(path.join(MIGRATIONS_DIR, filename));
+  }
+
   async teardown(): Promise<void> {
     await this.pool?.end();
     await this.adminPool.query(`DROP DATABASE IF EXISTS ${this.dbName}`);

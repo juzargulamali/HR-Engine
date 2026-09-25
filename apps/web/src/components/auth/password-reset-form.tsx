@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { getPasswordIssues, PASSWORD_REQUIREMENTS_TEXT } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,19 +11,15 @@ import { Alert } from "@/components/ui/alert";
 type Status = "checking" | "ready" | "invalid";
 
 /**
- * Supabase's invite email (its default template — editing templates
- * requires custom SMTP, which this project doesn't have configured) links
- * to Supabase's own /verify endpoint, which redirects back here with a
- * ready-made session as access_token/refresh_token in the URL hash
- * ("implicit grant" delivery). @supabase/ssr's browser client hardcodes
- * flowType: "pkce", so its own automatic hash-detection
- * (detectSessionInUrl, run once at client construction) explicitly refuses
- * that shape of URL — "Not a valid PKCE flow url" — and never establishes
- * a session from it. setSession() has no such gate (it just validates the
- * token pair directly), so this parses the hash itself and calls that
- * instead of relying on automatic detection.
+ * Shared by /set-password (invite completion) and /reset-password
+ * (forgot-password completion) — both receive the exact same
+ * access_token/refresh_token-in-URL-hash shape from Supabase's default
+ * email templates (see the original comment this was extracted from,
+ * still accurate): @supabase/ssr's browser client hardcodes flowType:
+ * "pkce", so its automatic hash-detection refuses that shape of URL, and
+ * setSession() is used directly instead of relying on it.
  */
-export function SetPasswordForm() {
+export function PasswordResetForm({ mode }: { mode: "invite" | "reset" }) {
   const [status, setStatus] = useState<Status>("checking");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -65,8 +62,9 @@ export function SetPasswordForm() {
     event.preventDefault();
     setError(null);
 
-    if (password.length < 8) {
-      setError("Use at least 8 characters.");
+    const issues = getPasswordIssues(password);
+    if (issues.length > 0) {
+      setError(issues[0] ?? "Password doesn't meet the requirements.");
       return;
     }
     if (password !== confirmPassword) {
@@ -76,12 +74,27 @@ export function SetPasswordForm() {
 
     setPending(true);
     const supabase = createClient();
-    const { error: updateError } = await supabase.auth.updateUser({ password });
+    const { data: updateData, error: updateError } = await supabase.auth.updateUser({ password });
     if (updateError) {
       setPending(false);
       setError(updateError.message);
       return;
     }
+
+    const userId = updateData.user?.id;
+    if (userId) {
+      // No-op (0 rows matched) unless this account is still 'invited' —
+      // profiles_self_activate is the only policy that allows this specific
+      // transition, so this is safe to call unconditionally from either flow.
+      await supabase.from("profiles").update({ account_status: "active" }).eq("id", userId);
+    }
+
+    // "Where supported" — Supabase's signOut(scope: 'others') invalidates
+    // every OTHER session for this user server-side, leaving the one that
+    // just set the new password signed in. Best-effort: a failure here
+    // doesn't block completing the password reset itself.
+    await supabase.auth.signOut({ scope: "others" });
+    await supabase.rpc("log_security_event", { p_action: "password_changed" });
 
     // Full navigation, not router.push — proxy.ts's session check runs on
     // the server and only sees cookies once a real request lands there;
@@ -91,13 +104,15 @@ export function SetPasswordForm() {
   }
 
   if (status === "checking") {
-    return <p className="text-sm text-muted-foreground">Verifying your invite link…</p>;
+    return <p className="text-sm text-muted-foreground">Verifying your link…</p>;
   }
 
   if (status === "invalid") {
     return (
       <Alert variant="destructive">
-        This link is invalid or has expired. Ask HR to send you a new invite from Admin → Users.
+        {mode === "invite"
+          ? "This link is invalid or has expired. Ask HR to send you a new invite from Admin → Users."
+          : "This link is invalid or has expired. Request a new one from the forgot-password page."}
       </Alert>
     );
   }
@@ -110,11 +125,14 @@ export function SetPasswordForm() {
           id="password"
           type="password"
           autoComplete="new-password"
-          minLength={8}
           required
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          aria-describedby="password-requirements"
         />
+        <p id="password-requirements" className="text-xs text-muted-foreground">
+          {PASSWORD_REQUIREMENTS_TEXT}
+        </p>
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="confirmPassword">Confirm password</Label>
@@ -122,15 +140,18 @@ export function SetPasswordForm() {
           id="confirmPassword"
           type="password"
           autoComplete="new-password"
-          minLength={8}
           required
           value={confirmPassword}
           onChange={(e) => setConfirmPassword(e.target.value)}
         />
       </div>
-      {error ? <Alert variant="destructive">{error}</Alert> : null}
+      {error ? (
+        <Alert variant="destructive" role="alert" aria-live="assertive">
+          {error}
+        </Alert>
+      ) : null}
       <Button type="submit" className="w-full" disabled={pending}>
-        {pending ? "Saving…" : "Set password & continue"}
+        {pending ? "Saving…" : mode === "invite" ? "Set password & continue" : "Reset password & continue"}
       </Button>
     </form>
   );

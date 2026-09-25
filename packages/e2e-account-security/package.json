@@ -1,0 +1,18 @@
+{
+  "name": "@enginious-hr/e2e-account-security",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:read-only": "playwright test tests/read-only",
+    "test:e2e:mutating": "playwright test tests/mutating",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@supabase/supabase-js": "^2.116.0",
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3"
+  }
+}
