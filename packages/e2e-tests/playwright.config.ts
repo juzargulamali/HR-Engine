@@ -1,28 +1,47 @@
 import { defineConfig, devices } from "@playwright/test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { isBrowserTlsBypassAllowed } from "./src/config";
 
 /**
- * Falls back to this sandbox's pre-installed Chromium binary ONLY if
- * PLAYWRIGHT_CHROMIUM_EXECUTABLE isn't set and the sandbox path exists — a
- * real CI machine with the correct browser revision already installed via
- * `playwright install` never takes this branch.
+ * Whether the ACTUALLY-REQUIRED Chromium revision (per this installed
+ * @playwright/test version's own browsers.json) is really present, checked
+ * dynamically rather than via a fixed path — a fixed path is exactly how
+ * this got it wrong once already: this sandbox has a stable
+ * `/opt/pw-browsers/chromium` symlink left over from image setup that
+ * pointed at an old revision (1194) and was NOT updated by a later
+ * `playwright install chromium`, which fetches new revisions alongside it
+ * (installed as a sibling `chromium-<rev>` directory, e.g. `chromium-1243`)
+ * without touching that symlink. Trusting the symlink's mere existence
+ * would have kept silently using the stale browser and the HTTPS-errors
+ * workaround below even after the correct one was installed.
  *
- * Why this fallback exists at all: this installed @playwright/test version
- * (1.63.0) expects Chromium revision 1243 (Chrome for Testing 153.0.8010.12
- * — see node_modules/playwright-core/browsers.json). This sandbox only has
- * revision 1194 (Chromium 141.0.7390.37) pre-installed, and `playwright
- * install chromium` to fetch 1243 fails here with a 403 from this session's
- * network policy: "no rule or allowlist entry allows host
- * cdn.playwright.dev" (confirmed by directly attempting the install, not
- * inferred). That domain — https://cdn.playwright.dev — is Playwright's
- * official browser-download host; allowlisting it (or its documented
- * mirror, https://playwright.download.prss.microsoft.com) is what would let
- * a future session install the matching build and delete this whole
- * fallback block, including `ignoreHTTPSErrors` below.
+ * "Present" also has to allow for Chrome for Testing's own layout change
+ * between these revisions: older revisions unzip to `chrome-linux/chrome`,
+ * newer ones (1243 included) to `chrome-linux64/chrome`.
  */
-const SANDBOX_CHROMIUM_PATH = "/opt/pw-browsers/chromium";
-const usingSandboxFallbackBrowser = !process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE && existsSync(SANDBOX_CHROMIUM_PATH);
-const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ?? (usingSandboxFallbackBrowser ? SANDBOX_CHROMIUM_PATH : undefined);
+const require = createRequire(import.meta.url);
+const PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH ?? "/opt/pw-browsers";
+// playwright-core's package.json "exports" map doesn't expose
+// "./browsers.json" as an importable subpath (require("playwright-core/browsers.json")
+// throws ERR_PACKAGE_PATH_NOT_EXPORTED) — resolve its package root instead
+// and read the file directly, which isn't subject to that restriction.
+const playwrightCoreDir = path.dirname(require.resolve("playwright-core/package.json"));
+const browsersManifest = JSON.parse(readFileSync(path.join(playwrightCoreDir, "browsers.json"), "utf8")) as {
+  browsers: Array<{ name: string; revision: string }>;
+};
+const requiredChromiumRevision = browsersManifest.browsers.find((b) => b.name === "chromium")!.revision;
+const requiredRevisionPath = ["chrome-linux/chrome", "chrome-linux64/chrome"]
+  .map((rel) => `${PLAYWRIGHT_BROWSERS_PATH}/chromium-${requiredChromiumRevision}/${rel}`)
+  .find(existsSync);
+
+// Only used as a last resort when the required revision truly isn't
+// installed anywhere Playwright would look — never when it is, however this
+// sandbox's browsers directory happens to be laid out otherwise.
+const SANDBOX_FALLBACK_CHROMIUM_PATH = "/opt/pw-browsers/chromium";
+const usingSandboxFallbackBrowser = !process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE && !requiredRevisionPath && existsSync(SANDBOX_FALLBACK_CHROMIUM_PATH);
+const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ?? (usingSandboxFallbackBrowser ? SANDBOX_FALLBACK_CHROMIUM_PATH : undefined);
 
 /**
  * Runs against Production only — there is no local/staging target for this
@@ -69,20 +88,25 @@ export default defineConfig({
     video: "retain-on-failure",
     actionTimeout: 15_000,
     navigationTimeout: 45_000,
-    // Only set when actually launching the sandbox's older, unmatched
-    // Chromium binary (see the comment above SANDBOX_CHROMIUM_PATH) — never
-    // applied when a real, version-matched browser is in use.
+    // Only set when the required revision genuinely isn't installed and
+    // this sandbox's stale fallback binary is being used instead (see the
+    // comment above SANDBOX_FALLBACK_CHROMIUM_PATH) — undefined, and
+    // Playwright's own default resolution takes over, the moment the
+    // correct revision is actually installed.
     launchOptions: chromiumExecutablePath ? { executablePath: chromiumExecutablePath } : {},
-    // That same old Chromium build's bundled root store predates Google
-    // Trust Services' WR1 intermediate, which vercel.app now serves —
-    // independently confirmed valid via `openssl s_client` against the
-    // system trust store (Verify return code: 0), so this is a stale local
-    // root store, not an actual invalid/MITM certificate. Scoped narrowly to
-    // the exact condition that causes it (`usingSandboxFallbackBrowser`), so
-    // a normal CI run with the correct browser installed keeps real
-    // certificate verification and would immediately fail on a genuine bad
-    // certificate, unlike this sandbox-only workaround.
-    ignoreHTTPSErrors: usingSandboxFallbackBrowser,
+    // false by default, and ONLY ever true via this exact, explicit env var
+    // — never inferred from browser path/version/container detection (that
+    // was tried and was wrong: it blamed a stale root store for a browser
+    // version that turned out not to be the real cause — see README.md).
+    // The real, confirmed cause is that Chromium's certificate verifier
+    // cannot validate ANY certificate in this specific container, on any
+    // browser revision, for any host, proxied or direct — a container
+    // defect independently confirmed via Node's own TLS stack, which
+    // validates the exact same certificates without complaint. Enabling
+    // this requires src/globalSetup.ts's independent strict Node TLS
+    // preflight (src/tlsPreflight.ts) to have already passed, or the whole
+    // run aborts before any browser launches.
+    ignoreHTTPSErrors: isBrowserTlsBypassAllowed(),
   },
 
   projects: [

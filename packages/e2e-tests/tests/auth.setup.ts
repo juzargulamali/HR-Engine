@@ -1,5 +1,6 @@
 import { test as setup } from "@playwright/test";
 import { ALL_ROLES, authStateFile, getCredentials, hasCredentials, type Role } from "../src/config";
+import { assertOnAllowedHost } from "../src/hostGuard";
 import { LoginPage } from "../src/pages/LoginPage";
 
 /**
@@ -35,6 +36,9 @@ for (const role of ALL_ROLES) {
     await loginPage.goto();
     await loginPage.signIn(email, password);
     await loginPage.expectSignedIn();
+    // Sign-in must land on this app (or its own Supabase project) — never
+    // an unexpected external origin (e.g. a hijacked/misconfigured redirect).
+    assertOnAllowedHost(page.url());
     await page.context().storageState({ path: authStateFile(role as Role) });
   });
 }

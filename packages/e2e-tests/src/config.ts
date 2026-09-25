@@ -65,6 +65,32 @@ function readRoleCredentials(role: Role): RoleCredentials | null {
   return { email, password };
 }
 
+/**
+ * Explicit, narrow escape hatch for one confirmed defect: Chromium's own
+ * certificate verifier cannot validate ANY HTTPS certificate inside this
+ * specific Claude cloud container — confirmed against both browser
+ * revisions and an unrelated, definitely-valid third-party host
+ * (api.anthropic.com), while Node's own TLS stack validates the exact same
+ * certificates without complaint. This is a container defect, not a real
+ * certificate problem — but a browser-level bypass is still a real
+ * reduction in what the suite verifies, so it requires this exact opt-in,
+ * is never inferred from browser path/version/container detection, and is
+ * paired with an independent strict Node TLS preflight (see
+ * src/tlsPreflight.ts) that still aborts the whole run on a genuine
+ * certificate problem before any browser launches.
+ */
+export function isBrowserTlsBypassAllowed(): boolean {
+  return process.env.E2E_ALLOW_BROWSER_TLS_BYPASS === "true";
+}
+
+/** The app's own Supabase project URL, if this environment happens to
+ * expose it as a plain (non-secret) env var — the project URL itself isn't
+ * sensitive, unlike its anon/service-role keys, which this suite never
+ * reads. Returns null (not a guess) if neither is set. */
+export function getSupabaseUrl(): string | null {
+  return process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? null;
+}
+
 export function getBaseUrl(): string {
   const url = process.env.E2E_BASE_URL;
   if (!url) {

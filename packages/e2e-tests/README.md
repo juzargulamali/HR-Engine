@@ -42,25 +42,94 @@ complete read-only run now makes **7 real sign-in requests total**: one per
 configured role during setup (6: employee, manager, hrAdmin, ceo, finance,
 sysAdmin), plus the one intentional wrong-password attempt in
 `auth.spec.ts`. This fix has been verified in isolation (one role's setup,
-then one smoke test consuming its saved state with zero further sign-ins —
-see the commit message) but the full 30-test read-only run has not been
-repeated since; do that next to get a trustworthy pass-rate number.
+then one smoke test consuming its saved state with zero further sign-ins).
 
-## Browser version — this sandbox's known limitation
+**Latest full read-only run** (after the auth-setup fix above, the browser
+version fix, and the TLS bypass described below — see that section, this run
+had `E2E_ALLOW_BROWSER_TLS_BYPASS=true`): all 6 auth-setup sign-ins passed
+cleanly on the first attempt (13.5s–32.3s each). A separate isolated
+per-role check (one small read-only navigation per role, comparing against
+the RBAC rules verified from source: employee/manager denied on
+`/audit-log`, hrAdmin allowed, ceo allowed on `/alerts`, finance allowed on
+`/assets`, sysAdmin allowed on `/ai-suggestions`) matched the expected
+result for **all 6 roles, no mismatches**. The full 30-test functional suite
+then ran once: **19 of 30 passed** (15 clean + 4 that passed on the
+configured retry); **11 failed, every one with the identical, generic "Test
+timeout of 60000ms exceeded"** — never a wrong-content or wrong-permission
+assertion. This matches the original diagnosis at the top of this section
+almost exactly: this sandbox's outbound path to Production still degrades
+under a long (here, ~38 minute), sustained, serial Playwright run. Both
+causes this session found (the broken auth fixtures, and the browser
+TLS-verifier defect) are now fixed; this remaining timeout pattern is a
+distinct, third, still-open issue — the same recommendation applies: a
+normal CI runner with direct, unproxied network egress should not show it.
 
-`@playwright/test` 1.63.0 (installed) expects Chromium **revision 1243**
-(Chrome for Testing 153.0.8010.12). This sandbox's pre-installed browser is
-revision 1194 (Chromium 141.0.7390.37) — about a year older. `npx playwright
-install chromium` to fetch the matching build fails here with an explicit
-403: `no rule or allowlist entry allows host "cdn.playwright.dev"` — that is
-Playwright's official browser-download host (fallback mirror:
-`playwright.download.prss.microsoft.com`); allowlisting either would let a
-future session install the correct browser and delete the workaround below
-entirely. Until then, `playwright.config.ts` falls back to the pre-installed
-binary **only when no correctly-versioned browser is available**
-(`usingSandboxFallbackBrowser`), and sets `ignoreHTTPSErrors` **only in that
-same condition** — a normal CI run with the matching browser installed
-never takes either branch, and keeps real certificate verification.
+## Browser version — resolved
+
+`@playwright/test` 1.63.0 expects Chromium revision 1243 (Chrome for Testing
+153.0.8010.12). This sandbox originally only had revision 1194 pre-installed,
+and `npx playwright install chromium` initially failed with a 403 (`cdn.playwright.dev`
+not allowlisted). Once that domain was allowlisted, `npx playwright install
+chromium` succeeded and downloaded revision 1243 correctly.
+
+`playwright.config.ts` detects the actually-required revision dynamically
+(via `playwright-core`'s own `browsers.json`) rather than trusting a fixed
+path — this sandbox has a stable `/opt/pw-browsers/chromium` symlink left
+over from image setup that still points at the old revision 1194 and was
+**not** updated by the later install (Playwright installs new revisions as
+sibling `chromium-<rev>` directories without touching that symlink). Trusting
+the symlink's mere existence would have silently kept using the stale
+browser. The fallback to that symlink now only fires if the required
+revision genuinely isn't installed anywhere — never when it is.
+
+## Browser TLS validation bypass — this is not a browser-version problem
+
+**Browser TLS validation was bypassed due to a Claude-container Chromium
+verifier defect. Independent Node TLS validation passed. This run does not
+test browser-side certificate enforcement.**
+
+After fixing the browser-version mismatch above, Chromium (revision 1243,
+the correct one) still failed every navigation with
+`net::ERR_CERT_AUTHORITY_INVALID`. Before assuming a browser/root-store
+problem again, this was checked independently:
+
+- Node's own TLS stack (a raw `tls.connect` through the same proxy tunnel,
+  nothing Chromium-related) validates the exact same certificate
+  (`hr-engine-web.vercel.app`, issued by Google Trust Services WR1) without
+  complaint.
+- With the correct, current Chromium build, navigating to a **completely
+  unrelated, definitely-valid, non-proxied** domain (`api.anthropic.com`)
+  **also** fails with the identical error.
+- The old browser (1194) fails the same way against that same unrelated
+  domain.
+
+Conclusion: this is not about browser version, root-store staleness, or the
+proxy/target certificate at all — Chromium's certificate verifier cannot
+validate *any* HTTPS certificate in this specific container, on either
+browser revision. This is a container defect, not a real certificate
+problem, but it's still a real reduction in what the suite verifies, so:
+
+- **`ignoreHTTPSErrors` is `false` by default**, and **only ever `true`**
+  when `E2E_ALLOW_BROWSER_TLS_BYPASS=true` is explicitly set — never
+  inferred from browser path, version, or container detection (that was
+  tried once already and reached the wrong conclusion).
+- When that variable is set, `src/globalSetup.ts` runs an **independent
+  strict TLS preflight** (`src/tlsPreflight.ts`) — a raw Node TLS
+  connection with `rejectUnauthorized: true`, never relaxed — against
+  `E2E_BASE_URL`'s hostname and, if available as a plain (non-secret) env
+  var, the Supabase project hostname (`SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_URL`).
+  **The whole run aborts if either check fails.** This is what still catches
+  a genuine certificate problem despite the browser-side bypass.
+- The preflight logs only hostname, authorized true/false, protocol, and
+  issuer/expiry if available — never headers, cookies, tokens, or other
+  environment values.
+- `src/hostGuard.ts`'s `assertOnAllowedHost()` additionally fails any setup
+  test whose sign-in lands on an unexpected external origin (excluding
+  Chromium's own internal error-interstitial pseudo-host, which is a failed
+  navigation, not a redirect).
+- None of this touches application code, other security settings, or any
+  assertion the suite makes about the app's own behavior — only Chromium's
+  own certificate-verifier bypass in this one confirmed-broken container.
 
 ## Safety model — read this before running anything
 
