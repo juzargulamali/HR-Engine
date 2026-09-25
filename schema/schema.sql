@@ -215,6 +215,11 @@ create table profiles (
   locale              text not null default 'en',
   is_active           boolean not null default true,
   account_status      account_status not null default 'invited',
+  -- Admin-entered free text (max 500 chars, enforced in set_account_status()
+  -- and its caller) — never render this via dangerouslySetInnerHTML; plain
+  -- JSX text interpolation (React's default) escapes it safely. There is no
+  -- server-side HTML/script sanitization on this field by design — output
+  -- encoding, not input blacklisting, is what actually prevents stored XSS.
   status_reason       text,
   status_changed_by   uuid references auth.users(id),
   status_changed_at   timestamptz,
@@ -4903,6 +4908,14 @@ $$;
 -- calls this RPC once that succeeds on deactivate; on reactivate it calls
 -- this RPC first and only unbans afterward — in both cases so a partial
 -- failure always leans toward less access, never more.
+--
+-- has_role('sys_admin') below is called with no company argument, which
+-- (per has_role's null-semantics, §13) requires an UNSCOPED grant — this is
+-- deliberately global, not per-company: a System Administrator may act on
+-- an account in any company. Approved explicitly as decision 7 in
+-- docs/08-decisions-log.md; revisit before HR Engine becomes a true
+-- multi-company/SaaS product, at which point a single global Sys Admin able
+-- to deactivate any tenant's users is very likely the wrong model.
 -- =============================================================================
 
 create or replace function set_account_status(p_user_id uuid, p_new_status account_status, p_reason text)
@@ -4925,6 +4938,14 @@ begin
 
   if p_reason is null or length(trim(p_reason)) = 0 then
     raise exception 'A reason is required';
+  end if;
+
+  -- Matches the app-layer max (setAccountStatusSchema in
+  -- lib/actions/account-status.ts) — defense-in-depth against a caller
+  -- bypassing that layer, not a UX limit (the form/prompt already stops
+  -- someone well before this).
+  if length(p_reason) > 500 then
+    raise exception 'Reason is too long (500 characters max)';
   end if;
 
   if p_user_id = auth.uid() then
@@ -4973,10 +4994,19 @@ grant execute on function set_account_status(uuid, account_status, text) to auth
 -- security event that doesn't correspond to an actual row mutation on an
 -- already-audited table (a forgot-password request from a signed-out
 -- visitor, a self-service password change, a self-service sign-out-
--- everywhere, or an admin sending a reset/invite email). Not a
--- general-purpose "write anything to audit_log" helper: the action
+-- everywhere, an admin sending a reset/invite email, or a reactivation that
+-- couldn't restore a consistent state — see set_account_status() above).
+-- Not a general-purpose "write anything to audit_log" helper: the action
 -- vocabulary is fixed, and who may log which action (and for whom) is
 -- checked here, not trusted from the caller.
+--
+-- Metadata is allowlisted PER ACTION (v_allowed_keys below), not
+-- denylisted — every current action's allowlist is empty, since none of
+-- them need any custom metadata today, so p_metadata collapses to '{}' for
+-- every real call site regardless of what a caller passes. This is
+-- deliberately stricter than "strip a few known-bad key names": a caller
+-- cannot get ANY key into after_data unless it's explicitly added to that
+-- action's allowlist here, reviewed alongside the action itself.
 --
 -- Never reveals whether an account exists: it has no meaningful return value
 -- (void) and every branch succeeds silently whether or not a target was
@@ -5000,15 +5030,12 @@ declare
   v_actor_role app_role;
   v_actor_roles app_role[];
   v_company_id uuid;
+  v_allowed_keys text[];
   v_metadata jsonb;
 begin
   select array_agg(role order by granted_at desc) into v_actor_roles
   from user_roles where user_id = auth.uid() and revoked_at is null;
   v_actor_role := v_actor_roles[1];
-
-  -- Defensive redaction, on top of "callers must never pass this in the
-  -- first place" — the same never-log-a-secret rule as everywhere else.
-  v_metadata := coalesce(p_metadata, '{}'::jsonb) - 'password' - 'token' - 'access_token' - 'refresh_token';
 
   if p_action = 'password_reset_requested' then
     -- Unauthenticated by definition (anon has no auth.uid()); resolves the
@@ -5033,9 +5060,40 @@ begin
     end if;
     v_target := p_target_user_id;
 
+  elsif p_action = 'account_reconciliation_required' then
+    -- Logged by the Server Action itself (lib/actions/account-status.ts)
+    -- when a reactivation's compensating deactivation ALSO fails, leaving
+    -- profiles/auth genuinely inconsistent — exists purely to flag that
+    -- state for a human System Administrator to resolve by hand.
+    if auth.uid() is null or not has_role('sys_admin') then
+      raise exception 'Only a System Administrator may log this action';
+    end if;
+    if p_target_user_id is null or not exists (select 1 from profiles where id = p_target_user_id) then
+      raise exception 'Unknown target account';
+    end if;
+    v_target := p_target_user_id;
+
   else
     raise exception 'Unknown security event action';
   end if;
+
+  -- Every action's allowlist is empty today — add a
+  -- `when '<action>' then array['key1', ...]` branch only alongside a
+  -- reviewed reason a specific action needs specific metadata.
+  v_allowed_keys := case p_action
+    when 'password_reset_requested' then array[]::text[]
+    when 'password_changed' then array[]::text[]
+    when 'all_device_signout_requested' then array[]::text[]
+    when 'password_reset_sent_by_admin' then array[]::text[]
+    when 'invitation_resent' then array[]::text[]
+    when 'account_reconciliation_required' then array[]::text[]
+    else array[]::text[]
+  end;
+
+  select coalesce(jsonb_object_agg(kv.key, kv.value), '{}'::jsonb)
+  into v_metadata
+  from jsonb_each(coalesce(p_metadata, '{}'::jsonb)) as kv(key, value)
+  where kv.key = any(v_allowed_keys);
 
   if v_target is not null then
     select company_id into v_company_id from employees where user_id = v_target and deleted_at is null limit 1;

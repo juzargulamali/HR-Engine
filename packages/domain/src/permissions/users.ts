@@ -36,3 +36,13 @@ export function canManageAccountStatus(grants: readonly RoleGrant[]): boolean {
 export function canAdminResetPassword(grants: readonly RoleGrant[]): boolean {
   return isSysAdmin(grants);
 }
+
+/**
+ * `isSysAdmin(grants)` called with no scope (as both functions above do)
+ * requires an unscoped grant — this is deliberately global, not per-company:
+ * a System Administrator may act on an account in any company. Approved
+ * explicitly as decision 7 in docs/08-decisions-log.md; revisit before HR
+ * Engine becomes a true multi-company/SaaS product, at which point a single
+ * global Sys Admin able to deactivate any tenant's users is very likely the
+ * wrong model.
+ */

@@ -22,4 +22,14 @@ traceability principle applied to every approval and balance change in the produ
 - Decision 5 sets delivery sequencing, not architecture: the schema and policy engine remain
   identical for all three countries; UAE simply goes first end-to-end.
 
+## Account Control & Security Settings (2026-09-25)
+
+One further judgment call, raised during the security review of that feature's implementation
+(commit `f6870ccfe4469557a1f0bbdaaeb23a663b8194b9`), needed the same explicit sign-off rather than
+inheriting an assumption:
+
+| # | Question | Decision | Rationale | Design impact |
+|---|---|---|---|---|
+| 7 | Should System Administrator's authority to activate/deactivate an account, resend an invitation, or trigger a password reset be scoped per company, or remain global? | **Global, approved as-is.** System Admin may manage accounts across all companies. HR Admin remains unable to activate/deactivate accounts, invite users, resend invitations, or trigger password resets — that authority stays Sys-Admin-only, unchanged by this decision. | Matches the pre-existing, already-shipped scope of every other Sys-Admin-gated action (`inviteUser`, `deleteUserAccount`, `assignRole` in `lib/actions/users.ts`) and `docs/03-permission-matrix.md` §3.6 ("Manage roles / user access" — Sys Admin: F, no company qualifier). `has_role('sys_admin')` called with no company argument (as `set_account_status()` and `log_security_event()` in `supabase/migrations/20261104000000_account_security_controls.sql` both do) structurally requires an *unscoped* grant — a company-scoped `sys_admin` row satisfies nothing anywhere in this codebase, so in practice every real Sys Admin grant already is global. | **No design change** — this feature inherits the existing scope model rather than introducing a new one. **Revisit before HR Engine becomes a true multi-company/SaaS product**: at that point, a single global Sys Admin role able to deactivate any tenant's users is very likely the wrong model, and this decision (along with `docs/03-permission-matrix.md` §3.6 generally) should be re-opened rather than carried forward by default. |
+
 Proceed to Phase 0 per [06-implementation-phases.md](./06-implementation-phases.md).

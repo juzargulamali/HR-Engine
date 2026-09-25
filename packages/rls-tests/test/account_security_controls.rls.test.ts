@@ -9,6 +9,44 @@ import { RlsTestDatabase } from "../src/harness";
  * System-Administrator check counts every active sys_admin globally.
  */
 describe("account security controls", () => {
+  describe("migration backfill (pre-existing profiles)", () => {
+    // Uses setupBefore()/applyMigration() rather than setup() — a fresh
+    // database created by setup() has no profiles that predate this
+    // migration, so it can't exercise what happens to one that does. This
+    // reproduces the real upgrade scenario: a profile that already existed
+    // when 20261104000000_account_security_controls.sql ran.
+    const db = new RlsTestDatabase();
+    const PRE_EXISTING_USER = "00000000-0000-0000-0000-0000000c0501";
+    const MIGRATION_FILE = "20261104000000_account_security_controls.sql";
+
+    beforeAll(async () => {
+      await db.setupBefore(MIGRATION_FILE);
+      await db.seed(`insert into auth.users (id, email) values ('${PRE_EXISTING_USER}', 'backfill-pre-existing@enginious.ae');`);
+      await db.applyMigration(MIGRATION_FILE);
+    }, 30_000);
+
+    afterAll(() => db.teardown());
+
+    it("backfills a pre-existing profile straight to 'active', never 'invited'", async () => {
+      const { rows } = await db.seed(`select account_status from profiles where id = '${PRE_EXISTING_USER}'`);
+      expect(rows[0].account_status).toBe("active");
+    });
+
+    it("does not generate any audit_log noise for the backfill", async () => {
+      const { rows } = await db.seed(`select count(*)::int as count from audit_log where table_name = 'profiles'`);
+      expect(rows[0].count).toBe(0);
+    });
+
+    it("leaves status_reason/status_changed_by/status_changed_at unset for the backfilled row", async () => {
+      const { rows } = await db.seed(
+        `select status_reason, status_changed_by, status_changed_at from profiles where id = '${PRE_EXISTING_USER}'`,
+      );
+      expect(rows[0].status_reason).toBeNull();
+      expect(rows[0].status_changed_by).toBeNull();
+      expect(rows[0].status_changed_at).toBeNull();
+    });
+  });
+
   describe("profiles self-update guard + self-activation", () => {
     const db = new RlsTestDatabase();
     const USER_INVITED = "00000000-0000-0000-0000-0000000c0001";
@@ -112,6 +150,21 @@ describe("account security controls", () => {
       await expect(
         db.asUser(USER_ADMIN_A, (query) => query("select set_account_status($1, 'deactivated', '   ')", [USER_PLAIN])),
       ).rejects.toThrow("A reason is required");
+    });
+
+    it("rejects a reason over 500 characters (defense-in-depth backstop matching the app-layer limit)", async () => {
+      await expect(
+        db.asUser(USER_ADMIN_A, (query) => query("select set_account_status($1, 'deactivated', $2)", [USER_PLAIN, "x".repeat(501)])),
+      ).rejects.toThrow("too long");
+    });
+
+    it("accepts a reason at exactly 500 characters", async () => {
+      // asUser (auto-rollback), not asUserCommit — this only needs to prove
+      // the call doesn't throw, not leave USER_PLAIN deactivated for the
+      // later tests in this same describe that assume it starts 'active'.
+      await expect(
+        db.asUser(USER_ADMIN_A, (query) => query("select set_account_status($1, 'deactivated', $2)", [USER_PLAIN, "x".repeat(500)])),
+      ).resolves.toBeDefined();
     });
 
     it("blocks a Sys Admin from changing their own account status", async () => {
@@ -325,7 +378,7 @@ describe("account security controls", () => {
       );
     });
 
-    it("strips password/token keys from metadata even if a caller passed them", async () => {
+    it("strips every metadata key — password_changed's allowlist is empty, so nothing survives, not even an innocuous key", async () => {
       await db.asUserCommit(USER_SELF, (query) =>
         query("select log_security_event('password_changed', null, null, $1::jsonb)", [
           JSON.stringify({ password: "hunter2", token: "abc", safe: "ok" }),
@@ -334,7 +387,71 @@ describe("account security controls", () => {
       const { rows } = await db.seed(
         `select after_data from audit_log where action = 'password_changed' and record_id = '${USER_SELF}' order by occurred_at desc limit 1`,
       );
-      expect(rows[0].after_data).toEqual({ safe: "ok" });
+      // Allowlist, not denylist: 'safe' isn't a secret-shaped key, but it's
+      // also not on password_changed's (empty) allowlist, so it's dropped
+      // too — proving this isn't just pattern-matching known-bad names.
+      expect(rows[0].after_data).toEqual({});
+    });
+
+    it("strips obvious secret-shaped key variants beyond the original 4 exact names", async () => {
+      await db.asUserCommit(USER_SELF, (query) =>
+        query("select log_security_event('password_changed', null, null, $1::jsonb)", [
+          JSON.stringify({
+            newPassword: "hunter2",
+            resetUrl: "https://evil.example/reset?token=abc",
+            resetLink: "https://evil.example/reset?token=abc",
+            authorization: "Bearer abc123",
+            cookie: "sb-session=abc123",
+          }),
+        ]),
+      );
+      const { rows } = await db.seed(
+        `select after_data from audit_log where action = 'password_changed' and record_id = '${USER_SELF}' order by occurred_at desc limit 1`,
+      );
+      expect(rows[0].after_data).toEqual({});
+    });
+  });
+
+  describe("log_security_event() — account_reconciliation_required", () => {
+    const db = new RlsTestDatabase();
+    const USER_ADMIN = "00000000-0000-0000-0000-0000000c0304";
+    const USER_PLAIN = "00000000-0000-0000-0000-0000000c0305";
+    const USER_TARGET = "00000000-0000-0000-0000-0000000c0306";
+
+    beforeAll(async () => {
+      await db.setup();
+      await db.seed(`
+        insert into auth.users (id, email) values
+          ('${USER_ADMIN}', 'lse-recon-admin@enginious.ae'),
+          ('${USER_PLAIN}', 'lse-recon-plain@enginious.ae'),
+          ('${USER_TARGET}', 'lse-recon-target@enginious.ae');
+        insert into user_roles (user_id, role) values ('${USER_ADMIN}', 'sys_admin');
+      `);
+    }, 30_000);
+
+    afterAll(() => db.teardown());
+
+    it("rejects a non-sys_admin caller", async () => {
+      await expect(
+        db.asUser(USER_PLAIN, (query) => query("select log_security_event('account_reconciliation_required', $1)", [USER_TARGET])),
+      ).rejects.toThrow("Only a System Administrator");
+    });
+
+    it("rejects an unknown target", async () => {
+      await expect(
+        db.asUser(USER_ADMIN, (query) =>
+          query("select log_security_event('account_reconciliation_required', $1)", ["00000000-0000-0000-0000-000000000000"]),
+        ),
+      ).rejects.toThrow("Unknown target account");
+    });
+
+    it("lets a Sys Admin log it against a real target, actor and target both recorded", async () => {
+      await db.asUserCommit(USER_ADMIN, (query) => query("select log_security_event('account_reconciliation_required', $1)", [USER_TARGET]));
+      const { rows } = await db.seed(
+        `select record_id, actor_id from audit_log where action = 'account_reconciliation_required' order by occurred_at desc limit 1`,
+      );
+      expect(rows[0].record_id).toBe(USER_TARGET);
+      expect(rows[0].actor_id).toBe(USER_ADMIN);
     });
   });
 

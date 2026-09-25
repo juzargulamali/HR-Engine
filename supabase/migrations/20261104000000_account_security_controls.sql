@@ -35,6 +35,11 @@ create type account_status as enum ('invited', 'active', 'deactivated');
 
 alter table profiles
   add column account_status account_status not null default 'invited',
+  -- Admin-entered free text (max 500 chars, enforced in set_account_status()
+  -- and its caller) — never render this via dangerouslySetInnerHTML; plain
+  -- JSX text interpolation (React's default) escapes it safely. There is no
+  -- server-side HTML/script sanitization on this field by design — output
+  -- encoding, not input blacklisting, is what actually prevents stored XSS.
   add column status_reason text,
   add column status_changed_by uuid references auth.users(id),
   add column status_changed_at timestamptz;
@@ -42,6 +47,16 @@ alter table profiles
 -- Existing rows predate this column and have already completed setup
 -- (they're signing in today) — back-fill them to 'active' so the migration
 -- doesn't retroactively brand every current user as "Invited".
+--
+-- Deliberately placed BEFORE `audit_profiles` is created below: triggers
+-- only fire for statements that execute after they exist, so running this
+-- backfill first means it does NOT generate an audit_log row for every
+-- existing profile. Verified empirically (fresh DB, pre-existing profile,
+-- migration applied, audit_log left at 0 rows) — see
+-- account_security_controls.rls.test.ts's "migration backfill" describe.
+-- Keep this statement above the `create trigger audit_profiles` below; if
+-- the two are ever reordered, every existing user will get a spurious,
+-- NULL-actor 'profiles updated' audit entry timestamped at migration time.
 update profiles set account_status = 'active';
 
 -- ---- Self-activation: the ONLY update a plain authenticated user may make
@@ -100,6 +115,9 @@ create trigger profiles_guard_self_update
 -- company_id/employee_id column, so write_audit_log() naturally resolves
 -- company_id to null here and every row is Sys-Admin-only, which matches
 -- decision 1 above.
+--
+-- Deliberately created AFTER the `update profiles set account_status =
+-- 'active'` backfill above — see that statement's comment. Must stay below it.
 create trigger audit_profiles after update on profiles
   for each row execute function write_audit_log();
 
@@ -117,6 +135,14 @@ alter policy audit_log_select_sysadmin on audit_log
 -- RPC once that succeeds; on reactivate, it calls this RPC first and only
 -- unbans afterward — in both cases so a partial failure always leans
 -- toward less access, never more (see design note above).
+--
+-- has_role('sys_admin') below is called with no company argument, which
+-- (per has_role's null-semantics, §13) requires an UNSCOPED grant — this is
+-- deliberately global, not per-company: a System Administrator may act on
+-- an account in any company. Approved explicitly as decision 7 in
+-- docs/08-decisions-log.md; revisit before HR Engine becomes a true
+-- multi-company/SaaS product, at which point a single global Sys Admin able
+-- to deactivate any tenant's users is very likely the wrong model.
 -- =============================================================================
 
 create or replace function set_account_status(p_user_id uuid, p_new_status account_status, p_reason text)
@@ -139,6 +165,14 @@ begin
 
   if p_reason is null or length(trim(p_reason)) = 0 then
     raise exception 'A reason is required';
+  end if;
+
+  -- Matches the app-layer max (setAccountStatusSchema in
+  -- lib/actions/account-status.ts) — defense-in-depth against a caller
+  -- bypassing that layer, not a UX limit (the form/prompt already stops
+  -- someone well before this).
+  if length(p_reason) > 500 then
+    raise exception 'Reason is too long (500 characters max)';
   end if;
 
   if p_user_id = auth.uid() then
@@ -187,11 +221,23 @@ grant execute on function set_account_status(uuid, account_status, text) to auth
 -- security event that doesn't correspond to an actual row mutation on an
 -- already-audited table (a forgot-password request from a signed-out
 -- visitor, a self-service password change, a self-service sign-out-
--- everywhere, or an admin sending a reset/invite email). This is not a
--- general-purpose "write anything to audit_log" helper: the action vocabulary
--- is fixed, and who may log which action (and for whom) is checked here, not
--- trusted from the caller — the same non-forgeability write_audit_log()'s
--- trigger-only design already guarantees for every other table.
+-- everywhere, an admin sending a reset/invite email, or a reactivation that
+-- couldn't restore a consistent state — see set_account_status() below).
+-- This is not a general-purpose "write anything to audit_log" helper: the
+-- action vocabulary is fixed, and who may log which action (and for whom)
+-- is checked here, not trusted from the caller — the same non-forgeability
+-- write_audit_log()'s trigger-only design already guarantees for every
+-- other table.
+--
+-- Metadata is allowlisted PER ACTION (v_allowed_keys below), not
+-- denylisted — every current action's allowlist is empty, since none of
+-- them need any custom metadata today, so p_metadata collapses to '{}' for
+-- every real call site regardless of what a caller passes. This is
+-- deliberately stricter than "strip a few known-bad key names": a caller
+-- (or a future call site added carelessly) cannot get ANY key into
+-- after_data unless it's explicitly added to that action's allowlist here,
+-- reviewed alongside the action itself — not just newPassword/resetUrl/
+-- resetLink/authorization/cookie, but any key not on the list.
 --
 -- Never reveals whether an account exists: it has no meaningful return value
 -- (void) and every branch succeeds silently whether or not a target was
@@ -215,15 +261,12 @@ declare
   v_actor_role app_role;
   v_actor_roles app_role[];
   v_company_id uuid;
+  v_allowed_keys text[];
   v_metadata jsonb;
 begin
   select array_agg(role order by granted_at desc) into v_actor_roles
   from user_roles where user_id = auth.uid() and revoked_at is null;
   v_actor_role := v_actor_roles[1];
-
-  -- Defensive redaction, on top of "callers must never pass this in the
-  -- first place" — the same never-log-a-secret rule as everywhere else.
-  v_metadata := coalesce(p_metadata, '{}'::jsonb) - 'password' - 'token' - 'access_token' - 'refresh_token';
 
   if p_action = 'password_reset_requested' then
     -- Unauthenticated by definition (anon has no auth.uid()); resolves the
@@ -248,9 +291,41 @@ begin
     end if;
     v_target := p_target_user_id;
 
+  elsif p_action = 'account_reconciliation_required' then
+    -- Logged by the Server Action itself (lib/actions/account-status.ts)
+    -- when a reactivation's compensating deactivation ALSO fails, leaving
+    -- profiles/auth genuinely inconsistent — this is the one action that
+    -- exists purely to flag that state for a human System Administrator to
+    -- resolve by hand; nothing reads or acts on it automatically.
+    if auth.uid() is null or not has_role('sys_admin') then
+      raise exception 'Only a System Administrator may log this action';
+    end if;
+    if p_target_user_id is null or not exists (select 1 from profiles where id = p_target_user_id) then
+      raise exception 'Unknown target account';
+    end if;
+    v_target := p_target_user_id;
+
   else
     raise exception 'Unknown security event action';
   end if;
+
+  -- Every action's allowlist is empty today (see design note above) — add a
+  -- `when '<action>' then array['key1', ...]` branch only alongside a
+  -- reviewed reason a specific action needs specific metadata.
+  v_allowed_keys := case p_action
+    when 'password_reset_requested' then array[]::text[]
+    when 'password_changed' then array[]::text[]
+    when 'all_device_signout_requested' then array[]::text[]
+    when 'password_reset_sent_by_admin' then array[]::text[]
+    when 'invitation_resent' then array[]::text[]
+    when 'account_reconciliation_required' then array[]::text[]
+    else array[]::text[]
+  end;
+
+  select coalesce(jsonb_object_agg(kv.key, kv.value), '{}'::jsonb)
+  into v_metadata
+  from jsonb_each(coalesce(p_metadata, '{}'::jsonb)) as kv(key, value)
+  where kv.key = any(v_allowed_keys);
 
   if v_target is not null then
     select company_id into v_company_id from employees where user_id = v_target and deleted_at is null limit 1;
