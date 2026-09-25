@@ -1,18 +1,25 @@
 name: E2E Production QA (Playwright)
 
-# Manual dispatch ONLY — never on push/pull_request/schedule. This suite runs
-# directly against Production with real (dedicated) test accounts, so it must
-# only ever start because a human deliberately clicked "Run workflow" and
-# reviewed the inputs, never as a side effect of a commit.
+# workflow_dispatch only shows up in the Actions UI once this file exists on
+# the default branch — until then, add a pull_request trigger (scoped to
+# just this workflow's own files) so opening a PR that touches them is how
+# this first reaches main. That does NOT make this workflow auto-run
+# unattended: the `environment: production-qa` below requires a human's
+# manual approval (configured as a required reviewer on that GitHub
+# Environment) before the job can start and before it can see any E2E
+# secret, on a pull_request run exactly as much as on a manual dispatch.
+# This workflow is permanently read-only — it always runs exactly
+# `npm run test:e2e:read-only`, never a mutating spec, and takes no input
+# that could change that.
 on:
-  workflow_dispatch:
-    inputs:
-      backup_confirmed:
-        description: "Has a recoverable Supabase backup been confirmed for this run? (required for @mutating specs — read-only specs run regardless)"
-        required: false
-        default: "false"
-        type: choice
-        options: ["false", "true"]
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/e2e-production-qa.yml"
+      - "packages/e2e-tests/**"
+  workflow_dispatch: {}
+  # ^ present for after this workflow reaches main, where dispatching it
+  # doesn't depend on a pull request touching these paths.
 
 permissions:
   contents: read
@@ -20,6 +27,7 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    environment: production-qa
     timeout-minutes: 60
     defaults:
       run:
@@ -52,7 +60,6 @@ jobs:
         run: npm run test:e2e:read-only
         env:
           E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
-          E2E_BACKUP_CONFIRMED: ${{ inputs.backup_confirmed }}
           E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
           E2E_EMPLOYEE_PASSWORD: ${{ secrets.E2E_EMPLOYEE_PASSWORD }}
           E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
