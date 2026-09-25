@@ -22,7 +22,7 @@ import { tagNote } from "../src/recordTag";
  * below checks for a second pending step and reports what it finds rather
  * than assuming either shape.
  */
-test.describe("annual leave workflow", () => {
+test.describe("annual leave workflow @mutating", () => {
   test.skip(!isBackupConfirmed(), "Backup not confirmed (E2E_BACKUP_CONFIRMED != 'true') — skipping mutating leave tests.");
 
   test("submit, manager approves, balance reflects the approved request", async ({ employeePage, managerPage, runId }) => {

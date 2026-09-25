@@ -6,6 +6,7 @@
   "scripts": {
     "test:e2e": "playwright test",
     "test:e2e:smoke": "playwright test --grep @smoke",
+    "test:e2e:read-only": "playwright test --grep-invert @mutating",
     "test:e2e:ui": "playwright test --ui",
     "cleanup:dry-run": "tsx scripts/dry-run-cleanup.ts",
     "typecheck": "tsc --noEmit"

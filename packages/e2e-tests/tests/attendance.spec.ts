@@ -20,7 +20,7 @@ import { testDate } from "../src/recordTag";
  *
  * Mutating — gated on E2E_BACKUP_CONFIRMED.
  */
-test.describe("attendance and recovery leave", () => {
+test.describe("attendance and recovery leave @mutating", () => {
   test.skip(!isBackupConfirmed(), "Backup not confirmed (E2E_BACKUP_CONFIRMED != 'true') — skipping mutating attendance tests.");
 
   test("HR Admin bulk-fills a day's attendance across work modes", async ({ hrAdminPage, runId }) => {

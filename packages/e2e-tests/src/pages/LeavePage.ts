@@ -1,4 +1,5 @@
 import { type Page, expect } from "@playwright/test";
+import { gotoWithRetry } from "../gotoWithRetry";
 
 /**
  * apps/web/src/app/(app)/leave/{page,new/leave-request-form}.tsx —
@@ -10,11 +11,11 @@ export class LeavePage {
   constructor(private readonly page: Page) {}
 
   async gotoNew(): Promise<void> {
-    await this.page.goto("/leave/new");
+    await gotoWithRetry(this.page, "/leave/new");
   }
 
   async gotoList(): Promise<void> {
-    await this.page.goto("/leave");
+    await gotoWithRetry(this.page, "/leave");
   }
 
   async submitRequest(opts: { startDate: string; endDate: string; leaveTypeCode?: string; reason?: string }): Promise<void> {
@@ -58,7 +59,7 @@ export class ApprovalsPage {
   constructor(private readonly page: Page) {}
 
   async goto(): Promise<void> {
-    await this.page.goto("/approvals");
+    await gotoWithRetry(this.page, "/approvals");
   }
 
   private cardFor(needle: string) {

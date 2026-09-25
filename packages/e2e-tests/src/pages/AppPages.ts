@@ -1,4 +1,5 @@
 import { type Page, expect } from "@playwright/test";
+import { gotoWithRetry } from "../gotoWithRetry";
 
 /**
  * Lighter-weight page objects for areas not deeply re-read this round
@@ -14,7 +15,7 @@ export class EmployeesPage {
   constructor(private readonly page: Page) {}
 
   async goto(): Promise<void> {
-    await this.page.goto("/employees");
+    await gotoWithRetry(this.page, "/employees");
   }
 
   async openProfile(name: string): Promise<void> {
@@ -33,7 +34,7 @@ export class EmployeesPage {
 export class HolidaysPage {
   constructor(private readonly page: Page) {}
   async goto(): Promise<void> {
-    await this.page.goto("/holidays");
+    await gotoWithRetry(this.page, "/holidays");
   }
   async expectHoliday(name: string): Promise<void> {
     await expect(this.page.getByText(new RegExp(name, "i"))).toBeVisible({ timeout: 10_000 });
@@ -44,7 +45,7 @@ export class ReimbursementsPage {
   constructor(private readonly page: Page) {}
 
   async goto(): Promise<void> {
-    await this.page.goto("/reimbursements");
+    await gotoWithRetry(this.page, "/reimbursements");
   }
 
   async gotoNew(): Promise<void> {
@@ -60,7 +61,7 @@ export class AuditLogPage {
   constructor(private readonly page: Page) {}
 
   async goto(): Promise<void> {
-    await this.page.goto("/audit-log");
+    await gotoWithRetry(this.page, "/audit-log");
   }
 
   async expectEntryVisible(needle: string): Promise<void> {
@@ -78,7 +79,7 @@ export class PayrollPage {
   constructor(private readonly page: Page) {}
 
   async goto(): Promise<void> {
-    await this.page.goto("/payroll");
+    await gotoWithRetry(this.page, "/payroll");
   }
 
   async expectExportControlVisible(): Promise<void> {
@@ -94,7 +95,7 @@ export class DashboardPage {
   constructor(private readonly page: Page) {}
 
   async goto(): Promise<void> {
-    await this.page.goto("/");
+    await gotoWithRetry(this.page, "/");
   }
 
   /** Part C's compact header: day/date/live clock/location/weather. Only

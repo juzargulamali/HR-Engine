@@ -1,4 +1,5 @@
 import { type Page, expect } from "@playwright/test";
+import { gotoWithRetry } from "../gotoWithRetry";
 
 /** Every top-level route this app has (apps/web/src/app/(app)/*\/page.tsx),
  * confirmed by directory listing. */
@@ -49,8 +50,12 @@ export const ROLE_DENIED_ALERT: Partial<Record<(typeof ROUTES)[number], RegExp>>
 };
 
 export async function visitDirectly(page: Page, route: string): Promise<{ finalUrl: string; bodyText: string }> {
-  await page.goto(route);
-  await page.waitForLoadState("networkidle");
+  await gotoWithRetry(page, route);
+  // Not "networkidle": this app appears to hold at least one long-lived
+  // connection (Supabase realtime), which would keep the network non-idle
+  // indefinitely and mask a real result behind the outer test timeout
+  // instead of failing fast on an actual navigation problem.
+  await page.waitForLoadState("load");
   const finalUrl = page.url();
   const bodyText = (await page.locator("body").innerText()).trim();
   return { finalUrl, bodyText };

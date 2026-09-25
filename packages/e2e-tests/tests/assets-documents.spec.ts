@@ -28,7 +28,7 @@ test.describe("assets permissions", () => {
  *
  * Mutating (creates a reimbursement claim) — gated on backup confirmation.
  */
-test.describe("document upload", () => {
+test.describe("document upload @mutating", () => {
   test.skip(!isBackupConfirmed(), "Backup not confirmed (E2E_BACKUP_CONFIRMED != 'true') — skipping mutating upload test.");
 
   test("employee can attach a harmless test file to a new reimbursement claim", async ({ employeePage, runId }) => {

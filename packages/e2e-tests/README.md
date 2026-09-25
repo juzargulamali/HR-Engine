@@ -4,6 +4,27 @@ Unattended Playwright end-to-end suite that runs directly against the live
 **Production** deployment, using dedicated test accounts only. There is no
 staging/local target for this suite.
 
+## Status as of the first live run
+
+Read-only tests were run twice against Production from this sandboxed
+session (`npm run test:e2e:read-only`, see "Read-only vs mutating" below).
+**16 of 30 passed cleanly; 14 failed — every single failure was a
+login/navigation-level timeout (`net::ERR_TOO_MANY_RETRIES`, "Test timeout
+... while setting up hrAdminPage", or the login form/redirect never
+completing), never a wrong-content or wrong-permission assertion.** Failures
+were heavily concentrated on the HR Admin/CEO fixtures specifically; no test
+that completed a login and reached its actual assertions produced an
+incorrect result. This is consistent with this sandbox's outbound proxy path
+to Production degrading under a long sustained run (both runs combined ran
+~50 minutes), not with an application defect — see
+`src/gotoWithRetry.ts` for the underlying evidence and mitigation attempted
+(retry-on-navigation, `retries: 1`), which reduced but did not eliminate the
+failures. **Recommendation: re-run this suite from a normal CI runner with
+direct network egress (not this constrained sandbox) for a trustworthy full
+pass**, or re-run here in smaller batches (5-8 tests per invocation) if a
+CI runner isn't available yet. Zero mutating actions occurred in these
+runs (only `@mutating`-tagged specs, all excluded, ever write anything).
+
 ## Safety model — read this before running anything
 
 This suite is built to run against a real production database with real
@@ -45,16 +66,27 @@ still arrive in the running session as ordinary `process.env` values,
 which is exactly what `src/config.ts` reads. See
 `.env.example` for the exact variable names to set as secrets.
 
+## Read-only vs mutating
+
+Every describe block that creates/modifies a real record has `@mutating` in
+its title (`leave.spec.ts`, `attendance.spec.ts`, and the "document upload"
+block in `assets-documents.spec.ts` — nowhere else). This is enforced two
+ways, not just one:
+
+1. **Structurally**, via Playwright's grep tag: `npm run test:e2e:read-only`
+   runs `playwright test --grep-invert @mutating`, which never even loads a
+   mutating test's steps.
+2. **At runtime**, each `@mutating` describe also calls
+   `test.skip(!isBackupConfirmed(), ...)`, so even a plain `npm run test:e2e`
+   (no grep filter) skips them cleanly without `E2E_BACKUP_CONFIRMED=true`.
+
 ## Running
 
 ```bash
 npm install --workspace @enginious-hr/e2e-tests
 
-# Read-only specs only (safe without backup confirmation):
-npx playwright test --project=desktop-chromium \
-  tests/auth.spec.ts tests/smoke.spec.ts tests/rbac.spec.ts \
-  tests/isolation.spec.ts tests/audit-log.spec.ts tests/payroll.spec.ts \
-  tests/policies.spec.ts tests/holidays.spec.ts tests/assets-documents.spec.ts
+# Read-only specs only — the one that's safe to run any time:
+npm run test:e2e:read-only
 
 # Full suite (mutating specs only actually run if E2E_BACKUP_CONFIRMED=true):
 npm run test:e2e
@@ -69,7 +101,11 @@ npx playwright test --project=mobile-smoke
 `playwright.config.ts` runs everything serially (`workers: 1`,
 `fullyParallel: false`) on purpose: this suite shares one live production
 database with real users, and serial execution avoids two specs racing on
-the same approvals inbox or attendance day.
+the same approvals inbox or attendance day. `retries: 1` tolerates this
+sandbox's observed transient proxy failures (see "Status as of the first
+live run" above and `src/gotoWithRetry.ts`) without masking a real app
+defect — a retry gets a fresh worker/context, so a genuine wrong-content
+assertion still fails identically both times.
 
 ## Run IDs and cleanup
 

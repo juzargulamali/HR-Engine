@@ -22,6 +22,7 @@ interface RoleFixtures {
   hrAdminPage: Page;
   ceoPage: Page;
   financePage: Page;
+  sysAdminPage: Page;
 }
 
 interface WorkerFixtures {
@@ -31,6 +32,7 @@ interface WorkerFixtures {
   hrAdminContext: BrowserContext;
   ceoContext: BrowserContext;
   financeContext: BrowserContext;
+  sysAdminContext: BrowserContext;
 }
 
 async function loginAs(context: BrowserContext, role: Role): Promise<Page> {
@@ -71,6 +73,11 @@ export const test = base.extend<RoleFixtures, WorkerFixtures>({
     await use(context);
     await context.close();
   }, { scope: "worker" }],
+  sysAdminContext: [async ({ browser }, use) => {
+    const context = await browser.newContext({ baseURL: getBaseUrl() });
+    await use(context);
+    await context.close();
+  }, { scope: "worker" }],
 
   employeePage: async ({ employeeContext }, use) => use(await loginAs(employeeContext, "employee")),
   managerPage: async ({ managerContext }, use) => use(await loginAs(managerContext, "manager")),
@@ -81,6 +88,12 @@ export const test = base.extend<RoleFixtures, WorkerFixtures>({
       test.skip(true, "No Finance test account configured — see the morning report's account-confirmation section.");
     }
     return use(await loginAs(financeContext, "finance"));
+  },
+  sysAdminPage: async ({ sysAdminContext }, use) => {
+    if (!hasCredentials("sysAdmin")) {
+      test.skip(true, "No Sys Admin test account configured.");
+    }
+    return use(await loginAs(sysAdminContext, "sysAdmin"));
   },
 });
 

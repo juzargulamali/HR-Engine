@@ -1,4 +1,5 @@
 import { type Page, expect } from "@playwright/test";
+import { gotoWithRetry } from "../gotoWithRetry";
 
 /**
  * apps/web/src/app/(app)/policies/{page,policy-versions-table,
@@ -11,7 +12,7 @@ export class PoliciesPage {
   constructor(private readonly page: Page) {}
 
   async goto(): Promise<void> {
-    await this.page.goto("/policies");
+    await gotoWithRetry(this.page, "/policies");
   }
 
   async showOlderVersions(): Promise<void> {

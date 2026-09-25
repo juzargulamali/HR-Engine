@@ -17,17 +17,24 @@ export interface RoleCredentials {
   password: string;
 }
 
-const OPTIONAL_ROLES = new Set(["finance"]);
+const OPTIONAL_ROLES = new Set(["finance", "sysAdmin"]);
 
-/** Every role this suite knows how to authenticate as. `finance` is optional — its
- * dedicated test account's existence has not been confirmed yet (see the morning
- * report); every other role is required for the suite to start at all. */
+/** Every role this suite knows how to authenticate as. `finance` and
+ * `sysAdmin` are optional — dedicated test accounts for them may not exist
+ * in every environment; every other role is required for the suite to
+ * start at all.
+ *
+ * Env var prefixes match the actual names configured for this Production
+ * environment's five confirmed test accounts (Employee Test, Manager Test,
+ * Admin Test, CEO Test, HR Test) — note "HR" (E2E_HR), not "HR_ADMIN", and
+ * "Admin" (E2E_ADMIN) is a distinct Sys Admin account, separate from HR. */
 export const ROLE_ENV_PREFIX = {
   employee: "E2E_EMPLOYEE",
   manager: "E2E_MANAGER",
-  hrAdmin: "E2E_HR_ADMIN",
+  hrAdmin: "E2E_HR",
   ceo: "E2E_CEO",
   finance: "E2E_FINANCE",
+  sysAdmin: "E2E_ADMIN",
 } as const;
 
 export type Role = keyof typeof ROLE_ENV_PREFIX;

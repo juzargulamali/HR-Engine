@@ -1,4 +1,5 @@
 import { type Page, expect } from "@playwright/test";
+import { gotoWithRetry } from "../gotoWithRetry";
 
 /**
  * apps/web/src/app/login/login-form.tsx: a plain labelled email/password
@@ -11,7 +12,7 @@ export class LoginPage {
   constructor(private readonly page: Page) {}
 
   async goto(): Promise<void> {
-    await this.page.goto("/login");
+    await gotoWithRetry(this.page, "/login");
   }
 
   async signIn(email: string, password: string): Promise<void> {

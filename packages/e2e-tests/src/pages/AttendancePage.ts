@@ -1,4 +1,5 @@
 import { type Page, expect } from "@playwright/test";
+import { gotoWithRetry } from "../gotoWithRetry";
 
 /**
  * apps/web/src/app/(app)/attendance/{page,bulk-attendance-form}.tsx — HR
@@ -22,7 +23,7 @@ export class AttendancePage {
     if (params?.date) qs.set("date", params.date);
     if (params?.companyId) qs.set("companyId", params.companyId);
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    await this.page.goto(`/attendance${suffix}`);
+    await gotoWithRetry(this.page, `/attendance${suffix}`);
   }
 
   private rowFor(employeeName: string) {
