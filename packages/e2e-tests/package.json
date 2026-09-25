@@ -9,6 +9,7 @@
     "test:e2e:read-only": "playwright test --grep-invert @mutating",
     "test:e2e:ui": "playwright test --ui",
     "cleanup:dry-run": "tsx scripts/dry-run-cleanup.ts",
+    "redact:error-context": "tsx scripts/redact-error-context.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

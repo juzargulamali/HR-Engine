@@ -1,0 +1,133 @@
+name: E2E Production QA (Playwright)
+
+# Manual dispatch ONLY — never on push/pull_request/schedule. This suite runs
+# directly against Production with real (dedicated) test accounts, so it must
+# only ever start because a human deliberately clicked "Run workflow" and
+# reviewed the inputs, never as a side effect of a commit.
+on:
+  workflow_dispatch:
+    inputs:
+      backup_confirmed:
+        description: "Has a recoverable Supabase backup been confirmed for this run? (required for @mutating specs — read-only specs run regardless)"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: packages/e2e-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        working-directory: .
+        run: npm ci
+
+      - name: Install Playwright's matching Chromium build
+        run: npx playwright install --with-deps chromium
+        # GitHub-hosted runners have normal internet access and no
+        # container-level certificate-verifier defect (unlike the Claude
+        # cloud sandbox this suite was originally built in — see
+        # README.md's "Browser TLS validation bypass" section).
+        # E2E_ALLOW_BROWSER_TLS_BYPASS is deliberately NOT set anywhere in
+        # this workflow: Chromium must do real, unmodified certificate
+        # verification here.
+
+      - name: Run E2E suite against Production
+        id: run_tests
+        continue-on-error: true
+        run: npm run test:e2e:read-only
+        env:
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+          E2E_BACKUP_CONFIRMED: ${{ inputs.backup_confirmed }}
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_EMPLOYEE_PASSWORD: ${{ secrets.E2E_EMPLOYEE_PASSWORD }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_MANAGER_PASSWORD: ${{ secrets.E2E_MANAGER_PASSWORD }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_HR_PASSWORD: ${{ secrets.E2E_HR_PASSWORD }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_CEO_PASSWORD: ${{ secrets.E2E_CEO_PASSWORD }}
+          E2E_FINANCE_EMAIL: ${{ secrets.E2E_FINANCE_EMAIL }}
+          E2E_FINANCE_PASSWORD: ${{ secrets.E2E_FINANCE_PASSWORD }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+
+      # Must run before any upload step below: scrubs test-account email
+      # addresses (which the app's own UI can render into a failure
+      # snapshot) out of error-context.md files, in place.
+      - name: Redact test-account emails from error-context snapshots
+        if: always()
+        run: npm run redact:error-context
+        env:
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_FINANCE_EMAIL: ${{ secrets.E2E_FINANCE_EMAIL }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+
+      # ---------------------------------------------------------------
+      # Evidence policy — trace.zip and the HTML reporter (which embeds
+      # full trace data, including a copy of every trace.zip) are NEVER
+      # uploaded as workflow artifacts. Both capture raw network activity
+      # for this run, including Cookie/Set-Cookie headers — for this app,
+      # those are live authenticated session tokens for the E2E test
+      # accounts. An uploaded artifact is downloadable by anyone with read
+      # access to this repository's Actions tab for the whole retention
+      # window, which is a far larger exposure than the runner's own
+      # lifetime. So: trace evidence is intentionally excluded from every
+      # artifact this workflow produces, because it can contain live
+      # session cookies — not because it wasn't captured. Both trace.zip
+      # and playwright-report/ still exist on the runner's disk after the
+      # run for local debugging via `act` or a self-hosted runner, but stay
+      # runner-local and are deleted with the runner when the job ends;
+      # only JUnit, screenshots, videos, and the now-redacted
+      # error-context.md files below ever leave it.
+      # ---------------------------------------------------------------
+
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-junit
+          path: packages/e2e-tests/test-results/junit.xml
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload screenshots and redacted error-context (no traces)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots-and-context
+          path: |
+            packages/e2e-tests/test-results/**/*.png
+            packages/e2e-tests/test-results/**/error-context.md
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-videos
+          path: packages/e2e-tests/test-results/**/*.webm
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Fail the job if the E2E run failed
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1
