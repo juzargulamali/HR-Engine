@@ -15,8 +15,7 @@
 --
 -- seed_phase2b_policy_drafts(p_created_by uuid) already existed (added in
 -- 20261101000000_leave_policy_configuration.sql) for leave_rules and
--- overtime_rules, already requiring a real authenticated actor (never the
--- all-zero UUID) and already safely repeatable via a payload marker per
+-- overtime_rules, already safely repeatable via a payload marker per
 -- (country, policy_type) — that pattern is preserved exactly. This
 -- migration replaces that function to:
 --   1. Correct a stale wording bug in Poland's leave_rules summary text: it
@@ -46,19 +45,37 @@
 --      about to claim, and it does NOT carry this function's own marker,
 --      the whole call fails loudly instead of silently stacking a v3 (or
 --      any other version) on top of an unrelated pre-existing draft.
+--   4. SECURITY CORRECTION (this round): the original signature took
+--      p_created_by as a caller-supplied uuid, checked only that it was
+--      non-null and existed in auth.users — nothing stopped an authenticated
+--      caller from attributing every draft to a DIFFERENT real user, and
+--      nothing checked the caller held any role at all. This version takes
+--      NO parameter: the actor is auth.uid() alone, and the caller must
+--      independently hold hr_admin (company-unscoped) for the specific
+--      country being drafted — the same authorization
+--      policy_versions_insert's RLS would require, restated explicitly here
+--      because this function is SECURITY DEFINER and therefore bypasses
+--      that RLS policy entirely; only this function's own check protects it.
 --
--- Not applied by this migration itself. To run it against a real database,
--- an authenticated HR Admin (or whoever is applying this migration, using
--- their own real user id) calls:
---   select * from seed_phase2b_policy_drafts(auth.uid());
--- after first reviewing preflight_phase2b_v2_policy_status()'s output.
-create or replace function seed_phase2b_policy_drafts(p_created_by uuid)
+-- Not applied by this migration itself, and NOT callable from the Supabase
+-- SQL Editor: that editor runs queries with no JWT/session context, so
+-- auth.uid() is null there and this function will correctly refuse to run.
+-- Call it as an authenticated HR Admin from inside the app instead — e.g.
+-- from the browser console while signed in, or from a small Server Action
+-- (both use the same signed-in Supabase client, so auth.uid() resolves to
+-- the real logged-in user):
+--   await supabase.rpc('seed_phase2b_policy_drafts');
+-- after first reviewing preflight_phase2b_v2_policy_status()'s output
+-- (callable the same way, or from SQL Editor — it's read-only and takes no
+-- actor).
+create or replace function seed_phase2b_policy_drafts()
 returns table(country_code text, policy_type text, version_no int, action text)
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
+  v_created_by uuid;
   v_country text;
   v_leave_version_no int;
   v_overtime_version_no int;
@@ -77,15 +94,24 @@ declare
   v_notice_payload jsonb;
   v_probation_payload jsonb;
 begin
-  if p_created_by is null then
-    raise exception 'seed_phase2b_policy_drafts requires a real authenticated actor id (p_created_by) — refusing to create policy drafts with no attributable owner.';
-  end if;
-  if not exists (select 1 from auth.users where id = p_created_by) then
-    raise exception 'p_created_by (%) does not correspond to a real auth.users row.', p_created_by;
+  v_created_by := auth.uid();
+  if v_created_by is null then
+    raise exception 'seed_phase2b_policy_drafts must be called by an authenticated user — auth.uid() is null. This cannot be run from the Supabase SQL Editor (no JWT context there); call it from the app as a signed-in HR Admin instead (e.g. supabase.rpc(''seed_phase2b_policy_drafts'')).';
   end if;
 
   foreach v_country in array array['AE', 'SA', 'PL']
   loop
+    -- Re-derives (does not merely trust RLS) the exact authorization
+    -- policy_versions_insert requires: company-UNSCOPED hr_admin for this
+    -- specific country. A single-company HR Admin, or an HR Admin scoped
+    -- to a different country, cannot draft policy for a country they don't
+    -- hold this unscoped grant for — checked once per country, before any
+    -- insert for it, so a caller authorized for only some of AE/SA/PL fails
+    -- loudly on the first one they aren't, rather than partially drafting.
+    if not has_role('hr_admin', null, v_country) then
+      raise exception 'Only a company-unscoped HR Admin for % may draft Phase 2B v2 policy versions for that country (auth.uid() = %).', v_country, v_created_by;
+    end if;
+
     -- ---- leave_rules: this brief's specific Annual Leave rules ----
     select exists (
       select 1 from policy_versions pv
@@ -136,7 +162,7 @@ begin
           'deduction_mode', v_deduction_mode,
           'extend_for_holidays', v_extend_for_holidays
         ),
-        p_created_by
+        v_created_by
       )
       returning id into v_leave_version_id;
 
@@ -192,7 +218,7 @@ begin
           'consumption_order', 'oldest_first',
           'approval_chain', jsonb_build_array('direct_manager', 'role:hr_admin')
         ),
-        p_created_by
+        v_created_by
       );
 
       country_code := v_country; policy_type := 'overtime_rules'; version_no := v_overtime_version_no; action := 'created';
@@ -241,7 +267,7 @@ begin
       end;
 
       insert into policy_versions (country_code, policy_type, version_no, effective_from, payload, created_by)
-      values (v_country, 'notice_period', v_notice_version_no, '2026-01-01', v_notice_payload || jsonb_build_object('phase2b_seed_marker', 'leave_policy_configuration'), p_created_by);
+      values (v_country, 'notice_period', v_notice_version_no, '2026-01-01', v_notice_payload || jsonb_build_object('phase2b_seed_marker', 'leave_policy_configuration'), v_created_by);
 
       country_code := v_country; policy_type := 'notice_period'; version_no := v_notice_version_no; action := 'created';
       return next;
@@ -277,7 +303,7 @@ begin
       end;
 
       insert into policy_versions (country_code, policy_type, version_no, effective_from, payload, created_by)
-      values (v_country, 'probation_rules', v_probation_version_no, '2026-01-01', v_probation_payload || jsonb_build_object('phase2b_seed_marker', 'leave_policy_configuration'), p_created_by);
+      values (v_country, 'probation_rules', v_probation_version_no, '2026-01-01', v_probation_payload || jsonb_build_object('phase2b_seed_marker', 'leave_policy_configuration'), v_created_by);
 
       country_code := v_country; policy_type := 'probation_rules'; version_no := v_probation_version_no; action := 'created';
       return next;
@@ -286,15 +312,24 @@ begin
 end;
 $$;
 
--- Read-only preflight/check: one row per (country, policy_type) this
--- function touches, showing exactly what's configured and whether it's
--- safe/unambiguous to activate. "runtime_can_resolve_unambiguously" checks
--- whether activating THIS draft (at its own effective_from, open-ended)
--- would collide with any currently-'active' version's date range for the
--- same (country_code, policy_type) — the same overlap the database's own
--- exclusion constraint on policy_versions enforces at activation time; this
--- just lets HR see the answer beforehand rather than discovering it as a
--- failed activation.
+-- Read-only preflight/check: ALWAYS one row per intended (country,
+-- policy_type) combination — 3 countries x 4 policy types = 12 rows, every
+-- time, whether or not seed_phase2b_policy_drafts() has run yet. Before
+-- seeding, every row reads status = 'not_created' with a null version_no —
+-- an explicit, visible "this is missing" rather than an empty result set
+-- that could be mistaken for a broken query. After a successful seed, all
+-- 12 rows show their real (draft) version/critical_values. This is a LEFT
+-- JOIN against the marker-tagged rows specifically, so it never shows the
+-- unrelated v1 seed rows (which carry no marker) as if they were this
+-- function's own output.
+--
+-- "runtime_can_resolve_unambiguously" checks whether activating THIS draft
+-- (at its own effective_from, open-ended) would collide with any
+-- currently-'active' version's date range for the same (country_code,
+-- policy_type) — the same overlap the database's own exclusion constraint
+-- on policy_versions enforces at activation time; this just lets HR see
+-- the answer beforehand rather than discovering it as a failed activation.
+-- Always false (not yet meaningful) for a not-yet-created row.
 create or replace function preflight_phase2b_v2_policy_status()
 returns table(
   country_code text,
@@ -311,13 +346,14 @@ security definer
 set search_path = public
 as $$
   select
-    pv.country_code,
-    pv.policy_type::text,
+    cc.code,
+    pt.policy_type,
     pv.version_no,
-    pv.status::text,
+    coalesce(pv.status::text, 'not_created'),
     pv.effective_from,
-    case pv.policy_type::text
-      when 'leave_rules' then (
+    case
+      when pv.id is null then null
+      when pt.policy_type = 'leave_rules' then (
         select jsonb_object_agg(plt.leave_type_code, jsonb_build_object(
           'accrual_method', plt.accrual_method,
           'accrual_rate_per_period', plt.accrual_rate_per_period,
@@ -329,7 +365,7 @@ as $$
       )
       else pv.payload - 'phase2b_seed_marker'
     end,
-    not exists (
+    pv.id is not null and not exists (
       select 1 from policy_versions other
       where other.country_code = pv.country_code
         and other.policy_type = pv.policy_type
@@ -338,9 +374,11 @@ as $$
         and other.effective_from <= coalesce(pv.effective_to, 'infinity'::date)
         and coalesce(other.effective_to, 'infinity'::date) >= pv.effective_from
     )
-  from policy_versions pv
-  where pv.country_code in ('AE', 'SA', 'PL')
-    and pv.policy_type::text in ('leave_rules', 'overtime_rules', 'notice_period', 'probation_rules')
+  from (values ('AE'), ('SA'), ('PL')) as cc(code)
+  cross join (values ('leave_rules'), ('overtime_rules'), ('notice_period'), ('probation_rules')) as pt(policy_type)
+  left join policy_versions pv
+    on pv.country_code = cc.code
+    and pv.policy_type::text = pt.policy_type
     and pv.payload ->> 'phase2b_seed_marker' = 'leave_policy_configuration'
-  order by pv.country_code, pv.policy_type, pv.version_no;
+  order by cc.code, pt.policy_type;
 $$;

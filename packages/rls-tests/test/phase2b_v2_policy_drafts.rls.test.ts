@@ -62,6 +62,32 @@ describe("Phase 2B v2 policy-data synchronisation", () => {
     }
   });
 
+  it("preflight reports all 12 intended records as not_created before seeding ever runs", async () => {
+    const { rows } = await db.asUser(ACTOR, (query) => query("select * from preflight_phase2b_v2_policy_status()"));
+    expect(rows).toHaveLength(12); // always all 12 intended slots, whether created yet or not
+    for (const row of rows) {
+      expect(row.status).toBe("not_created");
+      expect(row.version_no).toBeNull();
+      expect(row.critical_values).toBeNull();
+      expect(row.runtime_can_resolve_unambiguously).toBe(false);
+    }
+  });
+
+  it("refuses when there is no authenticated user at all — auth.uid() is null, as it would be from the Supabase SQL Editor", async () => {
+    // anon (no user id) — the same "no JWT context" situation SQL Editor
+    // leaves auth.uid() in, which is exactly why this function must never
+    // be called from there.
+    await expect(db.asUser(null, (query) => query("select * from seed_phase2b_policy_drafts()"))).rejects.toThrow(
+      /must be called by an authenticated user/,
+    );
+  });
+
+  it("refuses an authenticated user who does not hold company-unscoped HR Admin for the country being drafted", async () => {
+    const notAdmin = randomUUID();
+    await db.seed(`insert into auth.users (id, email) values ('${notAdmin}', 'not-hr-admin@enginious.ae');`);
+    await expect(db.asUser(notAdmin, (query) => query("select * from seed_phase2b_policy_drafts()"))).rejects.toThrow(/Only a company-unscoped HR Admin/);
+  });
+
   it("refuses (raises, never overwrites) when a conflicting, unmarked version already occupies the slot it would claim", async () => {
     // Run BEFORE any real v2 draft exists (a genuinely-fresh-database
     // scenario): an unmarked foreign draft sitting at exactly version_no 2
@@ -75,12 +101,12 @@ describe("Phase 2B v2 policy-data synchronisation", () => {
          values ('AE', 'leave_rules', 2, '2027-01-01', 'draft', '{"note": "an unrelated manual draft"}', $1)`,
         [ACTOR],
       );
-      await expect(query("select * from seed_phase2b_policy_drafts($1)", [ACTOR])).rejects.toThrow(/Conflict/);
+      await expect(query("select * from seed_phase2b_policy_drafts()")).rejects.toThrow(/Conflict/);
     });
   });
 
   it("creates v2 drafts for leave_rules, overtime_rules, notice_period and probation_rules across AE/SA/PL, never touching v1", async () => {
-    await db.asUserCommit(ACTOR, (query) => query("select * from seed_phase2b_policy_drafts($1)", [ACTOR]));
+    await db.asUserCommit(ACTOR, (query) => query("select * from seed_phase2b_policy_drafts()"));
 
     const created = await db.asUser(ACTOR, (query) =>
       query(
@@ -114,7 +140,7 @@ describe("Phase 2B v2 policy-data synchronisation", () => {
   });
 
   it("is idempotent — a second call reports every policy type as already seeded and creates no duplicate", async () => {
-    const { rows } = await db.asUser(ACTOR, (query) => query("select * from seed_phase2b_policy_drafts($1)", [ACTOR]));
+    const { rows } = await db.asUser(ACTOR, (query) => query("select * from seed_phase2b_policy_drafts()"));
     expect(rows).toHaveLength(12);
     for (const row of rows) {
       expect(row.action).toBe("skipped_already_seeded");
@@ -172,10 +198,4 @@ describe("Phase 2B v2 policy-data synchronisation", () => {
     }
   });
 
-  it("refuses a null or non-existent actor — never the all-zero placeholder", async () => {
-    await expect(db.asUser(ACTOR, (query) => query("select * from seed_phase2b_policy_drafts(null)"))).rejects.toThrow(/requires a real authenticated actor/);
-    await expect(
-      db.asUser(ACTOR, (query) => query("select * from seed_phase2b_policy_drafts('00000000-0000-0000-0000-000000000000')")),
-    ).rejects.toThrow(/does not correspond to a real auth.users row/);
-  });
 });
