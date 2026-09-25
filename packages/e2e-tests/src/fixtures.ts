@@ -1,20 +1,25 @@
-import { test as base, expect, type Page, type BrowserContext } from "@playwright/test";
-import { getBaseUrl, getCredentials, hasCredentials, getRunId, type Role } from "./config";
-import { LoginPage } from "./pages/LoginPage";
+import { existsSync } from "node:fs";
+import { test as base, expect, type Page, type Browser } from "@playwright/test";
+import { authStateFile, getBaseUrl, getRunId, type Role } from "./config";
+import { gotoWithRetry } from "./gotoWithRetry";
 
 /**
- * One authenticated Page per role, worker-scoped: each worker process logs
- * in as a given role AT MOST ONCE (Playwright caches a worker-scoped
- * fixture's value for every test that worker runs), not once per test.
- * Login happens through the real UI (LoginPage), the same path a real user
- * takes — never a direct API/cookie injection — so session-handling itself
- * is exercised, not bypassed.
+ * One authenticated Page per role, loaded from a storageState file that
+ * tests/auth.setup.ts (the "setup" project — see playwright.config.ts's
+ * `dependencies: ["setup"]`) wrote ONCE per role before any real test ran.
+ * Each test gets its own fresh BrowserContext/Page built from that saved
+ * state — never a shared mutable Page reused across unrelated tests, and
+ * never a fresh UI login per test.
  *
- * A test that needs multiple roles at once (e.g. "manager approves an
- * employee's leave request") just requests multiple fixtures — each is
- * backed by its own isolated BrowserContext, so actions in one never leak
- * into another's session, exactly like two different people in two
- * different browsers.
+ * This replaces an earlier, broken version of this file: the old
+ * `<role>Page` fixtures were declared as plain (TEST-scoped, the default)
+ * fixtures that called the login UI directly, while only their underlying
+ * BrowserContext was worker-scoped — so despite a comment claiming
+ * "at most once per worker", every single test that requested a role
+ * fixture re-ran a full UI login. A run of N tests meant N (not 1) real
+ * sign-ins for that role — a credible cause of the login-timeout failures
+ * documented in README.md's "Status as of the first live run", independent
+ * of the sandbox network flakiness also noted there.
  */
 interface RoleFixtures {
   employeePage: Page;
@@ -27,73 +32,42 @@ interface RoleFixtures {
 
 interface WorkerFixtures {
   runId: string;
-  employeeContext: BrowserContext;
-  managerContext: BrowserContext;
-  hrAdminContext: BrowserContext;
-  ceoContext: BrowserContext;
-  financeContext: BrowserContext;
-  sysAdminContext: BrowserContext;
 }
 
-async function loginAs(context: BrowserContext, role: Role): Promise<Page> {
+async function pageForRole(browser: Browser, role: Role, use: (page: Page) => Promise<void>): Promise<void> {
+  const context = await browser.newContext({ baseURL: getBaseUrl(), storageState: authStateFile(role) });
   const page = await context.newPage();
-  const { email, password } = getCredentials(role);
-  const loginPage = new LoginPage(page);
-  await loginPage.goto();
-  await loginPage.signIn(email, password);
-  await loginPage.expectSignedIn();
-  return page;
+  // storageState only restores cookies/localStorage — it doesn't navigate
+  // anywhere. Land on a real authenticated page before handing this off, so
+  // every test starts from actual app content instead of about:blank.
+  await gotoWithRetry(page, "/");
+  await use(page);
+  await context.close();
+}
+
+/** Optional roles (finance, sysAdmin) skip cleanly if the setup project had
+ * no credentials to sign in with for them, rather than failing on a missing
+ * storageState file. */
+function skipIfNoSavedState(role: Role): void {
+  if (!existsSync(authStateFile(role))) {
+    test.skip(true, `No saved sign-in for role "${role}" — its test account isn't configured (see tests/auth.setup.ts).`);
+  }
 }
 
 export const test = base.extend<RoleFixtures, WorkerFixtures>({
   runId: [async ({}, use) => use(getRunId()), { scope: "worker" }],
 
-  employeeContext: [async ({ browser }, use) => {
-    const context = await browser.newContext({ baseURL: getBaseUrl() });
-    await use(context);
-    await context.close();
-  }, { scope: "worker" }],
-  managerContext: [async ({ browser }, use) => {
-    const context = await browser.newContext({ baseURL: getBaseUrl() });
-    await use(context);
-    await context.close();
-  }, { scope: "worker" }],
-  hrAdminContext: [async ({ browser }, use) => {
-    const context = await browser.newContext({ baseURL: getBaseUrl() });
-    await use(context);
-    await context.close();
-  }, { scope: "worker" }],
-  ceoContext: [async ({ browser }, use) => {
-    const context = await browser.newContext({ baseURL: getBaseUrl() });
-    await use(context);
-    await context.close();
-  }, { scope: "worker" }],
-  financeContext: [async ({ browser }, use) => {
-    const context = await browser.newContext({ baseURL: getBaseUrl() });
-    await use(context);
-    await context.close();
-  }, { scope: "worker" }],
-  sysAdminContext: [async ({ browser }, use) => {
-    const context = await browser.newContext({ baseURL: getBaseUrl() });
-    await use(context);
-    await context.close();
-  }, { scope: "worker" }],
-
-  employeePage: async ({ employeeContext }, use) => use(await loginAs(employeeContext, "employee")),
-  managerPage: async ({ managerContext }, use) => use(await loginAs(managerContext, "manager")),
-  hrAdminPage: async ({ hrAdminContext }, use) => use(await loginAs(hrAdminContext, "hrAdmin")),
-  ceoPage: async ({ ceoContext }, use) => use(await loginAs(ceoContext, "ceo")),
-  financePage: async ({ financeContext }, use) => {
-    if (!hasCredentials("finance")) {
-      test.skip(true, "No Finance test account configured — see the morning report's account-confirmation section.");
-    }
-    return use(await loginAs(financeContext, "finance"));
+  employeePage: async ({ browser }, use) => pageForRole(browser, "employee", use),
+  managerPage: async ({ browser }, use) => pageForRole(browser, "manager", use),
+  hrAdminPage: async ({ browser }, use) => pageForRole(browser, "hrAdmin", use),
+  ceoPage: async ({ browser }, use) => pageForRole(browser, "ceo", use),
+  financePage: async ({ browser }, use) => {
+    skipIfNoSavedState("finance");
+    return pageForRole(browser, "finance", use);
   },
-  sysAdminPage: async ({ sysAdminContext }, use) => {
-    if (!hasCredentials("sysAdmin")) {
-      test.skip(true, "No Sys Admin test account configured.");
-    }
-    return use(await loginAs(sysAdminContext, "sysAdmin"));
+  sysAdminPage: async ({ browser }, use) => {
+    skipIfNoSavedState("sysAdmin");
+    return pageForRole(browser, "sysAdmin", use);
   },
 });
 

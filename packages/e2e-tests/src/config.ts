@@ -39,6 +39,18 @@ export const ROLE_ENV_PREFIX = {
 
 export type Role = keyof typeof ROLE_ENV_PREFIX;
 
+export const ALL_ROLES = Object.keys(ROLE_ENV_PREFIX) as Role[];
+
+/**
+ * Where the auth-setup project (tests/auth.setup.ts) saves each role's
+ * signed-in storageState, and where src/fixtures.ts reads it back from.
+ * Gitignored (packages/e2e-tests/.auth/) — a storageState file is live
+ * session cookies/tokens and must never be committed.
+ */
+export function authStateFile(role: Role): string {
+  return new URL(`../.auth/${role}.json`, import.meta.url).pathname;
+}
+
 function readRoleCredentials(role: Role): RoleCredentials | null {
   const prefix = ROLE_ENV_PREFIX[role];
   const email = process.env[`${prefix}_EMAIL`];

@@ -25,6 +25,43 @@ pass**, or re-run here in smaller batches (5-8 tests per invocation) if a
 CI runner isn't available yet. Zero mutating actions occurred in these
 runs (only `@mutating`-tagged specs, all excluded, ever write anything).
 
+**Correction after independent review:** the analysis above understated the
+real cause. The `<role>Page` fixtures in `src/fixtures.ts` were declared
+with test scope (Playwright's default) while only their `BrowserContext`
+was worker-scoped, so — despite a comment claiming otherwise — every one of
+those 30 tests re-ran a full UI login. A 30-test run could issue up to 30
+real Supabase sign-ins per role used, not one. That repeated authentication
+load is a more credible primary cause of the login timeouts than sandbox
+network flakiness alone. **Fixed**: authentication now happens through a
+dedicated Playwright `setup` project (`tests/auth.setup.ts`), which signs
+into each configured role exactly once and saves its `storageState` to a
+gitignored `.auth/` directory; `desktop-chromium` and `mobile-smoke` declare
+`dependencies: ["setup"]`, and every `<role>Page` fixture now just loads a
+fresh `BrowserContext` from that saved state — no per-test UI login. A
+complete read-only run now makes **7 real sign-in requests total**: one per
+configured role during setup (6: employee, manager, hrAdmin, ceo, finance,
+sysAdmin), plus the one intentional wrong-password attempt in
+`auth.spec.ts`. This fix has been verified in isolation (one role's setup,
+then one smoke test consuming its saved state with zero further sign-ins —
+see the commit message) but the full 30-test read-only run has not been
+repeated since; do that next to get a trustworthy pass-rate number.
+
+## Browser version — this sandbox's known limitation
+
+`@playwright/test` 1.63.0 (installed) expects Chromium **revision 1243**
+(Chrome for Testing 153.0.8010.12). This sandbox's pre-installed browser is
+revision 1194 (Chromium 141.0.7390.37) — about a year older. `npx playwright
+install chromium` to fetch the matching build fails here with an explicit
+403: `no rule or allowlist entry allows host "cdn.playwright.dev"` — that is
+Playwright's official browser-download host (fallback mirror:
+`playwright.download.prss.microsoft.com`); allowlisting either would let a
+future session install the correct browser and delete the workaround below
+entirely. Until then, `playwright.config.ts` falls back to the pre-installed
+binary **only when no correctly-versioned browser is available**
+(`usingSandboxFallbackBrowser`), and sets `ignoreHTTPSErrors` **only in that
+same condition** — a normal CI run with the matching browser installed
+never takes either branch, and keeps real certificate verification.
+
 ## Safety model — read this before running anything
 
 This suite is built to run against a real production database with real

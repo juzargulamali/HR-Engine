@@ -8,9 +8,10 @@ import { getCredentials } from "../src/config";
  * backup confirmation.
  */
 test.describe("authentication @smoke", () => {
-  test("employee can sign in through the real login form", async ({ employeePage }) => {
-    // employeePage fixture already logged in; just confirm we're not stuck
-    // on the login screen and a real page rendered.
+  test("a saved employee sign-in (from tests/auth.setup.ts) grants real access", async ({ employeePage }) => {
+    // employeePage is a fresh context loaded from storageState (no UI login
+    // in this test itself — see src/fixtures.ts); this confirms that saved
+    // state is actually valid, not just present.
     await expect(employeePage).not.toHaveURL(/\/login/);
     expect((await employeePage.locator("body").innerText()).length).toBeGreaterThan(20);
   });
@@ -35,9 +36,11 @@ test.describe("authentication @smoke", () => {
     await context.close();
   });
 
-  test("session persists across a reload", async ({ employeePage }) => {
+  test("saved session persists across a reload", async ({ employeePage }) => {
     await employeePage.reload();
-    await employeePage.waitForLoadState("networkidle");
+    // Not "networkidle": this app holds at least one long-lived connection
+    // (Supabase realtime), which keeps the network non-idle indefinitely.
+    await employeePage.waitForLoadState("load");
     await expect(employeePage).not.toHaveURL(/\/login/);
   });
 });
