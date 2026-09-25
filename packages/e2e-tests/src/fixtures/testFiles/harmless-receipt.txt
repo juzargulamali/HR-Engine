@@ -1,0 +1,3 @@
+This is a harmless, synthetic test file used only by the Playwright E2E
+suite (packages/e2e-tests) to exercise document/receipt upload UI. It
+contains no real data and is safe to store, view, or delete.

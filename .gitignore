@@ -12,3 +12,9 @@ coverage/
 npm-debug.log*
 supabase/.branches/
 supabase/.temp/
+
+# Playwright (packages/e2e-tests)
+/packages/e2e-tests/test-results/
+/packages/e2e-tests/playwright-report/
+/packages/e2e-tests/blob-report/
+/packages/e2e-tests/.auth/
