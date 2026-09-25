@@ -19,6 +19,7 @@
  */
 
 export type AppRole = "employee" | "line_manager" | "hr_admin" | "finance" | "ceo" | "cto" | "sys_admin";
+export type AccountStatus = "invited" | "active" | "deactivated";
 export type EmploymentStatus = "active" | "on_leave" | "suspended" | "terminated";
 export type EmploymentType = "full_time" | "part_time" | "contractor" | "intern";
 export type ContractType = "permanent" | "fixed_term" | "probation" | "contractor";
@@ -123,6 +124,10 @@ export interface Database {
           full_name: string | null;
           locale: string;
           is_active: boolean;
+          account_status: AccountStatus;
+          status_reason: string | null;
+          status_changed_by: string | null;
+          status_changed_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -132,7 +137,12 @@ export interface Database {
           full_name?: string | null;
           locale?: string;
           is_active?: boolean;
+          account_status?: AccountStatus;
         };
+        // status_reason/status_changed_by/status_changed_at are never set
+        // directly by application code — only set_account_status() (a
+        // SECURITY DEFINER RPC) writes them, same reasoning as audit_log's
+        // Insert type below.
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
         Relationships: [];
       };
@@ -1402,9 +1412,23 @@ export interface Database {
         Args: { p_role_grant_id: string };
         Returns: undefined;
       };
+      set_account_status: {
+        Args: { p_user_id: string; p_new_status: AccountStatus; p_reason: string };
+        Returns: undefined;
+      };
+      log_security_event: {
+        Args: {
+          p_action: string;
+          p_target_user_id?: string | null;
+          p_email?: string | null;
+          p_metadata?: Record<string, unknown>;
+        };
+        Returns: undefined;
+      };
     };
     Enums: {
       app_role: AppRole;
+      account_status: AccountStatus;
       employment_status: EmploymentStatus;
       employment_type: EmploymentType;
       contract_type: ContractType;

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 import { signIn, type SignInState } from "@/lib/actions/auth";
 import { Button } from "@/components/ui/button";
@@ -23,7 +24,12 @@ export function LoginForm({ next }: { next?: string }) {
             <Input id="email" name="email" type="email" autoComplete="email" required />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="password">Password</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="password">Password</Label>
+              <Link href="/forgot-password" className="text-xs text-muted-foreground underline underline-offset-4">
+                Forgot password?
+              </Link>
+            </div>
             <Input id="password" name="password" type="password" autoComplete="current-password" required />
           </div>
           {state.error ? <Alert variant="destructive">{state.error}</Alert> : null}

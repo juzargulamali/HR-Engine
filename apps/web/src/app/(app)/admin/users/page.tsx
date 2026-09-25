@@ -9,12 +9,13 @@ import { AssignRoleForm } from "./assign-role-form";
 import { ResendInviteButton } from "./resend-invite-button";
 import { DeleteUserButton } from "./delete-user-button";
 import { RevokeRoleButton } from "./revoke-role-button";
+import { AccountStatusBadge, AccountStatusControls } from "./account-status-controls";
 
 export default async function UsersPage() {
   const session = await getCurrentSession();
   const supabase = await createClient();
   const [{ data: profiles }, { data: roleGrants }, { data: companies }, { data: employees }] = await Promise.all([
-    supabase.from("profiles").select("id, email, full_name").order("email"),
+    supabase.from("profiles").select("id, email, full_name, account_status").order("email"),
     supabase
       .from("user_roles")
       .select("id, user_id, role, company_id, revoked_at")
@@ -74,6 +75,7 @@ export default async function UsersPage() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Email</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead>Roles</TableHead>
                 <TableHead />
               </TableRow>
@@ -83,6 +85,9 @@ export default async function UsersPage() {
                 <TableRow key={p.id}>
                   <TableCell className="font-medium">{p.full_name ?? employeeNameByUser.get(p.id) ?? "—"}</TableCell>
                   <TableCell>{p.email}</TableCell>
+                  <TableCell>
+                    <AccountStatusBadge status={p.account_status} />
+                  </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1.5">
                       {(grantsByUser.get(p.id) ?? []).map((grant) => (
@@ -101,7 +106,8 @@ export default async function UsersPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-2">
-                      <ResendInviteButton email={p.email} />
+                      <AccountStatusControls userId={p.id} status={p.account_status} isSelf={p.id === session?.userId} />
+                      {p.account_status === "invited" ? <ResendInviteButton email={p.email} /> : null}
                       {p.id !== session?.userId ? <DeleteUserButton userId={p.id} email={p.email} /> : null}
                     </div>
                   </TableCell>

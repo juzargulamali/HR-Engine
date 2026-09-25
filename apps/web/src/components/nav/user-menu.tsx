@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronsUpDown } from "lucide-react";
+import Link from "next/link";
+import { ChevronsUpDown, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
@@ -83,6 +84,14 @@ export function UserMenu({
         )}
       </div>
       <div className="my-1 h-px bg-border" />
+      <Link
+        href="/account/security"
+        role="menuitem"
+        className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors hover:bg-secondary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <ShieldCheck className="h-4 w-4 text-muted-foreground" aria-hidden />
+        Account &amp; security
+      </Link>
       <ThemeToggle variant="menu-item" />
       <div className="my-1 h-px bg-border" />
       <div className="px-1 [&_button]:w-full [&_button]:justify-start">{signOutSlot}</div>

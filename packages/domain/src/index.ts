@@ -11,4 +11,5 @@ export * from "./annualLeaveEntitlement";
 export * from "./recoveryCredit";
 export * from "./birthdays";
 export * from "./businessTime";
+export * from "./passwordPolicy";
 export * from "./permissions/index";

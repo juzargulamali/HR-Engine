@@ -1,11 +1,14 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// /set-password must stay public: it's where an invite email lands before
-// the recipient has any session cookie at all — the invite token arrives
-// as a URL hash fragment, which never reaches this server-side check, only
-// the browser JS running on that page (see set-password-form.tsx).
-const PUBLIC_PATHS = ["/login", "/set-password"];
+// /set-password and /reset-password must stay public: they're where an
+// invite/recovery email lands before the recipient has any session cookie
+// at all — the token arrives as a URL hash fragment, which never reaches
+// this server-side check, only the browser JS running on that page (see
+// components/auth/password-reset-form.tsx). /forgot-password is the request
+// form that sends that email in the first place, so it's public for the
+// same reason /login is.
+const PUBLIC_PATHS = ["/login", "/set-password", "/forgot-password", "/reset-password"];
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
