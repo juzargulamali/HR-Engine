@@ -167,3 +167,30 @@ export async function deleteHoliday(holidayId: string): Promise<{ error: string 
   revalidatePath("/holidays");
   return { error: error?.message ?? null };
 }
+
+export interface Phase2bDraftResult {
+  countryCode: string;
+  policyType: string;
+  versionNo: number | null;
+  action: string;
+}
+
+/**
+ * Thin relay to seed_phase2b_policy_drafts() (see supabase/migrations/
+ * 20261103000000_phase2b_v2_policy_drafts.sql) — the actor is auth.uid(),
+ * resolved server-side from THIS signed-in session's own Supabase client,
+ * never a token or id passed from the browser. Authorization (real
+ * company-unscoped HR Admin, per country) and the "never touch v1, never
+ * duplicate v2" idempotency are both enforced inside that SECURITY DEFINER
+ * function itself — this action is not the security boundary, just the
+ * one authenticated path to it (the function refuses outright if called
+ * with no session, e.g. from the Supabase SQL Editor).
+ */
+export async function createPhase2bPolicyDrafts(): Promise<{ error: string | null; results: Phase2bDraftResult[] }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("seed_phase2b_policy_drafts");
+  revalidatePath("/policies");
+  if (error) return { error: error.message, results: [] };
+  const results = (data ?? []).map((r) => ({ countryCode: r.country_code, policyType: r.policy_type, versionNo: r.version_no, action: r.action }));
+  return { error: null, results };
+}

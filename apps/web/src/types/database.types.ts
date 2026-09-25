@@ -1320,6 +1320,22 @@ export interface Database {
         Args: { p_employee_id: string; p_note?: string | null };
         Returns: undefined;
       };
+      seed_phase2b_policy_drafts: {
+        Args: Record<string, never>;
+        Returns: { country_code: string; policy_type: string; version_no: number | null; action: string }[];
+      };
+      preflight_phase2b_v2_policy_status: {
+        Args: Record<string, never>;
+        Returns: {
+          country_code: string;
+          policy_type: string;
+          version_no: number | null;
+          status: string;
+          effective_from: string | null;
+          critical_values: Record<string, unknown> | null;
+          runtime_can_resolve_unambiguously: boolean;
+        }[];
+      };
       preflight_country_schedule_config: {
         Args: Record<string, never>;
         Returns: {
