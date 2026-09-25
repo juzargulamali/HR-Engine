@@ -3,14 +3,10 @@ import { canActivatePolicy, canDeleteDraftPolicy, canDraftPolicy } from "@engini
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ActivateButton } from "./activate-button";
-import { DeletePolicyVersionButton } from "./delete-policy-version-button";
 import { CreatePhase2bDraftsButton } from "./create-phase2b-drafts-button";
-import { EmptyState } from "@/components/ui/empty-state";
+import { PolicyVersionsTable, type PolicyVersionRow } from "./policy-versions-table";
 
 export default async function PoliciesPage() {
   const session = await getCurrentSession();
@@ -30,9 +26,51 @@ export default async function PoliciesPage() {
     supabase.rpc("preflight_phase2b_v2_policy_status"),
   ]);
 
+  // policy_leave_types.policy_version_id has no ON DELETE CASCADE — deleting
+  // a policy_versions row that still has leave-type rows configured under
+  // it fails at the database with a foreign-key violation. Fetched here
+  // purely to know which draft versions that applies to, so Delete can be
+  // hidden for them instead of surfacing a raw DB error after the click;
+  // nothing is deleted or modified by this query.
+  const policyVersionIds = (policies ?? []).map((p) => p.id);
+  const { data: leaveTypeLinks } =
+    policyVersionIds.length > 0
+      ? await supabase.from("policy_leave_types").select("policy_version_id").in("policy_version_id", policyVersionIds)
+      : { data: [] as { policy_version_id: string }[] };
+  const versionIdsWithLeaveTypes = new Set((leaveTypeLinks ?? []).map((l) => l.policy_version_id));
+
   const countryName = new Map((countries ?? []).map((c) => [c.code, c.name]));
   const canDraftAnywhere = (countries ?? []).some((c) => canDraftPolicy(session.grants, c.code));
   const phase2bAllCreated = (phase2bStatus ?? []).length > 0 && (phase2bStatus ?? []).every((r) => r.status !== "not_created");
+
+  // The query above orders each (country_code, policy_type) group by
+  // version_no descending, so the first row encountered per group is that
+  // group's latest version — tracked here purely to decide what the table
+  // shows by default; every row is still fetched and available once the
+  // "Show older versions" toggle is used, nothing is filtered at the query
+  // level.
+  const seenGroups = new Set<string>();
+  const rows: PolicyVersionRow[] = (policies ?? []).map((p) => {
+    const groupKey = `${p.country_code}:${p.policy_type}`;
+    const isLatest = !seenGroups.has(groupKey);
+    seenGroups.add(groupKey);
+
+    const isDrafter = p.created_by === session.userId;
+    return {
+      id: p.id,
+      countryLabel: countryName.get(p.country_code) ?? p.country_code,
+      policyType: p.policy_type,
+      versionNo: p.version_no,
+      effectiveFrom: p.effective_from,
+      effectiveTo: p.effective_to,
+      status: p.status,
+      canActivate: p.status === "draft" && canActivatePolicy(session.grants, p.country_code, isDrafter),
+      canDelete: p.status === "draft" && canDeleteDraftPolicy(session.grants, p.country_code),
+      hasDependentConfig: versionIdsWithLeaveTypes.has(p.id),
+      isDrafter,
+      isLatest,
+    };
+  });
 
   return (
     <div className="space-y-6">
@@ -62,61 +100,7 @@ export default async function PoliciesPage() {
           <CardTitle>All policy versions you can see</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Country</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Version</TableHead>
-                <TableHead>Effective</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(policies ?? []).map((p) => {
-                const isDrafter = p.created_by === session.userId;
-                const canActivate = p.status === "draft" && canActivatePolicy(session.grants, p.country_code, isDrafter);
-                const canDelete = p.status === "draft" && canDeleteDraftPolicy(session.grants, p.country_code);
-                return (
-                  <TableRow key={p.id}>
-                    <TableCell>{countryName.get(p.country_code) ?? p.country_code}</TableCell>
-                    <TableCell className="capitalize">{p.policy_type.replace(/_/g, " ")}</TableCell>
-                    <TableCell>
-                      <Link href={`/policies/${p.id}`} className="hover:underline">
-                        v{p.version_no}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      {p.effective_from}
-                      {p.effective_to ? ` – ${p.effective_to}` : " – open"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={p.status === "active" ? "default" : p.status === "draft" ? "secondary" : "outline"}>
-                        {p.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {canActivate ? <ActivateButton policyVersionId={p.id} /> : null}
-                        {canDelete ? <DeletePolicyVersionButton policyVersionId={p.id} /> : null}
-                        {p.status === "draft" && isDrafter ? (
-                          <span className="text-xs text-muted-foreground">awaiting a different approver</span>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-              {(policies ?? []).length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6}>
-                    <EmptyState dense title="No policies yet." />
-                  </TableCell>
-                </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
+          <PolicyVersionsTable rows={rows} />
         </CardContent>
       </Card>
     </div>
