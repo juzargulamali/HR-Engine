@@ -112,7 +112,15 @@ test.describe("change password validation", () => {
     await expect(alert, "Resubmitting the current password as the new one must show a rejection message, not silently succeed.").toBeVisible({
       timeout: 10_000,
     });
-    const message = (await alert.innerText()).trim();
+    // .innerText() requires a completed layout pass and can race a just-
+    // mounted element (confirmed live: it returned "" for this exact alert
+    // right after toBeVisible() resolved, twice, even though the app only
+    // ever renders this Alert with a non-empty state.error string —
+    // apps/web/src/app/(app)/account/security/change-password-form.tsx's
+    // `{state.error ? <Alert>{state.error}</Alert> : null}`, its only
+    // role="alert" element on this page). .textContent() reads the DOM
+    // tree directly with no layout dependency.
+    const message = ((await alert.textContent()) ?? "").trim();
     await test.info().attach("change-password-reuse-message", { body: message, contentType: "text/plain" });
     expect(message, `Unexpected validation message for password reuse: "${message}"`).toMatch(
       /different from your current one|at least 10 characters|mix in at least 3/i,
