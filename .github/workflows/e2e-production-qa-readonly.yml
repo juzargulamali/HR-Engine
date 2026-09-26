@@ -1,0 +1,129 @@
+name: E2E Production QA (read-only)
+
+# This workflow is permanently read-only — it runs the "read-only" and
+# "mobile-smoke" Playwright projects only (see packages/e2e-tests/
+# playwright.config.ts), never the "mutating" project, and takes no input
+# that could change that. It creates no Production records.
+#
+# workflow_dispatch only shows up in the Actions UI once this file exists on
+# the default branch — until then, the pull_request trigger below (scoped
+# to just this package's own files) is how it first reaches main. That does
+# NOT make it auto-run unattended: `environment: production-qa` requires a
+# human's manual approval (a required reviewer configured on that GitHub
+# Environment) before the job can start and before it can see any E2E
+# secret, on a pull_request run exactly as much as on a manual dispatch.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/e2e-production-qa-readonly.yml"
+      - "packages/e2e-tests/**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-read-only:
+    runs-on: ubuntu-latest
+    environment: production-qa
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: packages/e2e-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        working-directory: .
+        run: npm ci
+
+      - name: Install Playwright's matching Chromium build
+        run: npx playwright install --with-deps chromium
+
+      - name: Run read-only + mobile-smoke Playwright projects against Production
+        id: run_tests
+        continue-on-error: true
+        run: npm run test:e2e:read-only
+        env:
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_EMPLOYEE_PASSWORD: ${{ secrets.E2E_EMPLOYEE_PASSWORD }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_MANAGER_PASSWORD: ${{ secrets.E2E_MANAGER_PASSWORD }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_HR_PASSWORD: ${{ secrets.E2E_HR_PASSWORD }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_CEO_PASSWORD: ${{ secrets.E2E_CEO_PASSWORD }}
+          E2E_FINANCE_EMAIL: ${{ secrets.E2E_FINANCE_EMAIL }}
+          E2E_FINANCE_PASSWORD: ${{ secrets.E2E_FINANCE_PASSWORD }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+          # Deliberately NOT set: E2E_BACKUP_CONFIRMED. This job never runs
+          # the "mutating" project, so it has no effect here either way —
+          # omitted so this file can never be mistaken for one that does.
+
+      # Must run before any upload step below: scrubs test-account email
+      # addresses (which the app's own UI can render into a failure
+      # snapshot) out of error-context.md files, in place.
+      - name: Redact test-account emails from error-context snapshots
+        if: always()
+        run: npm run redact:error-context
+        env:
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_FINANCE_EMAIL: ${{ secrets.E2E_FINANCE_EMAIL }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+
+      # ---------------------------------------------------------------
+      # Evidence policy — trace.zip, storageState/.auth/, and the HTML
+      # reporter (which embeds full trace data, including a copy of every
+      # trace.zip) are NEVER uploaded as workflow artifacts. Both capture
+      # raw network activity for this run, including Cookie/Set-Cookie
+      # headers — for this app, those are live authenticated session
+      # tokens for the E2E test accounts. An uploaded artifact is
+      # downloadable by anyone with read access to this repository's
+      # Actions tab for the whole retention window. Only JUnit,
+      # screenshots, videos, and the now-redacted error-context.md files
+      # below ever leave the runner.
+      # ---------------------------------------------------------------
+
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-readonly-junit
+          path: packages/e2e-tests/test-results/junit.xml
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload screenshots and redacted error-context (no traces)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-readonly-screenshots-and-context
+          path: |
+            packages/e2e-tests/test-results/**/*.png
+            packages/e2e-tests/test-results/**/error-context.md
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-readonly-videos
+          path: packages/e2e-tests/test-results/**/*.webm
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Fail the job if the E2E run failed
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1
