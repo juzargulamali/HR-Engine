@@ -39,11 +39,8 @@ export async function signIn(_prevState: SignInState, formData: FormData): Promi
  * this ends only the current session. `scope: 'local'` is what actually
  * keeps that promise: Supabase's own default (no scope argument) is
  * 'global', which revokes every session for this user everywhere, not just
- * this browser — confirmed live (a Playwright suite's logout test, using a
- * fresh sign-in per role, was invalidating every OTHER already-signed-in
- * session for the same account, including unrelated test fixtures loaded
- * from a saved session). See signOutEverywhere() below for the real
- * every-device case.
+ * this browser. See signOutEverywhere() below for the real every-device
+ * case.
  */
 export async function signOut(): Promise<void> {
   const supabase = await createClient();
