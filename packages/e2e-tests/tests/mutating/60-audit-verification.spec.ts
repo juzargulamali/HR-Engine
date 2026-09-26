@@ -1,5 +1,5 @@
 import { test, expect } from "../../src/fixtures";
-import { isBackupConfirmed } from "../../src/config";
+import { isMutationAuthorized } from "../../src/config";
 
 /**
  * Runs LAST among the mutating specs (see the "60-" filename prefix):
@@ -10,7 +10,7 @@ import { isBackupConfirmed } from "../../src/config";
  * in the same run ID, so it lives here rather than in tests/read-only/.
  */
 test.describe("audit log reflects this run's mutations @mutating", () => {
-  test.skip(!isBackupConfirmed(), "Mutation not authorized (E2E_BACKUP_CONFIRMED != 'true') — nothing tagged to verify.");
+  test.skip(!isMutationAuthorized(), "Mutation not authorized (E2E_MUTATION_AUTHORIZED != 'true') — nothing tagged to verify.");
 
   test("this run's tag appears somewhere in the audit log", async ({ hrAdminPage, runId }) => {
     await hrAdminPage.goto("/audit-log");
@@ -18,7 +18,7 @@ test.describe("audit log reflects this run's mutations @mutating", () => {
     if (count === 0) {
       test.info().annotations.push({
         type: "finding",
-        description: `No audit-log entry visible containing "${runId}" — either this run's leave/reimbursement mutations were skipped (E2E_BACKUP_CONFIRMED was false when they ran), the audit log doesn't surface the tagged free-text field directly, or pagination/filtering hides it. Confirm on first live run before treating this as a defect.`,
+        description: `No audit-log entry visible containing "${runId}" — either this run's leave/reimbursement mutations were skipped (E2E_MUTATION_AUTHORIZED was false when they ran), the audit log doesn't surface the tagged free-text field directly, or pagination/filtering hides it. Confirm on first live run before treating this as a defect.`,
       });
     }
     expect(count, `Expected at least one audit-log entry referencing this run's tag "${runId}"`).toBeGreaterThan(0);

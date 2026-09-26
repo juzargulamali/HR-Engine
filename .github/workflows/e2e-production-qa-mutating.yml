@@ -30,8 +30,8 @@ on:
         description: 'Type exactly RUN_PRODUCTION_E2E to run mutating tests against Production. Anything else aborts before any browser launches.'
         required: true
         type: string
-      backup_confirmed:
-        description: 'Mutation on the dedicated E2E test accounts (leave approval/balance changes, reimbursement approval, Employee account deactivate/reactivate) is explicitly authorized for this run.'
+      mutation_authorized:
+        description: 'Per-run authorization: mutation on the dedicated E2E test accounts (leave approval/balance changes, reimbursement approval, Employee account deactivate/reactivate) is explicitly authorized for THIS run. This does not claim a Supabase backup exists.'
         required: true
         type: choice
         options:
@@ -58,8 +58,8 @@ jobs:
             echo "::error::confirm input must be exactly RUN_PRODUCTION_E2E — aborting before any browser launches or secret is read."
             exit 1
           fi
-          if [ "${{ inputs.backup_confirmed }}" != "true" ]; then
-            echo "::error::backup_confirmed must be 'true' — mutation on the dedicated test accounts must be explicitly authorized for this run."
+          if [ "${{ inputs.mutation_authorized }}" != "true" ]; then
+            echo "::error::mutation_authorized must be 'true' — mutation on the dedicated test accounts must be explicitly authorized for this run."
             exit 1
           fi
       - name: Compute one run ID for every job in this workflow run
@@ -210,7 +210,7 @@ jobs:
         env:
           E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
           E2E_RUN_ID: ${{ needs.guard.outputs.run_id }}
-          E2E_BACKUP_CONFIRMED: ${{ inputs.backup_confirmed }}
+          E2E_MUTATION_AUTHORIZED: ${{ inputs.mutation_authorized }}
           E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
           E2E_EMPLOYEE_PASSWORD: ${{ secrets.E2E_EMPLOYEE_PASSWORD }}
           E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
@@ -259,12 +259,15 @@ jobs:
           path: packages/e2e-tests/test-results/**/*.webm
           retention-days: 14
           if-no-files-found: ignore
-      # Deliberately NOT a hard `exit 1` here the way read-only's job is:
-      # reconciliation below must still run, even after a partial mutating
-      # failure, so the actual final state is always known and reported.
-      - name: Record whether the mutating run itself passed
-        if: always()
-        run: echo "Mutating project outcome is ${{ steps.run_tests.outcome }}"
+      # This DOES fail the job (and so the overall workflow run) on a failed
+      # mutating test — `continue-on-error: true` on the run step above only
+      # exists so the artifact-upload steps still run first; it must never be
+      # mistaken for "a mutating failure doesn't matter". The `reconciliation`
+      # job below still runs regardless (needs: [..., mutating] + if: always()),
+      # so a partial failure here never skips finding out the real final state.
+      - name: Fail this job if any mutating test failed
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1
 
   reconciliation:
     needs: [guard, baseline, mutating]

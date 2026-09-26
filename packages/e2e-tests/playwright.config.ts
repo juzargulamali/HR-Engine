@@ -25,7 +25,12 @@ export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
   workers: 1,
-  retries: 1,
+  // No global default retry: mutating tests must never retry (see the
+  // "mutating" project below) — a timed-out submission or approval retried
+  // blindly could double-submit against a real Production record. Every
+  // other project opts back into a retry explicitly, for resilience against
+  // a one-off network hiccup on a read-only navigation.
+  retries: 0,
   timeout: 60_000,
   expect: { timeout: 10_000 },
   reportSlowTests: null,
@@ -54,17 +59,20 @@ export default defineConfig({
     {
       // Standard Playwright authenticated-state pattern (tests/auth.setup.ts):
       // signs in as each configured role ONCE, saves storageState per role.
+      // Read-only (a login), so a transient-network retry is safe here.
       name: "setup",
       testMatch: /.*\.setup\.ts$/,
+      retries: 1,
     },
     {
       // Captures the pre-run baseline (account status, leave balance,
       // reimbursement claim state) for the dedicated test accounts, via the
       // app's own UI — no service role, no direct DB read. See
-      // tests/baseline/capture.baseline.ts and src/baseline.ts.
+      // tests/baseline/capture.baseline.ts and src/baseline.ts. Read-only.
       name: "baseline",
       testMatch: /.*\.baseline\.ts$/,
       dependencies: ["setup"],
+      retries: 1,
     },
     {
       name: "read-only",
@@ -72,6 +80,7 @@ export default defineConfig({
       testIgnore: /.*\.mobile\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
       dependencies: ["setup"],
+      retries: 1,
     },
     {
       // Mobile smoke coverage only — the full functional matrix runs on
@@ -82,6 +91,7 @@ export default defineConfig({
       testMatch: /.*\.mobile\.spec\.ts/,
       use: { ...devices["Pixel 5"] },
       dependencies: ["setup"],
+      retries: 1,
     },
     {
       // Every file here mutates a real Production record on a dedicated
@@ -94,20 +104,29 @@ export default defineConfig({
       // account could otherwise disrupt any later mutating test that
       // depends on that account's session), then an audit-log check that
       // everything above actually left a trace.
+      //
+      // ZERO retries, explicitly (not just inherited from the global
+      // default above) — a Playwright retry re-runs the whole test from
+      // scratch, including every action already taken. A leave/reimbursement
+      // submission or approval that times out mid-request must never be
+      // blindly repeated: that risks a second real submission/approval
+      // against Production instead of a clean pass/fail signal.
       name: "mutating",
       testDir: "./tests/mutating",
       use: { ...devices["Desktop Chrome"] },
       dependencies: ["setup"],
+      retries: 0,
     },
     {
       // Compares the final state (same UI-driven reads as baseline) against
       // the captured baseline and writes a reconciliation report. Always
       // run by CI, even if the mutating project failed partway, so the
       // actual final state is always known and reported. See
-      // tests/reconcile/verify.reconcile.ts and src/baseline.ts.
+      // tests/reconcile/verify.reconcile.ts and src/baseline.ts. Read-only.
       name: "reconciliation",
       testMatch: /.*\.reconcile\.ts$/,
       dependencies: ["setup"],
+      retries: 1,
     },
   ],
 });

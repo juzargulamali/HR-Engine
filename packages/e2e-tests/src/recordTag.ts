@@ -44,9 +44,7 @@ export function tagNote(runId: string, testKey: string, detail?: string): string
  * (employee_id, work_date) instead. For those, identity comes from a
  * synthetic, always-in-the-future date derived deterministically from the
  * run ID, never from "today" or a real historical date a real attendance
- * import could also land on. The dry-run cleanup script matches on this
- * same derivation, scoped to known test employee IDs — never a bare date
- * range — so it can never pick up a real employee's real attendance record.
+ * import could also land on.
  *
  * Base year 2099 is arbitrary except for being far past any real payroll or
  * attendance data this system could plausibly hold.
@@ -62,11 +60,69 @@ function hashRunId(runId: string): number {
   return h;
 }
 
-/** `offsetDays` distinguishes multiple test dates within the same run
- * (e.g. one for an attendance spec, another for a leave-overlap spec). */
+/** A generic synthetic future date, with no weekday guarantee — safe for
+ * fields the app doesn't validate against working-day/weekend rules (e.g.
+ * a reimbursement's expense date). `offsetDays` distinguishes multiple test
+ * dates within the same run. Do NOT use this for leave or attendance dates
+ * — see testWorkday()/testWeekendDay() below for why. */
 export function testDate(runId: string, offsetDays = 0): string {
   const dayOffset = (hashRunId(runId) % TEST_DATE_SPAN_DAYS) + offsetDays;
   const ms = TEST_DATE_BASE + dayOffset * 24 * 60 * 60 * 1000;
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * Leave and attendance dates ARE validated against real working-day rules,
+ * verified directly from source:
+ *
+ * - `apps/web/src/lib/actions/leave.ts` rejects a request whose date range
+ *   has no working day at all ("weekends/holidays only").
+ * - `record_attendance_and_recovery()` (schema/schema.sql) derives a
+ *   "recovery day" (weekend or holiday) from each country's
+ *   `working_weekdays`/`week_start_day`, and — this is the important part —
+ *   automatically creates a `recovery_credit_requests` row (with its own
+ *   approval) whenever an attendance row is saved with `status = 'present'`
+ *   on a day it considers a recovery day. There is no separate UI control
+ *   for this; it is a pure function of the date and status. Landing a
+ *   "plain" attendance/leave test on a real recovery day would silently
+ *   create a misleading recovery-credit record instead of a plain one.
+ *
+ * This suite's three seeded countries use two weekend patterns (verified
+ * against supabase/seed.sql's `countries` rows, both currently with no
+ * `working_weekdays` override, so both fall back to the `week_start_day`
+ * derivation): UAE/Saudi Arabia (week_start_day=0, Sunday) => Friday+
+ * Saturday off; Poland (week_start_day=1, Monday) => Saturday+Sunday off.
+ * Since which of the three the Employee test account belongs to isn't
+ * knowable from source alone, every date below is chosen to be correct
+ * under BOTH patterns rather than assuming one.
+ *
+ * Anchors are fixed weekdays in 2099 (verified: 2099-01-06 is a Tuesday,
+ * 2099-01-10 is a Saturday); only whole WEEKS are added per run/offset, so
+ * the weekday — and therefore which of these two rules applies — never
+ * shifts no matter which run or offset picks the date.
+ */
+const WORKDAY_ANCHOR = Date.UTC(2099, 0, 6); // Tuesday — a working day under every seeded country's weekend rule.
+const WEEKEND_ANCHOR = Date.UTC(2099, 0, 10); // Saturday — a weekend day under every seeded country's weekend rule.
+const DATE_SPAN_WEEKS = 40;
+const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
+
+/** A synthetic future date guaranteed to be an ordinary working day
+ * (Tuesday) for every seeded country — use for attendance/leave dates that
+ * must NOT trigger recovery-day handling or a "no working days" rejection.
+ * `offsetWeeks` distinguishes multiple such dates within the same run. */
+export function testWorkday(runId: string, offsetWeeks = 0): string {
+  const weekOffset = (hashRunId(runId) % DATE_SPAN_WEEKS) + offsetWeeks;
+  const ms = WORKDAY_ANCHOR + weekOffset * MS_PER_WEEK;
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/** A synthetic future date guaranteed to be a weekend day (Saturday) for
+ * every seeded country — use to deliberately, reliably exercise the
+ * automatic recovery-credit path in record_attendance_and_recovery().
+ * `offsetWeeks` distinguishes multiple such dates within the same run. */
+export function testWeekendDay(runId: string, offsetWeeks = 0): string {
+  const weekOffset = (hashRunId(runId) % DATE_SPAN_WEEKS) + offsetWeeks;
+  const ms = WEEKEND_ANCHOR + weekOffset * MS_PER_WEEK;
   return new Date(ms).toISOString().slice(0, 10);
 }
 

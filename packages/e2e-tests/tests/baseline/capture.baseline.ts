@@ -12,7 +12,7 @@ import { captureSnapshot, writeSnapshot } from "../../src/baseline";
  */
 test("capture pre-run baseline for the Employee test account", async ({ hrAdminPage, employeePage, runId }) => {
   const { email } = getCredentials("employee");
-  const snapshot = await captureSnapshot(hrAdminPage, employeePage, email);
+  const snapshot = await captureSnapshot(hrAdminPage, employeePage, email, runId);
   writeSnapshot(runId, "baseline", snapshot);
   // eslint-disable-next-line no-console
   console.log(`[baseline] captured for run ${runId}:`, JSON.stringify(snapshot, null, 2));

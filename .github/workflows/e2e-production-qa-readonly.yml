@@ -64,9 +64,9 @@ jobs:
           E2E_FINANCE_PASSWORD: ${{ secrets.E2E_FINANCE_PASSWORD }}
           E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
           E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
-          # Deliberately NOT set: E2E_BACKUP_CONFIRMED. This job never runs
-          # the "mutating" project, so it has no effect here either way —
-          # omitted so this file can never be mistaken for one that does.
+          # Deliberately NOT set: E2E_MUTATION_AUTHORIZED. This job never
+          # runs the "mutating" project, so it has no effect here either way
+          # — omitted so this file can never be mistaken for one that does.
 
       # Must run before any upload step below: scrubs test-account email
       # addresses (which the app's own UI can render into a failure

@@ -22,7 +22,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 test("reconcile final state against baseline and verify the Employee account", async ({ hrAdminPage, employeePage, browser, runId }) => {
   const { email, password } = getCredentials("employee");
 
-  const finalSnapshot = await captureSnapshot(hrAdminPage, employeePage, email);
+  const finalSnapshot = await captureSnapshot(hrAdminPage, employeePage, email, runId);
   writeSnapshot(runId, "final", finalSnapshot);
 
   const baseline = readSnapshot(runId, "baseline");
@@ -45,12 +45,7 @@ test("reconcile final state against baseline and verify the Employee account", a
     await context.close();
   }
 
-  // A tagged leave row visible in the Employee's own list is treated as
-  // "explains a balance change" — see src/baseline.ts's doc comment.
-  await employeePage.goto("/leave");
-  const taggedLeaveVisible = (await employeePage.getByText(`[${runId}]`).count()) > 0;
-
-  const result = buildReconciliationReport(runId, baseline!, finalSnapshot, taggedLeaveVisible, employeeLoginStillWorks);
+  const result = buildReconciliationReport(runId, baseline!, finalSnapshot, employeeLoginStillWorks);
 
   const outDir = path.join(process.cwd(), "test-results", "reconciliation");
   mkdirSync(outDir, { recursive: true });

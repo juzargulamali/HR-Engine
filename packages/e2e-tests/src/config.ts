@@ -106,17 +106,19 @@ export function hasCredentials(role: Role): boolean {
 }
 
 /**
- * Backup confirmation gate. Every mutating spec calls isBackupConfirmed()
- * in a test.skip guard rather than relying on a human remembering not to
- * run it. There is deliberately no way to set this to true from inside the
- * test suite itself; it can only come from the person who actually
- * confirmed a recoverable Supabase backup exists (or, per the current
- * standing authorization, accepted that mutations on the dedicated test
- * accounts are approved and may leave a permanent, clearly identified
- * trace rather than being fully reversible).
+ * Per-run mutation authorization gate. Every mutating spec calls
+ * isMutationAuthorized() in a test.skip guard rather than relying on a
+ * human remembering not to run it. There is deliberately no way to set
+ * this to true from inside the test suite itself; it can only come from
+ * the person who explicitly authorized mutation on the dedicated test
+ * accounts for THIS run (leave/reimbursement approvals, Employee account
+ * deactivate/reactivate). This name and this doc comment deliberately do
+ * NOT say "backup" — this suite makes no claim that a Supabase backup was
+ * taken, and never should. Some of what this gate allows is not reversible
+ * via the UI at all (see README.md's "What is and isn't reversible").
  */
-export function isBackupConfirmed(): boolean {
-  return process.env.E2E_BACKUP_CONFIRMED === "true";
+export function isMutationAuthorized(): boolean {
+  return process.env.E2E_MUTATION_AUTHORIZED === "true";
 }
 
 /**

@@ -1,25 +1,35 @@
 import { test, expect } from "../../src/fixtures";
 import { LeavePage, ApprovalsPage } from "../../src/pages/LeavePage";
-import { isBackupConfirmed } from "../../src/config";
+import { isMutationAuthorized } from "../../src/config";
 import { tagNote, escapeForRegExp } from "../../src/recordTag";
+import { writeLeaveApprovalExpectation } from "../../src/baseline";
 
 /**
  * Annual Leave: submission, manager approval, rejection, cancellation, on
  * the dedicated Employee/Manager test accounts only. Mutating — every test
  * here creates a real leave_requests row against Production, gated on
- * E2E_BACKUP_CONFIRMED (set only once mutation on these test accounts has
- * been explicitly authorized).
+ * E2E_MUTATION_AUTHORIZED (set only once mutation on these test accounts
+ * has been explicitly authorized for this run).
  *
- * Uses far-future dates (year 2099+) so a request never overlaps a real
- * employee's real leave and is trivially identifiable by
- * src/recordTag.ts's testDate()/tag(). The approved request's balance
- * change is real and NOT reversed by this suite (there is no safe UI path
- * to un-approve a leave request) — this is reported by
- * tests/reconcile/verify.reconcile.ts as an expected, tagged, permanent
- * change, not hidden.
+ * Dates are fixed, real 2099 calendar dates chosen to be an ordinary
+ * working day under BOTH weekend patterns this suite's seeded countries use
+ * (UAE/Saudi Arabia: Friday+Saturday off; Poland: Saturday+Sunday off) —
+ * verified: 2099-03-10/11 are a Tuesday/Wednesday, 2099-03-17 a Tuesday,
+ * 2099-03-18 a Wednesday. This matters because
+ * apps/web/src/lib/actions/leave.ts rejects a request whose date range has
+ * no working day at all ("weekends/holidays only") — a date that happened
+ * to fall on the wrong country's weekend would fail submission for a
+ * reason unrelated to what each test is actually checking. See
+ * src/recordTag.ts's doc comment for the full reasoning.
+ *
+ * The approved request's balance change is real and NOT reversed by this
+ * suite (there is no safe UI path to un-approve a leave request) — this is
+ * reported by tests/reconcile/verify.reconcile.ts as an expected,
+ * quantified, permanent change (via writeLeaveApprovalExpectation below),
+ * not hidden.
  */
 test.describe("annual leave workflow @mutating", () => {
-  test.skip(!isBackupConfirmed(), "Mutation not authorized (E2E_BACKUP_CONFIRMED != 'true') — skipping mutating leave tests.");
+  test.skip(!isMutationAuthorized(), "Mutation not authorized (E2E_MUTATION_AUTHORIZED != 'true') — skipping mutating leave tests.");
 
   test("submit, manager approves, balance reflects the approved request", async ({ employeePage, managerPage, runId }) => {
     const employeeLeave = new LeavePage(employeePage);
@@ -30,6 +40,9 @@ test.describe("annual leave workflow @mutating", () => {
     const numberBefore = balanceBefore.match(/[\d.]+/)?.[0];
 
     const reason = tagNote(runId, "annual-leave-approve");
+    // 2099-03-10 (Tue) to 2099-03-11 (Wed): 2 consecutive real working days,
+    // no seeded holiday in range — the expected deduction is exactly 2 days.
+    const LEAVE_DAYS_REQUESTED = 2;
     await employeeLeave.gotoNew();
     await employeeLeave.submitRequest({
       startDate: "2099-03-10",
@@ -47,6 +60,16 @@ test.describe("annual leave workflow @mutating", () => {
 
     await employeeLeave.gotoList();
     await employeeLeave.expectRequestInList(reason);
+
+    // Written regardless of whether the balance card parses cleanly below
+    // — reconciliation does its own parsing later and needs this
+    // expectation on record either way, per "correlate a changed balance
+    // with the specific approved request, not just tagged text".
+    writeLeaveApprovalExpectation(runId, {
+      reasonTag: reason,
+      leaveTypeLabel: "Annual",
+      leaveDaysRequested: LEAVE_DAYS_REQUESTED,
+    });
 
     if (numberBefore) {
       const balanceAfter = await employeeLeave.getBalance("Annual");
@@ -67,8 +90,8 @@ test.describe("annual leave workflow @mutating", () => {
 
     await employeeLeave.gotoNew();
     await employeeLeave.submitRequest({
-      startDate: "2099-03-15",
-      endDate: "2099-03-15",
+      startDate: "2099-03-17", // Tuesday
+      endDate: "2099-03-17",
       leaveTypeCode: "annual",
       reason,
     });
@@ -88,8 +111,8 @@ test.describe("annual leave workflow @mutating", () => {
 
     await employeeLeave.gotoNew();
     await employeeLeave.submitRequest({
-      startDate: "2099-03-20",
-      endDate: "2099-03-20",
+      startDate: "2099-03-18", // Wednesday
+      endDate: "2099-03-18",
       leaveTypeCode: "annual",
       reason,
     });

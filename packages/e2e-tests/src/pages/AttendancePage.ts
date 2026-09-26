@@ -1,5 +1,6 @@
 import { type Page, expect } from "@playwright/test";
 import { gotoWithRetry } from "../gotoWithRetry";
+import { escapeForRegExp } from "../recordTag";
 
 /**
  * apps/web/src/app/(app)/attendance/{page,bulk-attendance-form}.tsx — HR
@@ -26,8 +27,11 @@ export class AttendancePage {
     await gotoWithRetry(this.page, `/attendance${suffix}`);
   }
 
-  private rowFor(employeeName: string) {
-    return this.page.getByRole("row", { name: new RegExp(employeeName, "i") });
+  /** Scoped to a specific employee's real display name — never "whichever
+   * row renders first" (the register lists every active employee in HR
+   * Admin's company, real employees included). */
+  rowFor(employeeName: string) {
+    return this.page.getByRole("row", { name: new RegExp(escapeForRegExp(employeeName), "i") });
   }
 
   async setStatus(employeeName: string, status: AttendanceStatus): Promise<void> {
@@ -51,5 +55,15 @@ export class AttendancePage {
 
   async expectRecoveryDayNotice(): Promise<void> {
     await expect(this.page.getByText(/recovery day/i)).toBeVisible();
+  }
+
+  /** The employee's own row text on whatever date this page is currently
+   * showing, or null if the employee has no row on this date's register
+   * (e.g. inactive or a different company). Used for baseline/reconciliation
+   * reporting — never mutates anything. */
+  async rowText(employeeName: string): Promise<string | null> {
+    const row = this.rowFor(employeeName);
+    if ((await row.count()) === 0) return null;
+    return (await row.first().innerText()).replace(/\s+/g, " ").trim();
   }
 }

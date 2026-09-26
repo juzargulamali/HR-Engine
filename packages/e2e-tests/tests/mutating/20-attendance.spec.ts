@@ -1,8 +1,9 @@
 import { test, expect } from "../../src/fixtures";
 import { AttendancePage } from "../../src/pages/AttendancePage";
 import { ApprovalsPage } from "../../src/pages/LeavePage";
-import { isBackupConfirmed } from "../../src/config";
-import { testDate } from "../../src/recordTag";
+import { isMutationAuthorized } from "../../src/config";
+import { testWorkday, testWeekendDay } from "../../src/recordTag";
+import { getOwnDisplayName } from "../../src/identity";
 
 /**
  * Attendance is HR-Admin bulk entry for the whole company (see
@@ -10,61 +11,69 @@ import { testDate } from "../../src/recordTag";
  * self-service clock-in/out, so "missing checkout" doesn't literally apply;
  * "correction" here is re-editing an already-saved row and saving again.
  *
- * Recovery Leave: created from an attendance record's exceptional-hours
- * facts and routed through the same generic approvals inbox as leave. Both
- * use a synthetic 2099+ work_date derived from the run ID so no real
- * attendance day is ever touched.
+ * Every test targets the Employee test account's OWN row, found by its real
+ * display name (src/identity.ts) — never "whichever row the register
+ * renders first", which lists every active employee in HR Admin's company,
+ * real employees included.
  *
- * Mutating — gated on E2E_BACKUP_CONFIRMED.
+ * Dates: `testWorkday()`/`testWeekendDay()` (src/recordTag.ts) are used
+ * instead of a plain synthetic date, because
+ * `record_attendance_and_recovery()` (schema/schema.sql) AUTOMATICALLY
+ * creates a recovery_credit_requests row (and its approval) whenever a
+ * `status = 'present'` row is saved on a date the server considers a
+ * recovery day (weekend or holiday) for that employee's country — there is
+ * no separate UI control for this. A "plain" attendance test on an
+ * accidental weekend date would silently create a misleading recovery
+ * record instead of a plain one; testWorkday() guarantees that never
+ * happens, and testWeekendDay() is used deliberately, once, to exercise
+ * that exact automatic path on purpose.
+ *
+ * Mutating — gated on E2E_MUTATION_AUTHORIZED.
  */
 test.describe("attendance and recovery leave @mutating", () => {
-  test.skip(!isBackupConfirmed(), "Mutation not authorized (E2E_BACKUP_CONFIRMED != 'true') — skipping mutating attendance tests.");
+  test.skip(!isMutationAuthorized(), "Mutation not authorized (E2E_MUTATION_AUTHORIZED != 'true') — skipping mutating attendance tests.");
 
-  test("HR Admin bulk-fills a day's attendance across work modes", async ({ hrAdminPage, runId }) => {
+  test("HR Admin bulk-fills a day's attendance across work modes", async ({ hrAdminPage, employeePage, runId }) => {
+    const employeeName = await getOwnDisplayName(employeePage);
     const attendance = new AttendancePage(hrAdminPage);
-    const date = testDate(runId, 0);
+    const date = testWorkday(runId, 0);
     await attendance.goto({ date });
 
-    const firstRow = hrAdminPage.getByRole("row").nth(1); // row 0 is the header
-    await expect(firstRow).toBeVisible();
+    const row = attendance.rowFor(employeeName);
+    await expect(row).toBeVisible();
 
-    await firstRow.getByRole("combobox").first().selectOption("present");
-    await firstRow.getByRole("combobox").nth(1).selectOption("business_travel");
-    await firstRow.getByRole("spinbutton").fill("8");
+    await row.getByRole("combobox").first().selectOption("present");
+    await row.getByRole("combobox").nth(1).selectOption("business_travel");
+    await row.getByRole("spinbutton").fill("8");
     await attendance.saveAll();
     await attendance.expectSaved();
   });
 
-  test("re-saving an already-recorded day (correction) succeeds", async ({ hrAdminPage, runId }) => {
+  test("re-saving an already-recorded day (correction) succeeds", async ({ hrAdminPage, employeePage, runId }) => {
+    const employeeName = await getOwnDisplayName(employeePage);
     const attendance = new AttendancePage(hrAdminPage);
-    const date = testDate(runId, 0); // same date as the previous test — a correction, not a new day
+    const date = testWorkday(runId, 0); // same date as the previous test — a correction, not a new day
     await attendance.goto({ date });
-    const firstRow = hrAdminPage.getByRole("row").nth(1);
-    await firstRow.getByRole("combobox").nth(1).selectOption("work_from_home");
+    const row = attendance.rowFor(employeeName);
+    await row.getByRole("combobox").nth(1).selectOption("work_from_home");
     await attendance.saveAll();
     await attendance.expectSaved();
   });
 
-  test("an overnight/exceptional day can be flagged for Recovery Leave and approved", async ({ hrAdminPage, managerPage, runId }) => {
+  test("a weekend day recorded present automatically creates and routes a Recovery Leave credit for approval", async ({ hrAdminPage, managerPage, employeePage, runId }) => {
+    const employeeName = await getOwnDisplayName(employeePage);
     const attendance = new AttendancePage(hrAdminPage);
-    const date = testDate(runId, 1);
+    const date = testWeekendDay(runId, 0);
     await attendance.goto({ date });
-    const firstRow = hrAdminPage.getByRole("row").nth(1);
-    await firstRow.getByRole("combobox").first().selectOption("present");
-    await firstRow.getByRole("combobox").nth(1).selectOption("business_travel");
-    await firstRow.getByRole("spinbutton").fill("8");
+    const row = attendance.rowFor(employeeName);
+    await row.getByRole("combobox").first().selectOption("present");
+    await row.getByRole("combobox").nth(1).selectOption("business_travel");
+    await row.getByRole("spinbutton").fill("8"); // >4h => 1 full recovery day, per record_attendance_and_recovery()
     await attendance.saveAll();
     await attendance.expectSaved();
 
-    // Whether Recovery Leave creation is a separate control or an automatic
-    // side effect of specific status/hours combinations is unverified —
-    // this assertion is deliberately soft, per "do not fabricate policy
-    // activation or direct DB state": it reports what it finds rather than
-    // asserting a specific unverified control exists.
-    const recoveryNotice = hrAdminPage.getByText(/recovery day|recovery leave|recovery credit/i);
-    const noticeCount = await recoveryNotice.count();
-    test.skip(noticeCount === 0, "No Recovery Leave control/notice found on the attendance page for this row — confirm the real trigger on first live run before treating this as a defect.");
-
+    // This is now a deterministic, verified server-side effect (not a
+    // guessed UI control) — a real, hard assertion, not a soft skip.
     const approvals = new ApprovalsPage(managerPage);
     await approvals.goto();
     await expect(managerPage.getByRole("button", { name: "Approve", exact: true }).first()).toBeVisible({ timeout: 10_000 });

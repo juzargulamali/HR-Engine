@@ -2,13 +2,15 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { stateFile } from "./config";
-import { isTagged } from "./recordTag";
+import { testWorkday, testWeekendDay, escapeForRegExp } from "./recordTag";
+import { getOwnDisplayName } from "./identity";
+import { AttendancePage } from "./pages/AttendancePage";
 
 /**
  * Baseline/reconciliation state, captured and re-captured via the SAME
  * authenticated UI reads the functional specs already use (HR Admin's
- * Users & Roles list, the Employee's own Leave and Reimbursements pages) —
- * never a direct database read, never a service-role key. This is
+ * Users & Roles list, the Employee's own Leave/Reimbursements/Attendance
+ * pages) — never a direct database read, never a service-role key. This is
  * necessarily narrower than a full-table scan: it only knows what the app's
  * own UI shows a role. That's an accepted, explicit trade-off for not using
  * a service-role key anywhere in this suite (see README.md's safety model).
@@ -17,7 +19,18 @@ export interface AccountSnapshot {
   capturedAt: string;
   employeeAccountStatusText: string | null;
   employeeAnnualLeaveBalanceText: string | null;
+  employeeAnnualLeaveBalanceNumber: number | null;
   employeeReimbursementRows: string[];
+  /** Keyed by the exact synthetic date string used this run (see
+   * src/recordTag.ts's testWorkday()/testWeekendDay()) — the Employee's own
+   * row text on that date's attendance register, or null if no row exists
+   * yet (expected at baseline time, before the mutating project runs). */
+  employeeAttendanceByDate: Record<string, string | null>;
+}
+
+function parseBalanceNumber(text: string | null): number | null {
+  const match = text?.match(/[\d.]+/)?.[0];
+  return match ? Number(match) : null;
 }
 
 /** Reads the Employee row's status cell from HR Admin's Users & Roles list
@@ -27,7 +40,7 @@ export interface AccountSnapshot {
  * account is configured). */
 export async function readEmployeeAccountStatus(hrAdminPage: Page, employeeEmail: string): Promise<string | null> {
   await hrAdminPage.goto("/admin/users");
-  const row = hrAdminPage.getByRole("row", { name: new RegExp(employeeEmail.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") });
+  const row = hrAdminPage.getByRole("row", { name: new RegExp(escapeForRegExp(employeeEmail), "i") });
   if ((await row.count()) === 0) return null;
   return (await row.first().innerText()).replace(/\s+/g, " ").trim();
 }
@@ -40,8 +53,8 @@ export async function readEmployeeAnnualLeaveBalance(employeePage: Page): Promis
 }
 
 /** A coarse, best-effort snapshot of the Employee's reimbursement claims —
- * one string per visible row/card — used only to notice that a new claim
- * appeared and to correlate it with this run's tag, not to parse amounts. */
+ * one string per visible row/card — used to notice that a new claim
+ * appeared and to correlate it with this run's tag. */
 export async function readEmployeeReimbursementRows(employeePage: Page): Promise<string[]> {
   await employeePage.goto("/reimbursements");
   const rows = employeePage.getByRole("row");
@@ -53,12 +66,31 @@ export async function readEmployeeReimbursementRows(employeePage: Page): Promise
   return texts;
 }
 
-export async function captureSnapshot(hrAdminPage: Page, employeePage: Page, employeeEmail: string): Promise<AccountSnapshot> {
+/** The Employee's own row text on each of this run's two synthetic
+ * attendance dates (the ordinary workday and the deliberate weekend day —
+ * see recordTag.ts), read via HR Admin's attendance register. Requires
+ * signing into employeePage first to read its display name. */
+export async function readEmployeeAttendanceByDate(hrAdminPage: Page, employeePage: Page, runId: string): Promise<Record<string, string | null>> {
+  const employeeName = await getOwnDisplayName(employeePage);
+  const attendance = new AttendancePage(hrAdminPage);
+  const dates = [testWorkday(runId, 0), testWeekendDay(runId, 0)];
+  const result: Record<string, string | null> = {};
+  for (const date of dates) {
+    await attendance.goto({ date });
+    result[date] = await attendance.rowText(employeeName);
+  }
+  return result;
+}
+
+export async function captureSnapshot(hrAdminPage: Page, employeePage: Page, employeeEmail: string, runId: string): Promise<AccountSnapshot> {
+  const employeeAnnualLeaveBalanceText = await readEmployeeAnnualLeaveBalance(employeePage);
   return {
     capturedAt: new Date().toISOString(),
     employeeAccountStatusText: await readEmployeeAccountStatus(hrAdminPage, employeeEmail),
-    employeeAnnualLeaveBalanceText: await readEmployeeAnnualLeaveBalance(employeePage),
+    employeeAnnualLeaveBalanceText,
+    employeeAnnualLeaveBalanceNumber: parseBalanceNumber(employeeAnnualLeaveBalanceText),
     employeeReimbursementRows: await readEmployeeReimbursementRows(employeePage),
+    employeeAttendanceByDate: await readEmployeeAttendanceByDate(hrAdminPage, employeePage, runId),
   };
 }
 
@@ -78,49 +110,108 @@ export function readSnapshot(runId: string, label: "baseline" | "final"): Accoun
   return JSON.parse(readFileSync(file, "utf8")) as AccountSnapshot;
 }
 
+/** Written by 10-leave.spec.ts's approve test right after a successful
+ * approval, so reconciliation can correlate a balance change with the
+ * SPECIFIC request that caused it and its EXACT expected day count — the
+ * presence of tagged text alone proves a record exists, not that it
+ * explains a particular numeric delta. */
+export interface LeaveApprovalExpectation {
+  reasonTag: string;
+  leaveTypeLabel: string;
+  leaveDaysRequested: number;
+}
+
+function expectationsFile(runId: string): string {
+  return stateFile(runId).replace(/\.json$/, ".expectations.json");
+}
+
+export function writeLeaveApprovalExpectation(runId: string, expectation: LeaveApprovalExpectation): void {
+  ensureStateDir(runId);
+  writeFileSync(expectationsFile(runId), JSON.stringify(expectation, null, 2), "utf8");
+}
+
+export function readLeaveApprovalExpectation(runId: string): LeaveApprovalExpectation | null {
+  const file = expectationsFile(runId);
+  if (!existsSync(file)) return null;
+  return JSON.parse(readFileSync(file, "utf8")) as LeaveApprovalExpectation;
+}
+
 export interface ReconciliationResult {
   markdown: string;
   /** True if something needs a human to look at it before this is safe to
    * call done — an account left deactivated, a login that stopped working,
-   * or a balance change with no matching tagged record to explain it. */
+   * or a balance change that doesn't match this run's specific approved
+   * request. */
   hasUnexplainedChange: boolean;
 }
 
 /** Compares baseline vs. final snapshots and produces the reconciliation
  * report required by the standing authorization: every record/value that
  * remains changed after the run, and — for anything that can't be reset via
- * the UI — the exact values that need resetting in Supabase. `runId` is
- * used to recognize a leave-balance change as EXPECTED (a tagged, approved
- * leave request from this same run explains it) vs. UNEXPECTED (no such
- * record is visible — investigate before calling the run clean). */
-export function buildReconciliationReport(runId: string, baseline: AccountSnapshot, final: AccountSnapshot, taggedApprovedLeaveVisible: boolean, employeeLoginStillWorks: boolean): ReconciliationResult {
+ * the UI — the exact values that need resetting in Supabase. A balance
+ * change is only treated as EXPLAINED when it numerically matches THIS
+ * run's specific approved leave request (via the expectations file 10-leave
+ * .spec.ts writes) — tagged text being visible somewhere is not, by itself,
+ * sufficient evidence that it explains a particular number. */
+export function buildReconciliationReport(runId: string, baseline: AccountSnapshot, final: AccountSnapshot, employeeLoginStillWorks: boolean): ReconciliationResult {
   const lines: string[] = [`# Reconciliation report — ${runId}`, "", `Baseline captured: ${baseline.capturedAt}`, `Final captured:    ${final.capturedAt}`, ""];
   let hasUnexplainedChange = false;
 
   lines.push("## Employee test account status");
   lines.push(`- Baseline: \`${baseline.employeeAccountStatusText ?? "(not found)"}\``);
   lines.push(`- Final:    \`${final.employeeAccountStatusText ?? "(not found)"}\``);
-  const statusLooksActive = /\bactive\b/i.test(final.employeeAccountStatusText ?? "") && !/deactivat/i.test(final.employeeAccountStatusText ?? "");
-  if (!statusLooksActive || !employeeLoginStillWorks) {
+  const baselineLooksActive = /\bactive\b/i.test(baseline.employeeAccountStatusText ?? "") && !/deactivat/i.test(baseline.employeeAccountStatusText ?? "");
+  const finalLooksActive = /\bactive\b/i.test(final.employeeAccountStatusText ?? "") && !/deactivat/i.test(final.employeeAccountStatusText ?? "");
+  if (!baselineLooksActive) {
+    lines.push(`- Note: baseline status did not read as plainly "Active" either — this account may not have started this run in a clean state.`);
+  }
+  if (!finalLooksActive || !employeeLoginStillWorks) {
     hasUnexplainedChange = true;
-    lines.push(`- **PROBLEM: the Employee test account is not confirmed active and able to log in at the end of this run.** Reset \`profiles.account_status\` to \`'active'\` and clear \`banned_until\` for this account in Supabase if the app's own reactivation flow did not already do so.`);
+    lines.push(
+      `- **PROBLEM: the Employee test account is not confirmed active and able to log in at the end of this run** (status text: "${final.employeeAccountStatusText ?? "(not found)"}", fresh login succeeded: ${employeeLoginStillWorks}). ` +
+        `Manual recovery: sign in as Sys Admin (E2E_ADMIN_EMAIL) -> /admin/users -> find the Employee test account's row -> click "Reactivate" and give any non-blank reason. ` +
+        `If that doesn't work, the Supabase fallback (schema/schema.sql's account-security migration) is to set that profile's \`account_status\` column back to \`'active'\` and clear its \`banned_until\` column directly.`,
+    );
+  } else if (baseline.employeeAccountStatusText === final.employeeAccountStatusText) {
+    lines.push("- OK — unchanged, active, and able to log in.");
   } else {
-    lines.push("- OK — active and able to log in.");
+    lines.push("- OK — active and able to log in (status text changed cosmetically but both read as Active — e.g. a timestamp in the row).");
   }
   lines.push("");
 
   lines.push("## Employee Annual Leave balance");
-  lines.push(`- Baseline: \`${baseline.employeeAnnualLeaveBalanceText ?? "(not found)"}\``);
-  lines.push(`- Final:    \`${final.employeeAnnualLeaveBalanceText ?? "(not found)"}\``);
-  if (baseline.employeeAnnualLeaveBalanceText !== final.employeeAnnualLeaveBalanceText) {
-    if (taggedApprovedLeaveVisible) {
-      lines.push(`- Changed, and explained: this run's tagged, approved leave request (\`[${runId}] ...\`) accounts for it. This is a real, permanent, approved leave grant on the test account and was not reset — reversing it would itself be a real leave-ledger mutation this suite is not authorized to perform. If you want the balance restored, cancel/reverse that approved request for the Employee test account directly in Supabase.`);
-    } else {
+  lines.push(`- Baseline: \`${baseline.employeeAnnualLeaveBalanceText ?? "(not found)"}\` (parsed: ${baseline.employeeAnnualLeaveBalanceNumber ?? "n/a"})`);
+  lines.push(`- Final:    \`${final.employeeAnnualLeaveBalanceText ?? "(not found)"}\` (parsed: ${final.employeeAnnualLeaveBalanceNumber ?? "n/a"})`);
+  const expectation = readLeaveApprovalExpectation(runId);
+  if (baseline.employeeAnnualLeaveBalanceNumber === null || final.employeeAnnualLeaveBalanceNumber === null) {
+    if (baseline.employeeAnnualLeaveBalanceText !== final.employeeAnnualLeaveBalanceText) {
       hasUnexplainedChange = true;
-      lines.push(`- **PROBLEM: balance changed but no matching tagged, approved leave request from this run is visible — unexplained, investigate before treating this run as clean.**`);
+      lines.push(`- **PROBLEM: the balance text changed but could not be parsed as a number on one or both sides — cannot verify the change is what this run expected.**`);
+    } else {
+      lines.push("- Unchanged (and unparseable as a number either way — confirm the balance-card format on a live run).");
     }
   } else {
-    lines.push("- Unchanged.");
+    const actualDelta = baseline.employeeAnnualLeaveBalanceNumber - final.employeeAnnualLeaveBalanceNumber;
+    if (Math.abs(actualDelta) < 0.001) {
+      if (expectation) {
+        hasUnexplainedChange = true;
+        lines.push(
+          `- **PROBLEM: this run recorded an approved leave request expecting a ${expectation.leaveDaysRequested}-day deduction ("${expectation.reasonTag}"), but the balance did not change at all.**`,
+        );
+      } else {
+        lines.push("- Unchanged (no leave-approval expectation was recorded for this run either, consistent with no change).");
+      }
+    } else if (expectation && Math.abs(actualDelta - expectation.leaveDaysRequested) < 0.01) {
+      lines.push(
+        `- Changed by ${actualDelta} day(s), which exactly matches this run's approved request ("${expectation.reasonTag}", ${expectation.leaveDaysRequested} day(s) requested). ` +
+          `This is a real, permanent, approved leave grant on the test account and was not reset — reversing it would itself be a real leave-ledger mutation this suite is not authorized to perform. ` +
+          `To restore it: in Supabase, reverse/cancel the leave_requests row whose reason starts with "[${runId}] annual-leave-approve" for the Employee test account, and restore its leave_ledger entry.`,
+      );
+    } else {
+      hasUnexplainedChange = true;
+      const expectedText = expectation ? `${expectation.leaveDaysRequested} day(s) (from "${expectation.reasonTag}")` : "no leave approval was recorded for this run at all";
+      lines.push(`- **PROBLEM: balance changed by ${actualDelta} day(s), but this does not match what this run expected (${expectedText}) — unexplained, investigate before treating this run as clean.**`);
+    }
   }
   lines.push("");
 
@@ -131,12 +222,28 @@ export function buildReconciliationReport(runId: string, baseline: AccountSnapsh
   } else {
     lines.push(`- ${newRows.length} new row(s), all expected to carry this run's tag (\`[${runId}] ...\`):`);
     for (const row of newRows) {
-      const tagged = isTagged(row, runId) || row.includes(`[${runId}]`);
+      const tagged = row.includes(`[${runId}]`);
       lines.push(`  - \`${row}\`${tagged ? "" : " — **not tagged with this run's ID, investigate**"}`);
       if (!tagged) hasUnexplainedChange = true;
     }
     lines.push(
-      `- These claims are real, permanent Production records (a smallest-allowed-amount, clearly fake test claim in \`approved\`/\`rejected\` state). They were never progressed past approval/rejection — no export, payment, or accounting integration was triggered. If you want them removed rather than left as identified test data, delete these specific tagged rows directly in Supabase; they are otherwise harmless and clearly identified.`,
+      `- These claims are real, permanent Production records (a smallest-allowed-amount, clearly fake test claim in \`approved\`/\`rejected\` state). They were never progressed past approval/rejection — no export, payment, or accounting integration was triggered. To remove rather than leave as identified test data: delete these specific tagged \`reimbursement_claim_lines\`/\`reimbursement_claims\` rows directly in Supabase.`,
+    );
+  }
+  lines.push("");
+
+  lines.push("## Employee attendance / recovery-leave records (this run's synthetic dates)");
+  const attendanceDates = Object.keys(final.employeeAttendanceByDate);
+  if (attendanceDates.length === 0) {
+    lines.push("- No attendance dates were captured for this run.");
+  } else {
+    for (const date of attendanceDates) {
+      const before = baseline.employeeAttendanceByDate[date] ?? null;
+      const after = final.employeeAttendanceByDate[date] ?? null;
+      lines.push(`- **${date}**: baseline \`${before ?? "(no row)"}\` -> final \`${after ?? "(no row)"}\``);
+    }
+    lines.push(
+      "- These are on synthetic 2099+ dates (one ordinary working day, one deliberate weekend day used to exercise the automatic Recovery Leave credit path) — they can never collide with a real attendance day. Left in place; there is no delete UI for an attendance/recovery-credit record. To remove: delete the corresponding `attendance_records`/`recovery_credit_requests`/`comp_day_ledger` rows for the Employee test account directly in Supabase.",
     );
   }
   lines.push("");

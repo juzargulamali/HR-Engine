@@ -1,7 +1,7 @@
 import { test, expect } from "../../src/fixtures";
 import { ReimbursementsPage } from "../../src/pages/AppPages";
 import { ApprovalsPage } from "../../src/pages/LeavePage";
-import { isBackupConfirmed } from "../../src/config";
+import { isMutationAuthorized } from "../../src/config";
 import { tagNote, testDate } from "../../src/recordTag";
 
 /**
@@ -20,10 +20,10 @@ import { tagNote, testDate } from "../../src/recordTag";
  * hidden) by tests/reconcile/verify.reconcile.ts as an expected, tagged
  * change.
  *
- * Mutating — gated on E2E_BACKUP_CONFIRMED.
+ * Mutating — gated on E2E_MUTATION_AUTHORIZED.
  */
 test.describe("reimbursement claims @mutating", () => {
-  test.skip(!isBackupConfirmed(), "Mutation not authorized (E2E_BACKUP_CONFIRMED != 'true') — skipping mutating reimbursement tests.");
+  test.skip(!isMutationAuthorized(), "Mutation not authorized (E2E_MUTATION_AUTHORIZED != 'true') — skipping mutating reimbursement tests.");
 
   test("submit a minimal claim, manager approves it", async ({ employeePage, managerPage, runId }) => {
     const reimbursements = new ReimbursementsPage(employeePage);

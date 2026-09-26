@@ -16,10 +16,10 @@ import { generateRunId, getBaseUrl, requireAllCredentials, ROLE_ENV_PREFIX, type
  *    (each a child of this one) reads the same value — see
  *    src/config.ts's getRunId().
  *
- * Never logs a credential value, only which roles are configured. Backup
- * confirmation is deliberately NOT enforced here: read-only specs should
+ * Never logs a credential value, only which roles are configured. Mutation
+ * authorization is deliberately NOT enforced here: read-only specs should
  * still be able to run without it. Every mutating spec gates on
- * isBackupConfirmed() itself.
+ * isMutationAuthorized() itself.
  */
 export default async function globalSetup(_config: FullConfig): Promise<void> {
   const baseUrl = getBaseUrl();
@@ -40,7 +40,7 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
       missingOptionalRoles.length > 0
         ? `[e2e] roles skipped: ${missingOptionalRoles.join(", ")} (optional, no account configured — dependent specs will skip)`
         : null,
-      `[e2e] backup/mutation confirmation (E2E_BACKUP_CONFIRMED=true): ${process.env.E2E_BACKUP_CONFIRMED === "true" ? "yes" : "NO — mutating specs will skip"}`,
+      `[e2e] mutation authorized for this run (E2E_MUTATION_AUTHORIZED=true): ${process.env.E2E_MUTATION_AUTHORIZED === "true" ? "yes" : "NO — mutating specs will skip"}`,
     ]
       .filter(Boolean)
       .join("\n"),

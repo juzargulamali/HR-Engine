@@ -1,6 +1,6 @@
 import { test, expect } from "../../src/fixtures";
 import { ReimbursementsPage } from "../../src/pages/AppPages";
-import { isBackupConfirmed } from "../../src/config";
+import { isMutationAuthorized } from "../../src/config";
 import { tagNote } from "../../src/recordTag";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,10 +16,10 @@ const HARMLESS_TEST_FILE = path.join(__dirname, "..", "..", "src", "fixtures", "
  * reimbursement flow (covered separately in 30-reimbursements.spec.ts).
  *
  * Mutating (creates a draft reimbursement claim) — gated on
- * E2E_BACKUP_CONFIRMED.
+ * E2E_MUTATION_AUTHORIZED.
  */
 test.describe("document upload @mutating", () => {
-  test.skip(!isBackupConfirmed(), "Mutation not authorized (E2E_BACKUP_CONFIRMED != 'true') — skipping mutating upload test.");
+  test.skip(!isMutationAuthorized(), "Mutation not authorized (E2E_MUTATION_AUTHORIZED != 'true') — skipping mutating upload test.");
 
   test("employee can attach a harmless test file to a new reimbursement claim", async ({ employeePage, runId }) => {
     const reimbursements = new ReimbursementsPage(employeePage);
