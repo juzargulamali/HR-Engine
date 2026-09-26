@@ -23,6 +23,22 @@ on:
 permissions:
   contents: read
 
+# Shared with e2e-production-qa-mutating.yml's group, on purpose: every job
+# in both workflows signs in as the same fixed set of dedicated E2E test
+# accounts against the same live Production instance. Two runs (of either
+# workflow, from any branch or PR) executing at once is a real, observed
+# failure mode — not a hypothetical one: an isolated rerun of the exact same
+# commit went from 3 genuine failures to a full-account cascade (every role
+# bounced to /login) solely because a second run was still executing against
+# the same accounts. `cancel-in-progress: false` queues a second run instead
+# of cancelling the first — this suite must never have a run torn down
+# mid-way through, since an in-flight run's PASS/FAIL signal (and, for the
+# mutating workflow, a partially-applied batch of real Production mutations)
+# needs to be resolved on its own, not silently discarded.
+concurrency:
+  group: e2e-production-qa-shared-test-accounts
+  cancel-in-progress: false
+
 jobs:
   e2e-read-only:
     runs-on: ubuntu-latest

@@ -42,6 +42,19 @@ on:
 permissions:
   contents: read
 
+# Shared with e2e-production-qa-readonly.yml's group, on purpose — see that
+# file's comment. Every job below signs in as the same dedicated E2E test
+# accounts against the same live Production instance as the read-only
+# workflow, so the two must never run concurrently. `cancel-in-progress:
+# false` queues instead of cancelling: a mutating run must never be torn
+# down mid-batch, since its own real Production mutations (leave approval,
+# attendance, reimbursements, account deactivate/reactivate) need the
+# `reconciliation` job to run to completion regardless of how the rest of
+# the run went.
+concurrency:
+  group: e2e-production-qa-shared-test-accounts
+  cancel-in-progress: false
+
 jobs:
   guard:
     runs-on: ubuntu-latest
