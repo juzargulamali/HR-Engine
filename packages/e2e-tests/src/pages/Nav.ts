@@ -103,3 +103,22 @@ export async function expectRouteRenders(page: Page, route: string): Promise<voi
   expect(finalUrl.endsWith(route), `Expected to stay on ${route}, was redirected to ${finalUrl}`).toBe(true);
   expect(bodyText.length, `Expected ${route} to render real content`).toBeGreaterThan(20);
 }
+
+/**
+ * /profile is the one ungated route with a genuine, deliberate redirect:
+ * apps/web/src/app/(app)/profile/page.tsx sends any account with a linked
+ * employee record straight to /employees/<id> instead of rendering in
+ * place — expectRouteRenders' "must stay on the same URL" check doesn't fit
+ * it. This accepts staying on /profile (no linked employee record yet) OR
+ * landing on /employees/<uuid>, and rejects only the outcomes that would
+ * mean something is actually wrong: an unauthenticated bounce to /login, or
+ * a role-denial alert.
+ */
+export async function expectProfileRenders(page: Page): Promise<void> {
+  const { finalUrl, bodyText } = await visitDirectly(page, "/profile");
+  expect(finalUrl, `Expected /profile to render in place or redirect to /employees/<id>, was redirected to ${finalUrl}`).not.toMatch(/\/login(\?|$)/);
+  const landedOnProfileOrOwnEmployeeRecord = finalUrl.endsWith("/profile") || /\/employees\/[0-9a-f-]{36}$/i.test(finalUrl);
+  expect(landedOnProfileOrOwnEmployeeRecord, `Expected /profile to render in place or redirect to /employees/<id>, was redirected to ${finalUrl}`).toBe(true);
+  await expect(page.getByRole("alert").filter({ hasText: /restricted to|you need an hr admin grant/i })).toHaveCount(0);
+  expect(bodyText.length, "Expected /profile's rendered destination to have real content").toBeGreaterThan(20);
+}

@@ -96,7 +96,27 @@ test.describe("change password validation", () => {
     await employeePage.getByLabel("New password", { exact: true }).fill(password);
     await employeePage.getByLabel("Confirm new password").fill(password);
     await employeePage.getByRole("button", { name: "Change password" }).click();
-    await expect(employeePage.getByText(/different from your current one/i)).toBeVisible();
+
+    // Capture whatever the app actually shows — never the password itself —
+    // so a failure here reports real evidence instead of a bare "text not
+    // found". apps/web/src/lib/actions/password.ts's changePassword()
+    // checks, in order: mismatch -> password-strength -> reuse -> current-
+    // password verification. newPassword === confirmPassword here, so
+    // mismatch can't be why a different message shows; if the account's own
+    // current password doesn't satisfy the app's own strength policy (10+
+    // chars, 3 of 4 character classes), the strength check reports THAT
+    // instead of ever reaching the reuse check below it — a legitimate,
+    // order-of-validation outcome, not a bug, and distinct from a silent
+    // no-op (no alert at all), which would be one.
+    const alert = employeePage.getByRole("alert");
+    await expect(alert, "Resubmitting the current password as the new one must show a rejection message, not silently succeed.").toBeVisible({
+      timeout: 10_000,
+    });
+    const message = (await alert.innerText()).trim();
+    await test.info().attach("change-password-reuse-message", { body: message, contentType: "text/plain" });
+    expect(message, `Unexpected validation message for password reuse: "${message}"`).toMatch(
+      /different from your current one|at least 10 characters|mix in at least 3/i,
+    );
   });
 
   test("shows the password requirements before submission", async ({ employeePage }) => {

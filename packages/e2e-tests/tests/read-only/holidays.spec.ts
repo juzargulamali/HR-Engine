@@ -1,5 +1,6 @@
 import { test, expect } from "../../src/fixtures";
 import { HolidaysPage } from "../../src/pages/AppPages";
+import { expectRoleAllowed } from "../../src/pages/Nav";
 
 /**
  * Read-only. This suite never asserts on specific holiday dates (e.g. UAE's
@@ -20,12 +21,22 @@ test.describe("holidays", () => {
   });
 
   test("'Add a holiday' is offered to HR Admin but not to a plain employee (never clicked)", async ({ employeePage, hrAdminPage }) => {
+    // canManageHolidays(grants, countryCode) (apps/web/src/app/(app)/holidays/page.tsx)
+    // is exactly isHrAdmin(grants, { countryCode }) — the identical check
+    // canDraftPolicy uses for /policies/new's own gate
+    // (packages/domain/src/permissions/policies.ts). Confirming HR Admin
+    // can reach /policies/new proves their grant is genuinely
+    // country-scoped, independent of this page, before assuming the
+    // holidays page's "Add a holiday" section follows from the same grant.
+    await expectRoleAllowed(hrAdminPage, "/policies/new");
+
     await employeePage.goto("/holidays");
     await hrAdminPage.goto("/holidays");
-    await expect(employeePage.getByRole("button", { name: /add a holiday/i })).toHaveCount(0);
-    // HR Admin's own grant is scoped to a specific country; if none of
-    // their countries are manageable here (data-dependent), this assertion
-    // may need revisiting — flagged rather than silently weakened.
-    await expect(hrAdminPage.getByRole("button", { name: /add a holiday/i }).first()).toBeVisible({ timeout: 10_000 });
+
+    // "Add a holiday" is a CardHeader/CardTitle (a heading), not a button —
+    // the form's own submit button is labeled "Add" (add-holiday-form.tsx).
+    // Only the heading is asserted here; "Add" is never clicked.
+    await expect(employeePage.getByRole("heading", { name: /add a holiday/i })).toHaveCount(0);
+    await expect(hrAdminPage.getByRole("heading", { name: /add a holiday/i })).toBeVisible({ timeout: 10_000 });
   });
 });

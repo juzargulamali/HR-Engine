@@ -1,5 +1,5 @@
 import { test, expect } from "../../src/fixtures";
-import { expectRoleAllowed, expectRoleDenied, expectRouteRenders, ROLE_DENIED_ALERT, ROUTES } from "../../src/pages/Nav";
+import { expectRoleAllowed, expectRoleDenied, expectRouteRenders, expectProfileRenders, ROLE_DENIED_ALERT, ROUTES } from "../../src/pages/Nav";
 import { hasCredentials, type Role } from "../../src/config";
 
 /**
@@ -78,7 +78,14 @@ test.describe("full RBAC matrix", () => {
       };
       for (const role of ALL_TESTABLE_ROLES) {
         if (!hasCredentials(role)) continue;
-        await expectRouteRenders(pageByRole[role], route);
+        // /profile deliberately redirects an account with a linked employee
+        // record to /employees/<id> (see Nav.ts's expectProfileRenders) —
+        // every other ungated route must stay on its own URL.
+        if (route === "/profile") {
+          await expectProfileRenders(pageByRole[role]);
+        } else {
+          await expectRouteRenders(pageByRole[role], route);
+        }
       }
     });
   }
