@@ -29,17 +29,37 @@ export class AttendancePage {
 
   /** Scoped to a specific employee's real display name — never "whichever
    * row renders first" (the register lists every active employee in HR
-   * Admin's company, real employees included). */
+   * Admin's company, real employees included). This alone does NOT
+   * guarantee uniqueness — see uniqueRowFor() below, which every mutating
+   * method uses instead. */
   rowFor(employeeName: string) {
     return this.page.getByRole("row", { name: new RegExp(escapeForRegExp(employeeName), "i") });
   }
 
+  /**
+   * Same lookup as rowFor(), but FAILS BEFORE any mutation if it doesn't
+   * resolve to EXACTLY one row on this date's register — two employees in
+   * the same company could plausibly share a display name, and this suite
+   * must never guess which one is the dedicated test account. Every method
+   * below that changes a value or saves goes through this, never rowFor()
+   * directly.
+   */
+  private async uniqueRowFor(employeeName: string) {
+    const row = this.rowFor(employeeName);
+    const count = await row.count();
+    if (count !== 1) {
+      throw new Error(`Expected exactly one attendance row for "${employeeName}" on this date, found ${count}. Refusing to select/fill/save an ambiguous or missing row.`);
+    }
+    return row;
+  }
+
   async setStatus(employeeName: string, status: AttendanceStatus): Promise<void> {
-    await this.rowFor(employeeName).getByRole("combobox").first().selectOption(status);
+    const row = await this.uniqueRowFor(employeeName);
+    await row.getByRole("combobox").first().selectOption(status);
   }
 
   async setWorkModeAndHours(employeeName: string, workMode: WorkMode, hours: number): Promise<void> {
-    const row = this.rowFor(employeeName);
+    const row = await this.uniqueRowFor(employeeName);
     const comboboxes = row.getByRole("combobox");
     await comboboxes.nth(1).selectOption(workMode);
     await row.getByRole("spinbutton").fill(String(hours));
@@ -53,8 +73,25 @@ export class AttendancePage {
     await expect(this.page.getByText(/^saved\./i)).toBeVisible({ timeout: 10_000 });
   }
 
-  async expectRecoveryDayNotice(): Promise<void> {
-    await expect(this.page.getByText(/recovery day/i)).toBeVisible();
+  /**
+   * Verified against bulk-attendance-form.tsx's own success message:
+   * `Saved.{result.creditedCount > 0 ? " N recovery credit request(s)
+   * submitted for approval." : ""}` — this is the ONE precise, save-scoped
+   * signal for "did saving THIS row on THIS date earn a recovery credit",
+   * tied exactly to the row(s) this specific "Save all" click touched
+   * (bulkRecordAttendance only sends changed/selected rows). This is used
+   * INSTEAD OF looking for the request on the Approvals page: reading
+   * apps/web/src/app/(app)/approvals/page.tsx directly shows it fetches
+   * every entity_type of pending approval but only ever renders sections
+   * for leave_request/reimbursement_claim/timesheet/generated_letter/
+   * payroll_export_run — `recovery_credit` approvals are silently never
+   * displayed there at all. Scanning that page for "the first Approve
+   * button" would at best prove an UNRELATED approval exists, never this
+   * one — this success message is the only reliable, specific signal
+   * available through the UI.
+   */
+  async expectSavedWithRecoveryCredits(count: number): Promise<void> {
+    await expect(this.page.getByText(`Saved. ${count} recovery credit request(s) submitted for approval.`, { exact: true })).toBeVisible({ timeout: 10_000 });
   }
 
   /** The employee's own row text on whatever date this page is currently

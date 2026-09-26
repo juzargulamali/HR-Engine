@@ -2,6 +2,7 @@ import { test, expect } from "../../src/fixtures";
 import { getCredentials, hasCredentials, isMutationAuthorized } from "../../src/config";
 import { assertApprovedTestEmail } from "../../src/emergencyStop";
 import { escapeForRegExp } from "../../src/recordTag";
+import { getAccountStatusCellText } from "../../src/identity";
 import { LoginPage } from "../../src/pages/LoginPage";
 
 /**
@@ -44,9 +45,18 @@ test.describe("account status (Employee test account only) @mutating", () => {
     // dedicated Employee test account.
     assertApprovedTestEmail(employeeEmail);
 
-    await sysAdminPage.goto("/admin/users");
+    // getAccountStatusCellText navigates fresh and throws unless the email
+    // resolves to exactly one row — used here once, before `row` below is
+    // captured, so there's no risk of it navigating away from underneath a
+    // locator this test still needs. Every check AFTER this one reads the
+    // SAME status cell in place (never the whole row, which also contains a
+    // "Deactivate" button on an Active account — see src/identity.ts's doc
+    // comment), scoped to the one `row` locator captured below, since the
+    // page never navigates again after this point (Next.js re-renders the
+    // badge/buttons in place after each server action).
+    expect(await getAccountStatusCellText(sysAdminPage, employeeEmail)).toBe("Active");
     const row = sysAdminPage.getByRole("row", { name: new RegExp(escapeForRegExp(employeeEmail), "i") });
-    await expect(row.getByText("Active")).toBeVisible();
+    const statusCell = row.getByRole("cell").nth(2);
 
     // The Employee's session is already open (employeePage, loaded from
     // storageState) BEFORE any deactivation happens — this is the session
@@ -61,7 +71,7 @@ test.describe("account status (Employee test account only) @mutating", () => {
     try {
       sysAdminPage.once("dialog", (dialog) => dialog.accept("Production QA run — temporary deactivation, will reactivate immediately"));
       await row.getByRole("button", { name: "Deactivate" }).click();
-      await expect(row.getByText(/Deactivated/i)).toBeVisible();
+      await expect(statusCell).toHaveText(/deactivat/i);
 
       // The Employee's ALREADY-OPEN session — no new login — makes its next
       // protected request. It must be denied and redirected to /login, not
@@ -80,11 +90,12 @@ test.describe("account status (Employee test account only) @mutating", () => {
     let reactivationError: unknown = null;
     try {
       await row.waitFor({ state: "visible" });
-      const alreadyActive = await row.getByText("Active").isVisible().catch(() => false);
+      const currentStatus = await statusCell.innerText().catch(() => "");
+      const alreadyActive = currentStatus.trim() === "Active";
       if (!alreadyActive) {
         sysAdminPage.once("dialog", (dialog) => dialog.accept("Production QA run — reactivation"));
         await row.getByRole("button", { name: "Reactivate" }).click();
-        await expect(row.getByText("Active")).toBeVisible();
+        await expect(statusCell).toHaveText("Active");
       }
     } catch (err) {
       reactivationError = err;

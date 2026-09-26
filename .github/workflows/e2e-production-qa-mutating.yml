@@ -259,6 +259,24 @@ jobs:
           path: packages/e2e-tests/test-results/**/*.webm
           retention-days: 14
           if-no-files-found: ignore
+      # This job and `reconciliation` run on SEPARATE, fresh runners with no
+      # shared filesystem — the leave-approval expectations file
+      # 10-leave.spec.ts writes (packages/e2e-tests/.e2e-state/<runId>.
+      # expectations.json) exists only on THIS runner's disk unless it's
+      # uploaded and re-downloaded explicitly. `if: always()` and
+      # `if-no-files-found: ignore` matter together here: this must still
+      # upload whatever WAS written even if a LATER mutating test (e.g.
+      # attendance, run after leave — see the numeric filename prefixes)
+      # fails partway through, and it must not fail this step if the leave
+      # test itself never got far enough to write anything.
+      - name: Upload this job's state (leave-approval expectations, if any were written)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-state-mutating-${{ needs.guard.outputs.run_id }}
+          path: packages/e2e-tests/.e2e-state/
+          retention-days: 14
+          if-no-files-found: ignore
       # This DOES fail the job (and so the overall workflow run) on a failed
       # mutating test — `continue-on-error: true` on the run step above only
       # exists so the artifact-upload steps still run first; it must never be
@@ -291,6 +309,20 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: e2e-state-${{ needs.guard.outputs.run_id }}
+          path: packages/e2e-tests/.e2e-state/
+      # From the `mutating` job — the leave-approval expectations file, if
+      # any leave approval ran (see that job's "Upload this job's state"
+      # step). Downloaded into the SAME directory as the baseline state
+      # above; the two artifacts never share a filename. continue-on-error
+      # because this artifact legitimately won't exist if no mutating test
+      # ever got far enough to write it (e.g. read-only already failed, or
+      # the leave test itself failed before approving) — reconciliation
+      # must still run and report accurately on THAT, not abort here.
+      - name: Download this run's mutating-job state (leave-approval expectations, if any)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: e2e-state-mutating-${{ needs.guard.outputs.run_id }}
           path: packages/e2e-tests/.e2e-state/
       - name: Reconcile final state against baseline; verify the Employee test account
         id: reconcile

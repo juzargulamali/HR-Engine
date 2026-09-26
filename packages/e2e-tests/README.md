@@ -51,11 +51,19 @@ and `.github/workflows/e2e-production-qa-mutating.yml`.
   `testWorkday()`/`testWeekendDay()` pick fixed-weekday synthetic 2099+
   dates that are correct under every seeded country's weekend pattern,
   rather than an arbitrary date that might silently land on the wrong day.
-- **Attendance mutations target the Employee test account's own row, found
-  by its real display name** (`src/identity.ts`, reading the signed-in
-  account's own sidebar identity — never a hardcoded name), never
-  "whichever row the register renders first" — that register lists every
-  active employee in HR Admin's company, real employees included.
+- **Attendance mutations target the Employee test account's own row,
+  resolved from a stable identifier.** `src/identity.ts`'s
+  `getEmployeeNameByAuthEmail()` looks up the display name from the
+  account's auth email (globally unique) via HR Admin's Users & Roles list
+  — never a self-reported name and never `employees.personal_email` (a
+  separate, nullable contact field with no guaranteed relationship to the
+  login email). It throws unless that email resolves to exactly one row.
+  `AttendancePage`'s mutating methods then independently refuse to
+  select/fill/save unless that name resolves to exactly one row on the
+  attendance register too (two employees could share a display name even
+  with different emails) — never "whichever row renders first", which
+  lists every active employee in HR Admin's company, real employees
+  included.
 - **Never activates, publishes, or deletes a policy.** `PoliciesPage.ts` has
   no method that clicks "Activate"/"Delete" — enforced by code review of
   that file, not a runtime guard.
@@ -65,8 +73,8 @@ and `.github/workflows/e2e-production-qa-mutating.yml`.
   only ever submits definitely-nonexistent addresses.
 - **Never touches a real employee or the System Administrator account.**
   Every mutating action targets one of the fixed `E2E_*` test accounts by
-  email (or, for attendance, by that account's own read-back display name),
-  checked against `src/emergencyStop.ts` before acting.
+  email (or, for attendance, by a display name resolved FROM that email —
+  see above), checked against `src/emergencyStop.ts` before acting.
 - **Every record this suite creates is tagged** with the current run's ID
   (`E2E-YYYYMMDD-HHMMSS`, see `src/recordTag.ts`), embedded in whatever
   free-text field the record has (a leave reason, a reimbursement
@@ -186,14 +194,35 @@ Page objects verified directly against real component source this round:
 `LoginPage`, `Nav`/RBAC route table, `AttendancePage`, `LeavePage` +
 `ApprovalsPage`, `PoliciesPage`, `ReimbursementsPage` (against
 `new-claim-form.tsx`/`[id]/add-line-form.tsx`/`[id]/claim-actions.tsx`),
-the account-menu/sign-out/display-name selector in `src/identity.ts` and
-`tests/read-only/auth.spec.ts` (grounded in `user-menu.tsx`'s known
-lucide-react icon class, not guessed), and the automatic Recovery Leave
-trigger in `20-attendance.spec.ts` (grounded in
-`record_attendance_and_recovery()`'s actual SQL, not a guessed UI control).
-Best-effort, kept generic (text/role-based rather than DOM-structure-based)
-so a first live run mostly needs small text tweaks: `EmployeesPage`,
-`HolidaysPage`, `AuditLogPage`, `PayrollPage`, `DashboardPage`.
+the account-menu/sign-out selector in `tests/read-only/auth.spec.ts`
+(grounded in `user-menu.tsx`'s known lucide-react icon class, not guessed),
+`src/identity.ts`'s email-to-name lookup (grounded in `admin/users/page.tsx`'s
+actual table columns), and the automatic Recovery Leave trigger and its
+verification in `20-attendance.spec.ts` (grounded in
+`record_attendance_and_recovery()`'s actual SQL and
+`bulk-attendance-form.tsx`'s save-result message — not a guessed UI control,
+and not the Approvals page, which a direct read of
+`apps/web/src/app/(app)/approvals/page.tsx` shows never renders
+`recovery_credit` approvals at all, despite fetching them). Best-effort,
+kept generic (text/role-based rather than DOM-structure-based) so a first
+live run mostly needs small text tweaks: `EmployeesPage`, `HolidaysPage`,
+`AuditLogPage`, `PayrollPage`, `DashboardPage`.
+
+## Known application gap found while building this suite
+
+Reading `apps/web/src/app/(app)/approvals/page.tsx` directly: its query
+fetches every pending `approvals` row for the signed-in approver regardless
+of `entity_type`, but the page only ever builds a display section for
+`leave_request`, `reimbursement_claim`, `timesheet`, `generated_letter`, and
+`payroll_export_run`. A `recovery_credit` approval (created automatically by
+`record_attendance_and_recovery()`) is fetched but never rendered anywhere
+on that page — not even counted toward whether the page shows its "nothing
+waiting on you" empty state. This suite works around it by verifying the
+attendance page's own save-result message instead (see
+`20-attendance.spec.ts`), but a manager currently has no UI-visible way to
+actually approve or reject a Recovery Leave credit request. This looks like
+a real application gap, not a test-design issue, and is worth a look outside
+this suite.
 
 ## What this suite has NOT verified
 

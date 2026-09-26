@@ -44,9 +44,26 @@ export class LeavePage {
     await row.getByRole("button", { name: /cancel/i }).click();
   }
 
+  /**
+   * Reads the balance NUMBER itself — never "the first number anywhere in
+   * the surrounding card". Verified against apps/web/src/app/(app)/leave/
+   * page.tsx's actual markup: each balance is `<Card><CardHeader><CardTitle>
+   * {label}</CardTitle></CardHeader><CardContent>{balance_days} days
+   * </CardContent></Card>` (components/ui/card.tsx: CardTitle is an <h3>
+   * nested two levels inside Card — CardTitle -> CardHeader -> Card;
+   * CardContent is CardHeader's SIBLING, not its descendant). So: find the
+   * label heading, go up exactly two levels to reach the Card itself, then
+   * within THAT card read only the element whose own text is the balance
+   * shape ("<number> days") — never the label text or anything else the
+   * card might contain.
+   */
   async getBalance(leaveTypeLabel: string): Promise<string> {
-    const card = this.page.getByText(new RegExp(leaveTypeLabel, "i")).locator("..");
-    return (await card.textContent()) ?? "";
+    const heading = this.page.getByRole("heading", { name: new RegExp(escapeForRegExp(leaveTypeLabel), "i") });
+    if ((await heading.count()) === 0) return "";
+    const card = heading.first().locator("..").locator(".."); // CardTitle -> CardHeader -> Card
+    const balanceText = card.getByText(/^\s*[\d.]+\s*days\s*$/i);
+    if ((await balanceText.count()) === 0) return "";
+    return ((await balanceText.first().textContent()) ?? "").trim();
   }
 }
 

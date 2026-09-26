@@ -2,9 +2,10 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { stateFile } from "./config";
-import { testWorkday, testWeekendDay, escapeForRegExp } from "./recordTag";
-import { getOwnDisplayName } from "./identity";
+import { testWorkday, testWeekendDay } from "./recordTag";
+import { getEmployeeNameByAuthEmail, getAccountStatusCellText } from "./identity";
 import { AttendancePage } from "./pages/AttendancePage";
+import { LeavePage } from "./pages/LeavePage";
 
 /**
  * Baseline/reconciliation state, captured and re-captured via the SAME
@@ -17,7 +18,7 @@ import { AttendancePage } from "./pages/AttendancePage";
  */
 export interface AccountSnapshot {
   capturedAt: string;
-  employeeAccountStatusText: string | null;
+  employeeAccountStatusText: string;
   employeeAnnualLeaveBalanceText: string | null;
   employeeAnnualLeaveBalanceNumber: number | null;
   employeeReimbursementRows: string[];
@@ -33,23 +34,28 @@ function parseBalanceNumber(text: string | null): number | null {
   return match ? Number(match) : null;
 }
 
-/** Reads the Employee row's status cell from HR Admin's Users & Roles list
- * (read-only for HR Admin — see packages/domain/src/permissions/users.ts's
- * canManageAccountStatus doc comment: only Sys Admin can toggle it, but HR
- * Admin can always see it, so this works even when no Sys Admin test
- * account is configured). */
-export async function readEmployeeAccountStatus(hrAdminPage: Page, employeeEmail: string): Promise<string | null> {
-  await hrAdminPage.goto("/admin/users");
-  const row = hrAdminPage.getByRole("row", { name: new RegExp(escapeForRegExp(employeeEmail), "i") });
-  if ((await row.count()) === 0) return null;
-  return (await row.first().innerText()).replace(/\s+/g, " ").trim();
+/** Reads ONLY the Employee's status cell/badge from HR Admin's Users &
+ * Roles list (read-only for HR Admin — see
+ * packages/domain/src/permissions/users.ts's canManageAccountStatus doc
+ * comment: only Sys Admin can toggle it, but HR Admin can always see it, so
+ * this works even when no Sys Admin test account is configured). Never the
+ * whole row's text — see src/identity.ts's getAccountStatusCellText doc
+ * comment for why that produces a false "deactivated" reading on an
+ * Active account. Throws (never returns null) if the row can't be found or
+ * is ambiguous — an identity problem this suite should stop on immediately,
+ * not paper over with a "(not found)" placeholder. */
+export async function readEmployeeAccountStatus(hrAdminPage: Page, employeeEmail: string): Promise<string> {
+  return getAccountStatusCellText(hrAdminPage, employeeEmail);
 }
 
+/** Delegates to LeavePage.getBalance(), which reads the balance NUMBER's
+ * own element specifically (Card > CardContent, "<N> days") rather than any
+ * digit found anywhere in the card — see LeavePage.ts's doc comment. */
 export async function readEmployeeAnnualLeaveBalance(employeePage: Page): Promise<string | null> {
-  await employeePage.goto("/leave");
-  const card = employeePage.getByText(/annual/i).locator("..");
-  if ((await card.count()) === 0) return null;
-  return ((await card.first().textContent()) ?? "").replace(/\s+/g, " ").trim();
+  const leavePage = new LeavePage(employeePage);
+  await leavePage.gotoList();
+  const text = await leavePage.getBalance("Annual");
+  return text || null;
 }
 
 /** A coarse, best-effort snapshot of the Employee's reimbursement claims —
@@ -68,10 +74,12 @@ export async function readEmployeeReimbursementRows(employeePage: Page): Promise
 
 /** The Employee's own row text on each of this run's two synthetic
  * attendance dates (the ordinary workday and the deliberate weekend day —
- * see recordTag.ts), read via HR Admin's attendance register. Requires
- * signing into employeePage first to read its display name. */
-export async function readEmployeeAttendanceByDate(hrAdminPage: Page, employeePage: Page, runId: string): Promise<Record<string, string | null>> {
-  const employeeName = await getOwnDisplayName(employeePage);
+ * see recordTag.ts), read via HR Admin's attendance register. The
+ * employee's name is resolved from their auth email via
+ * getEmployeeNameByAuthEmail (a stable identifier), never a self-reported
+ * name — see src/identity.ts. */
+export async function readEmployeeAttendanceByDate(hrAdminPage: Page, employeeEmail: string, runId: string): Promise<Record<string, string | null>> {
+  const employeeName = await getEmployeeNameByAuthEmail(hrAdminPage, employeeEmail);
   const attendance = new AttendancePage(hrAdminPage);
   const dates = [testWorkday(runId, 0), testWeekendDay(runId, 0)];
   const result: Record<string, string | null> = {};
@@ -90,7 +98,7 @@ export async function captureSnapshot(hrAdminPage: Page, employeePage: Page, emp
     employeeAnnualLeaveBalanceText,
     employeeAnnualLeaveBalanceNumber: parseBalanceNumber(employeeAnnualLeaveBalanceText),
     employeeReimbursementRows: await readEmployeeReimbursementRows(employeePage),
-    employeeAttendanceByDate: await readEmployeeAttendanceByDate(hrAdminPage, employeePage, runId),
+    employeeAttendanceByDate: await readEmployeeAttendanceByDate(hrAdminPage, employeeEmail, runId),
   };
 }
 
@@ -158,24 +166,31 @@ export function buildReconciliationReport(runId: string, baseline: AccountSnapsh
   let hasUnexplainedChange = false;
 
   lines.push("## Employee test account status");
-  lines.push(`- Baseline: \`${baseline.employeeAccountStatusText ?? "(not found)"}\``);
-  lines.push(`- Final:    \`${final.employeeAccountStatusText ?? "(not found)"}\``);
-  const baselineLooksActive = /\bactive\b/i.test(baseline.employeeAccountStatusText ?? "") && !/deactivat/i.test(baseline.employeeAccountStatusText ?? "");
-  const finalLooksActive = /\bactive\b/i.test(final.employeeAccountStatusText ?? "") && !/deactivat/i.test(final.employeeAccountStatusText ?? "");
+  lines.push(`- Baseline: \`${baseline.employeeAccountStatusText}\``);
+  lines.push(`- Final:    \`${final.employeeAccountStatusText}\``);
+  // Exact match against the literal badge label, per
+  // account-status-controls.tsx's STATUS_LABEL ("Active" / "Deactivated —
+  // access suspended" / "Invited") — this is now scoped to ONLY the status
+  // cell (src/identity.ts's getAccountStatusCellText), never the whole row,
+  // so it's no longer susceptible to a "Deactivate" BUTTON in the same row
+  // (present precisely because the account IS active) matching a loose
+  // /deactivat/i check.
+  const baselineLooksActive = baseline.employeeAccountStatusText === "Active";
+  const finalLooksActive = final.employeeAccountStatusText === "Active";
   if (!baselineLooksActive) {
-    lines.push(`- Note: baseline status did not read as plainly "Active" either — this account may not have started this run in a clean state.`);
+    lines.push(`- Note: baseline status was not "Active" either — this account may not have started this run in a clean state.`);
   }
   if (!finalLooksActive || !employeeLoginStillWorks) {
     hasUnexplainedChange = true;
     lines.push(
-      `- **PROBLEM: the Employee test account is not confirmed active and able to log in at the end of this run** (status text: "${final.employeeAccountStatusText ?? "(not found)"}", fresh login succeeded: ${employeeLoginStillWorks}). ` +
+      `- **PROBLEM: the Employee test account is not confirmed active and able to log in at the end of this run** (status text: "${final.employeeAccountStatusText}", fresh login succeeded: ${employeeLoginStillWorks}). ` +
         `Manual recovery: sign in as Sys Admin (E2E_ADMIN_EMAIL) -> /admin/users -> find the Employee test account's row -> click "Reactivate" and give any non-blank reason. ` +
         `If that doesn't work, the Supabase fallback (schema/schema.sql's account-security migration) is to set that profile's \`account_status\` column back to \`'active'\` and clear its \`banned_until\` column directly.`,
     );
   } else if (baseline.employeeAccountStatusText === final.employeeAccountStatusText) {
     lines.push("- OK — unchanged, active, and able to log in.");
   } else {
-    lines.push("- OK — active and able to log in (status text changed cosmetically but both read as Active — e.g. a timestamp in the row).");
+    lines.push("- OK — active and able to log in (status text changed but both read exactly \"Active\").");
   }
   lines.push("");
 
@@ -209,7 +224,9 @@ export function buildReconciliationReport(runId: string, baseline: AccountSnapsh
       );
     } else {
       hasUnexplainedChange = true;
-      const expectedText = expectation ? `${expectation.leaveDaysRequested} day(s) (from "${expectation.reasonTag}")` : "no leave approval was recorded for this run at all";
+      const expectedText = expectation
+        ? `${expectation.leaveDaysRequested} day(s) (from "${expectation.reasonTag}")`
+        : "no expectations file was found for this run — either no leave approval ran, or (check first) the mutating job's .e2e-state/ artifact failed to transfer to this reconciliation job";
       lines.push(`- **PROBLEM: balance changed by ${actualDelta} day(s), but this does not match what this run expected (${expectedText}) — unexplained, investigate before treating this run as clean.**`);
     }
   }
