@@ -45,45 +45,69 @@ test.describe("authentication @smoke", () => {
   });
 
   /**
-   * Logout, for every configured role. Deliberately uses its own fresh,
-   * real UI sign-in per role (never the shared employeePage/managerPage/...
-   * fixtures, which load the SAVED storageState every other spec in this
-   * run depends on). apps/web/src/lib/actions/auth.ts's signOut() calls
-   * Supabase's auth.signOut() with no explicit scope — whether that
-   * resolves to Supabase's 'global' default or something narrower isn't
-   * re-derived here; either way, signing out inside a disposable context
-   * this test created itself, rather than the shared saved-session
-   * fixtures, means it can never invalidate another test's session no
-   * matter which scope actually applies.
+   * Ordinary logout, for every configured role. Uses TWO independent fresh,
+   * real UI sign-ins per role — never the shared employeePage/managerPage/
+   * ... fixtures, which load the SAVED storageState every other spec in
+   * this run depends on. apps/web/src/lib/actions/auth.ts's signOut() now
+   * explicitly passes `{ scope: "local" }` (fixed alongside this test —
+   * see that file's doc comment): Supabase's own default with NO scope
+   * argument is 'global', which revokes every session for the account
+   * server-side, not just the browser that clicked it. That defaulted
+   * behavior is what this test's two-session structure is designed to
+   * catch: session B (untouched) staying signed in after session A signs
+   * out is the actual proof this is scoped locally, not just that session A
+   * itself ended (which "global" would do too).
    */
   for (const role of ALL_ROLES) {
-    test(`sign out (${role}) ends the session and a further protected request is denied`, async ({ browser }) => {
+    test(`sign out (${role}) ends only that session — a separate session for the same account is unaffected`, async ({ browser }) => {
       test.skip(!hasCredentials(role), `No test account configured for role "${role}".`);
       const { email, password } = getCredentials(role);
-      const context = await browser.newContext();
-      const page = await context.newPage();
-      const loginPage = new LoginPage(page);
-      await loginPage.goto();
-      await loginPage.signIn(email, password);
-      await loginPage.expectSignedIn();
 
-      // Source-verified selector: UserMenu's trigger button (the sidebar
-      // identity/account control) is the only button on this page rendering
-      // lucide-react's ChevronsUpDown icon (apps/web/src/components/nav/
-      // user-menu.tsx) — lucide-react gives every icon svg a stable
-      // `lucide-<icon-name>` class. Skips cleanly, rather than guessing
-      // further, if this doesn't resolve on the first real run.
-      const menuTrigger = page.locator("button:has(svg.lucide-chevrons-up-down)");
-      test.skip((await menuTrigger.count()) === 0, "Could not find the account-menu trigger by its known icon class — confirm the real selector on first live run.");
-      await menuTrigger.first().click();
+      const contextA = await browser.newContext();
+      const pageA = await contextA.newPage();
+      const loginA = new LoginPage(pageA);
+      await loginA.goto();
+      await loginA.signIn(email, password);
+      await loginA.expectSignedIn();
 
-      const signOutButton = page.getByRole("button", { name: "Sign out", exact: true });
-      test.skip((await signOutButton.count()) === 0, "Account menu opened but no exact 'Sign out' button was found inside it.");
-      await signOutButton.click();
+      // Session B: a second, independent real sign-in for the SAME
+      // account, created before A signs out — this is what proves the
+      // scope, not just that A itself ended.
+      const contextB = await browser.newContext();
+      const pageB = await contextB.newPage();
+      const loginB = new LoginPage(pageB);
+      await loginB.goto();
+      await loginB.signIn(email, password);
+      await loginB.expectSignedIn();
 
-      await expect(page).toHaveURL(/\/login/, { timeout: 15_000 });
-      await expectRedirectedToLogin(page, "/");
-      await context.close();
+      try {
+        // Source-verified selector: UserMenu's trigger button (the sidebar
+        // identity/account control) is the only button on this page
+        // rendering lucide-react's ChevronsUpDown icon
+        // (apps/web/src/components/nav/user-menu.tsx) — lucide-react gives
+        // every icon svg a stable `lucide-<icon-name>` class. Skips
+        // cleanly, rather than guessing further, if this doesn't resolve.
+        const menuTrigger = pageA.locator("button:has(svg.lucide-chevrons-up-down)");
+        test.skip((await menuTrigger.count()) === 0, "Could not find the account-menu trigger by its known icon class — confirm the real selector on first live run.");
+        await menuTrigger.first().click();
+
+        const signOutButton = pageA.getByRole("button", { name: "Sign out", exact: true });
+        test.skip((await signOutButton.count()) === 0, "Account menu opened but no exact 'Sign out' button was found inside it.");
+        await signOutButton.click();
+
+        // A ends.
+        await expect(pageA).toHaveURL(/\/login/, { timeout: 15_000 });
+        await expectRedirectedToLogin(pageA, "/");
+
+        // B — a completely separate session for the same account, never
+        // touched by this test — must still be signed in.
+        await pageB.reload();
+        await pageB.waitForLoadState("load");
+        await expect(pageB, `Session B for role "${role}" was signed out too — ordinary sign-out is not scoped to a single session (see apps/web/src/lib/actions/auth.ts's signOut()).`).not.toHaveURL(/\/login/);
+      } finally {
+        await contextA.close();
+        await contextB.close();
+      }
     });
   }
 });
