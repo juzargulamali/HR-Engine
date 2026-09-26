@@ -33,9 +33,18 @@ export async function signIn(_prevState: SignInState, formData: FormData): Promi
   redirect(parsed.data.next && parsed.data.next.startsWith("/") ? parsed.data.next : "/");
 }
 
+/**
+ * The ordinary sidebar/account-page "Sign out" — the UI next to it (see
+ * session-controls.tsx: "Sign out" vs. "Sign out of all devices") promises
+ * this ends only the current session. `scope: 'local'` is what actually
+ * keeps that promise: Supabase's own default (no scope argument) is
+ * 'global', which revokes every session for this user everywhere, not just
+ * this browser. See signOutEverywhere() below for the real every-device
+ * case.
+ */
 export async function signOut(): Promise<void> {
   const supabase = await createClient();
-  await supabase.auth.signOut();
+  await supabase.auth.signOut({ scope: "local" });
   redirect("/login");
 }
 
