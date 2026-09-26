@@ -108,18 +108,26 @@ test.describe("change password validation", () => {
     // instead of ever reaching the reuse check below it — a legitimate,
     // order-of-validation outcome, not a bug, and distinct from a silent
     // no-op (no alert at all), which would be one.
-    const alert = employeePage.getByRole("alert");
+    //
+    // /account/security has THREE <form> elements (change-password-form.tsx
+    // plus session-controls.tsx's two sign-out forms), so an unscoped
+    // getByRole("alert") is ambiguous about which form it belongs to even
+    // though only one alert happens to be on screen at a time — scope to
+    // the Change password form specifically, identified by its own submit
+    // button, so this can never accidentally match a different form's
+    // state.
+    const changePasswordForm = employeePage.locator("form").filter({ has: employeePage.getByRole("button", { name: "Change password" }) });
+    const alert = changePasswordForm.getByRole("alert");
     await expect(alert, "Resubmitting the current password as the new one must show a rejection message, not silently succeed.").toBeVisible({
       timeout: 10_000,
     });
-    // .innerText() requires a completed layout pass and can race a just-
-    // mounted element (confirmed live: it returned "" for this exact alert
-    // right after toBeVisible() resolved, twice, even though the app only
-    // ever renders this Alert with a non-empty state.error string —
-    // apps/web/src/app/(app)/account/security/change-password-form.tsx's
-    // `{state.error ? <Alert>{state.error}</Alert> : null}`, its only
-    // role="alert" element on this page). .textContent() reads the DOM
-    // tree directly with no layout dependency.
+    // toBeVisible() only confirms the element exists and is on screen — it
+    // does not wait for React to finish committing its text (confirmed
+    // live: a plain .innerText() read immediately after toBeVisible()
+    // returned "" for this exact alert, twice). Wait for real, non-empty
+    // text specifically — this assertion polls, unlike a one-shot read —
+    // before ever reading the message.
+    await expect(alert, "The alert became visible but never received its validation text.").not.toHaveText("", { timeout: 10_000 });
     const message = ((await alert.textContent()) ?? "").trim();
     await test.info().attach("change-password-reuse-message", { body: message, contentType: "text/plain" });
     expect(message, `Unexpected validation message for password reuse: "${message}"`).toMatch(
