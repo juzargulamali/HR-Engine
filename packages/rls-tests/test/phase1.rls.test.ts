@@ -99,6 +99,42 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
     });
   });
 
+  describe("get_employee_manager_name()", () => {
+    it("lets the report themselves resolve their own manager's name, even though employees_select never lets them see that row directly", async () => {
+      // Regression for the bug found live on the Employee E2E test account:
+      // a plain viewer's own `employees` query (company_id-scoped, RLS
+      // applied) never includes their manager's row — employees_select has
+      // no "see my own manager" clause, only "see my own reports"
+      // (is_manager_of). Confirms this RPC resolves the name anyway, gated
+      // by the same visibility rule.
+      const asReport = await db.asUser(USER_REPORT, (query) => query("select get_employee_manager_name($1) as name", [EMPLOYEE_REPORT]));
+      expect(asReport.rows).toEqual([{ name: "Maya Manager" }]);
+    });
+
+    it("lets the manager resolve it too (is_manager_of branch)", async () => {
+      const asManager = await db.asUser(USER_MANAGER, (query) => query("select get_employee_manager_name($1) as name", [EMPLOYEE_REPORT]));
+      expect(asManager.rows).toEqual([{ name: "Maya Manager" }]);
+    });
+
+    it("lets hr_admin and sys_admin resolve it regardless of the reporting line", async () => {
+      const asHr = await db.asUser(USER_HR_ADMIN, (query) => query("select get_employee_manager_name($1) as name", [EMPLOYEE_REPORT]));
+      expect(asHr.rows).toEqual([{ name: "Maya Manager" }]);
+
+      const asSysAdmin = await db.asUser(USER_SYS_ADMIN, (query) => query("select get_employee_manager_name($1) as name", [EMPLOYEE_REPORT]));
+      expect(asSysAdmin.rows).toEqual([{ name: "Maya Manager" }]);
+    });
+
+    it("returns null to an unrelated peer with no visibility into that reporting line — never leaks the name", async () => {
+      const asPeer = await db.asUser(USER_OTHER_EMPLOYEE, (query) => query("select get_employee_manager_name($1) as name", [EMPLOYEE_REPORT]));
+      expect(asPeer.rows).toEqual([{ name: null }]);
+    });
+
+    it("returns null when the target has no manager_id set, even for a viewer who could otherwise see the row", async () => {
+      const asHr = await db.asUser(USER_HR_ADMIN, (query) => query("select get_employee_manager_name($1) as name", [EMPLOYEE_MANAGER]));
+      expect(asHr.rows).toEqual([{ name: null }]);
+    });
+  });
+
   describe("employment_contracts", () => {
     it("lets the employee see every version of their own contract", async () => {
       const { rows } = await db.asUser(USER_REPORT, (query) =>

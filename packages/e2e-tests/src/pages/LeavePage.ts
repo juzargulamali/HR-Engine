@@ -112,20 +112,30 @@ export class ApprovalsPage {
     await gotoWithRetry(this.page, "/approvals");
   }
 
-  private cardFor(needle: string) {
-    // Approvals render as cards/list items, not a <table>; scope by the
-    // nearest ancestor containing the needle text instead of assuming a
-    // table row.
-    return this.page.locator(`text=${needle}`).locator("..").locator("..");
+  /** Scopes to the exact-one <TableRow> whose text contains this tagged
+   * reason — verified directly from approvals/page.tsx: every section
+   * (Leave requests, Reimbursement claims, Timesheets, Letters, Payroll
+   * exports) is a real <Table>/<TableRow>, not a card/list-item layout (a
+   * stale doc comment here previously said otherwise). Throws rather than
+   * guessing on 0 or >1 matches — same "exact-one" safety convention as
+   * src/identity.ts's findUniqueUserRow — so a decision action can never
+   * silently act on the wrong row or on more than one. */
+  private async rowFor(needle: string) {
+    const rows = this.page.getByRole("row", { name: new RegExp(escapeForRegExp(needle), "i") });
+    const count = await rows.count();
+    if (count !== 1) {
+      throw new Error(`Expected exactly one /approvals row matching this run's tagged reason, found ${count}. Refusing to guess which row to act on.`);
+    }
+    return rows.first();
   }
 
   async approve(needle: string): Promise<void> {
     this.page.once("dialog", (d) => d.accept());
-    await this.cardFor(needle).getByRole("button", { name: "Approve", exact: true }).click();
+    await (await this.rowFor(needle)).getByRole("button", { name: "Approve", exact: true }).click();
   }
 
   async reject(needle: string, reason: string): Promise<void> {
-    const scope = this.cardFor(needle);
+    const scope = await this.rowFor(needle);
     await scope.getByRole("button", { name: "Reject", exact: true }).click();
     await scope.getByPlaceholder(/reason for rejecting/i).fill(reason);
     await scope.getByRole("button", { name: /confirm reject/i }).click();
@@ -135,28 +145,38 @@ export class ApprovalsPage {
     try {
       await expect(this.page.getByText(needle).first()).toBeVisible({ timeout: 10_000 });
     } catch (err) {
-      // Turns a bare 10s timeout into an actionable diagnostic — this run's
-      // real, unresolved evidence (run 36351884519) is that this exact
-      // check failed with no prior failure explaining why, and this
-      // approver's session never had a way to say what it saw instead. The
-      // leading candidate, verified from source (resolveInitialApprover ->
-      // resolve_approver('direct_manager', ...) in schema.sql), is that step
-      // 1 of the leave_request approval workflow routes to the SUBMITTER's
-      // own `employees.manager_id`, not necessarily to whichever test
-      // account E2E_MANAGER happens to be — that relationship has never
-      // been verified against real Production data, and nothing before this
-      // suite's build documented it as a required precondition (see
-      // README.md's "Required role credentials" section).
+      // Turns a bare 10s timeout into an actionable diagnostic. Run
+      // 36351884519's manager-routing theory (that resolve_approver(
+      // 'direct_manager', ...) might not resolve to the E2E_MANAGER test
+      // account) has since been RULED OUT: confirmed live that
+      // employees.manager_id is correctly set to the Manager test account,
+      // and that account genuinely does see this run's tagged leave
+      // request pending in its own /approvals — the Employee profile page
+      // just failed to DISPLAY the manager's name (a separate, now-fixed
+      // RLS-visibility bug, see get_employee_manager_name() in
+      // schema.sql), which is what made routing look broken. So a future
+      // expectPending() timeout here is NOT explained by routing — it's
+      // either a genuine timing/propagation issue or a real regression;
+      // dump what IS on the page rather than guessing further.
       const rowCount = await this.page.getByRole("row").count();
       test.info().annotations.push({
         type: "diagnostic",
-        description:
-          `expectPending("${needle}") timed out. This approver's /approvals page currently has ${rowCount} table row(s) (all sections, header rows included). ` +
-          "If nothing routed here, the likely cause is approval routing, not a UI bug: resolve_approver('direct_manager', employee_id) (schema.sql) resolves the SUBMITTER's own employees.manager_id, which may not be the E2E_MANAGER test account. " +
-          "Confirm via HR Admin's Employees > [Employee test account] > Manager field that it is set to the E2E_MANAGER test account's own employee record before re-dispatching.",
+        description: `expectPending("${needle}") timed out. This approver's /approvals page currently has ${rowCount} table row(s) (all sections, header rows included). Approval routing itself is confirmed working (see README.md) — investigate this as a timing/selector issue, not a routing one.`,
       });
       throw err;
     }
+  }
+
+  /** Diagnostic read, not an assertion — returns the first row whose
+   * accessible name matches this needle (a Dates label or tagged reason),
+   * or "" if none currently matches. Unlike rowFor() (used by approve/
+   * reject, which throws on 0 or >1 matches since those must act on
+   * exactly one row), this is for confirming what's actually on the page
+   * right now, including cases where 0 or several rows match. */
+  async getPendingRowText(needle: string): Promise<string> {
+    const rows = this.page.getByRole("row", { name: new RegExp(escapeForRegExp(needle), "i") });
+    if ((await rows.count()) === 0) return "";
+    return (await rows.first().innerText()).replace(/\s+/g, " ").trim();
   }
 
   async expectNotPending(needle: string): Promise<void> {

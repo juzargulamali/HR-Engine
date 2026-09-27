@@ -26,18 +26,20 @@ and `.github/workflows/e2e-production-qa-mutating.yml`.
   substitutes another role for it.
 - **The Manager test account must be the Employee test account's actual
   `manager_id` in Production**, not just "a Manager-role account in the same
-  company". Verified directly from source: leave/reimbursement approval
-  routing (`resolveInitialApprover` -> `resolve_approver('direct_manager',
+  company" — leave/reimbursement approval routing
+  (`resolveInitialApprover` -> `resolve_approver('direct_manager',
   employee_id)`, schema.sql) resolves the SUBMITTER's own
-  `employees.manager_id` — it is never told which test account this suite
-  intends as "the manager". If that isn't how the two test accounts are set
-  up in Production, every mutating spec that submits as Employee and then
-  expects to see/decide it as Manager (10-leave.spec.ts,
-  30-reimbursements.spec.ts) will time out on the Approvals page with no
-  earlier failure explaining why — confirmed live, run 36351884519, where
-  this was the one mutating-spec failure never fully explained from log
-  evidence alone. Confirm via HR Admin's Employees list -> the Employee test
-  account -> its "Manager" field.
+  `employees.manager_id`, never "whichever account this suite calls
+  Manager". **Confirmed live that this IS correctly configured** — the
+  Manager test account genuinely sees this run's tagged leave requests
+  pending in its own `/approvals` (see
+  `tests/read-only/confirm-e2e-20260927-212904-leave-state.spec.ts`).
+  Run 36351884519's `expectPending()` timeout (10-leave.spec.ts's reject
+  test) was NOT a routing problem — the actual, separate bug was that the
+  Employee profile page failed to DISPLAY the manager's name at all (see
+  `get_employee_manager_name()` below), which is what made routing look
+  broken from the UI alone. That timeout's real cause is still unresolved,
+  but it is a timing/selector question, not this one.
 - **`E2E_MUTATION_AUTHORIZED` gates every mutating spec.** Unless it is
   exactly `"true"`, every spec that creates/modifies a real record skips
   itself. Read-only specs run regardless. This name is deliberate: it is a
@@ -240,15 +242,18 @@ this suite.
 
 ## What this suite has NOT verified
 
-- Whether the Manager test account is actually configured in Production as
-  the Employee test account's `manager_id` — see the "Manager test account"
-  bullet under "Safety model" above. (Confirmed from source: Annual Leave
-  approval IS a single manager step, never manager + a separate HR stage —
-  `seed_default_leave_workflow()`, supabase/migrations/
-  20260926000000_phase3_leave_and_approvals.sql, inserts exactly one
-  `approval_workflow_steps` row, `step_order=1, approver_type=
-  'direct_manager'`, per company, with no second step. What's unverified is
-  only which real employee record that step resolves to.)
+- ~~Whether the Manager test account is actually configured in Production as
+  the Employee test account's `manager_id`~~ — **now confirmed, see the
+  "Manager test account" bullet under "Safety model" above.** (Also
+  confirmed from source: Annual Leave approval IS a single manager step,
+  never manager + a separate HR stage — `seed_default_leave_workflow()`,
+  supabase/migrations/20260926000000_phase3_leave_and_approvals.sql, inserts
+  exactly one `approval_workflow_steps` row, `step_order=1, approver_type=
+  'direct_manager'`, per company, with no second step.)
+- The real cause of run 36351884519's one still-unexplained failure
+  (10-leave.spec.ts's reject test, timing out in `ApprovalsPage.
+  expectPending()`) — routing is ruled out (see above), so this is either a
+  timing/propagation issue or a genuine regression, not yet reproduced.
 - Exact per-country leave balance arithmetic beyond "a 2-day request
   deducts 2 days" (covered more precisely by `packages/domain`'s own unit
   tests).

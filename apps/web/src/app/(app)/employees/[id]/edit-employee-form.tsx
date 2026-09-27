@@ -27,12 +27,18 @@ export function EditEmployeeForm({
   employee,
   linkedEmail,
   managers,
+  managerName,
   canEditCore,
   isSelf,
 }: {
   employee: EmployeeCore;
   linkedEmail: string | null;
   managers: { id: string; first_name: string; last_name: string }[];
+  /** Resolved via the get_employee_manager_name RPC, not by looking `employee
+   * .manager_id` up in `managers` — that list is RLS-scoped to what the
+   * CURRENT VIEWER may see and never includes their own manager's row. See
+   * overview-section.tsx's doc comment. */
+  managerName: string | null;
   canEditCore: boolean;
   isSelf: boolean;
 }) {
@@ -44,7 +50,7 @@ export function EditEmployeeForm({
     <div className="space-y-6">
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
         <dt className="text-muted-foreground">Manager</dt>
-        <dd>{managers.find((m) => m.id === employee.manager_id)?.first_name ?? "—"}</dd>
+        <dd>{managerName ?? "—"}</dd>
         <dt className="text-muted-foreground">Personal email</dt>
         <dd>{employee.personal_email ?? "—"}</dd>
         <dt className="text-muted-foreground">Phone</dt>

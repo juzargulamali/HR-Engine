@@ -1,5 +1,5 @@
 import { test } from "../../src/fixtures";
-import { LeavePage, formatDateRange } from "../../src/pages/LeavePage";
+import { LeavePage, ApprovalsPage, formatDateRange } from "../../src/pages/LeavePage";
 
 /**
  * One-off, read-only confirmation for the specific tagged mutating run
@@ -7,12 +7,10 @@ import { LeavePage, formatDateRange } from "../../src/pages/LeavePage";
  * annual-leave tests each created a real leave_requests row but failed
  * before reaching approve/reject/cancel — their final status was reported
  * to the user as "left pending" INFERRED from where the tests stopped, not
- * independently read back from the app. This test performs that
- * independent read: signs in as the Employee test account (the same real
- * UI a real employee would use, no service role, no direct DB read) and
- * reports each request's actual current row text plus the current Annual
- * Leave balance — never asserts an expected value, since the whole point
- * is to observe whatever is actually there.
+ * independently read back from the app. These tests perform that
+ * independent read (real UI, no service role, no direct DB read) — never
+ * asserting an expected value, since the whole point is to observe
+ * whatever is actually there.
  *
  * Read-only — creates nothing, runs regardless of E2E_MUTATION_AUTHORIZED.
  *
@@ -28,7 +26,7 @@ const TAGGED_REQUESTS: { label: string; note: string }[] = [
 ];
 
 test.describe("confirm run E2E-20260927-212904's actual leave state", () => {
-  test("reads each tagged request's real row text and the current Annual Leave balance", async ({ employeePage }) => {
+  test("reads each tagged request's real row text and the current Annual Leave balance (Employee's own /leave)", async ({ employeePage }) => {
     const leave = new LeavePage(employeePage);
     await leave.gotoList();
 
@@ -50,5 +48,25 @@ test.describe("confirm run E2E-20260927-212904's actual leave state", () => {
     // eslint-disable-next-line no-console
     console.log(report);
     await test.info().attach("confirm-E2E-20260927-212904-leave-state", { body: report, contentType: "text/markdown" });
+  });
+
+  test("confirms the Manager test account can see a matching request in its own /approvals, and reads its tagged reason", async ({ managerPage }) => {
+    const approvals = new ApprovalsPage(managerPage);
+    await approvals.goto();
+
+    const lines = [
+      `# Confirmed approvals-side state for run E2E-20260927-212904 (read ${new Date().toISOString()})`,
+      "",
+      "## Tagged requests (row text as currently rendered on /approvals, Manager test account's own session)",
+      "",
+    ];
+    for (const { label, note } of TAGGED_REQUESTS) {
+      const rowText = await approvals.getPendingRowText(label);
+      lines.push(`- **${note}** (Dates: \`${label}\`): ${rowText ? `\`${rowText}\`` : "NOT FOUND — no row currently matches this Dates label on /approvals (may not be routed here, or already decided)"}`);
+    }
+    const report = lines.join("\n");
+    // eslint-disable-next-line no-console
+    console.log(report);
+    await test.info().attach("confirm-E2E-20260927-212904-approvals-state", { body: report, contentType: "text/markdown" });
   });
 });

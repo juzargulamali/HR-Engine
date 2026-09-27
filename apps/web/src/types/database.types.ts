@@ -1293,6 +1293,10 @@ export interface Database {
         Args: { p_approver_type: string; p_employee_id: string };
         Returns: string | null;
       };
+      get_employee_manager_name: {
+        Args: { p_employee_id: string };
+        Returns: string | null;
+      };
       decide_leave_approval: {
         Args: { p_approval_id: string; p_decision: ApprovalDecision; p_comments?: string | null };
         Returns: undefined;

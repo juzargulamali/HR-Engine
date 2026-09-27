@@ -30,11 +30,21 @@ export async function OverviewSection({
   isSelf: boolean;
 }) {
   const supabase = await createClient();
-  const [{ data: linkedProfile }, { data: managers }] = await Promise.all([
+  const [{ data: linkedProfile }, { data: managers }, { data: managerName }] = await Promise.all([
     employee.user_id
       ? supabase.from("profiles").select("email").eq("id", employee.user_id).maybeSingle()
       : Promise.resolve({ data: null }),
     supabase.from("employees").select("id, first_name, last_name").eq("company_id", employee.company_id).is("deleted_at", null),
+    // The `managers` list above is RLS-scoped to the CURRENT VIEWER (self,
+    // rows they manage, or hr_admin/sys_admin/finance/ceo/cto) — it never
+    // includes the viewer's OWN manager's row, so `managers.find(m => m.id
+    // === employee.manager_id)` can never resolve a name for a plain
+    // viewer even when manager_id is set and correct (confirmed live on
+    // the Employee E2E test account's own profile). get_employee_manager_name
+    // is a narrowly-scoped RPC that resolves just this one name, gated by
+    // the same visibility rule employees_select already applies — see its
+    // migration/schema.sql doc comment.
+    employee.manager_id ? supabase.rpc("get_employee_manager_name", { p_employee_id: employee.id }) : Promise.resolve({ data: null }),
   ]);
 
   const outstanding: string[] = [];
@@ -50,6 +60,7 @@ export async function OverviewSection({
         employee={employee}
         linkedEmail={linkedProfile?.email ?? null}
         managers={(managers ?? []).filter((m) => m.id !== employee.id)}
+        managerName={managerName ?? null}
         canEditCore={canEditCore}
         isSelf={isSelf}
       />
