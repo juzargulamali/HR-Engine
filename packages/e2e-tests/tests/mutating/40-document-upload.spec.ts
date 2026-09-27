@@ -24,7 +24,6 @@ test.describe("document upload @mutating", () => {
   test("employee can attach a harmless test file to a new reimbursement claim", async ({ employeePage, runId }) => {
     const reimbursements = new ReimbursementsPage(employeePage);
     await reimbursements.goto();
-    await reimbursements.gotoNew();
     await reimbursements.startDraftClaim("AED");
 
     const fileInput = employeePage.locator('input[type="file"]');

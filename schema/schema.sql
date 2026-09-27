@@ -1499,6 +1499,39 @@ as $$
   select exists (select 1 from chain where manager_id = current_employee_id());
 $$;
 
+-- Resolves ONLY the manager's display name for one specific employee,
+-- gated by the exact same predicate employees_select uses to decide
+-- whether the caller may view that employee row at all — so this never
+-- returns anything the caller couldn't already see via the profile page
+-- itself. Fixes a real gap in employees_select: it lets a viewer see rows
+-- they manage (is_manager_of) but never their OWN manager's row, so a
+-- plain employee's profile always showed "Manager: —" even when
+-- manager_id was set and correct.
+create or replace function get_employee_manager_name(p_employee_id uuid)
+returns text
+language sql stable security definer
+set search_path = public
+as $$
+  select nullif(trim(concat(m.first_name, ' ', coalesce(m.last_name, ''))), '')
+  from employees e
+  join employees m on m.id = e.manager_id
+  where e.id = p_employee_id
+    and (
+      has_role('hr_admin', e.company_id)
+      or has_role('sys_admin')
+      or (
+        e.deleted_at is null and (
+          e.id = current_employee_id()
+          or is_manager_of(e.id)
+          or has_role('finance', e.company_id)
+          or (has_role('ceo', e.company_id) or has_role('cto', e.company_id))
+        )
+      )
+    );
+$$;
+
+grant execute on function get_employee_manager_name(uuid) to authenticated;
+
 create or replace function same_company(target_employee_id uuid)
 returns boolean
 language sql stable security definer

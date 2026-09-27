@@ -12,6 +12,8 @@
  * remember.
  */
 
+import path from "node:path";
+
 export interface RoleCredentials {
   email: string;
   password: string;
@@ -153,8 +155,24 @@ export function getRunId(): string {
 
 /** Where baseline/reconciliation state for a run is written/read, since the
  * capture and verification steps are separate `playwright test` process
- * invocations (see tests/baseline, tests/reconcile). Gitignored — this is
- * scratch state for one run, never committed. */
+ * invocations, on separate CI runners with no shared filesystem (see
+ * tests/baseline, tests/reconcile) — the write happens in the `baseline`
+ * job's own process, the read in `reconciliation`'s, hours apart. Gitignored
+ * — this is scratch state for one run, never committed.
+ *
+ * Deliberately `process.cwd()`-based, NOT `import.meta.url`-based: confirmed
+ * live (run 36351884519) that the two disagree under Playwright's own
+ * TS/ESM transform. The `baseline` job's capture wrote real data with no
+ * error (console-logged, non-empty), yet `actions/upload-artifact` found
+ * zero files at the checkout-relative path the workflow uploads — the
+ * previous `import.meta.url`-derived path resolved somewhere else inside
+ * Playwright's transform pipeline, and that resolution isn't guaranteed
+ * stable across separate process invocations. `process.cwd()` is set
+ * explicitly by the workflow's `defaults.run.working-directory:
+ * packages/e2e-tests`, so it's the same real, checkout-relative path in
+ * every job — the same pattern verify.reconcile.ts already uses for its own
+ * report path, which the workflow's artifact upload DID find in that same
+ * run. */
 export function stateFile(runId: string): string {
-  return new URL(`../.e2e-state/${runId}.json`, import.meta.url).pathname;
+  return path.join(process.cwd(), ".e2e-state", `${runId}.json`);
 }

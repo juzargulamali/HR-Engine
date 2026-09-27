@@ -30,7 +30,6 @@ test.describe("reimbursement claims @mutating", () => {
     const description = tagNote(runId, "reimbursement-approve");
 
     await reimbursements.goto();
-    await reimbursements.gotoNew();
     await reimbursements.startDraftClaim("AED");
     await reimbursements.addLine({
       expenseDate: testDate(runId, 2),
@@ -56,7 +55,6 @@ test.describe("reimbursement claims @mutating", () => {
     const rejectionReason = tagNote(runId, "reimbursement-reject-decision", "Rejected by automated test");
 
     await reimbursements.goto();
-    await reimbursements.gotoNew();
     await reimbursements.startDraftClaim("AED");
     await reimbursements.addLine({
       expenseDate: testDate(runId, 3),
