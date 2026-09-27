@@ -1,0 +1,21 @@
+{
+  "name": "@enginious-hr/e2e-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:e2e:baseline": "playwright test --project=baseline",
+    "test:e2e:read-only": "playwright test --project=read-only --project=mobile-smoke",
+    "test:e2e:mutating": "playwright test --project=mutating",
+    "test:e2e:reconcile": "playwright test --project=reconciliation",
+    "test:e2e:ui": "playwright test --ui",
+    "redact:error-context": "tsx scripts/redact-error-context.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

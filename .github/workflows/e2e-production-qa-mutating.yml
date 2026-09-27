@@ -1,0 +1,379 @@
+name: E2E Production QA (mutating) — manual only
+
+# This workflow is the ONLY place this suite's mutating Playwright project
+# ever runs. It must NEVER run on push, pull_request, or a schedule — only
+# workflow_dispatch, gated by a typed confirmation input that must match
+# EXACTLY, checked in a job with no access to secrets or the `production-qa`
+# environment, before anything else starts. There is no
+# SUPABASE_SERVICE_ROLE_KEY (or any other database credential) anywhere in
+# this file — every credential below is a real login for a dedicated,
+# fixed E2E test account, read from the `production-qa` GitHub Environment's
+# encrypted secrets.
+#
+# Job order enforces the required safety sequence:
+#   guard (validate inputs, no secrets)
+#     -> baseline (capture pre-run state via the app's own UI, no service role)
+#     -> read-only (must pass, or mutating never starts)
+#     -> mutating (small ordered batches: leave, attendance, reimbursements,
+#                  document upload, account status LAST, audit verification)
+#     -> reconciliation (ALWAYS runs — even if mutating failed partway — and
+#                        fails the workflow if account status or leave
+#                        balances differ unexpectedly from baseline)
+#
+# Each job below that reads secrets also references `environment:
+# production-qa`, so if that Environment has a required-reviewer rule
+# configured, a human must approve each stage before it can run.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type exactly RUN_PRODUCTION_E2E to run mutating tests against Production. Anything else aborts before any browser launches.'
+        required: true
+        type: string
+      mutation_authorized:
+        description: 'Per-run authorization: mutation on the dedicated E2E test accounts (leave approval/balance changes, reimbursement approval, Employee account deactivate/reactivate) is explicitly authorized for THIS run. This does not claim a Supabase backup exists.'
+        required: true
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+        default: 'false'
+
+permissions:
+  contents: read
+
+# Shared with e2e-production-qa-readonly.yml's group, on purpose — see that
+# file's comment. Every job below signs in as the same dedicated E2E test
+# accounts against the same live Production instance as the read-only
+# workflow, so the two must never run concurrently. `cancel-in-progress:
+# false` queues instead of cancelling: a mutating run must never be torn
+# down mid-batch, since its own real Production mutations (leave approval,
+# attendance, reimbursements, account deactivate/reactivate) need the
+# `reconciliation` job to run to completion regardless of how the rest of
+# the run went.
+concurrency:
+  group: e2e-production-qa-shared-test-accounts
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    # Deliberately no `environment:` here — this check must run and be able
+    # to fail BEFORE any environment approval gate or secret is even
+    # requested, so a mistyped confirmation never costs a human an approval
+    # cycle.
+    outputs:
+      run_id: ${{ steps.runid.outputs.run_id }}
+    steps:
+      - name: Validate the typed confirmation and authorization inputs
+        run: |
+          if [ "${{ inputs.confirm }}" != "RUN_PRODUCTION_E2E" ]; then
+            echo "::error::confirm input must be exactly RUN_PRODUCTION_E2E — aborting before any browser launches or secret is read."
+            exit 1
+          fi
+          if [ "${{ inputs.mutation_authorized }}" != "true" ]; then
+            echo "::error::mutation_authorized must be 'true' — mutation on the dedicated test accounts must be explicitly authorized for this run."
+            exit 1
+          fi
+      - name: Compute one run ID for every job in this workflow run
+        id: runid
+        run: echo "run_id=E2E-$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
+  baseline:
+    needs: guard
+    runs-on: ubuntu-latest
+    environment: production-qa
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: packages/e2e-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        working-directory: .
+      - run: npx playwright install --with-deps chromium
+      - name: Capture pre-run baseline (account status, leave balance, claims) via the app's own UI
+        run: npm run test:e2e:baseline
+        env:
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+          E2E_RUN_ID: ${{ needs.guard.outputs.run_id }}
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_EMPLOYEE_PASSWORD: ${{ secrets.E2E_EMPLOYEE_PASSWORD }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_MANAGER_PASSWORD: ${{ secrets.E2E_MANAGER_PASSWORD }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_HR_PASSWORD: ${{ secrets.E2E_HR_PASSWORD }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_CEO_PASSWORD: ${{ secrets.E2E_CEO_PASSWORD }}
+          E2E_FINANCE_EMAIL: ${{ secrets.E2E_FINANCE_EMAIL }}
+          E2E_FINANCE_PASSWORD: ${{ secrets.E2E_FINANCE_PASSWORD }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      - name: Upload baseline state (no traces, no secrets — just the small JSON snapshot)
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-state-${{ needs.guard.outputs.run_id }}
+          path: packages/e2e-tests/.e2e-state/
+          retention-days: 14
+
+  read-only:
+    needs: [guard, baseline]
+    runs-on: ubuntu-latest
+    environment: production-qa
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: packages/e2e-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        working-directory: .
+      - run: npx playwright install --with-deps chromium
+      - name: Run read-only + mobile-smoke Playwright projects
+        id: run_tests
+        continue-on-error: true
+        run: npm run test:e2e:read-only
+        env:
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+          E2E_RUN_ID: ${{ needs.guard.outputs.run_id }}
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_EMPLOYEE_PASSWORD: ${{ secrets.E2E_EMPLOYEE_PASSWORD }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_MANAGER_PASSWORD: ${{ secrets.E2E_MANAGER_PASSWORD }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_HR_PASSWORD: ${{ secrets.E2E_HR_PASSWORD }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_CEO_PASSWORD: ${{ secrets.E2E_CEO_PASSWORD }}
+          E2E_FINANCE_EMAIL: ${{ secrets.E2E_FINANCE_EMAIL }}
+          E2E_FINANCE_PASSWORD: ${{ secrets.E2E_FINANCE_PASSWORD }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      - name: Redact test-account emails from error-context snapshots
+        if: always()
+        run: npm run redact:error-context
+        env:
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_FINANCE_EMAIL: ${{ secrets.E2E_FINANCE_EMAIL }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+      # Evidence policy — never trace.zip, .auth/storageState, or the HTML
+      # report (which embeds full trace data). Only JUnit, screenshots,
+      # videos, and redacted error-context.md files leave the runner.
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-mutating-run-readonly-junit
+          path: packages/e2e-tests/test-results/junit.xml
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Upload screenshots and redacted error-context (no traces)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-mutating-run-readonly-screenshots-and-context
+          path: |
+            packages/e2e-tests/test-results/**/*.png
+            packages/e2e-tests/test-results/**/error-context.md
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Upload videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-mutating-run-readonly-videos
+          path: packages/e2e-tests/test-results/**/*.webm
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Fail the job if the read-only run failed — mutating must not start
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1
+
+  mutating:
+    needs: [guard, read-only]
+    runs-on: ubuntu-latest
+    environment: production-qa
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: packages/e2e-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        working-directory: .
+      - run: npx playwright install --with-deps chromium
+      - name: Run the mutating Playwright project (small ordered batches — see filename prefixes under tests/mutating/)
+        id: run_tests
+        continue-on-error: true
+        run: npm run test:e2e:mutating
+        env:
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+          E2E_RUN_ID: ${{ needs.guard.outputs.run_id }}
+          E2E_MUTATION_AUTHORIZED: ${{ inputs.mutation_authorized }}
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_EMPLOYEE_PASSWORD: ${{ secrets.E2E_EMPLOYEE_PASSWORD }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_MANAGER_PASSWORD: ${{ secrets.E2E_MANAGER_PASSWORD }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_HR_PASSWORD: ${{ secrets.E2E_HR_PASSWORD }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_CEO_PASSWORD: ${{ secrets.E2E_CEO_PASSWORD }}
+          E2E_FINANCE_EMAIL: ${{ secrets.E2E_FINANCE_EMAIL }}
+          E2E_FINANCE_PASSWORD: ${{ secrets.E2E_FINANCE_PASSWORD }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      - name: Redact test-account emails from error-context snapshots
+        if: always()
+        run: npm run redact:error-context
+        env:
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_FINANCE_EMAIL: ${{ secrets.E2E_FINANCE_EMAIL }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-mutating-junit
+          path: packages/e2e-tests/test-results/junit.xml
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Upload screenshots and redacted error-context (no traces)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-mutating-screenshots-and-context
+          path: |
+            packages/e2e-tests/test-results/**/*.png
+            packages/e2e-tests/test-results/**/error-context.md
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Upload videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-mutating-videos
+          path: packages/e2e-tests/test-results/**/*.webm
+          retention-days: 14
+          if-no-files-found: ignore
+      # This job and `reconciliation` run on SEPARATE, fresh runners with no
+      # shared filesystem — the leave-approval expectations file
+      # 10-leave.spec.ts writes (packages/e2e-tests/.e2e-state/<runId>.
+      # expectations.json) exists only on THIS runner's disk unless it's
+      # uploaded and re-downloaded explicitly. `if: always()` and
+      # `if-no-files-found: ignore` matter together here: this must still
+      # upload whatever WAS written even if a LATER mutating test (e.g.
+      # attendance, run after leave — see the numeric filename prefixes)
+      # fails partway through, and it must not fail this step if the leave
+      # test itself never got far enough to write anything.
+      - name: Upload this job's state (leave-approval expectations, if any were written)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-state-mutating-${{ needs.guard.outputs.run_id }}
+          path: packages/e2e-tests/.e2e-state/
+          retention-days: 14
+          if-no-files-found: ignore
+      # This DOES fail the job (and so the overall workflow run) on a failed
+      # mutating test — `continue-on-error: true` on the run step above only
+      # exists so the artifact-upload steps still run first; it must never be
+      # mistaken for "a mutating failure doesn't matter". The `reconciliation`
+      # job below still runs regardless (needs: [..., mutating] + if: always()),
+      # so a partial failure here never skips finding out the real final state.
+      - name: Fail this job if any mutating test failed
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1
+
+  reconciliation:
+    needs: [guard, baseline, mutating]
+    if: always()
+    runs-on: ubuntu-latest
+    environment: production-qa
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: packages/e2e-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        working-directory: .
+      - run: npx playwright install --with-deps chromium
+      - name: Download this run's baseline state
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-state-${{ needs.guard.outputs.run_id }}
+          path: packages/e2e-tests/.e2e-state/
+      # From the `mutating` job — the leave-approval expectations file, if
+      # any leave approval ran (see that job's "Upload this job's state"
+      # step). Downloaded into the SAME directory as the baseline state
+      # above; the two artifacts never share a filename. continue-on-error
+      # because this artifact legitimately won't exist if no mutating test
+      # ever got far enough to write it (e.g. read-only already failed, or
+      # the leave test itself failed before approving) — reconciliation
+      # must still run and report accurately on THAT, not abort here.
+      - name: Download this run's mutating-job state (leave-approval expectations, if any)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: e2e-state-mutating-${{ needs.guard.outputs.run_id }}
+          path: packages/e2e-tests/.e2e-state/
+      - name: Reconcile final state against baseline; verify the Employee test account
+        id: reconcile
+        continue-on-error: true
+        run: npm run test:e2e:reconcile
+        env:
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+          E2E_RUN_ID: ${{ needs.guard.outputs.run_id }}
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_EMPLOYEE_PASSWORD: ${{ secrets.E2E_EMPLOYEE_PASSWORD }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_MANAGER_PASSWORD: ${{ secrets.E2E_MANAGER_PASSWORD }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_HR_PASSWORD: ${{ secrets.E2E_HR_PASSWORD }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_CEO_PASSWORD: ${{ secrets.E2E_CEO_PASSWORD }}
+          E2E_FINANCE_EMAIL: ${{ secrets.E2E_FINANCE_EMAIL }}
+          E2E_FINANCE_PASSWORD: ${{ secrets.E2E_FINANCE_PASSWORD }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      - name: Post the reconciliation report to the job summary
+        if: always()
+        run: |
+          if [ -f "test-results/reconciliation/${{ needs.guard.outputs.run_id }}.md" ]; then
+            cat "test-results/reconciliation/${{ needs.guard.outputs.run_id }}.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No reconciliation report was produced (the reconcile step may have failed before writing one)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload reconciliation report and JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-reconciliation-${{ needs.guard.outputs.run_id }}
+          path: |
+            packages/e2e-tests/test-results/reconciliation/**
+            packages/e2e-tests/test-results/junit.xml
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Fail the workflow if account status or leave balances differ unexpectedly
+        if: steps.reconcile.outcome == 'failure'
+        run: exit 1
