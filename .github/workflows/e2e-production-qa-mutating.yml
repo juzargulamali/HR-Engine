@@ -353,6 +353,12 @@ jobs:
         env:
           E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
           E2E_RUN_ID: ${{ needs.guard.outputs.run_id }}
+          # "skipped" is the only value that genuinely means nothing ran (the
+          # job graph never starts `mutating` unless `read-only` passed after
+          # `baseline`) — any other value means real Production mutations may
+          # have happened even though this run's baseline snapshot is
+          # missing. See verify.reconcile.ts's baseline-unavailable branch.
+          E2E_MUTATING_JOB_RESULT: ${{ needs.mutating.result }}
           E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
           E2E_EMPLOYEE_PASSWORD: ${{ secrets.E2E_EMPLOYEE_PASSWORD }}
           E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}

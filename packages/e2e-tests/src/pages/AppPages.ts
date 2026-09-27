@@ -55,12 +55,17 @@ export class HolidaysPage {
 export class ReimbursementsPage {
   constructor(private readonly page: Page) {}
 
+  /** Also lands on the "Start a new claim" form — verified directly from
+   * apps/web/src/app/(app)/reimbursements/page.tsx: "Start a new claim" is a
+   * CardTitle (a heading, not a link/button) and NewClaimForm is embedded
+   * inline on this SAME page, the same pattern as the Holidays page's "Add
+   * a holiday". There is no separate "new claim" page/link to navigate to.
+   * (A previous gotoNew() here searched for a "new/submit/add" link that
+   * never existed and timed out after 15s on every reimbursement/document-
+   * upload test, before any claim was ever created — confirmed live, run
+   * 36351884519. Removed rather than fixed: nothing to navigate to.) */
   async goto(): Promise<void> {
     await gotoWithRetry(this.page, "/reimbursements");
-  }
-
-  async gotoNew(): Promise<void> {
-    await this.page.getByRole("link", { name: /new|submit|add/i }).first().click();
   }
 
   /** Fills the "Start claim" form (currency only) and follows the redirect
@@ -103,8 +108,27 @@ export class AuditLogPage {
     await gotoWithRetry(this.page, "/audit-log");
   }
 
-  async expectEntryVisible(needle: string): Promise<void> {
-    await expect(this.page.getByText(new RegExp(needle, "i")).first()).toBeVisible({ timeout: 10_000 });
+  /** Applies the page's own Table/Action/From-date filter form (its "table"/
+   * "action"/"from" <select>/<input> fields, submitted via "Apply filters")
+   * — never a hand-built query string, so this stays correct if the page's
+   * own route/param handling ever changes. */
+  async filterBy(opts: { table?: string; action?: "insert" | "update" | "delete"; from?: string }): Promise<void> {
+    if (opts.table) await this.page.locator("#table").selectOption(opts.table);
+    if (opts.action) await this.page.locator("#action").selectOption(opts.action);
+    if (opts.from) await this.page.locator("#from").fill(opts.from);
+    await this.page.getByRole("button", { name: /apply filters/i }).click();
+  }
+
+  /** Verified directly from apps/web/src/app/(app)/audit-log/page.tsx: rows
+   * never render any free-text/tagged field — only When/Table/(truncated)
+   * Entity ID/Action/Actor/Actor role(s)/Source. A run's tag can therefore
+   * never appear as visible text on this page (confirmed live, run
+   * 36351884519: `60-audit-verification.spec.ts` searched for it and failed
+   * every time, by design of the page, not a bug in it). This checks for a
+   * real matching ROW instead — filter first with filterBy(), then call
+   * this with the exact table_name text the Table column renders. */
+  async expectTableHasRows(tableName: string): Promise<void> {
+    await expect(this.page.getByRole("cell", { name: tableName, exact: true }).first()).toBeVisible({ timeout: 10_000 });
   }
 
   /** There must be no edit/delete affordance anywhere on this page — audit

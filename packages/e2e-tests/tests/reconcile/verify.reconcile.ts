@@ -49,21 +49,49 @@ test("reconcile final state against baseline and verify the Employee account", a
 
   const baseline = readSnapshot(runId, "baseline");
   if (!baseline) {
-    const markdown = [
-      `# Reconciliation report — ${runId}`,
-      "",
-      "**Baseline unavailable; no mutations ran.**",
-      "",
-      "The `baseline` job did not produce a snapshot for this run (see its own failure earlier in this workflow run). Per the workflow's job graph, `read-only` and `mutating` both depend on `baseline` succeeding and were skipped as a result — nothing in Production was touched, so there is nothing to reconcile against.",
-      "",
-      `Employee test account login check (independent of baseline, always performed): ${employeeLoginStillWorks ? "OK — signed in successfully." : "**PROBLEM — could not sign in.**"}`,
-      "",
-    ].join("\n");
+    // `needs.mutating.result` (see the mutating workflow's reconciliation
+    // job) — "skipped" is the ONLY value that genuinely means nothing in
+    // Production was touched (the workflow's own `needs:` graph never lets
+    // `mutating` start unless `read-only` passed after `baseline`). Any
+    // other value ("success" or "failure") means the `mutating` job's
+    // Playwright process actually ran and could have made real, permanent
+    // Production changes — a missing baseline in that case is an artifact
+    // pipeline failure, not proof of an all-clear, and must never be
+    // reported as one (confirmed live: run 36351884519's baseline really
+    // did capture successfully, but its state artifact failed to upload —
+    // see config.ts's stateFile() doc comment — and this branch printed
+    // "no mutations ran" while 7 real mutating tests had just run).
+    const mutatingResult = process.env.E2E_MUTATING_JOB_RESULT ?? "";
+    const mutatingRan = mutatingResult !== "" && mutatingResult !== "skipped";
+    const markdown = mutatingRan
+      ? [
+          `# Reconciliation report — ${runId}`,
+          "",
+          "**PROBLEM: baseline unavailable, but the `mutating` job ran (result: `" + mutatingResult + "`).**",
+          "",
+          "This is not \"no mutations ran\" — `read-only` only starts after `baseline` succeeds, and `mutating` only starts after `read-only` passes, so the mutating Playwright tests genuinely executed and may have made real, permanent Production changes (leave requests, reimbursement claims, attendance/recovery-credit records, account status). What's missing is only this run's baseline SNAPSHOT — most likely its `.e2e-state` artifact failed to upload or download (see the `baseline` job's own upload step and this job's download steps), not that nothing happened.",
+          "",
+          "Do not treat this run as clean. Check the `mutating` job's own logs/JUnit/screenshots for what it actually did, and manually inspect the Employee test account's leave requests, reimbursement claims, and attendance records for this run's tag before dispatching again.",
+          "",
+          `Employee test account login check (independent of baseline, always performed): ${employeeLoginStillWorks ? "OK — signed in successfully." : "**PROBLEM — could not sign in.**"}`,
+          "",
+        ].join("\n")
+      : [
+          `# Reconciliation report — ${runId}`,
+          "",
+          "**Baseline unavailable; no mutations ran.**",
+          "",
+          "The `baseline` job did not produce a snapshot for this run (see its own failure earlier in this workflow run). Per the workflow's job graph, `read-only` and `mutating` both depend on `baseline` succeeding and were skipped as a result (`mutating` result: `" + (mutatingResult || "unknown") + "`) — nothing in Production was touched, so there is nothing to reconcile against.",
+          "",
+          `Employee test account login check (independent of baseline, always performed): ${employeeLoginStillWorks ? "OK — signed in successfully." : "**PROBLEM — could not sign in.**"}`,
+          "",
+        ].join("\n");
     writeFileSync(reportPath, markdown, "utf8");
     await test.info().attach("reconciliation-report", { path: reportPath, contentType: "text/markdown" });
     // eslint-disable-next-line no-console
     console.log(markdown);
     expect(employeeLoginStillWorks, "Employee test account must be able to log in even when there is no baseline to reconcile against").toBe(true);
+    expect(mutatingRan, "Baseline is unavailable but the mutating job ran — this must fail loudly rather than falsely report \"no mutations ran\" (see the reconciliation-report attachment)").toBe(false);
     return;
   }
 
