@@ -113,11 +113,24 @@ jobs:
           E2E_FINANCE_PASSWORD: ${{ secrets.E2E_FINANCE_PASSWORD }}
           E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
           E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      # include-hidden-files: true is required here — actions/upload-artifact@v4
+      # excludes dotfiles/dot-directories by default (its underlying glob
+      # search treats a leading "." as hidden), and .e2e-state/ is exactly
+      # that. Confirmed live (run 36351884519): this step reported success
+      # but actions/upload-artifact still printed "No files were found with
+      # the provided path" for this exact path, even after stateFile()'s
+      # path-resolution bug (see config.ts) was independently fixed — the
+      # hidden-directory exclusion is a second, separate cause of the same
+      # symptom. Verified in CI by .github/workflows/
+      # verify-hidden-artifact-upload.yml, which uploads/downloads a real
+      # dotfile the same way and fails loudly if it's ever silently dropped
+      # again.
       - name: Upload baseline state (no traces, no secrets — just the small JSON snapshot)
         uses: actions/upload-artifact@v4
         with:
           name: e2e-state-${{ needs.guard.outputs.run_id }}
           path: packages/e2e-tests/.e2e-state/
+          include-hidden-files: true
           retention-days: 14
 
   read-only:
@@ -282,12 +295,15 @@ jobs:
       # attendance, run after leave — see the numeric filename prefixes)
       # fails partway through, and it must not fail this step if the leave
       # test itself never got far enough to write anything.
+      # include-hidden-files: true — see the "baseline" job's identical
+      # upload step above for why this is required for a dot-directory path.
       - name: Upload this job's state (leave-approval expectations, if any were written)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-state-mutating-${{ needs.guard.outputs.run_id }}
           path: packages/e2e-tests/.e2e-state/
+          include-hidden-files: true
           retention-days: 14
           if-no-files-found: ignore
       # This DOES fail the job (and so the overall workflow run) on a failed

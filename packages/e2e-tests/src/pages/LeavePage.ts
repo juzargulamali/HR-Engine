@@ -59,6 +59,19 @@ export class LeavePage {
     await row.getByRole("button", { name: /cancel/i }).click();
   }
 
+  /** Reads the whole rendered row (Type/Dates/Days/Status/Cancel button) for
+   * the request matching this Dates label — a diagnostic read, not an
+   * assertion, for confirming a specific request's REAL current status
+   * (e.g. "submitted" vs "approved" vs "cancelled") rather than inferring it
+   * from where an earlier test run stopped. Returns "" (never throws) if no
+   * row matches, since a request may since have been resolved or the row
+   * may have moved off the current page/filter. */
+  async getRequestStatus(dateRangeLabel: string): Promise<string> {
+    const row = this.page.getByRole("row", { name: new RegExp(escapeForRegExp(dateRangeLabel), "i") });
+    if ((await row.count()) === 0) return "";
+    return (await row.first().innerText()).replace(/\s+/g, " ").trim();
+  }
+
   /**
    * Reads the balance NUMBER itself — never "the first number anywhere in
    * the surrounding card". Verified against apps/web/src/app/(app)/leave/

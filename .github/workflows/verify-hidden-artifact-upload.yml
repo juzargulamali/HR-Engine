@@ -1,0 +1,67 @@
+name: Verify hidden-directory artifact upload/download
+
+# Narrow, self-contained regression guard for one specific bug: the
+# mutating E2E workflow's baseline/mutating jobs write real state to
+# packages/e2e-tests/.e2e-state/ (a dot-directory) and upload it via
+# actions/upload-artifact@v4, for a LATER job (reconciliation) on a
+# separate runner to download and read. actions/upload-artifact@v4 excludes
+# dotfiles/dot-directories from its glob search by default — confirmed live
+# (mutating run 36351884519) that this silently dropped every file in
+# .e2e-state/ even after the real state was written and even after the
+# path-resolution bug in that run was independently fixed (see
+# e2e-tests/src/config.ts's stateFile() and e2e-production-qa-mutating.yml's
+# "Upload baseline state"/"Upload this job's state" steps, both of which now
+# set include-hidden-files: true).
+#
+# This workflow proves the fix end-to-end using ONLY GitHub's own artifact
+# service — no Production secrets, no E2E test accounts, no network egress
+# beyond actions/upload-artifact and actions/download-artifact themselves —
+# so it can run automatically on every PR with no environment-approval gate,
+# unlike the two e2e-production-qa-*.yml workflows.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/e2e-production-qa-mutating.yml"
+      - ".github/workflows/verify-hidden-artifact-upload.yml"
+      - "packages/e2e-tests/src/config.ts"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create a dot-directory JSON file, mirroring packages/e2e-tests/.e2e-state/<runId>.json
+        run: |
+          mkdir -p probe/.e2e-state
+          echo '{"probe":"hidden-artifact-upload-ok"}' > probe/.e2e-state/probe.json
+      - name: Upload it the same way the mutating workflow uploads .e2e-state/
+        uses: actions/upload-artifact@v4
+        with:
+          name: hidden-artifact-probe
+          path: probe/.e2e-state/
+          include-hidden-files: true
+          retention-days: 1
+
+  consume:
+    needs: produce
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download it in a separate job, on a separate runner — the same split as mutating -> reconciliation
+        uses: actions/download-artifact@v4
+        with:
+          name: hidden-artifact-probe
+          path: downloaded/.e2e-state/
+      - name: Assert the dotfile actually arrived with its real content
+        run: |
+          if [ ! -f "downloaded/.e2e-state/probe.json" ]; then
+            echo "::error::downloaded/.e2e-state/probe.json is missing — the hidden-directory artifact upload/download regressed."
+            exit 1
+          fi
+          if ! grep -q "hidden-artifact-upload-ok" "downloaded/.e2e-state/probe.json"; then
+            echo "::error::probe.json downloaded but its content doesn't match what was uploaded."
+            exit 1
+          fi
+          echo "OK: a dot-directory JSON file uploaded with include-hidden-files: true was found and downloaded correctly in a separate job."
