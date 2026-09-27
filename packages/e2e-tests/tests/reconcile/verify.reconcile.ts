@@ -1,5 +1,5 @@
 import { test, expect } from "../../src/fixtures";
-import { getCredentials } from "../../src/config";
+import { getCredentials, hasCredentials } from "../../src/config";
 import { captureSnapshot, readSnapshot, writeSnapshot, buildReconciliationReport } from "../../src/baseline";
 import { LoginPage } from "../../src/pages/LoginPage";
 import path from "node:path";
@@ -17,16 +17,18 @@ import { mkdirSync, writeFileSync } from "node:fs";
  * Global teardown requirement ("verify the Employee test account is active
  * and can log in") is done here as a REAL fresh sign-in — not a reused
  * storageState — because that's the only way to actually prove the
- * credentials still authenticate a brand-new session.
+ * credentials still authenticate a brand-new session. This runs FIRST,
+ * before anything that depends on a baseline snapshot existing, so it still
+ * happens even when the `baseline` job itself failed (in which case
+ * `read-only` and `mutating` are skipped by the workflow's own `needs:`
+ * graph — nothing was mutated, but the login check is still real,
+ * independent evidence, not something to skip along with the diff).
  */
-test("reconcile final state against baseline and verify the Employee account", async ({ hrAdminPage, employeePage, browser, runId }) => {
+test("reconcile final state against baseline and verify the Employee account", async ({ sysAdminPage, hrAdminPage, employeePage, browser, runId }) => {
   const { email, password } = getCredentials("employee");
-
-  const finalSnapshot = await captureSnapshot(hrAdminPage, employeePage, email, runId);
-  writeSnapshot(runId, "final", finalSnapshot);
-
-  const baseline = readSnapshot(runId, "baseline");
-  test.skip(!baseline, `No baseline found for run ${runId} — the baseline project did not run first, nothing to reconcile against.`);
+  const outDir = path.join(process.cwd(), "test-results", "reconciliation");
+  mkdirSync(outDir, { recursive: true });
+  const reportPath = path.join(outDir, `${runId}.md`);
 
   // Real, fresh sign-in — proves the account is genuinely usable, not just
   // that a previously-saved session cookie still happens to work.
@@ -45,11 +47,33 @@ test("reconcile final state against baseline and verify the Employee account", a
     await context.close();
   }
 
-  const result = buildReconciliationReport(runId, baseline!, finalSnapshot, employeeLoginStillWorks);
+  const baseline = readSnapshot(runId, "baseline");
+  if (!baseline) {
+    const markdown = [
+      `# Reconciliation report — ${runId}`,
+      "",
+      "**Baseline unavailable; no mutations ran.**",
+      "",
+      "The `baseline` job did not produce a snapshot for this run (see its own failure earlier in this workflow run). Per the workflow's job graph, `read-only` and `mutating` both depend on `baseline` succeeding and were skipped as a result — nothing in Production was touched, so there is nothing to reconcile against.",
+      "",
+      `Employee test account login check (independent of baseline, always performed): ${employeeLoginStillWorks ? "OK — signed in successfully." : "**PROBLEM — could not sign in.**"}`,
+      "",
+    ].join("\n");
+    writeFileSync(reportPath, markdown, "utf8");
+    await test.info().attach("reconciliation-report", { path: reportPath, contentType: "text/markdown" });
+    // eslint-disable-next-line no-console
+    console.log(markdown);
+    expect(employeeLoginStillWorks, "Employee test account must be able to log in even when there is no baseline to reconcile against").toBe(true);
+    return;
+  }
 
-  const outDir = path.join(process.cwd(), "test-results", "reconciliation");
-  mkdirSync(outDir, { recursive: true });
-  const reportPath = path.join(outDir, `${runId}.md`);
+  test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to read /admin/users for the final snapshot.");
+
+  const finalSnapshot = await captureSnapshot(sysAdminPage, hrAdminPage, employeePage, email, runId);
+  writeSnapshot(runId, "final", finalSnapshot);
+
+  const result = buildReconciliationReport(runId, baseline, finalSnapshot, employeeLoginStillWorks);
+
   writeFileSync(reportPath, result.markdown, "utf8");
   await test.info().attach("reconciliation-report", { path: reportPath, contentType: "text/markdown" });
 

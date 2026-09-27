@@ -34,18 +34,21 @@ function parseBalanceNumber(text: string | null): number | null {
   return match ? Number(match) : null;
 }
 
-/** Reads ONLY the Employee's status cell/badge from HR Admin's Users &
- * Roles list (read-only for HR Admin — see
- * packages/domain/src/permissions/users.ts's canManageAccountStatus doc
- * comment: only Sys Admin can toggle it, but HR Admin can always see it, so
- * this works even when no Sys Admin test account is configured). Never the
- * whole row's text — see src/identity.ts's getAccountStatusCellText doc
- * comment for why that produces a false "deactivated" reading on an
- * Active account. Throws (never returns null) if the row can't be found or
- * is ambiguous — an identity problem this suite should stop on immediately,
- * not paper over with a "(not found)" placeholder. */
-export async function readEmployeeAccountStatus(hrAdminPage: Page, employeeEmail: string): Promise<string> {
-  return getAccountStatusCellText(hrAdminPage, employeeEmail);
+/** Reads ONLY the Employee's status cell/badge from the Users & Roles list.
+ * MUST be a Sys Admin session — the whole `/admin/*` section (including
+ * `/admin/users`) is gated by apps/web/src/app/(app)/admin/layout.tsx to
+ * `isSysAdmin(session.grants)` only; HR Admin gets the same denial alert as
+ * anyone else and never sees a row at all (confirmed live: this previously
+ * took an `hrAdminPage` on the mistaken assumption that HR Admin could
+ * still VIEW this page even though only Sys Admin can toggle status —
+ * viewing requires it too). Never the whole row's text — see
+ * src/identity.ts's getAccountStatusCellText doc comment for why that
+ * produces a false "deactivated" reading on an Active account. Throws
+ * (never returns null) if the row can't be found or is ambiguous — an
+ * identity problem this suite should stop on immediately, not paper over
+ * with a "(not found)" placeholder. */
+export async function readEmployeeAccountStatus(sysAdminPage: Page, employeeEmail: string): Promise<string> {
+  return getAccountStatusCellText(sysAdminPage, employeeEmail);
 }
 
 /** Delegates to LeavePage.getBalance(), which reads the balance NUMBER's
@@ -74,12 +77,16 @@ export async function readEmployeeReimbursementRows(employeePage: Page): Promise
 
 /** The Employee's own row text on each of this run's two synthetic
  * attendance dates (the ordinary workday and the deliberate weekend day —
- * see recordTag.ts), read via HR Admin's attendance register. The
- * employee's name is resolved from their auth email via
- * getEmployeeNameByAuthEmail (a stable identifier), never a self-reported
- * name — see src/identity.ts. */
-export async function readEmployeeAttendanceByDate(hrAdminPage: Page, employeeEmail: string, runId: string): Promise<Record<string, string | null>> {
-  const employeeName = await getEmployeeNameByAuthEmail(hrAdminPage, employeeEmail);
+ * see recordTag.ts), read via the attendance register. Needs TWO separate
+ * role sessions, not one: name resolution (getEmployeeNameByAuthEmail)
+ * reads `/admin/users`, which apps/web/src/app/(app)/admin/layout.tsx gates
+ * to Sys Admin only, while the attendance register itself
+ * (canManageAttendance, packages/domain/src/permissions/attendance.ts) is
+ * HR Admin only — neither role can do both. The employee's name is
+ * resolved from their auth email via getEmployeeNameByAuthEmail (a stable
+ * identifier), never a self-reported name — see src/identity.ts. */
+export async function readEmployeeAttendanceByDate(sysAdminPage: Page, hrAdminPage: Page, employeeEmail: string, runId: string): Promise<Record<string, string | null>> {
+  const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, employeeEmail);
   const attendance = new AttendancePage(hrAdminPage);
   const dates = [testWorkday(runId, 0), testWeekendDay(runId, 0)];
   const result: Record<string, string | null> = {};
@@ -90,15 +97,15 @@ export async function readEmployeeAttendanceByDate(hrAdminPage: Page, employeeEm
   return result;
 }
 
-export async function captureSnapshot(hrAdminPage: Page, employeePage: Page, employeeEmail: string, runId: string): Promise<AccountSnapshot> {
+export async function captureSnapshot(sysAdminPage: Page, hrAdminPage: Page, employeePage: Page, employeeEmail: string, runId: string): Promise<AccountSnapshot> {
   const employeeAnnualLeaveBalanceText = await readEmployeeAnnualLeaveBalance(employeePage);
   return {
     capturedAt: new Date().toISOString(),
-    employeeAccountStatusText: await readEmployeeAccountStatus(hrAdminPage, employeeEmail),
+    employeeAccountStatusText: await readEmployeeAccountStatus(sysAdminPage, employeeEmail),
     employeeAnnualLeaveBalanceText,
     employeeAnnualLeaveBalanceNumber: parseBalanceNumber(employeeAnnualLeaveBalanceText),
     employeeReimbursementRows: await readEmployeeReimbursementRows(employeePage),
-    employeeAttendanceByDate: await readEmployeeAttendanceByDate(hrAdminPage, employeeEmail, runId),
+    employeeAttendanceByDate: await readEmployeeAttendanceByDate(sysAdminPage, hrAdminPage, employeeEmail, runId),
   };
 }
 
