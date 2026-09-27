@@ -1,5 +1,5 @@
 import { test, expect } from "../../src/fixtures";
-import { getCredentials, isMutationAuthorized } from "../../src/config";
+import { getCredentials, hasCredentials, isMutationAuthorized } from "../../src/config";
 import { AttendancePage } from "../../src/pages/AttendancePage";
 import { testWorkday, testWeekendDay } from "../../src/recordTag";
 import { getEmployeeNameByAuthEmail } from "../../src/identity";
@@ -21,6 +21,14 @@ import { getEmployeeNameByAuthEmail } from "../../src/identity";
  * exactly one row on THIS date's register too — two employees could
  * plausibly share a display name even if their auth emails don't.
  *
+ * Name resolution needs a SEPARATE Sys Admin session from the attendance
+ * register itself: getEmployeeNameByAuthEmail reads `/admin/users`, which
+ * apps/web/src/app/(app)/admin/layout.tsx gates to Sys Admin only, while
+ * the register (canManageAttendance, packages/domain/src/permissions/
+ * attendance.ts) is HR Admin only — neither role can do both, so this file
+ * uses `sysAdminPage` purely to resolve the name and `hrAdminPage` for
+ * every actual attendance action.
+ *
  * Dates: `testWorkday()`/`testWeekendDay()` (src/recordTag.ts) are used
  * instead of a plain synthetic date, because
  * `record_attendance_and_recovery()` (schema/schema.sql) AUTOMATICALLY
@@ -38,9 +46,10 @@ import { getEmployeeNameByAuthEmail } from "../../src/identity";
 test.describe("attendance and recovery leave @mutating", () => {
   test.skip(!isMutationAuthorized(), "Mutation not authorized (E2E_MUTATION_AUTHORIZED != 'true') — skipping mutating attendance tests.");
 
-  test("HR Admin bulk-fills a day's attendance across work modes", async ({ hrAdminPage, runId }) => {
+  test("HR Admin bulk-fills a day's attendance across work modes", async ({ hrAdminPage, sysAdminPage, runId }) => {
+    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /admin/users.");
     const { email } = getCredentials("employee");
-    const employeeName = await getEmployeeNameByAuthEmail(hrAdminPage, email);
+    const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, email);
     const attendance = new AttendancePage(hrAdminPage);
     const date = testWorkday(runId, 0);
     await attendance.goto({ date });
@@ -51,9 +60,10 @@ test.describe("attendance and recovery leave @mutating", () => {
     await attendance.expectSaved();
   });
 
-  test("re-saving an already-recorded day (correction) succeeds", async ({ hrAdminPage, runId }) => {
+  test("re-saving an already-recorded day (correction) succeeds", async ({ hrAdminPage, sysAdminPage, runId }) => {
+    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /admin/users.");
     const { email } = getCredentials("employee");
-    const employeeName = await getEmployeeNameByAuthEmail(hrAdminPage, email);
+    const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, email);
     const attendance = new AttendancePage(hrAdminPage);
     const date = testWorkday(runId, 0); // same date as the previous test — a correction, not a new day
     await attendance.goto({ date });
@@ -62,9 +72,10 @@ test.describe("attendance and recovery leave @mutating", () => {
     await attendance.expectSaved();
   });
 
-  test("a weekend day recorded present automatically creates exactly one Recovery Leave credit for this employee", async ({ hrAdminPage, runId }) => {
+  test("a weekend day recorded present automatically creates exactly one Recovery Leave credit for this employee", async ({ hrAdminPage, sysAdminPage, runId }) => {
+    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /admin/users.");
     const { email } = getCredentials("employee");
-    const employeeName = await getEmployeeNameByAuthEmail(hrAdminPage, email);
+    const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, email);
     const attendance = new AttendancePage(hrAdminPage);
     const date = testWeekendDay(runId, 0);
     await attendance.goto({ date });
