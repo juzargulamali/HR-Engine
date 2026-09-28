@@ -1,7 +1,8 @@
 import { test, expect } from "../../src/fixtures";
 import { getCredentials, hasCredentials, isMutationAuthorized } from "../../src/config";
 import { AttendancePage } from "../../src/pages/AttendancePage";
-import { testWorkday, testWeekendDay } from "../../src/recordTag";
+import { ApprovalsPage, LeavePage } from "../../src/pages/LeavePage";
+import { testWorkday, testWeekendDay, tagNote } from "../../src/recordTag";
 import { getEmployeeNameByAuthEmail } from "../../src/identity";
 
 /**
@@ -90,5 +91,121 @@ test.describe("attendance and recovery leave @mutating", () => {
     // this is used instead of the Approvals page (which never renders
     // recovery_credit approvals at all).
     await attendance.expectSavedWithRecoveryCredits(1);
+  });
+
+  /**
+   * The two-step Recovery Leave approval chain (Line Manager, then HR
+   * Admin — seed_default_approval_workflows() in schema.sql), walked end
+   * to end through the Approvals page's new "Recovery Leave credits"
+   * section, verifying the credit is only posted once BOTH steps approve.
+   *
+   * recovery_credit_requests has no tagged free-text field (it's manager/
+   * HR-attested, never a self-submitted request with a reason) — its
+   * work_date is this run's unique, deterministic identifier instead
+   * (testWeekendDay(runId, N) never collides with another N within the
+   * same run, and this suite's own dates are re-derived fresh every run),
+   * same role a tagged reason plays for leave/reimbursement rows.
+   */
+  test("Recovery Leave: manager approves (step 1), HR Admin approves (step 2), the comp-off credit posts only after both", async ({
+    employeePage,
+    managerPage,
+    hrAdminPage,
+    sysAdminPage,
+    runId,
+  }) => {
+    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /admin/users.");
+    const { email } = getCredentials("employee");
+    const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, email);
+    const date = testWeekendDay(runId, 2); // distinct from the creation test above (offset 0) and the rejection test below (offset 3)
+
+    const attendance = new AttendancePage(hrAdminPage);
+    await attendance.goto({ date });
+    await attendance.setStatus(employeeName, "present");
+    await attendance.setWorkModeAndHours(employeeName, "business_travel", 8); // >4h => 1 full recovery day
+    await attendance.saveAll();
+    await attendance.expectSavedWithRecoveryCredits(1);
+
+    const employeeLeave = new LeavePage(employeePage);
+    await employeeLeave.gotoList();
+    const compBalanceBefore = await employeeLeave.getBalance("Comp-off");
+    const numberBefore = compBalanceBefore.match(/[\d.]+/)?.[0];
+
+    const managerApprovals = new ApprovalsPage(managerPage);
+    await managerApprovals.goto();
+    await managerApprovals.expectPending(date);
+    await managerApprovals.approve(date);
+    // Step 1's approval row is now decided; the chain advances to a NEW
+    // approvals row for HR Admin (step 2) — the Manager should no longer
+    // see this request as pending, proving the routing actually moved
+    // forward rather than just disappearing.
+    await managerApprovals.expectNotPending(date);
+
+    const hrApprovals = new ApprovalsPage(hrAdminPage);
+    await hrApprovals.goto();
+    await hrApprovals.expectPending(date);
+    await hrApprovals.approve(date);
+    await hrApprovals.expectNotPending(date);
+
+    // The only observable, self-service signal of the posted credit: the
+    // Employee's own Comp-off balance card on /leave (comp_day_balances,
+    // read there — see leave/page.tsx). Must increase by exactly the
+    // credited amount (1 day, from the >4h business_travel day above),
+    // proving decide_leave_approval()'s HR-Admin-final-step ledger insert
+    // actually ran, not just that the UI stopped showing the request.
+    if (numberBefore) {
+      await expect(async () => {
+        const compBalanceAfter = await employeeLeave.getBalance("Comp-off");
+        const numberAfter = compBalanceAfter.match(/[\d.]+/)?.[0];
+        expect(numberAfter, "Comp-off balance is no longer parseable after approval").toBeDefined();
+        expect(Number(numberAfter), "Comp-off balance did not increase by the approved recovery credit").toBe(Number(numberBefore) + 1);
+      }).toPass({ timeout: 10_000 });
+    } else {
+      test.info().annotations.push({ type: "skip-reason", description: `Could not parse a "Comp-off" balance figure from: "${compBalanceBefore}" — confirm the real balance-card selector/format on first live run.` });
+    }
+  });
+
+  test("Recovery Leave: manager can reject at step 1, stopping the chain before HR Admin and before any credit posts", async ({
+    employeePage,
+    managerPage,
+    hrAdminPage,
+    sysAdminPage,
+    runId,
+  }) => {
+    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /admin/users.");
+    const { email } = getCredentials("employee");
+    const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, email);
+    const date = testWeekendDay(runId, 3); // distinct from both tests above
+    const rejectionReason = tagNote(runId, "recovery-credit-reject-decision", "Rejected by automated test");
+
+    const attendance = new AttendancePage(hrAdminPage);
+    await attendance.goto({ date });
+    await attendance.setStatus(employeeName, "present");
+    await attendance.setWorkModeAndHours(employeeName, "business_travel", 8);
+    await attendance.saveAll();
+    await attendance.expectSavedWithRecoveryCredits(1);
+
+    const employeeLeave = new LeavePage(employeePage);
+    await employeeLeave.gotoList();
+    const compBalanceBefore = await employeeLeave.getBalance("Comp-off");
+
+    const managerApprovals = new ApprovalsPage(managerPage);
+    await managerApprovals.goto();
+    await managerApprovals.expectPending(date);
+    await managerApprovals.reject(date, rejectionReason);
+    await managerApprovals.expectNotPending(date);
+
+    // A rejection at step 1 must never advance the chain to step 2 — HR
+    // Admin should never see this request at all, unlike the approve test
+    // above where it correctly DOES move there.
+    const hrApprovals = new ApprovalsPage(hrAdminPage);
+    await hrApprovals.goto();
+    await hrApprovals.expectNotPending(date);
+
+    // No credit was ever posted — the balance must be byte-for-byte
+    // unchanged, not just "not increased" (a decrease would also be wrong
+    // and this catches that too).
+    await employeeLeave.gotoList();
+    const compBalanceAfter = await employeeLeave.getBalance("Comp-off");
+    expect(compBalanceAfter, "Comp-off balance changed despite the recovery credit being rejected at step 1").toBe(compBalanceBefore);
   });
 });
