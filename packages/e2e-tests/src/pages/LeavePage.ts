@@ -36,9 +36,19 @@ export class LeavePage {
    * routing) has fully resolved, so a caller that races ahead of that
    * redirect can query /leave before the row is committed. On the error
    * path there is no redirect at all — the same page re-renders with
-   * `state.error` in a `role="alert"` element instead — so this also
-   * throws a clear error in that case rather than leaving the caller to
-   * fail confusingly on an unrelated later assertion. */
+   * `state.error` in a `role="alert"` element instead.
+   *
+   * Deliberately a poll, not a `Promise.race` between "redirected" and
+   * "alert visible" — confirmed live (run 36365755828) that the naive race
+   * is itself unreliable: a genuinely successful submission still tripped
+   * the "alert" branch, whose text then read empty, because whichever
+   * promise happens to settle a tick sooner wins regardless of which one
+   * reflects the real, final outcome (root cause not fully pinned down —
+   * possibly a transient/empty alert render during the same tick as the
+   * URL change). Polling instead means an EMPTY alert is never treated as
+   * authoritative — only a URL change to /leave, or a form alert that
+   * actually HAS text, ends the wait; anything else (including a fleeting
+   * empty alert) is ignored and polling continues. */
   async submitRequest(opts: { startDate: string; endDate: string; leaveTypeCode?: string; reason?: string }): Promise<void> {
     await this.page.locator("#startDate").fill(opts.startDate);
     await this.page.locator("#endDate").fill(opts.endDate);
@@ -50,20 +60,19 @@ export class LeavePage {
     }
     await this.page.getByRole("button", { name: /submit/i }).click();
 
-    const redirected = this.page.waitForURL(/\/leave(?:[?#]|$)/, { timeout: 15_000 }).then(() => true as const);
-    const errored = this.page
-      .getByRole("alert")
-      .waitFor({ state: "visible", timeout: 15_000 })
-      .then(() => false as const);
-    const succeeded = await Promise.race([redirected, errored]).catch(() => null);
-
-    if (succeeded === false) {
-      const message = (await this.page.getByRole("alert").first().textContent())?.trim() || "(no error text found)";
-      throw new Error(`submitRequest() failed validation instead of redirecting to /leave: "${message}"`);
+    const formAlert = this.page.locator("form").getByRole("alert");
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      if (new URL(this.page.url()).pathname.replace(/\/+$/, "") === "/leave") return;
+      if ((await formAlert.count()) > 0) {
+        const message = (await formAlert.first().textContent())?.trim();
+        if (message) {
+          throw new Error(`submitRequest() failed validation instead of redirecting to /leave: "${message}"`);
+        }
+      }
+      await this.page.waitForTimeout(200);
     }
-    if (succeeded === null) {
-      throw new Error("submitRequest() neither redirected to /leave nor showed a form error within 15s.");
-    }
+    throw new Error(`submitRequest() neither redirected to /leave nor showed a non-empty form error within 15s (current URL: ${this.page.url()}).`);
   }
 
   /** Must be the row's rendered "Dates" text (see formatDateRange below),
