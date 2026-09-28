@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -203,6 +204,7 @@ export default async function ApprovalsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
+                  <TableHead>Claim</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead>Amount</TableHead>
                   <TableHead>Status</TableHead>
@@ -215,6 +217,11 @@ export default async function ApprovalsPage() {
                   return (
                     <TableRow key={a.id}>
                       <TableCell>{employeeName(claim.employee_id)}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        <Link href={`/reimbursements/${claim.id}`} className="hover:underline">
+                          {claim.id.slice(0, 8)}…
+                        </Link>
+                      </TableCell>
                       <TableCell>{claim.claim_date}</TableCell>
                       <TableCell>
                         {claim.currency} {claim.total_amount}

@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { stateFile } from "./config";
-import { testWorkday, testWeekendDay } from "./recordTag";
+import { testWorkday, testWeekendDay, isTagged } from "./recordTag";
 import { getEmployeeNameByAuthEmail, getAccountStatusCellText } from "./identity";
 import { AttendancePage } from "./pages/AttendancePage";
 import { LeavePage } from "./pages/LeavePage";
@@ -21,12 +21,25 @@ export interface AccountSnapshot {
   employeeAccountStatusText: string;
   employeeAnnualLeaveBalanceText: string | null;
   employeeAnnualLeaveBalanceNumber: number | null;
-  employeeReimbursementRows: string[];
+  employeeReimbursementClaims: ReimbursementClaimSnapshot[];
   /** Keyed by the exact synthetic date string used this run (see
    * src/recordTag.ts's testWorkday()/testWeekendDay()) — the Employee's own
-   * row text on that date's attendance register, or null if no row exists
-   * yet (expected at baseline time, before the mutating project runs). */
+   * attendance register values on that date (status/work mode/hours), or
+   * null if no row exists yet (expected at baseline time, before the
+   * mutating project runs). */
   employeeAttendanceByDate: Record<string, string | null>;
+}
+
+/** One claim's actual, current state, read from ITS OWN detail page — never
+ * from the list page, which (verified from source,
+ * apps/web/src/app/(app)/reimbursements/page.tsx) only ever shows Date/
+ * Amount/Status, never the tagged description. `description` is the first
+ * expense line's own Description cell (this suite's tests always add
+ * exactly one line per claim), or null if the claim has no lines yet. */
+export interface ReimbursementClaimSnapshot {
+  id: string;
+  status: string;
+  description: string | null;
 }
 
 function parseBalanceNumber(text: string | null): number | null {
@@ -61,18 +74,52 @@ export async function readEmployeeAnnualLeaveBalance(employeePage: Page): Promis
   return text || null;
 }
 
-/** A coarse, best-effort snapshot of the Employee's reimbursement claims —
- * one string per visible row/card — used to notice that a new claim
- * appeared and to correlate it with this run's tag. */
-export async function readEmployeeReimbursementRows(employeePage: Page): Promise<string[]> {
+/** Reads every one of the Employee's reimbursement claims BY ID: first
+ * collects each claim's id from the list page's own row links
+ * (`<Link href="/reimbursements/{id}">`), then visits each claim's detail
+ * page individually to read its real current status and its first expense
+ * line's description — the only place either is genuinely visible (see
+ * ReimbursementClaimSnapshot's doc comment). Slower than a single list-page
+ * read, but a claim's identity, status, and tag can only be told apart this
+ * way — confirmed live (run 36359831264) that two claims sharing the same
+ * date and the same smallest-allowed test amount are otherwise
+ * indistinguishable from the list page alone. */
+export async function readEmployeeReimbursementClaims(employeePage: Page): Promise<ReimbursementClaimSnapshot[]> {
   await employeePage.goto("/reimbursements");
-  const rows = employeePage.getByRole("row");
-  const count = await rows.count();
-  const texts: string[] = [];
-  for (let i = 0; i < count; i++) {
-    texts.push((await rows.nth(i).innerText()).replace(/\s+/g, " ").trim());
+  const links = employeePage.locator('a[href^="/reimbursements/"]');
+  const linkCount = await links.count();
+  const ids: string[] = [];
+  for (let i = 0; i < linkCount; i++) {
+    const href = await links.nth(i).getAttribute("href");
+    const id = href?.match(/^\/reimbursements\/([^/?#]+)$/)?.[1];
+    if (id) ids.push(id);
   }
-  return texts;
+
+  const claims: ReimbursementClaimSnapshot[] = [];
+  for (const id of ids) {
+    await employeePage.goto(`/reimbursements/${id}`);
+    const status = ((await employeePage.getByText(/^(draft|submitted|pending approval|approved|rejected|cancelled)$/i).first().textContent()) ?? "").trim();
+    const rows = employeePage.getByRole("row");
+    // Row 0 is the expense-lines table's own header row; row 1, if present,
+    // is either this claim's first (and, for every test in this suite,
+    // only) expense line, or — for a claim with zero lines, e.g.
+    // 40-document-upload.spec.ts's draft, which deliberately never adds one
+    // — the table's own single-cell EmptyState row (colSpan=6). Description
+    // is the 4th cell (Date/Category/Amount/Description/Receipt/actions —
+    // verified from reimbursements/[id]/page.tsx), guarded by an actual
+    // cell count so the EmptyState row is never misread as a 4th cell that
+    // doesn't exist.
+    let description: string | null = null;
+    if ((await rows.count()) > 1) {
+      const cells = rows.nth(1).getByRole("cell");
+      if ((await cells.count()) >= 4) {
+        const text = (await cells.nth(3).innerText()).trim();
+        description = text === "—" ? null : text;
+      }
+    }
+    claims.push({ id, status, description });
+  }
+  return claims;
 }
 
 /** The Employee's own row text on each of this run's two synthetic
@@ -92,7 +139,7 @@ export async function readEmployeeAttendanceByDate(sysAdminPage: Page, hrAdminPa
   const result: Record<string, string | null> = {};
   for (const date of dates) {
     await attendance.goto({ date });
-    result[date] = await attendance.rowText(employeeName);
+    result[date] = await attendance.getRowValues(employeeName);
   }
   return result;
 }
@@ -104,7 +151,7 @@ export async function captureSnapshot(sysAdminPage: Page, hrAdminPage: Page, emp
     employeeAccountStatusText: await readEmployeeAccountStatus(sysAdminPage, employeeEmail),
     employeeAnnualLeaveBalanceText,
     employeeAnnualLeaveBalanceNumber: parseBalanceNumber(employeeAnnualLeaveBalanceText),
-    employeeReimbursementRows: await readEmployeeReimbursementRows(employeePage),
+    employeeReimbursementClaims: await readEmployeeReimbursementClaims(employeePage),
     employeeAttendanceByDate: await readEmployeeAttendanceByDate(sysAdminPage, hrAdminPage, employeeEmail, runId),
   };
 }
@@ -240,19 +287,36 @@ export function buildReconciliationReport(runId: string, baseline: AccountSnapsh
   lines.push("");
 
   lines.push("## Employee reimbursement claims");
-  const newRows = final.employeeReimbursementRows.filter((r) => !baseline.employeeReimbursementRows.includes(r));
-  if (newRows.length === 0) {
-    lines.push("- No new claim rows visible.");
+  // Matched by id, never by row text — a claim's list-page row never shows
+  // its tag at all (Date/Amount/Status only), and two claims from the same
+  // run can otherwise look identical (same date, same smallest-allowed test
+  // amount). Each claim's REAL current status is read from its own detail
+  // page, never assumed — a claim this run created is just as likely to be
+  // stuck at `submitted`/`pending_approval` as `approved`/`rejected`,
+  // confirmed live (run 36359831264) when two mutating tests failed before
+  // either claim was ever decided.
+  const baselineIds = new Set(baseline.employeeReimbursementClaims.map((c) => c.id));
+  const newClaims = final.employeeReimbursementClaims.filter((c) => !baselineIds.has(c.id));
+  if (newClaims.length === 0) {
+    lines.push("- No new claims.");
   } else {
-    lines.push(`- ${newRows.length} new row(s), all expected to carry this run's tag (\`[${runId}] ...\`):`);
-    for (const row of newRows) {
-      const tagged = row.includes(`[${runId}]`);
-      lines.push(`  - \`${row}\`${tagged ? "" : " — **not tagged with this run's ID, investigate**"}`);
+    lines.push(`- ${newClaims.length} new claim(s):`);
+    for (const claim of newClaims) {
+      const tagged = isTagged(claim.description, runId);
       if (!tagged) hasUnexplainedChange = true;
+      const statusNote: Record<string, string> = {
+        approved: "a real, permanent Production record. Reversing it would itself be a real mutation this suite is not authorized to perform — to restore, reverse/cancel this reimbursement_claims row directly in Supabase.",
+        rejected: "a real, permanent Production record in a terminal, no-further-action state — safe to leave as identified test data, or delete directly in Supabase.",
+        submitted: "still pending — no approver has decided it yet. Either leave it for a manager to decide, or cancel/delete it (via its own page, or directly in Supabase).",
+        pending_approval: "still pending — no approver has decided it yet. Either leave it for a manager to decide, or cancel/delete it (via its own page, or directly in Supabase).",
+        draft: "never submitted — has no approval routing at all yet. Delete it via its own \"Delete\" button, or directly in Supabase.",
+        cancelled: "cancelled by the employee — a real, permanent record, safe to leave or delete directly in Supabase.",
+      };
+      const note = statusNote[claim.status] ?? `in an unrecognized status ("${claim.status}") — investigate directly.`;
+      lines.push(
+        `  - \`${claim.id.slice(0, 8)}…\` — status \`${claim.status}\`, ${tagged ? `tagged (\`${claim.description}\`)` : "**not tagged with this run's ID — investigate**"}. ${note}`,
+      );
     }
-    lines.push(
-      `- These claims are real, permanent Production records (a smallest-allowed-amount, clearly fake test claim in \`approved\`/\`rejected\` state). They were never progressed past approval/rejection — no export, payment, or accounting integration was triggered. To remove rather than leave as identified test data: delete these specific tagged \`reimbursement_claim_lines\`/\`reimbursement_claims\` rows directly in Supabase.`,
-    );
   }
   lines.push("");
 

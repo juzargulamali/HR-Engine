@@ -94,13 +94,27 @@ export class AttendancePage {
     await expect(this.page.getByText(`Saved. ${count} recovery credit request(s) submitted for approval.`, { exact: true })).toBeVisible({ timeout: 10_000 });
   }
 
-  /** The employee's own row text on whatever date this page is currently
-   * showing, or null if the employee has no row on this date's register
-   * (e.g. inactive or a different company). Used for baseline/reconciliation
-   * reporting — never mutates anything. */
-  async rowText(employeeName: string): Promise<string | null> {
+  /** The employee's own SELECTED control values on whatever date this page
+   * is currently showing, or null if the employee has no row on this
+   * date's register (e.g. inactive or a different company). Used for
+   * baseline/reconciliation reporting — never mutates anything.
+   *
+   * Reads `.inputValue()` on the status/work-mode <select>s and the hours
+   * <input>, never the row's `.innerText()` — confirmed live (run
+   * 36359831264) that a native `<select>`'s `innerText`, read via an
+   * ancestor, includes every `<option>`'s label concatenated together
+   * regardless of which one is actually selected (a real Chromium quirk,
+   * not specific to this app), so baseline and final always looked
+   * identical no matter what was actually saved. `.inputValue()` returns
+   * the literal selected `value` attribute (e.g. "present",
+   * "business_travel"), which is also more precise than a display label. */
+  async getRowValues(employeeName: string): Promise<string | null> {
     const row = this.rowFor(employeeName);
     if ((await row.count()) === 0) return null;
-    return (await row.first().innerText()).replace(/\s+/g, " ").trim();
+    const comboboxes = row.first().getByRole("combobox");
+    const status = await comboboxes.first().inputValue();
+    const workMode = await comboboxes.nth(1).inputValue();
+    const hours = await row.first().getByRole("spinbutton").inputValue();
+    return `status=${status} workMode=${workMode} hours=${hours}`;
   }
 }
