@@ -86,13 +86,31 @@ export class LeavePage {
   }
 
   /** Same caveat as expectRequestInList — pass the rendered Dates label, not
-   * the tagged reason. */
+   * the tagged reason.
+   *
+   * Confirmed live (run E2E-20260928-094436): cancel-request-button.tsx's
+   * onClick calls `window.confirm(...)` BEFORE calling the server action —
+   * exactly like ApprovalsPage.approve()'s native dialog — and this method
+   * had no `page.once("dialog", ...)` handler. Playwright auto-DISMISSES
+   * any dialog with no registered handler, so `window.confirm()` silently
+   * returned false, the `if (!window.confirm(...)) return;` branch fired,
+   * and cancelLeaveRequest() was never even called — the caller's very next
+   * assertion (the Cancel button gone) then failed deterministically every
+   * time, not flakily, because nothing had happened at all. Registering the
+   * same accept-handler approve()/reject() already use fixes this. Also
+   * waits for the button to actually disappear (cancelLeaveRequest() is a
+   * plain server action with no redirect, relying on the same RSC-refresh
+   * pattern as submitForApproval()) before returning, so a caller's
+   * immediately-following assertion never races the refresh either. */
   async cancelRequest(dateRangeLabel: string): Promise<void> {
     // `[E2E-...]` tags carry regex metacharacters (character-class
     // brackets); date labels don't, but escaping is cheap and keeps this
     // safe if a caller ever passes a tagged string here again by mistake.
     const row = this.page.getByRole("row", { name: new RegExp(escapeForRegExp(dateRangeLabel), "i") });
-    await row.getByRole("button", { name: /cancel/i }).click();
+    this.page.once("dialog", (d) => d.accept());
+    const cancelButton = row.getByRole("button", { name: /cancel/i });
+    await cancelButton.click();
+    await expect(cancelButton).toHaveCount(0, { timeout: 15_000 });
   }
 
   /** Reads the whole rendered row (Type/Dates/Days/Status/Cancel button) for
