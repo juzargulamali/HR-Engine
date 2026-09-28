@@ -27,11 +27,24 @@ const HARMLESS_TEST_FILE = path.join(__dirname, "..", "..", "src", "fixtures", "
  * "every mutating record must be tagged" rule and tripping
  * reconciliation's reimbursement-claims check every single run ("not
  * tagged with this run's ID — investigate") — a false positive, since
- * there was never anything to tag. Now fills the required fields too (same
- * "e2e-test"/AED 0.01 convention as 30-reimbursements.spec.ts, a distinct
- * testDate offset so its date never collides with those two claims) and
- * clicks "Add line", so this claim carries one real, tagged, permanently
- * findable line — still never "Submit for approval".
+ * there was never anything to tag.
+ *
+ * A first fix (#12) filled the required fields and clicked "Add line" —
+ * but left the harmless .txt receipt attached in the SAME form field
+ * "Add line" submits. Confirmed live (run E2E-20260928-113008) that
+ * reimbursements.ts's addClaimLine() validates any attached receipt via
+ * validateUploadFile() ("Only PDF, JPEG, PNG, or WebP files are
+ * allowed."), the .txt file fails that check, the line insert never runs,
+ * and the claim was left with zero lines yet again — the exact same bug,
+ * just reproduced a different way, and silent because nothing here
+ * checked for the resulting error Alert. Now clears the receipt field
+ * (setInputFiles([]) — it's optional on this form) after proving the
+ * upload widget itself accepts the file, before filling the required
+ * fields (same "e2e-test"/AED 0.01 convention as 30-reimbursements.spec.ts,
+ * a distinct testDate offset so its date never collides with those two
+ * claims) and clicking "Add line" — and now asserts the line actually
+ * appears, so a future silent failure here fails loudly instead. Still
+ * never "Submit for approval".
  */
 test.describe("document upload @mutating", () => {
   test.skip(!isMutationAuthorized(), "Mutation not authorized (E2E_MUTATION_AUTHORIZED != 'true') — skipping mutating upload test.");
@@ -48,10 +61,20 @@ test.describe("document upload @mutating", () => {
     await fileInput.first().setInputFiles(HARMLESS_TEST_FILE);
     await expect(fileInput.first()).toHaveValue(/harmless-receipt\.txt$/);
 
+    // The receipt field is optional; a plain .txt file fails this app's
+    // real server-side content-type check (PDF/JPEG/PNG/WebP only), so it
+    // must be cleared before "Add line" or the line insert silently never
+    // happens. Proving the upload widget itself accepts an arbitrary file
+    // (above) is this test's job — persisting a real, findable, tagged
+    // line is a separate concern that must not depend on that file.
+    await fileInput.first().setInputFiles([]);
+
+    const description = tagNote(runId, "document-upload-test");
     await employeePage.getByLabel("Expense date").fill(testDate(runId, 4));
     await employeePage.getByLabel("Category").fill("e2e-test");
     await employeePage.getByLabel("Amount").fill("0.01");
-    await employeePage.getByLabel(/description/i).fill(tagNote(runId, "document-upload-test"));
+    await employeePage.getByLabel(/description/i).fill(description);
     await employeePage.getByRole("button", { name: /add line/i }).click();
+    await expect(employeePage.getByText(description)).toBeVisible({ timeout: 10_000 });
   });
 });
