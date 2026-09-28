@@ -1,6 +1,5 @@
 import { type Page, expect } from "@playwright/test";
 import { gotoWithRetry } from "../gotoWithRetry";
-import { escapeForRegExp } from "../recordTag";
 
 /**
  * Lighter-weight page objects for areas not deeply re-read this round
@@ -68,12 +67,32 @@ export class ReimbursementsPage {
     await gotoWithRetry(this.page, "/reimbursements");
   }
 
-  /** Fills the "Start claim" form (currency only) and follows the redirect
-   * to the new draft claim's own detail page. */
-  async startDraftClaim(currency = "AED"): Promise<void> {
+  /** Fills the "Start claim" form (currency only), follows the redirect to
+   * the new draft claim's own detail page, and returns its id (parsed from
+   * the resulting URL) — the only reliable way to refer to THIS claim
+   * later, since two claims from the same run can otherwise look identical
+   * everywhere else (same date, same smallest-allowed test amount). */
+  async startDraftClaim(currency = "AED"): Promise<string> {
     await this.page.getByLabel("Currency").fill(currency);
     await this.page.getByRole("button", { name: /start claim/i }).click();
     await this.page.waitForURL(/\/reimbursements\/[^/]+$/);
+    const match = this.page.url().match(/\/reimbursements\/([^/?#]+)/);
+    const claimId = match?.[1];
+    if (!claimId) throw new Error(`Could not parse a claim id out of the post-redirect URL: ${this.page.url()}`);
+    return claimId;
+  }
+
+  /** Navigates straight to one specific claim's own detail page. */
+  async gotoClaim(claimId: string): Promise<void> {
+    await gotoWithRetry(this.page, `/reimbursements/${claimId}`);
+  }
+
+  /** Reads the claim detail page's own StatusBadge text (e.g. "approved",
+   * "pending approval") — the actual, current status of THIS specific
+   * claim, not a guess from a list page that may show several identical-
+   * looking rows. */
+  async getClaimStatus(): Promise<string> {
+    return ((await this.page.getByText(/^(draft|submitted|pending approval|approved|rejected|cancelled)$/i).first().textContent()) ?? "").trim();
   }
 
   /** Adds one expense line on the claim's own detail page (call after
@@ -91,13 +110,17 @@ export class ReimbursementsPage {
   }
 
   /** Moves the claim from draft to pending approval — a real, permanent
-   * transition; the app exposes no "un-submit". */
+   * transition; the app exposes no "un-submit". Waits for the claim's own
+   * submitted state to actually land (the "Cancel claim" button, which
+   * claim-actions.tsx only renders once status is submitted/pending_approval)
+   * before returning — submitClaim() is a plain server action with no
+   * redirect, so a caller that switches to the Manager session right after
+   * the click can otherwise beat the RSC refresh that flips isDraft/
+   * isCancellable, and everything downstream looks like a routing failure
+   * instead of the timing issue it actually is. */
   async submitForApproval(): Promise<void> {
     await this.page.getByRole("button", { name: /submit for approval/i }).click();
-  }
-
-  async expectClaimVisible(needle: string): Promise<void> {
-    await expect(this.page.getByText(new RegExp(escapeForRegExp(needle), "i")).first()).toBeVisible({ timeout: 10_000 });
+    await expect(this.page.getByRole("button", { name: /cancel claim/i })).toBeVisible({ timeout: 15_000 });
   }
 }
 

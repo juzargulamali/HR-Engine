@@ -14,6 +14,17 @@ import { tagNote, testDate } from "../../src/recordTag";
  * "Submit for approval" moves it into the same generic approvals inbox
  * leave requests use.
  *
+ * Matched by claim ID throughout, never by date+amount+description text —
+ * confirmed live (run 36359831264) that both claims here are the same date
+ * and the same smallest-allowed test amount, so nothing about their visible
+ * fields distinguishes them; the tagged description, meanwhile, is never
+ * rendered on the Approvals page or the employee's own /reimbursements
+ * list (only Date/Amount/Status — verified from source), only on the
+ * claim's own detail page. ReimbursementsPage.startDraftClaim() returns the
+ * new claim's id (parsed from its own detail URL) specifically so every
+ * later step — the Approvals-page row, the reconciliation report, this
+ * test's own final status check — can refer to exactly one claim.
+ *
  * This suite NEVER progresses a claim past approval/rejection — no export,
  * payment run, or accounting integration is ever triggered. An approved
  * claim is a real, permanent Production record; it is reported (not
@@ -30,7 +41,7 @@ test.describe("reimbursement claims @mutating", () => {
     const description = tagNote(runId, "reimbursement-approve");
 
     await reimbursements.goto();
-    await reimbursements.startDraftClaim("AED");
+    const claimId = await reimbursements.startDraftClaim("AED");
     await reimbursements.addLine({
       expenseDate: testDate(runId, 2),
       category: "e2e-test",
@@ -41,12 +52,14 @@ test.describe("reimbursement claims @mutating", () => {
 
     const approvals = new ApprovalsPage(managerPage);
     await approvals.goto();
-    await approvals.expectPending(description);
-    await approvals.approve(description);
-    await approvals.expectNotPending(description);
+    await approvals.expectClaimPending(claimId);
+    await approvals.approveClaim(claimId);
+    await approvals.expectClaimNotPending(claimId);
 
-    await reimbursements.goto();
-    await reimbursements.expectClaimVisible(description);
+    await reimbursements.gotoClaim(claimId);
+    await expect(async () => {
+      expect(await reimbursements.getClaimStatus()).toMatch(/^approved$/i);
+    }).toPass({ timeout: 10_000 });
   });
 
   test("submit a separate minimal claim, manager rejects it with a reason", async ({ employeePage, managerPage, runId }) => {
@@ -55,7 +68,7 @@ test.describe("reimbursement claims @mutating", () => {
     const rejectionReason = tagNote(runId, "reimbursement-reject-decision", "Rejected by automated test");
 
     await reimbursements.goto();
-    await reimbursements.startDraftClaim("AED");
+    const claimId = await reimbursements.startDraftClaim("AED");
     await reimbursements.addLine({
       expenseDate: testDate(runId, 3),
       category: "e2e-test",
@@ -66,11 +79,13 @@ test.describe("reimbursement claims @mutating", () => {
 
     const approvals = new ApprovalsPage(managerPage);
     await approvals.goto();
-    await approvals.expectPending(description);
-    await approvals.reject(description, rejectionReason);
-    await approvals.expectNotPending(description);
+    await approvals.expectClaimPending(claimId);
+    await approvals.rejectClaim(claimId, rejectionReason);
+    await approvals.expectClaimNotPending(claimId);
 
-    await reimbursements.goto();
-    await reimbursements.expectClaimVisible(description);
+    await reimbursements.gotoClaim(claimId);
+    await expect(async () => {
+      expect(await reimbursements.getClaimStatus()).toMatch(/^rejected$/i);
+    }).toPass({ timeout: 10_000 });
   });
 });

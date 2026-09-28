@@ -27,6 +27,18 @@ export class LeavePage {
     await gotoWithRetry(this.page, "/leave");
   }
 
+  /** Waits for one of submitLeaveRequest()'s two real outcomes before
+   * returning — never just the click. Confirmed live (run 36359831264):
+   * both leave-list checks right after this call timed out even though the
+   * request genuinely existed a moment later (per the error-context
+   * screenshots) — `redirect("/leave")` only happens once the server
+   * action's own await chain (including submit_leave_request()'s insert +
+   * routing) has fully resolved, so a caller that races ahead of that
+   * redirect can query /leave before the row is committed. On the error
+   * path there is no redirect at all — the same page re-renders with
+   * `state.error` in a `role="alert"` element instead — so this also
+   * throws a clear error in that case rather than leaving the caller to
+   * fail confusingly on an unrelated later assertion. */
   async submitRequest(opts: { startDate: string; endDate: string; leaveTypeCode?: string; reason?: string }): Promise<void> {
     await this.page.locator("#startDate").fill(opts.startDate);
     await this.page.locator("#endDate").fill(opts.endDate);
@@ -37,6 +49,21 @@ export class LeavePage {
       await this.page.locator("#reason").fill(opts.reason);
     }
     await this.page.getByRole("button", { name: /submit/i }).click();
+
+    const redirected = this.page.waitForURL(/\/leave(?:[?#]|$)/, { timeout: 15_000 }).then(() => true as const);
+    const errored = this.page
+      .getByRole("alert")
+      .waitFor({ state: "visible", timeout: 15_000 })
+      .then(() => false as const);
+    const succeeded = await Promise.race([redirected, errored]).catch(() => null);
+
+    if (succeeded === false) {
+      const message = (await this.page.getByRole("alert").first().textContent())?.trim() || "(no error text found)";
+      throw new Error(`submitRequest() failed validation instead of redirecting to /leave: "${message}"`);
+    }
+    if (succeeded === null) {
+      throw new Error("submitRequest() neither redirected to /leave nor showed a form error within 15s.");
+    }
   }
 
   /** Must be the row's rendered "Dates" text (see formatDateRange below),
@@ -181,5 +208,42 @@ export class ApprovalsPage {
 
   async expectNotPending(needle: string): Promise<void> {
     await expect(this.page.getByText(needle)).toHaveCount(0);
+  }
+
+  /** Scopes to the exact-one reimbursement-claim row for this specific
+   * claim, via the truncated Claim ID column/link approvals/page.tsx now
+   * renders (see its own doc comment) — matching by date+amount can't
+   * disambiguate two claims that are otherwise identical (same date, same
+   * smallest-allowed test amount), confirmed live when two such claims
+   * landed in the same run (36359831264) and both timed out on a
+   * description that page never rendered in the first place. Uses
+   * toHaveCount's own auto-retry instead of a one-shot count() check, since
+   * the row can take a moment to appear after the Employee's own submit. */
+  private async reimbursementRowFor(claimId: string) {
+    const shortId = claimId.slice(0, 8);
+    const rows = this.page.getByRole("row", { name: new RegExp(escapeForRegExp(shortId)) });
+    await expect(rows, `Expected exactly one /approvals row for claim ${shortId}… — refusing to guess which row to act on`).toHaveCount(1, { timeout: 15_000 });
+    return rows.first();
+  }
+
+  async expectClaimPending(claimId: string): Promise<void> {
+    await this.reimbursementRowFor(claimId);
+  }
+
+  async approveClaim(claimId: string): Promise<void> {
+    this.page.once("dialog", (d) => d.accept());
+    await (await this.reimbursementRowFor(claimId)).getByRole("button", { name: "Approve", exact: true }).click();
+  }
+
+  async rejectClaim(claimId: string, reason: string): Promise<void> {
+    const scope = await this.reimbursementRowFor(claimId);
+    await scope.getByRole("button", { name: "Reject", exact: true }).click();
+    await scope.getByPlaceholder(/reason for rejecting/i).fill(reason);
+    await scope.getByRole("button", { name: /confirm reject/i }).click();
+  }
+
+  async expectClaimNotPending(claimId: string): Promise<void> {
+    const shortId = claimId.slice(0, 8);
+    await expect(this.page.getByRole("row", { name: new RegExp(escapeForRegExp(shortId)) })).toHaveCount(0);
   }
 }
