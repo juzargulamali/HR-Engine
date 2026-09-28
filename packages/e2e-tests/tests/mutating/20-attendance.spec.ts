@@ -125,10 +125,15 @@ test.describe("attendance and recovery leave @mutating", () => {
     await attendance.saveAll();
     await attendance.expectSavedWithRecoveryCredits(1);
 
+    // Read the balance BEFORE either decision. A failure to parse it here
+    // must fail the test outright, not skip with an annotation — there is
+    // no meaningful way to verify "the credit posted" without a real
+    // starting number to compare against.
     const employeeLeave = new LeavePage(employeePage);
     await employeeLeave.gotoList();
     const compBalanceBefore = await employeeLeave.getBalance("Comp-off");
     const numberBefore = compBalanceBefore.match(/[\d.]+/)?.[0];
+    expect(numberBefore, `Could not parse a "Comp-off" balance figure from: "${compBalanceBefore}"`).toBeDefined();
 
     const managerApprovals = new ApprovalsPage(managerPage);
     await managerApprovals.goto();
@@ -137,8 +142,23 @@ test.describe("attendance and recovery leave @mutating", () => {
     // Step 1's approval row is now decided; the chain advances to a NEW
     // approvals row for HR Admin (step 2) — the Manager should no longer
     // see this request as pending, proving the routing actually moved
-    // forward rather than just disappearing.
+    // forward rather than just disappearing. expectNotPending's own
+    // auto-retrying assertion is what actually waits for
+    // decide_leave_approval() to finish and /approvals to reflect it —
+    // approve() itself only dispatches the click, it doesn't wait for the
+    // server action's transition to complete.
     await managerApprovals.expectNotPending(date);
+
+    // Step 1 is only the "provisional release" — decide_leave_approval()
+    // never touches comp_day_ledger until HR Admin's step 2 final approval.
+    // A stale read here would prove nothing (a Server Component's HTML is
+    // baked in at request time), so this re-navigates to /leave for a
+    // genuinely fresh render rather than re-querying the page opened
+    // above, which still reflects its original request from before either
+    // decision.
+    await employeeLeave.gotoList();
+    const compBalanceAfterStep1 = await employeeLeave.getBalance("Comp-off");
+    expect(compBalanceAfterStep1, "Comp-off balance changed after only step 1 (manager) approval — the credit must not post until HR Admin's step 2").toBe(compBalanceBefore);
 
     const hrApprovals = new ApprovalsPage(hrAdminPage);
     await hrApprovals.goto();
@@ -152,16 +172,15 @@ test.describe("attendance and recovery leave @mutating", () => {
     // credited amount (1 day, from the >4h business_travel day above),
     // proving decide_leave_approval()'s HR-Admin-final-step ledger insert
     // actually ran, not just that the UI stopped showing the request.
-    if (numberBefore) {
-      await expect(async () => {
-        const compBalanceAfter = await employeeLeave.getBalance("Comp-off");
-        const numberAfter = compBalanceAfter.match(/[\d.]+/)?.[0];
-        expect(numberAfter, "Comp-off balance is no longer parseable after approval").toBeDefined();
-        expect(Number(numberAfter), "Comp-off balance did not increase by the approved recovery credit").toBe(Number(numberBefore) + 1);
-      }).toPass({ timeout: 10_000 });
-    } else {
-      test.info().annotations.push({ type: "skip-reason", description: `Could not parse a "Comp-off" balance figure from: "${compBalanceBefore}" — confirm the real balance-card selector/format on first live run.` });
-    }
+    // Same reload requirement as above — a fresh navigation, not a poll
+    // against the already-open page.
+    await employeeLeave.gotoList();
+    const compBalanceAfterStep2 = await employeeLeave.getBalance("Comp-off");
+    const numberAfterStep2 = compBalanceAfterStep2.match(/[\d.]+/)?.[0];
+    expect(numberAfterStep2, `Could not parse a "Comp-off" balance figure from: "${compBalanceAfterStep2}"`).toBeDefined();
+    expect(Number(numberAfterStep2), "Comp-off balance did not increase by exactly the approved recovery credit after HR Admin's final approval").toBe(
+      Number(numberBefore) + 1,
+    );
   });
 
   test("Recovery Leave: manager can reject at step 1, stopping the chain before HR Admin and before any credit posts", async ({
