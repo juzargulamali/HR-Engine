@@ -27,24 +27,45 @@ export default async function ApprovalsPage() {
   const timesheetIds = idsOf("timesheet");
   const letterIds = idsOf("generated_letter");
   const payrollRunIds = idsOf("payroll_export_run");
+  const recoveryCreditIds = idsOf("recovery_credit");
 
-  const [{ data: requests }, { data: claims }, { data: timesheets }, { data: letters }, { data: payrollRuns }] = await Promise.all([
-    leaveRequestIds.length > 0
-      ? supabase.from("leave_requests").select("id, employee_id, leave_type_code, start_date, end_date, total_days, reason").in("id", leaveRequestIds)
-      : Promise.resolve({ data: [] as never[] }),
-    claimIds.length > 0
-      ? supabase.from("reimbursement_claims").select("id, employee_id, claim_date, currency, total_amount").in("id", claimIds)
-      : Promise.resolve({ data: [] as never[] }),
-    timesheetIds.length > 0
-      ? supabase.from("timesheets").select("id, employee_id, period_start, period_end").in("id", timesheetIds)
-      : Promise.resolve({ data: [] as never[] }),
-    letterIds.length > 0
-      ? supabase.from("generated_letters").select("id, employee_id, template_id").in("id", letterIds)
-      : Promise.resolve({ data: [] as never[] }),
-    payrollRunIds.length > 0
-      ? supabase.from("payroll_export_runs").select("id, period_month, period_year").in("id", payrollRunIds)
-      : Promise.resolve({ data: [] as never[] }),
-  ]);
+  const [{ data: requests }, { data: claims }, { data: timesheets }, { data: letters }, { data: payrollRuns }, { data: recoveryRequests }] =
+    await Promise.all([
+      leaveRequestIds.length > 0
+        ? supabase.from("leave_requests").select("id, employee_id, leave_type_code, start_date, end_date, total_days, reason").in("id", leaveRequestIds)
+        : Promise.resolve({ data: [] as never[] }),
+      claimIds.length > 0
+        ? supabase.from("reimbursement_claims").select("id, employee_id, claim_date, currency, total_amount").in("id", claimIds)
+        : Promise.resolve({ data: [] as never[] }),
+      timesheetIds.length > 0
+        ? supabase.from("timesheets").select("id, employee_id, period_start, period_end").in("id", timesheetIds)
+        : Promise.resolve({ data: [] as never[] }),
+      letterIds.length > 0
+        ? supabase.from("generated_letters").select("id, employee_id, template_id").in("id", letterIds)
+        : Promise.resolve({ data: [] as never[] }),
+      payrollRunIds.length > 0
+        ? supabase.from("payroll_export_runs").select("id, period_month, period_year").in("id", payrollRunIds)
+        : Promise.resolve({ data: [] as never[] }),
+      recoveryCreditIds.length > 0
+        ? supabase
+            .from("recovery_credit_requests")
+            .select("id, employee_id, attendance_record_id, work_date, event_type, proposed_days")
+            .in("id", recoveryCreditIds)
+        : Promise.resolve({ data: [] as never[] }),
+    ]);
+
+  // recovery_credit_requests never exposes hours directly — "standard" days
+  // derive their credit from attendance_records.hours_worked,
+  // "overnight" ones from active_hours_after_midnight (see
+  // record_attendance_and_recovery()/record_overnight_recovery_credit() in
+  // schema.sql) — so the approver's hours figure has to come from a
+  // second, separate read of the underlying attendance row.
+  const attendanceRecordIds = [...new Set((recoveryRequests ?? []).map((r) => r.attendance_record_id))];
+  const { data: attendanceRecords } =
+    attendanceRecordIds.length > 0
+      ? await supabase.from("attendance_records").select("id, hours_worked, active_hours_after_midnight").in("id", attendanceRecordIds)
+      : { data: [] as never[] };
+  const attendanceById = new Map((attendanceRecords ?? []).map((a) => [a.id, a]));
 
   const templateIds = [...new Set((letters ?? []).map((l) => l.template_id))];
   const { data: templates } =
@@ -52,7 +73,9 @@ export default async function ApprovalsPage() {
   const templateName = new Map((templates ?? []).map((t) => [t.id, t.name]));
 
   const employeeIds = [
-    ...new Set([...(requests ?? []), ...(claims ?? []), ...(timesheets ?? []), ...(letters ?? [])].map((r) => r.employee_id)),
+    ...new Set(
+      [...(requests ?? []), ...(claims ?? []), ...(timesheets ?? []), ...(letters ?? []), ...(recoveryRequests ?? [])].map((r) => r.employee_id),
+    ),
   ];
   const { data: employees } =
     employeeIds.length > 0
@@ -107,19 +130,41 @@ export default async function ApprovalsPage() {
   const timesheetById = new Map((timesheets ?? []).map((t) => [t.id, t]));
   const letterById = new Map((letters ?? []).map((l) => [l.id, l]));
   const payrollRunById = new Map((payrollRuns ?? []).map((p) => [p.id, p]));
+  const recoveryRequestById = new Map((recoveryRequests ?? []).map((r) => [r.id, r]));
 
   const leaveApprovals = (approvals ?? []).filter((a) => a.entity_type === "leave_request" && requestById.has(a.entity_id));
   const claimApprovals = (approvals ?? []).filter((a) => a.entity_type === "reimbursement_claim" && claimById.has(a.entity_id));
   const timesheetApprovals = (approvals ?? []).filter((a) => a.entity_type === "timesheet" && timesheetById.has(a.entity_id));
   const letterApprovals = (approvals ?? []).filter((a) => a.entity_type === "generated_letter" && letterById.has(a.entity_id));
   const payrollApprovals = (approvals ?? []).filter((a) => a.entity_type === "payroll_export_run" && payrollRunById.has(a.entity_id));
+  const recoveryApprovals = (approvals ?? []).filter((a) => a.entity_type === "recovery_credit" && recoveryRequestById.has(a.entity_id));
 
   const nothingPending =
     leaveApprovals.length === 0 &&
     claimApprovals.length === 0 &&
     timesheetApprovals.length === 0 &&
     letterApprovals.length === 0 &&
-    payrollApprovals.length === 0;
+    payrollApprovals.length === 0 &&
+    recoveryApprovals.length === 0;
+
+  // Recovery Leave earning is a fixed, seeded two-step workflow — step 1
+  // (Line Manager, provisional) then step 2 (HR Admin, the only point that
+  // posts the actual comp_day_ledger credit) — see
+  // seed_default_approval_workflows() in schema.sql. Deriving the label
+  // straight from this approval row's own step_order avoids a further
+  // join just to read back approval_workflow_steps.approver_type; the
+  // fallback covers a future workflow edit changing that fixed shape.
+  function recoveryStepLabel(stepOrder: number): string {
+    if (stepOrder === 1) return "Step 1 of 2 — Line Manager (provisional)";
+    if (stepOrder === 2) return "Step 2 of 2 — HR Admin (final, posts the credit)";
+    return `Step ${stepOrder}`;
+  }
+
+  function recoveryHours(recoveryRequest: { attendance_record_id: string; event_type: string }): string {
+    const attendance = attendanceById.get(recoveryRequest.attendance_record_id);
+    const hours = recoveryRequest.event_type === "overnight" ? attendance?.active_hours_after_midnight : attendance?.hours_worked;
+    return hours === null || hours === undefined ? "—" : `${hours}h`;
+  }
 
   return (
     <div className="space-y-6">
@@ -351,6 +396,52 @@ export default async function ApprovalsPage() {
                       <TableCell>
                         <div className="space-y-0.5">
                           <StatusBadge status="pending_approval" />
+                          <p className="text-xs text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <DecisionButtons approvalId={a.id} />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {recoveryApprovals.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Recovery Leave credits</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Employee</TableHead>
+                  <TableHead>Work date</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Hours</TableHead>
+                  <TableHead>Credit</TableHead>
+                  <TableHead>Approval step</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recoveryApprovals.map((a) => {
+                  const recoveryRequest = recoveryRequestById.get(a.entity_id)!;
+                  return (
+                    <TableRow key={a.id}>
+                      <TableCell>{employeeName(recoveryRequest.employee_id)}</TableCell>
+                      <TableCell>{recoveryRequest.work_date}</TableCell>
+                      <TableCell className="capitalize">{recoveryRequest.event_type}</TableCell>
+                      <TableCell>{recoveryHours(recoveryRequest)}</TableCell>
+                      <TableCell>{recoveryRequest.proposed_days} day(s)</TableCell>
+                      <TableCell>
+                        <div className="space-y-0.5">
+                          <p className="text-sm">{recoveryStepLabel(a.step_order)}</p>
                           <p className="text-xs text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
                         </div>
                       </TableCell>
