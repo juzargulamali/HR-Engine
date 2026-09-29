@@ -872,6 +872,7 @@ export interface Database {
           created_by: string;
           comp_day_ledger_id: string | null;
           created_at: string;
+          project_id: string | null;
         };
         Insert: {
           id?: string;
@@ -882,6 +883,7 @@ export interface Database {
           proposed_days: number;
           status?: RequestStatus;
           created_by: string;
+          project_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["recovery_credit_requests"]["Insert"]> & {
           decided_at?: string | null;
@@ -1295,7 +1297,7 @@ export interface Database {
         Returns: Record<string, unknown> | null;
       };
       resolve_approver: {
-        Args: { p_approver_type: string; p_employee_id: string };
+        Args: { p_approver_type: string; p_employee_id: string; p_entity_id?: string | null };
         Returns: string | null;
       };
       get_employee_manager_name: {
@@ -1320,6 +1322,7 @@ export interface Database {
           p_work_date: string;
           p_completed_normal_scheduled_day: boolean;
           p_active_hours_after_midnight: number;
+          p_project_id: string | null;
         };
         Returns: { credited: boolean; credit_days: number }[];
       };
@@ -1401,7 +1404,13 @@ export interface Database {
       record_attendance_and_recovery: {
         Args: {
           p_work_date: string;
-          p_rows: { employee_id: string; status: string; work_mode: string | null; hours_worked: number | null }[];
+          p_rows: {
+            employee_id: string;
+            status: string;
+            work_mode: string | null;
+            hours_worked: number | null;
+            project_id?: string | null;
+          }[];
         };
         Returns: { attendance_employee_id: string; credited: boolean; reversed: boolean; needs_policy_review: boolean }[];
       };

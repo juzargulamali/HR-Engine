@@ -65,6 +65,29 @@ export class AttendancePage {
     await row.getByRole("spinbutton").fill(String(hours));
   }
 
+  /**
+   * Selects the project a recovery-day's work was for, by its visible name
+   * — required (validate_recovery_credit_project() in schema.sql) before a
+   * Present row on a recovery day can earn a credit request at all. The
+   * register's third combobox (after status, work mode); if the employee
+   * has only one active allocation for this date it's already the default
+   * selection, but this suite calls it explicitly rather than relying on
+   * that default. Throws if the employee has no allocation option at all
+   * (the column renders "No allocation" text instead of a <select> then) —
+   * the one-time fixture documented in README.md must be set up first.
+   */
+  async setProject(employeeName: string, projectName: string): Promise<void> {
+    const row = await this.uniqueRowFor(employeeName);
+    const comboboxes = row.getByRole("combobox");
+    const count = await comboboxes.count();
+    if (count < 3) {
+      throw new Error(
+        `"${employeeName}" has no project allocation option on this date's register — cannot select project "${projectName}". Set up the one-time E2E project/allocation fixture first (see README.md's "Recovery Leave PM/HR-owner fixture" section).`,
+      );
+    }
+    await comboboxes.nth(2).selectOption({ label: projectName });
+  }
+
   async saveAll(): Promise<void> {
     await this.page.getByRole("button", { name: /save all/i }).click();
   }

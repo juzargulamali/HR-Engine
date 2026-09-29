@@ -34,6 +34,13 @@ const EMPLOYEE_MANAGER = "00000000-0000-0000-0000-00000000ab21";
 const EMPLOYEE_REPORT = "00000000-0000-0000-0000-00000000ab22";
 const EMPLOYEE_PEER = "00000000-0000-0000-0000-00000000ab23";
 
+// A recovery-day request now requires HR to select the specific project the
+// work was for (Recovery Leave routing Stage 1 — see
+// supabase/migrations/20261106000000_recovery_leave_pm_hr_owner_stage1.sql's
+// validate_recovery_credit_project()), independent of which routing rule
+// actually decides who approves it. Plays no role in approval routing here.
+const RECOVERY_PROJECT_ID = "00000000-0000-0000-0000-00000000ab30";
+
 describe("Phase 2b row-level security: overnight recovery credit + termination forfeiture", () => {
   const db = new RlsTestDatabase();
 
@@ -78,6 +85,11 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
         ('00000000-0000-0000-0000-00000000ab90', 'annual', 'Annual Leave', 'monthly_accrual');
       insert into deduction_priority_rules (country_code, leave_type_code, source_ledger, priority_order, effective_from)
         values ('ZZ', 'recovery', 'comp_day', 1, '2020-01-01');
+
+      insert into projects (id, company_id, code, name, manager_id)
+        values ('${RECOVERY_PROJECT_ID}', '${COMPANY_A}', 'P2B-RECOVERY', 'Recovery credit fixture project', '${EMPLOYEE_MANAGER}');
+      insert into project_allocations (employee_id, project_id, allocation_percent, start_date)
+        values ('${EMPLOYEE_REPORT}', '${RECOVERY_PROJECT_ID}', 100, '2020-01-01');
     `);
   }, 30_000);
 
@@ -116,7 +128,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     it("requires an existing attendance record for the day first", async () => {
       await expect(
         db.asUser(USER_HR, (query) =>
-          query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-07-01"]),
+          query("select * from record_overnight_recovery_credit($1, $2, true, 5, $3)", [EMPLOYEE_REPORT, "2026-07-01", RECOVERY_PROJECT_ID]),
         ),
       ).rejects.toThrow(/Record ordinary attendance/);
     });
@@ -124,7 +136,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     it("grants nothing (no request created) when work ends exactly at midnight (0 active hours after midnight)", async () => {
       await seedAttendance("2026-07-02");
       await db.asUser(USER_HR, async (query) => {
-        const { rows } = await query("select * from record_overnight_recovery_credit($1, $2, true, 0)", [EMPLOYEE_REPORT, "2026-07-02"]);
+        const { rows } = await query("select * from record_overnight_recovery_credit($1, $2, true, 0, $3)", [EMPLOYEE_REPORT, "2026-07-02", null]);
         expect(rows).toEqual([{ credited: false, credit_days: "0" }]);
 
         const request = await query(
@@ -138,7 +150,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     it("creates a 0.5-day request for continuing to 2:00am (2 active hours after midnight)", async () => {
       await seedAttendance("2026-07-03");
       const { rows } = await db.asUser(USER_HR, (query) =>
-        query("select * from record_overnight_recovery_credit($1, $2, true, 2)", [EMPLOYEE_REPORT, "2026-07-03"]),
+        query("select * from record_overnight_recovery_credit($1, $2, true, 2, $3)", [EMPLOYEE_REPORT, "2026-07-03", RECOVERY_PROJECT_ID]),
       );
       expect(rows).toEqual([{ credited: true, credit_days: "0.5" }]);
     });
@@ -146,7 +158,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     it("creates a 0.5-day request for continuing to exactly 4:00am — the inclusive boundary", async () => {
       await seedAttendance("2026-07-04");
       const { rows } = await db.asUser(USER_HR, (query) =>
-        query("select * from record_overnight_recovery_credit($1, $2, true, 4)", [EMPLOYEE_REPORT, "2026-07-04"]),
+        query("select * from record_overnight_recovery_credit($1, $2, true, 4, $3)", [EMPLOYEE_REPORT, "2026-07-04", RECOVERY_PROJECT_ID]),
       );
       expect(rows).toEqual([{ credited: true, credit_days: "0.5" }]);
     });
@@ -154,7 +166,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     it("creates a 1-day request for continuing to 5:00am (over the 4-hour threshold), not an immediate ledger credit", async () => {
       await seedAttendance("2026-07-05");
       await db.asUser(USER_HR, async (query) => {
-        const { rows } = await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-07-05"]);
+        const { rows } = await query("select * from record_overnight_recovery_credit($1, $2, true, 5, $3)", [EMPLOYEE_REPORT, "2026-07-05", RECOVERY_PROJECT_ID]);
         expect(rows).toEqual([{ credited: true, credit_days: "1" }]);
 
         const recordId = (
@@ -176,7 +188,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     it("requires the normal scheduled day to have been completed first, regardless of hours", async () => {
       await seedAttendance("2026-07-06");
       const { rows } = await db.asUser(USER_HR, (query) =>
-        query("select * from record_overnight_recovery_credit($1, $2, false, 5)", [EMPLOYEE_REPORT, "2026-07-06"]),
+        query("select * from record_overnight_recovery_credit($1, $2, false, 5, $3)", [EMPLOYEE_REPORT, "2026-07-06", null]),
       );
       expect(rows).toEqual([{ credited: false, credit_days: "0" }]);
     });
@@ -184,17 +196,17 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     it("rejects a negative active_hours_after_midnight value", async () => {
       await seedAttendance("2026-07-07");
       await expect(
-        db.asUser(USER_HR, (query) => query("select * from record_overnight_recovery_credit($1, $2, true, -1)", [EMPLOYEE_REPORT, "2026-07-07"])),
+        db.asUser(USER_HR, (query) => query("select * from record_overnight_recovery_credit($1, $2, true, -1, $3)", [EMPLOYEE_REPORT, "2026-07-07", null])),
       ).rejects.toThrow(/non-negative/);
     });
 
     it("is idempotent under a repeated (double-submitted) call — never creates a second request for the same day", async () => {
       await seedAttendance("2026-07-08");
       await db.asUser(USER_HR, async (query) => {
-        const first = await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-07-08"]);
+        const first = await query("select * from record_overnight_recovery_credit($1, $2, true, 5, $3)", [EMPLOYEE_REPORT, "2026-07-08", RECOVERY_PROJECT_ID]);
         expect(first.rows).toEqual([{ credited: true, credit_days: "1" }]);
 
-        const second = await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-07-08"]);
+        const second = await query("select * from record_overnight_recovery_credit($1, $2, true, 5, $3)", [EMPLOYEE_REPORT, "2026-07-08", RECOVERY_PROJECT_ID]);
         expect(second.rows).toEqual([{ credited: false, credit_days: "0" }]);
 
         const requests = await query(
@@ -216,10 +228,10 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
       await db.asUser(USER_HR, async (query) => {
         await query("select * from record_attendance_and_recovery($1, $2::jsonb)", [
           "2026-07-11",
-          JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }]),
+          JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8, project_id: RECOVERY_PROJECT_ID }]),
         ]);
 
-        const { rows } = await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-07-11"]);
+        const { rows } = await query("select * from record_overnight_recovery_credit($1, $2, true, 5, $3)", [EMPLOYEE_REPORT, "2026-07-11", RECOVERY_PROJECT_ID]);
         expect(rows).toEqual([{ credited: false, credit_days: "0" }]);
 
         const recordId = (
@@ -233,7 +245,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     it("lets the employee's own manager record an overnight credit (and does not treat this as self-approval)", async () => {
       await seedAttendance("2026-07-09");
       const { rows } = await db.asUser(USER_MANAGER, (query) =>
-        query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-07-09"]),
+        query("select * from record_overnight_recovery_credit($1, $2, true, 5, $3)", [EMPLOYEE_REPORT, "2026-07-09", RECOVERY_PROJECT_ID]),
       );
       expect(rows).toEqual([{ credited: true, credit_days: "1" }]);
     });
@@ -241,14 +253,14 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     it("blocks an unrelated peer (not HR Admin, not this employee's manager) from recording a credit", async () => {
       await seedAttendance("2026-07-10");
       await expect(
-        db.asUser(USER_PEER, (query) => query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-07-10"])),
+        db.asUser(USER_PEER, (query) => query("select * from record_overnight_recovery_credit($1, $2, true, 5, $3)", [EMPLOYEE_REPORT, "2026-07-10", RECOVERY_PROJECT_ID])),
       ).rejects.toThrow(/Only HR Admin or this employee's manager/);
     });
 
     it("blocks the employee from recording their own overnight credit (never trust a self-supplied flag)", async () => {
       await seedAttendance("2026-07-12");
       await expect(
-        db.asUser(USER_REPORT, (query) => query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-07-12"])),
+        db.asUser(USER_REPORT, (query) => query("select * from record_overnight_recovery_credit($1, $2, true, 5, $3)", [EMPLOYEE_REPORT, "2026-07-12", RECOVERY_PROJECT_ID])),
       ).rejects.toThrow(/Only HR Admin or this employee's manager/);
     });
   });
@@ -257,7 +269,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     it("manager approval alone (step 1) never posts a ledger credit — only marks the request pending HR", async () => {
       await db.seed(`insert into attendance_records (employee_id, work_date, status) values ('${EMPLOYEE_REPORT}', '2026-08-01', 'present');`);
       await db.asUser(USER_HR, async (query) => {
-        await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-08-01"]);
+        await query("select * from record_overnight_recovery_credit($1, $2, true, 5, $3)", [EMPLOYEE_REPORT, "2026-08-01", RECOVERY_PROJECT_ID]);
         const recordId = (
           await query("select id from attendance_records where employee_id = $1 and work_date = '2026-08-01'", [EMPLOYEE_REPORT])
         ).rows[0]?.id;
@@ -281,7 +293,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     it("HR Admin's final approval credits exactly once, with the overnight source and 180-day expiry", async () => {
       await db.seed(`insert into attendance_records (employee_id, work_date, status) values ('${EMPLOYEE_REPORT}', '2026-08-08', 'present');`);
       await db.asUser(USER_HR, async (query) => {
-        await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-08-08"]);
+        await query("select * from record_overnight_recovery_credit($1, $2, true, 5, $3)", [EMPLOYEE_REPORT, "2026-08-08", RECOVERY_PROJECT_ID]);
         const recordId = (
           await query("select id from attendance_records where employee_id = $1 and work_date = '2026-08-08'", [EMPLOYEE_REPORT])
         ).rows[0]?.id;
@@ -308,7 +320,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     it("rejection at either step never posts a credit", async () => {
       await db.seed(`insert into attendance_records (employee_id, work_date, status) values ('${EMPLOYEE_REPORT}', '2026-08-15', 'present');`);
       await db.asUser(USER_HR, async (query) => {
-        await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-08-15"]);
+        await query("select * from record_overnight_recovery_credit($1, $2, true, 5, $3)", [EMPLOYEE_REPORT, "2026-08-15", RECOVERY_PROJECT_ID]);
         const recordId = (
           await query("select id from attendance_records where employee_id = $1 and work_date = '2026-08-15'", [EMPLOYEE_REPORT])
         ).rows[0]?.id;
@@ -338,7 +350,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     it("blocks the employee from approving their own recovery credit request", async () => {
       await db.seed(`insert into attendance_records (employee_id, work_date, status) values ('${EMPLOYEE_REPORT}', '2026-08-22', 'present');`);
       const requestId = await db.asUserCommit(USER_HR, async (query) => {
-        await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-08-22"]);
+        await query("select * from record_overnight_recovery_credit($1, $2, true, 5, $3)", [EMPLOYEE_REPORT, "2026-08-22", RECOVERY_PROJECT_ID]);
         const recordId = (
           await query("select id from attendance_records where employee_id = $1 and work_date = '2026-08-22'", [EMPLOYEE_REPORT])
         ).rows[0]?.id;
@@ -358,7 +370,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     it("rejects a repeated decision on the same approval (idempotency/duplicate-decision guard)", async () => {
       await db.seed(`insert into attendance_records (employee_id, work_date, status) values ('${EMPLOYEE_REPORT}', '2026-08-23', 'present');`);
       const requestId = await db.asUserCommit(USER_HR, async (query) => {
-        await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-08-23"]);
+        await query("select * from record_overnight_recovery_credit($1, $2, true, 5, $3)", [EMPLOYEE_REPORT, "2026-08-23", RECOVERY_PROJECT_ID]);
         const recordId = (
           await query("select id from attendance_records where employee_id = $1 and work_date = '2026-08-23'", [EMPLOYEE_REPORT])
         ).rows[0]?.id;
@@ -1129,6 +1141,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
       companyId: string;
       hrUserId: string;
       reportEmployeeId: string;
+      projectId: string;
     }
 
     async function seedRegionOrg(countryCode: string, idSuffix: string): Promise<RegionOrg> {
@@ -1138,6 +1151,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
       const hrUserId = `00000000-0000-0000-0000-00000000${idSuffix}3`;
       const managerEmployeeId = `00000000-0000-0000-0000-00000000${idSuffix}4`;
       const reportEmployeeId = `00000000-0000-0000-0000-00000000${idSuffix}5`;
+      const projectId = `00000000-0000-0000-0000-00000000${idSuffix}6`;
 
       await db.seed(`
         insert into auth.users (id, email) values
@@ -1154,16 +1168,21 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
         update employees set manager_id = '${managerEmployeeId}' where id = '${reportEmployeeId}';
 
         insert into user_roles (user_id, role, company_id) values ('${hrUserId}', 'hr_admin', '${companyId}');
+
+        insert into projects (id, company_id, code, name, manager_id)
+          values ('${projectId}', '${companyId}', 'WW-${idSuffix}-PRJ', 'Workweek fixture project', '${managerEmployeeId}');
+        insert into project_allocations (employee_id, project_id, allocation_percent, start_date)
+          values ('${reportEmployeeId}', '${projectId}', 100, '2020-01-01');
       `);
 
-      return { companyId, hrUserId, reportEmployeeId };
+      return { companyId, hrUserId, reportEmployeeId, projectId };
     }
 
     async function isRecoveryEligible(org: RegionOrg, workDate: string): Promise<boolean> {
       const { rows } = await db.asUser(org.hrUserId, (query) =>
         query("select * from record_attendance_and_recovery($1, $2::jsonb)", [
           workDate,
-          JSON.stringify([{ employee_id: org.reportEmployeeId, status: "present", hours_worked: 8 }]),
+          JSON.stringify([{ employee_id: org.reportEmployeeId, status: "present", hours_worked: 8, project_id: org.projectId }]),
         ]),
       );
       // credited=true only ever happens for a genuine recovery day (see

@@ -5,6 +5,14 @@ import { ApprovalsPage, LeavePage } from "../../src/pages/LeavePage";
 import { testWorkday, testWeekendDay, tagNote } from "../../src/recordTag";
 import { getEmployeeNameByAuthEmail } from "../../src/identity";
 
+// The dedicated E2E QA project, created once via the real UI by an HR Admin
+// — see README.md's "Recovery Leave PM/HR-owner fixture" section. Recording
+// ANY recovery-day request now requires HR to select the specific project
+// that work was for (validate_recovery_credit_project() in schema.sql),
+// independent of Stage 2's routing cutover — this suite selects it by its
+// exact name, matching the bulk register's own "Project" picker.
+const E2E_RECOVERY_PROJECT_NAME = "E2E QA Recovery Project";
+
 /**
  * Attendance is HR-Admin bulk entry for the whole company (see
  * AttendancePage.ts's header comment) — there is no individual
@@ -82,6 +90,7 @@ test.describe("attendance and recovery leave @mutating", () => {
     await attendance.goto({ date });
     await attendance.setStatus(employeeName, "present");
     await attendance.setWorkModeAndHours(employeeName, "business_travel", 8); // >4h => 1 full recovery day, per record_attendance_and_recovery()
+    await attendance.setProject(employeeName, E2E_RECOVERY_PROJECT_NAME);
     await attendance.saveAll();
 
     // This save touches ONLY this employee's row (bulkRecordAttendance only
@@ -176,6 +185,7 @@ test.describe("attendance and recovery leave @mutating", () => {
     // those would silently test nothing.
     await attendance.setStatus(employeeName, "present");
     await attendance.setWorkModeAndHours(employeeName, "business_travel", 8); // >4h => 1 full recovery day
+    await attendance.setProject(employeeName, E2E_RECOVERY_PROJECT_NAME);
     await attendance.saveAll();
     await attendance.expectSavedWithRecoveryCredits(1);
 
@@ -283,6 +293,7 @@ test.describe("attendance and recovery leave @mutating", () => {
     await attendance.goto({ date });
     await attendance.setStatus(employeeName, "present");
     await attendance.setWorkModeAndHours(employeeName, "business_travel", 8);
+    await attendance.setProject(employeeName, E2E_RECOVERY_PROJECT_NAME);
     await attendance.saveAll();
     await attendance.expectSavedWithRecoveryCredits(1);
 

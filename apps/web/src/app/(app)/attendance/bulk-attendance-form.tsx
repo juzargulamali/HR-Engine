@@ -14,11 +14,21 @@ interface Row {
   status: string;
   workMode: string | null;
   hoursWorked: string | null;
+  /** This employee's project allocations covering THIS register's own
+   * workDate — the only valid choices for validate_recovery_credit_project()
+   * (schema.sql), never "whichever allocation is active today". */
+  projects: { id: string; name: string }[];
 }
 
 export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate: string; rows: Row[]; isRecoveryDay: boolean }) {
   const [edits, setEdits] = useState(
-    () => new Map(rows.map((r) => [r.employeeId, { status: r.status, workMode: r.workMode ?? "", hoursWorked: r.hoursWorked ?? "" }])),
+    () =>
+      new Map(
+        rows.map((r) => [
+          r.employeeId,
+          { status: r.status, workMode: r.workMode ?? "", hoursWorked: r.hoursWorked ?? "", projectId: r.projects[0]?.id ?? "" },
+        ]),
+      ),
   );
   // Which employees the admin actually touched this session — Save All only
   // sends these, never every row in the register. Without this, opening a
@@ -30,7 +40,7 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<{ error: string | null; creditedCount: number } | null>(null);
 
-  function updateRow(employeeId: string, patch: Partial<{ status: string; workMode: string; hoursWorked: string }>) {
+  function updateRow(employeeId: string, patch: Partial<{ status: string; workMode: string; hoursWorked: string; projectId: string }>) {
     setEdits((prev) => {
       const next = new Map(prev);
       next.set(employeeId, { ...next.get(employeeId)!, ...patch });
@@ -61,6 +71,7 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
             status: edit.status,
             workMode: edit.workMode === "" ? undefined : edit.workMode,
             hoursWorked: edit.hoursWorked === "" ? undefined : Number(edit.hoursWorked),
+            projectId: edit.projectId === "" ? undefined : edit.projectId,
           };
         }),
       });
@@ -78,6 +89,7 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
             <TableHead>Status</TableHead>
             <TableHead>Work mode</TableHead>
             <TableHead>Hours</TableHead>
+            <TableHead>Project</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -124,6 +136,25 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
                     className="h-8 w-20 text-xs"
                   />
                 </TableCell>
+                <TableCell>
+                  {r.projects.length > 0 ? (
+                    <Select
+                      value={edit.projectId}
+                      onChange={(e) => updateRow(r.employeeId, { projectId: e.target.value })}
+                      className="h-8 w-40 text-xs"
+                    >
+                      {r.projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <span className="text-xs text-muted-foreground" title="Required before a recovery-day Present here can be saved">
+                      No allocation
+                    </span>
+                  )}
+                </TableCell>
               </TableRow>
             );
           })}
@@ -133,7 +164,8 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
       {isRecoveryDay ? (
         <p className="text-xs text-muted-foreground">
           Anyone marked Present today may earn a recovery day, per your country&apos;s policy — the exact credit (or
-          whether one applies at all) is decided when you save, not shown here in advance.
+          whether one applies at all) is decided when you save, not shown here in advance. A Project must be selected
+          for that credit request to be recorded — assign an allocation first if someone shows &quot;No allocation&quot;.
         </p>
       ) : null}
 

@@ -22,26 +22,43 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
  */
 export async function LeaveSection({ employeeId, canRecordOvernightRecovery = false }: { employeeId: string; canRecordOvernightRecovery?: boolean }) {
   const supabase = await createClient();
-  const [{ data: leaveBalances }, { data: compBalance }, { data: requests }, { data: recoveryCreditRequests }] = await Promise.all([
-    supabase.from("leave_balances").select("leave_type_code, balance_days").eq("employee_id", employeeId),
-    supabase.from("comp_day_balances").select("balance_days").eq("employee_id", employeeId).maybeSingle(),
-    supabase
-      .from("leave_requests")
-      .select("id, leave_type_code, start_date, end_date, total_days, status")
-      .eq("employee_id", employeeId)
-      .order("start_date", { ascending: false })
-      .limit(20),
-    // Recovery Leave EARNING status — a separate approval chain from the
-    // leave_requests table above (which only covers CONSUMING an
-    // already-earned day). RLS (recovery_credit_requests_select) already
-    // scopes this to the employee themselves, their manager, or HR Admin.
-    supabase
-      .from("recovery_credit_requests")
-      .select("id, work_date, event_type, proposed_days, status")
-      .eq("employee_id", employeeId)
-      .order("work_date", { ascending: false })
-      .limit(20),
-  ]);
+  const [{ data: leaveBalances }, { data: compBalance }, { data: requests }, { data: recoveryCreditRequests }, { data: allocationRows }] =
+    await Promise.all([
+      supabase.from("leave_balances").select("leave_type_code, balance_days").eq("employee_id", employeeId),
+      supabase.from("comp_day_balances").select("balance_days").eq("employee_id", employeeId).maybeSingle(),
+      supabase
+        .from("leave_requests")
+        .select("id, leave_type_code, start_date, end_date, total_days, status")
+        .eq("employee_id", employeeId)
+        .order("start_date", { ascending: false })
+        .limit(20),
+      // Recovery Leave EARNING status — a separate approval chain from the
+      // leave_requests table above (which only covers CONSUMING an
+      // already-earned day). RLS (recovery_credit_requests_select) already
+      // scopes this to the employee themselves, their manager, or HR Admin.
+      supabase
+        .from("recovery_credit_requests")
+        .select("id, work_date, event_type, proposed_days, status, project_id, projects(name)")
+        .eq("employee_id", employeeId)
+        .order("work_date", { ascending: false })
+        .limit(20),
+      // Every project this employee has ever been allocated to — only ever
+      // needed for the overnight-recovery form's picker below (canRecordOvernightRecovery),
+      // but cheap enough to fetch unconditionally rather than adding a
+      // second lazy branch.
+      supabase
+        .from("project_allocations")
+        .select("project_id, start_date, end_date, projects(name)")
+        .eq("employee_id", employeeId)
+        .order("start_date", { ascending: false }),
+    ]);
+
+  const allocations = (allocationRows ?? []).map((a) => ({
+    projectId: a.project_id,
+    projectName: (a.projects as unknown as { name: string } | null)?.name ?? "—",
+    startDate: a.start_date,
+    endDate: a.end_date,
+  }));
 
   return (
     <div className="space-y-4">
@@ -101,6 +118,7 @@ export async function LeaveSection({ employeeId, canRecordOvernightRecovery = fa
             <TableRow>
               <TableHead>Date</TableHead>
               <TableHead>Type</TableHead>
+              <TableHead>Project</TableHead>
               <TableHead>Days</TableHead>
               <TableHead>Status</TableHead>
             </TableRow>
@@ -110,6 +128,7 @@ export async function LeaveSection({ employeeId, canRecordOvernightRecovery = fa
               <TableRow key={r.id}>
                 <TableCell>{r.work_date}</TableCell>
                 <TableCell className="capitalize">{r.event_type}</TableCell>
+                <TableCell>{(r.projects as unknown as { name: string } | null)?.name ?? "—"}</TableCell>
                 <TableCell>{r.proposed_days}</TableCell>
                 <TableCell>
                   <Badge variant={STATUS_VARIANT[r.status] ?? "outline"}>{r.status.replace(/_/g, " ")}</Badge>
@@ -118,7 +137,7 @@ export async function LeaveSection({ employeeId, canRecordOvernightRecovery = fa
             ))}
             {(recoveryCreditRequests ?? []).length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4}>
+                <TableCell colSpan={5}>
                   <EmptyState dense title="No recovery credit requests yet." />
                 </TableCell>
               </TableRow>
@@ -127,7 +146,7 @@ export async function LeaveSection({ employeeId, canRecordOvernightRecovery = fa
         </Table>
       </div>
 
-      {canRecordOvernightRecovery ? <OvernightRecoveryForm employeeId={employeeId} /> : null}
+      {canRecordOvernightRecovery ? <OvernightRecoveryForm employeeId={employeeId} allocations={allocations} /> : null}
     </div>
   );
 }

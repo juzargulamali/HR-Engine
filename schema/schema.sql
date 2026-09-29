@@ -799,6 +799,9 @@ create table recovery_credit_requests (
   created_by            uuid not null,
   comp_day_ledger_id    uuid references comp_day_ledger(id),
   created_at            timestamptz not null default now()
+  -- project_id (references projects, added below once that table exists in
+  -- this file's declaration order) is added via ALTER TABLE right after the
+  -- projects table's own definition — see the comment there.
 );
 
 create index idx_recovery_credit_requests_employee on recovery_credit_requests(employee_id);
@@ -885,10 +888,29 @@ create table projects (
   -- recovery_leave_pm_hr_owner_stage2_cutover.sql). NULL means "not yet
   -- assigned"; resolve_approver() returns NULL for it, and
   -- create_initial_approval()/decide_leave_approval() already hard-stop
-  -- with a clear error on a NULL approver.
+  -- with a clear error on a NULL approver. Validated at write time by
+  -- validate_project_manager_is_active_and_same_company() (below): must
+  -- reference a currently active employee in THIS SAME company, or be
+  -- NULL — no role is required of a project manager, same precedent as
+  -- employees.manager_id itself.
   manager_id   uuid references employees(id),
   unique (company_id, code)
 );
+
+-- The SPECIFIC project a recovery day's work was actually for, chosen by
+-- HR at creation time (validate_recovery_credit_project(), called from
+-- record_attendance_and_recovery()/record_overnight_recovery_credit()) —
+-- never auto-derived from "whichever allocation has the highest percentage
+-- today", since an employee can be allocated to more than one project and
+-- the correct one for THIS particular day is whichever they actually
+-- worked, which only HR attests to. Snapshotted here (immutable once set —
+-- neither RPC ever updates it) so resolve_approver('project_manager', ...)
+-- always resolves against the SAME project this request was created for,
+-- even if the employee's allocations or the project's manager change
+-- later. Nullable only because rows created before this column existed
+-- have no value to backfill — every row created by either RPC from here on
+-- requires one.
+alter table recovery_credit_requests add column project_id uuid references projects(id);
 
 create table project_allocations (
   id                uuid primary key default gen_random_uuid(),
@@ -900,6 +922,105 @@ create table project_allocations (
 );
 
 create index idx_project_allocations_employee on project_allocations(employee_id);
+
+-- projects.manager_id must reference a currently active employee IN THE
+-- SAME COMPANY as the project, or be NULL — no role is required of a
+-- project manager (same precedent as employees.manager_id itself, which
+-- also requires no particular role). Mirrors
+-- validate_hr_owner_is_active_hr_admin()'s own shape below. SECURITY
+-- DEFINER: this must give the SAME, accurate answer regardless of whether
+-- the writer's own RLS visibility happens to include the referenced
+-- employee (e.g. an HR Admin in one company cannot normally SELECT another
+-- company's employee row at all) — without it, a cross-company reference
+-- would be rejected for the wrong reason ("no such active employee" instead
+-- of "different company"), since the underlying SELECT would simply find
+-- no visible row.
+create or replace function validate_project_manager_is_active_and_same_company()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_manager record;
+begin
+  if NEW.manager_id is null then
+    return NEW;
+  end if;
+  select id, company_id, employment_status, deleted_at into v_manager from employees where id = NEW.manager_id;
+  if v_manager.id is null or v_manager.deleted_at is not null or v_manager.employment_status = 'terminated' then
+    raise exception 'manager_id (%) must reference a currently active employee.', NEW.manager_id;
+  end if;
+  if v_manager.company_id is distinct from NEW.company_id then
+    raise exception 'manager_id (%) must belong to the same company as the project.', NEW.manager_id;
+  end if;
+  return NEW;
+end;
+$$;
+
+create trigger projects_validate_manager
+  before insert or update of manager_id on projects
+  for each row execute function validate_project_manager_is_active_and_same_company();
+
+-- Server-side gate shared by record_attendance_and_recovery() and
+-- record_overnight_recovery_credit(): the project HR selects for a
+-- recovery-day request must (1) belong to the SAME company as the
+-- employee, (2) have an active project_allocations row for this employee
+-- covering the ACTUAL work date (never current_date — this is called at
+-- creation time for a day that may be in the past OR, for this suite's own
+-- synthetic E2E dates, the future), and (3) currently have an active
+-- Project Manager in that same company. Raises a specific, actionable
+-- exception naming which check failed rather than a generic failure,
+-- matching create_initial_approval()'s own "no approver could be resolved"
+-- precedent. Not security definer: it only ever runs from inside the two
+-- (already security definer) RPCs that call it, so it executes under
+-- their already-elevated privileges; called directly by a plain
+-- authenticated user it would just be an ordinary RLS-checked read.
+create or replace function validate_recovery_credit_project(p_employee_id uuid, p_project_id uuid, p_work_date date)
+returns void
+language plpgsql
+as $$
+declare
+  v_employee_company_id uuid;
+  v_project record;
+  v_manager record;
+  v_allocation_exists boolean;
+begin
+  if p_project_id is null then
+    raise exception 'A project must be selected for this recovery-day request.';
+  end if;
+
+  select company_id into v_employee_company_id from employees where id = p_employee_id;
+
+  select id, company_id, manager_id, deleted_at into v_project from projects where id = p_project_id;
+  if v_project.id is null or v_project.deleted_at is not null then
+    raise exception 'Selected project (%) not found.', p_project_id;
+  end if;
+  if v_project.company_id is distinct from v_employee_company_id then
+    raise exception 'Selected project (%) belongs to a different company than this employee.', p_project_id;
+  end if;
+
+  select exists (
+    select 1 from project_allocations pa
+    where pa.employee_id = p_employee_id and pa.project_id = p_project_id
+      and pa.start_date <= p_work_date and (pa.end_date is null or pa.end_date >= p_work_date)
+  ) into v_allocation_exists;
+  if not v_allocation_exists then
+    raise exception 'This employee has no active allocation to the selected project covering %.', p_work_date;
+  end if;
+
+  if v_project.manager_id is null then
+    raise exception 'The selected project has no assigned Project Manager.';
+  end if;
+  select id, employment_status, deleted_at, company_id into v_manager from employees where id = v_project.manager_id;
+  if v_manager.id is null or v_manager.employment_status = 'terminated' or v_manager.deleted_at is not null then
+    raise exception 'The selected project''s Project Manager is not currently active.';
+  end if;
+  if v_manager.company_id is distinct from v_employee_company_id then
+    raise exception 'The selected project''s Project Manager belongs to a different company.';
+  end if;
+end;
+$$;
 
 create table reimbursement_claims (
   id             uuid primary key default gen_random_uuid(),
@@ -1643,6 +1764,7 @@ declare
   v_status text;
   v_work_mode text;
   v_hours numeric;
+  v_project_id uuid;
   v_company_id uuid;
   v_country_code text;
   v_week_start_day smallint;
@@ -1664,6 +1786,7 @@ begin
     v_status := v_row ->> 'status';
     v_work_mode := nullif(v_row ->> 'work_mode', '');
     v_hours := nullif(v_row ->> 'hours_worked', '')::numeric;
+    v_project_id := nullif(v_row ->> 'project_id', '')::uuid;
     v_credited := false;
     v_reversed := false;
     v_needs_review := false;
@@ -1719,9 +1842,15 @@ begin
         if v_hours is null then
           v_needs_review := true;
         elsif v_hours > 0 then
+          -- HR must select the actual project this work was for — never
+          -- auto-picked from the employee's allocations, and never
+          -- checked against today's date (p_work_date can be in the past,
+          -- or, for this suite's own synthetic E2E fixtures, the future).
+          -- See validate_recovery_credit_project()'s own doc comment.
+          perform validate_recovery_credit_project(v_employee_id, v_project_id, p_work_date);
           v_credit_days := case when v_hours > 4 then 1 else 0.5 end;
-          insert into recovery_credit_requests (employee_id, attendance_record_id, work_date, event_type, proposed_days, created_by)
-          values (v_employee_id, v_record_id, p_work_date, 'standard', v_credit_days, auth.uid())
+          insert into recovery_credit_requests (employee_id, attendance_record_id, work_date, event_type, proposed_days, created_by, project_id)
+          values (v_employee_id, v_record_id, p_work_date, 'standard', v_credit_days, auth.uid(), v_project_id)
           returning id into v_request_id;
           perform create_initial_approval('recovery_credit', v_request_id);
           v_credited := true;
@@ -1875,7 +2004,8 @@ create or replace function record_overnight_recovery_credit(
   p_employee_id uuid,
   p_work_date date,
   p_completed_normal_scheduled_day boolean,
-  p_active_hours_after_midnight numeric
+  p_active_hours_after_midnight numeric,
+  p_project_id uuid
 )
 returns table(credited boolean, credit_days numeric)
 language plpgsql
@@ -1935,10 +2065,16 @@ begin
     return;
   end if;
 
+  -- HR must select the actual project this overnight extension was for —
+  -- see validate_recovery_credit_project()'s own doc comment. Checked
+  -- against p_work_date (never current_date), since this attests to work
+  -- already recorded on that specific day, which may be in the past.
+  perform validate_recovery_credit_project(p_employee_id, p_project_id, p_work_date);
+
   v_credit_days := case when p_active_hours_after_midnight > 4 then 1 else 0.5 end;
 
-  insert into recovery_credit_requests (employee_id, attendance_record_id, work_date, event_type, proposed_days, created_by)
-  values (p_employee_id, v_record_id, p_work_date, 'overnight', v_credit_days, auth.uid())
+  insert into recovery_credit_requests (employee_id, attendance_record_id, work_date, event_type, proposed_days, created_by, project_id)
+  values (p_employee_id, v_record_id, p_work_date, 'overnight', v_credit_days, auth.uid(), p_project_id)
   returning id into v_request_id;
 
   perform create_initial_approval('recovery_credit', v_request_id);
@@ -2550,7 +2686,7 @@ $$;
 -- can't otherwise SELECT their manager's employees row at all). Returning
 -- "who approves this" is low-sensitivity org-chart information, not a data
 -- leak — the same judgment call already made for is_manager_of().
-create or replace function resolve_approver(p_approver_type text, p_employee_id uuid)
+create or replace function resolve_approver(p_approver_type text, p_employee_id uuid, p_entity_id uuid default null)
 returns uuid
 language plpgsql
 stable
@@ -2648,40 +2784,50 @@ begin
     order by ur.granted_at asc
     limit 1;
   elsif p_approver_type = 'project_manager' then
-    -- The employee's currently-active project allocation (start_date <=
-    -- today <= end_date, or end_date null) determines "the" project for
-    -- routing purposes. An employee can have several simultaneous
-    -- allocations (project_allocations has no uniqueness constraint on
-    -- employee_id) — deliberately NOT an error case: pick the allocation
-    -- with the highest percentage (their primary project), breaking ties
-    -- by the most recently started, then by id for full determinism. No
-    -- fallback if unresolvable (no active allocation, or the project has
-    -- no manager_id, or that manager is terminated/deleted) — unlike
-    -- direct_manager/role:%'s ceo/cto fallback, there is no sensible
-    -- "anyone can stand in" substitute for a specific project's PM, so
-    -- this deliberately returns NULL and lets create_initial_approval()/
-    -- decide_leave_approval()'s existing hard-stop surface a clear,
-    -- actionable error instead.
+    -- The SPECIFIC project HR selected for THIS Recovery Leave request,
+    -- snapshotted on recovery_credit_requests.project_id at creation time
+    -- by validate_recovery_credit_project() (called from
+    -- record_attendance_and_recovery()/record_overnight_recovery_credit())
+    -- — NEVER re-derived from "whichever allocation happens to be active
+    -- right now" (current_date): an employee can be allocated to several
+    -- projects at once, and the correct one for THIS request is whichever
+    -- HR actually attested to, not today's biggest percentage. p_entity_id
+    -- is recovery_credit_requests.id — the only entity type that ever uses
+    -- this approver_type. Re-checks the project's manager is STILL active
+    -- and in the SAME company as the project (projects_validate_manager
+    -- already enforces this at write time, so this should always hold —
+    -- defense-in-depth, same as hr_owner's own re-check below). No
+    -- fallback if unresolvable (deleted project, or its manager has since
+    -- been deactivated) — unlike direct_manager/role:%'s ceo/cto fallback,
+    -- there is no sensible "anyone can stand in" substitute for a specific
+    -- project's PM, so this deliberately returns NULL and lets
+    -- create_initial_approval()/decide_leave_approval()'s existing
+    -- hard-stop surface a clear, actionable error instead.
     select m.user_id into v_result
-    from project_allocations pa
-    join projects pr on pr.id = pa.project_id and pr.deleted_at is null
-    join employees m on m.id = pr.manager_id and m.employment_status <> 'terminated' and m.deleted_at is null
-    where pa.employee_id = p_employee_id
-      and pa.start_date <= current_date
-      and (pa.end_date is null or pa.end_date >= current_date)
-    order by pa.allocation_percent desc, pa.start_date desc, pa.id
-    limit 1;
+    from recovery_credit_requests r
+    join projects pr on pr.id = r.project_id and pr.deleted_at is null
+    join employees m on m.id = pr.manager_id
+      and m.employment_status <> 'terminated' and m.deleted_at is null and m.company_id = pr.company_id
+    where r.id = p_entity_id;
   elsif p_approver_type = 'hr_owner' then
     -- Direct, per-employee assignment — no company-wide role race, and no
-    -- fallback for the same reason as project_manager above: an
-    -- unassigned or since-deactivated HR owner is a real data-quality gap
-    -- that should hard-stop the request, not silently reroute.
+    -- fallback for the same reason as project_manager above. Re-checks, at
+    -- resolution time, that the assigned owner is STILL an active employee
+    -- in the SAME COMPANY as this employee (employees_validate_hr_owner
+    -- already enforces this at write time) AND still holds an hr_admin
+    -- role that applies to that company (a global grant, or one scoped
+    -- specifically to it) — an unassigned or since-invalidated HR owner is
+    -- a real data-quality gap that should hard-stop the request, not
+    -- silently reroute.
     select o.user_id into v_result
     from employees e
-    join employees o on o.id = e.hr_owner_id and o.deleted_at is null and o.employment_status <> 'terminated'
+    join employees o on o.id = e.hr_owner_id
+      and o.deleted_at is null and o.employment_status <> 'terminated' and o.company_id = e.company_id
     where e.id = p_employee_id
       and exists (
-        select 1 from user_roles ur where ur.user_id = o.user_id and ur.role = 'hr_admin' and ur.revoked_at is null
+        select 1 from user_roles ur
+        where ur.user_id = o.user_id and ur.role = 'hr_admin' and ur.revoked_at is null
+          and (ur.company_id is null or ur.company_id = e.company_id)
       );
   end if;
 
@@ -2691,12 +2837,19 @@ $$;
 
 -- ---- hr_owner_id validation + auto-assignment (Recovery Leave routing
 --      Stage 1 — see supabase/migrations/20261106000000_recovery_leave_pm_hr_owner_stage1.sql).
+-- SECURITY DEFINER for the same reason as
+-- validate_project_manager_is_active_and_same_company() above: must give an
+-- accurate answer regardless of whether the writer's own RLS visibility
+-- happens to include the referenced employee.
 create or replace function validate_hr_owner_is_active_hr_admin()
 returns trigger
 language plpgsql
+security definer
+set search_path = public
 as $$
 declare
   v_owner_user_id uuid;
+  v_owner_company_id uuid;
 begin
   if NEW.hr_owner_id is null then
     return NEW;
@@ -2704,12 +2857,16 @@ begin
   if NEW.hr_owner_id = NEW.id then
     raise exception 'An employee cannot be their own HR owner.';
   end if;
-  select user_id into v_owner_user_id from employees where id = NEW.hr_owner_id;
+  select user_id, company_id into v_owner_user_id, v_owner_company_id from employees where id = NEW.hr_owner_id;
+  if v_owner_company_id is distinct from NEW.company_id then
+    raise exception 'hr_owner_id (%) must belong to the same company as the employee being assigned an HR owner.', NEW.hr_owner_id;
+  end if;
   if v_owner_user_id is null or not exists (
     select 1 from user_roles
     where user_id = v_owner_user_id and role = 'hr_admin' and revoked_at is null
+      and (company_id is null or company_id = NEW.company_id)
   ) then
-    raise exception 'hr_owner_id (%) must reference an employee whose user currently holds an active hr_admin role.', NEW.hr_owner_id;
+    raise exception 'hr_owner_id (%) must reference an employee whose user currently holds an active hr_admin role for this company.', NEW.hr_owner_id;
   end if;
   return NEW;
 end;
@@ -2776,6 +2933,7 @@ begin
       and e.employment_status <> 'terminated'
       and ur.role = 'hr_admin'
       and ur.revoked_at is null
+      and (ur.company_id is null or ur.company_id = p_company_id)
     order by e.first_name, e.last_name;
 end;
 $$;
@@ -3098,7 +3256,7 @@ begin
   if p_entity_type = 'payroll_export_run' then
     v_approver_id := resolve_approver_for_company(v_approver_type, v_company_id);
   else
-    v_approver_id := resolve_approver(v_approver_type, v_employee_id);
+    v_approver_id := resolve_approver(v_approver_type, v_employee_id, p_entity_id);
   end if;
   if v_approver_id is null then
     raise exception 'No approver could be resolved (e.g. no manager assigned, or no one holds the required role). Contact HR Admin.';
@@ -3337,7 +3495,7 @@ begin
     if v_approval.entity_type = 'payroll_export_run' then
       v_next_approver := resolve_approver_for_company(v_step.approver_type, v_payroll_company_id);
     else
-      v_next_approver := resolve_approver(v_step.approver_type, v_employee_id);
+      v_next_approver := resolve_approver(v_step.approver_type, v_employee_id, v_approval.entity_id);
     end if;
 
     if v_next_approver is null then
