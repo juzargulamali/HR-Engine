@@ -292,7 +292,7 @@ viable), but no SQL from this section should be run to change anything:
 select
   u.email,
   ur.company_id,
-  c.name as company_name,
+  c.legal_name as company_name,
   ur.granted_at,
   ur.revoked_at
 from user_roles ur
