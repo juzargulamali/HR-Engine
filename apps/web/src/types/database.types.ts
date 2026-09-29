@@ -193,6 +193,7 @@ export interface Database {
           work_location: string | null;
           recognised_prior_service_years: number | null;
           is_first_ever_employment: boolean | null;
+          hr_owner_id: string | null;
           created_at: string;
           created_by: string | null;
           updated_at: string;
@@ -224,6 +225,8 @@ export interface Database {
           work_location?: string | null;
           recognised_prior_service_years?: number | null;
           is_first_ever_employment?: boolean | null;
+          hr_owner_id?: string | null;
+          created_by?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["employees"]["Insert"]> & {
           deleted_at?: string | null;
@@ -699,6 +702,7 @@ export interface Database {
           is_billable: boolean;
           is_active: boolean;
           deleted_at: string | null;
+          manager_id: string | null;
         };
         Insert: {
           id?: string;
@@ -708,6 +712,7 @@ export interface Database {
           client_name?: string | null;
           is_billable?: boolean;
           is_active?: boolean;
+          manager_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["projects"]["Insert"]>;
         Relationships: [];
@@ -1296,6 +1301,10 @@ export interface Database {
       get_employee_manager_name: {
         Args: { p_employee_id: string };
         Returns: string | null;
+      };
+      list_active_hr_admins: {
+        Args: { p_company_id: string };
+        Returns: { employee_id: string; first_name: string; last_name: string }[];
       };
       decide_leave_approval: {
         Args: { p_approval_id: string; p_decision: ApprovalDecision; p_comments?: string | null };

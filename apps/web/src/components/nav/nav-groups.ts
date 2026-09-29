@@ -25,6 +25,7 @@ export type NavIconKey =
   | "assets"
   | "policies"
   | "holidays"
+  | "projects"
   | "companies"
   | "ai"
   | "audit"
@@ -52,6 +53,10 @@ export function buildNavGroups(grants: readonly RoleGrant[]): NavGroupData[] {
   const showInsightsLinks = hasRoleAnyScope(grants, "hr_admin") || hasRoleAnyScope(grants, "sys_admin");
   const showAlertsLink = canViewHrAlerts(grants);
   const showAssetsLink = hasRoleAnyScope(grants, "hr_admin") || hasRoleAnyScope(grants, "finance");
+  // Projects management (Project Manager assignment) is HR-Admin/Sys-Admin
+  // only, same gating as the /projects page itself — projects_write is the
+  // real enforcement either way.
+  const showProjectsLink = hasRoleAnyScope(grants, "hr_admin") || isSysAdmin(grants);
 
   // Approvals routes through resolve_approver()/resolve_approver_for_company()
   // to one of: the employee's line manager, or role:hr_admin/finance/ceo
@@ -101,6 +106,7 @@ export function buildNavGroups(grants: readonly RoleGrant[]): NavGroupData[] {
         ...(showAssetsLink ? [{ href: "/assets", label: "Assets", iconKey: "assets" as const }] : []),
         { href: "/policies", label: "Policies", iconKey: "policies" },
         { href: "/holidays", label: "Holidays", iconKey: "holidays" },
+        ...(showProjectsLink ? [{ href: "/projects", label: "Projects", iconKey: "projects" as const }] : []),
         ...(showAdminLink ? [{ href: "/admin/companies", label: "Companies", iconKey: "companies" as const }] : []),
       ],
     },

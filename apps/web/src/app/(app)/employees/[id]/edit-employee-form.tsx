@@ -16,6 +16,7 @@ interface EmployeeCore {
   job_title: string | null;
   employment_status: "active" | "on_leave" | "suspended" | "terminated";
   manager_id: string | null;
+  hr_owner_id: string | null;
   personal_email: string | null;
   phone: string | null;
   date_of_birth: string | null;
@@ -28,6 +29,7 @@ export function EditEmployeeForm({
   linkedEmail,
   managers,
   managerName,
+  hrOwners,
   canEditCore,
   isSelf,
 }: {
@@ -39,6 +41,11 @@ export function EditEmployeeForm({
    * CURRENT VIEWER may see and never includes their own manager's row. See
    * overview-section.tsx's doc comment. */
   managerName: string | null;
+  /** Currently-active hr_admin holders in this company, via list_active_hr_admins
+   * — the only valid targets for hr_owner_id (see employees_validate_hr_owner),
+   * plus the current value even if it's since gone stale (see
+   * overview-section.tsx's doc comment). */
+  hrOwners: { id: string; first_name: string; last_name: string }[];
   canEditCore: boolean;
   isSelf: boolean;
 }) {
@@ -113,6 +120,21 @@ export function EditEmployeeForm({
                   </option>
                 ))}
               </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="hrOwnerId">HR owner</Label>
+              <Select id="hrOwnerId" name="hrOwnerId" defaultValue={employee.hr_owner_id ?? ""}>
+                <option value="">None</option>
+                {hrOwners.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.first_name} {o.last_name}
+                  </option>
+                ))}
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Responsible for this employee&apos;s HR-owned approvals (Recovery Leave). Must currently hold an
+                active HR Admin role — reassigning is audit-logged.
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="dateOfBirth">Date of birth</Label>

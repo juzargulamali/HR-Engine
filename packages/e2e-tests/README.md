@@ -226,19 +226,71 @@ live run mostly needs small text tweaks: `EmployeesPage`, `HolidaysPage`,
 
 ## Known application gap found while building this suite
 
-Reading `apps/web/src/app/(app)/approvals/page.tsx` directly: its query
+~~Reading `apps/web/src/app/(app)/approvals/page.tsx` directly: its query
 fetches every pending `approvals` row for the signed-in approver regardless
 of `entity_type`, but the page only ever builds a display section for
 `leave_request`, `reimbursement_claim`, `timesheet`, `generated_letter`, and
 `payroll_export_run`. A `recovery_credit` approval (created automatically by
 `record_attendance_and_recovery()`) is fetched but never rendered anywhere
-on that page — not even counted toward whether the page shows its "nothing
-waiting on you" empty state. This suite works around it by verifying the
-attendance page's own save-result message instead (see
-`20-attendance.spec.ts`), but a manager currently has no UI-visible way to
-actually approve or reject a Recovery Leave credit request. This looks like
-a real application gap, not a test-design issue, and is worth a look outside
-this suite.
+on that page~~ — **fixed**: `apps/web/src/app/(app)/approvals/page.tsx` now
+builds its own "Recovery Leave credits" section (`recoveryApprovals`,
+filtered by `entity_type === "recovery_credit"`). This suite's
+`20-attendance.spec.ts` now walks that section end to end via
+`ApprovalsPage` for both approval steps, in addition to still verifying the
+attendance page's own save-result message for the credit's creation.
+
+## Recovery Leave PM/HR-owner fixture (required once, before the Stage 2 cutover)
+
+A separate product PR changes Recovery Leave's approval routing from
+`direct_manager -> role:hr_admin` to `project_manager -> hr_owner` (see that
+PR's own migration, `supabase/migrations/
+20261106000000_recovery_leave_pm_hr_owner_stage1.sql`, and the manually-applied
+cutover file, `supabase/manual-sql/
+recovery_leave_pm_hr_owner_stage2_cutover.sql`). The cutover is **not**
+applied by this repo's migrations automatically — someone has to run that
+second file by hand in the Supabase SQL Editor when ready.
+
+`20-attendance.spec.ts`'s two Recovery Leave tests keep using the SAME
+dedicated Manager and HR Admin test accounts for both approval steps either
+way, but which routing RULE gets them there changes:
+
+- **Before the cutover** (today): step 1 resolves via the Employee test
+  account's `manager_id` (must already be the Manager test account — see
+  "Safety model" above); step 2 resolves via `role:hr_admin`, which
+  deterministically picks whichever active `hr_admin` holder was granted the
+  role earliest **company-wide** — this can be a different, real hr_admin
+  account instead of the HR Admin test account (see the "HR Admin approver
+  fixture" note inside `20-attendance.spec.ts`'s own OBSERVED TIMEOUT
+  handling for the one confirmed live occurrence, work_date 2100-12-18).
+- **After the cutover**: step 1 resolves via the Employee test account's
+  active `project_allocations` row -> that project's `manager_id`; step 2
+  resolves via the Employee test account's own `hr_owner_id`. Both are
+  per-employee assignments, so once the one-time fixture below is in place,
+  routing to the dedicated test accounts is deterministic and can no longer
+  race with a real employee's own approvals.
+
+**One-time manual fixture setup, done through the real UI by an HR Admin
+(never automated by this suite, and never touching a real employee or
+project)**, needed before (or any time relative to) the cutover so these
+tests keep passing once it's applied:
+
+1. Create a dedicated project for E2E QA (`/projects` -> "Add a project"),
+   e.g. code `E2E-QA`, and set its Project Manager to the **Manager test
+   account's** own employee record.
+2. On that project's detail page, add an allocation for the **Employee test
+   account** (any `allocation_percent` > 0, `start_date` on or before today,
+   no `end_date`) — an employee needs an active allocation before
+   `resolve_approver('project_manager', ...)` can resolve anything for them.
+3. On the **Employee test account's** own profile (Overview tab, HR Admin
+   edit form), set "HR owner" to the **HR Admin test account's** own
+   employee record. The picker only ever lists currently-active `hr_admin`
+   holders in the same company, so the HR Admin test account must already
+   hold that role there.
+
+None of this touches a real employee's `manager_id`, `hr_owner_id`, project
+assignments, or any shared company-wide role grant — every row here is
+scoped to the dedicated E2E QA project and the Employee test account's own
+profile.
 
 ## What this suite has NOT verified
 

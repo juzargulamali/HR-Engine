@@ -311,7 +311,19 @@ create table employees (
   -- Null (every employee until HR confirms it) blocks automatic Poland
   -- Annual Leave accrual for that employee rather than guessing either
   -- answer — see computeAnnualLeaveEntitlementToDate.
-  is_first_ever_employment boolean
+  is_first_ever_employment boolean,
+  -- The HR Admin (as an employees row) responsible for this employee's
+  -- HR-owned approvals (Recovery Leave step 2, once the Stage 2 cutover
+  -- runs — see supabase/manual-sql/recovery_leave_pm_hr_owner_stage2_cutover.sql).
+  -- Auto-set to the creating HR Admin on insert if they hold an active
+  -- hr_admin role at that moment (set_initial_hr_owner()); reassignable
+  -- later by any HR Admin via the normal employee edit form
+  -- (employees_update_hr already covers this column), captured as a
+  -- before/after audit trail by the existing audit_employees trigger.
+  -- Validated at write time by employees_validate_hr_owner: must
+  -- reference an employee whose user currently holds an active hr_admin
+  -- role, or be NULL ("not yet assigned").
+  hr_owner_id         uuid references employees(id)
 );
 
 create index idx_employees_manager on employees(manager_id) where deleted_at is null;
@@ -730,7 +742,7 @@ create table approval_workflow_steps (
   id                uuid primary key default gen_random_uuid(),
   workflow_id       uuid not null references approval_workflows(id),
   step_order        int not null,
-  approver_type     text not null,   -- 'direct_manager' | 'manager_of_manager' | 'role:hr_admin' | 'role:finance' | 'role:ceo'
+  approver_type     text not null,   -- 'direct_manager' | 'manager_of_manager' | 'role:hr_admin' | 'role:finance' | 'role:ceo' | 'project_manager' | 'hr_owner'
   condition         jsonb,           -- e.g. {"amount_gt": 5000} to make a step conditional
   unique (workflow_id, step_order)
 );
@@ -765,10 +777,15 @@ create index idx_approvals_entity on approvals(entity_type, entity_id);
 -- record at a time (the partial unique index below is the natural key: a
 -- cancelled/rejected row never permanently blocks a later, genuinely fresh
 -- request for the same day). Routed through the SAME generic approval
--- engine above via entity_type = 'recovery_credit' — manager approval
--- (step 1) is the policy brief's "provisional release"; the actual earned
--- comp_day_ledger row is posted only at HR Admin's final approval (step 2),
--- inside decide_leave_approval().
+-- engine above via entity_type = 'recovery_credit' — step 1's approval is
+-- the policy brief's "provisional release"; the actual earned
+-- comp_day_ledger row is posted only at step 2's final approval, inside
+-- decide_leave_approval(). As seeded by seed_default_approval_workflows(),
+-- step 1 is direct_manager and step 2 is role:hr_admin; a later, separately
+-- applied cutover (supabase/manual-sql/recovery_leave_pm_hr_owner_stage2_cutover.sql)
+-- changes this to project_manager then hr_owner without touching this
+-- table or any other part of the engine — only which approver_type each
+-- step names.
 create table recovery_credit_requests (
   id                    uuid primary key default gen_random_uuid(),
   employee_id           uuid not null references employees(id),
@@ -862,6 +879,14 @@ create table projects (
   is_billable  boolean not null default true,
   is_active    boolean not null default true,
   deleted_at   timestamptz,
+  -- This project's assigned Project Manager — used by
+  -- resolve_approver('project_manager', ...) for Recovery Leave step 1
+  -- once the Stage 2 cutover runs (see supabase/manual-sql/
+  -- recovery_leave_pm_hr_owner_stage2_cutover.sql). NULL means "not yet
+  -- assigned"; resolve_approver() returns NULL for it, and
+  -- create_initial_approval()/decide_leave_approval() already hard-stop
+  -- with a clear error on a NULL approver.
+  manager_id   uuid references employees(id),
   unique (company_id, code)
 );
 
@@ -2622,11 +2647,141 @@ begin
       )
     order by ur.granted_at asc
     limit 1;
+  elsif p_approver_type = 'project_manager' then
+    -- The employee's currently-active project allocation (start_date <=
+    -- today <= end_date, or end_date null) determines "the" project for
+    -- routing purposes. An employee can have several simultaneous
+    -- allocations (project_allocations has no uniqueness constraint on
+    -- employee_id) — deliberately NOT an error case: pick the allocation
+    -- with the highest percentage (their primary project), breaking ties
+    -- by the most recently started, then by id for full determinism. No
+    -- fallback if unresolvable (no active allocation, or the project has
+    -- no manager_id, or that manager is terminated/deleted) — unlike
+    -- direct_manager/role:%'s ceo/cto fallback, there is no sensible
+    -- "anyone can stand in" substitute for a specific project's PM, so
+    -- this deliberately returns NULL and lets create_initial_approval()/
+    -- decide_leave_approval()'s existing hard-stop surface a clear,
+    -- actionable error instead.
+    select m.user_id into v_result
+    from project_allocations pa
+    join projects pr on pr.id = pa.project_id and pr.deleted_at is null
+    join employees m on m.id = pr.manager_id and m.employment_status <> 'terminated' and m.deleted_at is null
+    where pa.employee_id = p_employee_id
+      and pa.start_date <= current_date
+      and (pa.end_date is null or pa.end_date >= current_date)
+    order by pa.allocation_percent desc, pa.start_date desc, pa.id
+    limit 1;
+  elsif p_approver_type = 'hr_owner' then
+    -- Direct, per-employee assignment — no company-wide role race, and no
+    -- fallback for the same reason as project_manager above: an
+    -- unassigned or since-deactivated HR owner is a real data-quality gap
+    -- that should hard-stop the request, not silently reroute.
+    select o.user_id into v_result
+    from employees e
+    join employees o on o.id = e.hr_owner_id and o.deleted_at is null and o.employment_status <> 'terminated'
+    where e.id = p_employee_id
+      and exists (
+        select 1 from user_roles ur where ur.user_id = o.user_id and ur.role = 'hr_admin' and ur.revoked_at is null
+      );
   end if;
 
   return v_result;
 end;
 $$;
+
+-- ---- hr_owner_id validation + auto-assignment (Recovery Leave routing
+--      Stage 1 — see supabase/migrations/20261106000000_recovery_leave_pm_hr_owner_stage1.sql).
+create or replace function validate_hr_owner_is_active_hr_admin()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_owner_user_id uuid;
+begin
+  if NEW.hr_owner_id is null then
+    return NEW;
+  end if;
+  if NEW.hr_owner_id = NEW.id then
+    raise exception 'An employee cannot be their own HR owner.';
+  end if;
+  select user_id into v_owner_user_id from employees where id = NEW.hr_owner_id;
+  if v_owner_user_id is null or not exists (
+    select 1 from user_roles
+    where user_id = v_owner_user_id and role = 'hr_admin' and revoked_at is null
+  ) then
+    raise exception 'hr_owner_id (%) must reference an employee whose user currently holds an active hr_admin role.', NEW.hr_owner_id;
+  end if;
+  return NEW;
+end;
+$$;
+
+create trigger employees_validate_hr_owner
+  before insert or update of hr_owner_id on employees
+  for each row execute function validate_hr_owner_is_active_hr_admin();
+
+-- Fires before employees_validate_hr_owner on the SAME (INSERT) event —
+-- Postgres runs same-timing triggers in name order, and
+-- 'employees_set_initial_hr_owner' sorts before 'employees_validate_hr_owner'.
+create or replace function set_initial_hr_owner()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_creator_employee_id uuid;
+begin
+  if NEW.hr_owner_id is not null or NEW.created_by is null then
+    return NEW;
+  end if;
+  select e.id into v_creator_employee_id
+  from employees e
+  where e.user_id = NEW.created_by
+    and e.company_id = NEW.company_id
+    and e.deleted_at is null
+    and exists (
+      select 1 from user_roles ur
+      where ur.user_id = e.user_id and ur.role = 'hr_admin' and ur.revoked_at is null
+    )
+  limit 1;
+  NEW.hr_owner_id := v_creator_employee_id; -- stays NULL if the creator isn't a current, active hr_admin in this company
+  return NEW;
+end;
+$$;
+
+create trigger employees_set_initial_hr_owner
+  before insert on employees
+  for each row execute function set_initial_hr_owner();
+
+-- RPC for the HR Owner picker UI — user_roles has no SELECT policy for
+-- plain hr_admin (user_roles_select_own restricts to auth.uid() or
+-- sys_admin), so listing "who currently holds hr_admin in my company"
+-- needs a definer function. Exposes only id/first_name/last_name — never
+-- role-grant metadata.
+create or replace function list_active_hr_admins(p_company_id uuid)
+returns table(employee_id uuid, first_name text, last_name text)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if not has_role('hr_admin', p_company_id) then
+    raise exception 'Only HR Admin can list HR owner candidates.';
+  end if;
+  return query
+    select e.id, e.first_name, e.last_name
+    from employees e
+    join user_roles ur on ur.user_id = e.user_id
+    where e.company_id = p_company_id
+      and e.deleted_at is null
+      and e.employment_status <> 'terminated'
+      and ur.role = 'hr_admin'
+      and ur.revoked_at is null
+    order by e.first_name, e.last_name;
+end;
+$$;
+
+revoke all on function list_active_hr_admins(uuid) from public;
+grant execute on function list_active_hr_admins(uuid) to authenticated;
 
 -- resolve_approver() is employee-centric (it needs an employee to find
 -- their company/manager chain) — payroll_export_run has no single

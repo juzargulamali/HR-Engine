@@ -30,7 +30,7 @@ export async function OverviewSection({
   isSelf: boolean;
 }) {
   const supabase = await createClient();
-  const [{ data: linkedProfile }, { data: managers }, { data: managerName }] = await Promise.all([
+  const [{ data: linkedProfile }, { data: managers }, { data: managerName }, { data: hrAdminCandidates }] = await Promise.all([
     employee.user_id
       ? supabase.from("profiles").select("email").eq("id", employee.user_id).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -45,11 +45,35 @@ export async function OverviewSection({
     // the same visibility rule employees_select already applies — see its
     // migration/schema.sql doc comment.
     employee.manager_id ? supabase.rpc("get_employee_manager_name", { p_employee_id: employee.id }) : Promise.resolve({ data: null }),
+    // HR Owner candidates (Recovery Leave routing — see schema.sql's
+    // list_active_hr_admins). Only ever needed when this HR-Admin-only
+    // section is even rendering (canEditCore below), same lazy-load
+    // rationale as the managers list above. user_roles has no SELECT
+    // policy that would let a plain query filter "who holds hr_admin" —
+    // this definer RPC is the only way to list valid candidates.
+    canEditCore
+      ? supabase.rpc("list_active_hr_admins", { p_company_id: employee.company_id })
+      : Promise.resolve({ data: [] as { employee_id: string; first_name: string; last_name: string }[] }),
   ]);
 
   const outstanding: string[] = [];
   if (!employee.job_title) outstanding.push("No job title set.");
   if (!employee.manager_id && employee.employment_status === "active") outstanding.push("No manager assigned.");
+  if (!employee.hr_owner_id && employee.employment_status === "active") outstanding.push("No HR owner assigned.");
+
+  // hrAdminCandidates only ever lists CURRENTLY active hr_admin holders — if
+  // this employee's existing hr_owner_id has since had that role revoked,
+  // it won't be in that list, but the <select> must still show who it
+  // currently is (defaultValue) rather than silently falling back to
+  // whichever option happens to render first. managers is already a full
+  // company-employee read (HR Admin's own employees_select scope, same
+  // query this section already makes), so it's a safe, no-extra-query
+  // source for just that display name.
+  const hrOwners = (hrAdminCandidates ?? []).map((c) => ({ id: c.employee_id, first_name: c.first_name, last_name: c.last_name }));
+  if (employee.hr_owner_id && !hrOwners.some((o) => o.id === employee.hr_owner_id)) {
+    const current = (managers ?? []).find((m) => m.id === employee.hr_owner_id);
+    if (current) hrOwners.push({ ...current, last_name: `${current.last_name} (role no longer active)` });
+  }
 
   return (
     <div className="space-y-4">
@@ -61,6 +85,7 @@ export async function OverviewSection({
         linkedEmail={linkedProfile?.email ?? null}
         managers={(managers ?? []).filter((m) => m.id !== employee.id)}
         managerName={managerName ?? null}
+        hrOwners={hrOwners}
         canEditCore={canEditCore}
         isSelf={isSelf}
       />

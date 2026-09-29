@@ -139,4 +139,13 @@ describe("buildNavGroups", () => {
     expect(allHrefs).toContain("/approvals");
     expect(allHrefs).toContain("/payroll");
   });
+
+  it("shows Projects to hr_admin and sys_admin, hides it from a plain line manager", () => {
+    const hrAdminHrefs = buildNavGroups([grant("hr_admin")]).flatMap((g) => g.links.map((l) => l.href));
+    const sysAdminHrefs = buildNavGroups([grant("sys_admin", null)]).flatMap((g) => g.links.map((l) => l.href));
+    const lineManagerHrefs = buildNavGroups([grant("line_manager")]).flatMap((g) => g.links.map((l) => l.href));
+    expect(hrAdminHrefs).toContain("/projects");
+    expect(sysAdminHrefs).toContain("/projects");
+    expect(lineManagerHrefs).not.toContain("/projects");
+  });
 });
