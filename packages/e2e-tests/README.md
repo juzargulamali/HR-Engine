@@ -323,44 +323,38 @@ setup described in an earlier revision of this section would not have
 solved anything. It has not been built, and per this finding, isn't worth
 building for this specific problem.
 
-### What's actually left, given that
+### Decision: accept existing coverage, don't chase live E2E verification of this one step
 
-Nothing safe remains that this suite (or I) can do unilaterally to make the
-HR Admin test account the resolved approver for this step, in this
+Nothing safe remained that this suite (or Claude) could do unilaterally to
+make the HR Admin test account the resolved approver for this step, in this
 environment, without either editing a real account's role grant (ruled out
-above) or a real product change. The realistic options, all decisions for
-you to make, not this PR:
+above) or a real product change. Three options were raised; **the account
+owner chose to accept existing coverage as sufficient** rather than pursue
+either of the other two:
 
-1. **Leave the live HR-approve→credit-posted path unverified via automated
-   E2E**, and rely on what's already independently confirmed: the local RLS
-   test suite's `decide_leave_approval()` chain tests (358/358 passing)
-   already exercise approve/reject/self-approval-skip/final-credit-amount
-   for `entity_type = 'recovery_credit'` at the database level, and this
-   suite's own rejection test (`20-attendance.spec.ts`) already proves the
-   new Approvals UI section renders correctly, its Reject button works
-   end-to-end in Production, and the chain correctly stops with the balance
-   unchanged. What's *not* independently proven live is specifically
-   whether HR Admin's Approve click posts the ledger row correctly — logic
-   already covered by the passing RLS suite, just not exercised through the
-   Production UI itself.
-2. **You personally decide the one already-pending request**
+1. **[Chosen] Leave the live HR-approve→credit-posted path unverified via
+   automated E2E**, relying on what's already independently confirmed: the
+   local RLS test suite's `decide_leave_approval()` chain tests (358/358
+   passing) already exercise approve/reject/self-approval-skip/
+   final-credit-amount for `entity_type = 'recovery_credit'` at the database
+   level, and this suite's own rejection test (`20-attendance.spec.ts`)
+   already proves the new Approvals UI section renders correctly, its Reject
+   button works end-to-end in Production, and the chain correctly stops with
+   the balance unchanged. What's *not* independently proven live is
+   specifically whether HR Admin's Approve click posts the ledger row
+   correctly — logic already covered by the passing RLS suite, just not
+   exercised through the Production UI itself. **This is accepted as
+   sufficient; no further work is planned on this specific gap.**
+2. *(Not chosen)* You personally decide the one already-pending request
    (`834ee897-8b61-4caa-a409-ae5a9793d330`, work_date `2100-12-18`) through
-   the real UI, at your own convenience — this suite will never do this
-   automatically, and I will not do it on your behalf. Approving it would
-   raise the Employee test account's Comp-off balance by exactly 1 (a real,
-   permanent, synthetic-dated credit, same category as every other
-   synthetic recovery-credit record this suite already leaves in place —
-   see "What is and isn't reversible" above) and would, in effect, complete
-   the same verification this PR set out to get, just via a manual click
-   instead of an automated script.
-3. **A real product change**, out of scope for this PR and worth a
-   separate, deliberate decision: e.g. requiring `hr_admin` grants to be
-   company-scoped rather than allowing `company_id is null`, or adding an
-   explicit "designated approver" concept per workflow step so routing
-   isn't purely "earliest-granted role holder, platform-wide."
-
-This PR does not pick one of these for you. It stops here, with the finding
-documented plainly instead of a runbook that would not have worked.
+   the real UI. Left exactly as pending — nobody, automated or manual, acted
+   on it as part of this decision.
+3. *(Not chosen, remains a legitimate idea for later)* A real product
+   change — e.g. requiring `hr_admin` grants to be company-scoped rather
+   than allowing `company_id is null`, or an explicit "designated approver"
+   concept per workflow step — worth a separate, deliberate decision if the
+   underlying single-approver-per-company-wide-role design is ever
+   revisited.
 
 ## What this suite has NOT verified
 
