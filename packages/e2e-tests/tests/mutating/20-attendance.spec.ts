@@ -200,7 +200,32 @@ test.describe("attendance and recovery leave @mutating", () => {
 
     const hrApprovals = new ApprovalsPage(hrAdminPage);
     await hrApprovals.goto();
-    await hrApprovals.expectPending(date);
+    try {
+      await hrApprovals.expectPending(date);
+    } catch (err) {
+      // Confirmed live (request 834ee897-8b61-4caa-a409-ae5a9793d330,
+      // work_date 2100-12-18): step 1 (direct_manager) correctly routed to
+      // and was approved by the Manager test account, but step 2
+      // (role:hr_admin) resolved to a DIFFERENT, real hr_admin account, not
+      // this HR Admin test account. resolve_approver()'s role:% branch
+      // (schema.sql) has no per-request distribution — it deterministically
+      // picks exactly one active hr_admin per company, "order by granted_at
+      // asc limit 1", so whichever account was granted that role FIRST
+      // always wins, for every such approval. The Approvals page itself is
+      // correct and working here (`.eq("approver_id", session.userId)` —
+      // the same single-approver-inbox pattern every entity type in this
+      // app uses); the HR Admin test account genuinely isn't the assigned
+      // approver for this request, so it correctly sees nothing pending.
+      //
+      // This is a TEST-FIXTURE/ENVIRONMENT mismatch, never evidence the
+      // Approvals UI or decide_leave_approval() is broken — see this
+      // package's README.md ("HR Admin approver fixture") for the read-only
+      // diagnostic query and the fix, which only ever adjusts the HR Admin
+      // test account's own role_grant row, never any other account's.
+      throw new Error(
+        `HR ADMIN TEST-FIXTURE MISMATCH, not an approval UI failure: this request's role:hr_admin step did not route to the HR Admin test account (getCredentials("hrAdmin")) — resolve_approver() picked a different hr_admin account instead, per its "earliest-granted role holder wins" rule (see README.md's "HR Admin approver fixture" section for the diagnostic query and fix — it only ever touches the HR Admin test account's own role grant). Underlying Approvals-page assertion: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     await hrApprovals.approve(date);
     await hrApprovals.expectNotPending(date);
 

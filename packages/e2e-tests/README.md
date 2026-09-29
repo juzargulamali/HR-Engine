@@ -240,6 +240,110 @@ actually approve or reject a Recovery Leave credit request. This looks like
 a real application gap, not a test-design issue, and is worth a look outside
 this suite.
 
+## HR Admin approver fixture (`role:hr_admin` routing) — read before running the Recovery Leave manager→HR test
+
+Confirmed live (request `834ee897-8b61-4caa-a409-ae5a9793d330`, work_date
+`2100-12-18`): step 1 (Manager, `direct_manager`) correctly routed to and was
+approved by the dedicated Manager test account. Step 2 (`role:hr_admin`)
+did **not** route to the dedicated HR Admin test account — it resolved to a
+different, real `hr_admin` role holder in the same company.
+
+Traced directly from `resolve_approver()` (schema.sql): its `role:%` branch
+(used for `role:hr_admin`, `role:finance`, `role:ceo`/`role:cto`) has no
+per-request or per-employee distribution logic at all — it deterministically
+picks exactly **one** active, non-terminated role holder scoped to the
+employee's company (or a global, `company_id is null` grant), ordered
+`granted_at asc`, `limit 1`. Whoever was granted that role **first** in the
+company always wins, for every `role:%`-routed approval, forever (unless
+revoked). This is intentional design for `direct_manager`/`manager_of_manager`
+(the whole point is "any qualifying person can unblock this, no one needs a
+manager assigned"), but it also means a company with more than one
+`hr_admin` role holder will always route every such approval to the same one
+person — nobody else can act on it, even though `approvals_select`'s RLS
+policy (`has_role('hr_admin')`) would let any `hr_admin` *read* the row: the
+Approvals page's own query (`apps/web/.../approvals/page.tsx`) narrows to
+`.eq("approver_id", session.userId)`, the same single-approver-inbox pattern
+every entity type in this app uses. **This is not a bug introduced by, or
+specific to, Recovery Leave** — it's a pre-existing characteristic of
+`resolve_approver()`'s `role:%` branch that would equally affect
+`role:finance`/`role:ceo`-routed steps. Worth a product decision on its own
+merits; out of scope for this suite to fix.
+
+**Never fix this by hardcoding a test email into `resolve_approver()`, and
+never touch a real account's role grant or grant order to make a test pass.**
+The fix belongs entirely to the E2E HR Admin test account's own fixture data.
+
+**Read-only diagnostic** — run this in Supabase SQL Editor first to see
+exactly which `hr_admin` grant currently wins the race:
+
+```sql
+select
+  u.email,
+  ur.company_id,
+  c.name as company_name,
+  ur.granted_at,
+  ur.revoked_at
+from user_roles ur
+join auth.users u on u.id = ur.user_id
+left join companies c on c.id = ur.company_id
+where ur.role = 'hr_admin'
+order by ur.granted_at asc;
+```
+
+The row with the earliest `granted_at` (among rows where `company_id` is
+null or matches the Employee test account's company) is who
+`resolve_approver('role:hr_admin', ...)` will always pick. Cross-check
+against the Employee test account's own company:
+
+```sql
+select e.id as employee_id, e.company_id, u.email
+from employees e
+join auth.users u on u.id = e.user_id
+where u.email = '<the dedicated Employee test account''s email>';
+```
+
+**Fix — adjusts only the E2E HR Admin test account's own row, never anyone
+else's:**
+
+- If the HR Admin test account's `hr_admin` grant's `company_id` does not
+  match the Employee test account's `company_id` from the query above (and
+  isn't `null`), correct it:
+  ```sql
+  update user_roles
+  set company_id = '<the Employee test account's company_id from above>'
+  where user_id = (select id from auth.users where email = '<the dedicated HR Admin test account''s email>')
+    and role = 'hr_admin'
+    and revoked_at is null;
+  ```
+- Then (or if `company_id` already matched and only `granted_at` ordering
+  was the problem — the expected case, since this suite's dedicated test
+  accounts were created after initial company setup): make the HR Admin test
+  account's grant strictly earlier than whatever currently wins, without
+  touching that other row at all:
+  ```sql
+  update user_roles
+  set granted_at = (
+    select granted_at - interval '1 second'
+    from user_roles
+    where role = 'hr_admin' and revoked_at is null
+    order by granted_at asc
+    limit 1
+  )
+  where user_id = (select id from auth.users where email = '<the dedicated HR Admin test account''s email>')
+    and role = 'hr_admin'
+    and revoked_at is null;
+  ```
+  Safe to re-run — it only ever pulls the HR Admin test account's own grant
+  earlier, never later, and never reads or writes any other account's row.
+
+Re-run the first diagnostic query afterward to confirm the HR Admin test
+account's row is now first. Until this is applied, the Recovery Leave
+manager→HR test's step-2 assertion will fail with an explicit
+`HR ADMIN TEST-FIXTURE MISMATCH` error (see `20-attendance.spec.ts`) rather
+than a generic Approvals-page timeout — that error is expected and
+diagnostic, not evidence of a UI regression, until this fixture fix is
+applied.
+
 ## What this suite has NOT verified
 
 - ~~Whether the Manager test account is actually configured in Production as
