@@ -242,25 +242,27 @@ this suite.
 
 ## HR Admin approver fixture (`role:hr_admin` routing) — read before running the Recovery Leave manager→HR test
 
-Confirmed live (request `834ee897-8b61-4caa-a409-ae5a9793d330`, work_date
-`2100-12-18`): step 1 (Manager, `direct_manager`) correctly routed to and was
-approved by the dedicated Manager test account. Step 2 (`role:hr_admin`)
-did **not** route to the dedicated HR Admin test account — it resolved to a
-different, real `hr_admin` role holder in the same company.
+Observed once, live (request `834ee897-8b61-4caa-a409-ae5a9793d330`,
+work_date `2100-12-18`): step 1 (Manager, `direct_manager`) correctly routed
+to and was approved by the dedicated Manager test account. Step 2
+(`role:hr_admin`) did **not** route to the dedicated HR Admin test account —
+it resolved to a different, real `hr_admin` role holder in the same company.
+That request is still `pending_approval` on real infrastructure and this
+suite must never touch it — see "What is and isn't reversible" above.
 
 Traced directly from `resolve_approver()` (schema.sql): its `role:%` branch
 (used for `role:hr_admin`, `role:finance`, `role:ceo`/`role:cto`) has no
-per-request or per-employee distribution logic at all — it deterministically
-picks exactly **one** active, non-terminated role holder scoped to the
-employee's company (or a global, `company_id is null` grant), ordered
-`granted_at asc`, `limit 1`. Whoever was granted that role **first** in the
-company always wins, for every `role:%`-routed approval, forever (unless
-revoked). This is intentional design for `direct_manager`/`manager_of_manager`
-(the whole point is "any qualifying person can unblock this, no one needs a
-manager assigned"), but it also means a company with more than one
-`hr_admin` role holder will always route every such approval to the same one
-person — nobody else can act on it, even though `approvals_select`'s RLS
-policy (`has_role('hr_admin')`) would let any `hr_admin` *read* the row: the
+per-request or per-employee distribution logic — it deterministically picks
+exactly **one** active, non-terminated role holder scoped to the employee's
+company (or a global, `company_id is null` grant), ordered `granted_at asc`,
+`limit 1`. Whoever was granted that role **first** in the company always
+wins, for every `role:%`-routed approval, forever (unless revoked). This is
+intentional design for `direct_manager`/`manager_of_manager` (the whole
+point is "any qualifying person can unblock this, no one needs a manager
+assigned"), but it also means a company with more than one `hr_admin` role
+holder always routes every such approval to the same one person — nobody
+else can act on it, even though `approvals_select`'s RLS policy would let a
+*global* (`company_id is null`) `hr_admin` grant holder read the row: the
 Approvals page's own query (`apps/web/.../approvals/page.tsx`) narrows to
 `.eq("approver_id", session.userId)`, the same single-approver-inbox pattern
 every entity type in this app uses. **This is not a bug introduced by, or
@@ -269,12 +271,22 @@ specific to, Recovery Leave** — it's a pre-existing characteristic of
 `role:finance`/`role:ceo`-routed steps. Worth a product decision on its own
 merits; out of scope for this suite to fix.
 
-**Never fix this by hardcoding a test email into `resolve_approver()`, and
-never touch a real account's role grant or grant order to make a test pass.**
-The fix belongs entirely to the E2E HR Admin test account's own fixture data.
+**Do not "fix" this by editing any `user_roles` row, including the E2E HR
+Admin test account's own.** The E2E test accounts and every real account
+currently share ONE company (see "What this suite has NOT verified" below).
+`resolve_approver()`'s query has no notion of "this grant is for testing
+only" — it just picks whichever matching grant has the earliest
+`granted_at`. Making the HR Admin test account's grant sort first (by
+changing its `granted_at`, or by pointing its `company_id` at the shared
+company) does not scope the fix to test data: it changes which account
+*every real* `role:hr_admin`-routed approval in that company resolves to,
+from that point on — a genuine change to production approval-routing
+behavior, not a test fixture change, however it's framed. **Never do this,
+and never hardcode a test email into `resolve_approver()` either.**
 
-**Read-only diagnostic** — run this in Supabase SQL Editor first to see
-exactly which `hr_admin` grant currently wins the race:
+**Read-only diagnostic only** — this stays useful for understanding the
+routing (and for judging whether the isolation approach below is even
+viable), but no SQL from this section should be run to change anything:
 
 ```sql
 select
@@ -292,57 +304,57 @@ order by ur.granted_at asc;
 
 The row with the earliest `granted_at` (among rows where `company_id` is
 null or matches the Employee test account's company) is who
-`resolve_approver('role:hr_admin', ...)` will always pick. Cross-check
-against the Employee test account's own company:
+`resolve_approver('role:hr_admin', ...)` will always pick.
 
-```sql
-select e.id as employee_id, e.company_id, u.email
-from employees e
-join auth.users u on u.id = e.user_id
-where u.email = '<the dedicated Employee test account''s email>';
-```
+### The only genuinely safe fix: an isolated QA company
 
-**Fix — adjusts only the E2E HR Admin test account's own row, never anyone
-else's:**
+Real isolation means the E2E suite's `role:hr_admin` resolution can never
+even consider a real account — not adjusting who wins a shared race. That
+requires the E2E HR Admin test account's `hr_admin` grant to live in a
+company that no real account's `hr_admin` grant also matches.
 
-- If the HR Admin test account's `hr_admin` grant's `company_id` does not
-  match the Employee test account's `company_id` from the query above (and
-  isn't `null`), correct it:
-  ```sql
-  update user_roles
-  set company_id = '<the Employee test account's company_id from above>'
-  where user_id = (select id from auth.users where email = '<the dedicated HR Admin test account''s email>')
-    and role = 'hr_admin'
-    and revoked_at is null;
-  ```
-- Then (or if `company_id` already matched and only `granted_at` ordering
-  was the problem — the expected case, since this suite's dedicated test
-  accounts were created after initial company setup): make the HR Admin test
-  account's grant strictly earlier than whatever currently wins, without
-  touching that other row at all:
-  ```sql
-  update user_roles
-  set granted_at = (
-    select granted_at - interval '1 second'
-    from user_roles
-    where role = 'hr_admin' and revoked_at is null
-    order by granted_at asc
-    limit 1
-  )
-  where user_id = (select id from auth.users where email = '<the dedicated HR Admin test account''s email>')
-    and role = 'hr_admin'
-    and revoked_at is null;
-  ```
-  Safe to re-run — it only ever pulls the HR Admin test account's own grant
-  earlier, never later, and never reads or writes any other account's row.
+**This only works if the currently-winning real account's `hr_admin` grant
+is company-scoped, not global** (`company_id` is a specific company, not
+`null`) — run the diagnostic above to check. If it's global
+(`company_id is null`), it matches *every* company, including a brand new
+one, and no company boundary can exclude it; in that case there is no safe
+way to fully exercise this step in Production without either a manual,
+one-time approval decision by the account holder (never this suite, and
+never automatic), or a real product change (e.g. an explicit
+"designated approver" field) — a separate decision from this test fix.
 
-Re-run the first diagnostic query afterward to confirm the HR Admin test
-account's row is now first. Until this is applied, the Recovery Leave
-manager→HR test's step-2 assertion will fail with an explicit
-`HR ADMIN TEST-FIXTURE MISMATCH` error (see `20-attendance.spec.ts`) rather
-than a generic Approvals-page timeout — that error is expected and
-diagnostic, not evidence of a UI regression, until this fixture fix is
-applied.
+If it IS company-scoped, the app already supports building this without
+any raw SQL, entirely through the existing Sys Admin UI, using the
+dedicated Sys Admin test account:
+
+1. **Create a new company** via `/admin/companies` (`createCompany()` in
+   `apps/web/src/lib/actions/companies.ts` — a plain `sys_admin`-gated
+   insert, confirmed from source; no service role involved). This
+   automatically seeds the standard two-step Recovery Leave workflow for it
+   (`companies_seed_default_approval_workflows` trigger, schema.sql:2482 —
+   confirmed fires `after insert on companies`).
+2. **Invite fresh, dedicated QA-only accounts** via `/admin/users`
+   (`inviteUser()`/`assignRole()` in `apps/web/src/lib/actions/users.ts`) for
+   a QA Employee, QA Manager (set as the QA Employee's manager), and QA HR
+   Admin, each with `user_roles` scoped to this new company's `company_id`.
+   **Do not reuse or move the existing dedicated test accounts** — their
+   `employees.company_id`/`manager_id` wiring is already confirmed correct
+   for every other spec in this suite; moving them risks breaking that.
+3. **New credentials** for these QA-only accounts would need their own
+   `E2E_QA_*` secrets in the `production-qa` GitHub Environment, and a
+   separate spec file (not mixed into the shared-account
+   `20-attendance.spec.ts`) that logs in as them and exercises the same
+   Manager→HR approval flow in full isolation.
+
+**Effect of this setup**: creating a company and a handful of new
+users/employees/role grants via the app's own admin UI is a real, permanent
+write to Production — but it creates entirely new, isolated rows rather
+than mutating any existing account's approval eligibility. It's reversible
+by deactivating/deleting those specific new rows, with no risk to the real
+company or any real account.
+
+**Nothing in this section has been built yet.** Whether it's worth building
+depends on the diagnostic query's answer above — confirm that first.
 
 ## What this suite has NOT verified
 

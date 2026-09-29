@@ -203,27 +203,30 @@ test.describe("attendance and recovery leave @mutating", () => {
     try {
       await hrApprovals.expectPending(date);
     } catch (err) {
-      // Confirmed live (request 834ee897-8b61-4caa-a409-ae5a9793d330,
-      // work_date 2100-12-18): step 1 (direct_manager) correctly routed to
-      // and was approved by the Manager test account, but step 2
-      // (role:hr_admin) resolved to a DIFFERENT, real hr_admin account, not
-      // this HR Admin test account. resolve_approver()'s role:% branch
-      // (schema.sql) has no per-request distribution — it deterministically
-      // picks exactly one active hr_admin per company, "order by granted_at
-      // asc limit 1", so whichever account was granted that role FIRST
-      // always wins, for every such approval. The Approvals page itself is
-      // correct and working here (`.eq("approver_id", session.userId)` —
-      // the same single-approver-inbox pattern every entity type in this
-      // app uses); the HR Admin test account genuinely isn't the assigned
-      // approver for this request, so it correctly sees nothing pending.
+      // Observed ONCE, live (request 834ee897-8b61-4caa-a409-ae5a9793d330,
+      // work_date 2100-12-18): this exact timeout was caused by
+      // resolve_approver('role:hr_admin', ...) (schema.sql) resolving step 2
+      // to a DIFFERENT, real hr_admin account instead of this HR Admin test
+      // account — its role:% branch has no per-request distribution, it
+      // deterministically picks exactly one active hr_admin per company,
+      // "order by granted_at asc limit 1", so whichever account was granted
+      // that role FIRST always wins. See README.md's "HR Admin approver
+      // fixture" section for the full trace, the read-only diagnostic query,
+      // and why this can't safely be "fixed" by editing any user_roles row
+      // (this suite's test accounts share a company with real accounts).
       //
-      // This is a TEST-FIXTURE/ENVIRONMENT mismatch, never evidence the
-      // Approvals UI or decide_leave_approval() is broken — see this
-      // package's README.md ("HR Admin approver fixture") for the read-only
-      // diagnostic query and the fix, which only ever adjusts the HR Admin
-      // test account's own role_grant row, never any other account's.
+      // That confirmed cause for ONE past occurrence is context, not a
+      // standing diagnosis — do NOT assume every future timeout here has the
+      // same root cause. It could just as easily be a genuine timing/
+      // propagation issue or a real regression in the Approvals UI or
+      // decide_leave_approval() (the exact caveat expectPending()'s own
+      // diagnostic annotation already carries for the Manager step's
+      // historical timeout — see LeavePage.ts). Investigate each occurrence
+      // on its own evidence (the row-count diagnostic below, screenshots,
+      // whether the assigned approver has changed) before concluding either
+      // way.
       throw new Error(
-        `HR ADMIN TEST-FIXTURE MISMATCH, not an approval UI failure: this request's role:hr_admin step did not route to the HR Admin test account (getCredentials("hrAdmin")) — resolve_approver() picked a different hr_admin account instead, per its "earliest-granted role holder wins" rule (see README.md's "HR Admin approver fixture" section for the diagnostic query and fix — it only ever touches the HR Admin test account's own role grant). Underlying Approvals-page assertion: ${err instanceof Error ? err.message : String(err)}`,
+        `OBSERVED TIMEOUT waiting for this request to appear pending on the HR Admin test account's /approvals (step 2, role:hr_admin). Known context: a prior occurrence (work_date 2100-12-18) was traced to resolve_approver() routing this step to a different, real hr_admin account rather than this test account (see README.md's "HR Admin approver fixture" section) — but that is NOT confirmed to be this occurrence's cause; treat this as an open timeout to investigate, not a pre-diagnosed fixture mismatch. Underlying Approvals-page assertion: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
     await hrApprovals.approve(date);
