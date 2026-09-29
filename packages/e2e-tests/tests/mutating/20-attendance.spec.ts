@@ -5,14 +5,6 @@ import { ApprovalsPage, LeavePage } from "../../src/pages/LeavePage";
 import { testWorkday, testWeekendDay, tagNote } from "../../src/recordTag";
 import { getEmployeeNameByAuthEmail } from "../../src/identity";
 
-// The dedicated E2E QA project, created once via the real UI by an HR Admin
-// — see README.md's "Recovery Leave PM/HR-owner fixture" section. Recording
-// ANY recovery-day request now requires HR to select the specific project
-// that work was for (validate_recovery_credit_project() in schema.sql),
-// independent of Stage 2's routing cutover — this suite selects it by its
-// exact name, matching the bulk register's own "Project" picker.
-const E2E_RECOVERY_PROJECT_NAME = "E2E QA Recovery Project";
-
 /**
  * Attendance is HR-Admin bulk entry for the whole company (see
  * AttendancePage.ts's header comment) — there is no individual
@@ -90,7 +82,6 @@ test.describe("attendance and recovery leave @mutating", () => {
     await attendance.goto({ date });
     await attendance.setStatus(employeeName, "present");
     await attendance.setWorkModeAndHours(employeeName, "business_travel", 8); // >4h => 1 full recovery day, per record_attendance_and_recovery()
-    await attendance.setProject(employeeName, E2E_RECOVERY_PROJECT_NAME);
     await attendance.saveAll();
 
     // This save touches ONLY this employee's row (bulkRecordAttendance only
@@ -103,36 +94,17 @@ test.describe("attendance and recovery leave @mutating", () => {
   });
 
   /**
-   * The two-step Recovery Leave approval chain, walked end to end through
-   * the Approvals page's "Recovery Leave credits" section, verifying the
-   * credit is only posted once BOTH steps approve.
-   *
-   * Routing depends on which routing rule is currently live for this
-   * company's recovery_credit workflow (schema.sql's resolve_approver()):
-   *   - Before the Stage 2 cutover (supabase/manual-sql/
-   *     recovery_leave_pm_hr_owner_stage2_cutover.sql) is manually applied:
-   *     step 1 = direct_manager (the Employee test account's line manager),
-   *     step 2 = role:hr_admin (whichever active hr_admin was granted the
-   *     role earliest company-wide — see README.md's "HR Admin approver
-   *     fixture" section for why that can race with a real account).
-   *   - After Stage 2 is applied: step 1 = project_manager, step 2 =
-   *     hr_owner. This test still uses managerPage/hrAdminPage for both
-   *     steps under the new routing too, because the one-time fixture
-   *     documented in README.md's "Recovery Leave PM/HR-owner fixture"
-   *     section makes the SAME dedicated Manager test account the assigned
-   *     project's manager, and the SAME dedicated HR Admin test account the
-   *     Employee test account's hr_owner — deterministic, per-employee
-   *     assignment rather than a company-wide role race.
+   * The two-step Recovery Leave approval chain (Line Manager, then HR
+   * Admin — seed_default_approval_workflows() in schema.sql), walked end
+   * to end through the Approvals page's new "Recovery Leave credits"
+   * section, verifying the credit is only posted once BOTH steps approve.
    *
    * recovery_credit_requests has no tagged free-text field (it's manager/
    * HR-attested, never a self-submitted request with a reason) — its
-   * work_date is this run's unique identifier instead, same role a tagged
-   * reason plays for leave/reimbursement rows. testWeekendDay(runId, N)
-   * never collides with another N within THIS run, but its hash-derived
-   * date CAN coincide with a date an earlier, different run already used
-   * (confirmed live — see the date-search loop below), so the actual date
-   * is confirmed free via AttendancePage.isUnrecorded() before saving,
-   * rather than assumed from the first candidate.
+   * work_date is this run's unique, deterministic identifier instead
+   * (testWeekendDay(runId, N) never collides with another N within the
+   * same run, and this suite's own dates are re-derived fresh every run),
+   * same role a tagged reason plays for leave/reimbursement rows.
    */
   test("Recovery Leave: manager approves (step 1), HR Admin approves (step 2), the comp-off credit posts only after both", async ({
     employeePage,
@@ -144,48 +116,12 @@ test.describe("attendance and recovery leave @mutating", () => {
     test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /admin/users.");
     const { email } = getCredentials("employee");
     const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, email);
+    const date = testWeekendDay(runId, 2); // distinct from the creation test above (offset 0) and the rejection test below (offset 3)
 
-    // testWeekendDay(runId, N) is hash(runId) % 40 weeks + N — deterministic
-    // per run, but NOT collision-proof across different runs' hashes.
-    // Confirmed live: run E2E-20260928-232518's offset-2 date (2099-05-30)
-    // had already been recorded by an earlier run (E2E-20260928-113008)'s
-    // own weekend-day test, so this employee's row there was no longer
-    // "not_recorded" — the save still succeeded but earned no NEW recovery
-    // credit (one already existed for that date), producing a bare "Saved."
-    // that expectSavedWithRecoveryCredits(1) correctly refused to accept as
-    // proof. A bare "Saved." must never be treated as evidence a new
-    // request was created — only the credit-specific message counts, and
-    // only once we've first confirmed the candidate date is actually free.
-    //
-    // Base offset 100 keeps this search's candidates clear of every other
-    // fixed offset this file uses (0 for the creation test above, 3 for the
-    // rejection test below) so a search landing on 100+k can never collide
-    // with either of those within the SAME run.
     const attendance = new AttendancePage(hrAdminPage);
-    const DATE_SEARCH_BASE_OFFSET = 100;
-    const MAX_DATE_SEARCH_ATTEMPTS = 20;
-    let date: string | undefined;
-    for (let attempt = 0; attempt < MAX_DATE_SEARCH_ATTEMPTS; attempt++) {
-      const candidate = testWeekendDay(runId, DATE_SEARCH_BASE_OFFSET + attempt);
-      await attendance.goto({ date: candidate });
-      if (await attendance.isUnrecorded(employeeName)) {
-        date = candidate;
-        break;
-      }
-    }
-    if (!date) {
-      throw new Error(
-        `Could not find an unused synthetic Saturday for the Employee test account after ${MAX_DATE_SEARCH_ATTEMPTS} attempts starting at testWeekendDay(runId, ${DATE_SEARCH_BASE_OFFSET}) — every candidate already has an attendance record. Investigate stale test data before retrying.`,
-      );
-    }
-
-    // `date` is now confirmed free and is reused, unchanged, through every
-    // subsequent assertion below (attendance save, both approval decisions,
-    // and the final balance check) — a genuinely different date for any of
-    // those would silently test nothing.
+    await attendance.goto({ date });
     await attendance.setStatus(employeeName, "present");
     await attendance.setWorkModeAndHours(employeeName, "business_travel", 8); // >4h => 1 full recovery day
-    await attendance.setProject(employeeName, E2E_RECOVERY_PROJECT_NAME);
     await attendance.saveAll();
     await attendance.expectSavedWithRecoveryCredits(1);
 
@@ -226,36 +162,7 @@ test.describe("attendance and recovery leave @mutating", () => {
 
     const hrApprovals = new ApprovalsPage(hrAdminPage);
     await hrApprovals.goto();
-    try {
-      await hrApprovals.expectPending(date);
-    } catch (err) {
-      // Observed ONCE, live (request 834ee897-8b61-4caa-a409-ae5a9793d330,
-      // work_date 2100-12-18), under the OLD routing (step 2 = role:hr_admin
-      // — schema.sql's resolve_approver()): that branch has no per-request
-      // distribution, it deterministically picks exactly one active
-      // hr_admin per company, "order by granted_at asc limit 1", so
-      // whichever account was granted that role FIRST always wins — which
-      // can be a different, real hr_admin account instead of this HR Admin
-      // test account. See README.md's "Recovery Leave PM/HR-owner fixture"
-      // section for the full trace and why this can't safely be "fixed" by
-      // editing any user_roles row (this suite's test accounts share a
-      // company with real accounts).
-      //
-      // This exact race is structurally eliminated once the Stage 2 cutover
-      // (supabase/manual-sql/recovery_leave_pm_hr_owner_stage2_cutover.sql)
-      // is applied AND this file's own one-time fixture is configured (see
-      // that same README.md section) — step 2 then resolves to a specific
-      // employee's hr_owner_id, never a company-wide role lookup. Until that
-      // cutover is applied, the same race can still occur here, so this
-      // diagnostic wrapper stays. Do NOT assume every future timeout has the
-      // same cause — investigate each occurrence on its own evidence
-      // (screenshots, whether the assigned approver has changed, whether the
-      // cutover/fixture are actually both in place yet) before concluding
-      // either way.
-      throw new Error(
-        `OBSERVED TIMEOUT waiting for this request to appear pending on the HR Admin test account's /approvals (step 2). Known context: a prior occurrence (work_date 2100-12-18), under the OLD role:hr_admin routing, was traced to resolve_approver() routing this step to a different, real hr_admin account rather than this test account (see README.md's "Recovery Leave PM/HR-owner fixture" section) — but that is NOT confirmed to be this occurrence's cause, and cannot recur at all once the Stage 2 cutover + this file's fixture are both in place. Underlying Approvals-page assertion: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    await hrApprovals.expectPending(date);
     await hrApprovals.approve(date);
     await hrApprovals.expectNotPending(date);
 
@@ -293,7 +200,6 @@ test.describe("attendance and recovery leave @mutating", () => {
     await attendance.goto({ date });
     await attendance.setStatus(employeeName, "present");
     await attendance.setWorkModeAndHours(employeeName, "business_travel", 8);
-    await attendance.setProject(employeeName, E2E_RECOVERY_PROJECT_NAME);
     await attendance.saveAll();
     await attendance.expectSavedWithRecoveryCredits(1);
 

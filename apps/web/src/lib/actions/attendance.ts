@@ -34,12 +34,6 @@ const bulkRowSchema = z.object({
   status: z.enum(["not_recorded", "present", "absent", "leave", "partial_day"]),
   workMode: z.enum(["office", "client_site", "work_from_home", "field_work", "business_travel"]).optional(),
   hoursWorked: z.number().min(0).max(24).optional(),
-  // Only actually required server-side when this row ends up earning a
-  // recovery credit (validate_recovery_credit_project() in schema.sql) —
-  // optional here so a plain absent/leave/non-recovery-day row never needs
-  // one; the RPC itself raises a clear error if a project was needed but
-  // missing.
-  projectId: z.string().uuid().optional(),
 });
 
 const bulkAttendanceSchema = z.object({
@@ -68,7 +62,7 @@ export interface BulkAttendanceResult {
  */
 export async function bulkRecordAttendance(input: {
   workDate: string;
-  rows: { employeeId: string; status: string; workMode?: string; hoursWorked?: number; projectId?: string }[];
+  rows: { employeeId: string; status: string; workMode?: string; hoursWorked?: number }[];
 }): Promise<BulkAttendanceResult> {
   const parsed = bulkAttendanceSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input.", creditedCount: 0, needsPolicyReviewCount: 0 };
@@ -87,7 +81,6 @@ export async function bulkRecordAttendance(input: {
       status: r.status,
       work_mode: r.workMode ?? null,
       hours_worked: r.hoursWorked ?? null,
-      project_id: r.projectId ?? null,
     })),
   });
   if (error) return { error: "Could not save attendance. Please try again.", creditedCount: 0, needsPolicyReviewCount: 0 };
@@ -108,11 +101,6 @@ const recordOvernightRecoveryCreditSchema = z.object({
   workDate: z.string().min(1),
   completedNormalScheduledDay: z.coerce.boolean().optional(),
   activeHoursAfterMidnight: z.coerce.number().min(0),
-  // HR must select the specific project this overnight extension was
-  // for (validate_recovery_credit_project() in schema.sql) — required here
-  // since, unlike the bulk register, this form always attempts a real
-  // credit attestation, never a plain non-recovery attendance row.
-  projectId: z.string().uuid(),
 });
 
 export interface RecoveryCreditActionState extends ActionState {
@@ -142,7 +130,6 @@ export async function recordOvernightRecoveryCredit(
     p_work_date: d.workDate,
     p_completed_normal_scheduled_day: d.completedNormalScheduledDay ?? false,
     p_active_hours_after_midnight: d.activeHoursAfterMidnight,
-    p_project_id: d.projectId,
   });
   if (error) return { error: error.message };
 

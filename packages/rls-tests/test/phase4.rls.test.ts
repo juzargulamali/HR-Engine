@@ -51,16 +51,6 @@ const EMPLOYEE_MANAGER = "00000000-0000-0000-0000-0000000004c1";
 const EMPLOYEE_REPORT = "00000000-0000-0000-0000-0000000004c2";
 const EMPLOYEE_PEER = "00000000-0000-0000-0000-0000000004c3";
 
-// A recovery-day request now requires HR to select the specific project the
-// work was for (Recovery Leave routing Stage 1 — see
-// supabase/migrations/20261106000000_recovery_leave_pm_hr_owner_stage1.sql's
-// validate_recovery_credit_project()), independent of which routing rule
-// (direct_manager/role:hr_admin here, still unchanged) actually decides who
-// approves it. This project/allocation exists purely to satisfy that
-// requirement for every recovery_credit test below — it plays no role in
-// approval routing.
-const RECOVERY_PROJECT_ID = "00000000-0000-0000-0000-0000000004d9";
-
 describe("Phase 4 row-level security: projects, reimbursements, timesheets, attendance", () => {
   const db = new RlsTestDatabase();
   let reimbursementWorkflowId: string;
@@ -93,11 +83,6 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
         ('${USER_HR}', 'hr_admin', '${COMPANY_A}'),
         ('${USER_FINANCE}', 'finance', '${COMPANY_A}'),
         ('${USER_CEO}', 'ceo', '${COMPANY_A}');
-
-      insert into projects (id, company_id, code, name, manager_id)
-        values ('${RECOVERY_PROJECT_ID}', '${COMPANY_A}', 'P4-RECOVERY', 'Recovery credit fixture project', '${EMPLOYEE_MANAGER}');
-      insert into project_allocations (employee_id, project_id, allocation_percent, start_date)
-        values ('${EMPLOYEE_REPORT}', '${RECOVERY_PROJECT_ID}', 100, '2020-01-01');
     `);
 
     const { rows } = await db.asUser(USER_HR, (query) =>
@@ -161,21 +146,18 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
         values ('${EMPLOYEE_REPORT}', '${projectId}', 50, '2024-03-01');
       `);
 
-      // Scoped to THIS test's own projectId — EMPLOYEE_REPORT also carries
-      // the beforeAll recovery-credit fixture allocation (RECOVERY_PROJECT_ID),
-      // unrelated to what this test is checking.
       const selfRead = await db.asUser(USER_REPORT, (query) =>
-        query("select id from project_allocations where employee_id = $1 and project_id = $2", [EMPLOYEE_REPORT, projectId]),
+        query("select id from project_allocations where employee_id = $1", [EMPLOYEE_REPORT]),
       );
       expect(selfRead.rows.length).toBe(1);
 
       const managerRead = await db.asUser(USER_MANAGER, (query) =>
-        query("select id from project_allocations where employee_id = $1 and project_id = $2", [EMPLOYEE_REPORT, projectId]),
+        query("select id from project_allocations where employee_id = $1", [EMPLOYEE_REPORT]),
       );
       expect(managerRead.rows.length).toBe(1);
 
       const peerRead = await db.asUser(USER_PEER, (query) =>
-        query("select id from project_allocations where employee_id = $1 and project_id = $2", [EMPLOYEE_REPORT, projectId]),
+        query("select id from project_allocations where employee_id = $1", [EMPLOYEE_REPORT]),
       );
       expect(peerRead.rows.length).toBe(0);
 
@@ -742,7 +724,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       await db.asUser(USER_HR, async (query) => {
         const { rows } = await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-04-04", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 , project_id: RECOVERY_PROJECT_ID }])],
+          ["2026-04-04", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }])],
         );
         expect(rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: true, reversed: false, needs_policy_review: false }]);
 
@@ -770,7 +752,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       await db.asUser(USER_HR, async (query) => {
         const { rows } = await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-04-06", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", work_mode: "office", hours_worked: 8 , project_id: RECOVERY_PROJECT_ID }])],
+          ["2026-04-06", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", work_mode: "office", hours_worked: 8 }])],
         );
         expect(rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: false, reversed: false, needs_policy_review: false }]);
 
@@ -786,7 +768,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       await db.asUser(USER_HR, async (query) => {
         const { rows } = await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-04-05", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" , project_id: RECOVERY_PROJECT_ID }])],
+          ["2026-04-05", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present" }])],
         );
         expect(rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: false, reversed: false, needs_policy_review: true }]);
 
@@ -803,7 +785,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
         // 2026-04-11 is a Saturday, 2026-04-12 a Sunday — both within ZZ's weekend.
         const half = await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-04-11", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 4 , project_id: RECOVERY_PROJECT_ID }])],
+          ["2026-04-11", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 4 }])],
         );
         expect(half.rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: true, reversed: false, needs_policy_review: false }]);
         const halfRequest = await query(
@@ -814,7 +796,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
 
         const full = await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-04-12", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 4.5 , project_id: RECOVERY_PROJECT_ID }])],
+          ["2026-04-12", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 4.5 }])],
         );
         expect(full.rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: true, reversed: false, needs_policy_review: false }]);
         const fullRequest = await query(
@@ -827,7 +809,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
 
     it("is idempotent under a repeated (e.g. double-clicked) save — never creates a second request for the same day", async () => {
       await db.asUser(USER_HR, async (query) => {
-        const payload = JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 , project_id: RECOVERY_PROJECT_ID }]);
+        const payload = JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }]);
         const first = await query("select * from record_attendance_and_recovery($1, $2::jsonb)", ["2026-04-18", payload]);
         expect(first.rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: true, reversed: false, needs_policy_review: false }]);
 
@@ -848,7 +830,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       await db.asUser(USER_HR, async (query) => {
         await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-04-25", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 , project_id: RECOVERY_PROJECT_ID }])],
+          ["2026-04-25", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }])],
         );
         const recordId = (
           await query("select id from attendance_records where employee_id = $1 and work_date = '2026-04-25'", [EMPLOYEE_REPORT])
@@ -894,7 +876,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
         // enforces uniqueness among non-cancelled/non-rejected requests).
         const restored = await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-04-25", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 , project_id: RECOVERY_PROJECT_ID }])],
+          ["2026-04-25", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }])],
         );
         expect(restored.rows).toEqual([{ attendance_employee_id: EMPLOYEE_REPORT, credited: true, reversed: false, needs_policy_review: false }]);
 
@@ -907,7 +889,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
     });
 
     it("blocks anyone other than HR Admin from recording attendance", async () => {
-      const payload = JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 , project_id: RECOVERY_PROJECT_ID }]);
+      const payload = JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }]);
       await expect(
         db.asUser(USER_MANAGER, (query) => query("select * from record_attendance_and_recovery($1, $2::jsonb)", ["2026-04-27", payload])),
       ).rejects.toThrow(/Only HR Admin/);
@@ -924,7 +906,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       await db.asUser(USER_HR, async (query) => {
         await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-05-30", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 , project_id: RECOVERY_PROJECT_ID }])],
+          ["2026-05-30", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }])],
         );
         const recordId = (
           await query("select id from attendance_records where employee_id = $1 and work_date = '2026-05-30'", [EMPLOYEE_REPORT])
@@ -947,7 +929,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
     async function submitStandardRequest(query: Client["query"], workDate: string, hours = 8) {
       await query("select * from record_attendance_and_recovery($1, $2::jsonb)", [
         workDate,
-        JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: hours , project_id: RECOVERY_PROJECT_ID }]),
+        JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: hours }]),
       ]);
       const record = await query("select id from attendance_records where employee_id = $1 and work_date = $2", [EMPLOYEE_REPORT, workDate]);
       const recordId = record.rows[0]?.id;
@@ -1068,7 +1050,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       await db.asUserCommit(USER_HR, async (query) => {
         await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-08-01", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 , project_id: RECOVERY_PROJECT_ID }])],
+          ["2026-08-01", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }])],
         );
         recordId = (
           await query("select id from attendance_records where employee_id = $1 and work_date = '2026-08-01'", [EMPLOYEE_REPORT])
@@ -1144,7 +1126,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       await db.asUserCommit(USER_HR, async (query) => {
         await query(
           "select * from record_attendance_and_recovery($1, $2::jsonb)",
-          ["2026-08-08", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 , project_id: RECOVERY_PROJECT_ID }])],
+          ["2026-08-08", JSON.stringify([{ employee_id: EMPLOYEE_REPORT, status: "present", hours_worked: 8 }])],
         );
         recordId = (
           await query("select id from attendance_records where employee_id = $1 and work_date = '2026-08-08'", [EMPLOYEE_REPORT])

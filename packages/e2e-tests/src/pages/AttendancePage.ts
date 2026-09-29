@@ -65,29 +65,6 @@ export class AttendancePage {
     await row.getByRole("spinbutton").fill(String(hours));
   }
 
-  /**
-   * Selects the project a recovery-day's work was for, by its visible name
-   * — required (validate_recovery_credit_project() in schema.sql) before a
-   * Present row on a recovery day can earn a credit request at all. The
-   * register's third combobox (after status, work mode); if the employee
-   * has only one active allocation for this date it's already the default
-   * selection, but this suite calls it explicitly rather than relying on
-   * that default. Throws if the employee has no allocation option at all
-   * (the column renders "No allocation" text instead of a <select> then) —
-   * the one-time fixture documented in README.md must be set up first.
-   */
-  async setProject(employeeName: string, projectName: string): Promise<void> {
-    const row = await this.uniqueRowFor(employeeName);
-    const comboboxes = row.getByRole("combobox");
-    const count = await comboboxes.count();
-    if (count < 3) {
-      throw new Error(
-        `"${employeeName}" has no project allocation option on this date's register — cannot select project "${projectName}". Set up the one-time E2E project/allocation fixture first (see README.md's "Recovery Leave PM/HR-owner fixture" section).`,
-      );
-    }
-    await comboboxes.nth(2).selectOption({ label: projectName });
-  }
-
   async saveAll(): Promise<void> {
     await this.page.getByRole("button", { name: /save all/i }).click();
   }
@@ -115,32 +92,6 @@ export class AttendancePage {
    */
   async expectSavedWithRecoveryCredits(count: number): Promise<void> {
     await expect(this.page.getByText(`Saved. ${count} recovery credit request(s) submitted for approval.`, { exact: true })).toBeVisible({ timeout: 10_000 });
-  }
-
-  /**
-   * True if this employee has NO attendance recorded yet for whatever date
-   * this page is currently showing (status === "not_recorded"). Read-only —
-   * call this BEFORE setStatus/saveAll to confirm a synthetic date is
-   * actually free.
-   *
-   * Why this check exists: this suite's synthetic weekend dates
-   * (testWeekendDay() in recordTag.ts) are `hash(runId) % 40 weeks +
-   * offsetWeeks` — deterministic per run, but NOT collision-proof across
-   * different runs' hashes. Confirmed live: run E2E-20260928-232518's
-   * offset-2 date (2099-05-30) had already been recorded by an earlier
-   * run (E2E-20260928-113008)'s own weekend-day test. On an
-   * already-recorded date, record_attendance_and_recovery() still saves
-   * successfully but creates no NEW recovery_credit_requests row (one
-   * already exists there), so the save only ever shows a bare "Saved." —
-   * expectSavedWithRecoveryCredits() correctly fails on that, but by then
-   * the test has already wasted a real Production mutation on the wrong
-   * date. This lets a caller pick a different candidate date BEFORE
-   * saving anything, rather than discover the collision only after.
-   */
-  async isUnrecorded(employeeName: string): Promise<boolean> {
-    const row = await this.uniqueRowFor(employeeName);
-    const status = await row.getByRole("combobox").first().inputValue();
-    return status === "not_recorded";
   }
 
   /** The employee's own SELECTED control values on whatever date this page

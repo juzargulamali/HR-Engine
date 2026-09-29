@@ -193,7 +193,6 @@ export interface Database {
           work_location: string | null;
           recognised_prior_service_years: number | null;
           is_first_ever_employment: boolean | null;
-          hr_owner_id: string | null;
           created_at: string;
           created_by: string | null;
           updated_at: string;
@@ -225,8 +224,6 @@ export interface Database {
           work_location?: string | null;
           recognised_prior_service_years?: number | null;
           is_first_ever_employment?: boolean | null;
-          hr_owner_id?: string | null;
-          created_by?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["employees"]["Insert"]> & {
           deleted_at?: string | null;
@@ -702,7 +699,6 @@ export interface Database {
           is_billable: boolean;
           is_active: boolean;
           deleted_at: string | null;
-          manager_id: string | null;
         };
         Insert: {
           id?: string;
@@ -712,7 +708,6 @@ export interface Database {
           client_name?: string | null;
           is_billable?: boolean;
           is_active?: boolean;
-          manager_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["projects"]["Insert"]>;
         Relationships: [];
@@ -872,7 +867,6 @@ export interface Database {
           created_by: string;
           comp_day_ledger_id: string | null;
           created_at: string;
-          project_id: string | null;
         };
         Insert: {
           id?: string;
@@ -883,7 +877,6 @@ export interface Database {
           proposed_days: number;
           status?: RequestStatus;
           created_by: string;
-          project_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["recovery_credit_requests"]["Insert"]> & {
           decided_at?: string | null;
@@ -1297,16 +1290,12 @@ export interface Database {
         Returns: Record<string, unknown> | null;
       };
       resolve_approver: {
-        Args: { p_approver_type: string; p_employee_id: string; p_entity_id?: string | null };
+        Args: { p_approver_type: string; p_employee_id: string };
         Returns: string | null;
       };
       get_employee_manager_name: {
         Args: { p_employee_id: string };
         Returns: string | null;
-      };
-      list_active_hr_admins: {
-        Args: { p_company_id: string };
-        Returns: { employee_id: string; first_name: string; last_name: string }[];
       };
       decide_leave_approval: {
         Args: { p_approval_id: string; p_decision: ApprovalDecision; p_comments?: string | null };
@@ -1322,7 +1311,6 @@ export interface Database {
           p_work_date: string;
           p_completed_normal_scheduled_day: boolean;
           p_active_hours_after_midnight: number;
-          p_project_id: string | null;
         };
         Returns: { credited: boolean; credit_days: number }[];
       };
@@ -1404,13 +1392,7 @@ export interface Database {
       record_attendance_and_recovery: {
         Args: {
           p_work_date: string;
-          p_rows: {
-            employee_id: string;
-            status: string;
-            work_mode: string | null;
-            hours_worked: number | null;
-            project_id?: string | null;
-          }[];
+          p_rows: { employee_id: string; status: string; work_mode: string | null; hours_worked: number | null }[];
         };
         Returns: { attendance_employee_id: string; credited: boolean; reversed: boolean; needs_policy_review: boolean }[];
       };

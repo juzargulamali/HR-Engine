@@ -49,7 +49,7 @@ export default async function ApprovalsPage() {
       recoveryCreditIds.length > 0
         ? supabase
             .from("recovery_credit_requests")
-            .select("id, employee_id, attendance_record_id, work_date, event_type, proposed_days, project_id, projects(name)")
+            .select("id, employee_id, attendance_record_id, work_date, event_type, proposed_days")
             .in("id", recoveryCreditIds)
         : Promise.resolve({ data: [] as never[] }),
     ]);
@@ -423,7 +423,6 @@ export default async function ApprovalsPage() {
                   <TableHead>Employee</TableHead>
                   <TableHead>Work date</TableHead>
                   <TableHead>Type</TableHead>
-                  <TableHead>Project</TableHead>
                   <TableHead>Hours</TableHead>
                   <TableHead>Credit</TableHead>
                   <TableHead>Approval step</TableHead>
@@ -438,7 +437,6 @@ export default async function ApprovalsPage() {
                       <TableCell>{employeeName(recoveryRequest.employee_id)}</TableCell>
                       <TableCell>{recoveryRequest.work_date}</TableCell>
                       <TableCell className="capitalize">{recoveryRequest.event_type}</TableCell>
-                      <TableCell>{(recoveryRequest.projects as unknown as { name: string } | null)?.name ?? "—"}</TableCell>
                       <TableCell>{recoveryHours(recoveryRequest)}</TableCell>
                       <TableCell>{recoveryRequest.proposed_days} day(s)</TableCell>
                       <TableCell>

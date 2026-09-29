@@ -67,12 +67,6 @@ export async function createEmployee(_prevState: ActionState, formData: FormData
       hire_date: d.hireDate,
       date_of_birth: d.dateOfBirth || null,
       job_title: d.jobTitle || null,
-      // Was never set before — set_initial_hr_owner() (schema.sql) reads
-      // this to auto-assign the creating HR Admin as the new employee's
-      // initial HR owner (Recovery Leave step 2, once that routing cuts
-      // over), and it stays null without it, silently skipping that
-      // assignment for every employee ever created through this form.
-      created_by: user.id,
     })
     .select("id")
     .single();
@@ -165,13 +159,6 @@ const updateEmployeeSchema = z.object({
   jobTitle: z.string().optional(),
   employmentStatus: z.enum(["active", "on_leave", "suspended", "terminated"]),
   managerId: z.string().uuid().optional().or(z.literal("")),
-  // Recovery Leave step 2's assigned approver once that routing cuts over
-  // (see schema.sql's employees_validate_hr_owner) — must reference an
-  // employee whose user currently holds an active hr_admin role, enforced
-  // at the database level regardless of what this form submits, so an
-  // invalid selection surfaces as this action's own error rather than a
-  // silently-ignored write.
-  hrOwnerId: z.string().uuid().optional().or(z.literal("")),
   dateOfBirth: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()),
   terminationDate: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()),
   // Optional HR reference data only — NOT used by
@@ -248,7 +235,6 @@ export async function updateEmployee(_prevState: ActionState, formData: FormData
       .update({
         job_title: d.jobTitle || null,
         manager_id: d.managerId || null,
-        hr_owner_id: d.hrOwnerId || null,
         date_of_birth: d.dateOfBirth || null,
         recognised_prior_service_years: d.recognisedPriorServiceYears ?? null,
         is_first_ever_employment: d.isFirstEverEmployment === undefined ? null : d.isFirstEverEmployment === "true",
@@ -274,7 +260,6 @@ export async function updateEmployee(_prevState: ActionState, formData: FormData
         job_title: d.jobTitle || null,
         employment_status: d.employmentStatus,
         manager_id: d.managerId || null,
-        hr_owner_id: d.hrOwnerId || null,
         date_of_birth: d.dateOfBirth || null,
         recognised_prior_service_years: d.recognisedPriorServiceYears ?? null,
         is_first_ever_employment: d.isFirstEverEmployment === undefined ? null : d.isFirstEverEmployment === "true",

@@ -1,6 +1,5 @@
 import {
   BellRing,
-  Briefcase,
   Building,
   BookOpen,
   CalendarCheck,
@@ -44,7 +43,6 @@ export const NAV_ICONS: Record<NavIconKey, LucideIcon> = {
   assets: Package,
   policies: BookOpen,
   holidays: Landmark,
-  projects: Briefcase,
   companies: Building,
   ai: Sparkles,
   audit: ScrollText,

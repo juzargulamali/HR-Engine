@@ -226,90 +226,19 @@ live run mostly needs small text tweaks: `EmployeesPage`, `HolidaysPage`,
 
 ## Known application gap found while building this suite
 
-~~Reading `apps/web/src/app/(app)/approvals/page.tsx` directly: its query
+Reading `apps/web/src/app/(app)/approvals/page.tsx` directly: its query
 fetches every pending `approvals` row for the signed-in approver regardless
 of `entity_type`, but the page only ever builds a display section for
 `leave_request`, `reimbursement_claim`, `timesheet`, `generated_letter`, and
 `payroll_export_run`. A `recovery_credit` approval (created automatically by
 `record_attendance_and_recovery()`) is fetched but never rendered anywhere
-on that page~~ — **fixed**: `apps/web/src/app/(app)/approvals/page.tsx` now
-builds its own "Recovery Leave credits" section (`recoveryApprovals`,
-filtered by `entity_type === "recovery_credit"`). This suite's
-`20-attendance.spec.ts` now walks that section end to end via
-`ApprovalsPage` for both approval steps, in addition to still verifying the
-attendance page's own save-result message for the credit's creation.
-
-## Recovery Leave PM/HR-owner fixture (required NOW — not staged)
-
-A separate product PR (see its own migration, `supabase/migrations/
-20261106000000_recovery_leave_pm_hr_owner_stage1.sql`) makes two changes,
-one staged and one not:
-
-- **Staged (dormant until Stage 2)**: Recovery Leave's approval ROUTING
-  changes from `direct_manager -> role:hr_admin` to `project_manager ->
-  hr_owner`. This only takes effect once someone manually runs the
-  cutover file, `supabase/manual-sql/
-  recovery_leave_pm_hr_owner_stage2_cutover.sql`, in the Supabase SQL
-  Editor — this repo's migrations never apply it automatically.
-- **NOT staged — live the moment this PR's migration + app code are
-  deployed**: recording ANY weekend/holiday/overnight recovery-day request
-  (`record_attendance_and_recovery()`/`record_overnight_recovery_credit()`)
-  now REQUIRES HR to select the specific project that day's work was for,
-  validated server-side (`validate_recovery_credit_project()`) — a company
-  match, an active allocation covering the actual work date, and a currently
-  active Project Manager on that project. This has nothing to do with which
-  routing rule is currently deciding who approves the request; it is a hard
-  requirement on the RECORDING step itself, independent of Stage 2.
-
-Practical effect for this suite: **the one-time fixture below must exist
-before `20-attendance.spec.ts`'s weekend-day/overnight tests can create a
-recovery-day request AT ALL**, not just before Stage 2 cuts over — without
-it, the bulk attendance register's "Project" column shows "No allocation"
-for the Employee test account and any attempted save fails outright with
-"A project must be selected for this recovery-day request." Which routing
-RULE then decides who approves it still depends on Stage 2:
-
-- **Before the cutover**: step 1 resolves via the Employee test account's
-  `manager_id` (must already be the Manager test account — see "Safety
-  model" above); step 2 resolves via `role:hr_admin`, which deterministically
-  picks whichever active `hr_admin` holder was granted the role earliest
-  **company-wide** — this can be a different, real hr_admin account instead
-  of the HR Admin test account (the confirmed live occurrence this traces
-  back to, work_date 2100-12-18, is described inside `20-attendance.spec.ts`'s
-  own OBSERVED TIMEOUT handling).
-- **After the cutover**: step 1 resolves via the Employee test account's
-  active `project_allocations` row -> that project's `manager_id`; step 2
-  resolves via the Employee test account's own `hr_owner_id`. Both are
-  per-employee assignments, so once the fixture below is in place, routing
-  to the dedicated test accounts is deterministic and can no longer race
-  with a real employee's own approvals.
-
-**One-time manual fixture setup, done through the real UI by an HR Admin
-(never automated by this suite, and never touching a real employee or
-project)** — needed now, independent of when (or whether yet) Stage 2 runs:
-
-1. Create a dedicated project for E2E QA (`/projects` -> "Add a project")
-   named exactly **`E2E QA Recovery Project`** (code e.g. `E2E-QA` —
-   `20-attendance.spec.ts` selects this project by its exact NAME, since
-   that's what the register's picker displays), and set its Project Manager
-   to the **Manager test account's** own employee record.
-2. On that project's detail page, add an allocation for the **Employee test
-   account** (any `allocation_percent` > 0, `start_date` on or before today,
-   no `end_date`) — an employee needs an active allocation before either the
-   recording step or `resolve_approver('project_manager', ...)` can resolve
-   anything for them.
-3. On the **Employee test account's** own profile (Overview tab, HR Admin
-   edit form), set "HR owner" to the **HR Admin test account's** own
-   employee record. The picker only ever lists currently-active `hr_admin`
-   holders in the same company, so the HR Admin test account must already
-   hold that role there. Not required for the RECORDING step above, only
-   for step 2 once Stage 2 cuts over — but there's no reason to wait, since
-   setting it now has no live effect until then.
-
-None of this touches a real employee's `manager_id`, `hr_owner_id`, project
-assignments, or any shared company-wide role grant — every row here is
-scoped to the dedicated E2E QA project and the Employee test account's own
-profile.
+on that page — not even counted toward whether the page shows its "nothing
+waiting on you" empty state. This suite works around it by verifying the
+attendance page's own save-result message instead (see
+`20-attendance.spec.ts`), but a manager currently has no UI-visible way to
+actually approve or reject a Recovery Leave credit request. This looks like
+a real application gap, not a test-design issue, and is worth a look outside
+this suite.
 
 ## What this suite has NOT verified
 

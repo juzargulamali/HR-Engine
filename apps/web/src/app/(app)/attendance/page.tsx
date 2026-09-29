@@ -124,35 +124,15 @@ export default async function AttendancePage({
   ]);
 
   const employeeIds = (employees ?? []).map((e) => e.id);
-  const [{ data: existing }, { data: allocations }] = await Promise.all([
+  const { data: existing } =
     employeeIds.length > 0
-      ? supabase
+      ? await supabase
           .from("attendance_records")
           .select("employee_id, status, work_mode, hours_worked")
           .eq("work_date", workDate)
           .in("employee_id", employeeIds)
-      : Promise.resolve({ data: [] as never[] }),
-    // Recovery Leave now requires HR to select the specific project a
-    // recovery day's work was for (validate_recovery_credit_project() in
-    // schema.sql) — only allocations covering THIS register's own workDate
-    // are valid choices, never "whichever is active today".
-    employeeIds.length > 0
-      ? supabase
-          .from("project_allocations")
-          .select("employee_id, project_id, projects(name)")
-          .in("employee_id", employeeIds)
-          .lte("start_date", workDate)
-          .or(`end_date.is.null,end_date.gte.${workDate}`)
-      : Promise.resolve({ data: [] as never[] }),
-  ]);
+      : { data: [] as never[] };
   const existingByEmployee = new Map((existing ?? []).map((r) => [r.employee_id, r]));
-  const allocationsByEmployee = new Map<string, { id: string; name: string }[]>();
-  for (const a of allocations ?? []) {
-    const projectName = (a.projects as unknown as { name: string } | null)?.name ?? "—";
-    const list = allocationsByEmployee.get(a.employee_id) ?? [];
-    list.push({ id: a.project_id, name: projectName });
-    allocationsByEmployee.set(a.employee_id, list);
-  }
 
   const weekStartDay = country?.week_start_day ?? 1;
   const isHolidayDate = !!holiday;
@@ -176,7 +156,6 @@ export default async function AttendancePage({
       status: rec?.status ?? "not_recorded",
       workMode: rec?.work_mode ?? null,
       hoursWorked: rec?.hours_worked ?? null,
-      projects: allocationsByEmployee.get(e.id) ?? [],
     };
   });
 
