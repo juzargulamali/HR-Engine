@@ -38,6 +38,11 @@ on:
           - 'false'
           - 'true'
         default: 'false'
+      test_grep:
+        description: 'Optional Playwright --grep pattern to scope the mutating project to a subset of tests (matched against "<describe title> > <test title>"), e.g. "Recovery Leave:". Leave blank to run the full mutating suite as normal — this is a temporary, one-off scoping knob and does not change any other job.'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -232,7 +237,13 @@ jobs:
       - name: Run the mutating Playwright project (small ordered batches — see filename prefixes under tests/mutating/)
         id: run_tests
         continue-on-error: true
-        run: npm run test:e2e:mutating
+        run: |
+          if [ -n "${{ inputs.test_grep }}" ]; then
+            echo "Scoped run: --grep '${{ inputs.test_grep }}' (test_grep input was set for this dispatch only)"
+            npx playwright test --project=mutating --grep "${{ inputs.test_grep }}"
+          else
+            npm run test:e2e:mutating
+          fi
         env:
           E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
           E2E_RUN_ID: ${{ needs.guard.outputs.run_id }}
