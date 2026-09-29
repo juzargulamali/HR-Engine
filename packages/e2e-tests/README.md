@@ -306,55 +306,61 @@ The row with the earliest `granted_at` (among rows where `company_id` is
 null or matches the Employee test account's company) is who
 `resolve_approver('role:hr_admin', ...)` will always pick.
 
-### The only genuinely safe fix: an isolated QA company
+### Confirmed: an isolated QA company would NOT fix this here
 
-Real isolation means the E2E suite's `role:hr_admin` resolution can never
-even consider a real account — not adjusting who wins a shared race. That
-requires the E2E HR Admin test account's `hr_admin` grant to live in a
-company that no real account's `hr_admin` grant also matches.
+The diagnostic above was run live. Result: every active `hr_admin` grant in
+this environment has `company_id = NULL` — including the one currently
+winning the race (granted 2026-09-22 09:48:03, the earliest of the three).
+A `company_id is null` grant satisfies `resolve_approver()`'s
+`(company_id is null or company_id = v_company_id)` check for **every**
+company, existing or brand new. So a freshly created, fully isolated QA
+company (new company, new QA-only Employee/Manager/HR Admin accounts) would
+**not** exclude that account — it would still win `role:hr_admin` resolution
+there too, for the exact same reason it wins in the shared company today.
+Company-level isolation only works when the account to be excluded holds a
+company-scoped grant; that isn't the case here, so building the QA-company
+setup described in an earlier revision of this section would not have
+solved anything. It has not been built, and per this finding, isn't worth
+building for this specific problem.
 
-**This only works if the currently-winning real account's `hr_admin` grant
-is company-scoped, not global** (`company_id` is a specific company, not
-`null`) — run the diagnostic above to check. If it's global
-(`company_id is null`), it matches *every* company, including a brand new
-one, and no company boundary can exclude it; in that case there is no safe
-way to fully exercise this step in Production without either a manual,
-one-time approval decision by the account holder (never this suite, and
-never automatic), or a real product change (e.g. an explicit
-"designated approver" field) — a separate decision from this test fix.
+### What's actually left, given that
 
-If it IS company-scoped, the app already supports building this without
-any raw SQL, entirely through the existing Sys Admin UI, using the
-dedicated Sys Admin test account:
+Nothing safe remains that this suite (or I) can do unilaterally to make the
+HR Admin test account the resolved approver for this step, in this
+environment, without either editing a real account's role grant (ruled out
+above) or a real product change. The realistic options, all decisions for
+you to make, not this PR:
 
-1. **Create a new company** via `/admin/companies` (`createCompany()` in
-   `apps/web/src/lib/actions/companies.ts` — a plain `sys_admin`-gated
-   insert, confirmed from source; no service role involved). This
-   automatically seeds the standard two-step Recovery Leave workflow for it
-   (`companies_seed_default_approval_workflows` trigger, schema.sql:2482 —
-   confirmed fires `after insert on companies`).
-2. **Invite fresh, dedicated QA-only accounts** via `/admin/users`
-   (`inviteUser()`/`assignRole()` in `apps/web/src/lib/actions/users.ts`) for
-   a QA Employee, QA Manager (set as the QA Employee's manager), and QA HR
-   Admin, each with `user_roles` scoped to this new company's `company_id`.
-   **Do not reuse or move the existing dedicated test accounts** — their
-   `employees.company_id`/`manager_id` wiring is already confirmed correct
-   for every other spec in this suite; moving them risks breaking that.
-3. **New credentials** for these QA-only accounts would need their own
-   `E2E_QA_*` secrets in the `production-qa` GitHub Environment, and a
-   separate spec file (not mixed into the shared-account
-   `20-attendance.spec.ts`) that logs in as them and exercises the same
-   Manager→HR approval flow in full isolation.
+1. **Leave the live HR-approve→credit-posted path unverified via automated
+   E2E**, and rely on what's already independently confirmed: the local RLS
+   test suite's `decide_leave_approval()` chain tests (358/358 passing)
+   already exercise approve/reject/self-approval-skip/final-credit-amount
+   for `entity_type = 'recovery_credit'` at the database level, and this
+   suite's own rejection test (`20-attendance.spec.ts`) already proves the
+   new Approvals UI section renders correctly, its Reject button works
+   end-to-end in Production, and the chain correctly stops with the balance
+   unchanged. What's *not* independently proven live is specifically
+   whether HR Admin's Approve click posts the ledger row correctly — logic
+   already covered by the passing RLS suite, just not exercised through the
+   Production UI itself.
+2. **You personally decide the one already-pending request**
+   (`834ee897-8b61-4caa-a409-ae5a9793d330`, work_date `2100-12-18`) through
+   the real UI, at your own convenience — this suite will never do this
+   automatically, and I will not do it on your behalf. Approving it would
+   raise the Employee test account's Comp-off balance by exactly 1 (a real,
+   permanent, synthetic-dated credit, same category as every other
+   synthetic recovery-credit record this suite already leaves in place —
+   see "What is and isn't reversible" above) and would, in effect, complete
+   the same verification this PR set out to get, just via a manual click
+   instead of an automated script.
+3. **A real product change**, out of scope for this PR and worth a
+   separate, deliberate decision: e.g. requiring `hr_admin` grants to be
+   company-scoped rather than allowing `company_id is null`, or adding an
+   explicit "designated approver" concept per workflow step so routing
+   isn't purely "earliest-granted role holder, platform-wide."
 
-**Effect of this setup**: creating a company and a handful of new
-users/employees/role grants via the app's own admin UI is a real, permanent
-write to Production — but it creates entirely new, isolated rows rather
-than mutating any existing account's approval eligibility. It's reversible
-by deactivating/deleting those specific new rows, with no risk to the real
-company or any real account.
-
-**Nothing in this section has been built yet.** Whether it's worth building
-depends on the diagnostic query's answer above — confirm that first.
+This PR does not pick one of these for you. It stops here, with the finding
+documented plainly instead of a runbook that would not have worked.
 
 ## What this suite has NOT verified
 
