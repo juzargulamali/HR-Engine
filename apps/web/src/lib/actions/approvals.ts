@@ -98,7 +98,11 @@ export async function decideApproval(input: { approvalId: string; decision: "app
     p_comments: parsed.data.comments || null,
   });
 
-  if (!error && approvalBefore?.entity_type === "leave_request") {
+  // leave_request approvals always resolve to a specific approver_id — only
+  // recovery_credit's role-queue step (see schema.sql) ever leaves it null.
+  // This can't happen for a leave_request here, but the column is nullable
+  // now, so guard rather than assert.
+  if (!error && approvalBefore?.entity_type === "leave_request" && approvalBefore.approver_id) {
     await notifyAfterLeaveDecision(supabase, { requestId: approvalBefore.entity_id, decidedByUserId: approvalBefore.approver_id });
   }
 

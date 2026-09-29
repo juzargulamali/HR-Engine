@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
 import { DecisionButtons } from "./decision-buttons";
+import { RecoveryCreditDecisionForm } from "./recovery-credit-decision-form";
 
 export default async function ApprovalsPage() {
   const session = await getCurrentSession();
@@ -49,23 +50,33 @@ export default async function ApprovalsPage() {
       recoveryCreditIds.length > 0
         ? supabase
             .from("recovery_credit_requests")
-            .select("id, employee_id, attendance_record_id, work_date, event_type, proposed_days")
+            .select("id, employee_id, attendance_record_id, work_date, event_type, proposed_days, correction_reason, checked_with, corrected_at")
             .in("id", recoveryCreditIds)
         : Promise.resolve({ data: [] as never[] }),
     ]);
 
-  // recovery_credit_requests never exposes hours directly — "standard" days
-  // derive their credit from attendance_records.hours_worked,
-  // "overnight" ones from active_hours_after_midnight (see
-  // record_attendance_and_recovery()/record_overnight_recovery_credit() in
-  // schema.sql) — so the approver's hours figure has to come from a
-  // second, separate read of the underlying attendance row.
+  // recovery_credit_requests.work_date/proposed_days are the CURRENT
+  // (possibly HR-corrected) values — the ORIGINAL, unedited hours/note come
+  // from the linked attendance_records row (and, for a Jibble-imported day,
+  // the jibble_time_entries row one layer further back) so the approval
+  // screen can show original vs. corrected side by side without ever
+  // overwriting the evidence.
   const attendanceRecordIds = [...new Set((recoveryRequests ?? []).map((r) => r.attendance_record_id))];
   const { data: attendanceRecords } =
     attendanceRecordIds.length > 0
-      ? await supabase.from("attendance_records").select("id, hours_worked, active_hours_after_midnight").in("id", attendanceRecordIds)
+      ? await supabase
+          .from("attendance_records")
+          .select("id, work_date, hours_worked, active_hours_after_midnight, source, jibble_time_entry_id")
+          .in("id", attendanceRecordIds)
       : { data: [] as never[] };
   const attendanceById = new Map((attendanceRecords ?? []).map((a) => [a.id, a]));
+
+  const jibbleTimeEntryIds = [...new Set((attendanceRecords ?? []).map((a) => a.jibble_time_entry_id).filter((v): v is string => Boolean(v)))];
+  const { data: jibbleTimeEntries } =
+    jibbleTimeEntryIds.length > 0
+      ? await supabase.from("jibble_time_entries").select("id, note, needs_review, review_reason").in("id", jibbleTimeEntryIds)
+      : { data: [] as never[] };
+  const jibbleTimeEntryById = new Map((jibbleTimeEntries ?? []).map((j) => [j.id, j]));
 
   const templateIds = [...new Set((letters ?? []).map((l) => l.template_id))];
   const { data: templates } =
@@ -147,23 +158,14 @@ export default async function ApprovalsPage() {
     payrollApprovals.length === 0 &&
     recoveryApprovals.length === 0;
 
-  // Recovery Leave earning is a fixed, seeded two-step workflow — step 1
-  // (Line Manager, provisional) then step 2 (HR Admin, the only point that
-  // posts the actual comp_day_ledger credit) — see
-  // seed_default_approval_workflows() in schema.sql. Deriving the label
-  // straight from this approval row's own step_order avoids a further
-  // join just to read back approval_workflow_steps.approver_type; the
-  // fallback covers a future workflow edit changing that fixed shape.
-  function recoveryStepLabel(stepOrder: number): string {
-    if (stepOrder === 1) return "Step 1 of 2 — Line Manager (provisional)";
-    if (stepOrder === 2) return "Step 2 of 2 — HR Admin (final, posts the credit)";
-    return `Step ${stepOrder}`;
-  }
-
-  function recoveryHours(recoveryRequest: { attendance_record_id: string; event_type: string }): string {
+  // Recovery Leave earning is now ONE HR decision — a company-scoped queue
+  // any current HR Admin may decide (see seed_default_approval_workflows()/
+  // decide_leave_approval()'s 'role_queue:hr_admin' handling in schema.sql)
+  // — never a manager-then-HR chain.
+  function recoveryHours(recoveryRequest: { attendance_record_id: string; event_type: string }): number | null {
     const attendance = attendanceById.get(recoveryRequest.attendance_record_id);
     const hours = recoveryRequest.event_type === "overnight" ? attendance?.active_hours_after_midnight : attendance?.hours_worked;
-    return hours === null || hours === undefined ? "—" : `${hours}h`;
+    return hours === null || hours === undefined ? null : Number(hours);
   }
 
   return (
@@ -415,38 +417,49 @@ export default async function ApprovalsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Recovery Leave credits</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              One HR decision each — any HR Admin may decide these. Check the work with the relevant project lead outside this
+              application before approving.
+            </p>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
-                  <TableHead>Work date</TableHead>
                   <TableHead>Type</TableHead>
-                  <TableHead>Hours</TableHead>
-                  <TableHead>Credit</TableHead>
-                  <TableHead>Approval step</TableHead>
-                  <TableHead />
+                  <TableHead>Evidence</TableHead>
+                  <TableHead>Decide</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {recoveryApprovals.map((a) => {
                   const recoveryRequest = recoveryRequestById.get(a.entity_id)!;
+                  const attendance = attendanceById.get(recoveryRequest.attendance_record_id);
+                  const jibbleEntry = attendance?.jibble_time_entry_id ? jibbleTimeEntryById.get(attendance.jibble_time_entry_id) : undefined;
+                  const originalHours = recoveryHours(recoveryRequest);
                   return (
                     <TableRow key={a.id}>
                       <TableCell>{employeeName(recoveryRequest.employee_id)}</TableCell>
-                      <TableCell>{recoveryRequest.work_date}</TableCell>
                       <TableCell className="capitalize">{recoveryRequest.event_type}</TableCell>
-                      <TableCell>{recoveryHours(recoveryRequest)}</TableCell>
-                      <TableCell>{recoveryRequest.proposed_days} day(s)</TableCell>
-                      <TableCell>
-                        <div className="space-y-0.5">
-                          <p className="text-sm">{recoveryStepLabel(a.step_order)}</p>
-                          <p className="text-xs text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
-                        </div>
+                      <TableCell className="max-w-xs space-y-1 text-xs text-muted-foreground">
+                        <p>Source: {attendance?.source === "jibble" ? "Jibble import" : "Manual entry"}</p>
+                        {jibbleEntry?.note ? <p className="italic">Note: &quot;{jibbleEntry.note}&quot;</p> : null}
+                        {jibbleEntry?.needs_review ? (
+                          <Badge variant="destructive" title={jibbleEntry.review_reason ?? undefined}>
+                            Needs review
+                          </Badge>
+                        ) : null}
                       </TableCell>
                       <TableCell>
-                        <DecisionButtons approvalId={a.id} />
+                        <RecoveryCreditDecisionForm
+                          requestId={recoveryRequest.id}
+                          originalWorkDate={attendance?.work_date ?? recoveryRequest.work_date}
+                          originalHours={originalHours}
+                          currentWorkDate={recoveryRequest.work_date}
+                          currentDays={Number(recoveryRequest.proposed_days)}
+                          wasCorrected={Boolean(recoveryRequest.corrected_at)}
+                        />
                       </TableCell>
                     </TableRow>
                   );

@@ -193,6 +193,7 @@ export interface Database {
           work_location: string | null;
           recognised_prior_service_years: number | null;
           is_first_ever_employment: boolean | null;
+          jibble_person_id: string | null;
           created_at: string;
           created_by: string | null;
           updated_at: string;
@@ -224,6 +225,7 @@ export interface Database {
           work_location?: string | null;
           recognised_prior_service_years?: number | null;
           is_first_ever_employment?: boolean | null;
+          jibble_person_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["employees"]["Insert"]> & {
           deleted_at?: string | null;
@@ -670,7 +672,7 @@ export interface Database {
           entity_id: string;
           workflow_id: string | null;
           step_order: number;
-          approver_id: string;
+          approver_id: string | null;
           decision: ApprovalDecision;
           decided_at: string | null;
           comments: string | null;
@@ -682,7 +684,7 @@ export interface Database {
           entity_id: string;
           workflow_id?: string | null;
           step_order: number;
-          approver_id: string;
+          approver_id?: string | null;
           decision?: ApprovalDecision;
           comments?: string | null;
         };
@@ -836,6 +838,7 @@ export interface Database {
           source: string;
           completed_normal_scheduled_day: boolean | null;
           active_hours_after_midnight: string | null;
+          jibble_time_entry_id: string | null;
         };
         Insert: {
           id?: string;
@@ -849,8 +852,49 @@ export interface Database {
           source?: string;
           completed_normal_scheduled_day?: boolean | null;
           active_hours_after_midnight?: number | null;
+          jibble_time_entry_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["attendance_records"]["Insert"]>;
+        Relationships: [];
+      };
+      jibble_time_entries: {
+        Row: {
+          id: string;
+          company_id: string;
+          jibble_entry_id: string;
+          jibble_person_id: string;
+          employee_id: string | null;
+          entry_start: string | null;
+          entry_end: string | null;
+          note: string | null;
+          break_minutes: string;
+          work_date: string | null;
+          raw_payload: Record<string, unknown>;
+          content_hash: string;
+          attendance_record_id: string | null;
+          needs_review: boolean;
+          review_reason: string | null;
+          synced_at: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          jibble_entry_id: string;
+          jibble_person_id: string;
+          employee_id?: string | null;
+          entry_start?: string | null;
+          entry_end?: string | null;
+          note?: string | null;
+          break_minutes?: number;
+          work_date?: string | null;
+          raw_payload: Record<string, unknown>;
+          content_hash: string;
+          attendance_record_id?: string | null;
+          needs_review?: boolean;
+          review_reason?: string | null;
+        };
+        Update: Record<string, never>; // no write policy at all — import_jibble_time_entry() is the only mutator
         Relationships: [];
       };
       recovery_credit_requests: {
@@ -867,6 +911,10 @@ export interface Database {
           created_by: string;
           comp_day_ledger_id: string | null;
           created_at: string;
+          correction_reason: string | null;
+          checked_with: string | null;
+          corrected_by: string | null;
+          corrected_at: string | null;
         };
         Insert: {
           id?: string;
@@ -881,6 +929,10 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["recovery_credit_requests"]["Insert"]> & {
           decided_at?: string | null;
           comp_day_ledger_id?: string | null;
+          correction_reason?: string | null;
+          checked_with?: string | null;
+          corrected_by?: string | null;
+          corrected_at?: string | null;
         };
         Relationships: [];
       };
@@ -1313,6 +1365,56 @@ export interface Database {
           p_active_hours_after_midnight: number;
         };
         Returns: { credited: boolean; credit_days: number }[];
+      };
+      recovery_credit_days_for_hours: {
+        Args: { p_hours: number | null };
+        Returns: number;
+      };
+      is_recovery_eligible_day: {
+        Args: { p_country_code: string; p_work_date: string };
+        Returns: { is_recovery_day: boolean; holiday_name: string | null }[];
+      };
+      country_timezone: {
+        Args: { p_country_code: string | null };
+        Returns: string;
+      };
+      import_jibble_time_entry: {
+        Args: {
+          p_company_id: string;
+          p_jibble_entry_id: string;
+          p_jibble_person_id: string;
+          p_entry_start: string | null;
+          p_entry_end: string | null;
+          p_note: string | null;
+          p_break_minutes: number | null;
+          p_raw_payload: Record<string, unknown>;
+        };
+        Returns: {
+          jibble_row_id: string;
+          attendance_record_id: string | null;
+          recovery_credit_request_id: string | null;
+          needs_review: boolean;
+          review_reason: string | null;
+        }[];
+      };
+      adjust_recovery_credit_request: {
+        Args: {
+          p_request_id: string;
+          p_corrected_work_date: string;
+          p_corrected_hours: number;
+          p_correction_reason?: string | null;
+          p_checked_with?: string | null;
+        };
+        Returns: undefined;
+      };
+      decide_recovery_credit_request: {
+        Args: {
+          p_request_id: string;
+          p_decision: ApprovalDecision;
+          p_checked_with?: string | null;
+          p_comments?: string | null;
+        };
+        Returns: undefined;
       };
       terminate_employee: {
         Args: { p_employee_id: string; p_termination_date?: string };

@@ -117,10 +117,22 @@ export default async function AttendancePage({
     employeesQuery = employeesQuery.or(`first_name.ilike.%${safeQ}%,last_name.ilike.%${safeQ}%`);
   }
 
-  const [{ data: country }, { data: employees }, { data: holiday }] = await Promise.all([
+  const [{ data: country }, { data: employees }, { data: holiday }, { data: needsReviewEntries }] = await Promise.all([
     supabase.from("countries").select("week_start_day, working_weekdays").eq("code", company.country_code).single(),
     employeesQuery,
     supabase.from("public_holidays").select("name").eq("country_code", company.country_code).eq("holiday_date", workDate).maybeSingle(),
+    // A failed/ambiguous Jibble sync (an unmapped person, an invalid entry,
+    // an edit after approval, a day the manual register already owns) is
+    // surfaced here rather than only in a cron job's own logs — HR is the
+    // one who can actually fix any of those causes (map the employee,
+    // correct the record, or just acknowledge it).
+    supabase
+      .from("jibble_time_entries")
+      .select("id, jibble_person_id, entry_start, review_reason")
+      .eq("company_id", companyId)
+      .eq("needs_review", true)
+      .order("entry_start", { ascending: false })
+      .limit(20),
   ]);
 
   const employeeIds = (employees ?? []).map((e) => e.id);
@@ -203,6 +215,38 @@ export default async function AttendancePage({
           {isHolidayDate ? `${holiday?.name ?? "Public holiday"} — ` : "Weekend — "}
           anyone marked present today may earn a recovery (comp) day, per your country&apos;s policy.
         </Alert>
+      ) : null}
+
+      {(needsReviewEntries ?? []).length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Jibble sync — needs review</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Jibble person</TableHead>
+                  <TableHead>Entry start</TableHead>
+                  <TableHead>Why</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(needsReviewEntries ?? []).map((e) => (
+                  <TableRow key={e.id}>
+                    <TableCell className="font-mono text-xs">{e.jibble_person_id}</TableCell>
+                    <TableCell>{e.entry_start ?? "—"}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{e.review_reason ?? "Needs review."}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Most often: this Jibble person still needs mapping to an employee (Employee → edit profile → Jibble
+              person ID), or the entry was edited in Jibble after its recovery credit was already approved.
+            </p>
+          </CardContent>
+        </Card>
       ) : null}
 
       <Card>

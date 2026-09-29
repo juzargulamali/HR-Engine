@@ -14,26 +14,21 @@ async function actAs(query: Client["query"], userId: string) {
   await query("SELECT set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: userId, role: "authenticated" })]);
 }
 
-// Recovery Leave earning is approval-gated (Line Manager, then HR Admin) —
-// this walks a standard/overnight recovery_credit_requests row all the way
-// to its final, ledger-posting approval. Must run inside ONE asUser() call
-// (started as the manager, the first step's approver), switching to USER_HR
-// with actAs() for the second — same reason as every other multi-step chain
-// in this file.
-async function fullyApproveRecoveryCredit(query: Client["query"], attendanceRecordId: string, managerUserId: string, hrUserId: string) {
+// Recovery Leave earning is now ONE HR decision — a company-scoped role
+// queue (see decide_recovery_credit_request()/decide_leave_approval()'s
+// null-approver_id branch in schema.sql), never a manager-then-HR chain.
+// Any current HR Admin in the company may decide it; this helper always
+// switches to whichever hrUserId the caller passes, exactly like the real
+// UI's single decision screen.
+async function fullyApproveRecoveryCredit(query: Client["query"], attendanceRecordId: string, hrUserId: string) {
   const request = await query(
     "select id from recovery_credit_requests where attendance_record_id = $1 and status not in ('cancelled', 'rejected')",
     [attendanceRecordId],
   );
   const requestId = request.rows[0]?.id;
 
-  await actAs(query, managerUserId);
-  const step1 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 1", [requestId]);
-  await query("select decide_leave_approval($1, 'approved', null)", [step1.rows[0]?.id]);
-
   await actAs(query, hrUserId);
-  const step2 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 2", [requestId]);
-  await query("select decide_leave_approval($1, 'approved', null)", [step2.rows[0]?.id]);
+  await query("select decide_recovery_credit_request($1, 'approved', 'Checked with the project lead')", [requestId]);
 
   return requestId;
 }
@@ -46,10 +41,16 @@ const USER_HR = "00000000-0000-0000-0000-0000000004b3";
 const USER_FINANCE = "00000000-0000-0000-0000-0000000004b4";
 const USER_CEO = "00000000-0000-0000-0000-0000000004b5";
 const USER_PEER = "00000000-0000-0000-0000-0000000004b6";
+// An HR Admin who is ALSO an employee with their own attendance recorded —
+// the one setup that can actually reach decide_recovery_credit_request()'s
+// self-decision block (a plain non-hr_admin employee like USER_REPORT fails
+// the role check first, before self-decision is ever considered).
+const USER_HR_SELF = "00000000-0000-0000-0000-0000000004b7";
 
 const EMPLOYEE_MANAGER = "00000000-0000-0000-0000-0000000004c1";
 const EMPLOYEE_REPORT = "00000000-0000-0000-0000-0000000004c2";
 const EMPLOYEE_PEER = "00000000-0000-0000-0000-0000000004c3";
+const EMPLOYEE_HR_SELF = "00000000-0000-0000-0000-0000000004c4";
 
 describe("Phase 4 row-level security: projects, reimbursements, timesheets, attendance", () => {
   const db = new RlsTestDatabase();
@@ -66,7 +67,8 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
         ('${USER_HR}', 'p4-hr@enginious.ae'),
         ('${USER_FINANCE}', 'p4-finance@enginious.ae'),
         ('${USER_CEO}', 'p4-ceo@enginious.ae'),
-        ('${USER_PEER}', 'p4-peer@enginious.ae');
+        ('${USER_PEER}', 'p4-peer@enginious.ae'),
+        ('${USER_HR_SELF}', 'p4-hr-self@enginious.ae');
 
       insert into countries (code, name, default_currency) values ('ZZ', 'Zedland', 'ZZD');
       insert into companies (id, legal_name, country_code, default_currency)
@@ -75,14 +77,16 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       insert into employees (id, user_id, employee_number, company_id, country_code, first_name, last_name, hire_date) values
         ('${EMPLOYEE_MANAGER}', '${USER_MANAGER}', 'P4-01', '${COMPANY_A}', 'ZZ', 'Mona', 'Manager', '2024-01-01'),
         ('${EMPLOYEE_REPORT}', '${USER_REPORT}', 'P4-02', '${COMPANY_A}', 'ZZ', 'Remy', 'Report', '2024-02-01'),
-        ('${EMPLOYEE_PEER}', '${USER_PEER}', 'P4-03', '${COMPANY_A}', 'ZZ', 'Pia', 'Peer', '2024-02-01');
+        ('${EMPLOYEE_PEER}', '${USER_PEER}', 'P4-03', '${COMPANY_A}', 'ZZ', 'Pia', 'Peer', '2024-02-01'),
+        ('${EMPLOYEE_HR_SELF}', '${USER_HR_SELF}', 'P4-04', '${COMPANY_A}', 'ZZ', 'Hana', 'HrSelf', '2024-02-01');
       update employees set manager_id = '${EMPLOYEE_MANAGER}' where id = '${EMPLOYEE_REPORT}';
 
       insert into user_roles (user_id, role, company_id) values
         ('${USER_MANAGER}', 'line_manager', '${COMPANY_A}'),
         ('${USER_HR}', 'hr_admin', '${COMPANY_A}'),
         ('${USER_FINANCE}', 'finance', '${COMPANY_A}'),
-        ('${USER_CEO}', 'ceo', '${COMPANY_A}');
+        ('${USER_CEO}', 'ceo', '${COMPANY_A}'),
+        ('${USER_HR_SELF}', 'hr_admin', '${COMPANY_A}');
     `);
 
     const { rows } = await db.asUser(USER_HR, (query) =>
@@ -837,7 +841,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
         ).rows[0]?.id;
 
         // Fully approve it first, so there's an actual earned ledger credit to reverse.
-        await fullyApproveRecoveryCredit(query, recordId, USER_MANAGER, USER_HR);
+        await fullyApproveRecoveryCredit(query, recordId, USER_HR);
         await actAs(query, USER_HR);
         const activeLedger = await query(
           "select entry_type from comp_day_ledger where reference_type = 'attendance_record' and reference_id = $1",
@@ -912,7 +916,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
           await query("select id from attendance_records where employee_id = $1 and work_date = '2026-05-30'", [EMPLOYEE_REPORT])
         ).rows[0]?.id;
 
-        await fullyApproveRecoveryCredit(query, recordId, USER_MANAGER, USER_HR);
+        await fullyApproveRecoveryCredit(query, recordId, USER_HR);
         await actAs(query, USER_HR);
 
         await expect(
@@ -925,7 +929,15 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
     });
   });
 
-  describe("recovery_credit approval chain (decide_leave_approval)", () => {
+  // Recovery Leave earning is now ONE HR decision — a company-scoped role
+  // queue, not a manager-then-HR chain — see decide_recovery_credit_request()/
+  // decide_leave_approval()'s null-approver_id branch in schema.sql. The
+  // fuller set of queue/company-isolation/self-approval/correction tests
+  // lives in recovery_leave_hr_queue.rls.test.ts; this describe block only
+  // keeps this file's own pre-existing coverage of the engine mechanics
+  // (exactly-once ledger posting, rejection, duplicate-decision guard)
+  // updated to the new single-step shape.
+  describe("recovery_credit approval chain (decide_recovery_credit_request / decide_leave_approval)", () => {
     async function submitStandardRequest(query: Client["query"], workDate: string, hours = 8) {
       await query("select * from record_attendance_and_recovery($1, $2::jsonb)", [
         workDate,
@@ -937,29 +949,20 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       return { recordId, requestId: request.rows[0]?.id };
     }
 
-    it("manager approval alone (step 1) never posts a ledger credit — only marks the request pending HR", async () => {
+    it("submitting a request routes it straight to the HR queue (no manager step at all)", async () => {
       await db.asUser(USER_HR, async (query) => {
-        const { recordId, requestId } = await submitStandardRequest(query, "2026-06-13");
-
-        await actAs(query, USER_MANAGER);
-        const step1 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 1", [
+        const { requestId } = await submitStandardRequest(query, "2026-06-13");
+        const approval = await query("select step_order, approver_id from approvals where entity_type = 'recovery_credit' and entity_id = $1", [
           requestId,
         ]);
-        await query("select decide_leave_approval($1, 'approved', null)", [step1.rows[0]?.id]);
-
-        await actAs(query, USER_HR);
-        const request = await query("select status from recovery_credit_requests where id = $1", [requestId]);
-        expect(request.rows).toEqual([{ status: "pending_approval" }]);
-
-        const ledger = await query("select id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = $1", [recordId]);
-        expect(ledger.rows).toEqual([]);
+        expect(approval.rows).toEqual([{ step_order: 1, approver_id: null }]);
       });
     });
 
-    it("HR Admin's final approval (step 2) credits exactly once, with the correct source and 180-day expiry", async () => {
+    it("HR's single decision credits exactly once, with the correct source and 180-day expiry", async () => {
       await db.asUser(USER_HR, async (query) => {
         const { recordId, requestId } = await submitStandardRequest(query, "2026-06-20");
-        await fullyApproveRecoveryCredit(query, recordId, USER_MANAGER, USER_HR);
+        await fullyApproveRecoveryCredit(query, recordId, USER_HR);
 
         const request = await query("select status, comp_day_ledger_id from recovery_credit_requests where id = $1", [requestId]);
         expect(request.rows[0]?.status).toBe("approved");
@@ -976,55 +979,88 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
       });
     });
 
-    it("rejection at either step never posts a credit, and closes the chain", async () => {
+    it("rejection never posts a credit, and closes the chain", async () => {
       await db.asUser(USER_HR, async (query) => {
         const { recordId, requestId } = await submitStandardRequest(query, "2026-06-27");
 
-        await actAs(query, USER_MANAGER);
-        const step1 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 1", [
-          requestId,
-        ]);
-        await query("select decide_leave_approval($1, 'rejected', 'not eligible')", [step1.rows[0]?.id]);
+        await query("select decide_recovery_credit_request($1, 'rejected', null, 'not eligible')", [requestId]);
 
-        await actAs(query, USER_HR);
         const request = await query("select status from recovery_credit_requests where id = $1", [requestId]);
         expect(request.rows).toEqual([{ status: "rejected" }]);
 
         const ledger = await query("select id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = $1", [recordId]);
         expect(ledger.rows).toEqual([]);
-
-        const step2 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 2", [
-          requestId,
-        ]);
-        expect(step2.rows).toEqual([]);
       });
     });
 
-    it("blocks the employee from approving their own recovery credit request", async () => {
+    it("blocks the employee from deciding their own recovery credit request even though it's a shared queue", async () => {
+      // Must be an HR Admin who is ALSO the beneficiary — an ordinary
+      // employee like USER_REPORT fails the "Only an active hr_admin"
+      // role check first, so it never reaches the self-decision check at
+      // all. This is exactly the "employee who led a small project"
+      // scenario in reverse: no special self-approval handling is needed
+      // for the project lead (never an app user), but an HR Admin
+      // deciding their OWN recovery credit is still blocked.
       await db.asUser(USER_HR, async (query) => {
-        const { requestId } = await submitStandardRequest(query, "2026-07-04");
-        const step1 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 1", [
-          requestId,
+        await query("select * from record_attendance_and_recovery($1, $2::jsonb)", [
+          "2026-07-04",
+          JSON.stringify([{ employee_id: EMPLOYEE_HR_SELF, status: "present", hours_worked: 8 }]),
         ]);
+        const record = await query("select id from attendance_records where employee_id = $1 and work_date = '2026-07-04'", [EMPLOYEE_HR_SELF]);
+        const request = await query("select id from recovery_credit_requests where attendance_record_id = $1", [record.rows[0]?.id]);
+        const requestId = request.rows[0]?.id;
 
-        await actAs(query, USER_REPORT);
-        await expect(query("select decide_leave_approval($1, 'approved', null)", [step1.rows[0]?.id])).rejects.toThrow(
-          /Only the assigned approver/,
+        await actAs(query, USER_HR_SELF);
+        await expect(query("select decide_recovery_credit_request($1, 'approved', 'self')", [requestId])).rejects.toThrow(
+          /cannot decide a recovery credit request for your own attendance/,
         );
+      });
+    });
+
+    it("blocks a non-HR-Admin (e.g. the line manager) from deciding a recovery credit request — it is HR's queue only", async () => {
+      await db.asUser(USER_HR, async (query) => {
+        const { requestId } = await submitStandardRequest(query, "2026-07-18");
+
+        await actAs(query, USER_MANAGER);
+        await expect(query("select decide_recovery_credit_request($1, 'approved', 'Checked with someone')", [requestId])).rejects.toThrow(
+          /Only an active hr_admin/,
+        );
+      });
+    });
+
+    it("requires recording whom HR checked with before an APPROVAL, but not before a rejection", async () => {
+      // The failed approve attempt raises inside Postgres, which aborts the
+      // rest of that transaction — the rejection case below must run in its
+      // own separate asUser() call, not a second statement of the same one.
+      await db.asUser(USER_HR, async (query) => {
+        const { requestId: approveId } = await submitStandardRequest(query, "2026-07-25");
+        await expect(query("select decide_recovery_credit_request($1, 'approved', null)", [approveId])).rejects.toThrow(
+          /Record whom you checked this work with/,
+        );
+      });
+
+      await db.asUser(USER_HR, async (query) => {
+        const { requestId: rejectId } = await submitStandardRequest(query, "2026-08-01", 4);
+        await query("select decide_recovery_credit_request($1, 'rejected', null)", [rejectId]);
+        const rejected = await query("select status from recovery_credit_requests where id = $1", [rejectId]);
+        expect(rejected.rows).toEqual([{ status: "rejected" }]);
       });
     });
 
     it("rejects a repeated decision on the same approval (idempotency/duplicate-decision guard)", async () => {
       await db.asUser(USER_HR, async (query) => {
         const { requestId } = await submitStandardRequest(query, "2026-07-11");
-        await actAs(query, USER_MANAGER);
-        const step1 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 1", [
-          requestId,
-        ]);
-        await query("select decide_leave_approval($1, 'approved', null)", [step1.rows[0]?.id]);
+        await query("select decide_recovery_credit_request($1, 'approved', 'Checked with the lead')", [requestId]);
 
-        await expect(query("select decide_leave_approval($1, 'approved', null)", [step1.rows[0]?.id])).rejects.toThrow(
-          /already been decided/,
+        // decide_recovery_credit_request() itself only ever looks up a
+        // PENDING approval for this request — once decided, that lookup
+        // finds nothing at all, which is a clearer message than forwarding
+        // into decide_leave_approval()'s own "already been decided" (that
+        // check is still there and still reachable if the row were somehow
+        // found despite being already decided; see that function's own
+        // idempotency test elsewhere in this suite for leave_request).
+        await expect(query("select decide_recovery_credit_request($1, 'approved', 'Checked with the lead')", [requestId])).rejects.toThrow(
+          /No pending approval found/,
         );
       });
     });
@@ -1055,7 +1091,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
         recordId = (
           await query("select id from attendance_records where employee_id = $1 and work_date = '2026-08-01'", [EMPLOYEE_REPORT])
         ).rows[0]?.id;
-        requestId = await fullyApproveRecoveryCredit(query, recordId, USER_MANAGER, USER_HR);
+        requestId = await fullyApproveRecoveryCredit(query, recordId, USER_HR);
 
         const activeBefore = await query(
           "select id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = $1 and entry_type = 'earned' and not exists (select 1 from comp_day_ledger r where r.reversal_of_id = comp_day_ledger.id)",
@@ -1089,10 +1125,7 @@ describe("Phase 4 row-level security: projects, reimbursements, timesheets, atte
           "select step_order, decision from approvals where entity_type = 'recovery_credit' and entity_id = $1 order by step_order",
           [requestId],
         );
-        expect(approvalsAfter.rows).toEqual([
-          { step_order: 1, decision: "approved" },
-          { step_order: 2, decision: "approved" },
-        ]);
+        expect(approvalsAfter.rows).toEqual([{ step_order: 1, decision: "approved" }]);
       });
     });
 

@@ -311,7 +311,17 @@ create table employees (
   -- Null (every employee until HR confirms it) blocks automatic Poland
   -- Annual Leave accrual for that employee rather than guessing either
   -- answer — see computeAnnualLeaveEntitlementToDate.
-  is_first_ever_employment boolean
+  is_first_ever_employment boolean,
+  -- HR's mapping of this employee to their own Jibble member/person id —
+  -- set once via the employee edit form, read by import_jibble_time_entry()
+  -- to attribute an imported time entry. Deliberately NOT auto-discovered
+  -- or auto-matched by name/email: Jibble's own person id is opaque and
+  -- this system has no verified way to look it up automatically (see the
+  -- PR description's "Jibble API" section), so a wrong auto-match could
+  -- silently attribute one employee's hours to another. Null means "not
+  -- yet mapped" — the sync job flags an unmapped entry for review rather
+  -- than guessing.
+  jibble_person_id   text
 );
 
 create index idx_employees_manager on employees(manager_id) where deleted_at is null;
@@ -326,6 +336,12 @@ create unique index employees_company_employee_number_unique
 -- can coexist, but a login can never be attached to two employee rows —
 -- current_employee_id()'s `limit 1` would otherwise pick an arbitrary one.
 create unique index employees_user_id_unique on employees(user_id) where user_id is not null;
+-- Same partial-uniqueness reasoning as employees_user_id_unique above,
+-- scoped per company (not globally) since jibble_person_id is opaque to a
+-- SPECIFIC Jibble workspace, and two different companies could plausibly
+-- run two entirely separate Jibble workspaces with overlapping ids.
+create unique index employees_jibble_person_id_unique
+  on employees(company_id, jibble_person_id) where jibble_person_id is not null;
 
 -- Append-only contract history. Never UPDATE a row's terms; insert a new
 -- version and flip the old one's is_current.
@@ -730,7 +746,17 @@ create table approval_workflow_steps (
   id                uuid primary key default gen_random_uuid(),
   workflow_id       uuid not null references approval_workflows(id),
   step_order        int not null,
-  approver_type     text not null,   -- 'direct_manager' | 'manager_of_manager' | 'role:hr_admin' | 'role:finance' | 'role:ceo'
+  -- 'role_queue:hr_admin' is distinct from 'role:hr_admin': the latter
+  -- resolves (via resolve_approver()) to ONE specific person (earliest
+  -- granted_at) and assigns approvals.approver_id to them; the former
+  -- resolves to NO ONE in particular at creation time — approver_id is left
+  -- null, and ANY current holder of that role in the approval's own company
+  -- may decide it (see decide_leave_approval()'s null-approver_id branch).
+  -- Currently used only by recovery_credit's single HR step, specifically
+  -- so Recovery Leave decisions go to a reliable company-wide HR queue
+  -- rather than always the same one HR Admin (or, worse, a dormant/test
+  -- account that happens to have the earliest grant).
+  approver_type     text not null,   -- 'direct_manager' | 'manager_of_manager' | 'role:hr_admin' | 'role:finance' | 'role:ceo' | 'role_queue:hr_admin'
   condition         jsonb,           -- e.g. {"amount_gt": 5000} to make a step conditional
   unique (workflow_id, step_order)
 );
@@ -743,7 +769,10 @@ create table approvals (
   entity_id       uuid not null,
   workflow_id     uuid references approval_workflows(id),
   step_order      int not null,
-  approver_id     uuid not null references auth.users(id),
+  -- Nullable specifically for a 'role_queue:%' step (see
+  -- approval_workflow_steps.approver_type above) — every OTHER approver
+  -- type still always resolves to and stores a specific person, unchanged.
+  approver_id     uuid references auth.users(id),
   decision        approval_decision not null default 'pending',
   decided_at      timestamptz,
   comments        text,
@@ -765,14 +794,27 @@ create index idx_approvals_entity on approvals(entity_type, entity_id);
 -- record at a time (the partial unique index below is the natural key: a
 -- cancelled/rejected row never permanently blocks a later, genuinely fresh
 -- request for the same day). Routed through the SAME generic approval
--- engine above via entity_type = 'recovery_credit' — manager approval
--- (step 1) is the policy brief's "provisional release"; the actual earned
--- comp_day_ledger row is posted only at HR Admin's final approval (step 2),
--- inside decide_leave_approval().
+-- engine above via entity_type = 'recovery_credit' — ONE HR decision (a
+-- company-scoped queue, see approval_workflow_steps.approver_type's
+-- 'role_queue:hr_admin' doc comment), not a manager-then-HR chain: HR
+-- checks the work with the relevant project lead OUTSIDE the application
+-- first, then this single decision either posts the comp_day_ledger credit
+-- (inside decide_leave_approval()) or rejects it. The project lead is
+-- never an application approver and needs no role or self-approval
+-- handling — they aren't in this table or the approvals chain at all.
 create table recovery_credit_requests (
   id                    uuid primary key default gen_random_uuid(),
   employee_id           uuid not null references employees(id),
   attendance_record_id  uuid not null references attendance_records(id),
+  -- work_date/proposed_days are the CURRENT/EFFECTIVE values — what the
+  -- ledger actually uses when this is approved. They start out equal to
+  -- whatever the originating attendance record/Jibble import implied, and
+  -- adjust_recovery_credit_request() (below) is the ONLY way either ever
+  -- changes afterward. The ORIGINAL, unedited values are never lost: they
+  -- live forever on attendance_records.hours_worked and, for a
+  -- Jibble-sourced request, jibble_time_entries.entry_start/entry_end/note
+  -- — the approval screen reads both sides to show "original vs. HR's
+  -- correction" side by side, never overwriting the evidence.
   work_date             date not null,
   event_type            text not null check (event_type in ('standard', 'overnight')),
   proposed_days         numeric(3,1) not null check (proposed_days in (0.5, 1)),
@@ -781,7 +823,19 @@ create table recovery_credit_requests (
   decided_at            timestamptz,
   created_by            uuid not null,
   comp_day_ledger_id    uuid references comp_day_ledger(id),
-  created_at            timestamptz not null default now()
+  created_at            timestamptz not null default now(),
+  -- HR's own correction trail — see adjust_recovery_credit_request().
+  -- correction_reason is required by that function whenever work_date or
+  -- proposed_days actually changes; checked_with is required at decision
+  -- time for an APPROVAL (decide_recovery_credit_request()) since the
+  -- product brief requires HR to have verified the work with the relevant
+  -- project lead outside the application before crediting anything.
+  -- corrected_at is the marker the UI uses to know whether to render an
+  -- "adjusted by HR" side-by-side comparison at all.
+  correction_reason     text,
+  checked_with          text,
+  corrected_by          uuid references auth.users(id),
+  corrected_at          timestamptz
 );
 
 create index idx_recovery_credit_requests_employee on recovery_credit_requests(employee_id);
@@ -967,7 +1021,7 @@ create table attendance_records (
                   check (status in ('not_recorded', 'present', 'absent', 'leave', 'partial_day')),
   work_mode     text
                   check (work_mode in ('office', 'client_site', 'work_from_home', 'field_work', 'business_travel')),
-  source        text not null default 'manual',   -- 'manual'|'biometric'|'import'
+  source        text not null default 'manual',   -- 'manual'|'jibble'|'biometric'|'import'
   -- Recovery Leave's exceptional-overnight-extension rule needs verified
   -- working-time facts, never a browser-supplied flag — but clock_in/
   -- clock_out above are never populated or read anywhere in this codebase,
@@ -978,7 +1032,68 @@ create table attendance_records (
   active_hours_after_midnight    numeric(4,2)
     check (active_hours_after_midnight is null or active_hours_after_midnight >= 0),
   unique (employee_id, work_date)
+  -- jibble_time_entry_id (references jibble_time_entries, added below once
+  -- that table exists in this file's declaration order) is added via ALTER
+  -- TABLE right after jibble_time_entries' own definition.
 );
+
+-- Raw Jibble time entries, imported via import_jibble_time_entry() — a
+-- server-only RPC (see the revoke/grant at its end: only the service_role
+-- may call it, never an ordinary authenticated session) invoked once per
+-- entry by the Jibble sync job (apps/web/src/app/api/cron/jibble-sync).
+-- This is the durable evidence trail the product brief requires ("preserve
+-- the original note as evidence" / "never silently modify the source entry
+-- in Jibble"): a row here is NEVER updated to reflect an HR correction —
+-- only recovery_credit_requests' own correction_* columns record what HR
+-- changed, and only after HR's decision, never here.
+--
+-- Exact Jibble API field names (note text, break representation, whether
+-- an in-progress clock-in has a null end time) are NOT yet verified against
+-- a live tenant — docs.api.jibble.io was unreachable from this environment
+-- while this was written (see the PR description's "Jibble API — confirmed
+-- vs. assumed" section for exactly what IS independently confirmed: the
+-- OAuth2 client_credentials token endpoint and the general
+-- OData-style TimeEntries resource shape). raw_payload stores the ENTIRE
+-- fetched record verbatim specifically so nothing is lost if the named
+-- columns below need renaming once real credentials are available — the
+-- sync job is responsible for populating them from whatever raw_payload
+-- actually contains, and import_jibble_time_entry() tolerates
+-- entry_end being null (still clocked in — nothing is derived yet).
+create table jibble_time_entries (
+  id                    uuid primary key default gen_random_uuid(),
+  company_id            uuid not null references companies(id),
+  jibble_entry_id       text not null,   -- Jibble's own stable id for this entry — the idempotency key
+  jibble_person_id      text not null,   -- Jibble's own member/person id — mapped via employees.jibble_person_id
+  employee_id           uuid references employees(id),  -- null until jibble_person_id is mapped to an employee
+  entry_start           timestamptz,
+  entry_end             timestamptz,     -- null while still an open/active clock-in
+  note                  text,            -- verbatim from Jibble — this system never edits it
+  break_minutes         numeric not null default 0,
+  -- The employee's own LOCAL calendar date this entry's work belongs to
+  -- (entry_start converted via country_timezone()) — null until the
+  -- employee is mapped AND the entry has an end time. Stored (not
+  -- recomputed ad hoc) so sync_jibble_attendance_for_day() can cheaply sum
+  -- every entry sharing a day, including two separate clock sessions on
+  -- the same date (e.g. an unpaid lunch modeled as clock-out/clock-in
+  -- rather than a breaks field) and an entry that crosses midnight (whose
+  -- work_date is the day it STARTED — same convention
+  -- record_overnight_recovery_credit()'s manual form already uses).
+  work_date             date,
+  raw_payload           jsonb not null,
+  content_hash          text not null,   -- md5(raw_payload) — detects a Jibble-side edit on re-sync
+  attendance_record_id  uuid references attendance_records(id),
+  needs_review          boolean not null default false,
+  review_reason         text,
+  synced_at             timestamptz not null default now(),
+  created_at            timestamptz not null default now(),
+  unique (company_id, jibble_entry_id)
+);
+
+create index idx_jibble_time_entries_employee on jibble_time_entries(employee_id);
+create index idx_jibble_time_entries_needs_review on jibble_time_entries(company_id) where needs_review;
+create index idx_jibble_time_entries_employee_workdate on jibble_time_entries(employee_id, work_date);
+
+alter table attendance_records add column jibble_time_entry_id uuid references jibble_time_entries(id);
 
 create table timesheets (
   id            uuid primary key default gen_random_uuid(),
@@ -1559,6 +1674,70 @@ as $$
   limit 1;
 $$;
 
+-- Country -> IANA timezone, so a Jibble time entry's instant converts to
+-- the EMPLOYEE'S OWN local calendar date, never UTC's date (which can be
+-- the wrong day entirely for a shift near midnight in AE/SA). Mirrors
+-- packages/domain/src/businessTime.ts's COUNTRY_TIMEZONES + DASHBOARD_TIMEZONE
+-- fallback exactly — keep both in sync if a new country is added; this one
+-- exists because import_jibble_time_entry() (below) needs it inside a
+-- single atomic SQL transaction, where the TS-side helper isn't reachable.
+create or replace function country_timezone(p_country_code text)
+returns text
+language sql
+immutable
+as $$
+  select case p_country_code
+    when 'AE' then 'Asia/Dubai'
+    when 'SA' then 'Asia/Riyadh'
+    when 'PL' then 'Europe/Warsaw'
+    else 'Asia/Dubai'
+  end;
+$$;
+
+-- Recovery Leave's ≤4h/>4h credit threshold — the ONE place this rule is
+-- expressed, so record_attendance_and_recovery(), record_overnight_recovery_credit(),
+-- import_jibble_time_entry(), and adjust_recovery_credit_request() (all
+-- below) can never drift apart on it. 0 for null/non-positive hours, never
+-- a negative or nonsensical credit.
+create or replace function recovery_credit_days_for_hours(p_hours numeric)
+returns numeric
+language sql
+immutable
+as $$
+  select case when p_hours is null or p_hours <= 0 then 0 when p_hours > 4 then 1 else 0.5 end;
+$$;
+
+-- Whether p_work_date is a qualifying Recovery-Leave day for p_country_code
+-- — a public holiday, OR outside that country's normal working weekdays.
+-- This is the ONE definition of "qualifying" every path that can produce a
+-- recovery_credit_requests row shares (the manual attendance register
+-- below, and import_jibble_time_entry()'s Jibble-driven detection) —
+-- deliberately excludes "ordinary late office work on a normal working
+-- day", which must never auto-qualify regardless of how many hours were
+-- logged. Prefers countries.working_weekdays when a country has one
+-- configured, falling back to the week_start_day-derived formula otherwise
+-- (see preflight_country_schedule_config()) — unchanged from the inline
+-- version this replaces.
+create or replace function is_recovery_eligible_day(p_country_code text, p_work_date date, out is_recovery_day boolean, out holiday_name text)
+language plpgsql
+stable
+as $$
+declare
+  v_week_start_day smallint;
+  v_working_weekdays integer[];
+begin
+  select week_start_day, working_weekdays into v_week_start_day, v_working_weekdays from countries where code = p_country_code;
+  select name into holiday_name from public_holidays where country_code = p_country_code and holiday_date = p_work_date;
+  is_recovery_day := holiday_name is not null
+    or (
+      case when v_working_weekdays is not null and array_length(v_working_weekdays, 1) > 0
+        then not (extract(dow from p_work_date)::int = any(v_working_weekdays))
+        else ((extract(dow from p_work_date)::int - coalesce(v_week_start_day, 1) + 7) % 7) >= 5
+      end
+    );
+end;
+$$;
+
 -- Records one day's attendance for a batch of employees and, where earned,
 -- credits (or reverses) the recovery/comp-day it produces — all as one
 -- atomic transaction per call, so a save can never leave the attendance row
@@ -1620,8 +1799,6 @@ declare
   v_hours numeric;
   v_company_id uuid;
   v_country_code text;
-  v_week_start_day smallint;
-  v_working_weekdays integer[];
   v_holiday_name text;
   v_is_recovery_day boolean;
   v_record_id uuid;
@@ -1659,25 +1836,23 @@ begin
     -- before either has committed its insert, and both request it.
     perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || v_employee_id::text));
 
-    select week_start_day, working_weekdays into v_week_start_day, v_working_weekdays from countries where code = v_country_code;
-    select name into v_holiday_name from public_holidays where country_code = v_country_code and holiday_date = p_work_date;
-    v_is_recovery_day := v_holiday_name is not null
-      or (
-        case when v_working_weekdays is not null and array_length(v_working_weekdays, 1) > 0
-          then not (extract(dow from p_work_date)::int = any(v_working_weekdays))
-          else ((extract(dow from p_work_date)::int - coalesce(v_week_start_day, 1) + 7) % 7) >= 5
-        end
-      );
+    select r.is_recovery_day, r.holiday_name into v_is_recovery_day, v_holiday_name from is_recovery_eligible_day(v_country_code, p_work_date) r;
 
     -- One atomic upsert rather than a check-then-branch — the latter has
     -- the same TOCTOU shape as the race bulkRecordAttendance()'s old
     -- "already credited?" check had (two concurrent saves for the same
     -- employee/date, e.g. a double-clicked Save, could otherwise both see
     -- "no existing row" and both attempt an insert).
-    insert into attendance_records (employee_id, work_date, status, work_mode, hours_worked, source)
-    values (v_employee_id, p_work_date, v_status, v_work_mode, v_hours, 'manual')
+    -- source = 'manual' is set on BOTH the insert and the conflict branch —
+    -- the manual register always reasserts manual ownership of this day,
+    -- even if a prior Jibble import (or a stale jibble_time_entry_id link)
+    -- had claimed it, so a LATER Jibble sync for this same date correctly
+    -- sees source <> 'jibble' and refuses to overwrite HR's correction (see
+    -- sync_jibble_attendance_for_day()'s own "safe manual path" guard).
+    insert into attendance_records (employee_id, work_date, status, work_mode, hours_worked, source, jibble_time_entry_id)
+    values (v_employee_id, p_work_date, v_status, v_work_mode, v_hours, 'manual', null)
     on conflict (employee_id, work_date) do update
-    set status = excluded.status, work_mode = excluded.work_mode, hours_worked = excluded.hours_worked
+    set status = excluded.status, work_mode = excluded.work_mode, hours_worked = excluded.hours_worked, source = 'manual'
     returning id into v_record_id;
 
     -- The CURRENTLY ACTIVE credit for this record, if any — an 'earned' row
@@ -1694,7 +1869,7 @@ begin
         if v_hours is null then
           v_needs_review := true;
         elsif v_hours > 0 then
-          v_credit_days := case when v_hours > 4 then 1 else 0.5 end;
+          v_credit_days := recovery_credit_days_for_hours(v_hours);
           insert into recovery_credit_requests (employee_id, attendance_record_id, work_date, event_type, proposed_days, created_by)
           values (v_employee_id, v_record_id, p_work_date, 'standard', v_credit_days, auth.uid())
           returning id into v_request_id;
@@ -1910,7 +2085,7 @@ begin
     return;
   end if;
 
-  v_credit_days := case when p_active_hours_after_midnight > 4 then 1 else 0.5 end;
+  v_credit_days := recovery_credit_days_for_hours(p_active_hours_after_midnight);
 
   insert into recovery_credit_requests (employee_id, attendance_record_id, work_date, event_type, proposed_days, created_by)
   values (p_employee_id, v_record_id, p_work_date, 'overnight', v_credit_days, auth.uid())
@@ -1921,6 +2096,506 @@ begin
   credited := true;
   credit_days := v_credit_days;
   return next;
+end;
+$$;
+
+-- Re-derives attendance + any recovery credit for ONE employee/day from
+-- EVERY jibble_time_entries row currently on file for that day — never
+-- incrementally from just the entry that triggered this call. This is what
+-- makes multiple Jibble sessions on the same date (e.g. an unpaid lunch
+-- modeled as a separate clock-out/clock-in rather than a breaks field) sum
+-- correctly regardless of sync order, and what makes an EDIT to one of
+-- several entries on a day recompute the whole day's total rather than
+-- leaving a stale contribution behind — the same idempotent-by-recompute
+-- property comp_day_expiry's own cron already relies on
+-- (computeCompDayExpiry re-derives from full history every run rather than
+-- tracking "have I swept this" state).
+--
+-- Computes, per entry, its FULL duration (minus breaks) and separately the
+-- portion after local midnight (using country_timezone()) — breaks are
+-- deducted from the full total only, a simplifying assumption (most real
+-- shifts take their breaks before midnight); this is called out explicitly
+-- in the PR description as unverified against real shift patterns.
+--
+--   - If p_work_date itself is recovery-eligible (is_recovery_eligible_day
+--     — a public holiday, or outside the employee's normal working
+--     weekdays), the FULL duration summed across every entry is the day's
+--     'standard' worked hours — a whole recovery day, exactly the manual
+--     register's own rule. One continuous shift that STARTS on a
+--     qualifying day is that day's credit in full even if it runs past
+--     local midnight — never split into "today's part" vs. a separate
+--     overnight credit for the next calendar day (a day is either a
+--     recovery day or it isn't; this is not double-counted either way,
+--     since the overnight branch below only ever applies to a day that is
+--     NOT itself recovery-eligible).
+--   - Otherwise, only the AFTER-MIDNIGHT portion across every entry
+--     matters — Recovery Leave's exceptional overnight-extension rule
+--     ("completed the normal day, then genuinely continued past
+--     midnight"). Evidence of real clock hours logged that day is treated
+--     as sufficient proof the normal day was worked, replacing the manual
+--     form's own explicit "completed_normal_scheduled_day" checkbox for
+--     THIS (Jibble-sourced) path only — the manual form itself is
+--     unchanged and still asks for it.
+--   - Ordinary late office work on a normal working day with no midnight
+--     spillover credits nothing, on purpose.
+--
+-- An existing PENDING request for the day is updated in place (safe — HR
+-- hasn't decided it yet, so refreshing it with fuller Jibble evidence is
+-- not "a correction", just keeping the automated proposal current). An
+-- existing APPROVED request is never touched here — see
+-- import_jibble_time_entry()'s own doc comment on why that's flagged for
+-- review instead.
+create or replace function sync_jibble_attendance_for_day(p_employee_id uuid, p_country_code text, p_work_date date)
+returns table (attendance_record_id uuid, recovery_credit_request_id uuid, flagged_for_review boolean)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_tz text;
+  v_next_local_midnight timestamptz;
+  v_standard_hours numeric := 0;
+  v_after_midnight_hours numeric := 0;
+  v_entry record;
+  v_full_hours numeric;
+  v_break_hours numeric;
+  v_record_id uuid;
+  v_status text;
+  v_is_recovery_day boolean;
+  v_holiday_name text;
+  v_event_type text;
+  v_credit_hours numeric;
+  v_credit_days numeric;
+  v_existing_request recovery_credit_requests%rowtype;
+  v_was_credited comp_day_ledger%rowtype;
+  v_approved_request_exists boolean;
+  v_request_id uuid;
+begin
+  v_tz := country_timezone(p_country_code);
+  v_next_local_midnight := ((p_work_date + 1)::timestamp) at time zone v_tz;
+
+  for v_entry in
+    select entry_start, entry_end, break_minutes from jibble_time_entries
+    where employee_id = p_employee_id and work_date = p_work_date and entry_end is not null
+  loop
+    -- v_standard_hours is the FULL entry duration (minus breaks) — when
+    -- p_work_date itself qualifies as a recovery day, the whole shift
+    -- counts toward it even if it runs past local midnight (one
+    -- continuous overnight shift that STARTED on a qualifying day is that
+    -- day's credit in full, never split). v_after_midnight_hours is
+    -- tracked separately for the OTHER case — a shift that started on an
+    -- ordinary working day and merely extended past midnight, where only
+    -- that extension is creditable.
+    v_break_hours := coalesce(v_entry.break_minutes, 0) / 60.0;
+    v_full_hours := greatest(0, extract(epoch from (v_entry.entry_end - v_entry.entry_start)) / 3600.0 - v_break_hours);
+    v_standard_hours := v_standard_hours + v_full_hours;
+    v_after_midnight_hours := v_after_midnight_hours + greatest(0, extract(epoch from (v_entry.entry_end - v_next_local_midnight)) / 3600.0);
+  end loop;
+  v_standard_hours := round(v_standard_hours::numeric, 2);
+  v_after_midnight_hours := round(v_after_midnight_hours::numeric, 2);
+
+  perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || p_employee_id::text));
+
+  select r.is_recovery_day, r.holiday_name into v_is_recovery_day, v_holiday_name from is_recovery_eligible_day(p_country_code, p_work_date) r;
+  v_status := case when v_standard_hours > 0 or v_after_midnight_hours > 0 then 'present' else 'not_recorded' end;
+
+  insert into attendance_records (employee_id, work_date, status, hours_worked, active_hours_after_midnight, source)
+  values (p_employee_id, p_work_date, v_status, v_standard_hours, nullif(v_after_midnight_hours, 0), 'jibble')
+  on conflict (employee_id, work_date) do update
+  set status = excluded.status, hours_worked = excluded.hours_worked, active_hours_after_midnight = excluded.active_hours_after_midnight
+  where attendance_records.source = 'jibble'
+  returning id into v_record_id;
+
+  if v_record_id is null then
+    -- A manually recorded row already exists for this date — the safe
+    -- manual path always wins; every entry that shares this work_date is
+    -- still linked for evidence by the caller, but nothing is derived.
+    select id into v_record_id from attendance_records where employee_id = p_employee_id and work_date = p_work_date;
+    attendance_record_id := v_record_id;
+    recovery_credit_request_id := null;
+    flagged_for_review := true;
+    return next;
+    return;
+  end if;
+
+  select r.* into v_existing_request from recovery_credit_requests r
+  where r.attendance_record_id = v_record_id and r.status not in ('cancelled', 'rejected');
+  select cl.* into v_was_credited from comp_day_ledger cl
+  where cl.reference_type = 'attendance_record' and cl.reference_id = v_record_id and cl.entry_type = 'earned'
+    and not exists (select 1 from comp_day_ledger r where r.reversal_of_id = cl.id);
+
+  if v_existing_request.id is not null then
+    select exists (select 1 from recovery_credit_requests where id = v_existing_request.id and status = 'approved') into v_approved_request_exists;
+    if v_approved_request_exists then
+      -- Never silently recompute an already-approved (ledger-posted)
+      -- request — the caller flags the triggering entry needs_review.
+      attendance_record_id := v_record_id;
+      recovery_credit_request_id := v_existing_request.id;
+      flagged_for_review := true;
+      return next;
+      return;
+    end if;
+  end if;
+
+  if v_is_recovery_day then
+    v_event_type := 'standard';
+    v_credit_hours := v_standard_hours;
+  elsif v_after_midnight_hours > 0 then
+    v_event_type := 'overnight';
+    v_credit_hours := v_after_midnight_hours;
+  else
+    v_event_type := null;
+    v_credit_hours := 0;
+  end if;
+
+  if v_event_type is not null and v_credit_hours > 0 and v_was_credited.id is null then
+    v_credit_days := recovery_credit_days_for_hours(v_credit_hours);
+    if v_existing_request.id is not null then
+      -- Still pending — refresh it in place with the fuller evidence
+      -- rather than creating a second row (the partial unique index on
+      -- attendance_record_id would reject that anyway).
+      update recovery_credit_requests
+      set work_date = p_work_date, event_type = v_event_type, proposed_days = v_credit_days
+      where id = v_existing_request.id;
+      recovery_credit_request_id := v_existing_request.id;
+    else
+      insert into recovery_credit_requests (employee_id, attendance_record_id, work_date, event_type, proposed_days, created_by)
+      values (p_employee_id, v_record_id, p_work_date, v_event_type, v_credit_days, coalesce(auth.uid(), '00000000-0000-0000-0000-000000000000'))
+      returning id into v_request_id;
+      perform create_initial_approval('recovery_credit', v_request_id);
+      recovery_credit_request_id := v_request_id;
+    end if;
+  else
+    recovery_credit_request_id := v_existing_request.id;
+  end if;
+
+  attendance_record_id := v_record_id;
+  flagged_for_review := false;
+  return next;
+end;
+$$;
+
+-- Imports ONE Jibble time entry — called once per entry by the server-only
+-- Jibble sync job (apps/web/src/app/api/cron/jibble-sync/route.ts, itself
+-- gated by a shared secret the same way every other scheduled job in this
+-- codebase is — see lib/cron/auth.ts), never by an ordinary authenticated
+-- session: the revoke/grant at the very end of this function restricts
+-- EXECUTE to service_role only.
+--
+-- Idempotent on (p_company_id, p_jibble_entry_id): re-importing a
+-- byte-identical entry (content_hash unchanged) is a pure no-op. An entry
+-- that HAS genuinely changed in Jibble since the last sync is detected the
+-- same way; if its already-linked recovery_credit_requests row is already
+-- 'approved' (the ledger credit is already posted), this flags it for HR
+-- review instead of silently re-deriving or re-posting anything — "an edit
+-- after HR approval must be flagged for HR review, never silently change
+-- an already-posted balance." Multiple entries on the same day (repeated
+-- syncs, a second clock session, an edit to one of several) are all
+-- resolved by sync_jibble_attendance_for_day() re-deriving the WHOLE day
+-- from every entry on file, never by this function incrementing anything —
+-- see that function's own doc comment for exactly how weekend/holiday and
+-- overnight eligibility are kept mutually exclusive per day.
+--
+-- "Ordinary late office work must not automatically qualify" is enforced
+-- by reusing is_recovery_eligible_day() inside sync_jibble_attendance_for_day()
+-- — the EXACT SAME weekend/holiday rule the manual attendance register
+-- (record_attendance_and_recovery(), above) uses — never a separate,
+-- looser definition for imported data.
+--
+-- A day that already has a MANUALLY recorded attendance row (source <>
+-- 'jibble') is never overwritten by an import — "keep a safe manual
+-- attendance path" means the manual path always wins if HR has touched
+-- that date; the entry is still stored (evidence preserved) and flagged.
+--
+-- Exact Jibble API field semantics are not yet verified against a live
+-- tenant — see jibble_time_entries' own doc comment and the PR
+-- description's "Jibble API — confirmed vs. assumed" section. This
+-- function only assumes: a stable per-entry id, a start instant, an
+-- optional end instant (null means still clocked in — nothing is imported
+-- yet), an optional free-text note, and that break time (if any) has
+-- already been resolved by the caller into p_break_minutes — everything
+-- else Jibble returns is preserved verbatim in raw_payload regardless of
+-- whether these assumptions turn out to need adjusting.
+create or replace function import_jibble_time_entry(
+  p_company_id uuid,
+  p_jibble_entry_id text,
+  p_jibble_person_id text,
+  p_entry_start timestamptz,
+  p_entry_end timestamptz,
+  p_note text,
+  p_break_minutes numeric,
+  p_raw_payload jsonb
+)
+returns table (
+  jibble_row_id uuid,
+  attendance_record_id uuid,
+  recovery_credit_request_id uuid,
+  needs_review boolean,
+  review_reason text
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_content_hash text;
+  v_existing jibble_time_entries%rowtype;
+  v_row_id uuid;
+  v_employee_id uuid;
+  v_country_code text;
+  v_work_date date;
+  v_needs_review boolean := false;
+  v_review_reason text := null;
+  v_approved_request_exists boolean;
+  v_sync record;
+  v_sync_review_reason text;
+begin
+  if p_jibble_entry_id is null or length(trim(p_jibble_entry_id)) = 0 then
+    raise exception 'A Jibble entry id is required.';
+  end if;
+  v_content_hash := md5(coalesce(p_raw_payload, '{}'::jsonb)::text);
+
+  select * into v_existing from jibble_time_entries
+  where company_id = p_company_id and jibble_entry_id = p_jibble_entry_id
+  for update;
+
+  select id, country_code into v_employee_id, v_country_code
+  from employees where company_id = p_company_id and jibble_person_id = p_jibble_person_id and deleted_at is null;
+
+  if v_employee_id is null then
+    v_needs_review := true;
+    v_review_reason := 'No employee in this company is mapped to Jibble person ' || p_jibble_person_id || '.';
+  end if;
+
+  if v_existing.id is not null and v_existing.content_hash = v_content_hash and v_existing.employee_id is not distinct from v_employee_id then
+    -- Byte-identical re-sync of an entry whose employee mapping also
+    -- hasn't changed — nothing changed, nothing to redo. Deliberately NOT
+    -- keyed on content_hash alone: an entry first synced before HR mapped
+    -- its Jibble person to an employee must still be reprocessed once that
+    -- mapping is added, even though the Jibble-side payload itself never
+    -- changed.
+    update jibble_time_entries set synced_at = now() where id = v_existing.id;
+    select r.id into recovery_credit_request_id from recovery_credit_requests r where r.attendance_record_id = v_existing.attendance_record_id;
+    jibble_row_id := v_existing.id;
+    attendance_record_id := v_existing.attendance_record_id;
+    needs_review := v_existing.needs_review;
+    review_reason := v_existing.review_reason;
+    return next;
+    return;
+  end if;
+
+  if v_existing.id is not null and v_existing.attendance_record_id is not null then
+    select exists (
+      select 1 from recovery_credit_requests r
+      where r.attendance_record_id = v_existing.attendance_record_id and r.status = 'approved'
+    ) into v_approved_request_exists;
+    if v_approved_request_exists then
+      update jibble_time_entries
+      set entry_start = p_entry_start, entry_end = p_entry_end, note = p_note, break_minutes = coalesce(p_break_minutes, 0),
+          raw_payload = p_raw_payload, content_hash = v_content_hash, needs_review = true,
+          review_reason = 'This Jibble entry was edited after its recovery credit was already approved — review before trusting the posted balance.',
+          synced_at = now()
+      where id = v_existing.id
+      returning id into v_row_id;
+
+      select r.id into recovery_credit_request_id from recovery_credit_requests r where r.attendance_record_id = v_existing.attendance_record_id;
+      jibble_row_id := v_row_id;
+      attendance_record_id := v_existing.attendance_record_id;
+      needs_review := true;
+      review_reason := 'This Jibble entry was edited after its recovery credit was already approved — review before trusting the posted balance.';
+      return next;
+      return;
+    end if;
+  end if;
+
+  if p_entry_end is not null and p_entry_end <= p_entry_start then
+    v_needs_review := true;
+    v_review_reason := case when v_review_reason is null then 'This entry''s end time is not after its start time.'
+      else v_review_reason || ' Also: this entry''s end time is not after its start time.' end;
+  end if;
+
+  v_work_date := case when v_employee_id is not null and p_entry_end is not null and not v_needs_review
+    then (p_entry_start at time zone country_timezone(v_country_code))::date
+    else null
+  end;
+
+  insert into jibble_time_entries (company_id, jibble_entry_id, jibble_person_id, employee_id, entry_start, entry_end, note, break_minutes, work_date, raw_payload, content_hash, needs_review, review_reason, synced_at)
+  values (p_company_id, p_jibble_entry_id, p_jibble_person_id, v_employee_id, p_entry_start, p_entry_end, p_note, coalesce(p_break_minutes, 0), v_work_date, p_raw_payload, v_content_hash, v_needs_review, v_review_reason, now())
+  on conflict (company_id, jibble_entry_id) do update
+  set jibble_person_id = excluded.jibble_person_id, employee_id = excluded.employee_id,
+      entry_start = excluded.entry_start, entry_end = excluded.entry_end, note = excluded.note,
+      break_minutes = excluded.break_minutes, work_date = excluded.work_date,
+      raw_payload = excluded.raw_payload, content_hash = excluded.content_hash,
+      needs_review = excluded.needs_review, review_reason = excluded.review_reason, synced_at = now()
+  returning id into v_row_id;
+
+  jibble_row_id := v_row_id;
+  needs_review := v_needs_review;
+  review_reason := v_review_reason;
+
+  if v_work_date is null then
+    -- Unmapped employee, or still an open/active clock-in — nothing to
+    -- derive attendance from yet.
+    attendance_record_id := null;
+    recovery_credit_request_id := null;
+    return next;
+    return;
+  end if;
+
+  select * into v_sync from sync_jibble_attendance_for_day(v_employee_id, v_country_code, v_work_date);
+
+  update jibble_time_entries set attendance_record_id = v_sync.attendance_record_id where id = v_row_id;
+  if v_sync.flagged_for_review then
+    needs_review := true;
+    -- v_sync_review_reason (a plain local, not the OUT parameter) avoids a
+    -- "column reference is ambiguous" error: inside an UPDATE ... SET
+    -- review_reason = ..., a bare identifier matching both a plpgsql
+    -- variable AND the target table's own column name is ambiguous.
+    v_sync_review_reason := coalesce(review_reason, 'A manually recorded attendance row already exists for this date, or its recovery credit was already approved — see the linked attendance record.');
+    review_reason := v_sync_review_reason;
+    update jibble_time_entries set needs_review = true, review_reason = v_sync_review_reason where id = v_row_id;
+  end if;
+
+  attendance_record_id := v_sync.attendance_record_id;
+  recovery_credit_request_id := v_sync.recovery_credit_request_id;
+  return next;
+end;
+$$;
+
+revoke all on function import_jibble_time_entry(uuid, text, text, timestamptz, timestamptz, text, numeric, jsonb) from public;
+grant execute on function import_jibble_time_entry(uuid, text, text, timestamptz, timestamptz, text, numeric, jsonb) to service_role;
+
+-- HR's correction step, made on the approval screen BEFORE deciding — never
+-- combined into the decision itself, so HR can save a correction, come
+-- back later, and still decide (or hand it to another HR Admin) without
+-- re-entering it. Locks (and requires 'pending') the SAME approval row
+-- decide_recovery_credit_request()/decide_leave_approval() lock, so an
+-- adjustment can never race a concurrent decision into inconsistent state.
+-- Requires a non-empty p_correction_reason whenever work_date or the
+-- resulting proposed_days actually changes (re-saving identical values, or
+-- only setting checked_with, is not "a correction"); recomputes
+-- proposed_days from p_corrected_hours via recovery_credit_days_for_hours()
+-- SERVER-SIDE — the client never gets to assert a day count directly.
+-- Company isolation and role enforcement both come from has_role() below,
+-- not from RLS (this is SECURITY DEFINER, like every other approval-engine
+-- mutator) — company_id is resolved from the request's own employee, never
+-- trusted from the caller.
+create or replace function adjust_recovery_credit_request(
+  p_request_id uuid,
+  p_corrected_work_date date,
+  p_corrected_hours numeric,
+  p_correction_reason text,
+  p_checked_with text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_request recovery_credit_requests%rowtype;
+  v_company_id uuid;
+  v_approval_id uuid;
+  v_approval_decision approval_decision;
+  v_new_days numeric;
+  v_changed boolean;
+begin
+  -- Locks approvals BEFORE recovery_credit_requests, in that order — the
+  -- same order decide_leave_approval() locks them in (its own entity-table
+  -- "for update" happens after it has already locked approvals). Taking
+  -- them in a consistent order everywhere is what makes a concurrent
+  -- adjust-vs-decide race on the same request block and serialize cleanly
+  -- instead of ever deadlocking each other.
+  select a.id, a.decision into v_approval_id, v_approval_decision
+  from approvals a where a.entity_type = 'recovery_credit' and a.entity_id = p_request_id
+  order by a.step_order desc limit 1
+  for update;
+  if v_approval_id is null then
+    raise exception 'No approval found for this recovery credit request.';
+  end if;
+  if v_approval_decision is distinct from 'pending' then
+    raise exception 'This request has already been decided and can no longer be adjusted.';
+  end if;
+
+  select * into v_request from recovery_credit_requests where id = p_request_id for update;
+  if not found then
+    raise exception 'Recovery credit request not found.';
+  end if;
+
+  select company_id into v_company_id from employees where id = v_request.employee_id;
+  if not has_role('hr_admin', v_company_id) then
+    raise exception 'Only HR Admin may adjust a recovery credit request.';
+  end if;
+
+  if p_corrected_work_date is null or p_corrected_hours is null then
+    raise exception 'A work date and hours are both required.';
+  end if;
+  if p_corrected_hours <= 0 then
+    raise exception 'Hours must be greater than zero.';
+  end if;
+
+  v_new_days := recovery_credit_days_for_hours(p_corrected_hours);
+  v_changed := p_corrected_work_date is distinct from v_request.work_date or v_new_days is distinct from v_request.proposed_days;
+
+  if v_changed and (p_correction_reason is null or length(trim(p_correction_reason)) = 0) then
+    raise exception 'A reason is required when correcting the work date or hours.';
+  end if;
+
+  update recovery_credit_requests
+  set work_date = p_corrected_work_date,
+      proposed_days = v_new_days,
+      correction_reason = case when v_changed then p_correction_reason else correction_reason end,
+      checked_with = coalesce(p_checked_with, checked_with),
+      corrected_by = case when v_changed then auth.uid() else corrected_by end,
+      corrected_at = case when v_changed then now() else corrected_at end
+  where id = p_request_id;
+end;
+$$;
+
+-- HR's decision on a Recovery Leave credit — a dedicated entry point (never
+-- a bare decide_leave_approval() call from the client) specifically so
+-- "record whom they checked with" is enforced for an APPROVAL (the product
+-- brief: HR must have verified the work with the relevant project lead
+-- outside the application before crediting anything) without adding
+-- recovery_credit-only parameters to the shared decide_leave_approval()
+-- used by five other entity types. Delegates the actual state transition —
+-- authorization, the row lock, ledger posting exactly once — to
+-- decide_leave_approval() itself, inside the SAME transaction, so there is
+-- exactly one implementation of "how a recovery credit gets approved."
+create or replace function decide_recovery_credit_request(
+  p_request_id uuid,
+  p_decision approval_decision,
+  p_checked_with text,
+  p_comments text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_approval_id uuid;
+begin
+  if p_decision not in ('approved', 'rejected') then
+    raise exception 'Decision must be ''approved'' or ''rejected''';
+  end if;
+  if p_decision = 'approved' and (p_checked_with is null or length(trim(p_checked_with)) = 0) then
+    raise exception 'Record whom you checked this work with before approving.';
+  end if;
+
+  select a.id into v_approval_id
+  from approvals a
+  where a.entity_type = 'recovery_credit' and a.entity_id = p_request_id and a.decision = 'pending'
+  order by a.step_order desc limit 1;
+  if v_approval_id is null then
+    raise exception 'No pending approval found for this recovery credit request.';
+  end if;
+
+  if p_checked_with is not null and length(trim(p_checked_with)) > 0 then
+    update recovery_credit_requests set checked_with = p_checked_with where id = p_request_id;
+  end if;
+
+  perform decide_leave_approval(v_approval_id, p_decision, p_comments);
 end;
 $$;
 
@@ -2463,17 +3138,22 @@ begin
     (v_workflow_id, 1, 'role:finance'),
     (v_workflow_id, 2, 'role:ceo');
 
-  -- Recovery Leave earning: Line Manager approval (provisional release),
-  -- then HR Admin final approval (the only point that posts a ledger
-  -- credit) — its own insert, outside the loop above, because its step
-  -- count (2) differs from every other entity type there (1).
+  -- Recovery Leave earning: ONE HR decision — a company-scoped role queue
+  -- (any current HR Admin in the company may decide it; see
+  -- approval_workflow_steps.approver_type's 'role_queue:hr_admin' doc
+  -- comment and decide_leave_approval()'s null-approver_id branch), not a
+  -- manager-then-HR chain and not a single specific assigned person. A
+  -- potential credit (from the Jibble import or the manual attendance
+  -- register) goes straight to this queue; HR checks the work with the
+  -- relevant project lead outside the application before deciding — its
+  -- own insert, outside the loop above, since every other entity type
+  -- there has exactly one step too, but resolves it very differently.
   insert into approval_workflows (company_id, entity_type, name)
-  values (new.id, 'recovery_credit', 'Recovery Leave earning approval (Line Manager, then HR Admin)')
+  values (new.id, 'recovery_credit', 'Recovery Leave earning approval (HR)')
   returning id into v_workflow_id;
 
   insert into approval_workflow_steps (workflow_id, step_order, approver_type) values
-    (v_workflow_id, 1, 'direct_manager'),
-    (v_workflow_id, 2, 'role:hr_admin');
+    (v_workflow_id, 1, 'role_queue:hr_admin');
 
   return new;
 end;
@@ -2901,7 +3581,18 @@ declare
   v_approval_id uuid;
   v_self_check_user_id uuid;
 begin
-  if not is_entity_owner(p_entity_type, p_entity_id) then
+  -- recovery_credit is the one entity type that can be created with NO
+  -- calling user session at all — the Jibble import (import_jibble_time_entry(),
+  -- a service_role-only SECURITY DEFINER function) attests to it on the
+  -- employee's behalf from a scheduled sync job, not a logged-in request.
+  -- is_entity_owner()'s created_by = auth.uid() check is meaningless there
+  -- (auth.uid() is null under a service-role call) and would otherwise hard-
+  -- block every Jibble-sourced request; it still fully applies whenever a
+  -- real user session created the row (the manual attendance/overnight
+  -- paths, where auth.uid() is the acting HR Admin/manager).
+  if p_entity_type = 'recovery_credit' and auth.uid() is null then
+    null;
+  elsif not is_entity_owner(p_entity_type, p_entity_id) then
     raise exception 'You do not own this % (or it does not exist)', p_entity_type;
   end if;
 
@@ -2940,32 +3631,58 @@ begin
     raise exception 'This workflow has no first step configured. Contact HR Admin.';
   end if;
 
-  if p_entity_type = 'payroll_export_run' then
-    v_approver_id := resolve_approver_for_company(v_approver_type, v_company_id);
+  if v_approver_type like 'role_queue:%' then
+    -- Company-scoped role queue (currently only recovery_credit's single
+    -- HR step) — no single resolved approver_id; ANY current holder of
+    -- this role in the company may later decide it (see
+    -- decide_leave_approval()'s own null-approver_id authorization branch).
+    -- Still hard-stops here if literally no one currently holds the role,
+    -- for the same "never create an unroutable approval" reason every
+    -- other branch below does.
+    if not exists (
+      select 1 from user_roles ur
+      where ur.role = replace(v_approver_type, 'role_queue:', '')::app_role
+        and ur.revoked_at is null
+        and (ur.company_id is null or ur.company_id = v_company_id)
+        and not exists (
+          select 1 from employees e2
+          where e2.user_id = ur.user_id and (e2.employment_status = 'terminated' or e2.deleted_at is not null)
+        )
+    ) then
+      raise exception 'No approver could be resolved (no one currently holds the "%" role in your company). Contact Sys Admin.', replace(v_approver_type, 'role_queue:', '');
+    end if;
+    v_approver_id := null;
   else
-    v_approver_id := resolve_approver(v_approver_type, v_employee_id);
-  end if;
-  if v_approver_id is null then
-    raise exception 'No approver could be resolved (e.g. no manager assigned, or no one holds the required role). Contact HR Admin.';
-  end if;
+    if p_entity_type = 'payroll_export_run' then
+      v_approver_id := resolve_approver_for_company(v_approver_type, v_company_id);
+    else
+      v_approver_id := resolve_approver(v_approver_type, v_employee_id);
+    end if;
+    if v_approver_id is null then
+      raise exception 'No approver could be resolved (e.g. no manager assigned, or no one holds the required role). Contact HR Admin.';
+    end if;
 
-  -- Self-approval prevention for step 1 — decide_leave_approval() already
-  -- refuses to route any LATER step back to the requester; this is the same
-  -- check for the first step, which that function never sees. Compares
-  -- against the ENTITY's own beneficiary, not always the caller: every
-  -- other entity type is self-submitted (the caller IS the requester, so
-  -- auth.uid() is correct), but recovery_credit is manager/HR-initiated ON
-  -- BEHALF OF the employee — the direct manager routinely is both the one
-  -- recording eligibility AND the resolved step-1 approver for their own
-  -- report, which is never "self-approval" (they aren't approving their
-  -- OWN leave). Only block if the resolved approver equals the beneficiary.
-  if p_entity_type = 'recovery_credit' then
-    select user_id into v_self_check_user_id from employees where id = v_employee_id;
-  else
-    v_self_check_user_id := auth.uid();
-  end if;
-  if v_approver_id = v_self_check_user_id then
-    raise exception 'The resolved approver for this workflow''s first step (%) is you — you can''t approve your own request. Contact HR Admin to assign a different approver.', v_approver_type;
+    -- Self-approval prevention for step 1 — decide_leave_approval() already
+    -- refuses to route any LATER step back to the requester; this is the
+    -- same check for the first step, which that function never sees.
+    -- Compares against the ENTITY's own beneficiary, not always the
+    -- caller: every other entity type is self-submitted (the caller IS the
+    -- requester, so auth.uid() is correct), but recovery_credit is
+    -- manager/HR-initiated ON BEHALF OF the employee — the direct manager
+    -- routinely is both the one recording eligibility AND the resolved
+    -- step-1 approver for their own report, which is never "self-approval"
+    -- (they aren't approving their OWN leave). Only block if the resolved
+    -- approver equals the beneficiary. A role_queue step has no single
+    -- resolved approver to compare here at all — its own self-decision
+    -- block instead happens at decision time, in decide_leave_approval().
+    if p_entity_type = 'recovery_credit' then
+      select user_id into v_self_check_user_id from employees where id = v_employee_id;
+    else
+      v_self_check_user_id := auth.uid();
+    end if;
+    if v_approver_id = v_self_check_user_id then
+      raise exception 'The resolved approver for this workflow''s first step (%) is you — you can''t approve your own request. Contact HR Admin to assign a different approver.', v_approver_type;
+    end if;
   end if;
 
   -- Idempotent under concurrent double-submission: reimbursement claims,
@@ -3091,6 +3808,9 @@ declare
   v_step record;
   v_next_approver uuid;
   v_found_next boolean := false;
+  v_queue_role text;
+  v_queue_company_id uuid;
+  v_queue_beneficiary_user_id uuid;
 begin
   if p_decision not in ('approved', 'rejected') then
     raise exception 'Decision must be ''approved'' or ''rejected''';
@@ -3100,9 +3820,45 @@ begin
   if not found then
     raise exception 'Approval not found';
   end if;
-  if auth.uid() is not null and v_approval.approver_id <> auth.uid() then
-    raise exception 'Only the assigned approver may decide this';
+
+  if v_approval.approver_id is not null then
+    if auth.uid() is not null and v_approval.approver_id <> auth.uid() then
+      raise exception 'Only the assigned approver may decide this';
+    end if;
+  else
+    -- Role-queue step (currently only recovery_credit's single HR step —
+    -- see approval_workflow_steps.approver_type's 'role_queue:%' doc
+    -- comment): there's no single assigned approver_id to compare against
+    -- auth.uid(); instead ANY user currently holding the step's named role
+    -- IN THE APPROVAL'S OWN COMPANY may decide it. Resolved here, before
+    -- entity dispatch below (which only runs after the decision is already
+    -- recorded), since this needs the company + beneficiary user up front.
+    select approver_type into v_queue_role
+    from approval_workflow_steps where workflow_id = v_approval.workflow_id and step_order = v_approval.step_order;
+    if v_queue_role is null or v_queue_role not like 'role_queue:%' then
+      raise exception 'This approval has no assigned approver and is not a recognized role-queue step.';
+    end if;
+
+    if v_approval.entity_type = 'recovery_credit' then
+      select e.company_id, e.user_id into v_queue_company_id, v_queue_beneficiary_user_id
+      from recovery_credit_requests r join employees e on e.id = r.employee_id
+      where r.id = v_approval.entity_id;
+    else
+      raise exception 'Role-queue approval steps are only supported for recovery_credit.';
+    end if;
+
+    if auth.uid() is null or not has_role(replace(v_queue_role, 'role_queue:', '')::app_role, v_queue_company_id) then
+      raise exception 'Only an active % may decide this.', replace(v_queue_role, 'role_queue:', '');
+    end if;
+    -- The project lead HR checked the work with is never an application
+    -- approver (no role, no seat in this table) — the only self-decision
+    -- risk here is the BENEFICIARY employee themselves also happening to
+    -- hold hr_admin and trying to decide their own request.
+    if auth.uid() = v_queue_beneficiary_user_id then
+      raise exception 'You cannot decide a recovery credit request for your own attendance. Ask another HR Admin to decide it.';
+    end if;
   end if;
+
   if v_approval.decision <> 'pending' then
     raise exception 'This approval has already been decided';
   end if;
@@ -3491,6 +4247,7 @@ alter table ai_drafts enable row level security;
 alter table audit_log enable row level security;
 alter table user_roles enable row level security;
 alter table recovery_credit_requests enable row level security;
+alter table jibble_time_entries enable row level security;
 alter table termination_settlement_inputs enable row level security;
 
 -- ---- countries: reference data, readable by any signed-in user, written only
@@ -4537,6 +5294,21 @@ create policy approvals_select on approvals for select
       entity_type = 'recovery_credit'
       and exists (select 1 from recovery_credit_requests r where r.id = entity_id and r.employee_id = current_employee_id())
     )
+    or (
+      -- A role_queue:% step's approver_id is null by design (see
+      -- approval_workflow_steps.approver_type's doc comment) — none of the
+      -- branches above would ever match for a company-scoped HR Admin (the
+      -- realistic case; has_role('hr_admin') with no company argument only
+      -- matches a GLOBAL, unscoped grant), so without this branch a queued
+      -- Recovery Leave approval would be invisible to the very HR Admins
+      -- meant to decide it.
+      entity_type = 'recovery_credit'
+      and approver_id is null
+      and exists (
+        select 1 from recovery_credit_requests r join employees e on e.id = r.employee_id
+        where r.id = entity_id and has_role('hr_admin', e.company_id)
+      )
+    )
   );
 
 -- ---- projects: broad read (same "transparency" pattern as departments —
@@ -4684,6 +5456,21 @@ create policy recovery_credit_requests_select on recovery_credit_requests for se
 
 create trigger audit_recovery_credit_requests after insert or update on recovery_credit_requests
   for each row execute function write_audit_log();
+
+-- ---- jibble_time_entries: HR Admin (full company visibility, needed to
+--      review a needs_review row and to see original-vs-corrected on the
+--      approval screen) + the employee themselves and their manager (same
+--      visibility tier as attendance_records, since each row is that same
+--      evidence one layer further back). No write policy at all —
+--      import_jibble_time_entry() (SECURITY DEFINER, service_role-only
+--      EXECUTE grant) is the only way this table is ever written; even HR
+--      Admin cannot edit a row directly, since it is the evidence trail an
+--      HR correction must be compared against, never overwritten by one.
+create policy jibble_time_entries_select on jibble_time_entries for select
+  using (
+    has_role('hr_admin', company_id)
+    or (employee_id is not null and (employee_id = current_employee_id() or is_manager_of(employee_id)))
+  );
 
 -- ---- termination_settlement_inputs: HR Admin/Finance read+write only —
 --      the HR/Finance-provided statutory wage basis final settlement
