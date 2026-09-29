@@ -101,10 +101,13 @@ test.describe("attendance and recovery leave @mutating", () => {
    *
    * recovery_credit_requests has no tagged free-text field (it's manager/
    * HR-attested, never a self-submitted request with a reason) — its
-   * work_date is this run's unique, deterministic identifier instead
-   * (testWeekendDay(runId, N) never collides with another N within the
-   * same run, and this suite's own dates are re-derived fresh every run),
-   * same role a tagged reason plays for leave/reimbursement rows.
+   * work_date is this run's unique identifier instead, same role a tagged
+   * reason plays for leave/reimbursement rows. testWeekendDay(runId, N)
+   * never collides with another N within THIS run, but its hash-derived
+   * date CAN coincide with a date an earlier, different run already used
+   * (confirmed live — see the date-search loop below), so the actual date
+   * is confirmed free via AttendancePage.isUnrecorded() before saving,
+   * rather than assumed from the first candidate.
    */
   test("Recovery Leave: manager approves (step 1), HR Admin approves (step 2), the comp-off credit posts only after both", async ({
     employeePage,
@@ -116,10 +119,45 @@ test.describe("attendance and recovery leave @mutating", () => {
     test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /admin/users.");
     const { email } = getCredentials("employee");
     const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, email);
-    const date = testWeekendDay(runId, 2); // distinct from the creation test above (offset 0) and the rejection test below (offset 3)
 
+    // testWeekendDay(runId, N) is hash(runId) % 40 weeks + N — deterministic
+    // per run, but NOT collision-proof across different runs' hashes.
+    // Confirmed live: run E2E-20260928-232518's offset-2 date (2099-05-30)
+    // had already been recorded by an earlier run (E2E-20260928-113008)'s
+    // own weekend-day test, so this employee's row there was no longer
+    // "not_recorded" — the save still succeeded but earned no NEW recovery
+    // credit (one already existed for that date), producing a bare "Saved."
+    // that expectSavedWithRecoveryCredits(1) correctly refused to accept as
+    // proof. A bare "Saved." must never be treated as evidence a new
+    // request was created — only the credit-specific message counts, and
+    // only once we've first confirmed the candidate date is actually free.
+    //
+    // Base offset 100 keeps this search's candidates clear of every other
+    // fixed offset this file uses (0 for the creation test above, 3 for the
+    // rejection test below) so a search landing on 100+k can never collide
+    // with either of those within the SAME run.
     const attendance = new AttendancePage(hrAdminPage);
-    await attendance.goto({ date });
+    const DATE_SEARCH_BASE_OFFSET = 100;
+    const MAX_DATE_SEARCH_ATTEMPTS = 20;
+    let date: string | undefined;
+    for (let attempt = 0; attempt < MAX_DATE_SEARCH_ATTEMPTS; attempt++) {
+      const candidate = testWeekendDay(runId, DATE_SEARCH_BASE_OFFSET + attempt);
+      await attendance.goto({ date: candidate });
+      if (await attendance.isUnrecorded(employeeName)) {
+        date = candidate;
+        break;
+      }
+    }
+    if (!date) {
+      throw new Error(
+        `Could not find an unused synthetic Saturday for the Employee test account after ${MAX_DATE_SEARCH_ATTEMPTS} attempts starting at testWeekendDay(runId, ${DATE_SEARCH_BASE_OFFSET}) — every candidate already has an attendance record. Investigate stale test data before retrying.`,
+      );
+    }
+
+    // `date` is now confirmed free and is reused, unchanged, through every
+    // subsequent assertion below (attendance save, both approval decisions,
+    // and the final balance check) — a genuinely different date for any of
+    // those would silently test nothing.
     await attendance.setStatus(employeeName, "present");
     await attendance.setWorkModeAndHours(employeeName, "business_travel", 8); // >4h => 1 full recovery day
     await attendance.saveAll();

@@ -94,6 +94,32 @@ export class AttendancePage {
     await expect(this.page.getByText(`Saved. ${count} recovery credit request(s) submitted for approval.`, { exact: true })).toBeVisible({ timeout: 10_000 });
   }
 
+  /**
+   * True if this employee has NO attendance recorded yet for whatever date
+   * this page is currently showing (status === "not_recorded"). Read-only —
+   * call this BEFORE setStatus/saveAll to confirm a synthetic date is
+   * actually free.
+   *
+   * Why this check exists: this suite's synthetic weekend dates
+   * (testWeekendDay() in recordTag.ts) are `hash(runId) % 40 weeks +
+   * offsetWeeks` — deterministic per run, but NOT collision-proof across
+   * different runs' hashes. Confirmed live: run E2E-20260928-232518's
+   * offset-2 date (2099-05-30) had already been recorded by an earlier
+   * run (E2E-20260928-113008)'s own weekend-day test. On an
+   * already-recorded date, record_attendance_and_recovery() still saves
+   * successfully but creates no NEW recovery_credit_requests row (one
+   * already exists there), so the save only ever shows a bare "Saved." —
+   * expectSavedWithRecoveryCredits() correctly fails on that, but by then
+   * the test has already wasted a real Production mutation on the wrong
+   * date. This lets a caller pick a different candidate date BEFORE
+   * saving anything, rather than discover the collision only after.
+   */
+  async isUnrecorded(employeeName: string): Promise<boolean> {
+    const row = await this.uniqueRowFor(employeeName);
+    const status = await row.getByRole("combobox").first().inputValue();
+    return status === "not_recorded";
+  }
+
   /** The employee's own SELECTED control values on whatever date this page
    * is currently showing, or null if the employee has no row on this
    * date's register (e.g. inactive or a different company). Used for
