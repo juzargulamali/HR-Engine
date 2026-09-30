@@ -128,7 +128,7 @@ export default async function AttendancePage({
     employeeIds.length > 0
       ? await supabase
           .from("attendance_records")
-          .select("employee_id, status, work_mode, hours_worked")
+          .select("employee_id, status, work_mode, hours_worked, source, presence_conflict")
           .eq("work_date", workDate)
           .in("employee_id", employeeIds)
       : { data: [] as never[] };
@@ -156,6 +156,13 @@ export default async function AttendancePage({
       status: rec?.status ?? "not_recorded",
       workMode: rec?.work_mode ?? null,
       hoursWorked: rec?.hours_worked ?? null,
+      // Self-clock leaves hours_worked null while the employee is still
+      // clocked in for this day (see sync_attendance_presence_for_day() in
+      // schema.sql) — the register shows "Clocked in" instead of a blank
+      // hours cell for exactly that combination, never for a manual entry
+      // that simply hasn't had hours filled in yet.
+      isClockedIn: rec?.source === "self_clock" && rec?.status === "present" && rec?.hours_worked == null,
+      presenceConflict: rec?.presence_conflict ?? null,
     };
   });
 

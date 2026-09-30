@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 
 interface Row {
   employeeId: string;
@@ -14,6 +15,16 @@ interface Row {
   status: string;
   workMode: string | null;
   hoursWorked: string | null;
+  /** True while this employee is still clocked in (self-clock, hours not
+   * final yet) for this day — see sync_attendance_presence_for_day() in
+   * schema.sql. Shown instead of a blank Hours cell; HR can still type a
+   * value here to override it. */
+  isClockedIn: boolean;
+  /** Set when self-clock activity exists for this day but a manual/import/
+   * biometric entry already recorded something else — self-clock never
+   * overwrote it, this just surfaces that for HR to review and reconcile
+   * (saving this row, as normal, clears it). */
+  presenceConflict: string | null;
 }
 
 export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate: string; rows: Row[]; isRecoveryDay: boolean }) {
@@ -85,7 +96,18 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
             const edit = edits.get(r.employeeId)!;
             return (
               <TableRow key={r.employeeId}>
-                <TableCell className="font-medium">{r.name}</TableCell>
+                <TableCell className="font-medium">
+                  {r.name}
+                  {r.presenceConflict ? (
+                    <span
+                      title={r.presenceConflict}
+                      className="ml-1.5 inline-flex cursor-help items-center text-warning"
+                      aria-label={`Presence conflict: ${r.presenceConflict}`}
+                    >
+                      ⚠
+                    </span>
+                  ) : null}
+                </TableCell>
                 <TableCell>
                   <Select
                     value={edit.status}
@@ -114,6 +136,11 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
                   </Select>
                 </TableCell>
                 <TableCell>
+                  {r.isClockedIn && edit.hoursWorked === "" ? (
+                    <Badge variant="success" className="mb-1">
+                      Clocked in{r.workMode ? ` — ${r.workMode}` : ""}
+                    </Badge>
+                  ) : null}
                   <Input
                     type="number"
                     step="0.25"

@@ -65,6 +65,7 @@ export async function clockIn(input: {
 
   revalidatePath("/attendance-clock");
   revalidatePath("/");
+  revalidatePath("/attendance");
   return { error: error?.message ?? null };
 }
 
@@ -104,6 +105,7 @@ export async function switchWorkSegment(input: {
 
   revalidatePath("/attendance-clock");
   revalidatePath("/");
+  revalidatePath("/attendance");
   return { error: error?.message ?? null };
 }
 
@@ -128,6 +130,7 @@ export async function clockOut(input: {
 
   revalidatePath("/attendance-clock");
   revalidatePath("/");
+  revalidatePath("/attendance");
   return { error: error?.message ?? null };
 }
 
