@@ -32,10 +32,21 @@ export class AttendanceClockPage {
     return this.page.locator("#main-content");
   }
 
+  /** Waits briefly for the page to settle rather than checking the DOM the
+   * instant goto() resolves — goto()'s default "load" wait covers the
+   * document and its subresources, not necessarily every real-network
+   * round-trip a genuinely-clocked-in account's data implies against live
+   * Production, and this is often called immediately after a fresh
+   * navigation (the "clean starting state" guard at the top of a test). A
+   * bare, non-waiting isVisible() here previously returned a false "not
+   * clocked in" for an account that genuinely was clocked in, which then
+   * surfaced as a confusing timeout inside clockIn() instead of a clear
+   * true/false answer. */
   isClockedIn(): Promise<boolean> {
     return this.main()
       .getByText("Clocked in", { exact: true })
-      .isVisible()
+      .waitFor({ state: "visible", timeout: 5_000 })
+      .then(() => true)
       .catch(() => false);
   }
 
