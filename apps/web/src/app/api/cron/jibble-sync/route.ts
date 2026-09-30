@@ -25,12 +25,20 @@ const MAX_REDACTED_SAMPLES = 5;
  * (with an overlap window, see OVERLAP_HOURS) and imports each one via
  * import_jibble_time_entry() — one atomic call per entry, so a single
  * malformed entry never blocks the rest of the batch. Every entry maps to a
- * COMPANY via JIBBLE_COMPANY_ID: this system has no per-tenant Jibble
- * workspace mapping yet, so a single Jibble organization is assumed for
- * now — a company with multiple Jibble workspaces (or multiple companies
- * sharing one) needs this route extended before it can be trusted, which is
- * exactly why it's not wired into vercel.json's cron list yet (see the PR
- * description's "still unverified" section).
+ * COMPANY via HR_ENGINE_TARGET_COMPANY_ID: this system has no per-tenant
+ * Jibble workspace mapping yet, so a single Jibble organization is assumed
+ * for now — a company with multiple Jibble workspaces (or multiple
+ * companies sharing one) needs this route extended before it can be
+ * trusted, which is exactly why it's not wired into vercel.json's cron
+ * list yet (see the PR description's "still unverified" section).
+ *
+ * HR_ENGINE_TARGET_COMPANY_ID is deliberately named to avoid the mistake of
+ * assuming it's a Jibble-side identifier: it is HR Engine's OWN internal
+ * `companies.id` — which of *our* companies an imported entry should be
+ * attributed to. Whether Jibble's own API additionally needs a
+ * workspace/organization id in the request (separate from whatever the
+ * auth token itself scopes) is not yet confirmed — see client.ts's own
+ * header comment.
  *
  * Sync checkpointing: jibble_sync_checkpoints (schema.sql) persists how far
  * this company's sync has successfully reached. A normal run reads it,
@@ -58,9 +66,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const companyId = process.env.JIBBLE_COMPANY_ID;
+  const companyId = process.env.HR_ENGINE_TARGET_COMPANY_ID;
   if (!companyId) {
-    return NextResponse.json({ error: "JIBBLE_COMPANY_ID is not configured." }, { status: 500 });
+    return NextResponse.json({ error: "HR_ENGINE_TARGET_COMPANY_ID is not configured." }, { status: 500 });
   }
 
   const { searchParams } = new URL(request.url);
