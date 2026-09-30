@@ -1,11 +1,17 @@
 name: E2E Attendance Clock (Preview) — manual only
 
-# Runs ONLY the new attendance-clock specs (packages/e2e-tests/tests/
-# mutating/25-attendance-clock.spec.ts and tests/read-only/attendance-clock.
-# mobile.spec.ts) — never the rest of packages/e2e-tests' own mutating suite
-# (leave/reimbursements/document-upload/account-status), which stays
-# exclusively wired to .github/workflows/e2e-production-qa-mutating.yml
-# against Production directly. This workflow targets a Vercel PREVIEW
+# Runs ONLY the new attendance-clock specs, via their own dedicated
+# Playwright projects (preview-attendance-mobile-smoke /
+# preview-attendance-mutating in playwright.config.ts) — deliberately NOT
+# the shared "mobile-smoke"/"mutating" projects those specs would otherwise
+# have matched by file location. That isolation matters: "mobile-smoke" and
+# "mutating" are exactly what e2e-production-qa-readonly.yml (on every PR
+# touching packages/e2e-tests/**) and e2e-production-qa-mutating.yml (manual
+# dispatch) run against Production directly — if these new specs matched
+# those project names, they would run against Production automatically/on a
+# routine dispatch, long before this feature is ever deployed there, and
+# fail every time. (This happened once already, on this PR's own CI, before
+# playwright.config.ts was split to fix it.) This workflow targets a Vercel PREVIEW
 # deployment (this PR's own branch build) instead — but that Preview, per
 # the user's own instruction, is configured to use the SAME Supabase
 # database as Production, using the SAME dedicated E2E_* test accounts. It
@@ -121,7 +127,7 @@ jobs:
       - name: Run the attendance-clock mobile-accessibility checks (read-only)
         id: run_tests
         continue-on-error: true
-        run: npx playwright test tests/read-only/attendance-clock.mobile.spec.ts --project=mobile-smoke
+        run: npx playwright test tests/read-only/attendance-clock.mobile.spec.ts --project=preview-attendance-mobile-smoke
         env:
           E2E_BASE_URL: ${{ inputs.preview_base_url }}
           E2E_RUN_ID: ${{ needs.guard.outputs.run_id }}
@@ -174,9 +180,9 @@ jobs:
         continue-on-error: true
         run: |
           if [ "${{ inputs.run_routing_tests }}" = "true" ]; then
-            npx playwright test tests/mutating/25-attendance-clock.spec.ts --project=mutating
+            npx playwright test tests/mutating/25-attendance-clock.spec.ts --project=preview-attendance-mutating
           else
-            npx playwright test tests/mutating/25-attendance-clock.spec.ts --project=mutating --grep "@mutating" --grep-invert "4-tier routing"
+            npx playwright test tests/mutating/25-attendance-clock.spec.ts --project=preview-attendance-mutating --grep "@mutating" --grep-invert "4-tier routing"
           fi
         env:
           E2E_BASE_URL: ${{ inputs.preview_base_url }}
