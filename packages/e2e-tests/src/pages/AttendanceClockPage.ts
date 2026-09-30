@@ -20,8 +20,20 @@ export class AttendanceClockPage {
     await gotoWithRetry(this.page, "/attendance-clock");
   }
 
+  /** Scopes a locator to <main id="main-content"> (app-shell.tsx), excluding
+   * the persistent mobile ClockFab — a sibling of <main>, present on every
+   * authenticated page — which renders the exact same "Clocked in"/"Clock
+   * In" text as this page's own status card. Without this scope, "Clocked
+   * in" resolves to 2 elements once the FAB catches up to a fresh clock-in,
+   * a real strict-mode race that intermittently made isClockedIn() throw
+   * (caught by its own .catch(() => false)) and report "not clocked in"
+   * immediately after a genuinely successful clock-in. */
+  private main() {
+    return this.page.locator("#main-content");
+  }
+
   isClockedIn(): Promise<boolean> {
-    return this.page
+    return this.main()
       .getByText("Clocked in", { exact: true })
       .isVisible()
       .catch(() => false);
@@ -51,7 +63,7 @@ export class AttendanceClockPage {
     // clockIn() round-trips through a Server Action before clock-controls.tsx
     // clears pending and re-renders — wait for either "Clocked in" or an
     // error alert, never a fixed sleep.
-    await expect(this.page.getByText("Clocked in", { exact: true }).or(this.page.locator('[role="alert"]'))).toBeVisible({ timeout: 15_000 });
+    await expect(this.main().getByText("Clocked in", { exact: true }).or(this.page.locator('[role="alert"]'))).toBeVisible({ timeout: 15_000 });
   }
 
   async switchWorkMode(opts: { workMode: WorkMode; projectName?: string; projectLeadName?: string }): Promise<void> {
@@ -67,7 +79,7 @@ export class AttendanceClockPage {
   async clockOut(): Promise<void> {
     await this.ensureNotSwitching();
     await this.page.getByRole("button", { name: "Clock Out", exact: true }).click();
-    await expect(this.page.getByText("Not clocked in", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(this.main().getByText("Not clocked in", { exact: true })).toBeVisible({ timeout: 15_000 });
   }
 
   async expectError(pattern: RegExp): Promise<void> {
