@@ -37,6 +37,10 @@ interface ShiftSummary {
  * Query params (all optional):
  *   ?hours=48          — how far back to look (default DEFAULT_WINDOW_HOURS)
  *   ?since=&until=     — explicit ISO range instead of ?hours
+ *   ?personId=         — narrow the summary to one Jibble person id, e.g. to
+ *                        walk through a single employee's shift for review
+ *                        (fetches the same full window either way; only the
+ *                        summary/samples below are filtered)
  *
  * Notes are redacted to their first 40 characters — long enough to spot a
  * project name, short enough not to leak the rest of a personal note into
@@ -53,12 +57,16 @@ export async function GET(request: Request) {
     ? new Date(searchParams.get("since")!)
     : new Date(now.getTime() - Number(searchParams.get("hours") ?? DEFAULT_WINDOW_HOURS) * 60 * 60 * 1000);
   const until = searchParams.get("until") ? new Date(searchParams.get("until")!) : now;
+  const personIdFilter = searchParams.get("personId");
 
   if (Number.isNaN(since.getTime()) || Number.isNaN(until.getTime()) || since >= until) {
     return NextResponse.json({ error: "Invalid or empty since/until range." }, { status: 400 });
   }
 
-  const result = await fetchJibbleTimeEntries(since.toISOString(), until.toISOString());
+  const fetched = await fetchJibbleTimeEntries(since.toISOString(), until.toISOString());
+  const result = personIdFilter
+    ? { ...fetched, parsed: fetched.parsed.filter((e) => e.personId === personIdFilter) }
+    : fetched;
   const admin = createAdminClient();
 
   // Read-only employee lookup (jibble_person_id -> employee/country), the
@@ -130,6 +138,7 @@ export async function GET(request: Request) {
     mode: "preview — read-only, nothing was imported or checkpointed",
     since: since.toISOString(),
     until: until.toISOString(),
+    personIdFilter,
     pagesFetched: result.pagesFetched,
     fetched: result.parsed.length,
     unparseableCount: result.unparseable.length,
