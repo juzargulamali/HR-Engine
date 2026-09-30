@@ -9,8 +9,17 @@ import { cn } from "@/lib/utils";
 import { SidebarNav } from "./sidebar-nav";
 import { CommandPalette } from "./command-palette";
 import { buildNavGroups } from "./nav-groups";
+import { ClockFab } from "./clock-fab";
 
-export function AppShell({ session, children }: { session: CurrentSession; children: React.ReactNode }) {
+export function AppShell({
+  session,
+  clockedIn = false,
+  children,
+}: {
+  session: CurrentSession;
+  clockedIn?: boolean;
+  children: React.ReactNode;
+}) {
   const roleLabels = roleLabelsFor(session.grants);
   const showAlertsLink = canViewHrAlerts(session.grants);
   const groups = buildNavGroups(session.grants);
@@ -51,6 +60,8 @@ export function AppShell({ session, children }: { session: CurrentSession; child
           <div className="mx-auto max-w-6xl">{children}</div>
         </main>
       </div>
+
+      {session.employeeId ? <ClockFab clockedIn={clockedIn} /> : null}
     </div>
   );
 }

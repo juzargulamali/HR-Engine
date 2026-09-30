@@ -1,23 +1,32 @@
--- Recovery Leave redesign, Stage 2 of 2 — THE CUTOVER.
+-- Recovery Leave redesign — THE CUTOVER.
 --
 -- DELIBERATELY NOT in supabase/migrations/ and NOT run by the local
 -- Postgres test bootstrap or CI. Run this by hand in the Supabase SQL
--- Editor, after Stage 1
--- (supabase/migrations/20261106000000_recovery_leave_jibble_hr_queue_stage1.sql)
--- has been applied AND deployed together with its app code — the Jibble
--- import and the HR correction/decision UI must both be live before you
--- cut over, since the OLD 2-step routing (direct_manager -> role:hr_admin)
--- has no such UI at all.
+-- Editor, after the migration
+-- (supabase/migrations/20261106000000_recovery_leave_hr_queue_and_self_clock_attendance.sql)
+-- has been applied AND deployed together with its app code — the employee
+-- self-clock attendance UI and the HR correction/decision/queue UI must
+-- both be live before you cut over, since the OLD 2-step routing
+-- (direct_manager -> role:hr_admin) has no such UI at all.
 --
 -- What this does: activates a NEW recovery_credit workflow (a single
 -- 'role_queue:hr_admin' step — any current HR Admin in the company may
 -- decide it) per company, and retires the OLD one (whatever your
 -- production database's recovery_credit workflow currently is — most
 -- likely still the very original direct_manager -> role:hr_admin, since
--- neither the Project-Manager/HR-owner design PR #16 first proposed nor
--- this one has been applied here before), by INSERTING a new
--- approval_workflows row and flipping is_active, rather than UPDATING the
--- existing approval_workflow_steps rows in place.
+-- nothing in this feature line has ever been applied here before), by
+-- INSERTING a new approval_workflows row and flipping is_active, rather
+-- than UPDATING the existing approval_workflow_steps rows in place.
+--
+-- This ONLY affects the LEGACY manual-attendance-register / overnight
+-- family of recovery_credit_requests (attendance_record_id set,
+-- applicant_route null) — the NEW self-clock family (segment_id set)
+-- computes its own 4-tier routing per request and never touches
+-- approval_workflows/approval_workflow_steps at all (see
+-- recovery_credit_requests.applicant_route's own doc comment in
+-- schema.sql). Nothing here is required before self-clock attendance can
+-- be used; it is only needed to move the OLDER manual-register path off
+-- its original 2-step chain.
 --
 -- This matters for one specific case: a request already pending at step 1
 -- the moment this runs. Its approvals row already carries the OLD
@@ -34,18 +43,7 @@
 -- Before you run this — readiness check (read-only, safe to run any time)
 -- ======================================================================
 --
--- 1. Every employee who might earn a Recovery Leave credit via Jibble
---    should have a jibble_person_id mapped (Employee -> edit profile) —
---    otherwise their imported entries land in jibble_time_entries flagged
---    needs_review instead of producing a request. Not required before
---    cutover (mapping can continue afterward), but worth doing first:
---
---   select id, employee_number, first_name, last_name, company_id
---   from employees
---   where deleted_at is null and employment_status <> 'terminated'
---     and jibble_person_id is null;
---
--- 2. Every company you're cutting over should currently have at least one
+-- 1. Every company you're cutting over should currently have at least one
 --    active hr_admin — role_queue:hr_admin hard-stops NEW requests
 --    (create_initial_approval() raises "No approver could be resolved")
 --    for any company with zero:
@@ -58,7 +56,7 @@
 --       and (ur.company_id is null or ur.company_id = c.id)
 --   );
 --
--- 3. Capture every request currently pending at step 1 — these are the
+-- 2. Capture every request currently pending at step 1 — these are the
 --    ones this cutover is specifically designed not to disturb (see the
 --    Verification section below for confirming that held):
 --
@@ -130,19 +128,22 @@ drop table _old_recovery_workflows;
 -- Stop conditions — do NOT run this cutover if:
 -- ======================================================================
 --
---   - Stage 1's migration has not been applied to this database yet
---     (role_queue:hr_admin/import_jibble_time_entry/decide_recovery_credit_request
---     etc. won't exist — every new-workflow lookup above and every future
---     recovery_credit approval would fail outright).
---   - The app-code deploy that ships the HR queue/correction UI has not
---     gone out yet — HR would have no way to decide a role_queue approval
---     at all (the /approvals page's own "Approve"/"Reject" buttons for
---     Recovery Leave must be calling decide_recovery_credit_request(),
---     not the old bare decide_leave_approval()).
---   - Readiness check 2 above shows any company with zero active
+--   - The migration
+--     (20261106000000_recovery_leave_hr_queue_and_self_clock_attendance.sql)
+--     has not been applied to this database yet (role_queue:hr_admin/
+--     decide_recovery_credit_request/adjust_recovery_credit_request etc.
+--     won't exist — every new-workflow lookup above and every future
+--     legacy-family recovery_credit approval would fail outright).
+--   - The app-code deploy that ships the HR queue/correction UI and the
+--     employee self-clock attendance UI has not gone out yet — HR would
+--     have no way to decide a role_queue approval at all (the /approvals
+--     page's own "Approve"/"Reject" buttons for Recovery Leave must be
+--     calling decide_recovery_credit_request(), not the old bare
+--     decide_leave_approval()).
+--   - Readiness check 1 above shows any company with zero active
 --     hr_admin — fix that first, or accept Recovery Leave will hard-stop
---     for that company's new requests until it's fixed (it will never
---     silently misroute them either way).
+--     for that company's new legacy-family requests until it's fixed (it
+--     will never silently misroute them either way).
 --
 -- Rollback: this script only ever INSERTS new approval_workflows/
 -- approval_workflow_steps rows and flips is_active on the OLD ones — it
@@ -163,4 +164,5 @@ drop table _old_recovery_workflows;
 -- data that has already changed.) Any recovery_credit_requests row created
 -- under the new role_queue step while it was active keeps its own history
 -- either way — rolling back never deletes a request or an approval, only
--- changes which workflow template NEW requests resolve against.
+-- changes which workflow template NEW legacy-family requests resolve
+-- against.

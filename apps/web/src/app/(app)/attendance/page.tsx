@@ -20,21 +20,6 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
   partial_day: "secondary",
 };
 
-const REVIEW_CATEGORY_LABELS: Record<string, string> = {
-  unmapped_employee: "Unmapped employee",
-  invalid_times: "Invalid times",
-  missing_start: "Missing start",
-  ambiguous_parse: "Ambiguous data",
-  edited_after_approval: "Edited after approval",
-  manual_attendance_conflict: "Manual entry on file",
-  already_approved: "Already approved",
-  ambiguous_entries_excluded: "Partial day (some entries excluded)",
-};
-
-function reviewCategoryLabel(category: string | null): string {
-  return category ? (REVIEW_CATEGORY_LABELS[category] ?? category) : "Needs review";
-}
-
 export default async function AttendancePage({
   searchParams,
 }: {
@@ -132,36 +117,10 @@ export default async function AttendancePage({
     employeesQuery = employeesQuery.or(`first_name.ilike.%${safeQ}%,last_name.ilike.%${safeQ}%`);
   }
 
-  const [{ data: country }, { data: employees }, { data: holiday }, { data: needsReviewEntries }, { data: incompleteEntries }, { data: syncCheckpoint }] = await Promise.all([
+  const [{ data: country }, { data: employees }, { data: holiday }] = await Promise.all([
     supabase.from("countries").select("week_start_day, working_weekdays").eq("code", company.country_code).single(),
     employeesQuery,
     supabase.from("public_holidays").select("name").eq("country_code", company.country_code).eq("holiday_date", workDate).maybeSingle(),
-    // A failed/ambiguous Jibble sync (an unmapped person, an invalid entry,
-    // an edit after approval, a day the manual register already owns) is
-    // surfaced here rather than only in a cron job's own logs — HR is the
-    // one who can actually fix any of those causes (map the employee,
-    // correct the record, or just acknowledge it). review_category groups
-    // these into distinct, actionable buckets rather than one undifferentiated list.
-    supabase
-      .from("jibble_time_entries")
-      .select("id, jibble_person_id, entry_start, review_reason, review_category")
-      .eq("company_id", companyId)
-      .eq("needs_review", true)
-      .order("entry_start", { ascending: false })
-      .limit(30),
-    // An open/active clock-in (no end time yet) is NOT an error — it's just
-    // not finished — but it's still worth HR seeing separately from the
-    // review bucket above, since "why hasn't this person's shift synced
-    // yet" has a different answer (they're still clocked in) than "why is
-    // this flagged" (something about the data is wrong).
-    supabase
-      .from("jibble_time_entries")
-      .select("id, jibble_person_id, entry_start")
-      .eq("company_id", companyId)
-      .is("entry_end", null)
-      .order("entry_start", { ascending: false })
-      .limit(10),
-    supabase.from("jibble_sync_checkpoints").select("last_synced_until, last_run_at, last_run_status, last_run_note").eq("company_id", companyId).maybeSingle(),
   ]);
 
   const employeeIds = (employees ?? []).map((e) => e.id);
@@ -244,81 +203,6 @@ export default async function AttendancePage({
           {isHolidayDate ? `${holiday?.name ?? "Public holiday"} — ` : "Weekend — "}
           anyone marked present today may earn a recovery (comp) day, per your country&apos;s policy.
         </Alert>
-      ) : null}
-
-      {syncCheckpoint ? (
-        <p className="text-xs text-muted-foreground">
-          Jibble sync last {syncCheckpoint.last_run_status === "ok" ? "ran cleanly" : syncCheckpoint.last_run_status} at{" "}
-          {new Date(syncCheckpoint.last_run_at).toLocaleString()}, caught up through{" "}
-          {new Date(syncCheckpoint.last_synced_until).toLocaleString()}
-          {syncCheckpoint.last_run_note ? ` — ${syncCheckpoint.last_run_note}` : ""}.
-        </p>
-      ) : null}
-
-      {(needsReviewEntries ?? []).length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Jibble sync — needs review</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Jibble person</TableHead>
-                  <TableHead>Entry start</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Why</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(needsReviewEntries ?? []).map((e) => (
-                  <TableRow key={e.id}>
-                    <TableCell className="font-mono text-xs">{e.jibble_person_id}</TableCell>
-                    <TableCell>{e.entry_start ?? "—"}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{reviewCategoryLabel(e.review_category)}</Badge>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{e.review_reason ?? "Needs review."}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Most often: this Jibble person still needs mapping to an employee (Employee → edit profile → Jibble
-              person ID), or the entry was edited in Jibble after its recovery credit was already approved.
-            </p>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {(incompleteEntries ?? []).length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Jibble — still clocked in</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Jibble person</TableHead>
-                  <TableHead>Clocked in at</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(incompleteEntries ?? []).map((e) => (
-                  <TableRow key={e.id}>
-                    <TableCell className="font-mono text-xs">{e.jibble_person_id}</TableCell>
-                    <TableCell>{e.entry_start ?? "—"}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Not an error — this shift hasn&apos;t been clocked out yet, so nothing is derived from it until it
-              is.
-            </p>
-          </CardContent>
-        </Card>
       ) : null}
 
       <Card>

@@ -21,9 +21,9 @@ const adjustSchema = z.object({
  * adjust_recovery_credit_request() in schema.sql — it requires a reason
  * only when the date/hours actually change, and recomputes the proposed
  * credit server-side via the same ≤4h/>4h threshold every recording path
- * shares). The ORIGINAL Jibble/manual values are never touched by this —
- * they stay on attendance_records/jibble_time_entries for the approval
- * screen's own "original vs. corrected" display.
+ * shares). The ORIGINAL values are never touched by this — they stay on
+ * the originating attendance evidence for the approval screen's own
+ * "original vs. corrected" display.
  */
 export async function adjustRecoveryCreditRequest(input: {
   requestId: string;

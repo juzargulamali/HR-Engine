@@ -45,6 +45,10 @@ export type ApprovableEntity =
   | "payroll_export_run"
   | "recovery_credit";
 export type RecoveryCreditEventType = "standard" | "overnight";
+export type RecoveryCreditApplicantRoute = "employee_lead_then_hr" | "manager_hr_direct" | "hr_admin_ceo_cto_queue" | "self_led_hr_direct";
+export type AttendanceWorkMode = "office" | "wfh" | "site_work" | "client_meeting" | "business_travel";
+export type AttendanceLocationEvent = "segment_start" | "segment_end";
+export type AttendanceLocationPermissionStatus = "granted" | "denied" | "unavailable" | "timeout";
 export type DocumentStatus = "valid" | "expiring_soon" | "expired";
 export type AssetStatus = "in_stock" | "issued" | "under_repair" | "retired";
 export type LetterStatus = "draft" | "pending_approval" | "issued" | "void";
@@ -193,7 +197,6 @@ export interface Database {
           work_location: string | null;
           recognised_prior_service_years: number | null;
           is_first_ever_employment: boolean | null;
-          jibble_person_id: string | null;
           created_at: string;
           created_by: string | null;
           updated_at: string;
@@ -225,7 +228,6 @@ export interface Database {
           work_location?: string | null;
           recognised_prior_service_years?: number | null;
           is_first_ever_employment?: boolean | null;
-          jibble_person_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["employees"]["Insert"]> & {
           deleted_at?: string | null;
@@ -673,6 +675,7 @@ export interface Database {
           workflow_id: string | null;
           step_order: number;
           approver_id: string | null;
+          queue_roles: AppRole[] | null;
           decision: ApprovalDecision;
           decided_at: string | null;
           comments: string | null;
@@ -685,6 +688,7 @@ export interface Database {
           workflow_id?: string | null;
           step_order: number;
           approver_id?: string | null;
+          queue_roles?: AppRole[] | null;
           decision?: ApprovalDecision;
           comments?: string | null;
         };
@@ -838,7 +842,6 @@ export interface Database {
           source: string;
           completed_normal_scheduled_day: boolean | null;
           active_hours_after_midnight: string | null;
-          jibble_time_entry_id: string | null;
         };
         Insert: {
           id?: string;
@@ -852,71 +855,82 @@ export interface Database {
           source?: string;
           completed_normal_scheduled_day?: boolean | null;
           active_hours_after_midnight?: number | null;
-          jibble_time_entry_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["attendance_records"]["Insert"]>;
         Relationships: [];
       };
-      jibble_time_entries: {
+      attendance_sessions: {
         Row: {
           id: string;
-          company_id: string;
-          jibble_entry_id: string;
-          jibble_person_id: string;
-          employee_id: string | null;
-          entry_start: string | null;
-          entry_end: string | null;
-          note: string | null;
-          break_minutes: string;
-          work_date: string | null;
-          raw_payload: Record<string, unknown>;
-          content_hash: string;
-          attendance_record_id: string | null;
-          needs_review: boolean;
-          review_reason: string | null;
-          review_category: string | null;
-          synced_at: string;
+          employee_id: string;
+          clock_in_at: string;
+          clock_out_at: string | null;
+          status: "open" | "closed";
+          hr_closed_by: string | null;
+          hr_closed_at: string | null;
+          hr_closed_reason: string | null;
           created_at: string;
         };
         Insert: {
           id?: string;
-          company_id: string;
-          jibble_entry_id: string;
-          jibble_person_id: string;
-          employee_id?: string | null;
-          entry_start?: string | null;
-          entry_end?: string | null;
-          note?: string | null;
-          break_minutes?: number;
-          work_date?: string | null;
-          raw_payload: Record<string, unknown>;
-          content_hash: string;
-          attendance_record_id?: string | null;
-          needs_review?: boolean;
-          review_reason?: string | null;
-          review_category?: string | null;
+          employee_id: string;
         };
-        Update: Record<string, never>; // no write policy at all — import_jibble_time_entry() is the only mutator
+        Update: Record<string, never>; // no UPDATE policy — clock_out()/hr_close_attendance_session() (both SECURITY DEFINER) are the only mutators
         Relationships: [];
       };
-      jibble_sync_checkpoints: {
+      attendance_segments: {
         Row: {
-          company_id: string;
-          last_synced_until: string;
-          last_run_at: string;
-          last_run_status: "ok" | "partial" | "failed";
-          last_run_note: string | null;
-          updated_at: string;
+          id: string;
+          session_id: string;
+          employee_id: string;
+          work_mode: AttendanceWorkMode;
+          project_name: string | null;
+          project_lead_employee_id: string | null;
+          segment_start: string;
+          segment_end: string | null;
+          created_at: string;
         };
-        Insert: Record<string, never>; // no write policy at all — record_jibble_sync_checkpoint() is the only mutator
-        Update: Record<string, never>;
+        Insert: {
+          id?: string;
+          session_id: string;
+          employee_id: string;
+          work_mode: AttendanceWorkMode;
+          project_name?: string | null;
+          project_lead_employee_id?: string | null;
+          segment_start?: string;
+        };
+        Update: Record<string, never>; // no UPDATE policy — clock_in()/switch_work_segment()/clock_out()/hr_close_attendance_session() are the only mutators
+        Relationships: [];
+      };
+      attendance_locations: {
+        Row: {
+          id: string;
+          segment_id: string;
+          event: AttendanceLocationEvent;
+          latitude: string | null;
+          longitude: string | null;
+          accuracy_meters: string | null;
+          permission_status: AttendanceLocationPermissionStatus;
+          captured_at: string;
+        };
+        Insert: {
+          id?: string;
+          segment_id: string;
+          event: AttendanceLocationEvent;
+          latitude?: number | null;
+          longitude?: number | null;
+          accuracy_meters?: number | null;
+          permission_status: AttendanceLocationPermissionStatus;
+        };
+        Update: Record<string, never>; // no UPDATE policy — record_attendance_location() (SECURITY DEFINER) is the only mutator
         Relationships: [];
       };
       recovery_credit_requests: {
         Row: {
           id: string;
           employee_id: string;
-          attendance_record_id: string;
+          attendance_record_id: string | null;
+          segment_id: string | null;
           work_date: string;
           event_type: RecoveryCreditEventType;
           proposed_days: string;
@@ -930,16 +944,31 @@ export interface Database {
           checked_with: string | null;
           corrected_by: string | null;
           corrected_at: string | null;
+          work_mode: string | null;
+          project_name: string | null;
+          project_lead_employee_id: string | null;
+          applicant_route: RecoveryCreditApplicantRoute | null;
+          awaiting_project_lead: boolean;
+          needs_policy_review: boolean;
+          routing_issue: string | null;
         };
         Insert: {
           id?: string;
           employee_id: string;
-          attendance_record_id: string;
+          attendance_record_id?: string | null;
+          segment_id?: string | null;
           work_date: string;
           event_type: RecoveryCreditEventType;
           proposed_days: number;
           status?: RequestStatus;
           created_by: string;
+          work_mode?: string | null;
+          project_name?: string | null;
+          project_lead_employee_id?: string | null;
+          applicant_route?: RecoveryCreditApplicantRoute | null;
+          awaiting_project_lead?: boolean;
+          needs_policy_review?: boolean;
+          routing_issue?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["recovery_credit_requests"]["Insert"]> & {
           decided_at?: string | null;
@@ -1393,37 +1422,6 @@ export interface Database {
         Args: { p_country_code: string | null };
         Returns: string;
       };
-      import_jibble_time_entry: {
-        Args: {
-          p_company_id: string;
-          p_jibble_entry_id: string;
-          p_jibble_person_id: string;
-          p_entry_start: string | null;
-          p_entry_end: string | null;
-          p_note: string | null;
-          p_break_minutes: number | null;
-          p_raw_payload: Record<string, unknown>;
-          p_client_needs_review?: boolean;
-          p_client_review_reason?: string | null;
-        };
-        Returns: {
-          jibble_row_id: string;
-          attendance_record_id: string | null;
-          recovery_credit_request_id: string | null;
-          needs_review: boolean;
-          review_reason: string | null;
-          review_category: string | null;
-        }[];
-      };
-      record_jibble_sync_checkpoint: {
-        Args: {
-          p_company_id: string;
-          p_synced_until: string;
-          p_status: "ok" | "partial" | "failed";
-          p_note?: string | null;
-        };
-        Returns: undefined;
-      };
       adjust_recovery_credit_request: {
         Args: {
           p_request_id: string;
@@ -1441,6 +1439,59 @@ export interface Database {
           p_checked_with?: string | null;
           p_comments?: string | null;
         };
+        Returns: undefined;
+      };
+      resolve_recovery_credit_project_lead: {
+        Args: { p_request_id: string; p_project_lead_employee_id: string };
+        Returns: string;
+      };
+      clock_in: {
+        Args: {
+          p_work_mode: AttendanceWorkMode;
+          p_project_name?: string | null;
+          p_project_lead_employee_id?: string | null;
+          p_location?: {
+            latitude?: number | null;
+            longitude?: number | null;
+            accuracy_meters?: number | null;
+            permission_status: AttendanceLocationPermissionStatus;
+          } | null;
+        };
+        Returns: string;
+      };
+      switch_work_segment: {
+        Args: {
+          p_work_mode: AttendanceWorkMode;
+          p_project_name?: string | null;
+          p_project_lead_employee_id?: string | null;
+          p_closing_location?: {
+            latitude?: number | null;
+            longitude?: number | null;
+            accuracy_meters?: number | null;
+            permission_status: AttendanceLocationPermissionStatus;
+          } | null;
+          p_opening_location?: {
+            latitude?: number | null;
+            longitude?: number | null;
+            accuracy_meters?: number | null;
+            permission_status: AttendanceLocationPermissionStatus;
+          } | null;
+        };
+        Returns: string;
+      };
+      clock_out: {
+        Args: {
+          p_location?: {
+            latitude?: number | null;
+            longitude?: number | null;
+            accuracy_meters?: number | null;
+            permission_status: AttendanceLocationPermissionStatus;
+          } | null;
+        };
+        Returns: string;
+      };
+      hr_close_attendance_session: {
+        Args: { p_session_id: string; p_corrected_clock_out_at: string; p_reason: string };
         Returns: undefined;
       };
       terminate_employee: {

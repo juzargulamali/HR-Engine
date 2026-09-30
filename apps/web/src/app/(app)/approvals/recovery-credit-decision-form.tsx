@@ -13,7 +13,7 @@ import { Alert } from "@/components/ui/alert";
  * old two-step manager-then-HR DecisionButtons flow. HR can:
  *   1. Correct the work date/hours (adjust_recovery_credit_request() —
  *      requires a reason whenever it actually changes something; the
- *      ORIGINAL Jibble/manual values below never change).
+ *      ORIGINAL evidence values below never change).
  *   2. Record whom they checked the work with (required before Approve —
  *      the product brief: verify with the relevant project lead outside
  *      the application first; that person is never an app user/approver).
@@ -32,6 +32,8 @@ export function RecoveryCreditDecisionForm({
   currentWorkDate,
   currentDays,
   wasCorrected,
+  canCorrect,
+  checkedWithRequired,
 }: {
   requestId: string;
   originalWorkDate: string;
@@ -39,6 +41,8 @@ export function RecoveryCreditDecisionForm({
   currentWorkDate: string;
   currentDays: number;
   wasCorrected: boolean;
+  canCorrect: boolean;
+  checkedWithRequired: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +70,7 @@ export function RecoveryCreditDecisionForm({
   }
 
   function approve() {
-    if (!checkedWith.trim()) {
+    if (checkedWithRequired && !checkedWith.trim()) {
       setError("Record whom you checked this work with before approving.");
       return;
     }
@@ -99,43 +103,47 @@ export function RecoveryCreditDecisionForm({
         {originalHours != null ? `, ${originalHours}h` : ""}
         {wasCorrected ? " — HR corrected below" : ""}
       </p>
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
-          <Label htmlFor={`work-date-${requestId}`} className="text-xs">
-            Work date
-          </Label>
-          <Input id={`work-date-${requestId}`} type="date" value={workDate} onChange={(e) => setWorkDate(e.target.value)} className="h-8 text-xs" />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor={`hours-${requestId}`} className="text-xs">
-            Hours
-          </Label>
-          <Input
-            id={`hours-${requestId}`}
-            type="number"
-            step="0.25"
-            min="0"
-            value={hours}
-            onChange={(e) => setHours(e.target.value)}
-            className="h-8 text-xs"
+      {canCorrect ? (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label htmlFor={`work-date-${requestId}`} className="text-xs">
+                Work date
+              </Label>
+              <Input id={`work-date-${requestId}`} type="date" value={workDate} onChange={(e) => setWorkDate(e.target.value)} className="h-8 text-xs" />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor={`hours-${requestId}`} className="text-xs">
+                Hours
+              </Label>
+              <Input
+                id={`hours-${requestId}`}
+                type="number"
+                step="0.25"
+                min="0"
+                value={hours}
+                onChange={(e) => setHours(e.target.value)}
+                className="h-8 text-xs"
+              />
+            </div>
+          </div>
+          <Textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Reason for correction (required if you change date/hours)"
+            rows={2}
+            className="text-xs"
           />
-        </div>
-      </div>
-      <Textarea
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-        placeholder="Reason for correction (required if you change date/hours)"
-        rows={2}
-        className="text-xs"
-      />
-      <Button size="sm" variant="outline" disabled={pending} onClick={saveCorrection}>
-        Save correction
-      </Button>
-      {saved ? <p className="text-xs text-muted-foreground">Saved — current proposed credit: {currentDays} day(s).</p> : null}
+          <Button size="sm" variant="outline" disabled={pending} onClick={saveCorrection}>
+            Save correction
+          </Button>
+          {saved ? <p className="text-xs text-muted-foreground">Saved — current proposed credit: {currentDays} day(s).</p> : null}
+        </>
+      ) : null}
 
       <div className="space-y-1 border-t border-border pt-2">
         <Label htmlFor={`checked-with-${requestId}`} className="text-xs">
-          Checked with (required to approve)
+          Checked with {checkedWithRequired ? "(required to approve)" : "(optional)"}
         </Label>
         <Input
           id={`checked-with-${requestId}`}

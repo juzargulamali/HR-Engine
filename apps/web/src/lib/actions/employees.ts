@@ -176,12 +176,6 @@ const updateEmployeeSchema = z.object({
   // defaulted to either answer. Irrelevant (harmlessly stored as null) for
   // any employee outside Poland.
   isFirstEverEmployment: z.preprocess((v) => (v === "" ? undefined : v), z.enum(["true", "false"]).optional()),
-  // HR's mapping of this employee to their own Jibble member/person id —
-  // read by import_jibble_time_entry() to attribute an imported time entry
-  // (see schema.sql). Deliberately a plain text field, not looked up
-  // against Jibble automatically: this system has no verified way to list
-  // Jibble people (see the PR description's "Jibble API" section).
-  jibblePersonId: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()),
 });
 
 /**
@@ -244,7 +238,6 @@ export async function updateEmployee(_prevState: ActionState, formData: FormData
         date_of_birth: d.dateOfBirth || null,
         recognised_prior_service_years: d.recognisedPriorServiceYears ?? null,
         is_first_ever_employment: d.isFirstEverEmployment === undefined ? null : d.isFirstEverEmployment === "true",
-        jibble_person_id: d.jibblePersonId ?? null,
       })
       .eq("id", d.employeeId);
     if (fieldsError) return { error: fieldsError.message };
@@ -270,7 +263,6 @@ export async function updateEmployee(_prevState: ActionState, formData: FormData
         date_of_birth: d.dateOfBirth || null,
         recognised_prior_service_years: d.recognisedPriorServiceYears ?? null,
         is_first_ever_employment: d.isFirstEverEmployment === undefined ? null : d.isFirstEverEmployment === "true",
-        jibble_person_id: d.jibblePersonId ?? null,
       })
       .eq("id", d.employeeId);
     if (error) return { error: error.message };

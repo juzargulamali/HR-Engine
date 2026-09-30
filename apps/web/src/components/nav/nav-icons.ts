@@ -5,6 +5,7 @@ import {
   CalendarCheck,
   CalendarDays,
   ClipboardCheck,
+  Clock,
   FileText,
   Landmark,
   LayoutDashboard,
@@ -31,6 +32,7 @@ import type { NavIconKey } from "./nav-groups";
 export const NAV_ICONS: Record<NavIconKey, LucideIcon> = {
   dashboard: LayoutDashboard,
   profile: User,
+  clock: Clock,
   employees: Users,
   attendance: CalendarCheck,
   leave: CalendarDays,

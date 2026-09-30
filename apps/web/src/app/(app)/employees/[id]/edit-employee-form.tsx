@@ -21,7 +21,6 @@ interface EmployeeCore {
   date_of_birth: string | null;
   recognised_prior_service_years: number | null;
   is_first_ever_employment: boolean | null;
-  jibble_person_id: string | null;
 }
 
 export function EditEmployeeForm({
@@ -149,14 +148,6 @@ export function EditEmployeeForm({
               <p className="text-xs text-muted-foreground">
                 Poland only — optional HR reference data. It does not gate or change Annual Leave accrual, which is
                 a flat 26-day/year company benefit for every Poland employee regardless of this field.
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="jibblePersonId">Jibble person ID</Label>
-              <Input id="jibblePersonId" name="jibblePersonId" defaultValue={employee.jibble_person_id ?? ""} placeholder="e.g. their Jibble member id" />
-              <p className="text-xs text-muted-foreground">
-                Links this employee to their Jibble account so imported attendance can be attributed to them. Set
-                this from Jibble&apos;s own People page — not looked up automatically.
               </p>
             </div>
           </div>
