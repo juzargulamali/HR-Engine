@@ -1,4 +1,5 @@
 import { CalendarClock, MapPin } from "lucide-react";
+import { resolveCountryTimeZone, formatBusinessTime } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +25,15 @@ function formatDuration(startIso: string, endIso: string | null): string {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return `${hours}h ${minutes}m`;
+}
+
+// Stored timestamps are UTC; every display here renders in the employee's
+// OWN country timezone (via resolveCountryTimeZone(employee.country_code)),
+// never the viewer's browser/OS timezone — toLocaleString() would otherwise
+// silently use the latter, which is wrong for a traveling employee or an HR
+// Admin viewing someone else's session in a different country.
+function formatDateTimeInZone(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-US", { timeZone, dateStyle: "short", timeStyle: "short" }).format(new Date(iso));
 }
 
 /**
@@ -56,6 +66,7 @@ export default async function AttendanceClockPage() {
   const employeeId = session.employeeId;
 
   const { data: employee } = await supabase.from("employees").select("company_id, country_code").eq("id", employeeId).maybeSingle();
+  const timeZone = resolveCountryTimeZone(employee?.country_code);
 
   const [{ data: openSession }, { data: colleagues }, { data: recentSessions }, { data: awaitingLeadRequests }] = await Promise.all([
     supabase
@@ -138,7 +149,7 @@ export default async function AttendanceClockPage() {
             {openSession && openSegment ? (
               <span className="flex items-center gap-2">
                 <Badge variant="success">Clocked in</Badge>
-                since {new Date(openSession.clock_in_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} (
+                since {formatBusinessTime(timeZone, new Date(openSession.clock_in_at))} (
                 {formatDuration(openSession.clock_in_at, null)})
               </span>
             ) : (
@@ -209,8 +220,8 @@ export default async function AttendanceClockPage() {
               <TableBody>
                 {(recentSessions ?? []).map((s) => (
                   <TableRow key={s.id}>
-                    <TableCell>{new Date(s.clock_in_at).toLocaleString()}</TableCell>
-                    <TableCell>{s.clock_out_at ? new Date(s.clock_out_at).toLocaleString() : "—"}</TableCell>
+                    <TableCell>{formatDateTimeInZone(s.clock_in_at, timeZone)}</TableCell>
+                    <TableCell>{s.clock_out_at ? formatDateTimeInZone(s.clock_out_at, timeZone) : "—"}</TableCell>
                     <TableCell className="max-w-sm text-xs text-muted-foreground">
                       {(segmentsBySession.get(s.id) ?? [])
                         .map((seg) => {
