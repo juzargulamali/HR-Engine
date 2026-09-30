@@ -874,6 +874,7 @@ export interface Database {
           attendance_record_id: string | null;
           needs_review: boolean;
           review_reason: string | null;
+          review_category: string | null;
           synced_at: string;
           created_at: string;
         };
@@ -893,8 +894,22 @@ export interface Database {
           attendance_record_id?: string | null;
           needs_review?: boolean;
           review_reason?: string | null;
+          review_category?: string | null;
         };
         Update: Record<string, never>; // no write policy at all — import_jibble_time_entry() is the only mutator
+        Relationships: [];
+      };
+      jibble_sync_checkpoints: {
+        Row: {
+          company_id: string;
+          last_synced_until: string;
+          last_run_at: string;
+          last_run_status: "ok" | "partial" | "failed";
+          last_run_note: string | null;
+          updated_at: string;
+        };
+        Insert: Record<string, never>; // no write policy at all — record_jibble_sync_checkpoint() is the only mutator
+        Update: Record<string, never>;
         Relationships: [];
       };
       recovery_credit_requests: {
@@ -1388,6 +1403,8 @@ export interface Database {
           p_note: string | null;
           p_break_minutes: number | null;
           p_raw_payload: Record<string, unknown>;
+          p_client_needs_review?: boolean;
+          p_client_review_reason?: string | null;
         };
         Returns: {
           jibble_row_id: string;
@@ -1395,7 +1412,17 @@ export interface Database {
           recovery_credit_request_id: string | null;
           needs_review: boolean;
           review_reason: string | null;
+          review_category: string | null;
         }[];
+      };
+      record_jibble_sync_checkpoint: {
+        Args: {
+          p_company_id: string;
+          p_synced_until: string;
+          p_status: "ok" | "partial" | "failed";
+          p_note?: string | null;
+        };
+        Returns: undefined;
       };
       adjust_recovery_credit_request: {
         Args: {

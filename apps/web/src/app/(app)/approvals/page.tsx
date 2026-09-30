@@ -74,7 +74,7 @@ export default async function ApprovalsPage() {
   const jibbleTimeEntryIds = [...new Set((attendanceRecords ?? []).map((a) => a.jibble_time_entry_id).filter((v): v is string => Boolean(v)))];
   const { data: jibbleTimeEntries } =
     jibbleTimeEntryIds.length > 0
-      ? await supabase.from("jibble_time_entries").select("id, note, needs_review, review_reason").in("id", jibbleTimeEntryIds)
+      ? await supabase.from("jibble_time_entries").select("id, note, needs_review, review_reason, review_category").in("id", jibbleTimeEntryIds)
       : { data: [] as never[] };
   const jibbleTimeEntryById = new Map((jibbleTimeEntries ?? []).map((j) => [j.id, j]));
 
@@ -447,7 +447,7 @@ export default async function ApprovalsPage() {
                         {jibbleEntry?.note ? <p className="italic">Note: &quot;{jibbleEntry.note}&quot;</p> : null}
                         {jibbleEntry?.needs_review ? (
                           <Badge variant="destructive" title={jibbleEntry.review_reason ?? undefined}>
-                            Needs review
+                            {jibbleEntry.review_category === "edited_after_approval" ? "Edited after approval" : "Needs review"}
                           </Badge>
                         ) : null}
                       </TableCell>

@@ -53,14 +53,26 @@ function rawPayload(args: { start: string | null; end: string | null; note?: str
 // has_role() instead, same as every other approval-engine mutator).
 async function importJibbleEntry(
   db: RlsTestDatabase,
-  args: { entryId: string; personId: string; start: string | null; end: string | null; note?: string | null; breakMinutes?: number; raw?: Record<string, unknown> },
+  args: {
+    entryId: string;
+    personId: string;
+    start: string | null;
+    end: string | null;
+    note?: string | null;
+    breakMinutes?: number;
+    raw?: Record<string, unknown>;
+    clientNeedsReview?: boolean;
+    clientReviewReason?: string;
+  },
 ) {
   return db.seed(
     `select * from import_jibble_time_entry(
       '${JIBBLE_COMPANY_ID}', '${args.entryId}', '${args.personId}',
       ${args.start ? `'${args.start}'` : "null"}, ${args.end ? `'${args.end}'` : "null"},
       ${args.note ? `'${args.note.replace(/'/g, "''")}'` : "null"}, ${args.breakMinutes ?? 0},
-      '${rawPayload(args, args.raw)}'::jsonb
+      '${rawPayload(args, args.raw)}'::jsonb,
+      ${args.clientNeedsReview ?? false},
+      ${args.clientReviewReason ? `'${args.clientReviewReason.replace(/'/g, "''")}'` : "null"}
     )`,
   );
 }
@@ -469,6 +481,124 @@ describe("Recovery Leave: Jibble import + single-step HR queue", () => {
           query("select adjust_recovery_credit_request($1, $2, $3, $4, null)", [requestId, "2027-05-16", 8, "Not your call"]),
         ),
       ).rejects.toThrow(/Only HR Admin may adjust/);
+    });
+  });
+
+  // Covers the second-pass "fail closed" hardening: a client-side parse
+  // ambiguity (apps/web/src/lib/jibble/client.ts's parseJibbleEntry(), not
+  // reachable from SQL — simulated here via p_client_needs_review/
+  // p_client_review_reason, exactly what the sync route passes through)
+  // must never silently contribute to an hours calculation, and a day with
+  // one ambiguous entry among several must still credit the clean ones
+  // while visibly flagging the day as incomplete.
+  describe("fail-closed parsing: ambiguous/missing data is excluded from hour totals, never guessed", () => {
+    it("an entry the client flagged as ambiguous is excluded entirely — no credit, day flagged", async () => {
+      const result = await importJibbleEntry(db, {
+        entryId: "e-ambig-1",
+        personId: "jp-worker",
+        start: "2027-05-22T04:00:00Z", // Saturday 08:00 local (ZJ -> Asia/Dubai, UTC+4)
+        end: "2027-05-22T09:00:00Z", // 13:00 local — 5h shift
+        clientNeedsReview: true,
+        clientReviewReason: "Breaks field is present but not an array or number.",
+      });
+      expect(result.rows[0].needs_review).toBe(true);
+      expect(result.rows[0].review_category).toBe("ambiguous_parse");
+      expect(result.rows[0].review_reason).toMatch(/Breaks field is present/);
+      // Excluded from the day's totals entirely -> nothing to credit.
+      expect(result.rows[0].recovery_credit_request_id).toBeNull();
+
+      const request = await db.seed(`select count(*)::int as n from recovery_credit_requests r
+        join attendance_records a on a.id = r.attendance_record_id
+        where a.work_date = '2027-05-22' and a.employee_id = '${EMPLOYEE_WORKER}'`);
+      expect(request.rows[0].n).toBe(0);
+    });
+
+    it("an ambiguous entry alongside a clean entry on the same day still credits the clean hours, but flags both", async () => {
+      // Clean 3h session (<=4h -> 0.5 day) plus a second, ambiguous session
+      // that must NOT contribute its own hours to the total.
+      const clean = await importJibbleEntry(db, {
+        entryId: "e-ambig-clean-1",
+        personId: "jp-worker2",
+        start: "2027-05-29T04:00:00Z", // Saturday 08:00 local
+        end: "2027-05-29T07:00:00Z", // 11:00 local — 3h
+      });
+      const ambiguous = await importJibbleEntry(db, {
+        entryId: "e-ambig-mixed-1",
+        personId: "jp-worker2",
+        start: "2027-05-29T10:00:00Z", // 14:00 local
+        end: "2027-05-29T14:00:00Z", // 18:00 local — 4h, but flagged
+        clientNeedsReview: true,
+        clientReviewReason: "Multiple note-like fields disagree.",
+      });
+
+      // Both entries end up flagged: the ambiguous one for its own reason,
+      // the clean one because the DAY it belongs to still has an excluded
+      // sibling entry — informative, not an error on the clean entry
+      // itself. `clean`'s own return value was captured BEFORE the
+      // ambiguous sibling existed (it hadn't been imported yet), so its
+      // needs_review update — applied retroactively by the ambiguous
+      // entry's own sync run — is only visible on a fresh read, not on
+      // that earlier return value.
+      expect(ambiguous.rows[0].review_category).toBe("ambiguous_parse");
+      const cleanRowId = clean.rows[0].jibble_row_id;
+      const cleanNow = await db.seed(`select needs_review, review_category from jibble_time_entries where id = '${cleanRowId}'`);
+      expect(cleanNow.rows[0].needs_review).toBe(true);
+      expect(cleanNow.rows[0].review_category).toBe("ambiguous_entries_excluded");
+
+      const request = await db.seed(`select r.proposed_days from recovery_credit_requests r
+        join attendance_records a on a.id = r.attendance_record_id
+        where a.work_date = '2027-05-29' and a.employee_id = '${EMPLOYEE_WORKER2}'`);
+      // Only the clean 3h contributed -> <=4h threshold -> 0.5 day, not the
+      // 7h combined total a naive sum would have produced.
+      expect(request.rows).toEqual([{ proposed_days: "0.5" }]);
+    });
+
+    it("an entry with no recognizable start time is flagged missing_start and never reaches attendance", async () => {
+      const result = await importJibbleEntry(db, {
+        entryId: "e-missing-start-1",
+        personId: "jp-worker",
+        start: null,
+        end: "2027-06-05T09:00:00Z",
+      });
+      expect(result.rows[0].needs_review).toBe(true);
+      expect(result.rows[0].review_category).toBe("missing_start");
+      expect(result.rows[0].attendance_record_id).toBeNull();
+      expect(result.rows[0].recovery_credit_request_id).toBeNull();
+    });
+  });
+
+  describe("jibble_sync_checkpoints: operational sync status, HR-Admin-only, company-scoped", () => {
+    it("only an HR Admin in the checkpoint's own company can read it", async () => {
+      await db.seed(`select record_jibble_sync_checkpoint('${JIBBLE_COMPANY_ID}', '2027-06-01T00:00:00Z', 'ok', null)`);
+
+      const own = await db.asUser(USER_HR1, (query) =>
+        query("select last_run_status from jibble_sync_checkpoints where company_id = $1", [JIBBLE_COMPANY_ID]),
+      );
+      expect(own.rows).toEqual([{ last_run_status: "ok" }]);
+
+      const otherCompany = await db.asUser(USER_HR_OTHER_COMPANY, (query) =>
+        query("select last_run_status from jibble_sync_checkpoints where company_id = $1", [JIBBLE_COMPANY_ID]),
+      );
+      expect(otherCompany.rows).toEqual([]);
+
+      const nonAdmin = await db.asUser(USER_MANAGER, (query) =>
+        query("select last_run_status from jibble_sync_checkpoints where company_id = $1", [JIBBLE_COMPANY_ID]),
+      );
+      expect(nonAdmin.rows).toEqual([]);
+    });
+
+    it("rejects an invalid status", async () => {
+      await expect(
+        db.seed(`select record_jibble_sync_checkpoint('${JIBBLE_COMPANY_ID}', now(), 'bogus', null)`),
+      ).rejects.toThrow(/Invalid sync status/);
+    });
+
+    it("upserts in place rather than creating a second row per company", async () => {
+      await db.seed(`select record_jibble_sync_checkpoint('${JIBBLE_COMPANY_ID}', '2027-06-02T00:00:00Z', 'partial', 'one page failed')`);
+      const rows = await db.seed(
+        `select count(*)::int as n, max(last_run_status) as status from jibble_sync_checkpoints where company_id = '${JIBBLE_COMPANY_ID}'`,
+      );
+      expect(rows.rows[0]).toEqual({ n: 1, status: "partial" });
     });
   });
 });

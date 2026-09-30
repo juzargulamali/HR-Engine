@@ -1084,6 +1084,17 @@ create table jibble_time_entries (
   attendance_record_id  uuid references attendance_records(id),
   needs_review          boolean not null default false,
   review_reason         text,
+  -- A machine-readable classification of WHY needs_review is set, so the
+  -- Attendance page can group review items into distinct buckets (an
+  -- unmapped employee is a data-entry gap; an ambiguous parse is a Jibble
+  -- API assumption that needs adjusting; a manual-attendance conflict is
+  -- neither — it's the safe-manual-path guard doing its job) rather than
+  -- parsing review_reason's free text. Null whenever needs_review is false.
+  review_category       text check (review_category is null or review_category in (
+                           'unmapped_employee', 'invalid_times', 'missing_start', 'ambiguous_parse',
+                           'edited_after_approval', 'manual_attendance_conflict', 'already_approved',
+                           'ambiguous_entries_excluded'
+                         )),
   synced_at             timestamptz not null default now(),
   created_at            timestamptz not null default now(),
   unique (company_id, jibble_entry_id)
@@ -1092,6 +1103,27 @@ create table jibble_time_entries (
 create index idx_jibble_time_entries_employee on jibble_time_entries(employee_id);
 create index idx_jibble_time_entries_needs_review on jibble_time_entries(company_id) where needs_review;
 create index idx_jibble_time_entries_employee_workdate on jibble_time_entries(employee_id, work_date);
+create index idx_jibble_time_entries_incomplete on jibble_time_entries(company_id) where entry_end is null;
+
+-- One row per company tracking how far the Jibble sync has successfully
+-- reached — replaces a naive "now minus a fixed lookback" window with a
+-- real checkpoint, so a missed cron run (Vercel outage, a deploy that
+-- briefly breaks the route, etc.) is recovered from on the NEXT run rather
+-- than silently losing whatever fell outside a fixed window. Written only
+-- by record_jibble_sync_checkpoint() (service_role-only, see its own
+-- grant below); read directly by the web app via the RLS policy below,
+-- the same way jibble_time_entries itself is read directly rather than
+-- through an RPC.
+create table jibble_sync_checkpoints (
+  company_id         uuid primary key references companies(id),
+  last_synced_until  timestamptz not null,
+  last_run_at        timestamptz not null default now(),
+  last_run_status    text not null default 'ok' check (last_run_status in ('ok', 'partial', 'failed')),
+  last_run_note      text,
+  updated_at         timestamptz not null default now()
+);
+
+alter table jibble_sync_checkpoints enable row level security;
 
 alter table attendance_records add column jibble_time_entry_id uuid references jibble_time_entries(id);
 
@@ -2146,7 +2178,7 @@ $$;
 -- import_jibble_time_entry()'s own doc comment on why that's flagged for
 -- review instead.
 create or replace function sync_jibble_attendance_for_day(p_employee_id uuid, p_country_code text, p_work_date date)
-returns table (attendance_record_id uuid, recovery_credit_request_id uuid, flagged_for_review boolean)
+returns table (attendance_record_id uuid, recovery_credit_request_id uuid, flagged_for_review boolean, review_category text)
 language plpgsql
 security definer
 set search_path = public
@@ -2170,14 +2202,29 @@ declare
   v_was_credited comp_day_ledger%rowtype;
   v_approved_request_exists boolean;
   v_request_id uuid;
+  v_has_excluded_entry boolean := false;
 begin
   v_tz := country_timezone(p_country_code);
   v_next_local_midnight := ((p_work_date + 1)::timestamp) at time zone v_tz;
 
   for v_entry in
-    select entry_start, entry_end, break_minutes from jibble_time_entries
+    select entry_start, entry_end, break_minutes, needs_review from jibble_time_entries
     where employee_id = p_employee_id and work_date = p_work_date and entry_end is not null
   loop
+    -- An entry the importer already flagged needs_review (ambiguous parse,
+    -- missing start, or any other data quality issue — see
+    -- import_jibble_time_entry()'s own doc comment) is NEVER folded into an
+    -- hours total: "unknown or incomplete data must produce a visible
+    -- review state, never a silently wrong hours calculation." Its
+    -- contribution is dropped from this day's sum entirely (not defaulted
+    -- to zero as if it were a real, confirmed zero) and the day itself
+    -- comes back flagged so HR sees there's more evidence to look at
+    -- before trusting whatever partial total the CLEAN entries produced.
+    if v_entry.needs_review then
+      v_has_excluded_entry := true;
+      continue;
+    end if;
+
     -- v_standard_hours is the FULL entry duration (minus breaks) — when
     -- p_work_date itself qualifies as a recovery day, the whole shift
     -- counts toward it even if it runs past local midnight (one
@@ -2214,6 +2261,7 @@ begin
     attendance_record_id := v_record_id;
     recovery_credit_request_id := null;
     flagged_for_review := true;
+    review_category := 'manual_attendance_conflict';
     return next;
     return;
   end if;
@@ -2232,6 +2280,7 @@ begin
       attendance_record_id := v_record_id;
       recovery_credit_request_id := v_existing_request.id;
       flagged_for_review := true;
+      review_category := 'already_approved';
       return next;
       return;
     end if;
@@ -2270,7 +2319,29 @@ begin
   end if;
 
   attendance_record_id := v_record_id;
-  flagged_for_review := false;
+  -- v_has_excluded_entry means at least one of this day's raw entries was
+  -- dropped from the totals above because it was already needs_review
+  -- (ambiguous parse, missing start, etc.) — the credit computed here only
+  -- reflects the CLEAN entries, so the day still comes back flagged even
+  -- though a request may have just been created/refreshed from real data.
+  --
+  -- This is deliberately propagated to every OTHER clean entry sharing
+  -- this employee/work_date too, not just whichever entry happened to
+  -- trigger this particular sync run — import order must never decide
+  -- whether HR sees that a day's evidence is incomplete. A row already
+  -- needs_review for its own reason keeps whatever category it already
+  -- had (coalesce), since that reason is more specific.
+  if v_has_excluded_entry then
+    -- jibble_time_entries.review_category qualified explicitly: this
+    -- function's own OUT parameter is also named review_category, so a
+    -- bare reference here would be ambiguous (same class of bug as
+    -- import_jibble_time_entry()'s v_sync_review_reason fix below).
+    update jibble_time_entries
+    set needs_review = true, review_category = coalesce(jibble_time_entries.review_category, 'ambiguous_entries_excluded')
+    where employee_id = p_employee_id and work_date = p_work_date and entry_end is not null and not needs_review;
+  end if;
+  flagged_for_review := v_has_excluded_entry;
+  review_category := case when v_has_excluded_entry then 'ambiguous_entries_excluded' else null end;
   return next;
 end;
 $$;
@@ -2324,14 +2395,17 @@ create or replace function import_jibble_time_entry(
   p_entry_end timestamptz,
   p_note text,
   p_break_minutes numeric,
-  p_raw_payload jsonb
+  p_raw_payload jsonb,
+  p_client_needs_review boolean default false,
+  p_client_review_reason text default null
 )
 returns table (
   jibble_row_id uuid,
   attendance_record_id uuid,
   recovery_credit_request_id uuid,
   needs_review boolean,
-  review_reason text
+  review_reason text,
+  review_category text
 )
 language plpgsql
 security definer
@@ -2346,9 +2420,11 @@ declare
   v_work_date date;
   v_needs_review boolean := false;
   v_review_reason text := null;
+  v_review_category text := null;
   v_approved_request_exists boolean;
   v_sync record;
   v_sync_review_reason text;
+  v_sync_review_category text;
 begin
   if p_jibble_entry_id is null or length(trim(p_jibble_entry_id)) = 0 then
     raise exception 'A Jibble entry id is required.';
@@ -2364,6 +2440,7 @@ begin
 
   if v_employee_id is null then
     v_needs_review := true;
+    v_review_category := 'unmapped_employee';
     v_review_reason := 'No employee in this company is mapped to Jibble person ' || p_jibble_person_id || '.';
   end if;
 
@@ -2380,6 +2457,7 @@ begin
     attendance_record_id := v_existing.attendance_record_id;
     needs_review := v_existing.needs_review;
     review_reason := v_existing.review_reason;
+    review_category := v_existing.review_category;
     return next;
     return;
   end if;
@@ -2394,6 +2472,7 @@ begin
       set entry_start = p_entry_start, entry_end = p_entry_end, note = p_note, break_minutes = coalesce(p_break_minutes, 0),
           raw_payload = p_raw_payload, content_hash = v_content_hash, needs_review = true,
           review_reason = 'This Jibble entry was edited after its recovery credit was already approved — review before trusting the posted balance.',
+          review_category = 'edited_after_approval',
           synced_at = now()
       where id = v_existing.id
       returning id into v_row_id;
@@ -2403,39 +2482,84 @@ begin
       attendance_record_id := v_existing.attendance_record_id;
       needs_review := true;
       review_reason := 'This Jibble entry was edited after its recovery credit was already approved — review before trusting the posted balance.';
+      review_category := 'edited_after_approval';
       return next;
       return;
     end if;
   end if;
 
-  if p_entry_end is not null and p_entry_end <= p_entry_start then
+  if p_entry_start is null then
+    -- No recognizable start time was parsed from Jibble's response — never
+    -- guess an hours calculation from a missing clock-in. Stored for
+    -- evidence (the raw payload is preserved regardless) but always
+    -- excluded from sync_jibble_attendance_for_day()'s hour totals below,
+    -- same as any other needs_review row.
     v_needs_review := true;
+    v_review_category := coalesce(v_review_category, 'missing_start');
+    v_review_reason := case when v_review_reason is null then 'This entry has no recognizable start time.'
+      else v_review_reason || ' Also: no recognizable start time.' end;
+  end if;
+
+  if p_entry_end is not null and p_entry_start is not null and p_entry_end <= p_entry_start then
+    v_needs_review := true;
+    v_review_category := coalesce(v_review_category, 'invalid_times');
     v_review_reason := case when v_review_reason is null then 'This entry''s end time is not after its start time.'
       else v_review_reason || ' Also: this entry''s end time is not after its start time.' end;
   end if;
 
-  v_work_date := case when v_employee_id is not null and p_entry_end is not null and not v_needs_review
+  if p_client_needs_review then
+    -- The importer's own OWN parser (apps/web/src/lib/jibble/client.ts)
+    -- already flagged this entry as ambiguous BEFORE it ever reached this
+    -- RPC — e.g. a breaks field in a shape it doesn't recognize, or
+    -- multiple candidate field names disagreeing on the same value. Fold
+    -- that signal in here rather than trusting whatever numbers were
+    -- passed, since "unknown or incomplete data must produce a visible
+    -- review state, never a silently wrong hours calculation" applies
+    -- just as much to a parse-time ambiguity as to a database-level one.
+    v_needs_review := true;
+    v_review_category := coalesce(v_review_category, 'ambiguous_parse');
+    v_review_reason := case
+      when v_review_reason is null then coalesce(p_client_review_reason, 'The importer could not confidently parse this entry.')
+      when p_client_review_reason is null then v_review_reason
+      else v_review_reason || ' Also: ' || p_client_review_reason
+    end;
+  end if;
+
+  -- Deliberately NOT conditioned on "not v_needs_review" — an entry that's
+  -- flagged for some OTHER reason (ambiguous breaks, invalid times) still
+  -- has a perfectly good start/end and must still be visible to
+  -- sync_jibble_attendance_for_day()'s day-grouping query below, so its
+  -- own exclusion from that day's hour totals (and the day-wide
+  -- flagged_for_review this produces) actually happens — a flagged entry
+  -- with no work_date would be invisible to that query entirely, silently
+  -- skipping the very re-derivation that's supposed to notice it. Only a
+  -- genuinely missing/unparseable start (nothing to convert) or an
+  -- unmapped employee (no country to convert it in) leaves work_date null.
+  v_work_date := case when v_employee_id is not null and p_entry_start is not null and p_entry_end is not null
     then (p_entry_start at time zone country_timezone(v_country_code))::date
     else null
   end;
 
-  insert into jibble_time_entries (company_id, jibble_entry_id, jibble_person_id, employee_id, entry_start, entry_end, note, break_minutes, work_date, raw_payload, content_hash, needs_review, review_reason, synced_at)
-  values (p_company_id, p_jibble_entry_id, p_jibble_person_id, v_employee_id, p_entry_start, p_entry_end, p_note, coalesce(p_break_minutes, 0), v_work_date, p_raw_payload, v_content_hash, v_needs_review, v_review_reason, now())
+  insert into jibble_time_entries (company_id, jibble_entry_id, jibble_person_id, employee_id, entry_start, entry_end, note, break_minutes, work_date, raw_payload, content_hash, needs_review, review_reason, review_category, synced_at)
+  values (p_company_id, p_jibble_entry_id, p_jibble_person_id, v_employee_id, p_entry_start, p_entry_end, p_note, coalesce(p_break_minutes, 0), v_work_date, p_raw_payload, v_content_hash, v_needs_review, v_review_reason, v_review_category, now())
   on conflict (company_id, jibble_entry_id) do update
   set jibble_person_id = excluded.jibble_person_id, employee_id = excluded.employee_id,
       entry_start = excluded.entry_start, entry_end = excluded.entry_end, note = excluded.note,
       break_minutes = excluded.break_minutes, work_date = excluded.work_date,
       raw_payload = excluded.raw_payload, content_hash = excluded.content_hash,
-      needs_review = excluded.needs_review, review_reason = excluded.review_reason, synced_at = now()
+      needs_review = excluded.needs_review, review_reason = excluded.review_reason,
+      review_category = excluded.review_category, synced_at = now()
   returning id into v_row_id;
 
   jibble_row_id := v_row_id;
   needs_review := v_needs_review;
   review_reason := v_review_reason;
+  review_category := v_review_category;
 
   if v_work_date is null then
-    -- Unmapped employee, or still an open/active clock-in — nothing to
-    -- derive attendance from yet.
+    -- Unmapped employee, still an open/active clock-in, or flagged
+    -- needs_review above (missing start, invalid times, ambiguous parse)
+    -- — nothing is derived from any of these until the issue is resolved.
     attendance_record_id := null;
     recovery_credit_request_id := null;
     return next;
@@ -2451,9 +2575,11 @@ begin
     -- "column reference is ambiguous" error: inside an UPDATE ... SET
     -- review_reason = ..., a bare identifier matching both a plpgsql
     -- variable AND the target table's own column name is ambiguous.
-    v_sync_review_reason := coalesce(review_reason, 'A manually recorded attendance row already exists for this date, or its recovery credit was already approved — see the linked attendance record.');
+    v_sync_review_reason := coalesce(review_reason, 'A manually recorded attendance row already exists for this date, another entry on this day is itself ambiguous, or this day''s recovery credit was already approved — see the linked attendance record.');
+    v_sync_review_category := coalesce(review_category, v_sync.review_category);
     review_reason := v_sync_review_reason;
-    update jibble_time_entries set needs_review = true, review_reason = v_sync_review_reason where id = v_row_id;
+    review_category := v_sync_review_category;
+    update jibble_time_entries set needs_review = true, review_reason = v_sync_review_reason, review_category = v_sync_review_category where id = v_row_id;
   end if;
 
   attendance_record_id := v_sync.attendance_record_id;
@@ -2462,8 +2588,52 @@ begin
 end;
 $$;
 
-revoke all on function import_jibble_time_entry(uuid, text, text, timestamptz, timestamptz, text, numeric, jsonb) from public;
-grant execute on function import_jibble_time_entry(uuid, text, text, timestamptz, timestamptz, text, numeric, jsonb) to service_role;
+revoke all on function import_jibble_time_entry(uuid, text, text, timestamptz, timestamptz, text, numeric, jsonb, boolean, text) from public;
+grant execute on function import_jibble_time_entry(uuid, text, text, timestamptz, timestamptz, text, numeric, jsonb, boolean, text) to service_role;
+
+-- Records how far one company's Jibble sync has successfully reached, so
+-- the next run's window is "since the last checkpoint (minus an overlap
+-- window)" rather than a fixed "now minus N hours" — the latter silently
+-- loses ground on any missed run longer than N hours, and never revisits
+-- an entry Jibble itself changed after the fact outside that window.
+-- service_role-only (called from the sync route's admin client, same as
+-- import_jibble_time_entry()); read directly by the web app via the RLS
+-- policy below for a "last synced" status display.
+--
+-- p_status is 'ok' (every fetched page imported cleanly), 'partial' (at
+-- least one page failed — see the sync route's own comment on why the
+-- checkpoint is only advanced up to the last CONFIRMED-complete page in
+-- that case, never past the gap), or 'failed' (the run couldn't make any
+-- progress at all, e.g. the token exchange itself failed).
+create or replace function record_jibble_sync_checkpoint(
+  p_company_id uuid,
+  p_synced_until timestamptz,
+  p_status text,
+  p_note text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_status not in ('ok', 'partial', 'failed') then
+    raise exception 'Invalid sync status % (must be ok, partial, or failed)', p_status;
+  end if;
+
+  insert into jibble_sync_checkpoints (company_id, last_synced_until, last_run_status, last_run_note, last_run_at, updated_at)
+  values (p_company_id, p_synced_until, p_status, p_note, now(), now())
+  on conflict (company_id) do update
+  set last_synced_until = excluded.last_synced_until,
+      last_run_status = excluded.last_run_status,
+      last_run_note = excluded.last_run_note,
+      last_run_at = now(),
+      updated_at = now();
+end;
+$$;
+
+revoke all on function record_jibble_sync_checkpoint(uuid, timestamptz, text, text) from public;
+grant execute on function record_jibble_sync_checkpoint(uuid, timestamptz, text, text) to service_role;
 
 -- HR's correction step, made on the approval screen BEFORE deciding — never
 -- combined into the decision itself, so HR can save a correction, come
@@ -5471,6 +5641,13 @@ create policy jibble_time_entries_select on jibble_time_entries for select
     has_role('hr_admin', company_id)
     or (employee_id is not null and (employee_id = current_employee_id() or is_manager_of(employee_id)))
   );
+
+-- ---- jibble_sync_checkpoints: HR Admin only — an operational "last synced
+--      at / run status" indicator, not evidence of any individual
+--      employee's attendance. No write policy: only
+--      record_jibble_sync_checkpoint() (service_role-only) ever writes it.
+create policy jibble_sync_checkpoints_select on jibble_sync_checkpoints for select
+  using (has_role('hr_admin', company_id));
 
 -- ---- termination_settlement_inputs: HR Admin/Finance read+write only —
 --      the HR/Finance-provided statutory wage basis final settlement
