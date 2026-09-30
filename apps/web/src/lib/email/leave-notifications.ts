@@ -181,7 +181,11 @@ export async function notifyAfterLeaveDecision(
         .order("step_order", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (!nextApproval) return;
+      // leave_request steps always resolve to a specific person — only
+      // recovery_credit's role-queue step (see schema.sql) ever has a null
+      // approver_id. This can't happen here, but the column is nullable
+      // now, so guard rather than assert.
+      if (!nextApproval?.approver_id) return;
 
       const { data: employee } = await supabase.from("employees").select("first_name, last_name").eq("id", request.employee_id).maybeSingle();
 

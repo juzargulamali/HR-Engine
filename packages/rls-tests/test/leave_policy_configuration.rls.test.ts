@@ -29,10 +29,16 @@ const USER_REPORT = "00000000-0000-0000-0000-00000000ab12";
 const USER_HR = "00000000-0000-0000-0000-00000000ab13";
 const USER_PEER = "00000000-0000-0000-0000-00000000ab14";
 const USER_FINANCE = "00000000-0000-0000-0000-00000000ab15";
+// An HR Admin who is ALSO an employee with their own attendance recorded —
+// the one setup that can actually reach decide_recovery_credit_request()'s
+// self-decision block (a plain non-hr_admin employee like USER_REPORT fails
+// the role check first, before self-decision is ever considered).
+const USER_HR_SELF = "00000000-0000-0000-0000-00000000ab16";
 
 const EMPLOYEE_MANAGER = "00000000-0000-0000-0000-00000000ab21";
 const EMPLOYEE_REPORT = "00000000-0000-0000-0000-00000000ab22";
 const EMPLOYEE_PEER = "00000000-0000-0000-0000-00000000ab23";
+const EMPLOYEE_HR_SELF = "00000000-0000-0000-0000-00000000ab24";
 
 describe("Phase 2b row-level security: overnight recovery credit + termination forfeiture", () => {
   const db = new RlsTestDatabase();
@@ -46,7 +52,8 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
         ('${USER_REPORT}', 'p2b-report@enginious.ae'),
         ('${USER_HR}', 'p2b-hr@enginious.ae'),
         ('${USER_PEER}', 'p2b-peer@enginious.ae'),
-        ('${USER_FINANCE}', 'p2b-finance@enginious.ae');
+        ('${USER_FINANCE}', 'p2b-finance@enginious.ae'),
+        ('${USER_HR_SELF}', 'p2b-hr-self@enginious.ae');
 
       insert into countries (code, name, default_currency) values ('ZZ', 'Zedland', 'ZZD')
       on conflict (code) do nothing;
@@ -56,13 +63,15 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
       insert into employees (id, user_id, employee_number, company_id, country_code, first_name, last_name, hire_date) values
         ('${EMPLOYEE_MANAGER}', '${USER_MANAGER}', 'P2B-01', '${COMPANY_A}', 'ZZ', 'Mona', 'Manager', '2024-01-01'),
         ('${EMPLOYEE_REPORT}', '${USER_REPORT}', 'P2B-02', '${COMPANY_A}', 'ZZ', 'Remy', 'Report', '2024-02-01'),
-        ('${EMPLOYEE_PEER}', '${USER_PEER}', 'P2B-03', '${COMPANY_A}', 'ZZ', 'Pia', 'Peer', '2024-02-01');
+        ('${EMPLOYEE_PEER}', '${USER_PEER}', 'P2B-03', '${COMPANY_A}', 'ZZ', 'Pia', 'Peer', '2024-02-01'),
+        ('${EMPLOYEE_HR_SELF}', '${USER_HR_SELF}', 'P2B-04', '${COMPANY_A}', 'ZZ', 'Hana', 'HrSelf', '2024-02-01');
       update employees set manager_id = '${EMPLOYEE_MANAGER}' where id = '${EMPLOYEE_REPORT}';
 
       insert into user_roles (user_id, role, company_id) values
         ('${USER_MANAGER}', 'line_manager', '${COMPANY_A}'),
         ('${USER_HR}', 'hr_admin', '${COMPANY_A}'),
-        ('${USER_FINANCE}', 'finance', '${COMPANY_A}');
+        ('${USER_FINANCE}', 'finance', '${COMPANY_A}'),
+        ('${USER_HR_SELF}', 'hr_admin', '${COMPANY_A}');
 
       -- An active leave_rules policy defining 'recovery' as a valid leave
       -- type for 'ZZ' — guard_leave_request_type() requires this before any
@@ -85,11 +94,9 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     await db.teardown();
   });
 
-  // Recovery Leave earning is approval-gated (Line Manager, then HR Admin)
-  // — walks a recovery_credit_requests row all the way to its final,
-  // ledger-posting approval. Must run inside ONE asUser() call (started as
-  // the manager, the first step's approver), switching to USER_HR with
-  // actAs() for the second.
+  // Recovery Leave earning is now ONE HR decision — a company-scoped role
+  // queue (see decide_recovery_credit_request()/decide_leave_approval()'s
+  // null-approver_id branch in schema.sql), never a manager-then-HR chain.
   async function fullyApproveRecoveryCredit(query: Client["query"], attendanceRecordId: string) {
     const request = await query(
       "select id from recovery_credit_requests where attendance_record_id = $1 and status not in ('cancelled', 'rejected')",
@@ -97,13 +104,8 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     );
     const requestId = request.rows[0]?.id;
 
-    await actAs(query, USER_MANAGER);
-    const step1 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 1", [requestId]);
-    await query("select decide_leave_approval($1, 'approved', null)", [step1.rows[0]?.id]);
-
     await actAs(query, USER_HR);
-    const step2 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 2", [requestId]);
-    await query("select decide_leave_approval($1, 'approved', null)", [step2.rows[0]?.id]);
+    await query("select decide_recovery_credit_request($1, 'approved', 'Checked with the project lead')", [requestId]);
 
     return requestId;
   }
@@ -253,8 +255,8 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     });
   });
 
-  describe("recovery_credit approval chain (decide_leave_approval)", () => {
-    it("manager approval alone (step 1) never posts a ledger credit — only marks the request pending HR", async () => {
+  describe("recovery_credit approval chain (decide_recovery_credit_request / decide_leave_approval)", () => {
+    it("submitting an overnight request routes it straight to the HR queue (no manager step at all)", async () => {
       await db.seed(`insert into attendance_records (employee_id, work_date, status) values ('${EMPLOYEE_REPORT}', '2026-08-01', 'present');`);
       await db.asUser(USER_HR, async (query) => {
         await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-08-01"]);
@@ -263,22 +265,17 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
         ).rows[0]?.id;
         const requestId = (await query("select id from recovery_credit_requests where attendance_record_id = $1", [recordId])).rows[0]?.id;
 
-        await actAs(query, USER_MANAGER);
-        const step1 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 1", [
+        const approval = await query("select step_order, approver_id from approvals where entity_type = 'recovery_credit' and entity_id = $1", [
           requestId,
         ]);
-        await query("select decide_leave_approval($1, 'approved', null)", [step1.rows[0]?.id]);
+        expect(approval.rows).toEqual([{ step_order: 1, approver_id: null }]);
 
-        await actAs(query, USER_HR);
         const request = await query("select status from recovery_credit_requests where id = $1", [requestId]);
-        expect(request.rows).toEqual([{ status: "pending_approval" }]);
-
-        const ledger = await query("select id from comp_day_ledger where reference_type = 'attendance_record' and reference_id = $1", [recordId]);
-        expect(ledger.rows).toEqual([]);
+        expect(request.rows).toEqual([{ status: "submitted" }]);
       });
     });
 
-    it("HR Admin's final approval credits exactly once, with the overnight source and 180-day expiry", async () => {
+    it("HR Admin's single decision credits exactly once, with the overnight source and 180-day expiry", async () => {
       await db.seed(`insert into attendance_records (employee_id, work_date, status) values ('${EMPLOYEE_REPORT}', '2026-08-08', 'present');`);
       await db.asUser(USER_HR, async (query) => {
         await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-08-08"]);
@@ -305,7 +302,7 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
       });
     });
 
-    it("rejection at either step never posts a credit", async () => {
+    it("rejection never posts a credit", async () => {
       await db.seed(`insert into attendance_records (employee_id, work_date, status) values ('${EMPLOYEE_REPORT}', '2026-08-15', 'present');`);
       await db.asUser(USER_HR, async (query) => {
         await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-08-15"]);
@@ -314,13 +311,8 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
         ).rows[0]?.id;
         const requestId = (await query("select id from recovery_credit_requests where attendance_record_id = $1", [recordId])).rows[0]?.id;
 
-        await actAs(query, USER_MANAGER);
-        const step1 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 1", [
-          requestId,
-        ]);
-        await query("select decide_leave_approval($1, 'rejected', 'not eligible')", [step1.rows[0]?.id]);
+        await query("select decide_recovery_credit_request($1, 'rejected', null, 'not eligible')", [requestId]);
 
-        await actAs(query, USER_HR);
         const request = await query("select status from recovery_credit_requests where id = $1", [requestId]);
         expect(request.rows).toEqual([{ status: "rejected" }]);
 
@@ -335,27 +327,22 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
     // transaction afterward. Two separate its() (each its own transaction)
     // instead of one continuing past a caught rejection, same convention
     // every other "expect this call to reject" test in this suite follows.
-    it("blocks the employee from approving their own recovery credit request", async () => {
-      await db.seed(`insert into attendance_records (employee_id, work_date, status) values ('${EMPLOYEE_REPORT}', '2026-08-22', 'present');`);
+    it("blocks the employee (an HR Admin deciding their OWN recovery credit) even though it's a shared queue", async () => {
+      await db.seed(`insert into attendance_records (employee_id, work_date, status) values ('${EMPLOYEE_HR_SELF}', '2026-08-22', 'present');`);
       const requestId = await db.asUserCommit(USER_HR, async (query) => {
-        await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-08-22"]);
+        await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_HR_SELF, "2026-08-22"]);
         const recordId = (
-          await query("select id from attendance_records where employee_id = $1 and work_date = '2026-08-22'", [EMPLOYEE_REPORT])
+          await query("select id from attendance_records where employee_id = $1 and work_date = '2026-08-22'", [EMPLOYEE_HR_SELF])
         ).rows[0]?.id;
         return (await query("select id from recovery_credit_requests where attendance_record_id = $1", [recordId])).rows[0]?.id;
       });
 
       await expect(
-        db.asUser(USER_REPORT, async (query) => {
-          const step1 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 1", [
-            requestId,
-          ]);
-          return query("select decide_leave_approval($1, 'approved', null)", [step1.rows[0]?.id]);
-        }),
-      ).rejects.toThrow(/Only the assigned approver/);
+        db.asUser(USER_HR_SELF, (query) => query("select decide_recovery_credit_request($1, 'approved', 'self')", [requestId])),
+      ).rejects.toThrow(/cannot decide a recovery credit request for your own attendance/);
     });
 
-    it("rejects a repeated decision on the same approval (idempotency/duplicate-decision guard)", async () => {
+    it("blocks a non-HR-Admin (e.g. the line manager) from deciding a recovery credit request — it is HR's queue only", async () => {
       await db.seed(`insert into attendance_records (employee_id, work_date, status) values ('${EMPLOYEE_REPORT}', '2026-08-23', 'present');`);
       const requestId = await db.asUserCommit(USER_HR, async (query) => {
         await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-08-23"]);
@@ -366,14 +353,25 @@ describe("Phase 2b row-level security: overnight recovery credit + termination f
       });
 
       await expect(
-        db.asUser(USER_MANAGER, async (query) => {
-          const step1 = await query("select id from approvals where entity_type = 'recovery_credit' and entity_id = $1 and step_order = 1", [
-            requestId,
-          ]);
-          await query("select decide_leave_approval($1, 'approved', null)", [step1.rows[0]?.id]);
-          return query("select decide_leave_approval($1, 'approved', null)", [step1.rows[0]?.id]);
-        }),
-      ).rejects.toThrow(/already been decided/);
+        db.asUser(USER_MANAGER, (query) => query("select decide_recovery_credit_request($1, 'approved', 'Checked with someone')", [requestId])),
+      ).rejects.toThrow(/Only an active hr_admin/);
+    });
+
+    it("rejects a repeated decision on the same approval (idempotency/duplicate-decision guard)", async () => {
+      await db.seed(`insert into attendance_records (employee_id, work_date, status) values ('${EMPLOYEE_REPORT}', '2026-08-24', 'present');`);
+      const requestId = await db.asUserCommit(USER_HR, async (query) => {
+        await query("select * from record_overnight_recovery_credit($1, $2, true, 5)", [EMPLOYEE_REPORT, "2026-08-24"]);
+        const recordId = (
+          await query("select id from attendance_records where employee_id = $1 and work_date = '2026-08-24'", [EMPLOYEE_REPORT])
+        ).rows[0]?.id;
+        const rid = (await query("select id from recovery_credit_requests where attendance_record_id = $1", [recordId])).rows[0]?.id;
+        await query("select decide_recovery_credit_request($1, 'approved', 'Checked with the lead')", [rid]);
+        return rid;
+      });
+
+      await expect(
+        db.asUser(USER_HR, (query) => query("select decide_recovery_credit_request($1, 'approved', 'Checked with the lead')", [requestId])),
+      ).rejects.toThrow(/No pending approval found/);
     });
   });
 

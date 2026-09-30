@@ -86,9 +86,33 @@ export default defineConfig({
       // Mobile smoke coverage only — the full functional matrix runs on
       // desktop; mobile specs are named *.mobile.spec.ts and kept
       // deliberately small (read-only navigation/rendering checks).
+      //
+      // Excludes attendance-clock.mobile.spec.ts: that spec checks a
+      // feature (self-clock attendance) that isn't deployed to Production
+      // yet. This project is invoked (via the "read-only" npm script) by
+      // e2e-production-qa-readonly.yml's `pull_request` trigger on every
+      // PR touching this package, against Production — so anything matched
+      // here must already exist there. The excluded spec instead has its
+      // own "preview-attendance-mobile-smoke" project below, run only by
+      // e2e-preview-attendance-clock.yml against a Preview deployment.
       name: "mobile-smoke",
       testDir: "./tests/read-only",
       testMatch: /.*\.mobile\.spec\.ts/,
+      testIgnore: /attendance-clock\.mobile\.spec\.ts/,
+      use: { ...devices["Pixel 5"] },
+      dependencies: ["setup"],
+      retries: 1,
+    },
+    {
+      // Same rendering checks as "mobile-smoke" above, but scoped to just
+      // attendance-clock.mobile.spec.ts and never invoked by the
+      // Production-only npm scripts/workflows — only by name
+      // (--project=preview-attendance-mobile-smoke) from
+      // e2e-preview-attendance-clock.yml, which points E2E_BASE_URL at a
+      // Vercel Preview instead of Production.
+      name: "preview-attendance-mobile-smoke",
+      testDir: "./tests/read-only",
+      testMatch: /attendance-clock\.mobile\.spec\.ts/,
       use: { ...devices["Pixel 5"] },
       dependencies: ["setup"],
       retries: 1,
@@ -111,8 +135,29 @@ export default defineConfig({
       // submission or approval that times out mid-request must never be
       // blindly repeated: that risks a second real submission/approval
       // against Production instead of a clean pass/fail signal.
+      //
+      // Excludes 25-attendance-clock.spec.ts (see the "preview-attendance-
+      // mutating" project below): that spec exercises self-clock attendance,
+      // which isn't deployed to Production yet, so a manual dispatch of
+      // e2e-production-qa-mutating.yml (`--project=mutating`, no specific
+      // file) must never pick it up.
       name: "mutating",
       testDir: "./tests/mutating",
+      testIgnore: /25-attendance-clock\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["setup"],
+      retries: 0,
+    },
+    {
+      // Same safety rationale as "mutating" above (zero retries), scoped to
+      // just 25-attendance-clock.spec.ts and never invoked by the
+      // Production-only npm scripts/workflows — only by name
+      // (--project=preview-attendance-mutating) from
+      // e2e-preview-attendance-clock.yml, which points E2E_BASE_URL at a
+      // Vercel Preview instead of Production.
+      name: "preview-attendance-mutating",
+      testDir: "./tests/mutating",
+      testMatch: /25-attendance-clock\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
       dependencies: ["setup"],
       retries: 0,

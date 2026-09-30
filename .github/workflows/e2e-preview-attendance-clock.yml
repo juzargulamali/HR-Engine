@@ -1,0 +1,239 @@
+name: E2E Attendance Clock (Preview) — manual only
+
+# Runs ONLY the new attendance-clock specs, via their own dedicated
+# Playwright projects (preview-attendance-mobile-smoke /
+# preview-attendance-mutating in playwright.config.ts) — deliberately NOT
+# the shared "mobile-smoke"/"mutating" projects those specs would otherwise
+# have matched by file location. That isolation matters: "mobile-smoke" and
+# "mutating" are exactly what e2e-production-qa-readonly.yml (on every PR
+# touching packages/e2e-tests/**) and e2e-production-qa-mutating.yml (manual
+# dispatch) run against Production directly — if these new specs matched
+# those project names, they would run against Production automatically/on a
+# routine dispatch, long before this feature is ever deployed there, and
+# fail every time. (This happened once already, on this PR's own CI, before
+# playwright.config.ts was split to fix it.) This workflow targets a Vercel PREVIEW
+# deployment (this PR's own branch build) instead — but that Preview, per
+# the user's own instruction, is configured to use the SAME Supabase
+# database as Production, using the SAME dedicated E2E_* test accounts. It
+# therefore has the EXACT same blast radius as the Production QA workflow
+# and is gated identically: workflow_dispatch only, a typed confirmation
+# checked before any secret is read, zero retries on the mutating job.
+#
+# What this run leaves behind (real, permanent, on the SAME dedicated test
+# accounts every other E2E workflow already uses):
+#   - New attendance_sessions/attendance_segments rows for Employee/Manager/
+#     HR Admin (mechanics tests always; the 4-tier routing tests only when
+#     triggered near local midnight — see below).
+#   - If triggered within ~6 minutes of local midnight in
+#     E2E_ATTENDANCE_CLOCK_TIMEZONE (default Asia/Dubai): one real overnight
+#     Recovery Leave credit each for Employee (0.5 day, after a deliberate
+#     HR correction), Manager, and HR Admin/CEO-queue — each a real,
+#     permanent comp_day_ledger 'earned' entry and Comp-off balance
+#     increase, exactly like packages/e2e-tests/tests/mutating/
+#     20-attendance.spec.ts's existing legacy-path recovery-credit tests
+#     already produce today. NOT reversed by this suite (there is no safe
+#     UI path to un-approve a recovery credit) — this is the same accepted,
+#     reported cost that suite's own README documents.
+#   - Every self-clock record this run creates is tagged: Site-work/
+#     client-meeting `project_name` fields start with `[<run id>] ...` (see
+#     src/recordTag.ts's tagNote()) — the SAME tagging convention the rest
+#     of this suite uses.
+# Otherwise (triggered NOT near local midnight): only the mechanics tests'
+# sessions/segments are created; the 4-tier routing tests skip themselves
+# with a clear message, no credit is created, nothing pending is left
+# behind.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type exactly RUN_PREVIEW_E2E_SAME_DB to confirm you understand this Preview uses the SAME Supabase database as Production, with the SAME dedicated test accounts. Anything else aborts before any browser launches.'
+        required: true
+        type: string
+      preview_base_url:
+        description: 'This PR branch''s Vercel Preview URL (e.g. https://hr-engine-web-git-feat-recovery-leave-pm-hr-ow-fe107c-enginious.vercel.app). Never guessed or defaulted.'
+        required: true
+        type: string
+      mutation_authorized:
+        description: 'Per-run authorization: mutation on the dedicated E2E test accounts (new attendance sessions; a real Recovery Leave credit each for Employee/Manager/HR if triggered near local midnight) is explicitly authorized for THIS run.'
+        required: true
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+        default: 'false'
+      run_routing_tests:
+        description: 'Include the 4-tier routing tests (self-skip unless triggered near local midnight — see the workflow''s own header comment). Set false to run mechanics/mobile checks only, any time.'
+        required: true
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+        default: 'true'
+
+permissions:
+  contents: read
+
+# Deliberately its OWN concurrency group, NOT shared with e2e-production-qa-
+# *.yml's group: this workflow signs in as the same dedicated accounts
+# against the SAME database, but through a DIFFERENT app deployment
+# (the Preview, not Production's own URL) — running it concurrently with a
+# real Production QA run would race the same accounts' sessions/approvals
+# either way, so it still shouldn't run at the same time as those.
+concurrency:
+  group: e2e-production-qa-shared-test-accounts
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      run_id: ${{ steps.runid.outputs.run_id }}
+    steps:
+      - name: Validate the typed confirmation and authorization inputs
+        run: |
+          if [ "${{ inputs.confirm }}" != "RUN_PREVIEW_E2E_SAME_DB" ]; then
+            echo "::error::confirm input must be exactly RUN_PREVIEW_E2E_SAME_DB — aborting before any browser launches or secret is read."
+            exit 1
+          fi
+          if [ "${{ inputs.mutation_authorized }}" != "true" ]; then
+            echo "::error::mutation_authorized must be 'true' — mutation on the dedicated test accounts must be explicitly authorized for this run."
+            exit 1
+          fi
+          case "${{ inputs.preview_base_url }}" in
+            https://*) ;;
+            *) echo "::error::preview_base_url must be a real https:// URL, not guessed or left default."; exit 1 ;;
+          esac
+      - name: Compute one run ID for every job in this workflow run
+        id: runid
+        run: echo "run_id=E2E-$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
+  mobile-read-only:
+    needs: guard
+    runs-on: ubuntu-latest
+    environment: production-qa
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: packages/e2e-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        working-directory: .
+      - run: npx playwright install --with-deps chromium
+      - name: Run the attendance-clock mobile-accessibility checks (read-only)
+        id: run_tests
+        continue-on-error: true
+        run: npx playwright test tests/read-only/attendance-clock.mobile.spec.ts --project=preview-attendance-mobile-smoke
+        env:
+          E2E_BASE_URL: ${{ inputs.preview_base_url }}
+          E2E_RUN_ID: ${{ needs.guard.outputs.run_id }}
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_EMPLOYEE_PASSWORD: ${{ secrets.E2E_EMPLOYEE_PASSWORD }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_MANAGER_PASSWORD: ${{ secrets.E2E_MANAGER_PASSWORD }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_HR_PASSWORD: ${{ secrets.E2E_HR_PASSWORD }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_CEO_PASSWORD: ${{ secrets.E2E_CEO_PASSWORD }}
+      - name: Upload JUnit results and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-preview-attendance-clock-mobile-${{ needs.guard.outputs.run_id }}
+          path: |
+            packages/e2e-tests/test-results/junit.xml
+            packages/e2e-tests/test-results/**/*.png
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Fail the job if the mobile check failed
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1
+
+  attendance-clock-mutating:
+    needs: [guard, mobile-read-only]
+    runs-on: ubuntu-latest
+    environment: production-qa
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: packages/e2e-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        working-directory: .
+      - run: npx playwright install --with-deps chromium
+      # ZERO retries, explicitly (playwright.config.ts's own `mutating`
+      # project already sets retries: 0 for the whole project — this run
+      # only ever selects that project). A timed-out clock-in/switch/
+      # clock-out or approval decision must fail cleanly, never be blindly
+      # repeated against the same real database.
+      - name: Run the attendance-clock mutating specs (mechanics always; 4-tier routing only near local midnight)
+        id: run_tests
+        continue-on-error: true
+        run: |
+          if [ "${{ inputs.run_routing_tests }}" = "true" ]; then
+            npx playwright test tests/mutating/25-attendance-clock.spec.ts --project=preview-attendance-mutating
+          else
+            npx playwright test tests/mutating/25-attendance-clock.spec.ts --project=preview-attendance-mutating --grep "@mutating" --grep-invert "4-tier routing"
+          fi
+        env:
+          E2E_BASE_URL: ${{ inputs.preview_base_url }}
+          E2E_RUN_ID: ${{ needs.guard.outputs.run_id }}
+          E2E_MUTATION_AUTHORIZED: ${{ inputs.mutation_authorized }}
+          E2E_ATTENDANCE_CLOCK_TIMEZONE: ${{ vars.E2E_ATTENDANCE_CLOCK_TIMEZONE }}
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_EMPLOYEE_PASSWORD: ${{ secrets.E2E_EMPLOYEE_PASSWORD }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_MANAGER_PASSWORD: ${{ secrets.E2E_MANAGER_PASSWORD }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_HR_PASSWORD: ${{ secrets.E2E_HR_PASSWORD }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_CEO_PASSWORD: ${{ secrets.E2E_CEO_PASSWORD }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      - name: Redact test-account emails from error-context snapshots
+        if: always()
+        run: npm run redact:error-context
+        env:
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-preview-attendance-clock-junit-${{ needs.guard.outputs.run_id }}
+          path: packages/e2e-tests/test-results/junit.xml
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Upload screenshots and redacted error-context (no traces)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-preview-attendance-clock-context-${{ needs.guard.outputs.run_id }}
+          path: |
+            packages/e2e-tests/test-results/**/*.png
+            packages/e2e-tests/test-results/**/error-context.md
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Upload videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-preview-attendance-clock-videos-${{ needs.guard.outputs.run_id }}
+          path: packages/e2e-tests/test-results/**/*.webm
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Fail the job if any test failed
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1

@@ -25,6 +25,7 @@ import { getCompanySnapshot } from "./dashboard-data";
 import { WorkforceSnapshot } from "./workforce-snapshot";
 import { CompanyComparisonTable } from "./company-comparison-table";
 import { ActionCentre } from "./action-centre";
+import { AttendanceClockCard } from "./attendance-clock-card";
 import { AttendanceCompletionBar } from "./attendance-completion-bar";
 import { UpcomingSection } from "./upcoming-section";
 import { DashboardHeader } from "./dashboard-header";
@@ -312,6 +313,8 @@ export default async function DashboardPage() {
           keeps happening.
         </Alert>
       ) : null}
+
+      {session.employeeId ? <AttendanceClockCard employeeId={session.employeeId} /> : null}
 
       {showHrView ? (
         <>

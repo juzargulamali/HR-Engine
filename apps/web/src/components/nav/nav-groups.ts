@@ -13,6 +13,7 @@ import type { RoleGrant } from "@enginious-hr/domain";
 export type NavIconKey =
   | "dashboard"
   | "profile"
+  | "clock"
   | "employees"
   | "attendance"
   | "leave"
@@ -74,6 +75,7 @@ export function buildNavGroups(grants: readonly RoleGrant[]): NavGroupData[] {
       links: [
         { href: "/", label: "Dashboard", iconKey: "dashboard" },
         { href: "/profile", label: "My Profile", iconKey: "profile" },
+        { href: "/attendance-clock", label: "My Attendance Clock", iconKey: "clock" },
       ],
     },
     {
