@@ -240,6 +240,110 @@ actually approve or reject a Recovery Leave credit request. This looks like
 a real application gap, not a test-design issue, and is worth a look outside
 this suite.
 
+## HR Admin approver fixture (`role:hr_admin` routing) — read before running the Recovery Leave manager→HR test
+
+Observed once, live (request `834ee897-8b61-4caa-a409-ae5a9793d330`,
+work_date `2100-12-18`): step 1 (Manager, `direct_manager`) correctly routed
+to and was approved by the dedicated Manager test account. Step 2
+(`role:hr_admin`) did **not** route to the dedicated HR Admin test account —
+it resolved to a different, real `hr_admin` role holder in the same company.
+That request is still `pending_approval` on real infrastructure and this
+suite must never touch it — see "What is and isn't reversible" above.
+
+Traced directly from `resolve_approver()` (schema.sql): its `role:%` branch
+(used for `role:hr_admin`, `role:finance`, `role:ceo`/`role:cto`) has no
+per-request or per-employee distribution logic — it deterministically picks
+exactly **one** active, non-terminated role holder scoped to the employee's
+company (or a global, `company_id is null` grant), ordered `granted_at asc`,
+`limit 1`. Whoever was granted that role **first** in the company always
+wins, for every `role:%`-routed approval, forever (unless revoked). This is
+intentional design for `direct_manager`/`manager_of_manager` (the whole
+point is "any qualifying person can unblock this, no one needs a manager
+assigned"), but it also means a company with more than one `hr_admin` role
+holder always routes every such approval to the same one person — nobody
+else can act on it, even though `approvals_select`'s RLS policy would let a
+*global* (`company_id is null`) `hr_admin` grant holder read the row: the
+Approvals page's own query (`apps/web/.../approvals/page.tsx`) narrows to
+`.eq("approver_id", session.userId)`, the same single-approver-inbox pattern
+every entity type in this app uses. **This is not a bug introduced by, or
+specific to, Recovery Leave** — it's a pre-existing characteristic of
+`resolve_approver()`'s `role:%` branch that would equally affect
+`role:finance`/`role:ceo`-routed steps. Worth a product decision on its own
+merits; out of scope for this suite to fix.
+
+**Do not "fix" this by editing any `user_roles` row, including the E2E HR
+Admin test account's own.** The E2E test accounts and every real account
+currently share ONE company (see "What this suite has NOT verified" below).
+`resolve_approver()`'s query has no notion of "this grant is for testing
+only" — it just picks whichever matching grant has the earliest
+`granted_at`. Making the HR Admin test account's grant sort first (by
+changing its `granted_at`, or by pointing its `company_id` at the shared
+company) does not scope the fix to test data: it changes which account
+*every real* `role:hr_admin`-routed approval in that company resolves to,
+from that point on — a genuine change to production approval-routing
+behavior, not a test fixture change, however it's framed. **Never do this,
+and never hardcode a test email into `resolve_approver()` either.**
+
+**Read-only diagnostic only** — this stays useful for understanding the
+routing (and for judging whether the isolation approach below is even
+viable), but no SQL from this section should be run to change anything:
+
+```sql
+select
+  u.email,
+  ur.company_id,
+  c.legal_name as company_name,
+  ur.granted_at,
+  ur.revoked_at
+from user_roles ur
+join auth.users u on u.id = ur.user_id
+left join companies c on c.id = ur.company_id
+where ur.role = 'hr_admin'
+order by ur.granted_at asc;
+```
+
+The row with the earliest `granted_at` (among rows where `company_id` is
+null or matches the Employee test account's company) is who
+`resolve_approver('role:hr_admin', ...)` will always pick.
+
+### Confirmed: an isolated QA company would NOT fix this here
+
+The diagnostic above was run live. Result: every active `hr_admin` grant in
+this environment has `company_id = NULL` — including the one currently
+winning the race (granted 2026-09-22 09:48:03, the earliest of the three).
+A `company_id is null` grant satisfies `resolve_approver()`'s
+`(company_id is null or company_id = v_company_id)` check for **every**
+company, existing or brand new. So a freshly created, fully isolated QA
+company (new company, new QA-only Employee/Manager/HR Admin accounts) would
+**not** exclude that account — it would still win `role:hr_admin` resolution
+there too, for the exact same reason it wins in the shared company today.
+Company-level isolation only works when the account to be excluded holds a
+company-scoped grant; that isn't the case here, so building the QA-company
+setup described in an earlier revision of this section would not have
+solved anything. It has not been built, and per this finding, isn't worth
+building for this specific problem.
+
+### Superseded by a product decision: routing is changing, not being patched around
+
+The three options once raised here (accept existing coverage / manually
+decide the one pending request / a future product change to role-grant
+scoping) are moot: the account owner has since decided on a real product
+change — Recovery Leave will route **project manager → the employee's HR
+owner**, a per-employee/per-project assignment, not a company-wide
+`role:hr_admin` lookup. That removes this whole class of problem for
+Recovery Leave specifically, because routing no longer depends on which
+account happens to hold `hr_admin` first. That change (migration, UI, RLS,
+tests, staged rollout) is being built as a separate product PR — this
+file's own test path will be updated as part of it, carrying forward the
+unused-date search fix built here rather than losing it.
+
+The request already pending from this investigation
+(`834ee897-8b61-4caa-a409-ae5a9793d330`, work_date `2100-12-18`) is
+untouched and remains exactly as it was — still routed under the OLD
+`role:hr_admin` rule, since existing pending approvals keep their current
+assignees under the new design too. Nobody, automated or manual, has acted
+on it.
+
 ## What this suite has NOT verified
 
 - ~~Whether the Manager test account is actually configured in Production as

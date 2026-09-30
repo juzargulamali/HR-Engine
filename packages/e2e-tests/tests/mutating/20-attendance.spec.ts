@@ -101,10 +101,13 @@ test.describe("attendance and recovery leave @mutating", () => {
    *
    * recovery_credit_requests has no tagged free-text field (it's manager/
    * HR-attested, never a self-submitted request with a reason) — its
-   * work_date is this run's unique, deterministic identifier instead
-   * (testWeekendDay(runId, N) never collides with another N within the
-   * same run, and this suite's own dates are re-derived fresh every run),
-   * same role a tagged reason plays for leave/reimbursement rows.
+   * work_date is this run's unique identifier instead, same role a tagged
+   * reason plays for leave/reimbursement rows. testWeekendDay(runId, N)
+   * never collides with another N within THIS run, but its hash-derived
+   * date CAN coincide with a date an earlier, different run already used
+   * (confirmed live — see the date-search loop below), so the actual date
+   * is confirmed free via AttendancePage.isUnrecorded() before saving,
+   * rather than assumed from the first candidate.
    */
   test("Recovery Leave: manager approves (step 1), HR Admin approves (step 2), the comp-off credit posts only after both", async ({
     employeePage,
@@ -116,10 +119,45 @@ test.describe("attendance and recovery leave @mutating", () => {
     test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /admin/users.");
     const { email } = getCredentials("employee");
     const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, email);
-    const date = testWeekendDay(runId, 2); // distinct from the creation test above (offset 0) and the rejection test below (offset 3)
 
+    // testWeekendDay(runId, N) is hash(runId) % 40 weeks + N — deterministic
+    // per run, but NOT collision-proof across different runs' hashes.
+    // Confirmed live: run E2E-20260928-232518's offset-2 date (2099-05-30)
+    // had already been recorded by an earlier run (E2E-20260928-113008)'s
+    // own weekend-day test, so this employee's row there was no longer
+    // "not_recorded" — the save still succeeded but earned no NEW recovery
+    // credit (one already existed for that date), producing a bare "Saved."
+    // that expectSavedWithRecoveryCredits(1) correctly refused to accept as
+    // proof. A bare "Saved." must never be treated as evidence a new
+    // request was created — only the credit-specific message counts, and
+    // only once we've first confirmed the candidate date is actually free.
+    //
+    // Base offset 100 keeps this search's candidates clear of every other
+    // fixed offset this file uses (0 for the creation test above, 3 for the
+    // rejection test below) so a search landing on 100+k can never collide
+    // with either of those within the SAME run.
     const attendance = new AttendancePage(hrAdminPage);
-    await attendance.goto({ date });
+    const DATE_SEARCH_BASE_OFFSET = 100;
+    const MAX_DATE_SEARCH_ATTEMPTS = 20;
+    let date: string | undefined;
+    for (let attempt = 0; attempt < MAX_DATE_SEARCH_ATTEMPTS; attempt++) {
+      const candidate = testWeekendDay(runId, DATE_SEARCH_BASE_OFFSET + attempt);
+      await attendance.goto({ date: candidate });
+      if (await attendance.isUnrecorded(employeeName)) {
+        date = candidate;
+        break;
+      }
+    }
+    if (!date) {
+      throw new Error(
+        `Could not find an unused synthetic Saturday for the Employee test account after ${MAX_DATE_SEARCH_ATTEMPTS} attempts starting at testWeekendDay(runId, ${DATE_SEARCH_BASE_OFFSET}) — every candidate already has an attendance record. Investigate stale test data before retrying.`,
+      );
+    }
+
+    // `date` is now confirmed free and is reused, unchanged, through every
+    // subsequent assertion below (attendance save, both approval decisions,
+    // and the final balance check) — a genuinely different date for any of
+    // those would silently test nothing.
     await attendance.setStatus(employeeName, "present");
     await attendance.setWorkModeAndHours(employeeName, "business_travel", 8); // >4h => 1 full recovery day
     await attendance.saveAll();
@@ -162,7 +200,35 @@ test.describe("attendance and recovery leave @mutating", () => {
 
     const hrApprovals = new ApprovalsPage(hrAdminPage);
     await hrApprovals.goto();
-    await hrApprovals.expectPending(date);
+    try {
+      await hrApprovals.expectPending(date);
+    } catch (err) {
+      // Observed ONCE, live (request 834ee897-8b61-4caa-a409-ae5a9793d330,
+      // work_date 2100-12-18): this exact timeout was caused by
+      // resolve_approver('role:hr_admin', ...) (schema.sql) resolving step 2
+      // to a DIFFERENT, real hr_admin account instead of this HR Admin test
+      // account — its role:% branch has no per-request distribution, it
+      // deterministically picks exactly one active hr_admin per company,
+      // "order by granted_at asc limit 1", so whichever account was granted
+      // that role FIRST always wins. See README.md's "HR Admin approver
+      // fixture" section for the full trace, the read-only diagnostic query,
+      // and why this can't safely be "fixed" by editing any user_roles row
+      // (this suite's test accounts share a company with real accounts).
+      //
+      // That confirmed cause for ONE past occurrence is context, not a
+      // standing diagnosis — do NOT assume every future timeout here has the
+      // same root cause. It could just as easily be a genuine timing/
+      // propagation issue or a real regression in the Approvals UI or
+      // decide_leave_approval() (the exact caveat expectPending()'s own
+      // diagnostic annotation already carries for the Manager step's
+      // historical timeout — see LeavePage.ts). Investigate each occurrence
+      // on its own evidence (the row-count diagnostic below, screenshots,
+      // whether the assigned approver has changed) before concluding either
+      // way.
+      throw new Error(
+        `OBSERVED TIMEOUT waiting for this request to appear pending on the HR Admin test account's /approvals (step 2, role:hr_admin). Known context: a prior occurrence (work_date 2100-12-18) was traced to resolve_approver() routing this step to a different, real hr_admin account rather than this test account (see README.md's "HR Admin approver fixture" section) — but that is NOT confirmed to be this occurrence's cause; treat this as an open timeout to investigate, not a pre-diagnosed fixture mismatch. Underlying Approvals-page assertion: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     await hrApprovals.approve(date);
     await hrApprovals.expectNotPending(date);
 
