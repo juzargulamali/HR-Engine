@@ -33,7 +33,14 @@ test.describe("attendance clock: mobile accessibility @smoke", () => {
   test("/attendance-clock renders usably at mobile width, with no horizontal overflow", async ({ employeePage }) => {
     const clock = new AttendanceClockPage(employeePage);
     await clock.goto();
-    await expect(employeePage.getByLabel("Work mode")).toBeVisible();
+    // This is a rendering/reachability check, not an assertion about clock
+    // state — the page shows a "Work mode" select when not clocked in, or
+    // "Clock Out"/"Switch work mode" controls when already clocked in (e.g.
+    // a session left open by a previous run). Either one proves the page
+    // rendered its real controls rather than a blank/error state; asserting
+    // only "Work mode" made this read-only test wrongly depend on the
+    // account never being mid-session.
+    await expect(employeePage.getByLabel("Work mode").or(employeePage.getByRole("button", { name: "Clock Out", exact: true }))).toBeVisible();
     const hasHorizontalOverflow = await employeePage.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
     expect(hasHorizontalOverflow, "/attendance-clock causes horizontal overflow at mobile width").toBe(false);
   });
