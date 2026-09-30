@@ -1108,6 +1108,14 @@ create table attendance_records (
   completed_normal_scheduled_day boolean,
   active_hours_after_midnight    numeric(4,2)
     check (active_hours_after_midnight is null or active_hours_after_midnight >= 0),
+  -- Set by sync_attendance_presence_for_day() when a self-clock event would
+  -- otherwise need to touch a day already recorded by a non-self-clock
+  -- source (manual/biometric/import) with a real status -- self-clock NEVER
+  -- overwrites that day, it only flags the conflict here for HR to see and
+  -- reconcile. Cleared automatically the next time that day is saved
+  -- through the manual register (record_attendance_and_recovery()), which
+  -- always reasserts manual ownership.
+  presence_conflict text,
   unique (employee_id, work_date)
 );
 
@@ -1935,6 +1943,121 @@ begin
 end;
 $$;
 
+-- Re-derives ONE calendar day's attendance_records row (status/work_mode/
+-- hours_worked) from this employee's own attendance_segments, exactly the
+-- same "recompute the whole day fresh from every closed segment on file for
+-- it" approach sync_attendance_recovery_for_day() already uses for Recovery
+-- Leave — so multiple sessions the same day, a mid-shift mode switch, or a
+-- later HR correction (hr_close_attendance_session()) can never produce a
+-- duplicate row or a drifted hours figure. Deliberately entirely separate
+-- from sync_attendance_recovery_for_day(): this function is never called
+-- with logic that creates a recovery_credit_requests row, and
+-- sync_attendance_recovery_for_day() never touches attendance_records —
+-- attendance PRESENCE and Recovery Leave APPROVAL stay two independent
+-- concerns fed by the same underlying segments.
+--
+-- Day-boundary handling matches clock_out()'s own loop exactly: callers
+-- always invoke this once per DISTINCT LOCAL date a session's segments
+-- touch (via segment_start, never segment_end), so an overnight session
+-- naturally produces two correct, separate day rows — one finalized (the
+-- start date, once its segments are closed) and one still "Clocked in" (the
+-- date the new segment opened on), never one row spanning both.
+--
+-- Precedence with the manual register (record_attendance_and_recovery()):
+-- manual ALWAYS wins, symmetric with that function's own "source = 'manual'
+-- is set on BOTH the insert and the conflict branch — the manual register
+-- always reasserts manual ownership" rule. This function only ever writes
+-- when there is no existing row for the day, the existing row is already
+-- source = 'self_clock' (its own prior write), or the existing row is the
+-- genuine not-yet-recorded default — any other existing row (a real
+-- manual/biometric/import entry, including one HR corrected) is left
+-- completely untouched and instead gets presence_conflict set, never
+-- silently overwritten.
+create or replace function sync_attendance_presence_for_day(p_employee_id uuid, p_work_date date)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_country_code text;
+  v_tz text;
+  v_total_hours numeric;
+  v_is_open boolean;
+  v_latest_work_mode text;
+  v_mapped_work_mode text;
+  v_existing attendance_records%rowtype;
+begin
+  select country_code into v_country_code from employees where id = p_employee_id and deleted_at is null;
+  if v_country_code is null then
+    return;
+  end if;
+  v_tz := country_timezone(v_country_code);
+
+  select coalesce(sum(extract(epoch from (segment_end - segment_start))), 0) / 3600.0
+  into v_total_hours
+  from attendance_segments
+  where employee_id = p_employee_id and segment_end is not null
+    and (segment_start at time zone v_tz)::date = p_work_date;
+
+  -- Whether THIS DATE'S OWN segment is still open — segment_end is null is
+  -- the authoritative "still open" signal (schema.sql's own check
+  -- constraint and its one-open-segment-per-session partial unique index
+  -- both key off exactly this), never the overall session's status: a
+  -- session stays 'open' as a whole for as long as ANY of its segments is,
+  -- which is a different question from whether the specific segment that
+  -- started on p_work_date is the one still open (a switch across local
+  -- midnight closes the OLD date's own segment while the session as a whole
+  -- keeps going into the new date).
+  select exists (
+    select 1 from attendance_segments s
+    where s.employee_id = p_employee_id and s.segment_end is null
+      and (s.segment_start at time zone v_tz)::date = p_work_date
+  ) into v_is_open;
+
+  select work_mode into v_latest_work_mode
+  from attendance_segments
+  where employee_id = p_employee_id and (segment_start at time zone v_tz)::date = p_work_date
+  order by segment_start desc limit 1;
+
+  if v_latest_work_mode is null then
+    return;
+  end if;
+
+  v_mapped_work_mode := case v_latest_work_mode
+    when 'office' then 'office'
+    when 'wfh' then 'work_from_home'
+    when 'site_work' then 'client_site'
+    when 'client_meeting' then 'field_work'
+    when 'business_travel' then 'business_travel'
+    else null
+  end;
+
+  select * into v_existing from attendance_records
+  where employee_id = p_employee_id and work_date = p_work_date
+  for update;
+
+  if v_existing.id is not null and v_existing.source <> 'self_clock' and v_existing.status <> 'not_recorded' then
+    if v_existing.presence_conflict is null then
+      update attendance_records
+      set presence_conflict = 'Self-clock activity exists for this day, which was already recorded as ''' || v_existing.status || ''' (source: ' || v_existing.source || '). Not overwritten — review and re-save manually if this should change.'
+      where id = v_existing.id;
+    end if;
+    return;
+  end if;
+
+  insert into attendance_records (employee_id, work_date, status, work_mode, hours_worked, source)
+  values (p_employee_id, p_work_date, 'present', v_mapped_work_mode, case when v_is_open then null else nullif(v_total_hours, 0) end, 'self_clock')
+  on conflict (employee_id, work_date) do update
+  set status = 'present',
+      work_mode = excluded.work_mode,
+      hours_worked = excluded.hours_worked,
+      source = 'self_clock',
+      presence_conflict = null
+  where attendance_records.source = 'self_clock' or attendance_records.status = 'not_recorded';
+end;
+$$;
+
 -- Starts a brand-new attendance session (clock in) for the caller's OWN
 -- employee row — current_employee_id(), never a parameter, so an employee
 -- can only ever clock themselves in. The partial unique index
@@ -1958,6 +2081,9 @@ declare
   v_employee_id uuid;
   v_session_id uuid;
   v_segment_id uuid;
+  v_country_code text;
+  v_tz text;
+  v_work_date date;
 begin
   v_employee_id := current_employee_id();
   if v_employee_id is null then
@@ -1983,6 +2109,11 @@ begin
   if p_work_mode = 'site_work' then
     perform record_attendance_location(v_segment_id, 'segment_start', p_location);
   end if;
+
+  select country_code into v_country_code from employees where id = v_employee_id;
+  v_tz := country_timezone(v_country_code);
+  select (segment_start at time zone v_tz)::date into v_work_date from attendance_segments where id = v_segment_id;
+  perform sync_attendance_presence_for_day(v_employee_id, v_work_date);
 
   return v_session_id;
 end;
@@ -2015,7 +2146,12 @@ declare
   v_session_id uuid;
   v_old_segment_id uuid;
   v_old_work_mode text;
+  v_old_segment_start timestamptz;
   v_new_segment_id uuid;
+  v_country_code text;
+  v_tz text;
+  v_old_work_date date;
+  v_new_work_date date;
 begin
   v_employee_id := current_employee_id();
   if v_employee_id is null then
@@ -2031,7 +2167,7 @@ begin
     raise exception 'You are not currently clocked in.';
   end if;
 
-  select id, work_mode into v_old_segment_id, v_old_work_mode
+  select id, work_mode, segment_start into v_old_segment_id, v_old_work_mode, v_old_segment_start
   from attendance_segments where session_id = v_session_id and segment_end is null
   for update;
   if v_old_segment_id is null then
@@ -2049,6 +2185,15 @@ begin
 
   if p_work_mode = 'site_work' then
     perform record_attendance_location(v_new_segment_id, 'segment_start', p_opening_location);
+  end if;
+
+  select country_code into v_country_code from employees where id = v_employee_id;
+  v_tz := country_timezone(v_country_code);
+  v_old_work_date := (v_old_segment_start at time zone v_tz)::date;
+  select (segment_start at time zone v_tz)::date into v_new_work_date from attendance_segments where id = v_new_segment_id;
+  perform sync_attendance_presence_for_day(v_employee_id, v_old_work_date);
+  if v_new_work_date <> v_old_work_date then
+    perform sync_attendance_presence_for_day(v_employee_id, v_new_work_date);
   end if;
 
   return v_new_segment_id;
@@ -2109,6 +2254,7 @@ begin
   for v_work_date in
     select distinct (segment_start at time zone v_tz)::date from attendance_segments where session_id = v_session_id
   loop
+    perform sync_attendance_presence_for_day(v_employee_id, v_work_date);
     perform sync_attendance_recovery_for_day(v_employee_id, v_work_date);
   end loop;
 
@@ -2192,6 +2338,7 @@ begin
   for v_work_date in
     select distinct (segment_start at time zone v_tz)::date from attendance_segments where session_id = p_session_id
   loop
+    perform sync_attendance_presence_for_day(v_employee_id, v_work_date);
     perform sync_attendance_recovery_for_day(v_employee_id, v_work_date);
   end loop;
 end;
@@ -2307,7 +2454,7 @@ begin
     insert into attendance_records (employee_id, work_date, status, work_mode, hours_worked, source)
     values (v_employee_id, p_work_date, v_status, v_work_mode, v_hours, 'manual')
     on conflict (employee_id, work_date) do update
-    set status = excluded.status, work_mode = excluded.work_mode, hours_worked = excluded.hours_worked, source = 'manual'
+    set status = excluded.status, work_mode = excluded.work_mode, hours_worked = excluded.hours_worked, source = 'manual', presence_conflict = null
     returning id into v_record_id;
 
     -- The CURRENTLY ACTIVE credit for this record, if any — an 'earned' row

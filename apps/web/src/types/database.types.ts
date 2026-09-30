@@ -842,6 +842,7 @@ export interface Database {
           source: string;
           completed_normal_scheduled_day: boolean | null;
           active_hours_after_midnight: string | null;
+          presence_conflict: string | null;
         };
         Insert: {
           id?: string;
@@ -855,6 +856,7 @@ export interface Database {
           source?: string;
           completed_normal_scheduled_day?: boolean | null;
           active_hours_after_midnight?: number | null;
+          presence_conflict?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["attendance_records"]["Insert"]>;
         Relationships: [];
