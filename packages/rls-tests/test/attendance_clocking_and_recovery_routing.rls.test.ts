@@ -132,6 +132,7 @@ const USER_WORKER = "00000000-0000-0000-0000-0000000c0a17";
 const USER_WORKER2 = "00000000-0000-0000-0000-0000000c0a18";
 const USER_SELF_LED = "00000000-0000-0000-0000-0000000c0a19";
 const USER_PEER = "00000000-0000-0000-0000-0000000c0a1a";
+const USER_HR_MANAGER = "00000000-0000-0000-0000-0000000c0a1b"; // holds BOTH hr_admin and line_manager
 
 const EMPLOYEE_HR1 = "00000000-0000-0000-0000-0000000c0a21";
 const EMPLOYEE_HR2 = "00000000-0000-0000-0000-0000000c0a22";
@@ -145,6 +146,7 @@ const EMPLOYEE_SELF_LED = "00000000-0000-0000-0000-0000000c0a29";
 const EMPLOYEE_PEER = "00000000-0000-0000-0000-0000000c0a2a";
 const EMPLOYEE_GHOST_LEAD = "00000000-0000-0000-0000-0000000c0a2b"; // active employee, no auth.users row at all -> "no HR Engine account"
 const EMPLOYEE_TERMINATED = "00000000-0000-0000-0000-0000000c0a2c";
+const EMPLOYEE_HR_MANAGER = "00000000-0000-0000-0000-0000000c0a2d";
 
 const USER_HR_B = "00000000-0000-0000-0000-0000000c0b11";
 const EMPLOYEE_HR_B = "00000000-0000-0000-0000-0000000c0b21";
@@ -168,6 +170,7 @@ describe("Attendance clocking + Recovery Leave 4-tier routing", () => {
         ('${USER_WORKER2}', 'ac-worker2@enginious.ae'),
         ('${USER_SELF_LED}', 'ac-selfled@enginious.ae'),
         ('${USER_PEER}', 'ac-peer@enginious.ae'),
+        ('${USER_HR_MANAGER}', 'ac-hrmanager@enginious.ae'),
         ('${USER_HR_B}', 'ac-hrb@enginious.ae');
 
       -- Mon-Fri working week (Sat/Sun weekend) for a clean, unambiguous
@@ -194,6 +197,7 @@ describe("Attendance clocking + Recovery Leave 4-tier routing", () => {
         ('${EMPLOYEE_PEER}', '${USER_PEER}', 'AC-10', '${COMPANY_A}', 'CX', 'Pia', 'Peer', '2024-01-01'),
         ('${EMPLOYEE_GHOST_LEAD}', null, 'AC-11', '${COMPANY_A}', 'CX', 'Gia', 'Ghost', '2024-01-01'),
         ('${EMPLOYEE_TERMINATED}', null, 'AC-12', '${COMPANY_A}', 'CX', 'Tara', 'Terminated', '2024-01-01'),
+        ('${EMPLOYEE_HR_MANAGER}', '${USER_HR_MANAGER}', 'AC-13', '${COMPANY_A}', 'CX', 'Hedy', 'HrManager', '2024-01-01'),
         ('${EMPLOYEE_HR_B}', '${USER_HR_B}', 'BC-01', '${COMPANY_B}', 'CX', 'Hina', 'HrB', '2024-01-01'),
         ('${EMPLOYEE_LEAD_B}', null, 'BC-02', '${COMPANY_B}', 'CX', 'Leyla', 'LeadB', '2024-01-01');
       update employees set employment_status = 'terminated' where id = '${EMPLOYEE_TERMINATED}';
@@ -204,6 +208,8 @@ describe("Attendance clocking + Recovery Leave 4-tier routing", () => {
         ('${USER_CEO}', 'ceo', '${COMPANY_A}'),
         ('${USER_CTO}', 'cto', '${COMPANY_A}'),
         ('${USER_MANAGER}', 'line_manager', '${COMPANY_A}'),
+        ('${USER_HR_MANAGER}', 'hr_admin', '${COMPANY_A}'),
+        ('${USER_HR_MANAGER}', 'line_manager', '${COMPANY_A}'),
         ('${USER_HR_B}', 'hr_admin', '${COMPANY_B}');
     `);
   }, 30_000);
@@ -747,6 +753,27 @@ describe("Attendance clocking + Recovery Leave 4-tier routing", () => {
       await db.asUserCommit(USER_CTO, (query) => query("select decide_recovery_credit_request($1, 'approved', 'Checked with HR directly')", [requestId]));
       const status = await db.seed(`select status from recovery_credit_requests where id = '${requestId}'`);
       expect(status.rows).toEqual([{ status: "approved" }]);
+    });
+
+    it("routes to the shared CEO/CTO queue for an employee who holds BOTH hr_admin and line_manager -- HR precedence, never manager_hr_direct", async () => {
+      // resolve_recovery_credit_route() checks has_role('hr_admin', ...)
+      // BEFORE has_role('line_manager', ...) -- confirms that check order
+      // actually matters, not just in the abstract.
+      const workDate = "2027-04-25"; // Sunday, also a weekend day for CX
+      await seedDayAndSync(db, {
+        employeeUserId: USER_HR_MANAGER,
+        employeeId: EMPLOYEE_HR_MANAGER,
+        workDate,
+        segments: [{ workMode: "office", startUtc: `${workDate}T04:00:00Z`, endUtc: `${workDate}T10:00:00Z` }],
+      });
+      await db.asUser(USER_HR_MANAGER, async (query) => {
+        const request = await getRequest(query, EMPLOYEE_HR_MANAGER, workDate);
+        expect(request).toMatchObject({ applicant_route: "hr_admin_ceo_cto_queue" });
+        const approval = await query("select approver_id, queue_roles::text[] from approvals where entity_type = 'recovery_credit' and entity_id = $1", [
+          request!.id,
+        ]);
+        expect(approval.rows).toEqual([{ approver_id: null, queue_roles: ["ceo", "cto"] }]);
+      });
     });
 
     it("lets whichever of CEO/CTO decides first win a genuinely concurrent race on the same shared-queue item", async () => {
