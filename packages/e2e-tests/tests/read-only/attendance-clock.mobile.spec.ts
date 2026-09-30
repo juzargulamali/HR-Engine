@@ -15,8 +15,13 @@ test.describe("attendance clock: mobile accessibility @smoke", () => {
     await dashboard.goto();
     await dashboard.expectHeaderVisible();
     // clock-fab.tsx: fixed-position, md:hidden — present on the dashboard
-    // itself with no navigation required to reach it.
-    await expect(employeePage.getByRole("link", { name: /clock in|clocked in/i })).toBeVisible();
+    // itself with no navigation required to reach it. Its accessible name
+    // (aria-label) is "Clock in" / "Clocked in — ..." (lowercase "in"),
+    // deliberately distinct from attendance-clock-card.tsx's own dashboard
+    // button text "Clock In" / "Clock Out / switch mode" (capital "In") —
+    // a case-INsensitive match here hits both and trips Playwright's
+    // strict-mode check, so this must stay case-sensitive.
+    await expect(employeePage.getByRole("link", { name: /^Clock in$|^Clocked in —/ })).toBeVisible();
   });
 
   test("the attendance clock dashboard card is visible near the top of the dashboard", async ({ employeePage }) => {

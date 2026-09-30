@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Clock } from "lucide-react";
+import { resolveCountryTimeZone, formatBusinessTime } from "@enginious-hr/domain";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -15,12 +16,15 @@ import { createClient } from "@/lib/supabase/server";
  */
 export async function AttendanceClockCard({ employeeId }: { employeeId: string }) {
   const supabase = await createClient();
-  const { data: openSession } = await supabase
-    .from("attendance_sessions")
-    .select("clock_in_at")
-    .eq("employee_id", employeeId)
-    .eq("status", "open")
-    .maybeSingle();
+  const [{ data: openSession }, { data: employee }] = await Promise.all([
+    supabase.from("attendance_sessions").select("clock_in_at").eq("employee_id", employeeId).eq("status", "open").maybeSingle(),
+    supabase.from("employees").select("country_code").eq("id", employeeId).maybeSingle(),
+  ]);
+  // The clock-in timestamp is stored in UTC; render it in the employee's OWN
+  // country timezone (never the viewer's browser/OS timezone, which
+  // toLocaleTimeString() would otherwise silently use) — same convention as
+  // the leave-accrual/document-expiry crons and the attendance page.
+  const timeZone = resolveCountryTimeZone(employee?.country_code);
 
   return (
     <Card>
@@ -36,7 +40,7 @@ export async function AttendanceClockCard({ employeeId }: { employeeId: string }
             <Badge variant="success" className="mr-2">
               Clocked in
             </Badge>
-            since {new Date(openSession.clock_in_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            since {formatBusinessTime(timeZone, new Date(openSession.clock_in_at))}
           </p>
         ) : (
           <p className="text-sm">
