@@ -294,13 +294,17 @@ function buildPeriod(
     }
   }
 
-  // A rollover is a 24-elapsed-hour boundary that arrives while the period
-  // has NOT yet had a completed 8 h rest. It never counts as rest itself.
+  // A rollover is a 24-elapsed-hour boundary that the work carries across
+  // while the period has NOT yet had a completed 8 h rest. It never counts as
+  // rest itself.
   const rollovers: RecoveryRolloverEvent[] = [];
   for (let k = 1; ; k += 1) {
     const boundary = startMs + k * windowMs;
     if (boundary > asOfMs) break;
     if (restCompletesAtMs !== null && restCompletesAtMs <= boundary) break;
+    // Only a boundary the work actually carries across is a rollover: work
+    // that already stopped before the boundary has nothing to roll over.
+    if (!(boundary < lastWorkEndMs || (hasOpenInterval && boundary <= lastWorkEndMs))) break;
     rollovers.push({ windowIndex: k, atMs: boundary });
   }
 

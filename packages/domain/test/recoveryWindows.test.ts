@@ -211,6 +211,11 @@ describe("buildRecoveryPeriods — 24 elapsed-hour windows", () => {
     expect(q!.rollovers.map((r) => r.atMs)).toEqual([at(24)]);
   });
 
+  it("raises no rollover when the work had already stopped before the 24h boundary", () => {
+    const [p] = buildRecoveryPeriods([iv("a", 0, 14), iv("b", 16, 20)], at(60));
+    expect(p!.rollovers).toHaveLength(0);
+  });
+
   it("manufactures no window after an actual rest", () => {
     const [p] = buildRecoveryPeriods([iv("a", 0, 10)], at(200));
     expect(p!.windows).toHaveLength(1);
