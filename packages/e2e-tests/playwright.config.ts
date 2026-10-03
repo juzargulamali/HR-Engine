@@ -163,6 +163,38 @@ export default defineConfig({
       retries: 0,
     },
     {
+      // Recovery Leave windows redesign — dedicated projects for the NEW attendance screens
+      // (tests/recovery-windows/). They live in their own directory on purpose: the Production
+      // `read-only` project (run on every PR touching this package) only covers
+      // tests/read-only, and `mutating` only tests/mutating, so none of these can ever be swept
+      // into a Production run. They are invoked only by name from
+      // e2e-preview-recovery-windows.yml, against a Preview deployment.
+      name: "preview-recovery-windows-read-only",
+      testDir: "./tests/recovery-windows",
+      testMatch: /10-.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["setup"],
+      retries: 1,
+    },
+    {
+      name: "preview-recovery-windows-mobile",
+      testDir: "./tests/recovery-windows",
+      testMatch: /11-.*\.mobile\.spec\.ts/,
+      use: { ...devices["Pixel 5"] },
+      dependencies: ["setup"],
+      retries: 1,
+    },
+    {
+      // Zero retries, like every mutating project: a timed-out HR save must never be blindly
+      // repeated against a real database.
+      name: "preview-recovery-windows-mutating",
+      testDir: "./tests/recovery-windows",
+      testMatch: /20-.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["setup"],
+      retries: 0,
+    },
+    {
       // Compares the final state (same UI-driven reads as baseline) against
       // the captured baseline and writes a reconciliation report. Always
       // run by CI, even if the mutating project failed partway, so the

@@ -311,6 +311,12 @@ describe("Recovery windows — processor, alerts, visibility, read models", () =
       expect(Number(byId.get(manual.employeeId)!.manual_hours)).toBe(8);
     });
 
+    it("a date in the future never shows anyone as clocked in", async () => {
+      const rows = await as<Record<string, any>>(hr1, "select * from attendance_register_for_date($1, '2099-01-01')", [COMPANY_AE]);
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.every((r) => r.clock_status === "not_started")).toBe(true);
+    });
+
     it("a person with approved leave that day is flagged on the register without any clock evidence being altered", async () => {
       const person = await newPerson(COMPANY_AE, "AE");
       await db.seed(`begin; set local session_replication_role = replica;

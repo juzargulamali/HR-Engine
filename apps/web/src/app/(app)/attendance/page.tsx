@@ -320,7 +320,7 @@ export default async function AttendancePage({
       .eq("work_date", workDate)
       .in("employee_id", allRows.map((r) => r.employeeId));
     const existingByEmployee = new Map((existing ?? []).map((r) => [r.employee_id, r]));
-    manualRows = allRows.map((e) => {
+    manualRows = allRows.filter((e) => !needle || e.name.toLowerCase().includes(needle)).map((e) => {
       const rec = existingByEmployee.get(e.employeeId);
       return {
         employeeId: e.employeeId,
@@ -370,6 +370,7 @@ export default async function AttendancePage({
               <Label htmlFor="date">Date</Label>
               <Input id="date" name="date" type="date" defaultValue={workDate} />
             </div>
+            {showManual ? <input type="hidden" name="manual" value="1" /> : null}
             <div className="space-y-1.5">
               <Label htmlFor="filter">Show</Label>
               <Select id="filter" name="filter" defaultValue={filter}>
@@ -399,39 +400,45 @@ export default async function AttendancePage({
       ) : null}
       {registerError ? <Alert variant="destructive">Could not load the register: {registerError.message}</Alert> : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <SummaryTile label="Clocked in now" value={clockedInNow} hint="Live clock status — separate from attendance for the date" />
-        <SummaryTile label={`Present on ${workDate}`} value={presentOnDate} hint="Stays Present after clocking out" />
-        <SummaryTile label="Not started / not recorded" value={notStartedCount} hint="No clock evidence — not treated as absent" />
-        <SummaryTile label="Needs review" value={needsReviewCount} hint="Conditions HR should look at" />
-      </div>
+      {!showManual ? (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <SummaryTile label="Clocked in now" value={clockedInNow} hint="Live clock status — separate from attendance for the date" />
+            <SummaryTile label={`Present on ${workDate}`} value={presentOnDate} hint="Stays Present after clocking out" />
+            <SummaryTile label="Not started / not recorded" value={notStartedCount} hint="No clock evidence — not treated as absent" />
+            <SummaryTile label="Needs review" value={needsReviewCount} hint="Conditions HR should look at" />
+          </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            {company.legal_name} — {workDate}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {allRows.length > 0 ? (
-            <RegisterTable rows={rows} details={details} colleagues={colleagues} workDate={workDate} canEdit />
-          ) : (
-            <p className="text-muted-foreground">No active employees in this company yet.</p>
-          )}
-          <p className="mt-3 text-xs text-muted-foreground">
-            Recorded hours count clocked-in time only (lunch while clocked in counts; clocked-out gaps never do). While someone is still clocked
-            in the figure is provisional and no verdict is shown.{" "}
-            <Link href={`/attendance?${hrLinkParams.toString()}&manual=${showManual ? "0" : "1"}`} className="underline">
-              {showManual ? "Hide the manual daily entry tool" : "Open the manual daily entry tool (previous register)"}
-            </Link>
-          </p>
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                {company.legal_name} — {workDate}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {allRows.length > 0 ? (
+                <RegisterTable rows={rows} details={details} colleagues={colleagues} workDate={workDate} canEdit />
+              ) : (
+                <p className="text-muted-foreground">No active employees in this company yet.</p>
+              )}
+              <p className="mt-3 text-xs text-muted-foreground">
+                Recorded hours count clocked-in time only (lunch while clocked in counts; clocked-out gaps never do). While someone is still clocked
+                in the figure is provisional and no verdict is shown.{" "}
+                <Link href={`/attendance?${hrLinkParams.toString()}&manual=1`} className="underline">
+                  Open the manual daily entry tool (previous register)
+                </Link>
+              </p>
+            </CardContent>
+          </Card>
+        </>
+      ) : null}
 
       {showManual ? (
         <Card>
           <CardHeader>
-            <CardTitle>Manual daily entry (previous register)</CardTitle>
+            <CardTitle>
+              {company.legal_name} — {workDate} · manual daily entry (previous register)
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <Alert>
@@ -439,6 +446,11 @@ export default async function AttendancePage({
               own — they are flagged for review. Use &ldquo;Edit → Add missing attendance&rdquo; above to record exact times instead.
             </Alert>
             <BulkAttendanceForm workDate={workDate} rows={manualRows} isRecoveryDay={isRecoveryDay} />
+            <p className="text-xs text-muted-foreground">
+              <Link href={`/attendance?${hrLinkParams.toString()}`} className="underline">
+                Back to the automatic register
+              </Link>
+            </p>
           </CardContent>
         </Card>
       ) : null}

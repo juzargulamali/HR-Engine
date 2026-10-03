@@ -1,0 +1,196 @@
+name: E2E Recovery Leave windows (Preview) — manual only
+
+# Runs ONLY the new Recovery Leave windows / attendance-register specs
+# (packages/e2e-tests/tests/recovery-windows/), via their own dedicated Playwright projects
+# (preview-recovery-windows-read-only / -mobile / -mutating). They are NOT part of the
+# Production QA projects (read-only / mobile-smoke / mutating), so e2e-production-qa-*.yml —
+# including the pull_request trigger on e2e-production-qa-readonly.yml — can never run them.
+# CI additionally fails if a recovery-windows spec is ever matched by a Production project.
+#
+# This targets a Vercel PREVIEW of the redesign branch. Per the repository's existing
+# arrangement a Preview uses the SAME Supabase database as Production and the SAME dedicated
+# E2E_* accounts, so the blast radius equals the Production QA workflows and the gating is the
+# same: workflow_dispatch only, a typed confirmation checked before any secret is read, an
+# explicit per-run mutation authorization, zero retries on the mutating job, and the same
+# shared-test-account concurrency group.
+#
+# What the MUTATING job leaves behind (real, permanent, tagged with the run id in every
+# free-text field): one Office clock session by the Employee test account, one HR-recorded
+# session (1 hour, a random past date) and HR's correction of it (to 1.5 hours). Every
+# duration is under 2 hours, which earns nothing under any band on any day type, so this run
+# can NEVER create a Recovery Leave credit, a pending approval or a ledger entry, and it never
+# approves or rejects anything. Nothing is cleaned up automatically. A failed mutating test is
+# NEVER re-run automatically: inspect the register for rows tagged with the run id first.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type exactly RUN_PREVIEW_E2E_SAME_DB to confirm you understand this Preview uses the SAME Supabase database as Production, with the SAME dedicated test accounts. Anything else aborts before any browser launches.'
+        required: true
+        type: string
+      preview_base_url:
+        description: 'This branch''s Vercel Preview URL. Never guessed or defaulted.'
+        required: true
+        type: string
+      run_mutating:
+        description: 'Also run the mutating job (adds an Office clock session and an HR-recorded + corrected session for the Employee test account). The read-only and phone checks always run.'
+        required: true
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+        default: 'false'
+      mutation_authorized:
+        description: 'Per-run authorization for mutation on the dedicated E2E test accounts. Must be true when run_mutating is true.'
+        required: true
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+        default: 'false'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-production-qa-shared-test-accounts
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      run_id: ${{ steps.runid.outputs.run_id }}
+    steps:
+      - name: Validate the typed confirmation and authorization inputs
+        run: |
+          if [ "${{ inputs.confirm }}" != "RUN_PREVIEW_E2E_SAME_DB" ]; then
+            echo "::error::confirm input must be exactly RUN_PREVIEW_E2E_SAME_DB — aborting before any browser launches or secret is read."
+            exit 1
+          fi
+          if [ "${{ inputs.run_mutating }}" = "true" ] && [ "${{ inputs.mutation_authorized }}" != "true" ]; then
+            echo "::error::run_mutating is true but mutation_authorized is not 'true' — mutation must be explicitly authorized for this run."
+            exit 1
+          fi
+          case "${{ inputs.preview_base_url }}" in
+            https://*) ;;
+            *) echo "::error::preview_base_url must be a real https:// URL, not guessed or left default."; exit 1 ;;
+          esac
+      - name: Compute one run ID for every job in this workflow run
+        id: runid
+        run: echo "run_id=E2E-$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
+  read-only:
+    needs: guard
+    runs-on: ubuntu-latest
+    environment: production-qa
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: packages/e2e-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        working-directory: .
+      - run: npx playwright install --with-deps chromium
+      - name: Run the register / dashboard / alerts checks (desktop, then phone) — read-only
+        id: run_tests
+        continue-on-error: true
+        run: npx playwright test --project=preview-recovery-windows-read-only --project=preview-recovery-windows-mobile
+        env:
+          E2E_BASE_URL: ${{ inputs.preview_base_url }}
+          E2E_RUN_ID: ${{ needs.guard.outputs.run_id }}
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_EMPLOYEE_PASSWORD: ${{ secrets.E2E_EMPLOYEE_PASSWORD }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_MANAGER_PASSWORD: ${{ secrets.E2E_MANAGER_PASSWORD }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_HR_PASSWORD: ${{ secrets.E2E_HR_PASSWORD }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_CEO_PASSWORD: ${{ secrets.E2E_CEO_PASSWORD }}
+      - name: Upload JUnit results and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-preview-recovery-windows-read-only-${{ needs.guard.outputs.run_id }}
+          path: |
+            packages/e2e-tests/test-results/junit.xml
+            packages/e2e-tests/test-results/**/*.png
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Fail the job if a check failed
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1
+
+  mutating:
+    if: ${{ inputs.run_mutating == 'true' }}
+    needs: [guard, read-only]
+    runs-on: ubuntu-latest
+    environment: production-qa
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: packages/e2e-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        working-directory: .
+      - run: npx playwright install --with-deps chromium
+      # ZERO retries (the project sets retries: 0). Never rerun this job automatically.
+      - name: Run the mutating recovery-window specs (short shifts only — can never create a credit)
+        id: run_tests
+        continue-on-error: true
+        run: npx playwright test --project=preview-recovery-windows-mutating
+        env:
+          E2E_BASE_URL: ${{ inputs.preview_base_url }}
+          E2E_RUN_ID: ${{ needs.guard.outputs.run_id }}
+          E2E_MUTATION_AUTHORIZED: ${{ inputs.mutation_authorized }}
+          E2E_ATTENDANCE_CLOCK_TIMEZONE: ${{ vars.E2E_ATTENDANCE_CLOCK_TIMEZONE }}
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_EMPLOYEE_PASSWORD: ${{ secrets.E2E_EMPLOYEE_PASSWORD }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_MANAGER_PASSWORD: ${{ secrets.E2E_MANAGER_PASSWORD }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_HR_PASSWORD: ${{ secrets.E2E_HR_PASSWORD }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_CEO_PASSWORD: ${{ secrets.E2E_CEO_PASSWORD }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      - name: Redact test-account emails from error-context snapshots
+        if: always()
+        run: npm run redact:error-context
+        env:
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-preview-recovery-windows-junit-${{ needs.guard.outputs.run_id }}
+          path: packages/e2e-tests/test-results/junit.xml
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Upload screenshots and redacted error-context (no traces)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-preview-recovery-windows-context-${{ needs.guard.outputs.run_id }}
+          path: |
+            packages/e2e-tests/test-results/**/*.png
+            packages/e2e-tests/test-results/**/error-context.md
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Fail the job if any test failed
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1

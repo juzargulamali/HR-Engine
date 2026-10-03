@@ -2402,6 +2402,7 @@ as $$
     from attendance_sessions ses
     join emps e on e.id = ses.employee_id
     where ses.status = 'open' and (ses.clock_in_at at time zone e.tz)::date <= p_date
+      and p_date <= (recovery_now() at time zone e.tz)::date
     group by ses.employee_id
   ),
   win as (
