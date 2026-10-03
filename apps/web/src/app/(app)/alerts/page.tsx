@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { canViewHrAlerts } from "@enginious-hr/domain";
+import { canViewHrAlerts, formatRecordedDuration, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,6 +7,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
+import { AutoRefresh } from "@/components/attendance/auto-refresh";
+import { ALERT_TYPE_LABELS } from "@/lib/recovery/labels";
+import { AcknowledgeAlertForm } from "./acknowledge-alert-form";
 
 const HORIZON_DAYS = 30;
 
@@ -37,8 +40,9 @@ export default async function AlertsPage() {
   // No explicit company filter on any of these — like employees/page.tsx,
   // RLS alone decides what's visible (every company an HR Admin/CEO/CTO
   // grant covers), never re-derived here.
-  const [{ data: employees }, { data: contracts }, { data: employeeDocs }, { data: identityDocs }] = await Promise.all([
-    supabase.from("employees").select("id, first_name, last_name").is("deleted_at", null),
+  const generatedAt = new Date().toISOString();
+  const [{ data: employees }, { data: contracts }, { data: employeeDocs }, { data: identityDocs }, { data: recoveryAlerts }, { data: schedulerStatus }, { data: companies }] = await Promise.all([
+    supabase.from("employees").select("id, first_name, last_name, company_id, country_code").is("deleted_at", null),
     supabase
       .from("employment_contracts")
       .select("id, employee_id, contract_type, end_date, probation_end_date")
@@ -53,7 +57,27 @@ export default async function AlertsPage() {
       .select("id, employee_id, document_type, document_number, expiry_date")
       .not("expiry_date", "is", null)
       .lte("expiry_date", horizon),
+    // Recovery Leave work alerts: visibility is decided entirely by row-level security
+    // (HR Admin / CEO / CTO of the alert's own company — never the employee or a manager).
+    supabase
+      .from("recovery_alerts")
+      .select("id, company_id, employee_id, alert_type, triggered_at, period_started_at, recorded_seconds, elapsed_seconds, details, status, acknowledged_at, acknowledgement_note")
+      .in("status", ["open", "acknowledged"])
+      .order("triggered_at", { ascending: false })
+      .limit(100),
+    // Health of the background processing. Only HR Admin / Sys Admin may read it; for anyone else this
+    // simply returns an error and the banner is omitted.
+    supabase.rpc("recovery_scheduler_status"),
+    supabase.from("companies").select("id, legal_name"),
   ]);
+  const companyName = new Map((companies ?? []).map((c) => [c.id, c.legal_name]));
+  const employeeMeta = new Map((employees ?? []).map((e) => [e.id, e]));
+  const isHrAdmin = session.grants.some((g) => g.role === "hr_admin");
+  const openAlerts = (recoveryAlerts ?? []).filter((a) => a.status === "open");
+  const acknowledgedAlerts = (recoveryAlerts ?? []).filter((a) => a.status === "acknowledged").slice(0, 10);
+  const alertTz = (employeeId: string) => resolveCountryTimeZone(employeeMeta.get(employeeId)?.country_code);
+  const fmtLocal = (iso: string, employeeId: string) =>
+    new Intl.DateTimeFormat("en-GB", { timeZone: alertTz(employeeId), weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 
   const employeeName = new Map((employees ?? []).map((e) => [e.id, `${e.first_name} ${e.last_name}`]));
 
@@ -76,7 +100,11 @@ export default async function AlertsPage() {
     .sort((a, b) => a.days - b.days);
 
   const nothingFlagged =
-    contractsEnding.length === 0 && probationEnding.length === 0 && docsFlagged.length === 0 && identityFlagged.length === 0;
+    contractsEnding.length === 0 &&
+    probationEnding.length === 0 &&
+    docsFlagged.length === 0 &&
+    identityFlagged.length === 0 &&
+    openAlerts.length === 0;
 
   return (
     <div className="space-y-6">
@@ -87,6 +115,85 @@ export default async function AlertsPage() {
           overdue. As of {todayStr}.
         </p>
       </div>
+
+      {schedulerStatus && schedulerStatus.windows_policy_active ? (
+        <Alert variant={schedulerStatus.stale || schedulerStatus.open_failures > 0 ? "warning" : "default"}>
+          <p className="font-medium">Recovery Leave background processing</p>
+          <p className="mt-1">
+            {schedulerStatus.last_success_at
+              ? `Last successful run: ${new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(schedulerStatus.last_success_at))}.`
+              : "It has not run yet."}{" "}
+            {schedulerStatus.stale ? "It is overdue, so windows may close and alerts may appear late. " : ""}
+            {schedulerStatus.open_failures > 0 ? `${schedulerStatus.open_failures} employee(s) failed on the last run and will be retried. ` : ""}
+            {!schedulerStatus.pg_cron_installed || !schedulerStatus.pg_cron_job
+              ? "The 5-minute database scheduler is not enabled, so only the daily safety-net run is active."
+              : `Scheduler: ${schedulerStatus.pg_cron_job.schedule}${schedulerStatus.pg_cron_job.active ? "" : " (paused)"}.`}
+          </p>
+        </Alert>
+      ) : null}
+
+      {openAlerts.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Recovery Leave work alerts</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Warnings only: recording continues and none of these creates a recovery day by itself. Times are in each employee&apos;s own country
+              time zone. Elapsed hours (the whole stretch) are not the same as recorded hours (clocked-in time only).
+            </p>
+            <AutoRefresh generatedAt={generatedAt} timeZone={resolveCountryTimeZone(null)} intervalSeconds={60} />
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Employee</TableHead>
+                  <TableHead>Company</TableHead>
+                  <TableHead>Alert</TableHead>
+                  <TableHead>Working period began</TableHead>
+                  <TableHead>Recorded</TableHead>
+                  <TableHead>Elapsed</TableHead>
+                  <TableHead>Triggered</TableHead>
+                  <TableHead>Rest / rollover</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {openAlerts.map((a) => {
+                  const d = a.details as { gaps?: unknown[]; still_open?: boolean; window_index?: number; threshold_hours?: number };
+                  return (
+                    <TableRow key={a.id}>
+                      <TableCell>
+                        <Link href={`/employees/${a.employee_id}`} className="hover:underline">
+                          {employeeName.get(a.employee_id) ?? "—"}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{companyName.get(a.company_id) ?? "—"}</TableCell>
+                      <TableCell>
+                        <Badge variant="warning">{ALERT_TYPE_LABELS[a.alert_type]}</Badge>
+                      </TableCell>
+                      <TableCell>{fmtLocal(a.period_started_at, a.employee_id)}</TableCell>
+                      <TableCell>{formatRecordedDuration(Number(a.recorded_seconds))}</TableCell>
+                      <TableCell>{formatRecordedDuration(Number(a.elapsed_seconds))}</TableCell>
+                      <TableCell>{fmtLocal(a.triggered_at, a.employee_id)}</TableCell>
+                      <TableCell className="max-w-xs text-xs text-muted-foreground">
+                        {a.alert_type === "window_rollover"
+                          ? `Window ${d.window_index ?? "?"} rolled over automatically at 24 elapsed hours without a completed rest; no manual clock-out was made.`
+                          : `${d.threshold_hours ?? 20} recorded hours reached without a completed rest${d.still_open ? " — still clocked in" : ""}; ${(d.gaps ?? []).length} clocked-out gap(s) shorter than the rest threshold.`}
+                      </TableCell>
+                      <TableCell>{isHrAdmin ? <AcknowledgeAlertForm alertId={a.id} /> : null}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+            {acknowledgedAlerts.length > 0 ? (
+              <p className="mt-3 text-xs text-muted-foreground">
+                Recently acknowledged: {acknowledgedAlerts.map((a) => `${employeeName.get(a.employee_id) ?? "—"} (${ALERT_TYPE_LABELS[a.alert_type]})`).join(", ")}.
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {nothingFlagged ? (
         <Card>

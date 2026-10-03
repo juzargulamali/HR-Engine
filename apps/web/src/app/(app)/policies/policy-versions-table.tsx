@@ -22,6 +22,8 @@ export interface PolicyVersionRow {
   hasDependentConfig: boolean;
   isDrafter: boolean;
   isLatest: boolean;
+  /** A window-based Recovery Leave policy: activated only through its own controlled form on the detail page. */
+  isWindowsPolicy: boolean;
 }
 
 /**
@@ -73,7 +75,12 @@ export function PolicyVersionsTable({ rows }: { rows: PolicyVersionRow[] }) {
               </TableCell>
               <TableCell>
                 <div className="flex items-center gap-2">
-                  {p.canActivate ? <ActivateButton policyVersionId={p.id} /> : null}
+                  {p.canActivate && !p.isWindowsPolicy ? <ActivateButton policyVersionId={p.id} /> : null}
+                  {p.canActivate && p.isWindowsPolicy ? (
+                    <Link href={`/policies/${p.id}`} className="text-xs underline">
+                      Review &amp; activate with an effective date
+                    </Link>
+                  ) : null}
                   {p.canDelete && !p.hasDependentConfig ? <DeletePolicyVersionButton policyVersionId={p.id} /> : null}
                   {p.canDelete && p.hasDependentConfig ? (
                     <span className="text-xs text-muted-foreground">has configured leave types — remove them first</span>

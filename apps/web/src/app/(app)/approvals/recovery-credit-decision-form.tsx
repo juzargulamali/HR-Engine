@@ -34,6 +34,8 @@ export function RecoveryCreditDecisionForm({
   wasCorrected,
   canCorrect,
   checkedWithRequired,
+  windowMode = false,
+  blockedReason = null,
 }: {
   requestId: string;
   originalWorkDate: string;
@@ -43,6 +45,10 @@ export function RecoveryCreditDecisionForm({
   wasCorrected: boolean;
   canCorrect: boolean;
   checkedWithRequired: boolean;
+  /** A window-based request: its amount comes from the attendance evidence and is never typed over here. */
+  windowMode?: boolean;
+  /** Why the database would refuse final approval right now (window not closed, HR verification outstanding, ...). */
+  blockedReason?: string | null;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -98,12 +104,19 @@ export function RecoveryCreditDecisionForm({
 
   return (
     <div className="flex w-72 flex-col gap-2 rounded-md border border-border p-3">
-      <p className="text-xs text-muted-foreground">
-        Original: {originalWorkDate}
-        {originalHours != null ? `, ${originalHours}h` : ""}
-        {wasCorrected ? " — HR corrected below" : ""}
-      </p>
-      {canCorrect ? (
+      {windowMode ? (
+        <p className="text-xs text-muted-foreground">
+          Amount: {currentDays} day{currentDays === 1 ? "" : "s"}, calculated from the recorded clock time (see the evidence). To change it, correct the
+          attendance evidence from Attendance → Edit; the request is recalculated and the change is recorded.
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Original: {originalWorkDate}
+          {originalHours != null ? `, ${originalHours}h` : ""}
+          {wasCorrected ? " — HR corrected below" : ""}
+        </p>
+      )}
+      {canCorrect && !windowMode ? (
         <>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
@@ -168,7 +181,7 @@ export function RecoveryCreditDecisionForm({
         </div>
       ) : (
         <div className="flex gap-2">
-          <Button size="sm" disabled={pending} onClick={approve}>
+          <Button size="sm" disabled={pending || !!blockedReason} onClick={approve} title={blockedReason ?? undefined}>
             Approve
           </Button>
           <Button size="sm" variant="outline" disabled={pending} onClick={() => setRejecting(true)}>

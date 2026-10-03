@@ -159,7 +159,7 @@ export function ClockControls({
   );
 
   return (
-    <div className="space-y-4">
+    <div id="switch" className="space-y-4">
       {!isClockedIn ? (
         <div className="space-y-4">
           {workModeFields}
