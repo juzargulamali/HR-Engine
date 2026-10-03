@@ -74,6 +74,17 @@ export interface RecoverySchedulerStatus {
   pg_cron_installed: boolean;
   pg_cron_job: { jobid: number; jobname: string; schedule: string; active: boolean } | null;
   expected_interval_minutes: number;
+  /** First 8 characters of this database's fingerprint — compare with the Supabase SQL Editor to confirm which project the app is bound to. */
+  database_fingerprint: string | null;
+  /** Verified (not assumed): job exists and is active, and a recent run started by pg_cron succeeded. */
+  scheduler_ready: { ready: boolean; reasons: string[]; last_pg_cron_success_at: string | null };
+  /** What the processor still has to finish; the scheduler may only be retired when all are zero. */
+  work_remaining: {
+    open_periods: number;
+    open_windowed_sessions: number;
+    unresolved_failures: number;
+    unrouted_window_requests: number;
+  };
 }
 
 export interface RecoveryLiveSummary {
@@ -538,6 +549,8 @@ export interface Database {
         Update: {
           status?: PolicyStatus;
           payload?: Record<string, unknown>;
+          /** Editable on a DRAFT by an HR Admin only (RLS + guard_policy_version_update). */
+          effective_from?: string;
           effective_to?: string | null;
           approved_by?: string | null;
           approved_at?: string | null;
@@ -1701,7 +1714,11 @@ export interface Database {
         Returns: { country_code: string; policy_type: string; version_no: number | null; action: string }[];
       };
       activate_recovery_windows_policy: {
-        Args: { p_policy_version_id: string; p_effective_from: string };
+        Args: { p_policy_version_id: string; p_effective_from?: string | null };
+        Returns: undefined;
+      };
+      deactivate_recovery_windows_policy: {
+        Args: { p_policy_version_id: string; p_last_effective_date: string };
         Returns: undefined;
       };
       recovery_scheduler_status: {

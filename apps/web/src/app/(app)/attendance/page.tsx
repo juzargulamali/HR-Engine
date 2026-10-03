@@ -312,6 +312,22 @@ export default async function AttendancePage({
   // The previous manual all-row register is still reachable, but never the default:
   // it is only loaded on request (?manual=1), since typed daily totals cannot prove
   // clock gaps or recovery windows (see record_attendance_and_recovery()).
+  // Which Recovery Leave rules are in force on this date for this company's country. Shown on the manual tool (and used as a
+  // stable marker by the browser tests, which must expect the previous credit behaviour only while the previous rules apply).
+  const { data: windowsPolicyInForce } = showManual
+    ? await supabase
+        .from("policy_versions")
+        .select("id, version_no")
+        .eq("country_code", company.country_code)
+        .eq("policy_type", "overtime_rules")
+        .eq("status", "active")
+        .filter("payload->>model", "eq", "recovery_windows")
+        .lte("effective_from", workDate)
+        .or(`effective_to.is.null,effective_to.gte.${workDate}`)
+        .limit(1)
+        .maybeSingle()
+    : { data: null };
+  const recoveryModelInForce: "windowed" | "legacy" = windowsPolicyInForce ? "windowed" : "legacy";
   let manualRows: { employeeId: string; name: string; status: string; workMode: string | null; hoursWorked: string | null; isClockedIn: boolean; presenceConflict: string | null }[] = [];
   if (showManual) {
     const { data: existing } = await supabase
@@ -441,9 +457,19 @@ export default async function AttendancePage({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <Alert>
-              Typed daily totals cannot prove clock gaps or recovery windows, so under the window policy they never create Recovery Leave on their
-              own — they are flagged for review. Use &ldquo;Edit → Add missing attendance&rdquo; above to record exact times instead.
+            <Alert data-testid="manual-register-model" data-model={recoveryModelInForce}>
+              {recoveryModelInForce === "windowed" ? (
+                <>
+                  The window-based Recovery Leave policy (version {windowsPolicyInForce?.version_no}) is in force on {workDate}. Typed daily totals cannot prove
+                  clock gaps or recovery windows, so they never create Recovery Leave on their own — they are flagged for review. Use &ldquo;Edit → Add
+                  missing attendance&rdquo; above to record exact times instead.
+                </>
+              ) : (
+                <>
+                  The previous Recovery Leave rules (same-day, over-4-hours) are in force on {workDate}: a present day over 4 hours on a weekend or public
+                  holiday creates a Recovery Leave request from the typed total, as before.
+                </>
+              )}
             </Alert>
             <BulkAttendanceForm workDate={workDate} rows={manualRows} isRecoveryDay={isRecoveryDay} />
             <p className="text-xs text-muted-foreground">

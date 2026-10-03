@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import {
   canActivatePolicy,
   canEditDraftPolicyContent,
+  canViewDraftPolicies,
   getBusinessDateString,
   parseRecoveryWindowRules,
   resolveCountryTimeZone,
@@ -14,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ActivateButton } from "../activate-button";
 import { ActivateRecoveryWindowsForm } from "./activate-recovery-windows-form";
+import { DeactivateRecoveryWindowsForm } from "./deactivate-recovery-windows-form";
 import { AddLeaveTypeForm } from "./add-leave-type-form";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -69,6 +71,10 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         .maybeSingle()
     : { data: null };
   const canEditContent = policy.status === "draft" && canEditDraftPolicyContent(session.grants, policy.country_code);
+  // Only an HR Admin may read the processor status; the CEO/CTO activation is still checked by the database.
+  const hrCanReadScheduler = isWindowsPolicy && canEditDraftPolicyContent(session.grants, policy.country_code);
+  const { data: schedulerStatus } = hrCanReadScheduler && policy.status === "draft" ? await supabase.rpc("recovery_scheduler_status") : { data: null };
+  const canDisable = isWindowsPolicy && policy.status === "active" && canViewDraftPolicies(session.grants, policy.country_code);
 
   return (
     <div className="space-y-6">
@@ -166,9 +172,23 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                 <ActivateRecoveryWindowsForm
                   policyVersionId={policy.id}
                   minDate={minEffective}
+                  plannedDate={policy.effective_from}
+                  canChooseDate={canEditDraftPolicyContent(session.grants, policy.country_code)}
                   countryName={country?.name ?? policy.country_code}
                   supersedesLabel={currentlyInForce ? `Version ${currentlyInForce.version_no}` : null}
+                  scheduler={schedulerStatus ? { ready: schedulerStatus.scheduler_ready.ready, reasons: schedulerStatus.scheduler_ready.reasons } : null}
                 />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {canDisable ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Stop using these rules for new working periods</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <DeactivateRecoveryWindowsForm policyVersionId={policy.id} minDate={minEffective} countryName={country?.name ?? policy.country_code} />
               </CardContent>
             </Card>
           ) : null}

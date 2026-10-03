@@ -36,10 +36,10 @@ test.describe("automatic attendance register (HR Admin) @recovery-windows", () =
   test("shows the live 'Clocked in now' count separately from attendance for the date", async ({ hrAdminPage }) => {
     const register = new AttendanceRegisterPage(hrAdminPage);
     await register.goto();
-    await expect(hrAdminPage.getByText("Clocked in now", { exact: true })).toBeVisible();
+    await expect(hrAdminPage.locator("p", { hasText: /^Clocked in now$/ })).toBeVisible(); // the summary tile (the same words are also a filter option)
     await expect(hrAdminPage.getByText(/^Present on \d{4}-\d{2}-\d{2}$/)).toBeVisible();
     await expect(hrAdminPage.getByText("Not started / not recorded", { exact: true })).toBeVisible();
-    await expect(hrAdminPage.getByText("Needs review", { exact: true })).toBeVisible();
+    await expect(hrAdminPage.locator("p", { hasText: /^Needs review$/ })).toBeVisible();
   });
 
   test("every row carries a clock state as TEXT (never colour alone) and never says Online/Offline or Absent", async ({ hrAdminPage }) => {
@@ -86,7 +86,7 @@ test.describe("employee dashboard status @recovery-windows", () => {
     await gotoWithRetry(employeePage, "/");
     const heading = employeePage.getByRole("heading", { name: "Attendance clock" });
     await expect(heading).toBeVisible();
-    const card = employeePage.locator("div", { has: heading }).last();
+    const card = heading.locator("xpath=ancestor::div[contains(@class, 'rounded-')][1]"); // the Card around the heading
     await expect(card.locator("[data-clock-status]")).toHaveCount(1);
     await expect(card.locator("[data-clock-status]")).toHaveText(/^(Clocked in|Clocked out|Not started)/);
     await expect(card.getByRole("link", { name: /^(Clock In|Clock Out)$/ })).toBeVisible();

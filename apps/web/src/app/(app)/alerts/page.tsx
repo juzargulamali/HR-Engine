@@ -116,18 +116,38 @@ export default async function AlertsPage() {
         </p>
       </div>
 
-      {schedulerStatus && schedulerStatus.windows_policy_active ? (
-        <Alert variant={schedulerStatus.stale || schedulerStatus.open_failures > 0 ? "warning" : "default"}>
+      {schedulerStatus ? (
+        <Alert
+          variant={
+            schedulerStatus.stale || schedulerStatus.open_failures > 0 || (schedulerStatus.windows_policy_active && !schedulerStatus.scheduler_ready.ready) ? "warning" : "default"
+          }
+          data-testid="processor-status"
+        >
           <p className="font-medium">Recovery Leave background processing</p>
           <p className="mt-1">
+            {schedulerStatus.scheduler_ready.ready
+              ? "5-minute processor: verified running."
+              : `5-minute processor: not verified (${schedulerStatus.scheduler_ready.reasons.join("; ")}). ${
+                  schedulerStatus.windows_policy_active
+                    ? "Windows and alerts are only processed by the daily safety-net run until it is enabled."
+                    : "A Recovery Leave windows policy cannot be activated until it is."
+                }`}{" "}
             {schedulerStatus.last_success_at
               ? `Last successful run: ${new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(schedulerStatus.last_success_at))}.`
               : "It has not run yet."}{" "}
             {schedulerStatus.stale ? "It is overdue, so windows may close and alerts may appear late. " : ""}
             {schedulerStatus.open_failures > 0 ? `${schedulerStatus.open_failures} employee(s) failed on the last run and will be retried. ` : ""}
-            {!schedulerStatus.pg_cron_installed || !schedulerStatus.pg_cron_job
-              ? "The 5-minute database scheduler is not enabled, so only the daily safety-net run is active."
-              : `Scheduler: ${schedulerStatus.pg_cron_job.schedule}${schedulerStatus.pg_cron_job.active ? "" : " (paused)"}.`}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Work still being finished: {schedulerStatus.work_remaining.open_periods} open working period(s), {schedulerStatus.work_remaining.open_windowed_sessions} open
+            session(s), {schedulerStatus.work_remaining.unresolved_failures} failure(s), {schedulerStatus.work_remaining.unrouted_window_requests} unrouted request(s). The
+            scheduler must stay enabled until all are 0, even after a policy is switched off.{" "}
+            {schedulerStatus.database_fingerprint ? (
+              <>
+                Database fingerprint: <span className="font-mono" data-testid="database-fingerprint">{schedulerStatus.database_fingerprint}</span> — compare it with the value the
+                verification SQL prints in the Supabase project you expect (Enginious HR Engine_V2).
+              </>
+            ) : null}
           </p>
         </Alert>
       ) : null}

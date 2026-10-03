@@ -68,6 +68,8 @@ Monday–Friday).
 | C16 | Two shifts with a gap of 7h 59m 59s vs exactly 8h. | 7h 59m 59s = one period; 8h = a new period. |
 | C17 | Someone left clocked in for more than 24 hours. | The window rolls over by itself with no clock-out; each 24 elapsed hours is judged separately; the dashboard says it rolled over. |
 | C18 | Recorded work reaches 20 hours with no 8-hour rest. | One amber notice for the employee and one HR alert (once only). Recording continues. |
+| C19 | **Activation day:** an employee's last shift under the old rules ends 20:00; they clock in again at 02:00 on the day the new policy starts (6 hours later). | Still judged by the old rules (no new-rules period is created, nothing is awarded twice). A restart exactly 8 hours later starts the new rules. |
+| C20 | **Switch-off day:** a shift running under the new rules ends 23:30 on the last day it applies; the employee clocks in again at 02:00 the next day (2.5 hours later). | One working period under the new rules: the hours of both parts add up in ONE window and earn ONE award. A restart 8 hours or more later is judged by whatever rules are in force then. |
 
 ## D. Approvals
 
@@ -90,15 +92,21 @@ Monday–Friday).
 | E2 | Look at a long-work alert. | Employee, company, original period start, recorded vs elapsed hours, trigger time, rest info, Acknowledge. |
 | E3 | Acknowledge it (with a note). | It leaves the open list; it is not raised again. |
 | E4 | Sign in as a plain employee or manager. | The alerts page is refused. |
+| E5 | Read the processor panel before the owner has enabled the 5-minute scheduler. | It says "5-minute processor: not verified" and why (for example pg_cron not installed, job missing, no recent successful run). |
+| E6 | Read the "Database fingerprint" on that panel and compare it with check 2.0 of the verification SQL in the Supabase project *Enginious HR Engine_V2*. | The same 8 characters. If not, stop: the app is connected to a different database. |
+| E7 | After a policy has been switched off, look at "Work still being finished". | It still counts running periods; the scheduler stays enabled until every number is 0. |
 
-## F. Policies (HR Admin only)
+## F. Policies (HR Admin; the CEO/CTO may activate or switch off, never edit)
 
 | # | Do this | Expect |
 |---|---|---|
 | F1 | Press "Create Recovery Leave (windows) drafts". | Drafts for UAE, Saudi Arabia, Poland; the active version is unchanged; nothing is active. |
 | F2 | Open a draft. | A rules table and wording generated from it (no hand-typed contradictions). |
 | F3 | Try to activate as the person who drafted it. | Refused. |
-| F4 | A second HR Admin activates with tomorrow's date. | The old version ends the day before; clock-ins from that date use the new rules; a session already open before then finishes the old way. |
+| F4 | A second HR Admin (a grant limited to that country is enough) activates with tomorrow's date — **after** the scheduler line on the draft says "verified running". | The old version ends the day before; clock-ins from that date use the new rules; a session already open before then finishes the old way. |
 | F5 | Try an effective date of today or earlier. | Refused. |
+| F6 | Try to activate while the 5-minute processor is not verified. | Refused with the reason; nothing changes. |
+| F7 | As the CEO or CTO, open a draft whose date HR has saved. | You see the date HR set and can activate on exactly that date; you cannot choose or change it. |
+| F8 | As an HR Admin or the CEO/CTO, switch the new rules off from a future date. | Nothing is deleted; running periods finish under the rules they started with; the scheduler keeps running (see E7). |
 
 Report anything that does not match, with the time, the employee (test account) and a screenshot.

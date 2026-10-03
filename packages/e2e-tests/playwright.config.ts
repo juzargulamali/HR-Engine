@@ -195,6 +195,28 @@ export default defineConfig({
       retries: 0,
     },
     {
+      // END-TO-END CREDIT PROOF (tests/recovery-windows/30-*): creates a REAL, permanent credit on the dedicated Employee
+      // test account, so it has its own project, its own extra authorization (E2E_RECOVERY_CREDIT_AUTHORIZED) and zero
+      // retries. Only invoked by name from e2e-preview-recovery-windows.yml (when the credit input is ticked) or against the
+      // throwaway local stack — never by a Production workflow.
+      name: "preview-recovery-windows-credit",
+      testDir: "./tests/recovery-windows",
+      testMatch: /30-.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["setup"],
+      retries: 0,
+    },
+    {
+      // LOCAL STACK ONLY (local-stack/README.md): specs that also poke the throwaway local database directly (a stand-in for
+      // pg_cron, policy-state assertions). They refuse to run unless LOCAL_DB_URL is set and the base URL is local, and no
+      // workflow invokes this project.
+      name: "local-stack",
+      testDir: "./tests/local-stack",
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["setup"],
+      retries: 0,
+    },
+    {
       // Compares the final state (same UI-driven reads as baseline) against
       // the captured baseline and writes a reconciliation report. Always
       // run by CI, even if the mutating project failed partway, so the

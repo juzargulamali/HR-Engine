@@ -21,6 +21,12 @@ name: E2E Recovery Leave windows (Preview) — manual only
 # can NEVER create a Recovery Leave credit, a pending approval or a ledger entry, and it never
 # approves or rejects anything. Nothing is cleaned up automatically. A failed mutating test is
 # NEVER re-run automatically: inspect the register for rows tagged with the run id first.
+#
+# The separate, OPTIONAL `credit-proof` job (preview-recovery-windows-credit, tests/recovery-windows/30-*) is the only thing
+# here that creates a REAL, permanent Recovery Leave credit (+1.0 day and a +0.5 verification-gate credit, with their
+# approvals) on the Employee test account: it records evidence for past rest days and drives the lead/HR approvals through
+# the browser. It needs the window-based policy to be ACTIVE and a rest day to have passed since its effective date (it
+# skips with a message otherwise), a second typed confirmation, and its own authorization input.
 on:
   workflow_dispatch:
     inputs:
@@ -41,13 +47,26 @@ on:
           - 'true'
         default: 'false'
       mutation_authorized:
-        description: 'Per-run authorization for mutation on the dedicated E2E test accounts. Must be true when run_mutating is true.'
+        description: 'Per-run authorization for mutation on the dedicated E2E test accounts. Must be true when run_mutating or run_credit_proof is true.'
         required: true
         type: choice
         options:
           - 'false'
           - 'true'
         default: 'false'
+      run_credit_proof:
+        description: 'ALSO run the end-to-end credit proof, which creates REAL, permanent Recovery Leave credits (+1.0 and +0.5 day) with approvals on the Employee test account. Requires the window-based policy to be active.'
+        required: true
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+        default: 'false'
+      credit_confirm:
+        description: 'Only when run_credit_proof is true: type exactly CREATE_REAL_RECOVERY_CREDIT.'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -71,6 +90,16 @@ jobs:
           if [ "${{ inputs.run_mutating }}" = "true" ] && [ "${{ inputs.mutation_authorized }}" != "true" ]; then
             echo "::error::run_mutating is true but mutation_authorized is not 'true' — mutation must be explicitly authorized for this run."
             exit 1
+          fi
+          if [ "${{ inputs.run_credit_proof }}" = "true" ]; then
+            if [ "${{ inputs.mutation_authorized }}" != "true" ]; then
+              echo "::error::run_credit_proof is true but mutation_authorized is not 'true'."
+              exit 1
+            fi
+            if [ "${{ inputs.credit_confirm }}" != "CREATE_REAL_RECOVERY_CREDIT" ]; then
+              echo "::error::credit_confirm must be exactly CREATE_REAL_RECOVERY_CREDIT to create real Recovery Leave credits."
+              exit 1
+            fi
           fi
           case "${{ inputs.preview_base_url }}" in
             https://*) ;;
@@ -186,6 +215,76 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-preview-recovery-windows-context-${{ needs.guard.outputs.run_id }}
+          path: |
+            packages/e2e-tests/test-results/**/*.png
+            packages/e2e-tests/test-results/**/error-context.md
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Fail the job if any test failed
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1
+
+  credit-proof:
+    if: ${{ inputs.run_credit_proof == 'true' }}
+    needs: [guard, read-only]
+    runs-on: ubuntu-latest
+    environment: production-qa
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: packages/e2e-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        working-directory: .
+      - run: npx playwright install --with-deps chromium
+      # ZERO retries (the project sets retries: 0). Never rerun this job automatically: look at what it already wrote first.
+      - name: Run the end-to-end credit proof (creates REAL credits on the Employee test account)
+        id: run_tests
+        continue-on-error: true
+        run: npx playwright test --project=preview-recovery-windows-credit
+        env:
+          E2E_BASE_URL: ${{ inputs.preview_base_url }}
+          E2E_RUN_ID: ${{ needs.guard.outputs.run_id }}
+          E2E_MUTATION_AUTHORIZED: ${{ inputs.mutation_authorized }}
+          E2E_RECOVERY_CREDIT_AUTHORIZED: ${{ inputs.run_credit_proof }}
+          E2E_ATTENDANCE_CLOCK_TIMEZONE: ${{ vars.E2E_ATTENDANCE_CLOCK_TIMEZONE }}
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_EMPLOYEE_PASSWORD: ${{ secrets.E2E_EMPLOYEE_PASSWORD }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_MANAGER_PASSWORD: ${{ secrets.E2E_MANAGER_PASSWORD }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_HR_PASSWORD: ${{ secrets.E2E_HR_PASSWORD }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_CEO_PASSWORD: ${{ secrets.E2E_CEO_PASSWORD }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      - name: Redact test-account emails from error-context snapshots
+        if: always()
+        run: npm run redact:error-context
+        env:
+          E2E_EMPLOYEE_EMAIL: ${{ secrets.E2E_EMPLOYEE_EMAIL }}
+          E2E_MANAGER_EMAIL: ${{ secrets.E2E_MANAGER_EMAIL }}
+          E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
+          E2E_CEO_EMAIL: ${{ secrets.E2E_CEO_EMAIL }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-preview-recovery-windows-credit-junit-${{ needs.guard.outputs.run_id }}
+          path: packages/e2e-tests/test-results/junit.xml
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Upload screenshots and redacted error-context (no traces)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-preview-recovery-windows-credit-context-${{ needs.guard.outputs.run_id }}
           path: |
             packages/e2e-tests/test-results/**/*.png
             packages/e2e-tests/test-results/**/error-context.md

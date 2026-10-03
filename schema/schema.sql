@@ -2444,7 +2444,16 @@ begin
     perform pg_advisory_xact_lock(hashtext('comp_day_ledger:' || v_employee_id::text));
 
     select r.is_recovery_day, r.holiday_name into v_is_recovery_day, v_holiday_name from is_recovery_eligible_day(v_country_code, p_work_date) r;
-    v_windowed := exists (select 1 from recovery_windows_policy_for(v_country_code, p_work_date));
+    -- Windowed when the policy covers the date, OR when the employee has windowed
+    -- clock evidence on it (a period that started under the policy and runs past
+    -- its end date): a manual daily total must never add a second award there.
+    v_windowed := exists (select 1 from recovery_windows_policy_for(v_country_code, p_work_date))
+      or exists (
+        select 1 from attendance_segments sg join attendance_sessions ws on ws.id = sg.session_id
+        where sg.employee_id = v_employee_id and ws.recovery_model = 'windowed'
+          and (sg.segment_start at time zone country_timezone(v_country_code))::date <= p_work_date
+          and coalesce((sg.segment_end at time zone country_timezone(v_country_code))::date, p_work_date) >= p_work_date
+      );
 
     -- One atomic upsert rather than a check-then-branch — the latter has
     -- the same TOCTOU shape as the race bulkRecordAttendance()'s old
@@ -5591,7 +5600,8 @@ begin
   -- that relocates it to country B (RLS's own WITH CHECK only requires
   -- holding hr_admin-or-ceo in the NEW country, which that dual-role user
   -- satisfies too).
-  if not has_role('hr_admin', null, old.country_code) then
+  if not has_role('hr_admin', null, old.country_code)
+     and coalesce(current_setting('app.recovery_policy_activation', true), '') <> 'on' then
     if new.policy_type is distinct from old.policy_type
       or new.version_no is distinct from old.version_no
       or new.effective_from is distinct from old.effective_from
@@ -7031,10 +7041,10 @@ create policy letters_delete on storage.objects for delete
 
 -- -----------------------------------------------------------------------------
 -- 17. Recovery Leave windows redesign (migration 20261108000000_recovery_windows_attendance_redesign.sql)
---     Tables, functions and triggers; the six replaced function bodies above
+--     Tables, functions and triggers; the seven replaced function bodies above
 --     (decide_leave_approval, is_entity_owner, adjust_recovery_credit_request,
 --     record_attendance_and_recovery, sync_attendance_recovery_for_day,
---     write_audit_log) are patched in place.
+--     write_audit_log, guard_policy_version_update) are patched in place.
 -- -----------------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------
@@ -7381,6 +7391,22 @@ revoke insert, update, delete, truncate on recovery_periods, recovery_windows, r
   recovery_alerts, attendance_session_corrections from authenticated;
 revoke all on recovery_processor_runs, recovery_processor_failures from authenticated;
 
+-- A one-row fingerprint of THIS database, created when the migration runs. The
+-- deployed app shows its first 8 characters on the HR Alerts page (read through
+-- recovery_scheduler_status()), and the verification SQL prints the same
+-- characters. If they match, the app is connected to the database the migration
+-- ran in — proof of which Supabase project the app and its jobs are bound to,
+-- with no credential or project address ever displayed. Deny-all table.
+create table if not exists recovery_deployment_info (
+  singleton    boolean primary key default true check (singleton),
+  fingerprint  uuid not null default gen_random_uuid(),
+  installed_at timestamptz not null default now(),
+  note         text not null default 'Recovery Leave windows migration 20261108000000'
+);
+insert into recovery_deployment_info (singleton) values (true) on conflict do nothing;
+alter table recovery_deployment_info enable row level security;
+revoke all on recovery_deployment_info from anon, authenticated;
+
 -- ---------------------------------------------------------------------
 -- 3. Small helpers
 -- ---------------------------------------------------------------------
@@ -7697,19 +7723,96 @@ begin
 end;
 $$;
 
+-- Is the 5-minute background processor VERIFIED to be running? True only when
+-- pg_cron has the active 'recovery-window-processor' job AND the processor has
+-- recorded a successful run started by that job within the last 15 minutes.
+-- Activating a windows policy requires it: without it, windows would close and
+-- alerts would appear only once a day. Internal helper (not callable by
+-- signed-in users); the HR screens read it through recovery_scheduler_status().
+create or replace function recovery_scheduler_ready()
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_job jsonb := null;
+  v_last timestamptz;
+  v_reasons text[] := '{}';
+begin
+  if to_regclass('cron.job') is null then
+    v_reasons := array_append(v_reasons, 'pg_cron is not installed in this database');
+  else
+    execute $q$select to_jsonb(j) from (select jobid, jobname, schedule, active, command from cron.job where jobname = 'recovery-window-processor' limit 1) j$q$ into v_job;
+    if v_job is null then
+      v_reasons := array_append(v_reasons, 'the recovery-window-processor job is not scheduled');
+    else
+      if not coalesce((v_job ->> 'active')::boolean, false) then
+        v_reasons := array_append(v_reasons, 'the recovery-window-processor job is not active');
+      end if;
+      if coalesce(v_job ->> 'command', '') not ilike '%recovery_process_due%' then
+        v_reasons := array_append(v_reasons, 'the scheduled job does not call recovery_process_due()');
+      end if;
+    end if;
+  end if;
+
+  select max(finished_at) into v_last
+  from recovery_processor_runs
+  where origin = 'pg_cron' and status = 'succeeded' and finished_at is not null;
+  if v_last is null then
+    v_reasons := array_append(v_reasons, 'no successful run started by pg_cron has been recorded yet');
+  elsif recovery_now() - v_last > interval '15 minutes' then
+    v_reasons := array_append(v_reasons, 'the last successful pg_cron run is older than 15 minutes');
+  end if;
+
+  return jsonb_build_object(
+    'ready', coalesce(array_length(v_reasons, 1), 0) = 0,
+    'reasons', to_jsonb(v_reasons),
+    'job', v_job - 'command',
+    'last_pg_cron_success_at', v_last
+  );
+end;
+$$;
+
+-- What the processor still has to finish for windowed work. The scheduler may
+-- only be retired when all of these are zero.
+create or replace function recovery_windowed_work_remaining()
+returns jsonb
+language sql stable security definer
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'open_periods', (select count(*) from recovery_periods where status = 'open'),
+    'open_windowed_sessions', (select count(*) from attendance_sessions where status = 'open' and recovery_model = 'windowed'),
+    'unresolved_failures', (select count(*) from recovery_processor_failures where resolved_at is null),
+    'unrouted_window_requests', (select count(*) from recovery_credit_requests where recovery_window_id is not null and status = 'submitted' and routing_issue is not null)
+  );
+$$;
+
 -- Controlled activation of a recovery_windows policy — the ONLY way one can
--- become active, so there is no SQL shortcut around the draft/approve flow:
---   * normal two-person rule (the activator is not the drafter) via the
---     existing guard_policy_version_update trigger,
---   * the activator must be a company-unscoped HR Admin of the country,
+-- become active, so there is no SQL shortcut around the draft/approve flow.
+-- GOVERNANCE (same as every other policy version): activation is allowed to
+--   * an HR Admin whose grant is not limited to one company (the exact
+--     predicate policy_versions' own RLS and guard_policy_version_update use:
+--     has_role('hr_admin', null, country) — a grant scoped to just that
+--     country is enough, no wider access is needed), or
+--   * the CEO/CTO under the same predicate, who — as for every other policy —
+--     may ACTIVATE a draft but never change its content: they can only use the
+--     effective date already set on the draft;
+--   * never the person who drafted it (two-person rule, also enforced by the
+--     guard trigger).
+-- WHAT IT ADDS, because the existing path cannot do it (an ordinary UPDATE
+-- cannot touch the version in force): a controlled effective date, ending the
+-- previous version the day before so the two never overlap, and a record of
+-- who/when. It also refuses unless the 5-minute processor is verified running.
 --   * the effective date must be tomorrow or later in the country's own time
---     zone (never retroactive, so no history is recalculated),
+--     zone (never retroactive, so no history is recalculated);
 --   * the version currently in force (V2) is ended the day before — never
---     edited or deleted — so the two never overlap,
---   * who/when/which effective date is recorded on the version.
--- Sessions already open at the effective point keep their legacy calculation;
--- the first clock-in on or after that date starts the first windowed period.
-create or replace function activate_recovery_windows_policy(p_policy_version_id uuid, p_effective_from date)
+--     edited or deleted;
+--   * a working period keeps the rules it started under: a session that
+--     restarts within the rest threshold of an earlier one keeps that
+--     session's model (see recovery_inherited_model()), so activation never
+--     starts the new rules in the middle of someone's period.
+create or replace function activate_recovery_windows_policy(p_policy_version_id uuid, p_effective_from date default null)
 returns void
 language plpgsql
 security definer
@@ -7719,9 +7822,13 @@ declare
   v_pv policy_versions%rowtype;
   v_prev policy_versions%rowtype;
   v_local_today date;
+  v_is_hr boolean;
+  v_is_exec boolean;
+  v_date date;
+  v_ready jsonb;
 begin
   if auth.uid() is null then
-    raise exception 'A signed-in HR Admin is required to activate a Recovery Leave policy.';
+    raise exception 'A signed-in HR Admin, CEO or CTO is required to activate a Recovery Leave policy.';
   end if;
   select * into v_pv from policy_versions where id = p_policy_version_id for update;
   if not found then raise exception 'Policy version not found.'; end if;
@@ -7729,51 +7836,62 @@ begin
     raise exception 'This is not a Recovery Leave windows policy.';
   end if;
   if v_pv.status <> 'draft' then raise exception 'Only a draft version can be activated.'; end if;
-  -- Activation sets the controlled effective date, which is policy CONTENT:
-  -- the existing guard_policy_version_update trigger lets only HR Admin change
-  -- content, so the CEO/CTO-only "activate but never edit" path cannot be used
-  -- here (it would have to change effective_from).
-  if not has_role('hr_admin', null, v_pv.country_code) then
-    raise exception 'Only a company-unscoped HR Admin for % may activate this policy (and not the person who drafted it).', v_pv.country_code;
+
+  v_is_hr := has_role('hr_admin', null, v_pv.country_code);
+  v_is_exec := has_role('ceo', null, v_pv.country_code) or has_role('cto', null, v_pv.country_code);
+  if not (v_is_hr or v_is_exec) then
+    raise exception 'Only a company-unscoped HR Admin, CEO or CTO for % may activate this policy (and not the person who drafted it).', v_pv.country_code;
   end if;
   if auth.uid() = v_pv.created_by then
     raise exception 'A policy version must be activated by someone other than who drafted it.';
   end if;
 
+  v_date := coalesce(p_effective_from, v_pv.effective_from);
+  if not v_is_hr and v_date is distinct from v_pv.effective_from then
+    raise exception 'The CEO/CTO may activate a drafted policy only on the effective date already set on the draft (%) — ask an HR Admin to change the date.', v_pv.effective_from;
+  end if;
+
   v_local_today := (recovery_now() at time zone country_timezone(v_pv.country_code))::date;
-  if p_effective_from is null or p_effective_from <= v_local_today then
+  if v_date is null or v_date <= v_local_today then
     raise exception 'The effective date must be after today (%) in this country''s time zone, so no history is recalculated.', v_local_today;
   end if;
   if exists (
     select 1 from policy_versions o
     where o.country_code = v_pv.country_code and o.policy_type = 'overtime_rules' and o.status = 'active'
-      and o.id <> v_pv.id and o.effective_from >= p_effective_from
+      and o.id <> v_pv.id and o.effective_from >= v_date
   ) then
-    raise exception 'An active version already starts on or after %. Resolve that first.', p_effective_from;
+    raise exception 'An active version already starts on or after %. Resolve that first.', v_date;
+  end if;
+
+  v_ready := recovery_scheduler_ready();
+  if not coalesce((v_ready ->> 'ready')::boolean, false) then
+    raise exception 'The 5-minute Recovery Leave processor is not verified as running (%). Enable it with supabase/manual-sql/recovery_windows_30_enable_scheduler.sql and wait for a successful run before activating.',
+      (select string_agg(x, '; ') from jsonb_array_elements_text(v_ready -> 'reasons') x);
   end if;
 
   select * into v_prev from policy_versions o
   where o.country_code = v_pv.country_code and o.policy_type = 'overtime_rules' and o.status = 'active'
-    and o.id <> v_pv.id and o.effective_from < p_effective_from
-    and coalesce(o.effective_to, 'infinity'::date) >= p_effective_from
+    and o.id <> v_pv.id and o.effective_from < v_date
+    and coalesce(o.effective_to, 'infinity'::date) >= v_date
   order by o.effective_from desc limit 1
   for update;
 
   perform set_config('app.recovery_policy_activation', 'on', true);
   if v_prev.id is not null then
-    update policy_versions set effective_to = p_effective_from - 1 where id = v_prev.id;
+    update policy_versions set effective_to = v_date - 1 where id = v_prev.id;
   end if;
   update policy_versions
-  set effective_from = p_effective_from,
+  set effective_from = v_date,
       effective_to = null,
       status = 'active',
       activation_record = jsonb_build_object(
         'activated_by', auth.uid(),
         'activated_at', recovery_now(),
-        'effective_from', p_effective_from,
+        'effective_from', v_date,
         'supersedes_version_id', v_prev.id,
         'supersedes_version_no', v_prev.version_no,
-        'supersedes_ended_on', case when v_prev.id is not null then p_effective_from - 1 else null end
+        'supersedes_ended_on', case when v_prev.id is not null then v_date - 1 else null end,
+        'scheduler_verified', v_ready - 'job'
       )
   where id = v_pv.id;
   perform set_config('app.recovery_policy_activation', 'off', true);
@@ -7781,18 +7899,25 @@ end;
 $$;
 
 -- The controlled way to STOP using the window model for new work (the "disable"
--- switch), without deleting or rewriting anything:
+-- switch), without deleting or rewriting anything. NEW capability (no policy
+-- version could be ended through the app before): allowed to the same people
+-- who may activate (HR Admin or CEO/CTO, grant not limited to one company);
+-- it only moves an end date to a FUTURE day, so it can never recalculate
+-- history or touch evidence.
 --   * the windows version gets an end date (never earlier than tomorrow in the
---     country's own time zone, so no history is recalculated);
---   * clock-ins that start after that date are stamped 'legacy' again, so no NEW
---     working period is ever created;
+--     country's own time zone);
+--   * a clock-in after that date is stamped 'legacy' again — EXCEPT a restart
+--     within the rest threshold of a windowed session, which stays in the same
+--     working period under the rules it started with (recovery_inherited_model),
+--     so a period is never split and never awarded twice;
 --   * every existing session, period, window, request, credit and audit row is
---     left exactly as it is — periods already running finish under the rules
---     they started with, and the background processor keeps finishing them;
+--     left exactly as it is; periods already running finish under their own
+--     rules and the background processor KEEPS RUNNING until they are
+--     finalized — do not unschedule it before recovery_windowed_work_remaining()
+--     is all zero (the disable script enforces this);
 --   * the version that was in force before is re-drafted (a fresh DRAFT copy of
---     its text, next version number) so HR can reactivate the earlier wording
---     through the normal two-person flow if they want it back on screen.
--- Nothing is reactivated automatically.
+--     its text, next version number) so it can be reactivated through the
+--     normal two-person flow. Nothing is reactivated automatically.
 create or replace function deactivate_recovery_windows_policy(p_policy_version_id uuid, p_last_effective_date date)
 returns void
 language plpgsql
@@ -7806,15 +7931,15 @@ declare
   v_next_no int;
 begin
   if auth.uid() is null then
-    raise exception 'A signed-in HR Admin is required to deactivate a Recovery Leave policy.';
+    raise exception 'A signed-in HR Admin, CEO or CTO is required to deactivate a Recovery Leave policy.';
   end if;
   select * into v_pv from policy_versions where id = p_policy_version_id for update;
   if not found then raise exception 'Policy version not found.'; end if;
   if v_pv.policy_type <> 'overtime_rules' or v_pv.payload ->> 'model' is distinct from 'recovery_windows' or v_pv.status <> 'active' then
     raise exception 'This is not an active Recovery Leave windows policy.';
   end if;
-  if not has_role('hr_admin', null, v_pv.country_code) then
-    raise exception 'Only a company-unscoped HR Admin for % may deactivate this policy.', v_pv.country_code;
+  if not (has_role('hr_admin', null, v_pv.country_code) or has_role('ceo', null, v_pv.country_code) or has_role('cto', null, v_pv.country_code)) then
+    raise exception 'Only a company-unscoped HR Admin, CEO or CTO for % may deactivate this policy.', v_pv.country_code;
   end if;
   v_local_today := (recovery_now() at time zone country_timezone(v_pv.country_code))::date;
   if p_last_effective_date is null or p_last_effective_date <= v_local_today then
@@ -7824,11 +7949,13 @@ begin
     raise exception 'This version already ends on %.', v_pv.effective_to;
   end if;
 
+  perform set_config('app.recovery_policy_activation', 'on', true);
   update policy_versions
   set effective_to = p_last_effective_date,
       activation_record = coalesce(activation_record, '{}'::jsonb) || jsonb_build_object(
         'deactivated_by', auth.uid(), 'deactivated_at', recovery_now(), 'last_effective_date', p_last_effective_date)
   where id = v_pv.id;
+  perform set_config('app.recovery_policy_activation', 'off', true);
 
   select * into v_prev from policy_versions where id = (v_pv.activation_record ->> 'supersedes_version_id')::uuid;
   if v_prev.id is not null then
@@ -8119,6 +8246,15 @@ begin
         v_group_rules := v_existing.rules; v_group_pv := v_existing.policy_version_id;
       else
         select * into v_pol from recovery_windows_policy_for(v_country, (r.segment_start at time zone v_tz)::date);
+        if v_pol.rules is null then
+          -- A correction can move a period's start to an instant the policy
+          -- no longer (or not yet) covers. The employee's nearest stored period
+          -- keeps its own policy version, so the period is never dropped.
+          select p.rules, p.policy_version_id into v_pol
+          from recovery_periods p
+          where p.employee_id = p_employee_id
+          order by abs(extract(epoch from (p.started_at - r.segment_start))) limit 1;
+        end if;
         if v_pol.rules is null then
           raise exception 'No active Recovery Leave windows policy covers % for country % — cannot derive this working period.', (r.segment_start at time zone v_tz)::date, v_country;
         end if;
@@ -8942,6 +9078,69 @@ $$;
 --    never fails the employee's own clock action.
 -- ---------------------------------------------------------------------
 
+-- The rest threshold (hours) that governs "is this the same working period?"
+-- for an employee: the one stored with their latest period snapshot, else the
+-- latest windows policy version of their country, else 8.
+create or replace function recovery_rest_gap_hours(p_employee_id uuid, p_country text, p_at timestamptz)
+returns numeric
+language sql stable security definer
+set search_path = public
+as $$
+  select coalesce(
+    (select (p.rules ->> 'rest_gap_hours')::numeric from recovery_periods p
+       where p.employee_id = p_employee_id and p.status <> 'superseded' and p.started_at <= p_at
+       order by p.started_at desc limit 1),
+    (select (pv.payload -> 'rules' ->> 'rest_gap_hours')::numeric from policy_versions pv
+       where pv.country_code = p_country and pv.policy_type = 'overtime_rules' and pv.payload ->> 'model' = 'recovery_windows'
+       order by pv.version_no desc limit 1),
+    8::numeric);
+$$;
+
+-- CONTINUITY ACROSS POLICY CHANGES. A working period is one unit: it keeps the
+-- calculation model (and, through its stored snapshot, the policy version and
+-- rules) it started with, however the policy status changes meanwhile. So a
+-- clock-in that restarts LESS than the rest threshold after the end of an
+-- earlier session of the same employee (or, for a retroactive HR entry, ends
+-- less than the threshold before a later one) INHERITS that session's model:
+--   * before activation: a restart within the threshold of a legacy session
+--     stays legacy — the new policy never starts mid-period;
+--   * after deactivation / end date: a restart within the threshold of a
+--     windowed session stays windowed — the period is never split in two, and
+--     its remaining work is judged by the rules it started under.
+-- Only a rest of the threshold or more lets the current policy decide.
+create or replace function recovery_inherited_model(p_employee_id uuid, p_country text, p_start timestamptz, p_end timestamptz)
+returns text
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_gap interval := make_interval(secs => recovery_rest_gap_hours(p_employee_id, p_country, p_start) * 3600);
+  v_model text;
+begin
+  select q.recovery_model into v_model
+  from (
+    select s.recovery_model,
+           case when s.clock_out_at is null then 'infinity'::timestamptz
+                else coalesce(greatest(s.clock_out_at, (select max(g.segment_end) from attendance_segments g where g.session_id = s.id)), s.clock_out_at) end as ses_end
+    from attendance_sessions s
+    where s.employee_id = p_employee_id and s.clock_in_at < p_start
+  ) q
+  where q.ses_end > p_start - v_gap
+  order by q.ses_end desc
+  limit 1;
+  if v_model is not null then return v_model; end if;
+
+  if p_end is not null then
+    select s.recovery_model into v_model
+    from attendance_sessions s
+    where s.employee_id = p_employee_id and s.clock_in_at > p_start and s.clock_in_at - p_end < v_gap
+    order by s.clock_in_at asc
+    limit 1;
+  end if;
+  return v_model;
+end;
+$$;
+
 -- Fixes each session's calculation model at insert. The value is always
 -- derived here — an inserted value is ignored, so it cannot be spoofed.
 create or replace function recovery_session_assign_model()
@@ -8952,9 +9151,17 @@ set search_path = public
 as $$
 declare
   v_country text;
+  v_inherited text;
 begin
   select country_code into v_country from employees where id = new.employee_id;
-  if v_country is not null and exists (
+  if v_country is null then
+    new.recovery_model := 'legacy';
+    return new;
+  end if;
+  v_inherited := recovery_inherited_model(new.employee_id, v_country, new.clock_in_at, new.clock_out_at);
+  if v_inherited is not null then
+    new.recovery_model := v_inherited;
+  elsif exists (
     select 1 from recovery_windows_policy_for(v_country, (new.clock_in_at at time zone country_timezone(v_country))::date)
   ) then
     new.recovery_model := 'windowed';
@@ -9414,7 +9621,12 @@ begin
     'stale', v_windowed_active and v_waiting > 0 and (v_last_ok is null or recovery_now() - v_last_ok > interval '20 minutes'),
     'pg_cron_installed', v_cron_installed,
     'pg_cron_job', v_job,
-    'expected_interval_minutes', 5
+    'expected_interval_minutes', 5,
+    -- Verified, not assumed: the job exists, is active and a recent run it started succeeded.
+    'database_fingerprint', (select left(fingerprint::text, 8) from recovery_deployment_info limit 1),
+    'scheduler_ready', recovery_scheduler_ready(),
+    -- What the processor still has to finish; the scheduler may only be retired when all are zero.
+    'work_remaining', recovery_windowed_work_remaining()
   );
 end;
 $$;
@@ -9687,7 +9899,11 @@ revoke execute on function
   recovery_post_window_ledger(uuid, uuid),
   recovery_process_due(text, timestamptz, int),
   user_has_role(uuid, app_role, uuid, text),
-  recovery_windows_policy_for(text, date)
+  recovery_windows_policy_for(text, date),
+  recovery_scheduler_ready(),
+  recovery_windowed_work_remaining(),
+  recovery_rest_gap_hours(uuid, text, timestamptz),
+  recovery_inherited_model(uuid, text, timestamptz, timestamptz)
 from public, anon, authenticated;
 
 do $grants$

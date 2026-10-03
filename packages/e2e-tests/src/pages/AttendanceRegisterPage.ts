@@ -56,4 +56,57 @@ export class AttendanceRegisterPage {
     const row = await this.uniqueRowFor(employeeName);
     await row.getByRole("button", { name: "Edit", exact: true }).click();
   }
+
+  /** The employee id the register row carries — the stable handle for the row's own detail panel and form ids. */
+  async employeeIdOf(employeeName: string): Promise<string> {
+    const row = await this.uniqueRowFor(employeeName);
+    const id = await row.getAttribute("data-employee-id");
+    if (!id) throw new Error(`The register row for "${employeeName}" has no data-employee-id`);
+    return id;
+  }
+
+  /** Expands the row's evidence panel (sessions, modes, corrections). */
+  async expandRow(employeeName: string): Promise<void> {
+    const row = await this.uniqueRowFor(employeeName);
+    await row.getByRole("button", { name: new RegExp(escapeForRegExp(employeeName)) }).first().click();
+  }
+
+  detailFor(employeeId: string) {
+    return this.page.locator(`#detail-${employeeId}`);
+  }
+
+  /**
+   * HR "Add missing attendance (recorded by HR)": exact wall-clock times in the EMPLOYEE'S country time zone, a work
+   * mode, and — for site work — a project and a lead, with the required reason. Waits for the save confirmation.
+   */
+  async addMissingAttendance(
+    employeeName: string,
+    input: { date: string; start: string; end: string; mode: "office" | "wfh" | "site_work" | "client_meeting" | "business_travel"; project?: string; leadName?: string; reason: string },
+  ): Promise<void> {
+    const employeeId = await this.employeeIdOf(employeeName);
+    await this.openEdit(employeeName);
+    const detail = this.detailFor(employeeId);
+    await detail.locator(`#ms-${employeeId}`).fill(`${input.date}T${input.start}`);
+    await detail.locator(`#me-${employeeId}`).fill(`${input.date}T${input.end}`);
+    await detail.locator(`#mm-${employeeId}`).selectOption(input.mode);
+    if (input.project) await detail.locator(`#mp-${employeeId}`).fill(input.project);
+    if (input.leadName) await detail.locator(`#ml-${employeeId}`).selectOption({ label: input.leadName });
+    await detail.locator(`#mr-${employeeId}`).fill(input.reason);
+    await detail.getByRole("button", { name: "Add attendance" }).click();
+    await expect(this.page.getByText("Saved. The register will refresh.").first()).toBeVisible({ timeout: 20_000 });
+  }
+
+  /** HR correction of an existing session's clock-out (required reason). The original and corrected times are both kept. */
+  async correctClockOut(employeeName: string, date: string, newEndLocal: string, reason: string): Promise<void> {
+    const employeeId = await this.employeeIdOf(employeeName);
+    await this.openEdit(employeeName);
+    const detail = this.detailFor(employeeId);
+    const save = detail.getByRole("button", { name: "Save correction" }).first();
+    await expect(save).toBeDisabled(); // a reason is required before a correction can be saved
+    await detail.getByLabel(/^Clock-out \(/).first().fill(`${date}T${newEndLocal}`);
+    await detail.getByLabel(/^Reason \(required/).first().fill(reason);
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(this.page.getByText("Saved. The register will refresh.").first()).toBeVisible({ timeout: 20_000 });
+  }
 }

@@ -152,19 +152,71 @@ export async function createRecoveryWindowsPolicyDrafts(): Promise<RecoveryWindo
 
 const activateSchema = z.object({
   policyVersionId: z.string().uuid(),
-  effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose the effective date."),
+  /** HR Admin chooses the date. The CEO/CTO omit it: they may only activate on the date HR already set on the draft. */
+  effectiveFrom: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Choose the effective date.")
+    .nullish(),
 });
 
-/** The ONLY activation path for a window-based Recovery Leave policy; the database enforces the controlled effective date. */
+/**
+ * The ONLY activation path for a window-based Recovery Leave policy. Who may use it is the same as for every other policy
+ * version (HR Admin, or CEO/CTO activating without changing the draft; never the drafter) — the database enforces that,
+ * the controlled effective date, and that the 5-minute processor is verified running.
+ */
 export async function activateRecoveryWindowsPolicy(input: z.input<typeof activateSchema>): Promise<RecoveryActionResult> {
   const parsed = activateSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   const supabase = await createClient();
   const { error } = await supabase.rpc("activate_recovery_windows_policy", {
     p_policy_version_id: parsed.data.policyVersionId,
-    p_effective_from: parsed.data.effectiveFrom,
+    p_effective_from: parsed.data.effectiveFrom ?? null,
   });
   revalidatePath("/policies");
+  revalidatePath(`/policies/${parsed.data.policyVersionId}`);
+  revalidatePath("/alerts");
+  return { error: error?.message ?? null };
+}
+
+const deactivateSchema = z.object({
+  policyVersionId: z.string().uuid(),
+  lastEffectiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose the last day the window rules apply."),
+});
+
+/** Stops the window model for NEW working periods from the day after the chosen date. Deletes and rewrites nothing. */
+export async function deactivateRecoveryWindowsPolicy(input: z.input<typeof deactivateSchema>): Promise<RecoveryActionResult> {
+  const parsed = deactivateSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("deactivate_recovery_windows_policy", {
+    p_policy_version_id: parsed.data.policyVersionId,
+    p_last_effective_date: parsed.data.lastEffectiveDate,
+  });
+  revalidatePath("/policies");
+  revalidatePath(`/policies/${parsed.data.policyVersionId}`);
+  revalidatePath("/alerts");
+  return { error: error?.message ?? null };
+}
+
+const plannedDateSchema = z.object({
+  policyVersionId: z.string().uuid(),
+  plannedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose the planned effective date."),
+});
+
+/**
+ * HR Admin sets the planned effective date ON THE DRAFT (the existing draft-edit path: a plain update that RLS and
+ * guard_policy_version_update already restrict to HR Admin). The CEO/CTO then activate on exactly that date — they can
+ * never change it.
+ */
+export async function setRecoveryWindowsDraftDate(input: z.input<typeof plannedDateSchema>): Promise<RecoveryActionResult> {
+  const parsed = plannedDateSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("policy_versions")
+    .update({ effective_from: parsed.data.plannedDate })
+    .eq("id", parsed.data.policyVersionId)
+    .eq("status", "draft");
   revalidatePath(`/policies/${parsed.data.policyVersionId}`);
   return { error: error?.message ?? null };
 }

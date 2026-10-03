@@ -5,6 +5,13 @@
 -- migration is DORMANT: it must not change how any clock-in is calculated until a windows
 -- policy is deliberately activated (STEP 5).
 
+-- 2.0  WHICH DATABASE IS THIS?  The migration stamped this database with a random fingerprint. The deployed app
+--      shows the same first 8 characters on its HR "Alerts" page (banner: "Database fingerprint"). If they match, the
+--      app and its scheduled jobs are bound to THIS Supabase project (Enginious HR Engine_V2) and not to any other.
+--      Nothing secret is shown. If the app shows a different value (or none), STOP: the app's Supabase settings in Vercel
+--      point somewhere else.
+select left(fingerprint::text, 8) as database_fingerprint, installed_at from recovery_deployment_info;
+
 -- 2.1  New tables exist and ROW LEVEL SECURITY is on for every one.  Expect rls = true on all 8 rows.
 select c.relname as table_name, c.relrowsecurity as rls
 from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -65,10 +72,20 @@ where trigger_schema = 'public' and trigger_name in (
   'attendance_segments_recovery_engine', 'attendance_sessions_recovery_engine')
 group by 1, 2 order by 1, 2;
 
--- 2.9  Existing behaviour for the replaced functions is intact: they exist with unchanged signatures.  Expect 6 rows.
+-- 2.9  Existing behaviour for the replaced functions is intact: they exist with unchanged signatures.  Expect 7 rows.
 select p.proname, pg_get_function_identity_arguments(p.oid) as args
 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public' and p.proname in (
   'decide_leave_approval', 'is_entity_owner', 'adjust_recovery_credit_request',
-  'record_attendance_and_recovery', 'sync_attendance_recovery_for_day', 'write_audit_log')
+  'record_attendance_and_recovery', 'sync_attendance_recovery_for_day', 'write_audit_log', 'guard_policy_version_update')
 order by 1;
+
+-- 2.10 The two-person rule is still enforced by the (patched) policy guard.  Expect true / true.
+select pg_get_functiondef('public.guard_policy_version_update()'::regprocedure) like '%someone other than who drafted it%' as drafter_cannot_activate,
+       pg_get_functiondef('public.guard_policy_version_update()'::regprocedure) like '%app.recovery_policy_activation%' as only_the_controlled_activation_may_set_dates;
+
+-- 2.11 THE 5-MINUTE PROCESSOR (required before ANY policy is activated). Right after the migration this is expected to
+--      say ready = false with reasons. After you run recovery_windows_30_enable_scheduler.sql and ~10 minutes pass it must
+--      say ready = true. activate_recovery_windows_policy() refuses to run until it does.
+select recovery_scheduler_ready() as scheduler_ready;
+select recovery_windowed_work_remaining() as work_the_processor_still_has_to_finish;
