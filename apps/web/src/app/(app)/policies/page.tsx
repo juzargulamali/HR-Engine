@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CreatePhase2bDraftsButton } from "./create-phase2b-drafts-button";
+import { CreateRecoveryWindowsDraftsButton } from "./create-recovery-windows-drafts-button";
 import { PolicyVersionsTable, type PolicyVersionRow } from "./policy-versions-table";
 
 export default async function PoliciesPage() {
@@ -16,7 +17,7 @@ export default async function PoliciesPage() {
   const [{ data: policies }, { data: countries }, { data: phase2bStatus }] = await Promise.all([
     supabase
       .from("policy_versions")
-      .select("id, country_code, policy_type, version_no, status, effective_from, effective_to, created_by")
+      .select("id, country_code, policy_type, version_no, status, effective_from, effective_to, created_by, payload")
       .order("country_code")
       .order("policy_type")
       .order("version_no", { ascending: false }),
@@ -42,6 +43,9 @@ export default async function PoliciesPage() {
   const countryName = new Map((countries ?? []).map((c) => [c.code, c.name]));
   const canDraftAnywhere = (countries ?? []).some((c) => canDraftPolicy(session.grants, c.code));
   const phase2bAllCreated = (phase2bStatus ?? []).length > 0 && (phase2bStatus ?? []).every((r) => r.status !== "not_created");
+  const isWindowsPayload = (payload: Record<string, unknown>) => payload?.model === "recovery_windows";
+  const windowsCountries = new Set((policies ?? []).filter((p) => p.policy_type === "overtime_rules" && isWindowsPayload(p.payload)).map((p) => p.country_code));
+  const windowsAllCreated = ["AE", "SA", "PL"].every((c) => windowsCountries.has(c));
 
   // The query above orders each (country_code, policy_type) group by
   // version_no descending, so the first row encountered per group is that
@@ -69,6 +73,7 @@ export default async function PoliciesPage() {
       hasDependentConfig: versionIdsWithLeaveTypes.has(p.id),
       isDrafter,
       isLatest,
+      isWindowsPolicy: p.policy_type === "overtime_rules" && isWindowsPayload(p.payload),
     };
   });
 
@@ -94,6 +99,7 @@ export default async function PoliciesPage() {
       </div>
 
       {canDraftAnywhere ? <CreatePhase2bDraftsButton allCreated={phase2bAllCreated} /> : null}
+      {canDraftAnywhere ? <CreateRecoveryWindowsDraftsButton allCreated={windowsAllCreated} /> : null}
 
       <Card>
         <CardHeader>

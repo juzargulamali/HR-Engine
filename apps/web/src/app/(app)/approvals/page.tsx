@@ -8,6 +8,9 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
 import { DecisionButtons } from "./decision-buttons";
 import { RecoveryCreditDecisionForm } from "./recovery-credit-decision-form";
+import { RecoveryWindowEvidence, type WindowEvidenceData } from "./recovery-window-evidence";
+import { getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
+import { CLASSIFICATION_LABELS, ROUTE_LABELS, formatHoursMinutes } from "@/lib/recovery/labels";
 
 export default async function ApprovalsPage() {
   const session = await getCurrentSession();
@@ -61,7 +64,7 @@ export default async function ApprovalsPage() {
         ? supabase
             .from("recovery_credit_requests")
             .select(
-              "id, employee_id, attendance_record_id, work_date, event_type, proposed_days, correction_reason, checked_with, corrected_at, work_mode, project_name, project_lead_employee_id, applicant_route, needs_policy_review, routing_issue",
+              "id, employee_id, attendance_record_id, segment_id, work_date, event_type, proposed_days, correction_reason, checked_with, corrected_at, work_mode, project_name, project_lead_employee_id, applicant_route, needs_policy_review, routing_issue, recovery_window_id, window_revision_no, adjusts_request_id, consumption_ack_at",
             )
             .in("id", recoveryCreditIds)
         : Promise.resolve({ data: [] as never[] }),
@@ -101,6 +104,99 @@ export default async function ApprovalsPage() {
     const e = employeeById.get(id);
     return e ? `${e.first_name} ${e.last_name}` : "—";
   };
+
+  // ---- Window-based Recovery Leave requests: the full evidence an approver needs ----
+  const windowRequests = (recoveryRequests ?? []).filter((r) => r.recovery_window_id);
+  const windowIds = [...new Set(windowRequests.map((r) => r.recovery_window_id!))];
+  const [{ data: windowRows }, { data: allocationRows }, { data: revisionRows }, { data: stepRows }] = await Promise.all([
+    windowIds.length > 0
+      ? supabase
+          .from("recovery_windows")
+          .select(
+            "id, period_id, window_index, window_start, window_end, starting_local_date, classification, holiday_name, recorded_seconds, status, closed_reason, entitlement_days, review_flags, hr_verification_required, hr_verified_at, hr_verification_note, revision_no, policy_version_id",
+          )
+          .in("id", windowIds)
+      : Promise.resolve({ data: [] as never[] }),
+    windowIds.length > 0
+      ? supabase
+          .from("recovery_window_allocations")
+          .select("id, window_id, session_id, work_mode, project_name, project_lead_employee_id, alloc_start, alloc_end, seconds")
+          .in("window_id", windowIds)
+          .order("alloc_start")
+      : Promise.resolve({ data: [] as never[] }),
+    windowIds.length > 0
+      ? supabase
+          .from("recovery_window_revisions")
+          .select("window_id, revision_no, recorded_seconds, entitlement_days, reason, origin, created_at")
+          .in("window_id", windowIds)
+          .order("revision_no")
+      : Promise.resolve({ data: [] as never[] }),
+    windowRequests.length > 0
+      ? supabase
+          .from("approvals")
+          .select("entity_id, step_order, decision, queue_roles, approver_id")
+          .eq("entity_type", "recovery_credit")
+          .in("entity_id", windowRequests.map((r) => r.id))
+          .order("step_order")
+      : Promise.resolve({ data: [] as never[] }),
+  ]);
+  const periodIds = [...new Set((windowRows ?? []).map((w) => w.period_id))];
+  const sessionIdsForWindows = [...new Set((allocationRows ?? []).map((a) => a.session_id))];
+  const policyIds = [...new Set((windowRows ?? []).map((w) => w.policy_version_id))];
+  const [{ data: periodRows }, { data: sessionHrRows }, { data: policyRows }, { data: correctionRows }] = await Promise.all([
+    periodIds.length > 0 ? supabase.from("recovery_periods").select("id, started_at, rules").in("id", periodIds) : Promise.resolve({ data: [] as never[] }),
+    sessionIdsForWindows.length > 0 ? supabase.from("attendance_sessions").select("id, recorded_by_hr").in("id", sessionIdsForWindows) : Promise.resolve({ data: [] as never[] }),
+    policyIds.length > 0 ? supabase.from("policy_versions").select("id, version_no").in("id", policyIds) : Promise.resolve({ data: [] as never[] }),
+    sessionIdsForWindows.length > 0
+      ? supabase
+          .from("attendance_session_corrections")
+          .select("id, session_id, reason, created_at, original_clock_in_at, original_clock_out_at, corrected_clock_in_at, corrected_clock_out_at, actor_id")
+          .in("session_id", sessionIdsForWindows)
+          .order("created_at")
+      : Promise.resolve({ data: [] as never[] }),
+  ]);
+  const leadAndActorIds = [
+    ...new Set([
+      ...(allocationRows ?? []).map((a) => a.project_lead_employee_id).filter((id): id is string => !!id),
+    ]),
+  ];
+  const actorUserIds = [...new Set((correctionRows ?? []).map((c) => c.actor_id))];
+  const [{ data: leadEmployees }, { data: actorEmployees }] = await Promise.all([
+    leadAndActorIds.length > 0 ? supabase.from("employees").select("id, first_name, last_name").in("id", leadAndActorIds) : Promise.resolve({ data: [] as never[] }),
+    actorUserIds.length > 0 ? supabase.from("employees").select("user_id, first_name, last_name").in("user_id", actorUserIds) : Promise.resolve({ data: [] as never[] }),
+  ]);
+  const leadNameById = new Map((leadEmployees ?? []).map((e) => [e.id, `${e.first_name} ${e.last_name}`]));
+  const actorNameByUser = new Map((actorEmployees ?? []).map((e) => [e.user_id, `${e.first_name} ${e.last_name}`]));
+  const windowById = new Map((windowRows ?? []).map((w) => [w.id, w]));
+  const periodById = new Map((periodRows ?? []).map((p) => [p.id, p]));
+  const policyVersionById = new Map((policyRows ?? []).map((p) => [p.id, p.version_no]));
+  const hrSessionIds = new Set((sessionHrRows ?? []).filter((s) => s.recorded_by_hr).map((s) => s.id));
+  const blockerEntries = await Promise.all(
+    windowRequests.map(async (r) => [r.id, (await supabase.rpc("get_recovery_request_blocker", { p_request_id: r.id })).data ?? null] as const),
+  );
+  const blockerByRequest = new Map(blockerEntries);
+
+  // Original hours for SELF-CLOCK requests of the previous (same-day) calculation: summed from the
+  // employee's own clock segments for that local date — previously these showed a blank "—".
+  const legacySelfClock = (recoveryRequests ?? []).filter((r) => r.attendance_record_id === null && !r.recovery_window_id);
+  const legacyEmployeeIds = [...new Set(legacySelfClock.map((r) => r.employee_id))];
+  const { data: legacySegments } =
+    legacyEmployeeIds.length > 0
+      ? await supabase
+          .from("attendance_segments")
+          .select("employee_id, segment_start, segment_end")
+          .in("employee_id", legacyEmployeeIds)
+          .not("segment_end", "is", null)
+          .gte("segment_start", new Date(Math.min(...legacySelfClock.map((r) => new Date(`${r.work_date}T00:00:00Z`).getTime())) - 26 * 3600_000).toISOString())
+          .lte("segment_start", new Date(Math.max(...legacySelfClock.map((r) => new Date(`${r.work_date}T00:00:00Z`).getTime())) + 50 * 3600_000).toISOString())
+      : { data: [] as { employee_id: string; segment_start: string; segment_end: string | null }[] };
+  function selfClockRecordedHours(request: { employee_id: string; work_date: string }): number | null {
+    const tz = resolveCountryTimeZone(employeeById.get(request.employee_id)?.country_code);
+    const seconds = (legacySegments ?? [])
+      .filter((sg) => sg.employee_id === request.employee_id && sg.segment_end && getBusinessDateString(tz, new Date(sg.segment_start)) === request.work_date)
+      .reduce((sum, sg) => sum + (new Date(sg.segment_end!).getTime() - new Date(sg.segment_start).getTime()) / 1000, 0);
+    return seconds > 0 ? Math.round((seconds / 3600) * 100) / 100 : null;
+  }
 
   // "Insufficient balance" is a warning shown to the approver, not a block
   // on submission — nothing stops a manager from knowingly approving
@@ -215,6 +311,14 @@ export default async function ApprovalsPage() {
     return session!.grants.some((g) => g.role === "hr_admin" && (g.companyId === null || g.companyId === companyId));
   }
 
+  const EVENT_TYPE_CELL: Record<string, string> = {
+    standard: "Weekend / holiday",
+    overnight: "Overnight",
+    window: "24-hour window",
+    window_top_up: "Window top-up",
+    window_reduction: "Window reduction",
+  };
+
   const APPLICANT_ROUTE_LABELS: Record<string, string> = {
     employee_lead_then_hr: "Project lead → HR",
     manager_hr_direct: "Manager → HR",
@@ -271,8 +375,8 @@ export default async function ApprovalsPage() {
   // attendance_records row to read original hours from; that evidence lives
   // in attendance_segments instead, which the Approvals UI does not yet
   // surface (see task tracking the 4-tier routing UI).
-  function recoveryHours(recoveryRequest: { attendance_record_id: string | null; event_type: string }): number | null {
-    if (recoveryRequest.attendance_record_id === null) return null;
+  function recoveryHours(recoveryRequest: { attendance_record_id: string | null; event_type: string; employee_id: string; work_date: string }): number | null {
+    if (recoveryRequest.attendance_record_id === null) return selfClockRecordedHours(recoveryRequest);
     const attendance = attendanceById.get(recoveryRequest.attendance_record_id);
     const hours = recoveryRequest.event_type === "overnight" ? attendance?.active_hours_after_midnight : attendance?.hours_worked;
     return hours === null || hours === undefined ? null : Number(hours);
@@ -550,26 +654,120 @@ export default async function ApprovalsPage() {
                   const originalHours = recoveryHours(recoveryRequest);
                   const isSelfClock = recoveryRequest.attendance_record_id === null;
                   const companyId = employeeById.get(recoveryRequest.employee_id)?.company_id;
+                  const windowRow = recoveryRequest.recovery_window_id ? windowById.get(recoveryRequest.recovery_window_id) : undefined;
+                  const period = windowRow ? periodById.get(windowRow.period_id) : undefined;
+                  // The lead's own step (step 1 of "project lead, then HR") is a provisional release, not the final
+                  // approval, so the final-approval blockers only apply to every other step.
+                  const isFinalStep = !(recoveryRequest.applicant_route === "employee_lead_then_hr" && a.step_order === 1);
+                  const blocker = windowRow && isFinalStep ? (blockerByRequest.get(recoveryRequest.id) ?? null) : null;
+                  const employeeCountry = employeeById.get(recoveryRequest.employee_id)?.country_code ?? "";
+                  const windowEvidence: WindowEvidenceData | null =
+                    windowRow && period
+                      ? {
+                          requestId: recoveryRequest.id,
+                          eventType: recoveryRequest.event_type,
+                          proposedDays: Number(recoveryRequest.proposed_days),
+                          applicantRoute: recoveryRequest.applicant_route,
+                          routingIssue: recoveryRequest.routing_issue,
+                          needsAcknowledgement: recoveryRequest.event_type === "window_reduction" && !recoveryRequest.consumption_ack_at && (blocker ?? "").includes("already been used"),
+                          blocker,
+                          canVerify: isHrAdminFor(companyId),
+                          timeZone: resolveCountryTimeZone(employeeCountry),
+                          countryCode: employeeCountry,
+                          policyVersionLabel: policyVersionById.has(windowRow.policy_version_id) ? `version ${policyVersionById.get(windowRow.policy_version_id)}` : "(version not visible to you)",
+                          rulesSummary: (() => {
+                            const rules = period.rules as { normal_day?: { zero_max_hours: number; half_max_hours: number }; rest_day?: { zero_below_hours: number; half_max_hours: number } };
+                            if (windowRow.classification === "normal_day" && rules.normal_day)
+                              return `Rule: up to ${rules.normal_day.zero_max_hours} h = 0; over ${rules.normal_day.zero_max_hours} h to ${rules.normal_day.half_max_hours} h = 0.5; over ${rules.normal_day.half_max_hours} h = 1 day.`;
+                            if (rules.rest_day)
+                              return `Rule (${CLASSIFICATION_LABELS[windowRow.classification]}): under ${rules.rest_day.zero_below_hours} h = 0; ${rules.rest_day.zero_below_hours}–${rules.rest_day.half_max_hours} h = 0.5; over ${rules.rest_day.half_max_hours} h = 1 day.`;
+                            return "";
+                          })(),
+                          window: {
+                            id: windowRow.id,
+                            index: windowRow.window_index,
+                            start: windowRow.window_start,
+                            end: windowRow.window_end,
+                            startingLocalDate: windowRow.starting_local_date,
+                            classification: windowRow.classification,
+                            holidayName: windowRow.holiday_name,
+                            recordedSeconds: Number(windowRow.recorded_seconds),
+                            status: windowRow.status,
+                            closedReason: windowRow.closed_reason,
+                            entitlementDays: Number(windowRow.entitlement_days),
+                            flags: windowRow.review_flags,
+                            hrVerificationRequired: windowRow.hr_verification_required,
+                            hrVerifiedAt: windowRow.hr_verified_at,
+                            hrVerificationNote: windowRow.hr_verification_note,
+                            revisionNo: windowRow.revision_no,
+                          },
+                          periodStartedAt: period.started_at,
+                          allocations: (allocationRows ?? [])
+                            .filter((al) => al.window_id === windowRow.id)
+                            .map((al) => ({
+                              id: al.id,
+                              mode: al.work_mode,
+                              projectName: al.project_name,
+                              leadName: al.project_lead_employee_id ? leadNameById.get(al.project_lead_employee_id) ?? null : null,
+                              start: al.alloc_start,
+                              end: al.alloc_end,
+                              seconds: Number(al.seconds),
+                              byHr: hrSessionIds.has(al.session_id),
+                            })),
+                          revisions: (revisionRows ?? [])
+                            .filter((rv) => rv.window_id === windowRow.id)
+                            .map((rv) => ({
+                              revisionNo: rv.revision_no,
+                              recordedSeconds: Number(rv.recorded_seconds),
+                              entitlementDays: Number(rv.entitlement_days),
+                              reason: rv.reason,
+                              origin: rv.origin,
+                              createdAt: rv.created_at,
+                            })),
+                          corrections: (correctionRows ?? [])
+                            .filter((c) => (allocationRows ?? []).some((al) => al.window_id === windowRow.id && al.session_id === c.session_id))
+                            .map((c) => ({
+                              id: c.id,
+                              reason: c.reason,
+                              createdAt: c.created_at,
+                              originalIn: c.original_clock_in_at,
+                              originalOut: c.original_clock_out_at,
+                              correctedIn: c.corrected_clock_in_at,
+                              correctedOut: c.corrected_clock_out_at,
+                              actor: actorNameByUser.get(c.actor_id) ?? "HR",
+                            })),
+                          steps: (stepRows ?? [])
+                            .filter((st) => st.entity_id === recoveryRequest.id)
+                            .map((st) => ({
+                              stepOrder: st.step_order,
+                              label: st.approver_id ? "Project lead" : (st.queue_roles ?? []).map((role) => (role === "hr_admin" ? "HR Admin" : role.toUpperCase())).join(" or "),
+                              decision: st.decision,
+                            })),
+                        }
+                      : null;
                   return (
                     <TableRow key={a.id}>
                       <TableCell>{employeeName(recoveryRequest.employee_id)}</TableCell>
-                      <TableCell className="capitalize">{recoveryRequest.event_type}</TableCell>
+                      <TableCell>{EVENT_TYPE_CELL[recoveryRequest.event_type] ?? recoveryRequest.event_type}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {recoveryRequest.applicant_route ? APPLICANT_ROUTE_LABELS[recoveryRequest.applicant_route] ?? recoveryRequest.applicant_route : "Legacy HR queue"}
                       </TableCell>
-                      <TableCell className="max-w-xs space-y-1 text-xs text-muted-foreground">
-                        {isSelfClock ? (
+                      <TableCell className="max-w-md space-y-1 text-xs text-muted-foreground">
+                        {windowEvidence ? (
+                          <RecoveryWindowEvidence data={windowEvidence} />
+                        ) : isSelfClock ? (
                           <>
                             <p>
                               Self-clock: {WORK_MODE_LABELS[recoveryRequest.work_mode ?? ""] ?? recoveryRequest.work_mode ?? "—"}
                               {recoveryRequest.project_name ? ` — ${recoveryRequest.project_name}` : ""}
                             </p>
                             {recoveryRequest.project_lead_employee_id ? <p>Lead: {employeeName(recoveryRequest.project_lead_employee_id)}</p> : null}
+                            <p>Recorded clock time that day: {originalHours != null ? `${originalHours} h` : "not available"}</p>
                           </>
                         ) : (
                           <p>Source: Manual entry</p>
                         )}
-                        {recoveryRequest.needs_policy_review ? (
+                        {recoveryRequest.needs_policy_review && !windowEvidence ? (
                           <Badge variant="warning" title="Business travel and/or multiple site-work leads on this day — HR's own judgment call, not auto-decided.">
                             Needs policy review
                           </Badge>
@@ -585,6 +783,8 @@ export default async function ApprovalsPage() {
                           wasCorrected={Boolean(recoveryRequest.corrected_at)}
                           canCorrect={isHrAdminFor(companyId)}
                           checkedWithRequired={recoveryRequest.applicant_route !== "employee_lead_then_hr"}
+                          windowMode={!!windowRow}
+                          blockedReason={blocker}
                         />
                       </TableCell>
                     </TableRow>

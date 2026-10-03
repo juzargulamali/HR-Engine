@@ -881,8 +881,13 @@ describe("Attendance clocking + Recovery Leave 4-tier routing", () => {
         ]);
         expect(segment.rows).toHaveLength(1);
 
-        // No lead relationship to EMPLOYEE_PEER at all -> invisible.
-        const unrelated = await query("select 1 from recovery_credit_requests where employee_id = $1", [EMPLOYEE_PEER]);
+        // Never any request where the lead is NOT the named lead. (Earlier tests in this file clock EMPLOYEE_PEER in
+        // and out in real time naming this same lead, so on a weekend/holiday a request for them legitimately exists
+        // and is visible; the invariant is that nothing UNRELATED to this lead ever is.)
+        const unrelated = await query("select 1 from recovery_credit_requests where employee_id = $1 and project_lead_employee_id is distinct from $2", [
+          EMPLOYEE_PEER,
+          EMPLOYEE_LEAD,
+        ]);
         expect(unrelated.rows).toHaveLength(0);
       });
     });

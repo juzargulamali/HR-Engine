@@ -1,12 +1,21 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { canActivatePolicy, canEditDraftPolicyContent } from "@enginious-hr/domain";
+import {
+  canActivatePolicy,
+  canEditDraftPolicyContent,
+  canViewDraftPolicies,
+  getBusinessDateString,
+  parseRecoveryWindowRules,
+  resolveCountryTimeZone,
+} from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ActivateButton } from "../activate-button";
+import { ActivateRecoveryWindowsForm } from "./activate-recovery-windows-form";
+import { DeactivateRecoveryWindowsForm } from "./deactivate-recovery-windows-form";
 import { AddLeaveTypeForm } from "./add-leave-type-form";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -18,7 +27,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   const supabase = await createClient();
   const { data: policy } = await supabase
     .from("policy_versions")
-    .select("id, country_code, policy_type, version_no, status, effective_from, effective_to, payload, created_by, approved_by, approved_at")
+    .select("id, country_code, policy_type, version_no, status, effective_from, effective_to, payload, created_by, approved_by, approved_at, activation_record")
     .eq("id", id)
     .maybeSingle();
 
@@ -35,7 +44,37 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
 
   const isDrafter = policy.created_by === session.userId;
   const canActivate = policy.status === "draft" && canActivatePolicy(session.grants, policy.country_code, isDrafter);
+
+  // A window-based Recovery Leave policy (working periods + 24-elapsed-hour
+  // windows) has its own machine-readable rules, database-generated wording and
+  // a controlled activation (effective date chosen by HR, never retroactive).
+  const isWindowsPolicy = policy.policy_type === "overtime_rules" && policy.payload?.model === "recovery_windows";
+  const parsedRules = isWindowsPolicy ? parseRecoveryWindowRules(policy.payload.rules) : null;
+  const windowsRules = parsedRules && "rules" in parsedRules ? parsedRules.rules : null;
+  const wording = typeof policy.payload?.wording === "string" ? (policy.payload.wording as string) : null;
+  const countryTz = resolveCountryTimeZone(policy.country_code);
+  const minEffective = (() => {
+    const today = getBusinessDateString(countryTz);
+    const d = new Date(`${today}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+  })();
+  const { data: currentlyInForce } = isWindowsPolicy
+    ? await supabase
+        .from("policy_versions")
+        .select("version_no")
+        .eq("country_code", policy.country_code)
+        .eq("policy_type", "overtime_rules")
+        .eq("status", "active")
+        .neq("id", policy.id)
+        .is("effective_to", null)
+        .maybeSingle()
+    : { data: null };
   const canEditContent = policy.status === "draft" && canEditDraftPolicyContent(session.grants, policy.country_code);
+  // Only an HR Admin may read the processor status; the CEO/CTO activation is still checked by the database.
+  const hrCanReadScheduler = isWindowsPolicy && canEditDraftPolicyContent(session.grants, policy.country_code);
+  const { data: schedulerStatus } = hrCanReadScheduler && policy.status === "draft" ? await supabase.rpc("recovery_scheduler_status") : { data: null };
+  const canDisable = isWindowsPolicy && policy.status === "active" && canViewDraftPolicies(session.grants, policy.country_code);
 
   return (
     <div className="space-y-6">
@@ -54,7 +93,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           <Badge variant={policy.status === "active" ? "default" : policy.status === "draft" ? "secondary" : "outline"}>
             {policy.status}
           </Badge>
-          {canActivate ? <ActivateButton policyVersionId={policy.id} /> : null}
+          {canActivate && !isWindowsPolicy ? <ActivateButton policyVersionId={policy.id} /> : null}
         </div>
       </div>
 
@@ -62,6 +101,98 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         <p className="text-sm text-muted-foreground">
           You drafted this version — a different HR Admin or the CEO/CTO for {country?.name} needs to activate it.
         </p>
+      ) : null}
+
+      {isWindowsPolicy ? (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>How Recovery Leave is calculated</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              {windowsRules ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Rule</TableHead>
+                      <TableHead>Value</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow><TableCell>Window length (real elapsed hours)</TableCell><TableCell>{windowsRules.windowHours} h</TableCell></TableRow>
+                    <TableRow><TableCell>Clocked-out gap that ends a working period</TableCell><TableCell>{windowsRules.restGapHours} h or more</TableCell></TableRow>
+                    <TableRow><TableCell>Normal working day</TableCell><TableCell>up to and including {windowsRules.normalDay.zeroMaxHours} h = 0 · over {windowsRules.normalDay.zeroMaxHours} h up to and including {windowsRules.normalDay.halfMaxHours} h = 0.5 day · over {windowsRules.normalDay.halfMaxHours} h = 1 day</TableCell></TableRow>
+                    <TableRow><TableCell>Weekly rest day / public holiday</TableCell><TableCell>under {windowsRules.restDay.zeroBelowHours} h = 0 · {windowsRules.restDay.zeroBelowHours} h up to and including {windowsRules.restDay.halfMaxHours} h = 0.5 day · over {windowsRules.restDay.halfMaxHours} h = 1 day</TableCell></TableRow>
+                    <TableRow><TableCell>Maximum per window</TableCell><TableCell>{windowsRules.maxDaysPerWindow} day</TableCell></TableRow>
+                    <TableRow><TableCell>Normal daily requirement (display only)</TableCell><TableCell>{windowsRules.normalDayRequiredHours} recorded hours</TableCell></TableRow>
+                    <TableRow><TableCell>HR long-work alert</TableCell><TableCell>{windowsRules.alertWorkHours} recorded hours without a {windowsRules.restGapHours} h rest</TableCell></TableRow>
+                    <TableRow><TableCell>Expiry</TableCell><TableCell>{windowsRules.expiryDays} days after earning · never converted to cash</TableCell></TableRow>
+                  </TableBody>
+                </Table>
+              ) : (
+                <p className="text-destructive">These rules are not valid: {parsedRules && "issues" in parsedRules ? parsedRules.issues.join(" ") : "missing"}</p>
+              )}
+              {wording ? (
+                <div>
+                  <p className="mb-1 font-medium">Policy wording (generated from the rules above — it cannot disagree with the calculation)</p>
+                  <div className="space-y-2 rounded-md bg-secondary/60 p-4 text-sm">
+                    {wording.split("\n").map((line, i) => (
+                      <p key={i}>{line}</p>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {typeof policy.payload?.statutory_safeguard === "string" ? (
+                <p className="text-xs text-muted-foreground">{policy.payload.statutory_safeguard as string}</p>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          {policy.activation_record ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Activation record</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-muted-foreground">
+                Activated {String(policy.activation_record.activated_at ?? "").slice(0, 10)} with a controlled effective date of{" "}
+                {String(policy.activation_record.effective_from ?? "")}
+                {policy.activation_record.supersedes_version_no
+                  ? `; version ${policy.activation_record.supersedes_version_no} ended on ${policy.activation_record.supersedes_ended_on}.`
+                  : "."}
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {canActivate ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Activate with a controlled effective date</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ActivateRecoveryWindowsForm
+                  policyVersionId={policy.id}
+                  minDate={minEffective}
+                  plannedDate={policy.effective_from}
+                  canChooseDate={canEditDraftPolicyContent(session.grants, policy.country_code)}
+                  countryName={country?.name ?? policy.country_code}
+                  supersedesLabel={currentlyInForce ? `Version ${currentlyInForce.version_no}` : null}
+                  scheduler={schedulerStatus ? { ready: schedulerStatus.scheduler_ready.ready, reasons: schedulerStatus.scheduler_ready.reasons } : null}
+                />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {canDisable ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Stop using these rules for new working periods</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <DeactivateRecoveryWindowsForm policyVersionId={policy.id} minDate={minEffective} countryName={country?.name ?? policy.country_code} />
+              </CardContent>
+            </Card>
+          ) : null}
+        </>
       ) : null}
 
       <Card>

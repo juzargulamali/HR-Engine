@@ -139,3 +139,36 @@ describe("UTC database timestamps remain unchanged", () => {
     expect(beforeIso).toBe("2026-09-24T20:30:00.000Z"); // still plain UTC, untouched
   });
 });
+
+
+import { localDateTimeToUtcIso, utcIsoToLocalDateTime } from "../src/businessTime";
+
+describe("localDateTimeToUtcIso / utcIsoToLocalDateTime", () => {
+  it("converts using the given business timezone, never the runtime's", () => {
+    expect(localDateTimeToUtcIso("Asia/Dubai", "2027-01-09T09:00")).toBe("2027-01-09T05:00:00.000Z");
+    expect(localDateTimeToUtcIso("Asia/Riyadh", "2027-01-09T09:00")).toBe("2027-01-09T06:00:00.000Z");
+    expect(localDateTimeToUtcIso("Europe/Warsaw", "2027-01-09T09:00:30")).toBe("2027-01-09T08:00:30.000Z");
+  });
+
+  it("handles Warsaw's daylight-saving offsets on both sides of the change", () => {
+    expect(localDateTimeToUtcIso("Europe/Warsaw", "2027-03-27T12:00")).toBe("2027-03-27T11:00:00.000Z"); // UTC+1
+    expect(localDateTimeToUtcIso("Europe/Warsaw", "2027-03-28T12:00")).toBe("2027-03-28T10:00:00.000Z"); // UTC+2
+  });
+
+  it("rejects a wall-clock time that does not exist (spring-forward gap) and picks the first of a repeated time (fall-back)", () => {
+    expect(localDateTimeToUtcIso("Europe/Warsaw", "2027-03-28T02:30")).toBeNull();
+    // 2027-10-31 03:00 CEST -> 02:00 CET: 02:30 happens twice; the first is 00:30Z.
+    expect(localDateTimeToUtcIso("Europe/Warsaw", "2027-10-31T02:30")).toBe("2027-10-31T00:30:00.000Z");
+  });
+
+  it("rejects malformed input", () => {
+    expect(localDateTimeToUtcIso("Asia/Dubai", "2027-01-09 09:00")).toBeNull();
+    expect(localDateTimeToUtcIso("Asia/Dubai", "")).toBeNull();
+  });
+
+  it("round-trips with utcIsoToLocalDateTime", () => {
+    const iso = "2027-01-09T05:00:00.000Z";
+    expect(utcIsoToLocalDateTime("Asia/Dubai", iso)).toBe("2027-01-09T09:00");
+    expect(localDateTimeToUtcIso("Asia/Dubai", utcIsoToLocalDateTime("Asia/Dubai", iso))).toBe(iso);
+  });
+});

@@ -34,6 +34,17 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
           SUPABASE_SERVICE_ROLE_KEY: placeholder-service-role-key
 
+      - name: E2E project isolation — the recovery-windows specs must never be part of a Production project
+        run: |
+          set -e
+          cd packages/e2e-tests
+          if npx playwright test --list --project=read-only --project=mobile-smoke --project=mutating --project=baseline --project=reconciliation 2>&1 | grep -qE "recovery-windows|local-stack"; then
+            echo "::error::A recovery-windows or local-stack spec is matched by a Production Playwright project. They must run only under the dedicated preview-recovery-windows-* / local-stack projects."
+            exit 1
+          fi
+          npx playwright test --list --project=preview-recovery-windows-read-only --project=preview-recovery-windows-mobile --project=preview-recovery-windows-mutating --project=preview-recovery-windows-credit | grep -q "recovery-windows/"
+          npx playwright test --list --project=local-stack | grep -q "local-stack/"
+
       - name: Secrets audit — SUPABASE_SERVICE_ROLE_KEY must never reach the client bundle
         run: npm run check:secrets
         env:

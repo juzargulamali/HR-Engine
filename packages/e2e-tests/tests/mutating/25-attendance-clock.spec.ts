@@ -6,6 +6,7 @@ import { tagNote } from "../../src/recordTag";
 import { minutesUntilLocalMidnight, targetTimezone } from "../../src/overnightWindow";
 import { getEmployeeNameByAuthEmail } from "../../src/identity";
 import { AttendanceClockPage } from "../../src/pages/AttendanceClockPage";
+import { AttendancePage } from "../../src/pages/AttendancePage";
 import { RecoveryCreditApprovalsPage } from "../../src/pages/RecoveryCreditApprovalsPage";
 import { LeavePage } from "../../src/pages/LeavePage";
 
@@ -166,6 +167,19 @@ test.describe("attendance clock: 4-tier routing (overnight-window) @mutating", (
     `This local time in ${tz} is ${minutesToMidnight} minute(s) before midnight — trigger this workflow within ${MAX_WAIT_MINUTES} minutes of local midnight in ${tz} to exercise the real overnight-credit path (set E2E_ATTENDANCE_CLOCK_TIMEZONE if ${tz} isn't this account's real country).`,
   );
   test.setTimeout(10 * 60 * 1000);
+
+  // These tests describe the PREVIOUS calculation (a shift crossing local midnight earns an "overnight" credit). Once the
+  // window-based policy is in force a few minutes either side of midnight earns nothing, so they skip — with the reason —
+  // before touching anything. The window-based end-to-end proof (including the lead -> HR route) is
+  // tests/recovery-windows/30-recovery-credit-end-to-end.spec.ts.
+  test.beforeEach(async ({ hrAdminPage }) => {
+    const attendance = new AttendancePage(hrAdminPage);
+    await attendance.goto();
+    test.skip(
+      (await attendance.modelInForce()) === "windowed",
+      "The window-based Recovery Leave policy is in force, so the overnight-window credit these tests expect no longer exists. See tests/recovery-windows/30-recovery-credit-end-to-end.spec.ts.",
+    );
+  });
 
   test("employee_lead_then_hr: colleague-lead approves, then HR — credited exactly once; a correction requires a renewed lead approval", async ({
     employeePage,

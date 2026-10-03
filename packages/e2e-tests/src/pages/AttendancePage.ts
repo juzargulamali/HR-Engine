@@ -3,6 +3,16 @@ import { gotoWithRetry } from "../gotoWithRetry";
 import { escapeForRegExp } from "../recordTag";
 
 /**
+ * NOTE (recovery windows redesign): the DEFAULT /attendance page is now the automatic,
+ * read-first register (see tests/recovery-windows/). This page object drives the PREVIOUS
+ * manual all-row register, which the app still serves at /attendance?manual=1 — goto()
+ * always asks for it. Under an active window-based Recovery Leave policy a typed daily
+ * total no longer creates a credit (it is flagged for review), so the recovery-credit
+ * assertions in tests/mutating/20-attendance.spec.ts describe the PREVIOUS calculation: they
+ * check modelInForce() first and skip, with the reason, once the window rules are in force
+ * (their window-based replacement is tests/recovery-windows/30-*) — see
+ * docs/recovery-windows-deployment.md.
+ *
  * apps/web/src/app/(app)/attendance/{page,bulk-attendance-form}.tsx — HR
  * Admin bulk-fills a whole day's attendance for every active employee in
  * one company; there is no individual employee self-service clock-in/out
@@ -20,11 +30,26 @@ export class AttendancePage {
   constructor(private readonly page: Page) {}
 
   async goto(params?: { date?: string; companyId?: string }): Promise<void> {
-    const qs = new URLSearchParams();
+    const qs = new URLSearchParams({ manual: "1" });
     if (params?.date) qs.set("date", params.date);
     if (params?.companyId) qs.set("companyId", params.companyId);
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     await gotoWithRetry(this.page, `/attendance${suffix}`);
+  }
+
+  /**
+   * Which Recovery Leave rules the app says are in force on the date this page is showing, read from the marker the manual
+   * tool renders (`data-testid="manual-register-model"`). The previous-calculation assertions in this suite (a typed day
+   * total over 4 hours on a weekend creates a credit request; the overnight-window routing) only describe the PREVIOUS
+   * rules, so those tests ask this first and skip — with the reason — once the window-based policy is in force. The
+   * window-based equivalents live in tests/recovery-windows/.
+   */
+  async modelInForce(): Promise<"legacy" | "windowed"> {
+    const marker = this.page.getByTestId("manual-register-model");
+    await expect(marker, "the manual tool did not render its Recovery Leave rules marker").toBeVisible({ timeout: 15_000 });
+    const model = await marker.getAttribute("data-model");
+    if (model !== "legacy" && model !== "windowed") throw new Error(`Unexpected Recovery Leave model marker: ${model}`);
+    return model;
   }
 
   /** Scoped to a specific employee's real display name — never "whichever

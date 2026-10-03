@@ -100,3 +100,43 @@ export function formatBusinessDateLong(timeZone: string, instant: Date = new Dat
 export function formatBusinessTime(timeZone: string, instant: Date = new Date(), locale = "en-US"): string {
   return new Intl.DateTimeFormat(locale, { timeZone, hour: "numeric", minute: "2-digit" }).format(instant);
 }
+
+function offsetMsAt(timeZone: string, instant: Date): number {
+  const p = partsFor(timeZone, instant);
+  const asUtc = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second));
+  return asUtc - Math.floor(instant.getTime() / 1000) * 1000;
+}
+
+/**
+ * Converts a wall-clock date-time typed for a business timezone
+ * ('YYYY-MM-DDTHH:mm' or 'YYYY-MM-DDTHH:mm:ss', the shape a
+ * <input type="datetime-local"> gives) into the real UTC instant, as an ISO
+ * string. Uses the employee's/company's timezone, never the browser's, so an
+ * HR Admin correcting a Warsaw employee's clock-out from Dubai means Warsaw
+ * time. A time that does not exist (the hour skipped by a spring-forward) is
+ * rejected with null instead of being guessed; an ambiguous time (the hour
+ * repeated at fall-back) resolves to its FIRST occurrence.
+ */
+export function localDateTimeToUtcIso(timeZone: string, local: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(local);
+  if (!m) return null;
+  const [y, mo, d, h, mi, se] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6] ?? "0")];
+  const guessUtc = Date.UTC(y, mo - 1, d, h, mi, se);
+  const offsets = new Set([offsetMsAt(timeZone, new Date(guessUtc - 86_400_000)), offsetMsAt(timeZone, new Date(guessUtc + 86_400_000))]);
+  const matches: number[] = [];
+  for (const offset of offsets) {
+    const candidate = guessUtc - offset;
+    const p = partsFor(timeZone, new Date(candidate));
+    if (Number(p.year) === y && Number(p.month) === mo && Number(p.day) === d && Number(p.hour) === h && Number(p.minute) === mi && Number(p.second) === se) {
+      matches.push(candidate);
+    }
+  }
+  if (matches.length === 0) return null;
+  return new Date(Math.min(...matches)).toISOString();
+}
+
+/** 'YYYY-MM-DDTHH:mm' wall-clock string for an instant in a business timezone — the inverse of localDateTimeToUtcIso(), for pre-filling a datetime-local input. */
+export function utcIsoToLocalDateTime(timeZone: string, instant: Date | string): string {
+  const p = partsFor(timeZone, typeof instant === "string" ? new Date(instant) : instant);
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+}

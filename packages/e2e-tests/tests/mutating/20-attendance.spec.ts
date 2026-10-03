@@ -44,6 +44,10 @@ import { getEmployeeNameByAuthEmail } from "../../src/identity";
  *
  * Mutating — gated on E2E_MUTATION_AUTHORIZED.
  */
+const WINDOWED_SKIP =
+  "The window-based Recovery Leave policy is in force on this date, so a typed day total never creates a credit (it is flagged for review). " +
+  "This test describes the PREVIOUS same-day / 4-hour rules; the window-based equivalent is tests/recovery-windows/30-recovery-credit-end-to-end.spec.ts.";
+
 test.describe("attendance and recovery leave @mutating", () => {
   test.skip(!isMutationAuthorized(), "Mutation not authorized (E2E_MUTATION_AUTHORIZED != 'true') — skipping mutating attendance tests.");
 
@@ -80,6 +84,7 @@ test.describe("attendance and recovery leave @mutating", () => {
     const attendance = new AttendancePage(hrAdminPage);
     const date = testWeekendDay(runId, 0);
     await attendance.goto({ date });
+    test.skip((await attendance.modelInForce()) === "windowed", WINDOWED_SKIP);
     await attendance.setStatus(employeeName, "present");
     await attendance.setWorkModeAndHours(employeeName, "business_travel", 8); // >4h => 1 full recovery day, per record_attendance_and_recovery()
     await attendance.saveAll();
@@ -120,6 +125,7 @@ test.describe("attendance and recovery leave @mutating", () => {
 
     const attendance = new AttendancePage(hrAdminPage);
     await attendance.goto({ date });
+    test.skip((await attendance.modelInForce()) === "windowed", WINDOWED_SKIP);
     await attendance.setStatus(employeeName, "present");
     await attendance.setWorkModeAndHours(employeeName, "business_travel", 8); // >4h => 1 full recovery day
     await attendance.saveAll();
@@ -198,6 +204,7 @@ test.describe("attendance and recovery leave @mutating", () => {
 
     const attendance = new AttendancePage(hrAdminPage);
     await attendance.goto({ date });
+    test.skip((await attendance.modelInForce()) === "windowed", WINDOWED_SKIP);
     await attendance.setStatus(employeeName, "present");
     await attendance.setWorkModeAndHours(employeeName, "business_travel", 8);
     await attendance.saveAll();

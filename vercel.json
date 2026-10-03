@@ -3,6 +3,7 @@
     { "path": "/api/cron/leave-accrual", "schedule": "0 0 1 * *" },
     { "path": "/api/cron/comp-day-expiry", "schedule": "0 1 * * *" },
     { "path": "/api/cron/document-expiry", "schedule": "0 2 * * *" },
-    { "path": "/api/ai/detect-balance-discrepancies", "schedule": "0 3 * * *" }
+    { "path": "/api/ai/detect-balance-discrepancies", "schedule": "0 3 * * *" },
+    { "path": "/api/cron/recovery-windows", "schedule": "30 0 * * *" }
   ]
 }

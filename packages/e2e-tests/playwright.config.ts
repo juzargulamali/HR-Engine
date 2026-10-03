@@ -163,6 +163,60 @@ export default defineConfig({
       retries: 0,
     },
     {
+      // Recovery Leave windows redesign — dedicated projects for the NEW attendance screens
+      // (tests/recovery-windows/). They live in their own directory on purpose: the Production
+      // `read-only` project (run on every PR touching this package) only covers
+      // tests/read-only, and `mutating` only tests/mutating, so none of these can ever be swept
+      // into a Production run. They are invoked only by name from
+      // e2e-preview-recovery-windows.yml, against a Preview deployment.
+      name: "preview-recovery-windows-read-only",
+      testDir: "./tests/recovery-windows",
+      testMatch: /10-.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["setup"],
+      retries: 1,
+    },
+    {
+      name: "preview-recovery-windows-mobile",
+      testDir: "./tests/recovery-windows",
+      testMatch: /11-.*\.mobile\.spec\.ts/,
+      use: { ...devices["Pixel 5"] },
+      dependencies: ["setup"],
+      retries: 1,
+    },
+    {
+      // Zero retries, like every mutating project: a timed-out HR save must never be blindly
+      // repeated against a real database.
+      name: "preview-recovery-windows-mutating",
+      testDir: "./tests/recovery-windows",
+      testMatch: /20-.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["setup"],
+      retries: 0,
+    },
+    {
+      // END-TO-END CREDIT PROOF (tests/recovery-windows/30-*): creates a REAL, permanent credit on the dedicated Employee
+      // test account, so it has its own project, its own extra authorization (E2E_RECOVERY_CREDIT_AUTHORIZED) and zero
+      // retries. Only invoked by name from e2e-preview-recovery-windows.yml (when the credit input is ticked) or against the
+      // throwaway local stack — never by a Production workflow.
+      name: "preview-recovery-windows-credit",
+      testDir: "./tests/recovery-windows",
+      testMatch: /30-.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["setup"],
+      retries: 0,
+    },
+    {
+      // LOCAL STACK ONLY (local-stack/README.md): specs that also poke the throwaway local database directly (a stand-in for
+      // pg_cron, policy-state assertions). They refuse to run unless LOCAL_DB_URL is set and the base URL is local, and no
+      // workflow invokes this project.
+      name: "local-stack",
+      testDir: "./tests/local-stack",
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["setup"],
+      retries: 0,
+    },
+    {
       // Compares the final state (same UI-driven reads as baseline) against
       // the captured baseline and writes a reconciliation report. Always
       // run by CI, even if the mutating project failed partway, so the
