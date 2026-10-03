@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
+import { computeCompDayExpiry } from "../../domain/src/compDayExpiry";
 import { COMPANY_AE, COMPANY_OTHER, H, SYSTEM_ACTOR, createRecoveryFixtures, plusSeconds, type Person } from "../src/recoveryFixtures";
 
 // Recovery windows — approvals, routing, readiness, corrections, ledger,
@@ -485,6 +486,31 @@ describe("Recovery windows — approvals, corrections, ledger, access", () => {
     });
   });
 
+  describe("expiry and consumption after adjustments", () => {
+    it("a top-up never extends the window's 180-day expiry, and oldest-first consumption + the expiry sweep stay consistent", async () => {
+      const { person, rs } = await shiftWithLead(5 * H, [], { lead: "self" });
+      await approveFully(person, rs[0]!.id);
+      const [session] = await sessionIds(person);
+      await setClock(plusSeconds(SAT, 30 * H));
+      await as(hr1, "select hr_correct_attendance_session($1, $2, $3, 'Clock-out was missed')", [session!.id, SAT, plusSeconds(SAT, 7 * H)]);
+      const topUp = (await requests(person)).find((r) => r.event_type === "window_top_up")!;
+      await approveFully(person, topUp.id);
+      const entries = await ledger(person);
+      expect(entries.map((e) => e.expiry_date)).toEqual(["2027-07-08", "2027-07-08"]);
+
+      // Half a day used: it is consumed from the pool oldest-first, and the sweep only expires what is left.
+      await db.seed(`insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, created_by) values ('${person.employeeId}', '2027-02-01', 'redeemed', -0.5, 'leave', '${hr1.userId}')`);
+      const all = await ledger(person);
+      const postings = computeCompDayExpiry(
+        all.map((e) => ({ id: e.id, entryType: e.entry_type as "earned", days: e.days, txnDate: e.txn_date, expiryDate: e.expiry_date })),
+        "2027-07-09",
+      );
+      expect(postings.reduce((sum, p) => sum + p.expiredDays, 0)).toBe(0.5);
+      // before the expiry date nothing expires
+      expect(computeCompDayExpiry(all.map((e) => ({ id: e.id, entryType: e.entry_type as "earned", days: e.days, txnDate: e.txn_date, expiryDate: e.expiry_date })), "2027-07-07")).toHaveLength(0);
+    });
+  });
+
   describe("evidence rules for corrections and added attendance", () => {
     it("rejects a clock-out in the future, a clock-out before the clock-in, and overlapping recordings", async () => {
       const { person } = await shiftWithLead(5 * H);
@@ -504,7 +530,8 @@ describe("Recovery windows — approvals, corrections, ledger, access", () => {
       await asFails(hr1, "select hr_add_missing_attendance($1, $2, $3, 'office', null, null, '')", [person.employeeId, SAT, plusSeconds(SAT, 5 * H)], /A reason is required/);
       await asFails(hrOther, "select hr_add_missing_attendance($1, $2, $3, 'office', null, null, 'x')", [person.employeeId, SAT, plusSeconds(SAT, 5 * H)], /Only HR Admin/);
       await asFails(hr1, "select hr_add_missing_attendance($1, $2, $3, 'office', null, null, 'x')", [person.employeeId, SAT, plusSeconds(SAT, 99 * H)], /cannot be in the future/);
-      const [{ id }] = await as<{ id: string }>(hr1, "select hr_add_missing_attendance($1, $2, $3, 'office', null, null, 'Employee forgot to clock; confirmed by the manager') as id", [person.employeeId, SAT, plusSeconds(SAT, 5 * H)]);
+      const [added] = await as<{ id: string }>(hr1, "select hr_add_missing_attendance($1, $2, $3, 'office', null, null, 'Employee forgot to clock; confirmed by the manager') as id", [person.employeeId, SAT, plusSeconds(SAT, 5 * H)]);
+      const id = added!.id;
       const { rows } = await db.seed(`select status, recorded_by_hr, recorded_by_hr_reason, recovery_model from attendance_sessions where id = '${id}'`);
       expect(rows[0]).toMatchObject({ status: "closed", recorded_by_hr: true, recovery_model: "windowed" });
       expect((await windows(person))[0]).toMatchObject({ days: 0.5, status: "closed" });

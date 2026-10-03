@@ -9259,7 +9259,7 @@ begin
   end if;
   perform set_config('app.audit_origin', 'processor', true);
 
-  insert into recovery_processor_runs (origin, as_of) values (p_origin, v_as_of) returning id into v_run;
+  insert into recovery_processor_runs (origin, as_of, started_at) values (p_origin, v_as_of, recovery_now()) returning id into v_run;
 
   for v_emp in
     select distinct c.employee_id from (
@@ -9286,7 +9286,7 @@ begin
 
   v_status := case when v_failed = 0 then 'succeeded' when v_failed < v_examined then 'partial' else 'failed' end;
   update recovery_processor_runs
-  set finished_at = now(), status = v_status, employees_examined = v_examined, employees_failed = v_failed, error_summary = v_first_error
+  set finished_at = recovery_now(), status = v_status, employees_examined = v_examined, employees_failed = v_failed, error_summary = v_first_error
   where id = v_run;
 
   return jsonb_build_object('status', v_status, 'run_id', v_run, 'examined', v_examined, 'failed', v_failed, 'as_of', v_as_of);
