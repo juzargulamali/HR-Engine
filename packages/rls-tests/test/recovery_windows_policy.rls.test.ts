@@ -285,4 +285,39 @@ describe("Recovery windows — policy drafts, wording, controlled activation", (
       expect(both.map((r) => r.zero_max)).toEqual(["13", "12"]);
     });
   });
+
+  describe("disabling (deactivate) without deleting anything", () => {
+    it("ends the windows version on a future date, stamps later clock-ins legacy again, keeps every record, and re-drafts the earlier version for HR to reactivate", async () => {
+      await setClock("2027-03-01T08:00:00Z");
+      const [, v3, v4] = await overtimeVersions("AE");
+      expect(v4!.status).toBe("active");
+      const before = (await db.seed("select (select count(*) from recovery_periods)::int as periods, (select count(*) from attendance_sessions)::int as sessions")).rows[0];
+
+      await fails(workerUser, "select deactivate_recovery_windows_policy($1, '2027-03-10')", [v4!.id], /company-unscoped HR Admin/);
+      await fails(companyHr, "select deactivate_recovery_windows_policy($1, '2027-03-10')", [v4!.id], /company-unscoped HR Admin/);
+      await fails(policyHr1, "select deactivate_recovery_windows_policy($1, '2027-03-01')", [v4!.id], /must be after today/);
+      await fails(policyHr1, "select deactivate_recovery_windows_policy($1, '2027-03-10')", [v3!.id], /not an active Recovery Leave windows policy|already ends/);
+      await asCommit(policyHr1, "select deactivate_recovery_windows_policy($1, '2027-03-10')", [v4!.id]);
+
+      const versions = await overtimeVersions("AE");
+      expect(versions.find((v) => v.id === v4!.id)).toMatchObject({ status: "active", effective_to: "2027-03-10" });
+      expect(versions.find((v) => v.id === v4!.id)!.activation_record).toMatchObject({ deactivated_by: policyHr1, last_effective_date: "2027-03-10" });
+      const redraft = versions[versions.length - 1]!;
+      expect(redraft).toMatchObject({ status: "draft", effective_from: "2027-03-11", created_by: policyHr1 });
+      expect(redraft.payload.model).toBe("recovery_windows"); // the earlier version (v3, itself a windows policy in this suite) is re-drafted verbatim
+
+      // nothing was deleted or rewritten
+      const after = (await db.seed("select (select count(*) from recovery_periods)::int as periods, (select count(*) from attendance_sessions)::int as sessions")).rows[0];
+      expect(after).toEqual(before);
+
+      // a clock-in AFTER the end date is a legacy session again; one on the last day is still windowed
+      await setClock("2027-03-12T12:00:00Z");
+      const late = await person("AE");
+      await db.seed(`insert into attendance_sessions (employee_id, clock_in_at, clock_out_at, status) values ('${late.employeeId}', '2027-03-11T05:00:00Z', '2027-03-11T06:00:00Z', 'closed')`);
+      expect((await db.seed(`select recovery_model from attendance_sessions where employee_id = '${late.employeeId}'`)).rows[0].recovery_model).toBe("legacy");
+      const onLastDay = await person("AE");
+      await db.seed(`insert into attendance_sessions (employee_id, clock_in_at, clock_out_at, status) values ('${onLastDay.employeeId}', '2027-03-10T05:00:00Z', '2027-03-10T06:00:00Z', 'closed')`);
+      expect((await db.seed(`select recovery_model from attendance_sessions where employee_id = '${onLastDay.employeeId}'`)).rows[0].recovery_model).toBe("windowed");
+    });
+  });
 });

@@ -759,6 +759,66 @@ begin
 end;
 $$;
 
+-- The controlled way to STOP using the window model for new work (the "disable"
+-- switch), without deleting or rewriting anything:
+--   * the windows version gets an end date (never earlier than tomorrow in the
+--     country's own time zone, so no history is recalculated);
+--   * clock-ins that start after that date are stamped 'legacy' again, so no NEW
+--     working period is ever created;
+--   * every existing session, period, window, request, credit and audit row is
+--     left exactly as it is — periods already running finish under the rules
+--     they started with, and the background processor keeps finishing them;
+--   * the version that was in force before is re-drafted (a fresh DRAFT copy of
+--     its text, next version number) so HR can reactivate the earlier wording
+--     through the normal two-person flow if they want it back on screen.
+-- Nothing is reactivated automatically.
+create or replace function deactivate_recovery_windows_policy(p_policy_version_id uuid, p_last_effective_date date)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_pv policy_versions%rowtype;
+  v_prev policy_versions%rowtype;
+  v_local_today date;
+  v_next_no int;
+begin
+  if auth.uid() is null then
+    raise exception 'A signed-in HR Admin is required to deactivate a Recovery Leave policy.';
+  end if;
+  select * into v_pv from policy_versions where id = p_policy_version_id for update;
+  if not found then raise exception 'Policy version not found.'; end if;
+  if v_pv.policy_type <> 'overtime_rules' or v_pv.payload ->> 'model' is distinct from 'recovery_windows' or v_pv.status <> 'active' then
+    raise exception 'This is not an active Recovery Leave windows policy.';
+  end if;
+  if not has_role('hr_admin', null, v_pv.country_code) then
+    raise exception 'Only a company-unscoped HR Admin for % may deactivate this policy.', v_pv.country_code;
+  end if;
+  v_local_today := (recovery_now() at time zone country_timezone(v_pv.country_code))::date;
+  if p_last_effective_date is null or p_last_effective_date <= v_local_today then
+    raise exception 'The last effective date must be after today (%) in this country''s time zone, so no history is recalculated.', v_local_today;
+  end if;
+  if v_pv.effective_to is not null and v_pv.effective_to <= p_last_effective_date then
+    raise exception 'This version already ends on %.', v_pv.effective_to;
+  end if;
+
+  update policy_versions
+  set effective_to = p_last_effective_date,
+      activation_record = coalesce(activation_record, '{}'::jsonb) || jsonb_build_object(
+        'deactivated_by', auth.uid(), 'deactivated_at', recovery_now(), 'last_effective_date', p_last_effective_date)
+  where id = v_pv.id;
+
+  select * into v_prev from policy_versions where id = (v_pv.activation_record ->> 'supersedes_version_id')::uuid;
+  if v_prev.id is not null then
+    select coalesce(max(version_no), 0) + 1 into v_next_no
+    from policy_versions where country_code = v_pv.country_code and policy_type = 'overtime_rules';
+    insert into policy_versions (country_code, policy_type, version_no, effective_from, payload, created_by)
+    values (v_pv.country_code, 'overtime_rules', v_next_no, p_last_effective_date + 1, v_prev.payload, auth.uid());
+  end if;
+end;
+$$;
+
 -- ---------------------------------------------------------------------
 -- 5. The calculation: working periods and 24-elapsed-hour windows.
 --    recovery_derive() is READ-ONLY and mirrors
