@@ -38,6 +38,39 @@ async function emailsById(supabase: SupabaseClient, userIds: string[]): Promise<
   return new Map((data ?? []).map((p) => [p.id, p.email]));
 }
 
+/**
+ * Display names for greetings and the "sent to" footer. Prefers the employee
+ * record's own first/last name (what HR typed), then the login profile's
+ * full_name, then the part of the email before the @ — so a name is always
+ * available even where row-level security hides another person's employee
+ * row from the acting user. Every mail here also carries a footer naming its
+ * recipient(s): when several people share one mailbox (aliases, shared
+ * inboxes, test accounts), the greeting and footer are what tell the
+ * messages apart.
+ */
+async function namesById(supabase: SupabaseClient, userIds: string[]): Promise<Map<string, string>> {
+  const unique = Array.from(new Set(userIds));
+  if (unique.length === 0) return new Map();
+  const [{ data: employees }, { data: profiles }] = await Promise.all([
+    supabase.from("employees").select("user_id, first_name, last_name").in("user_id", unique),
+    supabase.from("profiles").select("id, email, full_name").in("id", unique),
+  ]);
+  const names = new Map<string, string>();
+  for (const p of profiles ?? []) {
+    names.set(p.id, p.full_name?.trim() || (p.email.split("@")[0] ?? p.email));
+  }
+  for (const e of employees ?? []) {
+    const full = `${e.first_name} ${e.last_name}`.trim();
+    if (e.user_id && full) names.set(e.user_id, full);
+  }
+  return names;
+}
+
+function recipientFooter(recipients: { name: string; email: string }[]): string {
+  const list = recipients.map((r) => `${escapeHtml(r.name)} &lt;${escapeHtml(r.email)}&gt;`).join(", ");
+  return `<p style="color:#666;font-size:12px">Sent to: ${list}</p>`;
+}
+
 export async function notifyLeaveSubmitted(
   supabase: SupabaseClient,
   params: {
@@ -69,10 +102,16 @@ export async function notifyLeaveSubmitted(
       (id): id is string => typeof id === "string" && id !== params.employeeUserId,
     );
 
-    const emails = await emailsById(supabase, [params.employeeUserId, ...recipientIds]);
+    const [emails, names] = await Promise.all([
+      emailsById(supabase, [params.employeeUserId, ...recipientIds]),
+      namesById(supabase, recipientIds),
+    ]);
     const fromEmail = emails.get(params.employeeUserId);
     const toEmails = recipientIds.map((id) => emails.get(id)).filter((e): e is string => Boolean(e));
     if (!fromEmail || toEmails.length === 0) return;
+    const recipients = Array.from(new Set(recipientIds))
+      .map((id) => ({ name: names.get(id) ?? "", email: emails.get(id) ?? "" }))
+      .filter((r) => r.email);
 
     await sendMailAsUser({
       fromEmail,
@@ -87,6 +126,7 @@ export async function notifyLeaveSubmitted(
           <li>Total days: ${params.totalDays}</li>
         </ul>
         <p>Review it in the HR Engine app.</p>
+        ${recipientFooter(recipients)}
       `,
     });
   } catch (err) {
@@ -99,18 +139,24 @@ async function notifyApproverTurn(
   params: { fromUserId: string; approverUserId: string; employeeName: string; startDate: string; endDate: string },
 ): Promise<void> {
   try {
-    const emails = await emailsById(supabase, [params.fromUserId, params.approverUserId]);
+    const [emails, names] = await Promise.all([
+      emailsById(supabase, [params.fromUserId, params.approverUserId]),
+      namesById(supabase, [params.approverUserId]),
+    ]);
     const fromEmail = emails.get(params.fromUserId);
     const toEmail = emails.get(params.approverUserId);
     if (!fromEmail || !toEmail) return;
+    const approverName = names.get(params.approverUserId) ?? toEmail;
 
     await sendMailAsUser({
       fromEmail,
       to: [toEmail],
-      subject: `Action needed — leave request for ${params.employeeName}`,
+      subject: `Action needed from ${approverName} — leave request for ${params.employeeName}`,
       html: `
+        <p>Hi ${escapeHtml(approverName)},</p>
         <p>${escapeHtml(params.employeeName)}'s leave request (${escapeHtml(params.startDate)} to ${escapeHtml(params.endDate)}) now needs your decision.</p>
         <p>Review it in the HR Engine app.</p>
+        ${recipientFooter([{ name: approverName, email: toEmail }])}
       `,
     });
   } catch (err) {
@@ -123,16 +169,25 @@ async function notifyLeaveDecision(
   params: { decidedByUserId: string; employeeUserId: string; decision: "approved" | "rejected"; startDate: string; endDate: string },
 ): Promise<void> {
   try {
-    const emails = await emailsById(supabase, [params.decidedByUserId, params.employeeUserId]);
+    const [emails, names] = await Promise.all([
+      emailsById(supabase, [params.decidedByUserId, params.employeeUserId]),
+      namesById(supabase, [params.decidedByUserId, params.employeeUserId]),
+    ]);
     const fromEmail = emails.get(params.decidedByUserId);
     const toEmail = emails.get(params.employeeUserId);
     if (!fromEmail || !toEmail) return;
+    const employeeName = names.get(params.employeeUserId) ?? toEmail;
+    const deciderName = names.get(params.decidedByUserId) ?? fromEmail;
 
     await sendMailAsUser({
       fromEmail,
       to: [toEmail],
-      subject: `Your leave request was ${params.decision} (${params.startDate} to ${params.endDate})`,
-      html: `<p>Your leave request from ${escapeHtml(params.startDate)} to ${escapeHtml(params.endDate)} has been <strong>${params.decision}</strong>.</p>`,
+      subject: `Leave request ${params.decision} for ${employeeName} (${params.startDate} to ${params.endDate})`,
+      html: `
+        <p>Hi ${escapeHtml(employeeName)},</p>
+        <p>Your leave request from ${escapeHtml(params.startDate)} to ${escapeHtml(params.endDate)} has been <strong>${params.decision}</strong> by ${escapeHtml(deciderName)}.</p>
+        ${recipientFooter([{ name: employeeName, email: toEmail }])}
+      `,
     });
   } catch (err) {
     logFailure("notifyLeaveDecision", err);
