@@ -211,7 +211,7 @@ describe("Recovery windows — processor, alerts, visibility, read models", () =
   // Group 21 — who may read evidence; nobody writes it directly
   // ---------------------------------------------------------------------
   describe("evidence visibility and direct-write protection", () => {
-    it("the employee, their manager and HR see a window and its allocations; a colleague, another company's HR and the public do not; the named project lead sees only their window", async () => {
+    it("the employee, their manager and HR see a window and its allocations; a colleague, another company's HR and the public do not; the named project lead sees the window and period behind their request", async () => {
       const manager = await newPerson(COMPANY_AE, "AE", ["line_manager"]);
       const lead = await newPerson(COMPANY_AE, "AE");
       const person = await newPerson(COMPANY_AE, "AE");
@@ -228,7 +228,25 @@ describe("Recovery windows — processor, alerts, visibility, read models", () =
       for (const viewer of [person, manager, hr1, lead]) expect((await as(viewer, alloc, [w!.id])).length).toBeGreaterThan(0);
       expect(await as(newPersonPlaceholder(), alloc, [w!.id])).toHaveLength(0);
       expect(await as(person, "select id from recovery_periods where employee_id = $1", [person.employeeId])).toHaveLength(1);
-      expect(await as(lead, "select id from recovery_periods where employee_id = $1", [person.employeeId])).toHaveLength(0);
+      // the lead sees the working period behind their own request (and, below, nobody else's)
+      expect(await as(lead, "select id from recovery_periods where employee_id = $1", [person.employeeId])).toHaveLength(1);
+    });
+
+    it("the named project lead also sees the working period and the HR corrections behind THEIR request — and nobody else's", async () => {
+      const lead = await newPerson(COMPANY_AE, "AE");
+      const person = await newPerson(COMPANY_AE, "AE");
+      const other = await newPerson(COMPANY_AE, "AE");
+      await setClock(plusSeconds(SAT, 30 * H));
+      await seedSessions(person, [{ start: SAT, end: plusSeconds(SAT, 5 * H), lead: lead.employeeId, project: "P", mode: "site_work" }]);
+      await seedSessions(other, [{ start: SAT, end: plusSeconds(SAT, 5 * H), lead: other.employeeId, project: "Q", mode: "site_work" }]);
+      await recalc(person);
+      await recalc(other);
+      const [{ id: sessionId }] = (await db.seed(`select id from attendance_sessions where employee_id = '${person.employeeId}'`)).rows;
+      await asCommit(hr1, "select hr_correct_attendance_session($1, $2, $3, 'Left half an hour later')", [sessionId, SAT, plusSeconds(SAT, 5.5 * H)]);
+      expect(await as(lead, "select id from recovery_periods where employee_id = $1", [person.employeeId])).toHaveLength(1);
+      expect(await as(lead, "select id from attendance_session_corrections where session_id = $1", [sessionId])).toHaveLength(1);
+      expect(await as(lead, "select id from recovery_periods where employee_id = $1", [other.employeeId])).toHaveLength(0);
+      expect(await as(lead, "select id from recovery_windows where employee_id = $1", [other.employeeId])).toHaveLength(0);
     });
 
     it("nobody can write these tables directly, including HR Admin", async () => {

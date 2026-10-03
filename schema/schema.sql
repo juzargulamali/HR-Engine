@@ -7317,7 +7317,15 @@ as $$
 $$;
 
 create policy recovery_periods_select on recovery_periods for select
-  using (can_view_recovery_evidence(employee_id));
+  using (
+    can_view_recovery_evidence(employee_id)
+    -- A named project lead sees the working period behind THEIR request, never the employee's other periods.
+    or exists (
+      select 1 from recovery_windows w
+      join recovery_credit_requests r on r.recovery_window_id = w.id
+      where w.period_id = recovery_periods.id and r.project_lead_employee_id = current_employee_id()
+    )
+  );
 
 create policy recovery_windows_select on recovery_windows for select
   using (
@@ -7352,7 +7360,15 @@ create policy recovery_alerts_select on recovery_alerts for select
   using (has_role('hr_admin', company_id) or has_role('ceo', company_id) or has_role('cto', company_id));
 
 create policy attendance_session_corrections_select on attendance_session_corrections for select
-  using (can_view_recovery_evidence(employee_id));
+  using (
+    can_view_recovery_evidence(employee_id)
+    -- ... and the corrections to the sessions that fed that request, so original vs corrected is visible to them.
+    or exists (
+      select 1 from recovery_window_allocations a
+      join recovery_credit_requests r on r.recovery_window_id = a.window_id
+      where a.session_id = attendance_session_corrections.session_id and r.project_lead_employee_id = current_employee_id()
+    )
+  );
 
 -- Processor tables have no policy at all: deny-all to every signed-in user.
 -- recovery_scheduler_status() (below) is the only reader, and it checks roles.

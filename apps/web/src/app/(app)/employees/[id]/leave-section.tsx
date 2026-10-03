@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { EVENT_TYPE_LABELS } from "@/lib/recovery/labels";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -109,7 +110,7 @@ export async function LeaveSection({ employeeId, canRecordOvernightRecovery = fa
             {(recoveryCreditRequests ?? []).map((r) => (
               <TableRow key={r.id}>
                 <TableCell>{r.work_date}</TableCell>
-                <TableCell className="capitalize">{r.event_type}</TableCell>
+                <TableCell>{EVENT_TYPE_LABELS[r.event_type] ?? r.event_type}</TableCell>
                 <TableCell>{r.proposed_days}</TableCell>
                 <TableCell>
                   <Badge variant={STATUS_VARIANT[r.status] ?? "outline"}>{r.status.replace(/_/g, " ")}</Badge>
