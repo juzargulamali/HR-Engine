@@ -8895,12 +8895,16 @@ create trigger attendance_sessions_assign_recovery_model
   for each row execute function recovery_session_assign_model();
 
 -- A recorded session may never end in the future, and a recording never
--- overlaps another recording of the same employee.
+-- overlaps another recording of the same employee. Applies to sessions on the
+-- window model only: legacy sessions keep exactly the behaviour they had.
 create or replace function guard_attendance_session_timing()
 returns trigger
 language plpgsql
 as $$
 begin
+  if new.recovery_model <> 'windowed' then
+    return new;
+  end if;
   if new.clock_out_at is not null and new.clock_out_at > recovery_now() + interval '1 minute' then
     raise exception 'A clock-out time cannot be in the future.';
   end if;
@@ -8921,6 +8925,9 @@ returns trigger
 language plpgsql
 as $$
 begin
+  if not exists (select 1 from attendance_sessions ses where ses.id = new.session_id and ses.recovery_model = 'windowed') then
+    return new;
+  end if;
   if exists (
     select 1 from attendance_segments s
     where s.employee_id = new.employee_id and s.id <> new.id

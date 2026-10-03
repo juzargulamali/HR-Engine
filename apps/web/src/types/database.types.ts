@@ -44,7 +44,95 @@ export type ApprovableEntity =
   | "offboarding_task"
   | "payroll_export_run"
   | "recovery_credit";
-export type RecoveryCreditEventType = "standard" | "overnight";
+export type RecoveryCreditEventType = "standard" | "overnight" | "window" | "window_top_up" | "window_reduction";
+export type RecoveryDayClassification = "normal_day" | "rest_day" | "public_holiday";
+export type RecoveryWindowReviewFlag =
+  | "business_travel"
+  | "multiple_leads"
+  | "forgotten_clock_out"
+  | "hr_recorded"
+  | "unusual_long_work"
+  | "leave_conflict"
+  | "manual_conflict";
+export type RecoveryAlertType = "long_work" | "window_rollover";
+export type RecoveryAlertStatus = "open" | "acknowledged" | "obsolete";
+export interface RecoverySchedulerStatus {
+  windows_policy_active: boolean;
+  open_periods: number;
+  open_failures: number;
+  last_run: {
+    started_at: string;
+    finished_at: string | null;
+    status: "running" | "succeeded" | "partial" | "failed";
+    origin: string;
+    employees_examined: number;
+    employees_failed: number;
+  } | null;
+  last_success_at: string | null;
+  seconds_since_last_success: number | null;
+  stale: boolean;
+  pg_cron_installed: boolean;
+  pg_cron_job: { jobid: number; jobname: string; schedule: string; active: boolean } | null;
+  expected_interval_minutes: number;
+}
+
+export interface RecoveryLiveSummary {
+  linked: boolean;
+  as_of?: string;
+  timezone?: string;
+  country_code?: string;
+  clock_status?: "clocked_in" | "clocked_out" | "not_started";
+  open_since?: string | null;
+  work_mode?: AttendanceWorkMode | null;
+  project_name?: string | null;
+  windowed?: boolean;
+  period?: {
+    started_at: string;
+    elapsed_seconds: number;
+    recorded_seconds: number;
+    rest_completes_at: string | null;
+    rollover_count: number;
+    long_work_warning: boolean;
+    alert_work_hours: number;
+    rest_gap_hours: number;
+  } | null;
+  window?: {
+    index: number;
+    started_at: string;
+    ends_at: string;
+    recorded_seconds: number;
+    closed: boolean;
+    classification: RecoveryDayClassification;
+    entitlement_days: number;
+    review_flags: RecoveryWindowReviewFlag[];
+    request_status: RequestStatus | null;
+  } | null;
+}
+
+export interface AttendanceRegisterRow {
+  employee_id: string;
+  employee_name: string;
+  country_code: string;
+  timezone: string;
+  clock_status: "clocked_in" | "clocked_out" | "not_started";
+  attendance_status: "not_recorded" | "present" | "absent" | "leave" | "partial_day";
+  attendance_source: string | null;
+  work_modes: AttendanceWorkMode[];
+  first_clock_in: string | null;
+  last_clock_out: string | null;
+  recorded_seconds: string | number;
+  is_provisional: boolean;
+  open_since: string | null;
+  session_count: number;
+  recovery_summary: "none" | "awaiting_closure" | "awaiting_approval" | "approved" | "needs_review";
+  review_flags: RecoveryWindowReviewFlag[];
+  open_alert_count: number;
+  presence_conflict: string | null;
+  on_leave: boolean;
+  hr_recorded: boolean;
+  manual_hours: string | null;
+}
+
 export type RecoveryCreditApplicantRoute = "employee_lead_then_hr" | "manager_hr_direct" | "hr_admin_ceo_cto_queue" | "self_led_hr_direct";
 export type AttendanceWorkMode = "office" | "wfh" | "site_work" | "client_meeting" | "business_travel";
 export type AttendanceLocationEvent = "segment_start" | "segment_end";
@@ -434,6 +522,7 @@ export interface Database {
           approved_at: string | null;
           created_at: string;
           updated_at: string;
+          activation_record: Record<string, unknown> | null;
         };
         Insert: {
           id?: string;
@@ -872,6 +961,11 @@ export interface Database {
           hr_closed_at: string | null;
           hr_closed_reason: string | null;
           created_at: string;
+          recovery_model: "legacy" | "windowed";
+          recorded_by_hr: boolean;
+          recorded_by_hr_by: string | null;
+          recorded_by_hr_at: string | null;
+          recorded_by_hr_reason: string | null;
         };
         Insert: {
           id?: string;
@@ -953,6 +1047,12 @@ export interface Database {
           awaiting_project_lead: boolean;
           needs_policy_review: boolean;
           routing_issue: string | null;
+          recovery_window_id: string | null;
+          window_revision_no: number | null;
+          adjusts_request_id: string | null;
+          consumption_ack_by: string | null;
+          consumption_ack_at: string | null;
+          consumption_ack_note: string | null;
         };
         Insert: {
           id?: string;
@@ -980,6 +1080,145 @@ export interface Database {
           corrected_by?: string | null;
           corrected_at?: string | null;
         };
+        Relationships: [];
+      };
+      // ---- Recovery Leave windows redesign (migration 20261108000000). Read-only
+      // for every signed-in user: all writes are SECURITY DEFINER functions.
+      recovery_periods: {
+        Row: {
+          id: string;
+          employee_id: string;
+          company_id: string;
+          country_code: string;
+          timezone: string;
+          policy_version_id: string;
+          rules: Record<string, unknown>;
+          started_at: string;
+          last_work_end_at: string;
+          has_open_session: boolean;
+          rest_completes_at: string | null;
+          status: "open" | "ended" | "superseded";
+          ended_at: string | null;
+          recorded_seconds: string;
+          elapsed_seconds: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      recovery_windows: {
+        Row: {
+          id: string;
+          period_id: string;
+          employee_id: string;
+          company_id: string;
+          window_index: number;
+          window_start: string;
+          window_end: string;
+          recorded_seconds: string;
+          status: "open" | "closed";
+          closed_at: string | null;
+          closed_reason: "elapsed_window" | "rest" | null;
+          starting_local_date: string;
+          country_code: string;
+          timezone: string;
+          classification: RecoveryDayClassification;
+          holiday_name: string | null;
+          policy_version_id: string;
+          entitlement_days: string;
+          band: "none" | "half" | "full";
+          review_flags: RecoveryWindowReviewFlag[];
+          hr_verification_required: boolean;
+          hr_verified_by: string | null;
+          hr_verified_at: string | null;
+          hr_verification_note: string | null;
+          revision_no: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      recovery_window_allocations: {
+        Row: {
+          id: string;
+          window_id: string;
+          employee_id: string;
+          session_id: string;
+          segment_id: string;
+          work_mode: AttendanceWorkMode;
+          project_name: string | null;
+          project_lead_employee_id: string | null;
+          alloc_start: string;
+          alloc_end: string;
+          seconds: string;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      recovery_window_revisions: {
+        Row: {
+          id: string;
+          window_id: string;
+          revision_no: number;
+          recorded_seconds: string;
+          entitlement_days: string;
+          classification: RecoveryDayClassification;
+          starting_local_date: string;
+          review_flags: RecoveryWindowReviewFlag[];
+          reason: string;
+          actor_id: string | null;
+          origin: string;
+          previous_facts: Record<string, unknown> | null;
+          created_at: string;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      recovery_alerts: {
+        Row: {
+          id: string;
+          company_id: string;
+          employee_id: string;
+          period_id: string;
+          alert_type: RecoveryAlertType;
+          dedup_key: string;
+          triggered_at: string;
+          detected_at: string;
+          period_started_at: string;
+          recorded_seconds: string;
+          elapsed_seconds: string;
+          details: Record<string, unknown>;
+          status: RecoveryAlertStatus;
+          acknowledged_by: string | null;
+          acknowledged_at: string | null;
+          acknowledgement_note: string | null;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      attendance_session_corrections: {
+        Row: {
+          id: string;
+          session_id: string;
+          employee_id: string;
+          kind: "correct_times" | "add_missing";
+          original_clock_in_at: string | null;
+          original_clock_out_at: string | null;
+          corrected_clock_in_at: string;
+          corrected_clock_out_at: string;
+          reason: string;
+          actor_id: string;
+          created_at: string;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
         Relationships: [];
       };
       termination_settlement_inputs: {
@@ -1331,6 +1570,7 @@ export interface Database {
           is_ai_generated: boolean;
           ai_context: Record<string, unknown> | null;
           occurred_at: string;
+          origin: "user" | "system" | "processor" | null;
         };
         Insert: Record<string, never>; // written only by write_audit_log() (SECURITY DEFINER)
         Update: Record<string, never>;
@@ -1423,6 +1663,63 @@ export interface Database {
       country_timezone: {
         Args: { p_country_code: string | null };
         Returns: string;
+      };
+      hr_verify_recovery_window: {
+        Args: { p_window_id: string; p_note: string };
+        Returns: undefined;
+      };
+      hr_acknowledge_recovery_reduction: {
+        Args: { p_request_id: string; p_note: string };
+        Returns: undefined;
+      };
+      acknowledge_recovery_alert: {
+        Args: { p_alert_id: string; p_note?: string | null };
+        Returns: undefined;
+      };
+      get_recovery_request_blocker: {
+        Args: { p_request_id: string };
+        Returns: string | null;
+      };
+      hr_correct_attendance_session: {
+        Args: { p_session_id: string; p_clock_in_at: string; p_clock_out_at: string; p_reason: string };
+        Returns: undefined;
+      };
+      hr_add_missing_attendance: {
+        Args: {
+          p_employee_id: string;
+          p_clock_in_at: string;
+          p_clock_out_at: string;
+          p_work_mode: AttendanceWorkMode;
+          p_project_name?: string | null;
+          p_project_lead_employee_id?: string | null;
+          p_reason: string;
+        };
+        Returns: string;
+      };
+      seed_recovery_windows_policy_drafts: {
+        Args: Record<string, never>;
+        Returns: { country_code: string; policy_type: string; version_no: number | null; action: string }[];
+      };
+      activate_recovery_windows_policy: {
+        Args: { p_policy_version_id: string; p_effective_from: string };
+        Returns: undefined;
+      };
+      recovery_scheduler_status: {
+        Args: Record<string, never>;
+        Returns: RecoverySchedulerStatus;
+      };
+      recovery_live_summary: {
+        Args: { p_employee_id: string };
+        Returns: RecoveryLiveSummary;
+      };
+      attendance_register_for_date: {
+        Args: { p_company_id: string; p_date: string };
+        Returns: AttendanceRegisterRow[];
+      };
+      // Service-role only (never granted to signed-in users): the background processor.
+      recovery_process_due: {
+        Args: { p_origin?: string; p_as_of?: string | null; p_limit?: number };
+        Returns: { status: string; run_id?: string; examined?: number; failed?: number; as_of?: string };
       };
       adjust_recovery_credit_request: {
         Args: {
