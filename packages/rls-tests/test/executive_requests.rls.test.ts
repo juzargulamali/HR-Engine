@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
-import { COMPANY_AE, H, createRecoveryFixtures, plusSeconds, type Person } from "../src/recoveryFixtures";
+import { COMPANY_AE, COMPANY_OTHER, H, createRecoveryFixtures, plusSeconds, type Person } from "../src/recoveryFixtures";
 
 // CEO/CTO requests need no approver (docs/08-decisions-log.md, decision 19):
 //   * their LEAVE is approved on submission (through decide_leave_approval(), so
@@ -129,6 +129,31 @@ describe("CEO/CTO requests need no approver", () => {
     it("an employee's claim still goes to their manager", async () => {
       const { approvalId } = await submitClaim(report);
       expect(await approver(approvalId)).toEqual({ approver_id: manager.userId, decision: "pending" });
+    });
+  });
+
+  describe("a CEO/CTO who also holds the Finance role", () => {
+    async function submitClaim(p: Person) {
+      return db.asUserCommit(p.userId, async (q) => {
+        const c = await q("insert into reimbursement_claims (employee_id, currency) values ($1, 'AED') returning id", [p.employeeId]);
+        const claimId = c.rows[0].id as string;
+        await q("update reimbursement_claims set status = 'submitted' where id = $1", [claimId]);
+        const a = await q("select create_initial_approval('reimbursement_claim', $1) as id", [claimId]);
+        return a.rows[0].id as string;
+      });
+    }
+
+    it("their claim goes to ANOTHER Finance holder, even when they hold the earliest Finance grant", async () => {
+      const both = await newPerson(COMPANY_AE, "AE", ["ceo", "finance"]);
+      await db.seed(`update user_roles set granted_at = '2020-01-01' where user_id = '${both.userId}' and role = 'finance'`);
+      const approvalId = await submitClaim(both);
+      const { rows } = await db.seed(`select approver_id, decision from approvals where id = '${approvalId}'`);
+      expect(rows[0]).toEqual({ approver_id: finance.userId, decision: "pending" });
+    });
+
+    it("with no other Finance holder the claim is refused with the normal 'no approver' message, never routed to themselves", async () => {
+      const lonely = await newPerson(COMPANY_OTHER, "AE", ["ceo", "finance"]);
+      await expect(submitClaim(lonely)).rejects.toThrow(/No approver could be resolved/);
     });
   });
 

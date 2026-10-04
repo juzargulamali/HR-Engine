@@ -4208,6 +4208,7 @@ declare
   v_self_check_user_id uuid;
   v_applicant_route text;
   v_project_lead_employee_id uuid;
+  v_exec_claim boolean := false;
 begin
   -- Every recovery_credit row is now created under a real logged-in user
   -- session — the employee's own session for a self-clock candidate (see
@@ -4347,6 +4348,7 @@ begin
         return v_approval_id;
       else
         v_approver_type := 'role:finance';
+        v_exec_claim := true;
       end if;
     end if;
   end if;
@@ -4377,6 +4379,24 @@ begin
       v_approver_id := resolve_approver_for_company(v_approver_type, v_company_id);
     else
       v_approver_id := resolve_approver(v_approver_type, v_employee_id);
+    end if;
+    -- A CEO/CTO's claim goes to a Finance holder OTHER than themselves: when the
+    -- executive also holds the Finance role (or is the earliest Finance grant),
+    -- the generic resolver would hand the claim back to them and refuse it as
+    -- self-approval. Pick the earliest other active Finance holder instead.
+    if v_exec_claim then
+      select ur.user_id into v_approver_id
+      from user_roles ur
+      where ur.role = 'finance'
+        and ur.revoked_at is null
+        and (ur.company_id is null or ur.company_id = v_company_id)
+        and ur.user_id <> v_self_check_user_id
+        and not exists (
+          select 1 from employees e2
+          where e2.user_id = ur.user_id and (e2.employment_status = 'terminated' or e2.deleted_at is not null)
+        )
+      order by ur.granted_at asc
+      limit 1;
     end if;
     if v_approver_id is null then
       raise exception 'No approver could be resolved (e.g. no manager assigned, or no one holds the required role). Contact HR Admin.';

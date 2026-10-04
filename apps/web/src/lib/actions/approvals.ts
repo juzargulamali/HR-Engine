@@ -55,10 +55,13 @@ export async function resolveInitialApprover(
     entityType === "leave_request" || entityType === "reimbursement_claim"
       ? (await supabase.rpc("i_am_c_level", { p_company_id: companyId })).data === true
       : false;
-  if (isExecutive && entityType === "leave_request") {
+  if (isExecutive) {
+    // Leave is approved by the database on submission; a claim is routed to a Finance
+    // holder other than the executive, and create_initial_approval() refuses it with a
+    // clear message if there is none — so there is nothing to pre-check here.
     return { workflowId: workflow.id, approverId: requesterUserId };
   }
-  const approverType = isExecutive ? "role:finance" : step.approver_type;
+  const approverType = step.approver_type;
 
   const { data: approverId } =
     entityType === "payroll_export_run"
