@@ -146,6 +146,29 @@ describe("CEO/CTO requests need no approver", () => {
     });
   });
 
+  describe("employee_is_c_level() — the profile page's 'No manager assigned' note", () => {
+    const ask = (viewer: Person, target: Person) =>
+      db.asUserCommit(viewer.userId, async (q) => (await q("select employee_is_c_level($1) as v", [target.employeeId])).rows[0].v as boolean);
+
+    it("an HR Admin (who cannot read user_roles) still gets true for a CEO and a CTO, and false for an ordinary employee", async () => {
+      expect(await ask(hr, ceo)).toBe(true);
+      expect(await ask(hr, cto)).toBe(true);
+      expect(await ask(hr, report)).toBe(false);
+    });
+
+    it("a CEO viewing their own profile gets true", async () => {
+      expect(await ask(ceo, ceo)).toBe(true);
+    });
+
+    it("an ordinary employee cannot use it to learn who the executives are (false for a CEO they may not see)", async () => {
+      expect(await ask(report, ceo)).toBe(false);
+    });
+
+    it("is not callable without signing in", async () => {
+      await expect(db.seed(`set role anon; select employee_is_c_level('${ceo.employeeId}')`)).rejects.toThrow(/permission denied/);
+    });
+  });
+
   describe("Recovery Leave credit", () => {
     async function shift(person: Person, seconds: number, mode = "office") {
       const end = plusSeconds(SAT, seconds);
