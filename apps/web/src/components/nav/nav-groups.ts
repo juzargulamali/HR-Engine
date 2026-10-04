@@ -48,7 +48,7 @@ export interface NavGroupData {
  * hasRoleAnyScope, canViewHrAlerts). Kept separate from AppShell so it can
  * be unit tested directly without rendering anything.
  */
-export function buildNavGroups(grants: readonly RoleGrant[]): NavGroupData[] {
+export function buildNavGroups(grants: readonly RoleGrant[], options: { hasPendingApprovals?: boolean } = {}): NavGroupData[] {
   const showAdminLink = isSysAdmin(grants);
   const showInsightsLinks = hasRoleAnyScope(grants, "hr_admin") || hasRoleAnyScope(grants, "sys_admin");
   const showAlertsLink = canViewHrAlerts(grants);
@@ -61,9 +61,12 @@ export function buildNavGroups(grants: readonly RoleGrant[]): NavGroupData[] {
   // empty "nothing waiting on you" page for them — hidden rather than shown
   // and immediately empty. Purely a UI affordance, same caveat as every
   // other check here: RLS on the approvals table is the real enforcement.
-  const showApprovalsLink = (["line_manager", "hr_admin", "finance", "ceo", "cto"] as const).some((role) =>
-    hasRoleAnyScope(grants, role),
-  );
+  // ...plus anyone who currently HAS something waiting on their own decision:
+  // a project lead is an ordinary employee with no approval-capable role, yet
+  // the lead's step of a Recovery Leave request lands in their own Approvals.
+  const showApprovalsLink =
+    options.hasPendingApprovals === true ||
+    (["line_manager", "hr_admin", "finance", "ceo", "cto"] as const).some((role) => hasRoleAnyScope(grants, role));
   // Payroll is an HR/Finance/C-level workflow — sys_admin has no business
   // reason to run payroll, and neither does a plain employee or a line
   // manager acting only as an approver.

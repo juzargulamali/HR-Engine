@@ -14,15 +14,17 @@ import { ClockFab } from "./clock-fab";
 export function AppShell({
   session,
   clockedIn = false,
+  hasPendingApprovals = false,
   children,
 }: {
   session: CurrentSession;
   clockedIn?: boolean;
+  hasPendingApprovals?: boolean;
   children: React.ReactNode;
 }) {
   const roleLabels = roleLabelsFor(session.grants);
   const showAlertsLink = canViewHrAlerts(session.grants);
-  const groups = buildNavGroups(session.grants);
+  const groups = buildNavGroups(session.grants, { hasPendingApprovals });
 
   const signOutSlot = (
     <form action={signOut}>
