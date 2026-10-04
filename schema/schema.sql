@@ -4319,6 +4319,38 @@ begin
     raise exception 'This workflow has no first step configured. Contact HR Admin.';
   end if;
 
+  -- CEO/CTO applicant (docs/08-decisions-log.md): there is nobody above them,
+  -- so their LEAVE needs no approver and is approved on the spot (through the
+  -- same decide_leave_approval() finalisation every approval uses, so the
+  -- balance/ledger work is identical), and their REIMBURSEMENT CLAIMS go
+  -- straight to Finance instead of to a manager. Everything else (timesheets,
+  -- letters, payroll runs, every other applicant) is unchanged. Leave and
+  -- claims are always submitted by the requester's own session, which is what
+  -- lets decide_leave_approval() accept the system's decision below.
+  if p_entity_type in ('leave_request', 'reimbursement_claim') and v_employee_id is not null then
+    select user_id into v_self_check_user_id from employees where id = v_employee_id;
+    if is_c_level(v_self_check_user_id, v_company_id) then
+      if p_entity_type = 'leave_request' then
+        begin
+          insert into approvals (entity_type, entity_id, workflow_id, step_order, approver_id, decision)
+          values (p_entity_type, p_entity_id, v_workflow_id, 1, v_self_check_user_id, 'pending')
+          returning id into v_approval_id;
+        exception when unique_violation then
+          select id into v_approval_id from approvals
+          where entity_type = p_entity_type and entity_id = p_entity_id and step_order = 1;
+          return v_approval_id;
+        end;
+        perform decide_leave_approval(
+          v_approval_id, 'approved',
+          'Approved automatically: a CEO or CTO''s leave needs no approver.'
+        );
+        return v_approval_id;
+      else
+        v_approver_type := 'role:finance';
+      end if;
+    end if;
+  end if;
+
   if v_approver_type like 'role_queue:%' then
     -- Company-scoped role queue (currently only recovery_credit's single
     -- HR step) — no single resolved approver_id; ANY current holder of
@@ -7457,6 +7489,32 @@ as $$
   );
 $$;
 
+-- CEO/CTO requests need no approver (decision 19): helpers used by
+-- create_initial_approval(), recovery_route_for_employee() and recovery_route_request().
+create or replace function is_c_level(p_user_id uuid, p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select user_has_role(p_user_id, 'ceo', p_company_id) or user_has_role(p_user_id, 'cto', p_company_id);
+$$;
+
+revoke all on function is_c_level(uuid, uuid) from public, anon, authenticated;
+
+-- App-facing: "am I a CEO/CTO of this company?" — about the CALLER only, so it
+-- discloses nothing about anyone else.
+create or replace function i_am_c_level(p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select is_c_level(auth.uid(), p_company_id);
+$$;
+
+revoke all on function i_am_c_level(uuid) from public, anon;
+grant execute on function i_am_c_level(uuid) to authenticated;
+
+
 -- ---------------------------------------------------------------------
 -- 4. Policy: machine-readable rules, generated wording, validation
 -- ---------------------------------------------------------------------
@@ -8322,6 +8380,13 @@ declare
   v_company uuid;
 begin
   select user_id, company_id into v_user, v_company from employees where id = p_employee_id;
+  -- A CEO/CTO has nobody above them (even when they also hold hr_admin): a
+  -- credit nothing blocks is approved automatically by recovery_route_request();
+  -- anything that does need a human (HR verification, a correction after use)
+  -- goes to the HR queue, never to a project lead.
+  if is_c_level(v_user, v_company) then
+    return 'self_led_hr_direct';
+  end if;
   if user_has_role(v_user, 'hr_admin', v_company) then
     return 'hr_admin_ceo_cto_queue';
   elsif user_has_role(v_user, 'line_manager', v_company) then
@@ -8360,6 +8425,35 @@ begin
 
   select id into v_approval_id from approvals where entity_type = 'recovery_credit' and entity_id = p_request_id and step_order = 1;
   if v_approval_id is not null then return v_approval_id; end if;
+  -- A CEO/CTO's credit needs no approver. When nothing blocks it (the window is
+  -- closed and verified, the amount is current) it is approved right here, by the
+  -- system, through the same decide_leave_approval() finalisation as any approval.
+  -- It only runs for the background processor (no signed-in user) or the CEO/CTO's
+  -- own session, so a correction an HR Admin makes after approval creates a
+  -- request that goes to the HR queue for a human to approve, never auto-approved.
+  -- Anything recovery_request_blocker() reports (HR verification pending, a
+  -- reduction that needs acknowledging, a stale amount) also falls through to the
+  -- normal single-step HR queue below.
+  if is_c_level(v_user, v_company)
+     and (auth.uid() is null or auth.uid() = v_user)
+     and recovery_request_blocker(p_request_id) is null then
+    begin
+      insert into approvals (entity_type, entity_id, step_order, approver_id, decision)
+      values ('recovery_credit', p_request_id, 1, v_user, 'pending')
+      returning id into v_approval_id;
+    exception when unique_violation then
+      select id into v_approval_id from approvals
+      where entity_type = 'recovery_credit' and entity_id = p_request_id and step_order = 1;
+      return v_approval_id;
+    end;
+    perform decide_leave_approval(
+      v_approval_id, 'approved',
+      'Approved automatically: a CEO or CTO''s Recovery Leave needs no approver.'
+    );
+    update recovery_credit_requests set routing_issue = null where id = p_request_id and routing_issue is not null;
+    return v_approval_id;
+  end if;
+
   if r.applicant_route is null then return null; end if;
 
   if r.applicant_route = 'employee_lead_then_hr' then

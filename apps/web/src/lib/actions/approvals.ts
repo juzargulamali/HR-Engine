@@ -47,10 +47,23 @@ export async function resolveInitialApprover(
     .single();
   if (!step) return { error: "This workflow has no first step configured. Contact HR Admin." };
 
+  // CEO/CTO applicants (decision 19): their leave needs no approver — the
+  // database approves it on submission — and their reimbursement claims go
+  // straight to Finance. Mirrors create_initial_approval(); this pre-check just
+  // has to agree with it so a CEO is never refused for "no manager".
+  const isExecutive =
+    entityType === "leave_request" || entityType === "reimbursement_claim"
+      ? (await supabase.rpc("i_am_c_level", { p_company_id: companyId })).data === true
+      : false;
+  if (isExecutive && entityType === "leave_request") {
+    return { workflowId: workflow.id, approverId: requesterUserId };
+  }
+  const approverType = isExecutive ? "role:finance" : step.approver_type;
+
   const { data: approverId } =
     entityType === "payroll_export_run"
-      ? await supabase.rpc("resolve_approver_for_company", { p_approver_type: step.approver_type, p_company_id: companyId })
-      : await supabase.rpc("resolve_approver", { p_approver_type: step.approver_type, p_employee_id: employeeId });
+      ? await supabase.rpc("resolve_approver_for_company", { p_approver_type: approverType, p_company_id: companyId })
+      : await supabase.rpc("resolve_approver", { p_approver_type: approverType, p_employee_id: employeeId });
   if (!approverId) {
     return { error: "No approver could be resolved (e.g. no manager assigned, or no one holds the required role). Contact HR Admin." };
   }
@@ -61,7 +74,7 @@ export async function resolveInitialApprover(
   // own payroll run, for example.
   if (approverId === requesterUserId) {
     return {
-      error: `The resolved approver for this workflow's first step (${step.approver_type}) is you — you can't approve your own request. Contact HR Admin to assign a different approver.`,
+      error: `The resolved approver for this workflow's first step (${approverType}) is you — you can't approve your own request. Contact HR Admin to assign a different approver.`,
     };
   }
 
