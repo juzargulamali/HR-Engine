@@ -162,11 +162,13 @@ describe("Recovery windows — approvals, corrections, ledger, access", () => {
       expect(rs[0]!.applicant_route).toBe("hr_admin_ceo_cto_queue");
     });
 
-    it("a CEO of the same person cannot approve their OWN request", async () => {
+    it("a CEO's own credit needs no approver: it is approved automatically (decision 19), never routed to a project lead", async () => {
       const { person, rs } = await shiftWithLead(8 * H, ["ceo"]);
-      // a CEO is not an HR admin / manager -> ordinary route (lead then HR); force the self-decision case on the executive queue instead
-      expect(rs[0]!.applicant_route).toBe("employee_lead_then_hr");
-      void person;
+      // an executive has nobody above them: single-step route recorded, approved by the system
+      expect(rs[0]!.applicant_route).toBe("self_led_hr_direct");
+      expect(rs[0]!.status).toBe("approved");
+      expect(rs[0]!.awaiting_project_lead).toBe(false);
+      expect(await balance(person)).toBe(1);
     });
 
     it("missing project lead: the request waits (awaiting lead, no approval row) until the employee supplies one", async () => {
