@@ -7514,6 +7514,32 @@ $$;
 revoke all on function i_am_c_level(uuid) from public, anon;
 grant execute on function i_am_c_level(uuid) to authenticated;
 
+-- Profile page: is this employee a CEO/CTO? Gated like get_employee_manager_name().
+create or replace function employee_is_c_level(p_employee_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select coalesce(bool_or(is_c_level(e.user_id, e.company_id)), false)
+  from employees e
+  where e.id = p_employee_id
+    and (
+      has_role('hr_admin', e.company_id)
+      or has_role('sys_admin')
+      or (
+        e.deleted_at is null and (
+          e.id = current_employee_id()
+          or is_manager_of(e.id)
+          or has_role('finance', e.company_id)
+          or (has_role('ceo', e.company_id) or has_role('cto', e.company_id))
+        )
+      )
+    );
+$$;
+
+revoke all on function employee_is_c_level(uuid) from public, anon;
+grant execute on function employee_is_c_level(uuid) to authenticated;
+
 
 -- ---------------------------------------------------------------------
 -- 4. Policy: machine-readable rules, generated wording, validation

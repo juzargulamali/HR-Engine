@@ -48,19 +48,15 @@ export async function OverviewSection({
   ]);
 
   // A CEO/CTO is top of the org chart: nothing ever assigns them a manager and
-  // nothing should, so "No manager assigned" is noise for them. Only looked up
-  // when it could matter (active, no manager). If the viewer's access hides the
-  // role rows, this reads as "not an exec" and the callout is shown, as before.
+  // nothing should, so "No manager assigned" is noise for them. Asked through
+  // employee_is_c_level() (gated like the manager-name lookup above) rather than
+  // by reading user_roles, which only the owner and a Sys Admin can read — an HR
+  // Admin looking at a CEO's profile must get the same answer. Only looked up
+  // when it could matter (active, no manager).
   let isExecutive = false;
-  if (!employee.manager_id && employee.employment_status === "active" && employee.user_id) {
-    const { data: execRoles } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", employee.user_id)
-      .in("role", ["ceo", "cto"])
-      .is("revoked_at", null)
-      .limit(1);
-    isExecutive = (execRoles ?? []).length > 0;
+  if (!employee.manager_id && employee.employment_status === "active") {
+    const { data } = await supabase.rpc("employee_is_c_level", { p_employee_id: employee.id });
+    isExecutive = data === true;
   }
 
   const outstanding: string[] = [];

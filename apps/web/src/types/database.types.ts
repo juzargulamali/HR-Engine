@@ -1652,6 +1652,10 @@ export interface Database {
         Args: { p_company_id: string };
         Returns: boolean;
       };
+      employee_is_c_level: {
+        Args: { p_employee_id: string };
+        Returns: boolean;
+      };
       decide_leave_approval: {
         Args: { p_approval_id: string; p_decision: ApprovalDecision; p_comments?: string | null };
         Returns: undefined;
