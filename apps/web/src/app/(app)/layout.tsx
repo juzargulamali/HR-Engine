@@ -30,8 +30,25 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     }
   }
 
+  // An ordinary employee who is a project lead has no approval-capable role,
+  // so the menu would hide Approvals from exactly the person who has a request
+  // waiting. Show it whenever something is waiting on THIS user's own decision.
+  // Degrades to "none waiting" on any failure, like the clock badge above.
+  let hasPendingApprovals = false;
+  try {
+    const supabase = await createClient();
+    const { count } = await supabase
+      .from("approvals")
+      .select("id", { count: "exact", head: true })
+      .eq("approver_id", session.userId)
+      .eq("decision", "pending");
+    hasPendingApprovals = (count ?? 0) > 0;
+  } catch {
+    hasPendingApprovals = false;
+  }
+
   return (
-    <AppShell session={session} clockedIn={clockedIn}>
+    <AppShell session={session} clockedIn={clockedIn} hasPendingApprovals={hasPendingApprovals}>
       {children}
     </AppShell>
   );

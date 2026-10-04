@@ -110,6 +110,19 @@ describe("buildNavGroups", () => {
     expect(allHrefs).not.toContain("/approvals");
   });
 
+  it("shows Approvals to a plain employee who has something waiting on their own decision (e.g. a project lead)", () => {
+    const groups = buildNavGroups([grant("employee")], { hasPendingApprovals: true });
+    const allHrefs = groups.flatMap((g) => g.links.map((l) => l.href));
+    expect(allHrefs).toContain("/approvals");
+    expect(allHrefs).not.toContain("/payroll");
+  });
+
+  it("still hides Approvals from a plain employee when nothing is waiting", () => {
+    const groups = buildNavGroups([grant("employee")], { hasPendingApprovals: false });
+    const allHrefs = groups.flatMap((g) => g.links.map((l) => l.href));
+    expect(allHrefs).not.toContain("/approvals");
+  });
+
   it("shows Approvals but hides Payroll for a Line Manager", () => {
     const groups = buildNavGroups([grant("line_manager")]);
     const allHrefs = groups.flatMap((g) => g.links.map((l) => l.href));
