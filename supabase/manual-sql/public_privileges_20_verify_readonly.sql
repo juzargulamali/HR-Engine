@@ -28,16 +28,17 @@ select status, check_name, detail from (
                 then 'PASS' else 'FAIL' end,
          'tables created in future by postgres will NOT grant those privileges to anon / authenticated', 'default privileges of role postgres in schema public'
   union all
-  select 3.5, case when not exists (
-                  select 1 from pg_default_acl d, lateral aclexplode(d.defaclacl) x
-                  where d.defaclobjtype = 'r' and d.defaclnamespace = 'public'::regnamespace and pg_get_userbyid(d.defaclrole) <> 'postgres'
-                    and pg_get_userbyid(x.grantee) in ('anon', 'authenticated') and x.privilege_type in ('TRUNCATE', 'TRIGGER', 'REFERENCES', 'MAINTAIN'))
-                then 'PASS' else 'REVIEW' end,
-         'no OTHER role (for example supabase_admin) hands those privileges to new tables in schema public',
-         coalesce((select string_agg(distinct pg_get_userbyid(d.defaclrole), ', ') from pg_default_acl d, lateral aclexplode(d.defaclacl) x
-                   where d.defaclobjtype = 'r' and d.defaclnamespace = 'public'::regnamespace and pg_get_userbyid(d.defaclrole) <> 'postgres'
-                     and pg_get_userbyid(x.grantee) in ('anon', 'authenticated') and x.privilege_type in ('TRUNCATE', 'TRIGGER', 'REFERENCES', 'MAINTAIN')),
-                  'none; if REVIEW, send me the row: those defaults belong to another role and only matter if that role creates your tables')
+  select 3.5,
+         case when exists (select 1 from pg_default_acl d, lateral aclexplode(d.defaclacl) x
+                           where d.defaclobjtype = 'r' and d.defaclnamespace = 'public'::regnamespace and pg_get_userbyid(d.defaclrole) not in ('postgres', 'supabase_admin')
+                             and pg_get_userbyid(x.grantee) in ('anon', 'authenticated') and x.privilege_type in ('TRUNCATE', 'TRIGGER', 'REFERENCES', 'MAINTAIN'))
+              then 'REVIEW'
+              when exists (select 1 from pg_default_acl d, lateral aclexplode(d.defaclacl) x
+                           where d.defaclobjtype = 'r' and d.defaclnamespace = 'public'::regnamespace and pg_get_userbyid(d.defaclrole) = 'supabase_admin'
+                             and pg_get_userbyid(x.grantee) in ('anon', 'authenticated') and x.privilege_type in ('TRUNCATE', 'TRIGGER', 'REFERENCES', 'MAINTAIN'))
+              then 'INFO' else 'PASS' end,
+         'no OTHER role hands those privileges to new tables in schema public',
+         'INFO = only supabase_admin (the platform''s own role) still does: it applies only to tables supabase_admin itself creates, never to tables created by your migrations (postgres). REVIEW = some other role does: send me the table.'
   union all
   select 4, case when exists (
                   select 1 from pg_default_acl d, lateral aclexplode(d.defaclacl) x
