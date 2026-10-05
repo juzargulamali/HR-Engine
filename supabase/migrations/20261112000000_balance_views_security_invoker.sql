@@ -61,8 +61,8 @@ alter view public.comp_day_balances set (security_invoker = true);
 
 revoke all on public.leave_balances from anon;
 revoke all on public.comp_day_balances from anon;
-revoke insert, update, delete, truncate, references, trigger on public.leave_balances from authenticated;
-revoke insert, update, delete, truncate, references, trigger on public.comp_day_balances from authenticated;
+revoke all on public.leave_balances from authenticated;
+revoke all on public.comp_day_balances from authenticated;
 grant select on public.leave_balances to authenticated;
 grant select on public.comp_day_balances to authenticated;
 

@@ -67,17 +67,18 @@ select status, check_name, detail from (
   select 2, case when count(*) = 2 then 'PASS' else 'FAIL' end, 'both views exist as views', count(*) || ' of 2 found'
   from pg_class where relnamespace = 'public'::regnamespace and relname in ('leave_balances', 'comp_day_balances') and relkind = 'v'
   union all
-  select 3, case when has_table_privilege('anon', v.n, 'SELECT') or has_table_privilege('anon', v.n, 'INSERT')
-                      or has_table_privilege('anon', v.n, 'UPDATE') or has_table_privilege('anon', v.n, 'DELETE')
-                 then 'FAIL' else 'PASS' end,
-         'anon has no access to ' || v.n, 'not-signed-in visitors'
+  select 3, case when not exists (select 1 from pg_class c, lateral aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) x
+                                 where c.oid = v.n::regclass and x.grantee = (select oid from pg_roles where rolname = 'anon'))
+                 then 'PASS' else 'FAIL' end,
+         'anon has no access to ' || v.n, 'not-signed-in visitors hold no privilege at all'
   from (values ('public.leave_balances'), ('public.comp_day_balances')) v(n)
   union all
-  select 4, case when has_table_privilege('authenticated', v.n, 'SELECT')
-                      and not (has_table_privilege('authenticated', v.n, 'INSERT') or has_table_privilege('authenticated', v.n, 'UPDATE')
-                               or has_table_privilege('authenticated', v.n, 'DELETE') or has_table_privilege('authenticated', v.n, 'TRUNCATE'))
+  select 4, case when exists (select 1 from pg_class c, lateral aclexplode(c.relacl) x
+                              where c.oid = v.n::regclass and x.grantee = (select oid from pg_roles where rolname = 'authenticated') and x.privilege_type = 'SELECT')
+                      and not exists (select 1 from pg_class c, lateral aclexplode(c.relacl) x
+                              where c.oid = v.n::regclass and x.grantee = (select oid from pg_roles where rolname = 'authenticated') and x.privilege_type <> 'SELECT')
                  then 'PASS' else 'FAIL' end,
-         'signed-in users can only read ' || v.n, 'SELECT yes; insert/update/delete/truncate no'
+         'signed-in users can only read ' || v.n, 'SELECT yes; every other privilege no'
   from (values ('public.leave_balances'), ('public.comp_day_balances')) v(n)
   union all
   select 5, case when has_table_privilege('service_role', v.n, 'SELECT') then 'PASS' else 'REVIEW' end,
