@@ -10060,3 +10060,37 @@ begin
   end if;
 end
 $grants$;
+
+-- ---- Least privilege on every public table (migration 20261114000000) ----------------------------
+-- TRUNCATE / TRIGGER / REFERENCES (and MAINTAIN on PostgreSQL 17) ignore row-level security, so they are
+-- removed from anon / authenticated / PUBLIC on every public table, and from the default privileges of
+-- tables created in future. SELECT / INSERT / UPDATE / DELETE, service_role and postgres are untouched.
+do $hardening$
+declare
+  v_pg17 boolean := current_setting('server_version_num')::int >= 170000;
+  t record;
+  r text;
+  v_roles text[];
+begin
+  for t in
+    select c.oid::regclass as rel, pg_has_role(current_user, c.relowner, 'USAGE') as can_change
+    from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p')
+  loop
+    continue when not t.can_change;
+    execute format('revoke truncate, trigger, references on table %s from anon, authenticated, public', t.rel);
+    if v_pg17 then execute format('revoke maintain on table %s from anon, authenticated, public', t.rel); end if;
+  end loop;
+
+  select array_agg(distinct x) into v_roles
+  from unnest(array['postgres', current_user::text, 'supabase_admin']) x
+  where exists (select 1 from pg_roles where rolname = x);
+  foreach r in array v_roles loop
+    begin
+      execute format('alter default privileges for role %I in schema public revoke truncate, trigger, references on tables from anon, authenticated', r);
+      if v_pg17 then execute format('alter default privileges for role %I in schema public revoke maintain on tables from anon, authenticated', r); end if;
+    exception when insufficient_privilege then
+      null;
+    end;
+  end loop;
+end
+$hardening$;
