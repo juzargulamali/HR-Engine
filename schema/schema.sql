@@ -658,7 +658,9 @@ create table leave_ledger (
 create index idx_leave_ledger_employee_type
   on leave_ledger(employee_id, leave_type_code, txn_date);
 
-create view leave_balances as
+-- security_invoker: callers see only the ledger rows their own RLS allows
+-- (migration 20261112000000; a plain view would run as its owner and bypass RLS).
+create view leave_balances with (security_invoker = true) as
   select employee_id, leave_type_code, sum(amount_days) as balance_days
   from leave_ledger
   group by employee_id, leave_type_code;
@@ -689,7 +691,7 @@ create table comp_day_ledger (
 create index idx_comp_ledger_employee on comp_day_ledger(employee_id, txn_date);
 
 
-create view comp_day_balances as
+create view comp_day_balances with (security_invoker = true) as
   select employee_id, sum(days) as balance_days
   from comp_day_ledger
   group by employee_id;
@@ -6031,6 +6033,13 @@ create policy leave_ledger_select on leave_ledger for select
 create policy leave_ledger_insert_hr on leave_ledger for insert
   with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
 
+-- CEO/CTO read leave balances (the balance views run as the caller; migration 20261112000000).
+create policy leave_ledger_select_clevel on leave_ledger for select
+  using (
+    has_role('ceo', (select e.company_id from employees e where e.id = employee_id))
+    or has_role('cto', (select e.company_id from employees e where e.id = employee_id))
+  );
+
 create policy comp_ledger_select on comp_day_ledger for select
   using (
     employee_id = current_employee_id()
@@ -6040,6 +6049,14 @@ create policy comp_ledger_select on comp_day_ledger for select
 
 create policy comp_ledger_insert_hr on comp_day_ledger for insert
   with check (has_role('hr_admin', (select company_id from employees where id = employee_id)));
+
+-- Finance and CEO/CTO read Recovery Leave balances (migration 20261112000000).
+create policy comp_ledger_select_finance_clevel on comp_day_ledger for select
+  using (
+    has_role('finance', (select e.company_id from employees e where e.id = employee_id))
+    or has_role('ceo', (select e.company_id from employees e where e.id = employee_id))
+    or has_role('cto', (select e.company_id from employees e where e.id = employee_id))
+  );
 
 -- ---- deduction_priority_rules: readable by anyone signed in (it explains
 --      how their own balance will be drawn down), writable by HR Admin
