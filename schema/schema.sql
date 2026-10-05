@@ -6934,6 +6934,16 @@ create trigger audit_profiles after update on profiles
 -- Ledgers and approvals are append-only at the table-grant level too.
 revoke update, delete on leave_ledger from authenticated, anon;
 revoke update, delete on comp_day_ledger from authenticated, anon;
+
+-- Least privilege on the ledgers (migration 20261113000000): TRUNCATE / TRIGGER / REFERENCES (and
+-- MAINTAIN on PostgreSQL 17) ignore row-level security, so they are removed outright. anon holds
+-- nothing; authenticated holds SELECT + INSERT only, still gated by the policies above.
+revoke all on leave_ledger from anon;
+revoke all on comp_day_ledger from anon;
+revoke all on leave_ledger from authenticated;
+revoke all on comp_day_ledger from authenticated;
+grant select, insert on leave_ledger to authenticated;
+grant select, insert on comp_day_ledger to authenticated;
 revoke update, delete on approvals from authenticated, anon;
 
 -- =============================================================================
