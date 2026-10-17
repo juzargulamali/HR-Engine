@@ -25,16 +25,25 @@ export function ActionForm({
   secondary?: React.ReactNode;
   variant?: "default" | "destructive" | "outline" | "secondary";
 }) {
-  const [state, formAction, pending] = useActionState(action, { error: null } as S);
   const formRef = useRef<HTMLFormElement>(null);
-  const handled = useRef<S | null>(null);
+  // onDone / reset run inside the action wrapper, not in an effect: a successful save often changes what the page
+  // shows (revalidation can unmount this very form, e.g. the last item leaves a picker), and an effect would then never
+  // run, leaving a dialog open after the work was done.
+  const onDoneRef = useRef(onDone);
+  const resetRef = useRef(resetOnSuccess);
   useEffect(() => {
-    if (state && state !== handled.current && state.error === null && handled.current !== null) {
-      if (resetOnSuccess) formRef.current?.reset();
-      onDone?.(state);
+    onDoneRef.current = onDone;
+    resetRef.current = resetOnSuccess;
+  });
+  const wrapped = async (prev: S, formData: FormData): Promise<S> => {
+    const result = await action(prev, formData);
+    if (result.error === null) {
+      if (resetRef.current) formRef.current?.reset();
+      onDoneRef.current?.(result);
     }
-    handled.current = state;
-  }, [state, onDone, resetOnSuccess]);
+    return result;
+  };
+  const [state, formAction, pending] = useActionState(wrapped, { error: null } as S);
   return (
     <form
       ref={formRef}

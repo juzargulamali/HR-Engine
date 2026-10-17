@@ -12682,12 +12682,12 @@ begin
   perform crm_require_user();
   if not crm_has_any_access() then return; end if;
   return query
-    select g.user_id, p.full_name, case when crm_is_any_founder() then p.email end, array_agg(distinct g.company_id)
+    select g.user_id, coalesce(nullif(btrim(p.full_name), ''), split_part(p.email, '@', 1)), case when crm_is_any_founder() then p.email end, array_agg(distinct g.company_id)
     from crm_company_grants g
     join profiles p on p.id = g.user_id and p.is_active
     where g.revoked_at is null and crm_has_access(g.company_id)
     group by g.user_id, p.full_name, p.email
-    order by p.full_name nulls last;
+    order by 2;
 end;
 $$;
 
@@ -12700,9 +12700,9 @@ begin
   perform crm_require_user();
   if not crm_has_any_access() then return; end if;
   return query
-    select p.id, p.full_name, case when crm_is_any_founder() then p.email end
+    select p.id, coalesce(nullif(btrim(p.full_name), ''), split_part(p.email, '@', 1)), case when crm_is_any_founder() then p.email end
     from profiles p where p.is_active
-    order by p.full_name nulls last, p.email;
+    order by 2, p.email;
 end;
 $$;
 
