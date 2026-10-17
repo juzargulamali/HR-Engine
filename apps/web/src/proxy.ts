@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isScheduledRoutePath, scheduledRoutesAllowedWithoutSession } from "@/lib/cron/scheduled-routes";
 
 // /set-password and /reset-password must stay public: they're where an
 // invite/recovery email lands before the recipient has any session cookie
@@ -9,6 +10,12 @@ import { NextResponse, type NextRequest } from "next/server";
 // form that sends that email in the first place, so it's public for the
 // same reason /login is.
 const PUBLIC_PATHS = ["/login", "/set-password", "/forgot-password", "/reset-password"];
+
+// Scheduled (Vercel Cron) routes carry no session cookie, so without an
+// exemption this proxy answers them 307 -> /login before their own CRON_SECRET
+// check runs. The exemption is OFF unless ALLOW_SCHEDULED_ROUTES_WITHOUT_SESSION
+// is exactly "on", and then covers only the exact paths in
+// SCHEDULED_ROUTE_PATHS. See docs/scheduled-routes-diagnosis.md before enabling.
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -42,7 +49,9 @@ export async function proxy(request: NextRequest) {
 
   const isPublicPath = PUBLIC_PATHS.some((path) => request.nextUrl.pathname.startsWith(path));
 
-  if (!user && !isPublicPath) {
+  const isExemptScheduledRoute = scheduledRoutesAllowedWithoutSession() && isScheduledRoutePath(request.nextUrl.pathname);
+
+  if (!user && !isPublicPath && !isExemptScheduledRoute) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", request.nextUrl.pathname);
     return NextResponse.redirect(loginUrl);
