@@ -250,12 +250,12 @@ export function ActionMenu({ label, items }: { label: string; items: { label: st
   );
 }
 
-export function Field({ label, hint, error, required, children, htmlFor }: { label: string; hint?: string; error?: string | null; required?: boolean; children: React.ReactNode; htmlFor: string }) {
+export function Field({ label, hint, error, required, children, htmlFor, tag }: { label: string; hint?: string; error?: string | null; required?: boolean; children: React.ReactNode; htmlFor: string; tag?: string }) {
   return (
     <div className="space-y-1.5">
       <label htmlFor={htmlFor} className="flex items-center gap-1 text-sm font-medium">
         {label}
-        {required ? <span className="text-xs font-normal text-muted-foreground">(required)</span> : <span className="text-xs font-normal text-muted-foreground">(optional)</span>}
+        <span className="text-xs font-normal text-muted-foreground">{tag ?? (required ? "(required)" : "(optional)")}</span>
       </label>
       {children}
       {hint && !error ? <p className="text-xs text-muted-foreground">{hint}</p> : null}

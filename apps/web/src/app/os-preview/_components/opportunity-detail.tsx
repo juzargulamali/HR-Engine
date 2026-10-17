@@ -91,8 +91,8 @@ export function OpportunityDetail({ refId }: { refId: string }) {
       return r.next.kind === "schedule" ? [...done, { id: `n${all.length}`, oppId: opp.id, owner, title: r.next.title, dueAt: r.next.dueAt, createdAt: NOW, kind: r.next.actionKind }] : done;
     });
     setActs((a) => [
-      ...(r.notes || r.reply === "yes" ? [{ id: `c${a.length}`, oppId: opp.id, type: (r.reply === "yes" ? "client_response" : "note") as Activity["type"], at: NOW, by: roleDef.person, text: r.notes || r.outcome, internal: r.reply !== "yes" }] : []),
-      { id: `o${a.length}`, oppId: opp.id, type: "note", at: NOW, by: roleDef.person, text: `Completed “${f.title}”: ${r.outcome}.${r.reply === "no" ? " No reply yet." : ""}`, internal: true },
+      ...(r.notes || r.clientReplied ? [{ id: `c${a.length}`, oppId: opp.id, type: (r.clientReplied ? "client_response" : "note") as Activity["type"], at: NOW, by: roleDef.person, text: r.notes || r.outcome, internal: !r.clientReplied }] : []),
+      { id: `o${a.length}`, oppId: opp.id, type: "note", at: NOW, by: roleDef.person, text: `Completed “${f.title}”: ${r.outcome}.`, internal: true },
       ...a,
     ]);
     if (r.next.kind === "hold") { setStage("on_hold"); setHold({ reason: r.next.reason, review: r.next.review }); }

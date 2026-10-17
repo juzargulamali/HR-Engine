@@ -67,7 +67,7 @@ export function MoveDialog({ opp, stage, open, onClose, onMoved }: { opp: Opport
             <Field label="Next action" htmlFor="mv-action" required error={errors.action} hint="For example: Call to confirm dates."><Input id="mv-action" value={action} onChange={(e) => setAction(e.target.value)} /></Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Date" htmlFor="mv-date" required error={errors.date}><Input id="mv-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-              <Field label={`Time (${TZ_LABEL})`} htmlFor="mv-time" required><Input id="mv-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} /></Field>
+              <Field label="Time (Dubai)" htmlFor="mv-time" required><Input id="mv-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} /></Field>
             </div>
           </>
         )}

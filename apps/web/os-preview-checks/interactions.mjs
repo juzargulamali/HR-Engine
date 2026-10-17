@@ -98,12 +98,12 @@ await p.getByRole("button", { name: "Complete follow-up" }).click();
 await p.getByRole("dialog").getByRole("button", { name: "Complete follow-up" }).click();
 let dlg = await p.getByRole("dialog").innerText();
 check("complete: needs an outcome and a next action", dlg.includes("Choose what happened.") && dlg.includes("Every open opportunity needs a next action."));
-check("complete: says it does not change the stage or mean won", dlg.includes("does not change the stage and does not mean the deal is won"));
+check("complete: says it does not change the stage or mean won", dlg.includes("does not change the stage or mean the deal is won"));
 await p.selectOption("#cf-outcome", "Left a message");
-await p.getByLabel("Yes, record their reply as a client response").check();
+await p.locator("#cf-replied").check();
 await p.getByRole("dialog").getByRole("button", { name: "Complete follow-up" }).click();
 check("complete: a claimed client reply needs what they said", (await p.getByRole("dialog").innerText()).includes("Write what the client said."));
-await p.getByLabel("No reply yet").check();
+await p.locator("#cf-replied").uncheck();
 await p.fill("#cf-what", "Call the producer");
 await p.fill("#cf-date", "2026-10-21"); await p.fill("#cf-time", "10:00");
 await p.getByRole("dialog").getByRole("button", { name: "Complete follow-up" }).click();
@@ -111,8 +111,10 @@ await p.waitForTimeout(200);
 body = await text(p);
 check("complete: stage is still Proposal sent (never Won)", body.includes("Proposal sent") && !/\bWon\b/.test(body.split("Next action")[0]));
 check("complete: next action replaced with the new primary deadline", body.includes("Call the producer") && body.includes("Due 21 Oct, 10:00 am · Dubai time"));
-check("complete: no client-response entry was invented", !(await (async () => { await p.getByRole("tab", { name: "Activities" }).click(); return (await text(p)).includes("Completed “Chase client on proposal v2”: Left a message. No reply yet.") ? false : true; })()));
-check("complete: outcome recorded in the timeline", (await text(p)).includes("Left a message"));
+await p.getByRole("tab", { name: "Activities" }).click();
+body = await text(p);
+check("complete: no client-response entry was invented (only the one seeded)", (body.match(/Client response/g) ?? []).length === 1);
+check("complete: outcome recorded in the timeline", body.includes("Completed “Chase client on proposal v2”: Left a message."));
 
 // schedule next action validation & on hold rule
 await p.getByRole("button", { name: "Schedule next action" }).click();
@@ -123,7 +125,7 @@ await p.keyboard.press("Escape");
 await go(p, "/sales/opportunities/OPP-2026-0053?role=sales");
 await p.getByRole("button", { name: "Complete follow-up" }).click();
 await p.selectOption("#cf-outcome", "Email sent");
-await p.getByLabel("Put on hold").check();
+await p.locator("#cf-hold").check();
 await p.getByRole("dialog").getByRole("button", { name: "Complete follow-up" }).click();
 check("on hold: needs a review date", (await p.getByRole("dialog").innerText()).includes("Choose a review date."));
 await p.fill("#cf-review", "2026-11-10");
@@ -248,6 +250,11 @@ check("People & HR is a link to the live app, not redrawn", (await p.locator('a[
 await go(p, "/sales/new?role=sales");
 await p.getByRole("button", { name: "Record enquiry" }).click();
 check("new enquiry: five required fields enforced", (await p.locator("#form-errors li").count()) === 5);
+check("new enquiry: the company-or-contact rule is explained", (await text(p)).includes("One is enough") && (await p.getByRole("group", { name: /Who is it from/ }).count()) === 1);
+await p.fill("#e-contact", "Hana Verma");
+await p.getByRole("button", { name: "Record enquiry" }).click();
+check("new enquiry: a contact name alone satisfies the rule", !(await p.locator("#form-errors").innerText()).includes("One is enough"));
+await p.fill("#e-contact", "");
 await p.fill("#e-party", "Northwind");
 check("new enquiry: duplicate warning", await p.getByRole("region", { name: "Possible duplicate" }).isVisible());
 await go(p, "/sales/pipeline?role=sales");
@@ -291,6 +298,20 @@ for (const w of [320, 360, 390]) {
   }
   await s.context().close();
 }
+// contact cards keep every button and line inside the card, desktop and narrow phones
+for (const [w, h] of [[1440, 900], [390, 844], [320, 740]]) {
+  const c = await fresh({ width: w, height: h });
+  for (const path of ["/sales/opportunities/OPP-2026-0041?role=sales", "/sales/clients?role=sales", "/sales/opportunities/OPP-2026-0047/handover?role=sales"]) {
+    await c.goto(`${B}${path}`, { waitUntil: "networkidle" });
+    const out = await c.evaluate(() => {
+      const cards = [...document.querySelectorAll("main div")].filter((d) => d.className.toString().includes("rounded-lg") && d.querySelector("button") && /Copy (number|email)/.test(d.innerText) && !d.querySelector("div.rounded-lg"));
+      return { n: cards.length, bad: cards.flatMap((card) => { const r = card.getBoundingClientRect(); return [...card.querySelectorAll("a,button,p,dd")].filter((e) => e.getBoundingClientRect().right > r.right + 0.5).map((e) => e.innerText.slice(0, 20)); }) };
+    });
+    check(`contact cards fit inside their card at ${w}px on ${path.split("?")[0].split("/").pop()}`, out.n > 0 && out.bad.length === 0, JSON.stringify(out));
+  }
+  await c.context().close();
+}
+
 // bottom nav never covers the last action
 for (const path of ["/sales/opportunities?role=sales", "/sales/follow-ups?role=sales", "/sales/new?role=sales", "/sales/settings?role=founder", "/my-day?role=founder", "/sales/opportunities/OPP-2026-0041?role=sales&tab=proposals"]) {
   await m.goto(`${B}${path}`, { waitUntil: "networkidle" });

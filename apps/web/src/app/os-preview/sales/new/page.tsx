@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CheckCircle2, TriangleAlert } from "lucide-react";
+import { CheckCircle2, CircleAlert, TriangleAlert } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -34,7 +34,7 @@ export default function NewEnquiry() {
     const err: Record<string, string> = {};
     if (!f.title.trim()) err.title = "Describe the requirement in a few words.";
     if (!f.source) err.source = "Choose where the enquiry came from.";
-    if (!f.party.trim() && !f.contact.trim()) err.party = "Enter the agency or client name, or a contact name.";
+    if (!f.party.trim() && !f.contact.trim()) err.party = "Give an agency or end-client name, or a contact name. One is enough.";
     if (!f.action.trim()) err.action = "Every open opportunity needs a next action.";
     if (!f.date) err.date = "Choose when the next action is due.";
     else if (f.date < TODAY) err.date = "The next action date cannot be in the past.";
@@ -79,10 +79,15 @@ export default function NewEnquiry() {
               <div className="space-y-4">
                 <Field label="Requirement" htmlFor="e-title" required error={errors.title} hint="Title or one-line brief, for example “LED tunnel for a mall activation”."><Input id="e-title" value={f.title} onChange={set("title")} /></Field>
                 <Field label="Source" htmlFor="e-source" required error={errors.source} ><Select id="e-source" value={f.source} onChange={set("source")}><option value="">Choose a source…</option>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Agency or client name" htmlFor="e-party" required error={errors.party} hint="Or give a contact name instead."><Input id="e-party" value={f.party} onChange={set("party")} placeholder="Agency or end client" /></Field>
-                  <Field label="Contact name" htmlFor="e-contact" hint="Optional if the agency or client is given."><Input id="e-contact" value={f.contact} onChange={set("contact")} /></Field>
-                </div>
+                <fieldset aria-describedby="who-help" className="rounded-md border border-border p-3.5">
+                  <legend className="px-1 text-sm font-medium">Who is it from? <span className="text-xs font-normal text-muted-foreground">(required: at least one)</span></legend>
+                  <p id="who-help" className="mb-3 text-xs text-muted-foreground">Give an agency or end-client name, or a contact name. One is enough.</p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Agency or end-client name" htmlFor="e-party" tag="(either this…)"><Input id="e-party" value={f.party} onChange={set("party")} aria-invalid={!!errors.party} aria-describedby={errors.party ? "who-error" : undefined} /></Field>
+                    <Field label="Contact name" htmlFor="e-contact" tag="(…or this)"><Input id="e-contact" value={f.contact} onChange={set("contact")} aria-invalid={!!errors.party} aria-describedby={errors.party ? "who-error" : undefined} /></Field>
+                  </div>
+                  {errors.party ? <p id="who-error" role="alert" className="mt-3 flex items-center gap-1 text-xs text-[hsl(var(--os-bad))]"><CircleAlert className="h-3.5 w-3.5" aria-hidden />{errors.party}</p> : null}
+                </fieldset>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="Next action" htmlFor="e-action" required error={errors.action}><Input id="e-action" value={f.action} onChange={set("action")} placeholder="Call to qualify" /></Field>
                   <Field label="Next action date" htmlFor="e-date" required error={errors.date}><Input id="e-date" type="date" value={f.date} onChange={set("date")} /></Field>

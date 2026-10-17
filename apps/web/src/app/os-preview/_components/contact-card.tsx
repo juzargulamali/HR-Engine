@@ -30,33 +30,30 @@ const RELATION = { agency: "Agency contact", client: "End-client contact", direc
 export function ContactCard({ contact, roleOnOpportunity, className }: { contact: Contact; roleOnOpportunity?: string; className?: string }) {
   const org = orgById(contact.orgId);
   return (
-    <div className={cn("rounded-lg border border-border bg-card p-3.5", className)}>
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold">{contact.name}</p>
-          <p className="text-sm text-muted-foreground">{contact.role} · {org.name}</p>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          <Chip tone="info">{RELATION[org.type]}</Chip>
-          {roleOnOpportunity ? <Chip>{roleOnOpportunity}</Chip> : null}
-        </div>
+    <div className={cn("min-w-0 rounded-lg border border-border bg-card p-3.5", className)}>
+      <p className="break-words text-sm font-semibold">{contact.name}</p>
+      <p className="break-words text-sm">{contact.role}</p>
+      <p className="break-words text-sm text-muted-foreground">{org.name}</p>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        <Chip tone="info">{RELATION[org.type]}</Chip>
+        {roleOnOpportunity ? <Chip>{roleOnOpportunity}</Chip> : null}
       </div>
-      <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-        <div>
-          <dt className="text-xs text-muted-foreground">Phone</dt>
+      <dl className="mt-3 space-y-3 border-t border-border/70 pt-3 text-sm">
+        <div className="grid grid-cols-[3.25rem_minmax(0,1fr)] gap-x-2">
+          <dt className="pt-0.5 text-xs text-muted-foreground">Phone</dt>
           {contact.phone ? (
-            <dd className="mt-0.5"><p className="tabular-nums">{contact.phone}</p>
+            <dd><p className="tabular-nums">{contact.phone}</p>
               <p className="mt-1.5 flex flex-wrap gap-2"><CopyButton value={contact.phone} label="Copy number" /><a href={`tel:${contact.phone.replace(/\s+/g, "")}`} className={ACTION}><Phone className="h-3.5 w-3.5" aria-hidden />Call</a></p>
             </dd>
-          ) : <dd className="mt-0.5 text-muted-foreground">Not recorded</dd>}
+          ) : <dd className="text-muted-foreground">Not recorded</dd>}
         </div>
-        <div className="min-w-0">
-          <dt className="text-xs text-muted-foreground">Email</dt>
+        <div className="grid grid-cols-[3.25rem_minmax(0,1fr)] gap-x-2">
+          <dt className="pt-0.5 text-xs text-muted-foreground">Email</dt>
           {contact.email ? (
-            <dd className="mt-0.5"><p className="break-all">{contact.email}</p>
+            <dd><p className="break-words [overflow-wrap:anywhere]">{contact.email}</p>
               <p className="mt-1.5 flex flex-wrap gap-2"><CopyButton value={contact.email} label="Copy email" /><a href={`mailto:${contact.email}`} className={ACTION}><Mail className="h-3.5 w-3.5" aria-hidden />Email</a></p>
             </dd>
-          ) : <dd className="mt-0.5 text-muted-foreground">Not recorded</dd>}
+          ) : <dd className="text-muted-foreground">Not recorded</dd>}
         </div>
       </dl>
     </div>
