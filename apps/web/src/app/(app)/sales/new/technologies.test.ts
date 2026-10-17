@@ -34,4 +34,9 @@ describe("serialiseTechnologies", () => {
     expect(JSON.parse(serialiseTechnologies([{ name: "Projector", qty: "2" }, { name: "", qty: "" }]))).toEqual([{ name: "Projector", qty: 2 }]);
     expect(serialiseTechnologies([])).toBe("[]");
   });
+
+  it("ignores the untouched default row (no name, quantity 1) so a form with no technologies saves", () => {
+    expect(parseTechnologyRows([{ name: "", qty: "1" }])).toEqual({ items: [], error: null });
+    expect(parseTechnologyRows([{ name: "Projector", qty: "2" }, { name: "", qty: "1" }]).error).toBeNull();
+  });
 });

@@ -10366,10 +10366,11 @@ as $$
 declare
   v_id uuid;
   v_caps text[] := coalesce(p_capabilities, '{}'::text[]);
+  v_existing text[];
 begin
   if auth.uid() is null then raise exception 'Not signed in' using errcode = '28000'; end if;
   if not crm_has_capability(p_company_id, 'manage_access') then
-    raise exception 'Only a CRM founder can grant Sales access for this company' using errcode = '42501';
+    raise exception 'Only a founder, or someone a founder gave access management to, can grant Sales access for this company' using errcode = '42501';
   end if;
   if not (v_caps <@ crm_capability_list()) then
     raise exception 'Unknown CRM capability in %', v_caps using errcode = '22023';
@@ -10383,6 +10384,20 @@ begin
   end if;
   if not exists (select 1 from companies where id = p_company_id and is_active and deleted_at is null) then
     raise exception 'Unknown or inactive company' using errcode = '22023';
+  end if;
+  -- Changing an existing founder's rights is a founder's decision, and the last founder can never be demoted
+  -- (the same protection crm_revoke_access gives against revoking them).
+  select capabilities into v_existing from crm_company_grants
+   where user_id = p_user_id and company_id = p_company_id and revoked_at is null;
+  if v_existing is not null and 'founder' = any (v_existing) then
+    if not crm_is_founder(p_company_id) then
+      raise exception 'Only a CRM founder can change a founder''s rights' using errcode = '42501';
+    end if;
+    if not ('founder' = any (v_caps)) and (
+         select count(*) from crm_company_grants
+          where company_id = p_company_id and revoked_at is null and 'founder' = any (capabilities)) <= 1 then
+      raise exception 'Cannot remove founder rights from the last founder of this company' using errcode = '23514';
+    end if;
   end if;
 
   update crm_company_grants

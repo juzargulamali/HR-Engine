@@ -41,6 +41,7 @@ export default async function OpportunityPage({ params, searchParams }: { params
   const hasQuoteRef = !!detail.zoho?.quote_ref?.trim();
   const moveOptions = crmAllowedMoves(opp.stage).map((to) => ({ id: to, label: crmStageLabel(to), requirement: stageMoveRequirement(to, { hasSentProposal, hasQuoteRef }) }));
   const holdReviewPassed = !!opp.hold_review_date && opp.hold_review_date < todayInDubai();
+  const partyLabel = item.client ? "Client" : item.agency ? "Agency" : "Client";
   const clientLine = item.client && item.agency ? `${item.client.name} via ${item.agency.name}` : (item.client?.name ?? item.agency?.name ?? "No client recorded");
 
   const tabs: DetailTab[] = [
@@ -64,7 +65,7 @@ export default async function OpportunityPage({ params, searchParams }: { params
             <StageBadge stage={opp.stage} />
           </div>
           <dl className="mt-3 grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-            <div className="min-w-0"><dt className="text-xs text-muted-foreground">Client</dt><dd className="break-words">{clientLine}</dd></div>
+            <div className="min-w-0"><dt className="text-xs text-muted-foreground">{partyLabel}</dt><dd className="break-words">{clientLine}</dd></div>
             <div className="min-w-0"><dt className="text-xs text-muted-foreground">Owner</dt><dd className="break-words font-medium">{view.ownerName}</dd></div>
             <div className="min-w-0"><dt className="text-xs text-muted-foreground">Value</dt><dd className="font-medium">{formatMoney(item.value, opp.currency)}</dd></div>
             <div className="min-w-0">

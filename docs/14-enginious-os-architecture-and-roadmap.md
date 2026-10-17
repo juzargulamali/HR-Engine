@@ -5,7 +5,11 @@
 > supersedes the "Projects first" release order of v1. Existing HR stays operational and unchanged and becomes **People & HR**
 > at the approved rollout. Stage A changes no database, no Production setting and creates no hosted service.
 >
-> **HR is not described here as proven in company use.** The HR team-testing week was postponed; automated tests passing is not
+> > **Stage B status (2026-10-17):** the owner approved the Stage A design and authorised Sales & CRM implementation on a feature
+> branch. It is built and verified locally (see [crm-deployment.md](./crm-deployment.md)) but **not merged and not applied to
+> Production**; deployment is the owner's manual SQL sequence in that guide.
+>
+**HR is not described here as proven in company use.** The HR team-testing week was postponed; automated tests passing is not
 > the same as staff relying on it every day. Labels: **[EXISTS]** = built and inspected in this repository, **[CHANGE]** = exists
 > but must change, **[NEW]** = proposed, does not exist yet.
 

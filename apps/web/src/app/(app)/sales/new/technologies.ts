@@ -15,8 +15,8 @@ export interface TechnologyParse {
 }
 
 /**
- * Turns the rows into the `technologies` JSON the action reads. A row with neither a name nor a quantity is ignored
- * (the empty row left at the bottom of the list); a row with a quantity but no name is an error; a blank quantity on a
+ * Turns the rows into the `technologies` JSON the action reads. A row with no name and a blank or default (1) quantity
+ * is ignored (the untouched row at the bottom of the list); a row with another quantity but no name is an error; a blank quantity on a
  * named row means 1. A quantity that is not a whole number of at least 1 is kept as 0 so the server refuses it too.
  */
 export function parseTechnologyRows(rows: readonly { name: string; qty: string }[]): TechnologyParse {
@@ -25,7 +25,7 @@ export function parseTechnologyRows(rows: readonly { name: string; qty: string }
   for (const row of rows) {
     const name = row.name.trim();
     const qtyText = row.qty.trim();
-    if (name === "" && qtyText === "") continue;
+    if (name === "" && (qtyText === "" || qtyText === "1")) continue; // the untouched row: quantity 1 is its default
     if (name === "") {
       error ??= "Give each technology a name, or clear its quantity.";
       continue;

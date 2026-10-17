@@ -59,6 +59,9 @@ export default async function SalesOverviewPage({ searchParams }: { searchParams
   const { scope: scopeParam } = await searchParams;
   const ctx = await getCrmContext();
   if (!ctx) return null;
+  // The layout shows its own no-access message but Next renders the page alongside it, so stop here for anyone
+  // without a grant (RLS would return nothing anyway; this also keeps the reminder job from running for them).
+  if (ctx.grants.length === 0) return null;
 
   // Never throws; makes follow-ups that fell due mid-day show up as reminders without waiting for the daily job.
   await generateRemindersThrottled();

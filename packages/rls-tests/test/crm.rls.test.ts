@@ -37,11 +37,13 @@ describe("Sales & CRM", () => {
   let oppPl: string;
   let companyCount = 0;
 
+  // Rows are typed as non-empty so `rows[0]` reads naturally; assertions on emptiness use toHaveLength.
+  type Rows<T> = [T, ...T[]];
   const q = <T = Record<string, unknown>>(user: string | null, sql: string, params: unknown[] = []) =>
-    db.asUser(user, async (query) => (await query(sql, params)).rows as T[]);
+    db.asUser(user, async (query) => (await query(sql, params)).rows as Rows<T>);
   const commit = <T = Record<string, unknown>>(user: string, sql: string, params: unknown[] = []) =>
-    db.asUserCommit(user, async (query) => (await query(sql, params)).rows as T[]);
-  const admin = async <T = Record<string, unknown>>(sql: string) => (await db.seed(sql)).rows as T[];
+    db.asUserCommit(user, async (query) => (await query(sql, params)).rows as Rows<T>);
+  const admin = async <T = Record<string, unknown>>(sql: string) => (await db.seed(sql)).rows as Rows<T>;
   const soon = "now() + interval '2 days'";
   /** Assert a statement fails inside an open transaction without aborting it (savepoint). */
   const fails = async (query: (sql: string) => Promise<unknown>, sql: string, re: RegExp) => {
@@ -178,7 +180,7 @@ describe("Sales & CRM", () => {
           crm_company_settings: `update crm_company_settings set approval_policy = 'not_required'`,
           crm_proposals: `insert into crm_proposals (opportunity_id, company_id, version, created_by) values ('${oppUae}', '${CO.uae}', 9, '${U.amira}')`,
         };
-        const rows = await q(U.juzar, sql[table]).then(
+        const rows = await q(U.juzar, sql[table] as string).then(
           (r) => r,
           (e: Error) => e,
         );
@@ -669,7 +671,7 @@ describe("Sales & CRM", () => {
       const claimed = await admin<{ reminder_id: string; recipient_email: string; attempt: number }>("select * from crm_claim_reminder_emails(10)");
       const mine = claimed.filter((c) => c.reminder_id === r.id);
       expect(mine).toHaveLength(1);
-      expect(mine[0].recipient_email).toBe("amira@crm-test.ae");
+      expect(mine[0]!.recipient_email).toBe("amira@crm-test.ae");
       expect((await admin<{ reminder_id: string }>("select * from crm_claim_reminder_emails(10)")).filter((c) => c.reminder_id === r.id)).toHaveLength(0);
       // Failure schedules a retry; the retry succeeds; a sent row is never reopened.
       await admin(`select crm_finish_reminder_email('${r.id}', false, 'smtp down')`);
