@@ -481,6 +481,45 @@ end;
 $$;
 
 -- -----------------------------------------------------------------------------
+-- People pickers. Sales needs names (owner, assignee, Project Manager) without being given read access to the HR
+-- tables. crm_people lists holders of an active CRM grant in companies the caller can access; crm_staff_directory
+-- lists active staff (names only) for the Project Manager and access pickers. Email addresses are returned only to a
+-- founder, who needs them to tell two people apart when granting access.
+-- -----------------------------------------------------------------------------
+create or replace function crm_people()
+returns table (user_id uuid, full_name text, email text, company_ids uuid[])
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform crm_require_user();
+  if not crm_has_any_access() then return; end if;
+  return query
+    select g.user_id, p.full_name, case when crm_is_any_founder() then p.email end, array_agg(distinct g.company_id)
+    from crm_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.revoked_at is null and crm_has_access(g.company_id)
+    group by g.user_id, p.full_name, p.email
+    order by p.full_name nulls last;
+end;
+$$;
+
+create or replace function crm_staff_directory()
+returns table (user_id uuid, full_name text, email text)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform crm_require_user();
+  if not crm_has_any_access() then return; end if;
+  return query
+    select p.id, p.full_name, case when crm_is_any_founder() then p.email end
+    from profiles p where p.is_active
+    order by p.full_name nulls last, p.email;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
 -- Privileges
 -- -----------------------------------------------------------------------------
 revoke all on function
@@ -489,7 +528,7 @@ revoke all on function
   crm_upsert_zoho_reference(uuid, text, date, text, date, date, numeric),
   crm_request_availability(uuid), crm_confirm_availability(uuid, text, text),
   crm_request_approval(uuid, uuid), crm_decide_approval(uuid, text, text),
-  crm_update_handover(uuid, text, uuid, text), crm_mark_reminder_read(uuid),
+  crm_update_handover(uuid, text, uuid, text), crm_mark_reminder_read(uuid), crm_people(), crm_staff_directory(),
   crm_generate_reminders(timestamptz), crm_claim_reminder_emails(integer, timestamptz),
   crm_finish_reminder_email(uuid, boolean, text)
   from public, anon, authenticated;
@@ -500,7 +539,7 @@ grant execute on function
   crm_upsert_zoho_reference(uuid, text, date, text, date, date, numeric),
   crm_request_availability(uuid), crm_confirm_availability(uuid, text, text),
   crm_request_approval(uuid, uuid), crm_decide_approval(uuid, text, text),
-  crm_update_handover(uuid, text, uuid, text), crm_mark_reminder_read(uuid)
+  crm_update_handover(uuid, text, uuid, text), crm_mark_reminder_read(uuid), crm_people(), crm_staff_directory()
   to authenticated;
 
 -- Scheduled-job functions: the service role only (never reachable from a browser session).

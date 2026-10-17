@@ -710,6 +710,23 @@ describe("Sales & CRM", () => {
   });
 
   // ---------------------------------------------------------------------------------------------------------------
+  describe("people pickers", () => {
+    it("lists CRM staff of the caller's companies by name only (email for founders)", async () => {
+      const daniel = await q<{ user_id: string; email: string | null }>(U.daniel, "select user_id, email from crm_people()");
+      expect(daniel.map((r) => r.user_id)).toEqual(expect.arrayContaining([U.amira, U.juzar, U.daniel]));
+      expect(daniel.map((r) => r.user_id)).not.toContain(U.lena); // PL staff are not visible from UAE only
+      expect(daniel.every((r) => r.email === null)).toBe(true);
+      const juzar = await q<{ email: string | null }>(U.juzar, "select email from crm_people()");
+      expect(juzar.every((r) => r.email !== null)).toBe(true);
+    });
+    it("lists the staff directory for pickers, hidden from anyone without CRM access", async () => {
+      expect((await q(U.amira, "select * from crm_staff_directory()")).length).toBeGreaterThanOrEqual(8);
+      expect(await q(U.hr, "select * from crm_staff_directory()")).toHaveLength(0);
+      expect(await q(U.hr, "select * from crm_people()")).toHaveLength(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------------------------
   describe("privileges", () => {
     const CRM_TABLES = [
       "crm_company_grants", "crm_audit_log", "crm_company_settings", "crm_organisations", "crm_contacts", "crm_reference_counters",

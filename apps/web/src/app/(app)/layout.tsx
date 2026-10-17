@@ -47,8 +47,23 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     hasPendingApprovals = false;
   }
 
+  // Sales & CRM is shown only to people holding a CRM grant (its own table, not an HR role). Degrades to "no access" on
+  // any failure — including the CRM tables not existing yet — so the HR shell can never be broken by it.
+  let hasCrmAccess = false;
+  try {
+    const supabase = await createClient();
+    const { count, error } = await supabase
+      .from("crm_company_grants")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", session.userId)
+      .is("revoked_at", null);
+    hasCrmAccess = !error && (count ?? 0) > 0;
+  } catch {
+    hasCrmAccess = false;
+  }
+
   return (
-    <AppShell session={session} clockedIn={clockedIn} hasPendingApprovals={hasPendingApprovals}>
+    <AppShell session={session} clockedIn={clockedIn} hasPendingApprovals={hasPendingApprovals} hasCrmAccess={hasCrmAccess}>
       {children}
     </AppShell>
   );

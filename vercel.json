@@ -4,6 +4,7 @@
     { "path": "/api/cron/comp-day-expiry", "schedule": "0 1 * * *" },
     { "path": "/api/cron/document-expiry", "schedule": "0 2 * * *" },
     { "path": "/api/ai/detect-balance-discrepancies", "schedule": "0 3 * * *" },
-    { "path": "/api/cron/recovery-windows", "schedule": "30 0 * * *" }
+    { "path": "/api/cron/recovery-windows", "schedule": "30 0 * * *" },
+    { "path": "/api/cron/crm-reminders", "schedule": "0 4 * * *" }
   ]
 }

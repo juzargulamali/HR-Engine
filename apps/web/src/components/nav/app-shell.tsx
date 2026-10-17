@@ -15,16 +15,18 @@ export function AppShell({
   session,
   clockedIn = false,
   hasPendingApprovals = false,
+  hasCrmAccess = false,
   children,
 }: {
   session: CurrentSession;
   clockedIn?: boolean;
   hasPendingApprovals?: boolean;
+  hasCrmAccess?: boolean;
   children: React.ReactNode;
 }) {
   const roleLabels = roleLabelsFor(session.grants);
   const showAlertsLink = canViewHrAlerts(session.grants);
-  const groups = buildNavGroups(session.grants, { hasPendingApprovals });
+  const groups = buildNavGroups(session.grants, { hasPendingApprovals, hasCrmAccess });
 
   const signOutSlot = (
     <form action={signOut}>
