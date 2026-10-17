@@ -6,11 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { HOLD_REASONS, TODAY, type Opportunity, type StageId, allowedMoves, stageLabel } from "../_lib/data";
+import { HOLD_REASONS, NOW, TODAY, TZ_LABEL, type Opportunity, type StageId, allowedMoves, stageLabel } from "../_lib/data";
 import { PLink } from "./context";
 import { Field, Sheet } from "./ui";
 
-export interface MoveResult { stage: StageId; holdReason?: string; holdReview?: string; nextAction?: string; nextDate?: string }
+export interface MoveResult { stage: StageId; holdReason?: string; holdReview?: string; nextAction?: string; nextDueAt?: string }
 
 /**
  * Controlled stage change. Won and Lost are deliberately NOT here: they need evidence or a reason and live on the
@@ -24,6 +24,7 @@ export function MoveDialog({ opp, stage, open, onClose, onMoved }: { opp: Opport
   const [review, setReview] = useState("");
   const [action, setAction] = useState("");
   const [date, setDate] = useState("");
+  const [time, setTime] = useState("10:00");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   function submit(e: React.FormEvent) {
@@ -36,10 +37,11 @@ export function MoveDialog({ opp, stage, open, onClose, onMoved }: { opp: Opport
     } else {
       if (!action.trim()) err.action = "Every open opportunity needs a next action.";
       if (!date) err.date = "Choose a date for the next action.";
+      else if (`${date}T${time}` <= NOW) err.date = "Choose a time after the sample time shown at the top.";
     }
     setErrors(err);
     if (Object.keys(err).length) return;
-    onMoved(target === "on_hold" ? { stage: target, holdReason: reason.startsWith("Other") ? `Other: ${note.trim()}` : reason, holdReview: review } : { stage: target, nextAction: action.trim(), nextDate: date });
+    onMoved(target === "on_hold" ? { stage: target, holdReason: reason.startsWith("Other") ? `Other: ${note.trim()}` : reason, holdReview: review } : { stage: target, nextAction: action.trim(), nextDueAt: `${date}T${time}` });
     onClose();
   }
 
@@ -63,12 +65,15 @@ export function MoveDialog({ opp, stage, open, onClose, onMoved }: { opp: Opport
         ) : (
           <>
             <Field label="Next action" htmlFor="mv-action" required error={errors.action} hint="For example: Call to confirm dates."><Input id="mv-action" value={action} onChange={(e) => setAction(e.target.value)} /></Field>
-            <Field label="Next action date" htmlFor="mv-date" required error={errors.date}><Input id="mv-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Date" htmlFor="mv-date" required error={errors.date}><Input id="mv-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+              <Field label={`Time (${TZ_LABEL})`} htmlFor="mv-time" required><Input id="mv-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} /></Field>
+            </div>
           </>
         )}
         <div className="rounded-md border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
-          Winning or losing is not a normal move: it needs evidence or a reason.{" "}
-          <PLink href={`/os-preview/sales/opportunities/${opp.ref}/close`} className="font-medium text-[hsl(var(--os-link))] hover:underline">Open the Won / Lost confirmation</PLink>
+          To win or lose it you need evidence or a reason:{" "}
+          <PLink href={`/os-preview/sales/opportunities/${opp.ref}/close`} className="font-medium text-[hsl(var(--os-link))] underline underline-offset-2">Mark Won or Lost</PLink>
         </div>
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" onClick={onClose} className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>Cancel</button>

@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { Select } from "@/components/ui/select";
 import {
-  COMPANIES, FOLLOWUPS, OPPORTUNITIES, PIPELINE_STAGES, SALES_USERS, SAMPLE_PERIOD, ZOHO, fmtDate, isOpen, personName, stageLabel, type CompanyId, type Currency, type Opportunity,
+  COMPANIES, FOLLOWUPS, OPPORTUNITIES, PIPELINE_STAGES, SALES_USERS, SAMPLE_PERIOD, ZOHO, dueState, fmtDate, isOpen, personName, stageLabel, type CompanyId, type Currency, type Opportunity,
 } from "../../_lib/data";
 import { usePreview } from "../../_components/context";
-import { Chip, PageHeader, Panel, Restriction, StateGate } from "../../_components/ui";
+import { Chip, Hint, PageHeader, Panel, StateGate, ScrollHint } from "../../_components/ui";
 
 type Scope = "all" | CompanyId;
 const CURRENCIES: Currency[] = ["AED", "SAR", "EUR"];
@@ -33,13 +33,13 @@ export default function Reports() {
   const hours = responded.map((o) => (Date.parse(o.firstResponseAt!) - Date.parse(`${o.createdAt}T09:00`)) / 3600000).sort((a, b) => a - b);
   const median = hours.length ? hours[Math.floor(hours.length / 2)]! : null;
   const completed = fus.filter((f) => f.doneAt);
-  const onTime = completed.filter((f) => f.doneAt!.slice(0, 10) <= f.due).length;
+  const onTime = completed.filter((f) => f.doneAt! <= f.dueAt).length;
   const reasons = [...new Set(lost.map((o) => o.lostReason!))].map((r) => ({ r, n: lost.filter((o) => o.lostReason === r).length }));
   const th = "px-3 py-2 text-right font-medium";
 
   return (
     <>
-      <PageHeader eyebrow="Sales & CRM" title="Sales reports" description="Every figure shows its period and how many records it is based on. Currencies are never added together." />
+      <PageHeader eyebrow="Sales & CRM" title="Sales reports" />
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-sm"><span className="text-muted-foreground">Company</span>
           <Select value={scope} onChange={(e) => setScope(e.target.value as Scope)} className="h-9 w-56">
@@ -48,12 +48,13 @@ export default function Reports() {
           </Select>
         </label>
         <Chip>Period: {fmtDate(SAMPLE_PERIOD.from)} to {fmtDate(SAMPLE_PERIOD.to)} (sample)</Chip>
-        {!roleDef.crossCompany ? <Restriction>Cross-company totals are limited to authorised founders.</Restriction> : null}
+        {!roleDef.crossCompany ? <Hint text="Totals across all companies are limited to authorised founders." /> : null}
       </div>
       <StateGate what="Sales reports" emptyTitle="Not enough data yet" emptyText="Reports appear once opportunities have been recorded for a period.">
         <div className="grid gap-6 lg:grid-cols-2">
-          <Panel title="Open pipeline by stage" description={`Count and value. ${scope === "all" ? "One column per currency." : ""}`} flush>
-            <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Open pipeline by stage table"><table className="w-full text-sm"><caption className="sr-only">Open pipeline by stage</caption>
+          <Panel title="Open pipeline by stage" help="Each currency has its own column. They are never added together." flush>
+            <ScrollHint />
+            <div className="relative overflow-x-auto" tabIndex={0} role="region" aria-label="Open pipeline by stage table"><table className="w-full text-sm"><caption className="sr-only">Open pipeline by stage</caption>
               <thead><tr className="border-b border-border text-xs text-muted-foreground"><th scope="col" className="px-4 py-2 text-left font-medium">Stage</th><th scope="col" className={th}>Open</th>{currencies.map((c) => <th key={c} scope="col" className={th}>{c}</th>)}</tr></thead>
               <tbody>{PIPELINE_STAGES.map((s) => { const l = open.filter((o) => o.stage === s); return <tr key={s} className="border-b border-border/60 last:border-0"><th scope="row" className="px-4 py-2 text-left font-normal">{stageLabel(s)}</th><td className="px-3 py-2 text-right tabular-nums">{l.length}</td><ValueCells list={l} currencies={currencies} /></tr>; })}</tbody>
             </table></div>
@@ -61,7 +62,8 @@ export default function Reports() {
           </Panel>
 
           <Panel title="Open pipeline by owner" flush>
-            <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Open pipeline by owner table"><table className="w-full text-sm"><caption className="sr-only">Open pipeline by owner</caption>
+            <ScrollHint />
+            <div className="relative overflow-x-auto" tabIndex={0} role="region" aria-label="Open pipeline by owner table"><table className="w-full text-sm"><caption className="sr-only">Open pipeline by owner</caption>
               <thead><tr className="border-b border-border text-xs text-muted-foreground"><th scope="col" className="px-4 py-2 text-left font-medium">Owner</th><th scope="col" className={th}>Open</th>{currencies.map((c) => <th key={c} scope="col" className={th}>{c}</th>)}</tr></thead>
               <tbody>{SALES_USERS.map((p) => { const l = open.filter((o) => o.owner === p); return <tr key={p} className="border-b border-border/60 last:border-0"><th scope="row" className="px-4 py-2 text-left font-normal">{personName(p)}</th><td className="px-3 py-2 text-right tabular-nums">{l.length}</td><ValueCells list={l} currencies={currencies} /></tr>; })}</tbody>
             </table></div>
@@ -70,14 +72,14 @@ export default function Reports() {
 
           <Panel title="Follow-ups due and overdue">
             <dl className="grid grid-cols-3 gap-3 text-center">
-              {[{ l: "Overdue", n: fus.filter((f) => !f.doneAt && f.due < "2026-10-19").length }, { l: "Due today", n: fus.filter((f) => !f.doneAt && f.due === "2026-10-19").length }, { l: "Upcoming", n: fus.filter((f) => !f.doneAt && f.due > "2026-10-19").length }].map((x) => <div key={x.l} className="rounded-md border border-border p-3"><dt className="text-xs text-muted-foreground">{x.l}</dt><dd className="font-heading text-2xl font-semibold">{x.n}</dd></div>)}
+              {[{ l: "Overdue", n: fus.filter((f) => !f.doneAt && dueState(f.dueAt) === "overdue").length }, { l: "Due today", n: fus.filter((f) => !f.doneAt && dueState(f.dueAt) === "today").length }, { l: "Upcoming", n: fus.filter((f) => !f.doneAt && dueState(f.dueAt) === "upcoming").length }].map((x) => <div key={x.l} className="rounded-md border border-border p-3"><dt className="text-xs text-muted-foreground">{x.l}</dt><dd className="font-heading text-2xl font-semibold">{x.n}</dd></div>)}
             </dl>
             <SampleNote n={fus.length} what="follow-ups" />
           </Panel>
 
-          <Panel title="Timeliness">
+          <Panel title="Timeliness" help="Share within target needs a response target. None is configured yet, so only elapsed times are shown.">
             <dl className="space-y-3 text-sm">
-              <div><dt className="font-medium">First response</dt><dd className="text-muted-foreground">{median === null ? "No responses recorded in this scope." : `Median ${median.toFixed(1)} hours from logging to first response (${responded.length} of ${all.length} responded).`}</dd><dd className="text-xs text-muted-foreground">Share within target: <strong>not available</strong>, because no response target is configured yet.</dd></div>
+              <div><dt className="font-medium">First response</dt><dd className="text-muted-foreground">{median === null ? "No responses recorded in this scope." : `Median ${median.toFixed(1)} hours from logging to first response (${responded.length} of ${all.length} responded).`}</dd><dd className="text-xs text-muted-foreground">Share within target: not available yet.</dd></div>
               <div><dt className="font-medium">Follow-up completion</dt><dd className="text-muted-foreground">{completed.length ? `${onTime} of ${completed.length} completed follow-ups were finished on or before their due date.` : "No completed follow-ups in this scope."}</dd><dd className="text-xs text-muted-foreground">Very small sample: read with care.</dd></div>
             </dl>
             <SampleNote n={all.length} what="opportunities" />
@@ -90,9 +92,10 @@ export default function Reports() {
             <SampleNote n={won.length + lost.length} what="closed opportunities" />
           </Panel>
 
-          <Panel title="Won value, invoiced and collected" description="Three different things. Invoicing and payments are recorded in Zoho Books; here we only hold references and dates." className="lg:col-span-2" flush>
-            <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Won value against invoice and payment table"><table className="w-full min-w-[34rem] text-sm"><caption className="sr-only">Won value against invoice and payment status</caption>
-              <thead><tr className="border-b border-border text-xs text-muted-foreground">{["Opportunity", "Won value", "Invoice issued", "Payment received"].map((h, i) => <th key={h} scope="col" className={i ? "px-3 py-2 text-left font-medium" : "px-4 py-2 text-left font-medium"}>{h}</th>)}</tr></thead>
+          <Panel title="Won value, invoiced and collected" help="Three different things. Invoices and payments live in Zoho Books; here we only hold references and dates." className="lg:col-span-2" flush>
+            <ScrollHint />
+            <div className="relative overflow-x-auto" tabIndex={0} role="region" aria-label="Won value against invoice and payment table"><table className="w-full min-w-[34rem] text-sm"><caption className="sr-only">Won value against invoice and payment status</caption>
+              <thead><tr className="border-b border-border text-xs text-muted-foreground">{["Opportunity", "Won value", "Invoice issued", "Customer payment received"].map((h, i) => <th key={h} scope="col" className={i ? "px-3 py-2 text-left font-medium" : "px-4 py-2 text-left font-medium"}>{h}</th>)}</tr></thead>
               <tbody>
                 {won.length === 0 ? <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">No won opportunities in this scope.</td></tr> : won.map((o) => { const z = ZOHO.find((x) => x.oppId === o.id); return (
                   <tr key={o.id} className="border-b border-border/60 last:border-0"><th scope="row" className="px-4 py-2 text-left font-normal">{o.ref} · {o.title}</th><td className="px-3 py-2 tabular-nums">{o.currency} {fmt(o.value ?? 0)}</td><td className="px-3 py-2">{z?.invoiceRef ? `${z.invoiceRef}, ${fmtDate(z.invoiceIssuedOn)}` : "Not recorded"}</td><td className="px-3 py-2">{z?.paymentReceivedOn ? fmtDate(z.paymentReceivedOn) : "Not recorded"}</td></tr>

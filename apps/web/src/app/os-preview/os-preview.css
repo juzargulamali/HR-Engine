@@ -13,3 +13,11 @@
   --os-good: 152 66% 22%;
   --os-link: 187 90% 24%;
 }
+
+/* Clearer secondary text inside the preview than the app default, without touching the shared token. */
+.os-root {
+  --muted-foreground: 190 16% 74%;
+}
+:root[data-theme="light"] .os-root {
+  --muted-foreground: 196 20% 30%;
+}

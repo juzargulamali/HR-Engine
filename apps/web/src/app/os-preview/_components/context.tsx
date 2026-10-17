@@ -14,6 +14,7 @@ export function usePreview() {
   const role = parseRole(sp.get("role"));
   const state = parseState(sp.get("state"));
   const tab = sp.get("tab");
+  const param = (name: string) => sp.get(name);
   const href = useCallback(
     (path: string, extra?: Record<string, string>) => {
       const [base, query] = path.split("?");
@@ -24,7 +25,7 @@ export function usePreview() {
     },
     [role],
   );
-  return { role, roleDef: ROLES[role], state, tab, href };
+  return { role, roleDef: ROLES[role], state, tab, param, href };
 }
 
 /** A Link that keeps the previewed role in the URL. */

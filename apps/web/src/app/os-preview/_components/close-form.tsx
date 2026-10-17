@@ -30,7 +30,7 @@ export function CloseForm({ refId }: { refId: string }) {
         <PageHeader eyebrow={opp.ref} title="Already closed" />
         <Panel>
           <p className="text-sm">This opportunity is <strong>{opp.stage === "won" ? "won" : "lost"}</strong> ({fmtDate(opp.closedAt)}). {opp.stage === "won" && opp.evidence ? `Evidence: ${opp.evidence.type}, ${opp.evidence.reference}.` : `Reason: ${opp.lostReason}.`}</p>
-          <p className="mt-2 text-sm text-muted-foreground">Reopening or correcting a closed opportunity is audited and limited to the owner or a founder.</p>
+          <p className="mt-2 text-sm text-muted-foreground">Reopening or correcting a closed opportunity is limited to the owner or a founder, and is recorded.</p>
           <PLink href={`/os-preview/sales/opportunities/${opp.ref}`} className="mt-3 inline-block text-sm font-medium text-[hsl(var(--os-link))] hover:underline">Back to the opportunity</PLink>
         </Panel>
       </>
@@ -56,7 +56,7 @@ export function CloseForm({ refId }: { refId: string }) {
         <PageHeader eyebrow={opp.ref} title={outcome === "won" ? "Marked as won (preview)" : "Marked as lost (preview)"} />
         <div role="status" className="rounded-lg border border-success/40 bg-success/10 p-5">
           <p className="flex items-center gap-2 font-medium text-[hsl(var(--os-good))]"><CheckCircle2 className="h-5 w-5" aria-hidden />{outcome === "won" ? "Commercially won. The handover package is the next step." : "Lost. The reason is kept for reporting."}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Design preview: nothing was saved.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Preview only: nothing was saved.</p>
           <div className="mt-3 flex gap-2">
             {outcome === "won" ? <PLink href={`/os-preview/sales/opportunities/${opp.ref}/handover`} className={cn(buttonVariants({ size: "sm" }))}>Prepare handover package</PLink> : null}
             <PLink href={`/os-preview/sales/opportunities/${opp.ref}`} className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>Back to the opportunity</PLink>
@@ -84,7 +84,7 @@ export function CloseForm({ refId }: { refId: string }) {
             </fieldset>
           </Panel>
           {outcome === "won" ? (
-            <Panel title="Evidence of the win" description="A purchase order is the main evidence. An authorised email can confirm a job too.">
+            <Panel title="Evidence of the win" description="A purchase order, or an authorised email.">
               <div className="space-y-4">
                 <Field label="Evidence type" htmlFor="c-type" required><Select id="c-type" value={evType} onChange={(e) => setEvType(e.target.value)}><option>Purchase order</option><option>Authorised email</option></Select></Field>
                 <Field label={evType === "Purchase order" ? "PO number" : "Sender and subject"} htmlFor="c-ref" required error={err.ref}><Input id="c-ref" value={ref} onChange={(e) => setRef(e.target.value)} /></Field>
@@ -92,7 +92,7 @@ export function CloseForm({ refId }: { refId: string }) {
               </div>
             </Panel>
           ) : (
-            <Panel title="Why was it lost?" description="Used in reporting. Choose the closest reason.">
+            <Panel title="Why was it lost?">
               <div className="space-y-4">
                 <Field label="Reason" htmlFor="c-reason" required error={err.reason}><Select id="c-reason" value={reason} onChange={(e) => setReason(e.target.value)}><option value="">Choose a reason…</option>{LOST_REASONS.map((r) => <option key={r}>{r}</option>)}</Select></Field>
                 <Field label="Note" htmlFor="c-note"><Textarea id="c-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
@@ -103,7 +103,7 @@ export function CloseForm({ refId }: { refId: string }) {
         </div>
         <aside aria-label="About closing" className="space-y-4">
           <Panel title="You are closing"><p className="text-sm font-medium">{opp.title}</p><p className="text-xs text-muted-foreground"><ClientLine o={opp} /></p></Panel>
-          <Restriction>Only the owner or a founder can do this. The change, who made it and the evidence are kept in the history, and reopening is audited.</Restriction>
+          <Restriction>Only the owner or a founder can do this. It is recorded in the history.</Restriction>
         </aside>
       </form>
     </>

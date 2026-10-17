@@ -15,15 +15,58 @@ export const TASKS: SampleTask[] = [
   { id: "t4", projectId: "pr2", title: "Sculpture motion sequence draft", assignee: "Zeynep Arslan", due: "2026-10-30", status: "todo", dept: "Programming" },
   { id: "t5", projectId: "pr1", title: "Brand colour approval pack", assignee: "Tariq Aziz", due: "2026-10-19", status: "todo", dept: "Content" },
   { id: "t6", projectId: "pr3", title: "Lobby scene 4 illustrations", assignee: "Tariq Aziz", due: "2026-10-26", status: "doing", dept: "Content" },
+  { id: "t7", projectId: "pr2", title: "Motion sequence review with the client", assignee: "Zeynep Arslan", due: "2026-10-16", status: "doing", dept: "Programming" },
 ];
 
 export const WEEK_DAYS = ["Mon 19", "Tue 20", "Wed 21", "Thu 22", "Fri 23"] as const;
-/** Programming team plan for the sample week. `null` = unassigned. Two-project days are the competing-deadline signal. */
-export const TEAM_PLAN: { person: string; days: (string[] | null)[] }[] = [
-  { person: "Nadia Farouk", days: [["Expo stand"], ["Expo stand", "Bank lobby"], ["Expo stand", "Bank lobby"], ["Bank lobby"], null] },
-  { person: "Ibrahim Saad", days: [["Bank lobby"], ["Bank lobby"], ["Bank lobby", "Marina"], ["Bank lobby"], ["Marina"]] },
-  { person: "Zeynep Arslan", days: [["Marina"], ["Marina"], null, ["Expo stand"], ["Expo stand", "Marina"]] },
+
+/**
+ * Representative team plan. Office and workshop work can run across several projects on the same day, so several
+ * projects on a day is neutral. An empty day only means no allocation is recorded: it does not mean idle or absent.
+ * Only confirmed SITE commitments protect time (see SITE_BOOKINGS).
+ */
+export type AssignmentType = "office" | "workshop" | "site";
+export interface Allocation { project: string; type: AssignmentType }
+const off = (project: string): Allocation => ({ project, type: "office" });
+const shop = (project: string): Allocation => ({ project, type: "workshop" });
+export const TEAM_PLAN: { person: string; title: string; days: Allocation[][] }[] = [
+  { person: "Nadia Farouk", title: "Programmer", days: [[off("Expo stand")], [off("Expo stand"), off("Bank lobby")], [off("Expo stand"), off("Bank lobby")], [off("Bank lobby")], []] },
+  { person: "Ibrahim Saad", title: "Programmer", days: [[off("Bank lobby")], [off("Bank lobby")], [off("Bank lobby"), off("Marina")], [off("Bank lobby")], [off("Marina")]] },
+  { person: "Zeynep Arslan", title: "Programmer", days: [[off("Marina")], [off("Marina")], [], [off("Expo stand")], [off("Expo stand"), off("Marina")]] },
+  { person: "Selim Doruk", title: "Engineer", days: [[shop("Expo stand"), shop("Marina")], [shop("Expo stand"), shop("Marina")], [shop("Expo stand")], [shop("Marina")], []] },
 ];
+export const multiProjectDays = () => TEAM_PLAN.flatMap((p) => p.days).filter((d) => d.length > 1).length;
+export const daysWithoutAllocation = () => TEAM_PLAN.flatMap((p) => p.days).filter((d) => d.length === 0).length;
+
+/** Explicit concerns are raised by a person. They are never inferred from how many projects someone is on. */
+export const CAPACITY_CONCERNS = [
+  { id: "cc1", raisedBy: "Priya Raman (Project Manager)", at: "2026-10-18T17:20", text: "Show-control cue sheet and Touch calibration build both need Nadia Farouk by 23 Oct. Both client dates are fixed, so one needs a decision." },
+];
+
+/** Confirmed physical commitments. These, and only these, block overlapping time, including travel and preparation. */
+export interface SiteBooking { id: string; person: string; title: string; project: string; place: string; start: string; end: string; travelMin: number; prepMin: number; confirmed: boolean }
+export const SITE_BOOKINGS: SiteBooking[] = [
+  { id: "sb1", person: "Nadia Farouk", title: "Programmer", project: "Expo holographic stand", place: "Dubai World Trade Centre", start: "2026-11-08T07:00", end: "2026-11-08T19:00", travelMin: 60, prepMin: 30, confirmed: true },
+  { id: "sb2", person: "Nadia Farouk", title: "Programmer", project: "Bank lobby wall, phase 2", place: "Branch in Sharjah", start: "2026-11-08T15:00", end: "2026-11-08T17:00", travelMin: 45, prepMin: 15, confirmed: true },
+  { id: "sb3", person: "Ibrahim Saad", title: "Programmer", project: "Expo holographic stand", place: "Dubai World Trade Centre", start: "2026-11-09T08:00", end: "2026-11-09T16:00", travelMin: 60, prepMin: 30, confirmed: true },
+];
+const mins = (s: string) => Date.parse(`${s}:00Z`) / 60000;
+/** The time a site booking protects: preparation and travel before, travel back after. */
+export function bookingWindow(b: SiteBooking): { from: number; to: number } {
+  return { from: mins(b.start) - b.travelMin - b.prepMin, to: mins(b.end) + b.travelMin };
+}
+export function siteConflicts(list: SiteBooking[] = SITE_BOOKINGS): { a: SiteBooking; b: SiteBooking }[] {
+  const out: { a: SiteBooking; b: SiteBooking }[] = [];
+  const conf = list.filter((x) => x.confirmed);
+  for (let i = 0; i < conf.length; i++) for (let j = i + 1; j < conf.length; j++) {
+    const x = conf[i]!, y = conf[j]!;
+    if (x.person !== y.person) continue;
+    const wx = bookingWindow(x), wy = bookingWindow(y);
+    if (wx.from < wy.to && wy.from < wx.to) out.push({ a: x, b: y });
+  }
+  return out;
+}
+export const fmtClock = (m: number) => { const d = new Date(m * 60000); return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`; };
 
 export const SAMPLE_REQUESTS = {
   advances: [

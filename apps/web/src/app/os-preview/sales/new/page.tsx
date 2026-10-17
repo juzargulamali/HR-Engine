@@ -51,7 +51,7 @@ export default function NewEnquiry() {
         <div role="status" className="rounded-lg border border-success/40 bg-success/10 p-6">
           <p className="flex items-center gap-2 font-heading text-lg font-semibold text-[hsl(var(--os-good))]"><CheckCircle2 className="h-5 w-5" aria-hidden />Enquiry recorded (preview only)</p>
           <p className="mt-2 text-sm">It would be created as <strong>{saved.ref}</strong> in stage <strong>New enquiry</strong>, owned by <strong>{personName(roleDef.person)}</strong> as its creator, with the next action “{f.action}” on {f.date}.</p>
-          <p className="mt-1 text-xs text-muted-foreground">Design preview: nothing was saved. The reference format (company code, year, sequence) is an open decision.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Preview only: nothing was saved.</p>
           <div className="mt-4 flex gap-2">
             <Button size="sm" onClick={() => { setF(EMPTY); setOverride(""); setSaved(null); }}>Record another</Button>
             <PLink href="/os-preview/sales/opportunities" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>Back to opportunities</PLink>
@@ -64,7 +64,7 @@ export default function NewEnquiry() {
   const errKeys = Object.keys(errors);
   return (
     <>
-      <PageHeader eyebrow="Sales & CRM" title="New enquiry" description="Five things are required. If you don't know the dates, budget or scope yet, leave them blank: they can be added later." />
+      <PageHeader eyebrow="Sales & CRM" title="New enquiry" description="Five things are required. Leave anything you do not know blank." />
       <StateGate what="the enquiry form" emptyTitle="Nothing to show" emptyText="This form has no empty state.">
         <form onSubmit={submit} noValidate className="grid gap-6 lg:grid-cols-3">
           <div className="space-y-5 lg:col-span-2">
@@ -78,9 +78,9 @@ export default function NewEnquiry() {
             <Panel title="Required">
               <div className="space-y-4">
                 <Field label="Requirement" htmlFor="e-title" required error={errors.title} hint="Title or one-line brief, for example “LED tunnel for a mall activation”."><Input id="e-title" value={f.title} onChange={set("title")} /></Field>
-                <Field label="Source" htmlFor="e-source" required error={errors.source} hint="Enquiries are entered by hand, whatever the channel."><Select id="e-source" value={f.source} onChange={set("source")}><option value="">Choose a source…</option>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
+                <Field label="Source" htmlFor="e-source" required error={errors.source} ><Select id="e-source" value={f.source} onChange={set("source")}><option value="">Choose a source…</option>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Agency or client name" htmlFor="e-party" required error={errors.party} hint="Or give a contact name instead."><Input id="e-party" value={f.party} onChange={set("party")} placeholder="Try “Northwind” to see a duplicate warning" /></Field>
+                  <Field label="Agency or client name" htmlFor="e-party" required error={errors.party} hint="Or give a contact name instead."><Input id="e-party" value={f.party} onChange={set("party")} placeholder="Agency or end client" /></Field>
                   <Field label="Contact name" htmlFor="e-contact" hint="Optional if the agency or client is given."><Input id="e-contact" value={f.contact} onChange={set("contact")} /></Field>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -103,13 +103,13 @@ export default function NewEnquiry() {
               </section>
             ) : null}
 
-            <Panel title="Add now if you know it" description="All optional. Leave blank when unknown.">
+            <Panel title="Add now if you know it">
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Owning company" htmlFor="e-company" hint="Preselected. Sets the currency and who can see company totals."><Select id="e-company" value={f.company} onChange={set("company")}>{(Object.keys(COMPANIES) as CompanyId[]).map((c) => <option key={c} value={c}>{COMPANIES[c].name.replace(" (sample entity)", "")} · {COMPANIES[c].currency}</option>)}</Select></Field>
-                <Field label="Event or install start" htmlFor="e-event"><Input id="e-event" type="date" value={f.eventStart} onChange={set("eventStart")} /></Field>
+                <Field label="Owning company" htmlFor="e-company"><Select id="e-company" value={f.company} onChange={set("company")}>{(Object.keys(COMPANIES) as CompanyId[]).map((c) => <option key={c} value={c}>{COMPANIES[c].name.replace(" (sample entity)", "")} · {COMPANIES[c].currency}</option>)}</Select></Field>
+                <Field label="Installation date" htmlFor="e-event"><Input id="e-event" type="date" value={f.eventStart} onChange={set("eventStart")} /></Field>
                 <Field label="Budget (as stated)" htmlFor="e-budget" hint="Free text, e.g. “about 150k”."><Input id="e-budget" value={f.budget} onChange={set("budget")} /></Field>
-                <Field label="Location" htmlFor="e-place"><Input id="e-place" value={f.place} onChange={set("place")} /></Field>
-                <div className="sm:col-span-2"><Field label="Technologies requested" htmlFor="e-tech" hint="Comma separated. A managed list comes later."><Input id="e-tech" value={f.techs} onChange={set("techs")} /></Field></div>
+                <Field label="Event location" htmlFor="e-place"><Input id="e-place" value={f.place} onChange={set("place")} /></Field>
+                <div className="sm:col-span-2"><Field label="Technologies requested" htmlFor="e-tech" hint="Separate with commas."><Input id="e-tech" value={f.techs} onChange={set("techs")} /></Field></div>
               </div>
             </Panel>
             <div className="flex gap-2">
@@ -121,10 +121,9 @@ export default function NewEnquiry() {
           <aside aria-label="What happens next" className="space-y-4 lg:sticky lg:top-28 lg:self-start">
             <Panel title="What happens next">
               <ul className="space-y-2 text-sm text-muted-foreground">
-                <li>You become the <strong className="text-foreground">owner</strong>. Only a founder can reassign it.</li>
-                <li>It starts in <strong className="text-foreground">New enquiry</strong> with a unique reference.</li>
-                <li>The next action creates a follow-up you will see on your overview.</li>
-                <li>Everyone with Sales access can see it and add notes.</li>
+                <li>You become the owner. Only a founder can reassign it.</li>
+                <li>It starts as a new enquiry with its own reference.</li>
+                <li>Your next action appears in your follow-ups.</li>
               </ul>
             </Panel>
           </aside>

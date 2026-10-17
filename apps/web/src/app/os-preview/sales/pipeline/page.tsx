@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ArrowRightLeft, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  OPPORTUNITIES, PIPELINE_STAGES, isOpen, money, nextActionOf, personName, stageLabel, type Currency, type Opportunity, type StageId, fmtDate,
+  OPPORTUNITIES, PIPELINE_STAGES, equipmentOk, fmtDay, fmtRange, fmtTime, isOpen, money, nextActionOf, personName, stageLabel, type Currency, type Opportunity, type StageId, fmtDate,
 } from "../../_lib/data";
 import { PLink, usePreview } from "../../_components/context";
 import { AvailabilityChip, Chip, DueChip, PageHeader, StateGate, useNotice } from "../../_components/ui";
@@ -15,20 +15,22 @@ type Local = Record<string, MoveResult>;
 
 function Card({ o, stage, local, onMove }: { o: Opportunity; stage: StageId; local?: MoveResult; onMove: () => void }) {
   const { canChange } = useOppRights(o);
-  const next = local?.nextAction ? { title: local.nextAction, due: local.nextDate! } : nextActionOf(o.id);
+  const next = local?.nextAction ? { title: local.nextAction, dueAt: local.nextDueAt! } : nextActionOf(o.id);
   return (
     <li className="rounded-lg border border-border bg-card p-3 shadow-sm">
       <PLink href={`/os-preview/sales/opportunities/${o.ref}`} className="text-sm font-medium leading-snug hover:underline">{o.title}</PLink>
       <p className="mt-0.5 text-xs text-muted-foreground"><ClientLine o={o} /></p>
       <p className="mt-2 text-sm font-medium tabular-nums">{money(o.value, o.currency)}</p>
+      <p className="mt-1 text-xs">{o.installStart ? <>Install {fmtDay(o.installStart)}{o.eventStart ? <> · Show {fmtRange(o.eventStart, o.eventEnd)}</> : null}</> : <span className="text-muted-foreground">Dates not confirmed</span>}</p>
+      {o.location ? <p className="break-words text-xs text-muted-foreground">{o.location}</p> : null}
       <p className="text-xs text-muted-foreground">{o.ref} · {personName(o.owner)}</p>
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {next ? <DueChip due={next.due} /> : null}
+        {next ? <DueChip dueAt={next.dueAt} /> : null}
         {stage === "on_hold" && (local?.holdReview ?? o.holdReview) ? <Chip tone="warn">Review {fmtDate(local?.holdReview ?? o.holdReview)}</Chip> : null}
         {o.waiting === "client" && stage !== "on_hold" ? <Chip>Waiting for client</Chip> : null}
-        {o.availability.state !== "confirmed" && stage !== "new" && stage !== "on_hold" ? <AvailabilityChip a={o.availability} /> : null}
+        {!equipmentOk(o) && stage !== "new" && stage !== "on_hold" ? <AvailabilityChip o={o} /> : null}
       </div>
-      {next ? <p className="mt-1.5 text-xs text-muted-foreground">Next: {next.title}</p> : null}
+      {next ? <p className="mt-1.5 text-xs text-muted-foreground">Next: {next.title} · {fmtDay(next.dueAt)}, {fmtTime(next.dueAt)}</p> : null}
       <div className="mt-2.5 border-t border-border/70 pt-2">
         {canChange ? (
           <Button variant="outline" size="sm" className="h-7 w-full text-xs" onClick={onMove}><ArrowRightLeft className="h-3 w-3" aria-hidden />Change stage</Button>
@@ -51,9 +53,9 @@ export default function PipelineBoard() {
 
   return (
     <>
-      <PageHeader eyebrow="Sales & CRM" title="Pipeline" description="Stages are columns. Moves are controlled: only the owner or a founder can move a card, and winning or losing needs evidence or a reason." />
+      <PageHeader eyebrow="Sales & CRM" title="Pipeline" />
       <StateGate what="the pipeline" emptyTitle="The pipeline is empty" emptyText="Cards appear here as enquiries are recorded and move through stages.">
-        <div className="-mx-4 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0" tabIndex={0} aria-label="Pipeline board, scroll sideways for more stages">
+        <div className="relative -mx-4 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0" tabIndex={0} aria-label="Pipeline board, scroll sideways for more stages">
           <div className="flex snap-x snap-mandatory gap-3 lg:min-w-max">
             {columns.map((s) => {
               const cards = open.filter((o) => stageOf(o) === s);
@@ -74,7 +76,7 @@ export default function PipelineBoard() {
             })}
           </div>
         </div>
-        <p className="mt-2 text-xs text-muted-foreground">Won and lost opportunities leave the board; find them in Opportunities.</p>
+        <p className="mt-2 text-xs text-muted-foreground">Won and lost opportunities are listed under Opportunities.</p>
       </StateGate>
       {moving ? (
         <MoveDialog

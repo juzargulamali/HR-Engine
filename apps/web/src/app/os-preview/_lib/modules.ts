@@ -40,38 +40,43 @@ export const MODULES: ModuleDef[] = [
 export type RoleId = "founder" | "sales" | "pm" | "head" | "employee";
 export interface RoleDef {
   id: RoleId; label: string; short: string; person: PersonId; personLabel: string; modules: ModuleId[];
-  salesAccess: boolean; canAssignOwner: boolean; canConfigureSales: boolean; crossCompany: boolean; description: string;
+  salesAccess: boolean; canAssignOwner: boolean;
+  /** Approval rules and stage labels: authorised founders only. */
+  canConfigureSales: boolean;
+  /** Agreed operational settings (follow-up targets, calendar, lists): anyone with Sales access. Never approval powers. */
+  canConfigureFollowups: boolean;
+  crossCompany: boolean; description: string;
 }
 export const ROLES: Record<RoleId, RoleDef> = {
   founder: {
     id: "founder", label: "Founder (Juzar / Rafi)", short: "Founder", person: "juzar", personLabel: "Juzar (Founder)",
     modules: ["my-day", "sales", "projects", "people", "inventory", "vendors", "performance", "approvals", "reports", "admin"],
-    salesAccess: true, canAssignOwner: true, canConfigureSales: true, crossCompany: true,
-    description: "Company overview; assigns Sales owners; sees every Sales record in scope.",
+    salesAccess: true, canAssignOwner: true, canConfigureSales: true, canConfigureFollowups: true, crossCompany: true,
+    description: "What needs a founder today.",
   },
   sales: {
     id: "sales", label: "Sales", short: "Sales", person: "amira", personLabel: "Amira Nasser (Sales)",
     modules: ["my-day", "sales", "people", "performance"],
-    salesAccess: true, canAssignOwner: false, canConfigureSales: false, crossCompany: false,
-    description: "Sees all opportunities in scope; owns what they create; cannot reassign.",
+    salesAccess: true, canAssignOwner: false, canConfigureSales: false, canConfigureFollowups: true, crossCompany: false,
+    description: "Your enquiries, follow-ups and what is due.",
   },
   pm: {
     id: "pm", label: "Project Manager", short: "PM", person: "priya", personLabel: "Priya Raman (Project Manager)",
     modules: ["my-day", "projects", "inventory", "people", "approvals", "performance"],
-    salesAccess: false, canAssignOwner: false, canConfigureSales: false, crossCompany: false,
-    description: "Coordinates delivery; no Sales access unless granted.",
+    salesAccess: false, canAssignOwner: false, canConfigureSales: false, canConfigureFollowups: false, crossCompany: false,
+    description: "Your projects, handovers and deadlines.",
   },
   head: {
     id: "head", label: "Department head", short: "Dept head", person: "omar", personLabel: "Omar Haddad (Head of Programming)",
     modules: ["my-day", "projects", "inventory", "people", "approvals", "performance"],
-    salesAccess: false, canAssignOwner: false, canConfigureSales: false, crossCompany: false,
-    description: "Plans their team's days across competing project deadlines.",
+    salesAccess: false, canAssignOwner: false, canConfigureSales: false, canConfigureFollowups: false, crossCompany: false,
+    description: "Your team's week, deadlines and blockers.",
   },
   employee: {
     id: "employee", label: "Employee", short: "Employee", person: "tariq", personLabel: "Tariq Aziz (Content Designer)",
     modules: ["my-day", "projects", "people", "performance"],
-    salesAccess: false, canAssignOwner: false, canConfigureSales: false, crossCompany: false,
-    description: "My tasks, clock, requests; nothing else.",
+    salesAccess: false, canAssignOwner: false, canConfigureSales: false, canConfigureFollowups: false, crossCompany: false,
+    description: "Your tasks, clock and requests.",
   },
 };
 export const ROLE_IDS = Object.keys(ROLES) as RoleId[];

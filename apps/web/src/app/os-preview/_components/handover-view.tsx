@@ -4,10 +4,11 @@ import { useState } from "react";
 import { CheckCircle2, Circle, TriangleAlert } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { type Opportunity, buildHandover, fmtDate, personName, oppByRef } from "../_lib/data";
+import { type Opportunity, buildHandover, contactById, fmtDate, personName, oppByRef } from "../_lib/data";
+import { ContactCard } from "./contact-card";
 import { PLink } from "./context";
 import { useOppRights } from "./sales-bits";
-import { Chip, PageHeader, Panel, PermissionDenied, Restriction, useNotice } from "./ui";
+import { AvailabilityChip, Chip, PageHeader, Panel, PermissionDenied, Restriction, useNotice } from "./ui";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <Panel title={title}>{children}</Panel>;
@@ -23,7 +24,7 @@ export function HandoverView({ refId }: { refId: string }) {
   }
   const h = buildHandover(opp);
   const gaps: string[] = [];
-  if (opp.availability.state !== "confirmed") gaps.push("Technology availability is not confirmed.");
+  if (opp.availability.state !== "confirmed") gaps.push("Equipment availability has not been confirmed.");
   if (h.acceptedProposal.startsWith("No proposal")) gaps.push("No accepted proposal or quote is recorded.");
   if (!opp.paymentTerms) gaps.push("Payment terms are not recorded.");
   if (opp.contacts.length === 0) gaps.push("No contacts are linked.");
@@ -33,7 +34,7 @@ export function HandoverView({ refId }: { refId: string }) {
     <>
       <PageHeader
         eyebrow={`${opp.ref} · Handover package`} title={opp.title}
-        description="Everything the Project Manager needs to start, in one place. This is a package of facts, not a project: no tasks or team are created here."
+        description="Everything the Project Manager needs to start. It is a summary of agreed facts, not a project."
         actions={rights.canChange ? (prepared ? <Chip tone="good" icon={CheckCircle2}>Prepared</Chip> : <Button size="sm" onClick={() => { setPrepared(true); notify("Handover package marked as prepared"); }}>Mark package as prepared</Button>) : undefined}
       />
       {!rights.canChange ? <div className="mb-4"><Restriction>Only the owner ({personName(opp.owner)}) prepares the package. You can read it.</Restriction></div> : null}
@@ -52,9 +53,9 @@ export function HandoverView({ refId }: { refId: string }) {
         <Section title="Accepted scope"><p className="text-sm">{h.acceptedScope}</p><h3 className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Exclusions</h3><p className="mt-1 text-sm">{h.exclusions}</p></Section>
         <Section title="Latest accepted proposal / quote"><p className="text-sm">{h.acceptedProposal}</p></Section>
         <Section title="Confirmation"><p className="text-sm">{h.confirmation}</p></Section>
-        <Section title="Promised technologies"><div className="flex flex-wrap gap-1.5">{h.technologies.map((t) => <Chip key={t}>{t}</Chip>)}</div><p className="mt-2 text-xs text-muted-foreground">Availability: {opp.availability.state === "confirmed" ? `confirmed by ${personName(opp.availability.by)}` : "not confirmed"}</p></Section>
+        <Section title="Promised technologies"><div className="flex flex-wrap gap-1.5">{h.technologies.map((t) => <Chip key={t.name}>{t.name} ×{t.qty}</Chip>)}</div><div className="mt-2"><AvailabilityChip o={opp} /></div></Section>
         <Section title="Dates and place"><p className="text-sm">{h.dates}</p><p className="mt-1 text-xs text-muted-foreground">Location: {opp.location ?? "Not recorded"}</p></Section>
-        <Section title="Contacts">{h.contacts.length ? <ul className="space-y-1 text-sm">{h.contacts.map((c) => <li key={c.name}><strong>{c.name}</strong> <span className="text-muted-foreground">· {c.role}</span></li>)}</ul> : <p className="text-sm text-muted-foreground">No contacts linked.</p>}</Section>
+        <Section title="Contacts">{opp.contacts.length ? <div className="space-y-3">{opp.contacts.map((c) => <ContactCard key={c.contactId} contact={contactById(c.contactId)} roleOnOpportunity={c.role} />)}</div> : <p className="text-sm text-muted-foreground">No contacts linked.</p>}</Section>
         <Section title="Payment terms"><p className="text-sm">{h.paymentTerms}</p></Section>
         <Section title="Unresolved risks">{h.risks.length ? <ul className="list-disc pl-5 text-sm">{h.risks.map((r) => <li key={r}>{r}</li>)}</ul> : <p className="text-sm text-muted-foreground">None recorded.</p>}</Section>
       </div>

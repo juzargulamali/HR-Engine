@@ -14,9 +14,8 @@ export default function Approvals() {
   const rows = APPROVALS_SAMPLE.filter((a) => view === "all" || (view === "hr" ? a.live : !a.live));
   return (
     <>
-      <PageHeader eyebrow="Approvals" title="Approvals" description="One inbox of decisions waiting for you. HR items are the existing approvals; the other items show how commercial and purchasing decisions could appear later." />
-      <div role="note" className="mb-5 rounded-md border border-border bg-secondary/50 px-3 py-2.5 text-sm">The existing approvals engine is <strong>not changed</strong> by Sales &amp; CRM. Commercial approvals live inside Sales as their own records; this unified view is a later design.</div>
-      <SegmentedControl<View> aria-label="Approvals view" value={view} onChange={setView} className="mb-4" options={[{ value: "all", label: "All" }, { value: "hr", label: "HR (existing)" }, { value: "commercial", label: "Commercial & purchasing (design)" }]} />
+      <PageHeader eyebrow="Approvals" title="Approvals" />
+      <SegmentedControl<View> aria-label="Approvals view" value={view} onChange={setView} className="mb-4" options={[{ value: "all", label: "All" }, { value: "hr", label: "HR (existing)" }, { value: "commercial", label: "Commercial and purchasing" }]} />
       <Panel flush>
         <ul className="divide-y divide-border/70">
           {rows.map((a) => (

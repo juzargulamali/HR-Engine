@@ -260,6 +260,18 @@ flowchart TB
 **Three things that must never be conflated:** *quotation sent* ≠ *invoice issued* ≠ *payment received*. They are dated, separate
 manual statuses with a Zoho reference each.
 
+**Workload and scheduling principle (owner feedback, design review).** Programming, Content and other office-based staff can work
+across several projects on the same day, and department heads plan in **days and task deadlines**, not hours.
+
+- Several projects on one day is shown neutrally ("Multiple project assignments"). It never produces a warning, a negative KPI or a
+  capacity verdict, and no hourly allocation or mandatory timesheet is invented to calculate capacity.
+- Warnings come only from an explicitly identified capacity concern (raised by a person), conflicting delivery deadlines, overdue work or a blocker.
+- A day with nothing recorded reads "No allocation recorded"; it does not mean idle or absent.
+- Only **confirmed physical/site commitments** block overlapping time, including travel and preparation buffers. This applies **by
+  assignment type, not job title**: a programmer on site is protected exactly like an engineer on site, while an engineer preparing two
+  projects in the workshop may work across both.
+- The scheduling engine itself is not part of Stage A or Stage B; the preview only shows representative examples.
+
 Existing touch-points deliberately **left alone**: attendance still uses free-text project name and project lead for Site work
 (**[EXISTS]**), because it carries the live Recovery Leave rules, and **the narrow project-lead approval right for Recovery Leave is preserved**.
 
@@ -306,6 +318,11 @@ self-contained record inside Sales & CRM:
 - Who may approve is a **capability** (`crm.approve_pricing`, §3.3), not an HR role. Whether approval is needed at all, and above
   what value per currency, is **configuration** and starts **switched off** until the owner supplies the rule.
 - An approved price/version is **locked**; a change creates a new version and needs a new approval. It is never silently edited.
+- The approval **state** is always explicit, and *not configured* is never read as *not required*: **Approval requirements not configured**
+  (nobody has decided) · **No approval required** (explicitly decided by the founders) · **Approval required** · **Pending approval** ·
+  **Approved** · **Changes requested**. Policy is set per owning company by authorised founders; no thresholds, discount limits or approvers are invented.
+- Recording that a version was **sent externally** is allowed and kept as history, but it is never presented as internal authorisation.
+- Commercial approval rules are a founder-only setting. Ordinary Sales users may configure agreed operational follow-up settings, but cannot give themselves approval powers.
 - The existing `/approvals` page is **unchanged** in Stage B. The design preview shows how a unified inbox could later list
   commercial items next to HR items; that is a future refactor (option B in the v1 analysis), not part of Stage B.
 
@@ -462,6 +479,8 @@ Stages (stable ids; labels configurable; renaming never rewrites historical metr
 
 Configurable: response targets, defaults, reminders, escalation, working hours and calendar. **No deadline is hardcoded**; values
 are blank until the owner supplies them. Calculations use the **configured Sales operating timezone/calendar**, not the event's country or the browser. Configuration changes are audited and history is preserved. Both the scheduled and the completion timestamp are kept.
+Each action has **one primary deadline** shown as, for example, "Due 16 Oct, 4:00 pm · Dubai time"; creation, scheduling and completion
+timestamps sit in secondary details and history. Completing a follow-up records the outcome and requires the next action (or a hold with a reason and review date); it never implies the client replied or that the deal is won.
 Internal notes are distinguished from **recorded client responses**. A failed email never loses the activity. **No automatic client messages.**
 
 ### 11.4 Proposals, pricing and Zoho Books
@@ -470,11 +489,12 @@ Canva/ChatGPT stay outside the app. The app stores a secure file or link, versio
 source for quotes, invoices and payments: the app keeps references/links and **dated manual statuses**. Internal commercial approval
 is configurable (§7.2); thresholds, margins and approvers are not invented.
 
-### 11.5 Technology availability
+### 11.5 Equipment availability
 
-States only: **Availability unverified** · **Awaiting internal confirmation** · **Confirmed by [person] at [time] with notes** ·
-**Unavailable – alternative proposed**. No fabricated stock calendar. A material change (dates, quantities, location, technology)
-**invalidates** a prior confirmation.
+Shown as **Equipment availability** (never a bare "Confirmed"), separate from commercial confirmation, and never a stock reservation. States:
+**not checked** · **check requested** · **confirmed** (who checked, when, and the dates, technologies and quantities the check covers, with notes) ·
+**unavailable – alternative proposed**. No fabricated stock calendar. If the dates, technologies or quantities change afterwards, the check visibly
+**needs repeating**. Commercially Won stays tied to a purchase order or authorised email only.
 
 ### 11.6 Won, Lost, handover
 
@@ -485,6 +505,9 @@ Lost needs a reason. Reopening and corrections are audited.
 
 Open pipeline by stage/owner/company; follow-ups due/overdue; first-response and follow-up completion timeliness; won/lost and reasons;
 **won value distinct from invoiced and collected**; **currencies never summed together**; every figure shows period and sample size.
+Future financial reporting keeps these apart: **approved budget**, **committed cost**, **actual incurred cost** (it may be unpaid),
+**forecast final cost**, **invoiced amount**, **customer collections** and **supplier payments**. An advance is cash issued, not automatically an expense, and
+one receipt, card transaction and accounting entry describing the same expense count as one cost. Zoho Books remains the accounting source.
 An optional, reviewed Excel/CSV import comes later in Stage B (template, validation, preview, duplicate warnings, no overwrite) and **nothing
 is imported until you supply and approve a source**.
 
@@ -501,7 +524,13 @@ is imported until you supply and approve a source**.
 - **State toggles:** `?state=loading|empty|error|denied|overdue` render each state on the real layouts.
 - **Fixed sample "today":** Monday 19 October 2026 (GST), so overdue/due-today states are deterministic.
 - **Where the code is:** `apps/web/src/app/os-preview/` (its own layout, components, sample data and CSS). It reuses the existing design tokens, fonts, theme toggle and UI primitives, adds no UI library, and touches no HR route. The only change outside that folder is one line in `apps/web/src/proxy.ts` (the auth-proxy matcher skips `/os-preview`), covered by a test.
-- **How it was checked:** lint, typecheck and 173 unit tests (including the gate, the proxy matcher and sample-data integrity); a scripted run of 44 interaction checks (validation, duplicate warning, controlled stage moves, permission-denied pages, availability invalidation, won/lost evidence, clock, theme, role switch, mobile overflow); an automated accessibility scan (axe, WCAG 2.1 AA) of 40 pages in desktop and mobile, dark and light, with zero findings after fixes; a production build with `VERCEL_ENV=production`, where every preview route returns 404 and no sample data is in the response. Screenshots: `docs/os-preview-screenshots/`.
+- **Design review revision (PR #33, second round):** neutral multi-project wording and separate site-booking examples; an action-led founder
+  dashboard with filtered drill-downs; install date, show dates and location in lists and on the opportunity; "Equipment availability" wording with
+  coverage and re-check; everyday actions first (log activity, complete follow-up, schedule next action); one deadline format and one fixed sample clock;
+  actionable contacts; upload-or-link proposals; explicit approval states; corrected financial terms; less commentary (tooltips and a preview guide instead);
+  readable mobile layouts with the same five bottom tabs (My Day, Sales, Clock, People, More) for every role.
+- **Sample time:** every date, count and label uses one fixed sample "now", Monday 19 October 2026, 9:30 am Dubai time, shown in the banner and the guide. The preview never reads the browser clock.
+- **How it was checked:** lint, typecheck and the unit tests (including the gate, the proxy matcher, sample-data integrity, the sample clock, site-booking rules and source-hygiene scans); a scripted run of 160+ interaction checks with the browser clock deliberately set to a different year and every network request recorded (no write and no external call); an automated accessibility scan (axe, WCAG 2.1 AA) of every page plus open dialogs and menus in desktop and mobile, dark and light; a production build with `VERCEL_ENV=production`, where every preview route returns 404 and no sample data is in the response. Screenshots: `docs/os-preview-screenshots/`.
 - **Known limitation:** the preview's JavaScript (including the fictional sample data) is part of the application bundle, so on Production the pages are hidden but the static bundle files exist. Nothing in them is real data.
 - **Constraints to know:** Vercel previews have no Supabase settings, so the real signed-in app cannot run there; the preview therefore stands alone. Links to People & HR point to the live app and are labelled.
 
