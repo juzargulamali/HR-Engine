@@ -16,7 +16,7 @@ request is a draft. Every step below is yours to run, in this order, and each st
 
 | | |
 |---|---|
-| **Added** | A **Sales & CRM** area in the existing app (`/sales`): overview, opportunities, pipeline, follow-ups, proposals, clients, reports, settings, access. Seventeen new `crm_*` tables, controlled database functions, a private file bucket, a daily reminder job. |
+| **Added** | A **Sales & CRM** area in the existing app (`/sales`): overview, opportunities, pipeline, follow-ups, proposals, clients, reports, settings, access. Nineteen new `crm_*` tables, controlled database functions, a private file bucket, a daily reminder job. |
 | **Not touched** | Every HR table, policy, function, calculation, approval route and page. Attendance, Recovery Leave, leave, expenses, payroll and appraisals behave exactly as before. No HR role is created, changed or consulted. |
 | **Separate access** | Sales access is its own table (`crm_company_grants`), **per company**. An HR admin, CEO or sys admin with no Sales grant sees nothing in Sales, and a Sales grant gives no HR access. Founders (Juzar, Rafi) grant access inside the app (Sales → Access). |
 | **Future modules** | Projects & Tasks, Inventory, Vendors & Purchasing and Performance & KPIs appear in the menu as **Coming soon** (not links), only for people who have Sales access. |
@@ -33,18 +33,25 @@ request is a draft. Every step below is yours to run, in this order, and each st
 
 ## 3. Files
 
-- `supabase/migrations/20261115000000_crm_access_audit_settings.sql` — grants, capabilities, CRM audit log, settings (+ seeding).
-- `supabase/migrations/20261115000100_crm_core_tables.sql` — organisations, contacts, opportunities, follow-ups, activities, files, proposals, approvals, handover, reminders (read-only to clients).
-- `supabase/migrations/20261115000200_crm_workflow_functions.sql` — create, edit, stage moves, hold/resume, won/lost, owner assignment, follow-ups.
-- `supabase/migrations/20261115000300_crm_proposals_files_reminders.sql` — files, proposals, Zoho references, availability, approval (unconfigured), handover, reminders, `crm-files` bucket, people pickers.
-- `supabase/manual-sql/crm_00_preflight_readonly.sql`, `crm_20_verify_readonly.sql` (read-only), `crm_30_bootstrap_founders.sql` (writes grants only), `crm_90_rollback.sql` (back-out; refuses while data exists).
-- Application: `apps/web/src/app/(app)/sales/**`, `lib/crm/**`, `lib/actions/crm*.ts`, the `/api/cron/crm-reminders` route (04:00 UTC daily), domain logic in `packages/domain/src/crm*.ts`, tests.
+- `supabase/migrations/20261115000000_crm_access_audit_settings.sql` — grants, capabilities (incl. `reopen_closed`), CRM audit log, settings (+ seeding).
+- `supabase/migrations/20261115000100_crm_core_tables.sql` — organisations, contacts, opportunities, follow-ups, activities, files, proposals, approvals, handover, reminders, **closure history**, **upload intents** (read-only to clients; intents have no client access at all).
+- `supabase/migrations/20261115000200_crm_workflow_functions.sql` — create, edit, stage moves, hold/resume, won/lost, **reopen**, owner assignment, follow-ups, **contacts on an opportunity**.
+- `supabase/migrations/20261115000300_crm_proposals_files_reminders.sql` — **upload flow (quarantine bucket + intents)**, links, proposals, Zoho references, availability, approval (unconfigured), handover, reminders, `crm-files` and `crm-quarantine` buckets, people pickers.
+- `supabase/manual-sql/crm_00_preflight_readonly.sql`, `crm_05_preservation_check_readonly.sql`, `crm_20_verify_readonly.sql` (read-only), `crm_30_bootstrap_founders.sql` (writes grants only), `crm_90_rollback.sql` (back-out; refuses while data exists).
+- Application: `apps/web/src/app/(app)/sales/**`, `lib/crm/**`, `lib/actions/crm*.ts`, the `/api/cron/crm-reminders` route (04:00 UTC daily; also sweeps abandoned uploads), domain logic in `packages/domain/src/crm*.ts`, tests.
+
+### What changed since the first draft (release-readiness round)
+1. **Contacts after creation.** The owner or a founder can link an existing shared contact, add a new person and link them, change a contact's role on the opportunity, and unlink (the contact record is always kept). The shared record can be edited by whoever created it, any founder, or the owner of a live opportunity it is on; each edit is written to the timeline of every opportunity the contact is on and to the CRM audit log with old and new values. A lost opportunity's contacts are frozen until it is reopened.
+2. **Controlled reopening.** Won or Lost can be reopened by a founder or someone a founder gave the new `reopen_closed` right, with a reason and a **new next action**. Every closure stays in `crm_closures` (outcome, evidence or lost reason, value, who/when, and who reopened it and why). The live evidence/lost-reason fields clear only because they are now history. A handover already prepared is left exactly as it was (and is not redone when the opportunity is Won again). Reports count a reopened closure separately, never as a current win or loss.
+3. **Large private uploads.** See §6.
+4. **Honest reminder timing.** See §6.
 
 ## 4. Before you start (nothing is changed by these)
 
 1. Confirm the Vercel project's Supabase variables point at **Enginious HR Engine_V2** (the recovery-windows guide §3 explains the fingerprint check; it applies unchanged).
-2. If your Supabase plan offers backups/point-in-time recovery, note the time you start. The CRM migrations are **additive** (new tables/functions only) and `crm_90_rollback.sql` backs them out, so a backup is a comfort, not a requirement.
+2. If your Supabase plan offers backups/point-in-time recovery, note the time you start. The CRM migrations are **additive** (new tables/functions/buckets only) and `crm_90_rollback.sql` backs them out, so a backup is a comfort, not a requirement.
 3. Decide the two founder logins (Juzar, Rafi). The preflight lists active CEO/CTO users to help.
+4. Know the merge order (§5a) and that nothing below depends on merging first: the SQL is applied **before** the application is deployed.
 
 ## 5. The exact sequence (V2, by hand)
 
@@ -52,16 +59,37 @@ Run each file in the Supabase SQL Editor of **Enginious HR Engine_V2**, **the wh
 
 | Step | File | Kind | What you check afterwards |
 |---|---|---|---|
-| 1 | `supabase/manual-sql/crm_00_preflight_readonly.sql` | read-only | Section B all `OK`; section C `OK - no CRM tables…`; section D shows your companies and what will be seeded; section G `OK`. **Send me the result before step 2.** If something is not OK, stop. |
-| 2 | `supabase/migrations/20261115000000_crm_access_audit_settings.sql` | writes | "Success". |
-| 3 | `supabase/migrations/20261115000100_crm_core_tables.sql` | writes | "Success". |
-| 4 | `supabase/migrations/20261115000200_crm_workflow_functions.sql` | writes | "Success". |
-| 5 | `supabase/migrations/20261115000300_crm_proposals_files_reminders.sql` | writes | "Success". |
-| 6 | `supabase/manual-sql/crm_20_verify_readonly.sql` | read-only | **Every row `PASS`** (rows 12–14 may read INFO only after someone changed settings). Compare section `I HR row counts` of step 1 — HR numbers must be identical. |
-| 7 | `supabase/manual-sql/crm_30_bootstrap_founders.sql` | writes grants only | Edit the two emails first (it refuses placeholders). The final table lists the founders per company. Run step 6 again: row 19 stays `PASS`. |
-| 8 | Merge the PR and let Vercel deploy | your decision | Only after steps 1–7 are green. |
+| 1 | `supabase/manual-sql/crm_00_preflight_readonly.sql` | read-only | Section B all `OK`; section C `OK - no CRM tables…`; section D shows your companies and what will be seeded; section G `OK - neither exists yet`. **Send me the result before step 3.** If something is not OK, stop. |
+| 2 | `supabase/manual-sql/crm_05_preservation_check_readonly.sql` | read-only | **Run as it is (snapshot mode).** Export the whole result to CSV and copy the entire `paste` column (keep both). The first row `cutoff` is the instant of the snapshot. See §5b. |
+| 3 | `supabase/migrations/20261115000000_crm_access_audit_settings.sql` | writes | "Success". |
+| 4 | `supabase/migrations/20261115000100_crm_core_tables.sql` | writes | "Success". |
+| 5 | `supabase/migrations/20261115000200_crm_workflow_functions.sql` | writes | "Success". |
+| 6 | `supabase/migrations/20261115000300_crm_proposals_files_reminders.sql` | writes | "Success". |
+| 7 | `supabase/manual-sql/crm_20_verify_readonly.sql` | read-only | **Every row `PASS`** (rows 12–14 may read INFO only after someone changed settings). |
+| 8 | `supabase/manual-sql/crm_05_preservation_check_readonly.sql` | read-only | **Compare mode:** replace the single `>>> PASTE <<<` line with the lines copied in step 2, run again. Read it as in §5b; the SUMMARY row must say `PASS`. |
+| 9 | `supabase/manual-sql/crm_30_bootstrap_founders.sql` | writes grants only | Edit the two emails first (it refuses placeholders). The final table lists the founders per company. Run step 7 again: row 19 stays `PASS`. |
+| 10 | Merge the PR(s) and let Vercel deploy | your decision | Only after steps 1–9 are green, in the order in §5a. |
 
 If a migration fails partway: the files use `create … if not exists` / `create or replace`, so re-running the same file after fixing the cause is safe. To abandon the install entirely, §10.
+
+### 5a. Merge order: #33 (Stage A) first, then #34 (this change)
+
+#34 is stacked on #33 (its base is `feat/os-design-preview`). **Do not merge #34 into the Stage A branch.** After #33 has merged into `main`:
+1. Retarget #34 to `main` (GitHub does this automatically when #33's branch is deleted; otherwise edit the PR's base).
+2. Bring #34 onto current `main` **with a merge, not a rebase** (the branch is already pushed and shared): `git fetch origin && git checkout feat/sales-crm-stage-b && git merge origin/main`, then `git push`. This was rehearsed locally against all three ways #33 can land (merge commit, squash, rebase) and is conflict-free in each, because #34 deliberately does not edit any file Stage A edits.
+3. Check the PR's "Files changed" now shows **only** Sales & CRM work (no `os-preview` files; about 113 files). If it shows Stage A files, the base is wrong: stop.
+4. **CI must run again on the pushed merge result** (it runs on the PR head automatically). Do not merge #34 until `lint-typecheck-test` and `rls-policies` are green on that new head. A green run from before the merge does not count.
+5. If PR #35 (scheduled routes) merges first, bring it in the same way; the two touch different lines of `proxy.ts` and merge cleanly (rehearsed).
+6. Only then merge #34. The SQL in step 3–9 above must already have been applied to V2 before the deploy that follows the merge.
+
+### 5b. Preservation check: how to read it (replaces "compare the HR row counts")
+
+Row counts cannot prove HR was untouched, because HR keeps being used while you work. `crm_05_preservation_check_readonly.sql` separates the two:
+- `struct:*` rows fingerprint **everything HR owns** (every non-CRM table's columns, constraints, indexes, policies, row-level-security flags, privileges, triggers, views, enums, function bodies and privileges, default privileges, other storage buckets and policies). Normal HR use never changes these; installing CRM must not either. **Any `DIFFERENT` here is a real finding: stop.**
+- `data:<table>:members_at_cutoff` rows fingerprint the **set of rows that existed at the snapshot instant** in every HR table that records a creation time. Rows created afterwards (legitimate new HR activity) are excluded from that fingerprint and listed separately as `info:<table>:rows_created_after_cutoff` (INFO, expected to be non-zero on a live system). A row that existed at the cutoff and is now gone, or an old row that appeared late, makes it `DIFFERENT`.
+- `data:<table>:content_at_cutoff` additionally fingerprints the full content of the append-only tables (leave ledger, Recovery Leave ledger, HR audit log) up to the cutoff.
+- Edits to old rows in ordinary tables (a changed phone number, an approved request) are normal and are **not** flagged. A `DIFFERENT` data row names the table to look at; it does not by itself prove the migration is to blame (someone may have deleted an old row by hand), and it is not a substitute for judgement.
+- Rehearsed locally: the install plus new and edited HR rows reported `PASS`; changing a function body, dropping a policy, granting a privilege, adding a column and deleting an old row each reported `DIFFERENT` on the right item.
 
 ## 6. Environment and hosting notes
 
@@ -84,6 +112,11 @@ If a migration fails partway: the files use `create … if not exists` / `create
 | Upload a PDF; then try `a.exe`, `b.xlsm`, `c.exe.pdf` | PDF accepted (private; opens through a short-lived link). The others are refused with a plain message. |
 | Try to request commercial approval | Refused: "rules are not configured". Nothing shows as approved. |
 | Mark one test opportunity Won | Needs PO/authorised-email reference + date and a value; open follow-ups are cancelled; the handover page appears. |
+| Open an opportunity as its owner → Contacts: add an existing person, add a new person, change a role, remove one | The person is removed from this opportunity only; they still appear in Clients and on other opportunities. As a non-owner colleague none of those buttons appear. |
+| Edit a contact's phone number that is on two opportunities | Both opportunities' history shows the change; the founder's audit trail (Sales → Access / audit) shows old and new. |
+| Mark a test opportunity Won, prepare its handover, then (as a founder) **Reopen** it with a reason and a new next action | It returns to the stage it came from; the Won entry stays in "Closure history" marked reopened; the handover is unchanged; Reports counts it as "later reopened", not as a win. Mark it Won again: a second closure appears. |
+| Upload a **10 MB** and a **19 MB** PDF to an opportunity | Both are accepted, appear only after a short "Checking the file's contents…" step, and open through a private link. (This is the first live proof of the large-file flow.) |
+| Rename a small program to `a.pdf` and upload it; also try a macro-enabled `.xlsm` and `b.exe.pdf` | Refused with a plain message; **nothing** appears in the opportunity's files. Afterwards the Storage UI shows nothing for it in `crm-files`, and `crm-quarantine` is emptied by the next 08:00 run. |
 | HR pages (leave, attendance, payroll…) | Unchanged. |
 
 ## 8. Turning on owner emails (later, deliberately)
@@ -92,7 +125,7 @@ Reminders appear in-app first. To enable emails: (1) confirm the Microsoft Graph
 
 ## 9. What is and is not verified
 
-- **Verified here:** the database rules (105+ real-Postgres tests on PostgreSQL 16 and 17: company scoping, HR separation, owner/founder rules, stage rules, hold/won/lost evidence, ownership, follow-up rules, availability recheck, approval never granted while unconfigured, file rules, reminders idempotency/retry, privileges), the domain logic, the menu, lint, typecheck, build.
+- **Verified here:** the database rules (141 Sales tests among 700+ real-Postgres tests on PostgreSQL 16 and 17: company scoping, HR separation, owner/founder rules, stage rules, hold/won/lost evidence, ownership, follow-up rules, availability recheck, approval never granted while unconfigured, file rules, upload intents, contacts, reopen and closure history, reminders idempotency/retry, privileges), the domain logic, the menu, lint, typecheck, build.
 - **Also verified locally, in a real browser:** the real app against a real PostgreSQL + PostgREST (the repository's local full stack: it enforces the real RLS policies, but it is **not** Supabase Auth or Storage). A founder created organisations, an enquiry, completed the only follow-up (forced to add a next action), moved stages, held and resumed, recorded availability (and saw "needs recheck" logic), added a link (http refused), saved a Zoho quote reference, closed as Won with a PO, opened the handover, and reminders appeared on the overview and from the cron route; a colleague saw the pipeline with no action buttons; an HR admin and a plain employee with no grant saw "You do not have Sales access" and no menu item. That run found and fixed one real bug (an untouched technologies row blocked saving).
 - **Not verified live:** your Supabase project, Storage signing, Microsoft 365 delivery, Vercel cron, the screens against real data and real staff. The smoke test in §7 is the first live check.
 - **Still your decisions:** commercial approval rules; response-time targets and the working calendar; who gets which capability; the Project Manager list when Projects arrives.
@@ -100,5 +133,5 @@ Reminders appear in-app first. To enable emails: (1) confirm the Microsoft Graph
 ## 10. Rollback
 
 1. Deploy the previous app version (the Sales menu disappears by itself when the tables are absent).
-2. If no business data exists yet, run `supabase/manual-sql/crm_90_rollback.sql`. It **refuses** while opportunities, organisations, contacts, files, proposals or follow-ups exist (export first, then deliberately change one flag) and while the bucket contains files (empty it in the Storage UI first). It never touches an HR object.
+2. If no business data exists yet, run `supabase/manual-sql/crm_90_rollback.sql`. It **refuses** while opportunities, organisations, contacts, files, proposals, follow-ups or closures exist (export first, then deliberately change one flag) and while either bucket contains files (empty `crm-files` and `crm-quarantine` in the Storage UI first). It never touches an HR object.
 3. Run `crm_00_preflight_readonly.sql` again: section C must show "no CRM tables or functions exist yet".

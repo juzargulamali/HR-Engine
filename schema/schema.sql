@@ -10134,7 +10134,8 @@ as $$
     'manage_settings',        -- edit CRM settings for the company
     'manage_approval_rules',  -- configure commercial approval rules (none exist yet)
     'manage_access',          -- grant / revoke CRM access for the company
-    'view_audit'              -- read the CRM audit log for the company
+    'view_audit',             -- read the CRM audit log for the company
+    'reopen_closed'           -- reopen a Won or Lost opportunity (with a reason and a new next action)
   ]::text[];
 $$;
 
@@ -10601,6 +10602,9 @@ create table if not exists crm_opportunities (
   -- Where the opportunity was before it went on hold, so Resume returns to the right place.
   stage_before_hold     text check (stage_before_hold is null or stage_before_hold in (
                           'new', 'qualified', 'proposal_prep', 'proposal_sent', 'quote_sent', 'negotiation')),
+  -- Where it was when it was closed, so a controlled reopen returns it to the right place.
+  stage_before_close    text check (stage_before_close is null or stage_before_close in (
+                          'new', 'qualified', 'proposal_prep', 'proposal_sent', 'quote_sent', 'negotiation')),
   waiting_on            text check (waiting_on is null or waiting_on in ('client', 'internal')),
   first_response_at     timestamptz,
 
@@ -10676,7 +10680,8 @@ create table if not exists crm_opportunity_events (
   company_id      uuid not null references companies(id),
   kind            text not null check (kind in (
                     'created', 'stage_changed', 'owner_changed', 'held', 'resumed', 'won', 'lost',
-                    'details_changed', 'value_changed', 'availability', 'approval', 'handover', 'proposal', 'file')),
+                    'details_changed', 'value_changed', 'availability', 'approval', 'handover', 'proposal', 'file',
+                    'contact', 'reopened')),
   from_value      text,
   to_value        text,
   reason          text,
@@ -10739,6 +10744,15 @@ as $$
   ]::text[];
 $$;
 
+-- No executable, script or macro-capable name in ANY dot-separated segment ("invoice.exe.pdf" is refused too).
+-- One definition, used by the table CHECK and by crm_create_upload_intent.
+create or replace function crm_file_name_blocked(p_name text)
+returns boolean
+language sql immutable
+as $$
+  select p_name ~* '(^|\.)(exe|dll|msi|bat|cmd|com|scr|pif|cpl|msc|lnk|hta|wsf|wsh|vbs|vbe|js|jse|ps1|psm1|sh|bash|jar|apk|app|dmg|iso|reg|docm|dotm|xlsm|xlsb|xltm|xlam|pptm|potm|ppsm|ppam|sldm|html|htm|svg)(\.|$)';
+$$;
+
 create table if not exists crm_files (
   id              uuid primary key default gen_random_uuid(),
   opportunity_id  uuid not null references crm_opportunities(id) on delete cascade,
@@ -10761,8 +10775,7 @@ create table if not exists crm_files (
       and url is null
       and mime_type = any (crm_allowed_mime_types())
       and size_bytes between 1 and 20971520
-      -- No executable or macro-capable name in ANY dot-separated segment ("invoice.exe.pdf" is refused too).
-      and original_name !~* '(^|\.)(exe|dll|msi|bat|cmd|com|scr|pif|cpl|msc|lnk|hta|wsf|wsh|vbs|vbe|js|jse|ps1|psm1|sh|bash|jar|apk|app|dmg|iso|reg|docm|dotm|xlsm|xlsb|xltm|xlam|pptm|potm|ppsm|ppam|sldm|html|htm|svg)(\.|$)'
+      and not crm_file_name_blocked(original_name)
       and storage_path ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}/[0-9a-f-]{36}-[A-Za-z0-9._-]{1,150}$'
     )),
   constraint crm_files_link_shape check (
@@ -10865,6 +10878,61 @@ create index if not exists idx_crm_reminders_user on crm_reminders(user_id, read
 create index if not exists idx_crm_reminders_email on crm_reminders(email_next_attempt_at) where email_status in ('pending', 'failed');
 
 -- -----------------------------------------------------------------------------
+-- Closure history: every Won / Lost is kept even if the opportunity is later reopened. The live columns on
+-- crm_opportunities describe only the CURRENT state; reporting on past outcomes and the audit trail read this table.
+-- -----------------------------------------------------------------------------
+create table if not exists crm_closures (
+  id                  uuid primary key default gen_random_uuid(),
+  opportunity_id      uuid not null references crm_opportunities(id) on delete cascade,
+  company_id          uuid not null references companies(id),
+  outcome             text not null check (outcome in ('won', 'lost')),
+  closed_from_stage   text,
+  closed_at           timestamptz not null default now(),
+  closed_by           uuid references auth.users(id),
+  value_at_close      numeric(14, 2),
+  currency            text,
+  evidence_type       text,
+  evidence_reference  text,
+  evidence_date       date,
+  lost_reason         text,
+  reopened_at         timestamptz,
+  reopened_by         uuid references auth.users(id),
+  reopen_reason       text,
+  constraint crm_closures_reopen_complete check (
+    (reopened_at is null) = (reopened_by is null) and (reopened_at is null or length(btrim(coalesce(reopen_reason, ''))) > 0))
+);
+-- At most one closure is "current" (not reopened) per opportunity.
+create unique index if not exists uq_crm_closures_current on crm_closures(opportunity_id) where reopened_at is null;
+create index if not exists idx_crm_closures_company_time on crm_closures(company_id, closed_at);
+
+-- -----------------------------------------------------------------------------
+-- Upload intents. A file is uploaded by the browser straight to a private QUARANTINE bucket (Vercel functions accept at
+-- most 4.5 MB of request body, so large files cannot pass through the app), then validated by the server, and only a
+-- validated file is moved into the real bucket and registered. Clients have no access to this table or to the
+-- quarantine bucket; the intent functions in migration 4 are the only way in.
+-- -----------------------------------------------------------------------------
+create table if not exists crm_upload_intents (
+  id               uuid primary key default gen_random_uuid(),
+  opportunity_id   uuid not null references crm_opportunities(id) on delete cascade,
+  company_id       uuid not null references companies(id),
+  user_id          uuid not null references auth.users(id),
+  original_name    text not null,
+  mime_type        text not null,
+  size_bytes       bigint not null check (size_bytes between 1 and 20971520),
+  purpose          text not null check (purpose in ('proposal', 'purchase_order', 'authorised_email', 'brief', 'other')),
+  label            text,
+  quarantine_path  text not null unique,
+  final_path       text not null unique,
+  status           text not null default 'pending' check (status in ('pending', 'validated', 'rejected', 'registered', 'expired')),
+  reject_reason    text,
+  created_at       timestamptz not null default now(),
+  expires_at       timestamptz not null default now() + interval '2 hours',
+  finished_at      timestamptz,
+  swept_at         timestamptz           -- set once the scheduled clean-up has removed whatever it may have left in storage
+);
+create index if not exists idx_crm_upload_intents_open on crm_upload_intents(expires_at) where swept_at is null;
+
+-- -----------------------------------------------------------------------------
 -- updated_at + audit triggers
 -- -----------------------------------------------------------------------------
 do $$
@@ -10879,7 +10947,7 @@ begin
   end loop;
   foreach t in array array[
     'crm_organisations', 'crm_contacts', 'crm_opportunities', 'crm_opportunity_contacts', 'crm_follow_ups',
-    'crm_files', 'crm_proposals', 'crm_zoho_references', 'crm_approvals', 'crm_handovers'
+    'crm_files', 'crm_proposals', 'crm_zoho_references', 'crm_approvals', 'crm_handovers', 'crm_closures'
   ] loop
     execute format('drop trigger if exists %I on %I', t || '_audit', t);
     execute format('create trigger %I after insert or update or delete on %I for each row execute function crm_audit_trigger()',
@@ -10896,7 +10964,7 @@ begin
   foreach t in array array[
     'crm_organisations', 'crm_contacts', 'crm_reference_counters', 'crm_opportunities', 'crm_opportunity_contacts',
     'crm_opportunity_events', 'crm_activities', 'crm_follow_ups', 'crm_files', 'crm_proposals',
-    'crm_zoho_references', 'crm_approvals', 'crm_handovers', 'crm_reminders'
+    'crm_zoho_references', 'crm_approvals', 'crm_handovers', 'crm_reminders', 'crm_closures', 'crm_upload_intents'
   ] loop
     execute format('alter table %I enable row level security', t);
   end loop;
@@ -10912,7 +10980,7 @@ declare t text;
 begin
   foreach t in array array[
     'crm_opportunities', 'crm_opportunity_contacts', 'crm_opportunity_events', 'crm_activities', 'crm_follow_ups',
-    'crm_files', 'crm_proposals', 'crm_zoho_references', 'crm_approvals', 'crm_handovers'
+    'crm_files', 'crm_proposals', 'crm_zoho_references', 'crm_approvals', 'crm_handovers', 'crm_closures'
   ] loop
     execute format('drop policy if exists %I on %I', t || '_select', t);
     execute format('create policy %I on %I for select using (crm_has_access(company_id))', t || '_select', t);
@@ -10931,12 +10999,12 @@ create policy crm_reminders_select on crm_reminders for select
 revoke all on table
   crm_organisations, crm_contacts, crm_reference_counters, crm_opportunities, crm_opportunity_contacts,
   crm_opportunity_events, crm_activities, crm_follow_ups, crm_files, crm_proposals, crm_zoho_references,
-  crm_approvals, crm_handovers, crm_reminders
+  crm_approvals, crm_handovers, crm_reminders, crm_closures, crm_upload_intents
   from anon, authenticated, public;
 grant select on table
   crm_organisations, crm_contacts, crm_opportunities, crm_opportunity_contacts, crm_opportunity_events,
   crm_activities, crm_follow_ups, crm_files, crm_proposals, crm_zoho_references, crm_approvals, crm_handovers,
-  crm_reminders
+  crm_reminders, crm_closures
   to authenticated;
 
 -- Equipment-availability recheck: true when the check no longer covers what the opportunity now says.
@@ -10952,12 +11020,12 @@ as $$
   from crm_opportunities o
   where o.id = p_opportunity_id and crm_has_access(o.company_id);
 $$;
-revoke all on function crm_availability_needs_recheck(uuid), crm_allowed_mime_types() from public, anon;
-grant execute on function crm_availability_needs_recheck(uuid), crm_allowed_mime_types() to authenticated;
+revoke all on function crm_availability_needs_recheck(uuid), crm_allowed_mime_types(), crm_file_name_blocked(text) from public, anon;
+grant execute on function crm_availability_needs_recheck(uuid), crm_allowed_mime_types(), crm_file_name_blocked(text) to authenticated;
 
 -- ROLLBACK (only before any CRM data exists; afterwards export first):
 --   drop function if exists crm_availability_needs_recheck(uuid);
---   drop table if exists crm_reminders, crm_handovers, crm_approvals, crm_zoho_references, crm_proposals, crm_files,
+--   drop table if exists crm_upload_intents, crm_closures, crm_reminders, crm_handovers, crm_approvals, crm_zoho_references, crm_proposals, crm_files,
 --     crm_follow_ups, crm_activities, crm_opportunity_events, crm_opportunity_contacts, crm_opportunities,
 --     crm_reference_counters, crm_contacts, crm_organisations cascade;
 --   drop function if exists crm_allowed_mime_types();
@@ -11479,9 +11547,14 @@ begin
   end if;
   update crm_opportunities set stage = 'won', stage_changed_at = now(), evidence_type = p_evidence_type,
          evidence_reference = btrim(p_evidence_reference), evidence_date = p_evidence_date,
-         closed_at = now(), closed_by = auth.uid(), version = version + 1
+         stage_before_close = v.stage, closed_at = now(), closed_by = auth.uid(), version = version + 1
    where id = p_id returning version into v_version;
+  insert into crm_closures (opportunity_id, company_id, outcome, closed_from_stage, closed_by, value_at_close, currency,
+                            evidence_type, evidence_reference, evidence_date)
+  values (p_id, v.company_id, 'won', v.stage, auth.uid(), v.value, v.currency, p_evidence_type,
+          btrim(p_evidence_reference), p_evidence_date);
   update crm_follow_ups set status = 'cancelled', updated_at = now() where opportunity_id = p_id and status = 'open';
+  -- A handover already prepared before an earlier closure (then a reopen) is kept as it is.
   insert into crm_handovers (opportunity_id, company_id) values (p_id, v.company_id) on conflict do nothing;
   perform crm_log_event(p_id, v.company_id, 'won', v.stage, 'won',
     p_evidence_type || ': ' || btrim(p_evidence_reference) || coalesce(' — ' || nullif(btrim(p_note), ''), ''));
@@ -11506,9 +11579,12 @@ begin
     raise exception 'A reason is required to mark an opportunity Lost' using errcode = '22023';
   end if;
   update crm_opportunities set stage = 'lost', stage_changed_at = now(), lost_reason = btrim(p_reason),
+         stage_before_close = case when v.stage = 'on_hold' then v.stage_before_hold else v.stage end,
          stage_before_hold = null, hold_reason = null, hold_review_date = null,
          closed_at = now(), closed_by = auth.uid(), version = version + 1
    where id = p_id returning version into v_version;
+  insert into crm_closures (opportunity_id, company_id, outcome, closed_from_stage, closed_by, value_at_close, currency, lost_reason)
+  values (p_id, v.company_id, 'lost', v.stage, auth.uid(), v.value, v.currency, btrim(p_reason));
   update crm_follow_ups set status = 'cancelled', updated_at = now() where opportunity_id = p_id and status = 'open';
   perform crm_log_event(p_id, v.company_id, 'lost', v.stage, 'lost', btrim(p_reason));
   return v_version;
@@ -11734,6 +11810,185 @@ end;
 $$;
 
 -- -----------------------------------------------------------------------------
+-- Controlled reopening of a Won or Lost opportunity.
+-- Needs the 'reopen_closed' capability (founders hold it), a reason and a NEW next action. Nothing is erased: the
+-- closure is kept in crm_closures (marked reopened, by whom, why), the timeline records it, any handover already
+-- prepared is left exactly as it was, and the evidence / lost reason leave the live row only because they are now
+-- history. A later Won or Lost starts a new closure.
+-- -----------------------------------------------------------------------------
+create or replace function crm_reopen_opportunity(
+  p_id uuid,
+  p_reason text,
+  p_next_title text,
+  p_next_due timestamptz,
+  p_next_kind text default 'other',
+  p_to_stage text default null,
+  p_expected_version integer default null
+) returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v crm_opportunities;
+  v_target text;
+  v_owner uuid;
+  v_version integer;
+begin
+  v := crm_lock_opportunity(p_id);
+  perform crm_check_version(v, p_expected_version);
+  if not crm_has_capability(v.company_id, 'reopen_closed') then
+    raise exception 'Only a founder, or someone a founder gave the reopen right to, can reopen a closed opportunity'
+      using errcode = '42501';
+  end if;
+  if v.stage not in ('won', 'lost') then
+    raise exception 'Only a Won or Lost opportunity can be reopened' using errcode = '23514';
+  end if;
+  if length(btrim(coalesce(p_reason, ''))) = 0 then
+    raise exception 'A reason is required to reopen an opportunity' using errcode = '22023';
+  end if;
+  if length(btrim(coalesce(p_next_title, ''))) = 0 or p_next_due is null then
+    raise exception 'Reopening needs a new next action with a due date' using errcode = '22023';
+  end if;
+  v_target := coalesce(p_to_stage, v.stage_before_close, 'negotiation');
+  if crm_stage_index(v_target) is null then
+    raise exception 'Choose one of the working stages to reopen into' using errcode = '22023';
+  end if;
+  -- The follow-up must have an owner who can still work it: if the owner has lost Sales access, the person
+  -- reopening takes it over (recorded on the timeline) rather than leaving a task nobody can see.
+  v_owner := v.owner_id;
+  if not crm_user_has_company_access(v_owner, v.company_id) then v_owner := auth.uid(); end if;
+
+  update crm_closures set reopened_at = now(), reopened_by = auth.uid(), reopen_reason = btrim(p_reason)
+   where opportunity_id = p_id and reopened_at is null;
+
+  update crm_opportunities set
+    stage = v_target, stage_changed_at = now(), stage_before_close = null, owner_id = v_owner,
+    evidence_type = null, evidence_reference = null, evidence_date = null, lost_reason = null,
+    closed_at = null, closed_by = null, version = version + 1
+   where id = p_id returning version into v_version;
+
+  insert into crm_follow_ups (opportunity_id, company_id, assigned_to, title, kind, due_at, created_by)
+  values (p_id, v.company_id, v_owner, btrim(p_next_title), coalesce(p_next_kind, 'other'), p_next_due, auth.uid());
+
+  perform crm_log_event(p_id, v.company_id, 'reopened', v.stage, v_target, btrim(p_reason));
+  if v_owner <> v.owner_id then
+    perform crm_log_event(p_id, v.company_id, 'owner_changed', v.owner_id::text, v_owner::text,
+                          'Previous owner no longer has Sales access; taken over when reopening');
+  end if;
+  return v_version;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Opportunity contacts after creation. A contact is a SHARED record (one person, many opportunities): linking and
+-- unlinking only touch the link, never the contact; editing a contact changes the shared record and is written to the
+-- timeline of every opportunity it is linked to. Every change is also in the CRM audit log (triggers on
+-- crm_opportunity_contacts and crm_contacts).
+-- -----------------------------------------------------------------------------
+create or replace function crm_link_contact(p_opportunity_id uuid, p_contact_id uuid, p_role text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities; c crm_contacts; v_existing boolean;
+begin
+  v := crm_lock_opportunity(p_opportunity_id);
+  perform crm_require_owner_or_founder(v);
+  if v.stage = 'lost' then
+    raise exception 'A lost opportunity can no longer be changed (reopen it first)' using errcode = '23514';
+  end if;
+  select * into c from crm_contacts where id = p_contact_id and archived_at is null;
+  if not found then raise exception 'Contact not found' using errcode = 'P0002'; end if;
+  select exists (select 1 from crm_opportunity_contacts where opportunity_id = v.id and contact_id = c.id) into v_existing;
+  insert into crm_opportunity_contacts (opportunity_id, contact_id, company_id, role)
+  values (v.id, c.id, v.company_id, nullif(btrim(p_role), ''))
+  on conflict (opportunity_id, contact_id) do update set role = excluded.role;
+  perform crm_log_event(v.id, v.company_id, 'contact', null,
+    c.name || coalesce(' (' || nullif(btrim(p_role), '') || ')', ''),
+    case when v_existing then 'Contact role updated' else 'Contact linked' end);
+end;
+$$;
+
+create or replace function crm_unlink_contact(p_opportunity_id uuid, p_contact_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities; c crm_contacts; n integer;
+begin
+  v := crm_lock_opportunity(p_opportunity_id);
+  perform crm_require_owner_or_founder(v);
+  if v.stage = 'lost' then
+    raise exception 'A lost opportunity can no longer be changed (reopen it first)' using errcode = '23514';
+  end if;
+  select * into c from crm_contacts where id = p_contact_id;
+  delete from crm_opportunity_contacts where opportunity_id = v.id and contact_id = p_contact_id;
+  get diagnostics n = row_count;
+  if n > 0 then
+    perform crm_log_event(v.id, v.company_id, 'contact', c.name, null, 'Contact unlinked (the contact record is kept)');
+  end if;
+end;
+$$;
+
+-- Who may edit the shared contact record: whoever created it, a founder of any company, or the owner of an opportunity
+-- (not lost) the contact is currently linked to. Everyone else with Sales access can read it but not change it.
+create or replace function crm_can_edit_contact(p_contact_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select crm_has_any_access() and (
+    exists (select 1 from crm_contacts c where c.id = p_contact_id and c.created_by = auth.uid())
+    or crm_is_any_founder()
+    or exists (
+      select 1 from crm_opportunity_contacts oc
+      join crm_opportunities o on o.id = oc.opportunity_id
+      where oc.contact_id = p_contact_id and o.owner_id = auth.uid() and o.stage <> 'lost' and crm_has_access(o.company_id))
+  );
+$$;
+
+create or replace function crm_update_contact(p_contact_id uuid, p_patch jsonb)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  c crm_contacts; k text; o record;
+  v_allowed text[] := array['name', 'role_title', 'email', 'phone', 'organisation_id'];
+begin
+  perform crm_require_user();
+  if not crm_can_edit_contact(p_contact_id) then
+    raise exception 'Only the person who added this contact, a founder, or the owner of an opportunity it is on can change it'
+      using errcode = '42501';
+  end if;
+  select * into c from crm_contacts where id = p_contact_id and archived_at is null for update;
+  if not found then raise exception 'Contact not found' using errcode = 'P0002'; end if;
+  if p_patch is null or jsonb_typeof(p_patch) <> 'object' or p_patch = '{}'::jsonb then
+    raise exception 'Nothing to change' using errcode = '22023';
+  end if;
+  for k in select jsonb_object_keys(p_patch) loop
+    if not (k = any (v_allowed)) then raise exception 'Field % cannot be changed here', k using errcode = '22023'; end if;
+  end loop;
+  update crm_contacts set
+    name = case when p_patch ? 'name' then btrim(p_patch->>'name') else name end,
+    role_title = case when p_patch ? 'role_title' then nullif(btrim(p_patch->>'role_title'), '') else role_title end,
+    email = case when p_patch ? 'email' then nullif(btrim(p_patch->>'email'), '') else email end,
+    phone = case when p_patch ? 'phone' then nullif(btrim(p_patch->>'phone'), '') else phone end,
+    organisation_id = case when p_patch ? 'organisation_id' then (p_patch->>'organisation_id')::uuid else organisation_id end
+   where id = p_contact_id;
+  -- One line on each opportunity's timeline (only those the editor can see) so the history shows the change.
+  for o in
+    select op.id, op.company_id from crm_opportunity_contacts oc
+    join crm_opportunities op on op.id = oc.opportunity_id
+    where oc.contact_id = p_contact_id and crm_has_access(op.company_id)
+  loop
+    perform crm_log_event(o.id, o.company_id, 'contact', c.name, (select name from crm_contacts where id = p_contact_id),
+      'Contact details updated (' || (select string_agg(x, ', ' order by x) from jsonb_object_keys(p_patch) x) || ')');
+  end loop;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
 -- Privileges: internal helpers are not callable by clients; workflow functions are, for signed-in users only.
 -- -----------------------------------------------------------------------------
 revoke all on function
@@ -11742,6 +11997,17 @@ revoke all on function
   crm_user_has_company_access(uuid, uuid), crm_validate_technologies(jsonb), crm_stage_index(text),
   crm_require_follow_up_actor(crm_follow_ups, crm_opportunities)
   from public, anon, authenticated;
+
+revoke all on function
+  crm_reopen_opportunity(uuid, text, text, timestamptz, text, text, integer),
+  crm_link_contact(uuid, uuid, text), crm_unlink_contact(uuid, uuid), crm_can_edit_contact(uuid),
+  crm_update_contact(uuid, jsonb)
+  from public, anon;
+grant execute on function
+  crm_reopen_opportunity(uuid, text, text, timestamptz, text, text, integer),
+  crm_link_contact(uuid, uuid, text), crm_unlink_contact(uuid, uuid), crm_can_edit_contact(uuid),
+  crm_update_contact(uuid, jsonb)
+  to authenticated;
 
 revoke all on function
   crm_create_organisation(text, text, text, text), crm_create_contact(uuid, text, text, text, text),
@@ -11776,9 +12042,14 @@ grant execute on function
 -- approval (unconfigured by default), handover, in-app reminders and the private storage bucket.
 --
 -- Hard rules encoded here:
---   * Files: private bucket, no client policies at all. The web server validates type, size and content, uploads with
---     the service role, then registers the file through crm_register_file(), which re-checks the path shape and that
---     the object exists. The table CHECKs and the bucket reject executables and macro-enabled formats a second time.
+--   * Files: two private buckets and no client policies on either. Vercel functions accept at most 4.5 MB of request
+--     body, so a browser cannot post a large file through the app. Instead: crm_create_upload_intent() records what
+--     the person says they will upload (name, type, size) after the same checks as the table; the browser sends the
+--     bytes straight to the QUARANTINE bucket with a one-time signed URL; the server then reads the object back,
+--     checks its real size and leading bytes (executables and macro-enabled Office files are refused), and only a file
+--     that passes is moved into 'crm-files' and registered by crm_register_uploaded_file() from the intent's own
+--     stored values (the client never supplies a path). Nobody can read a file that has not been validated. The table
+--     CHECKs and both buckets reject executables and macro-enabled formats again.
 --   * Commercial approval: while a company's policy is 'not_configured' nothing can be requested or decided, and the
 --     UI shows "not configured", never "approved". Policy changes need 'manage_approval_rules'.
 --   * Equipment availability is a dated check by a person with 'confirm_availability'. It is not a stock reservation
@@ -11787,16 +12058,25 @@ grant execute on function
 --     and a unique dedupe key. Nothing here sends anything to a client.
 
 -- -----------------------------------------------------------------------------
--- Private bucket (no client policies: the service role is the only writer and signer)
+-- Private buckets (no client policies: the service role is the only reader, mover and signer)
 -- -----------------------------------------------------------------------------
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('crm-files', 'crm-files', false, 20971520, crm_allowed_mime_types())
 on conflict (id) do update
   set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
 
+-- Quarantine: where an upload lands BEFORE it has been validated. Private, same size and type lock, no policies,
+-- never readable by users; the server deletes the object after validating (or rejecting) it, and anything left over
+-- is purged when its intent expires.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('crm-quarantine', 'crm-quarantine', false, 20971520, crm_allowed_mime_types())
+on conflict (id) do update
+  set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
 -- -----------------------------------------------------------------------------
 -- Files and links
 -- -----------------------------------------------------------------------------
+-- Links only. (Files go through crm_create_upload_intent / crm_register_uploaded_file below.)
 create or replace function crm_register_file(
   p_opportunity_id uuid,
   p_kind text,
@@ -11817,13 +12097,8 @@ begin
   if v.stage = 'lost' then
     raise exception 'A lost opportunity can no longer be updated' using errcode = '23514';
   end if;
-  if p_kind = 'file' then
-    if p_storage_path is null or p_storage_path not like (v.company_id::text || '/' || v.id::text || '/%') then
-      raise exception 'The file path does not belong to this opportunity' using errcode = '22023';
-    end if;
-    if not exists (select 1 from storage.objects where bucket_id = 'crm-files' and name = p_storage_path) then
-      raise exception 'The uploaded file was not found' using errcode = 'P0002';
-    end if;
+  if p_kind <> 'link' then
+    raise exception 'Files are added through the upload flow, not here; this records links only' using errcode = '22023';
   end if;
   insert into crm_files (opportunity_id, company_id, kind, label, original_name, storage_path, mime_type, size_bytes,
                          url, purpose, uploaded_by)
@@ -11832,6 +12107,144 @@ begin
   returning id into v_id;
   perform crm_log_event(v.id, v.company_id, 'file', null, p_kind || ': ' || coalesce(nullif(btrim(p_label), ''), p_original_name, p_url));
   return v_id;
+end;
+$$;
+
+create or replace function crm_create_upload_intent(
+  p_opportunity_id uuid,
+  p_original_name text,
+  p_mime_type text,
+  p_size_bytes bigint,
+  p_safe_name text,
+  p_purpose text default 'other',
+  p_label text default null
+) returns table (intent_id uuid, quarantine_path text)
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities; v_id uuid := gen_random_uuid(); v_final uuid := gen_random_uuid(); v_open integer; v_qpath text;
+begin
+  v := crm_lock_opportunity(p_opportunity_id);
+  if v.stage = 'lost' then
+    raise exception 'A lost opportunity can no longer be updated' using errcode = '23514';
+  end if;
+  if length(coalesce(p_original_name, '')) not between 1 and 200 or crm_file_name_blocked(p_original_name) then
+    raise exception 'Executable, script and macro-enabled files cannot be uploaded' using errcode = '22023';
+  end if;
+  if p_mime_type is null or not (p_mime_type = any (crm_allowed_mime_types())) then
+    raise exception 'That file type is not allowed' using errcode = '22023';
+  end if;
+  if p_size_bytes is null or p_size_bytes not between 1 and 20971520 then
+    raise exception 'Files must be between 1 byte and 20 MB' using errcode = '22023';
+  end if;
+  if p_safe_name is null or p_safe_name !~ '^[A-Za-z0-9._-]{1,150}$' then
+    raise exception 'Invalid file name' using errcode = '22023';
+  end if;
+  if p_purpose not in ('proposal', 'purchase_order', 'authorised_email', 'brief', 'other') then
+    raise exception 'Unknown file purpose' using errcode = '22023';
+  end if;
+  -- A person cannot park an unlimited amount of unvalidated data in quarantine.
+  select count(*) into v_open from crm_upload_intents i
+   where i.user_id = auth.uid() and i.status in ('pending', 'validated') and i.expires_at > now();
+  if v_open >= 20 then
+    raise exception 'Too many uploads are waiting. Finish or wait for them to expire, then try again' using errcode = '53400';
+  end if;
+  v_qpath := v.company_id::text || '/' || v.id::text || '/' || v_id::text || '-' || p_safe_name;
+  insert into crm_upload_intents (id, opportunity_id, company_id, user_id, original_name, mime_type, size_bytes, purpose,
+                                  label, quarantine_path, final_path)
+  values (v_id, v.id, v.company_id, auth.uid(), p_original_name, p_mime_type, p_size_bytes, p_purpose,
+          nullif(btrim(p_label), ''), v_qpath,
+          v.company_id::text || '/' || v.id::text || '/' || v_final::text || '-' || p_safe_name);
+  return query select v_id, v_qpath;
+end;
+$$;
+
+-- The caller's own intent (used by the server to finish the upload).
+create or replace function crm_get_upload_intent(p_intent_id uuid)
+returns table (id uuid, opportunity_id uuid, company_id uuid, original_name text, mime_type text, size_bytes bigint,
+               purpose text, label text, quarantine_path text, final_path text, status text, expires_at timestamptz)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform crm_require_user();
+  return query
+    select i.id, i.opportunity_id, i.company_id, i.original_name, i.mime_type, i.size_bytes, i.purpose, i.label,
+           i.quarantine_path, i.final_path, i.status, i.expires_at
+    from crm_upload_intents i
+    where i.id = p_intent_id and i.user_id = auth.uid() and crm_has_access(i.company_id);
+end;
+$$;
+
+-- Service role only: the server records the outcome of validation. Only a pending, unexpired intent can be decided.
+create or replace function crm_mark_upload_intent(p_intent_id uuid, p_status text, p_reason text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if p_status not in ('validated', 'rejected') then raise exception 'Unknown status' using errcode = '22023'; end if;
+  update crm_upload_intents i
+     set status = p_status, reject_reason = left(p_reason, 300),
+         finished_at = case when p_status = 'rejected' then now() else i.finished_at end
+   where i.id = p_intent_id and i.status = 'pending' and i.expires_at > now();
+  if not found then raise exception 'Upload not found, already decided, or expired' using errcode = 'P0002'; end if;
+end;
+$$;
+
+-- The caller registers THEIR validated upload. Everything (path, name, type, size, purpose) comes from the intent the
+-- server validated, never from the browser; the validated object must exist in the real bucket.
+create or replace function crm_register_uploaded_file(p_intent_id uuid)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare i crm_upload_intents; v crm_opportunities; v_id uuid;
+begin
+  perform crm_require_user();
+  select * into i from crm_upload_intents where id = p_intent_id and user_id = auth.uid() for update;
+  if not found then raise exception 'Upload not found' using errcode = 'P0002'; end if;
+  if i.status = 'registered' then raise exception 'This upload was already added' using errcode = '23514'; end if;
+  if i.status <> 'validated' then
+    raise exception 'This upload has not passed the file checks' using errcode = '23514';
+  end if;
+  v := crm_lock_opportunity(i.opportunity_id);
+  if v.stage = 'lost' then
+    raise exception 'A lost opportunity can no longer be updated' using errcode = '23514';
+  end if;
+  if not exists (select 1 from storage.objects where bucket_id = 'crm-files' and name = i.final_path) then
+    raise exception 'The validated file was not found' using errcode = 'P0002';
+  end if;
+  insert into crm_files (opportunity_id, company_id, kind, label, original_name, storage_path, mime_type, size_bytes,
+                         purpose, uploaded_by)
+  values (i.opportunity_id, i.company_id, 'file', i.label, i.original_name, i.final_path, i.mime_type, i.size_bytes,
+          i.purpose, auth.uid())
+  returning id into v_id;
+  update crm_upload_intents set status = 'registered', finished_at = now() where id = i.id;
+  perform crm_log_event(i.opportunity_id, i.company_id, 'file', null, 'file: ' || coalesce(i.label, i.original_name));
+  return v_id;
+end;
+$$;
+
+-- Service role only (scheduled clean-up). Once an intent is past its expiry (which is also when its one-time upload URL
+-- stops working) it is swept exactly once: unfinished intents become 'expired', and the paths it may have left behind
+-- are returned for the server to delete: always the quarantine object (a replayed upload URL could have put something
+-- there even after the intent finished), and, for a validated-but-never-registered intent, the file in the real bucket.
+create or replace function crm_expire_upload_intents()
+returns table (quarantine_path text, final_path text, orphaned_validated boolean)
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  return query
+    with due as (select u.id, u.status from crm_upload_intents u where u.swept_at is null and u.expires_at < now() for update),
+         upd as (update crm_upload_intents i
+                    set swept_at = now(),
+                        status = case when i.status in ('pending', 'validated') then 'expired' else i.status end,
+                        finished_at = coalesce(i.finished_at, now())
+                   from due where i.id = due.id
+                 returning i.id, i.quarantine_path as qp, i.final_path as fp)
+    select upd.qp, upd.fp, (due.status = 'validated') from upd join due on due.id = upd.id;
 end;
 $$;
 
@@ -12298,6 +12711,8 @@ $$;
 -- -----------------------------------------------------------------------------
 revoke all on function
   crm_register_file(uuid, text, text, text, text, text, text, bigint, text), crm_remove_file(uuid),
+  crm_create_upload_intent(uuid, text, text, bigint, text, text, text), crm_get_upload_intent(uuid),
+  crm_mark_upload_intent(uuid, text, text), crm_register_uploaded_file(uuid), crm_expire_upload_intents(),
   crm_add_proposal(uuid, text, uuid), crm_set_proposal_status(uuid, text, date),
   crm_upsert_zoho_reference(uuid, text, date, text, date, date, numeric),
   crm_request_availability(uuid), crm_confirm_availability(uuid, text, text),
@@ -12309,6 +12724,8 @@ revoke all on function
 
 grant execute on function
   crm_register_file(uuid, text, text, text, text, text, text, bigint, text), crm_remove_file(uuid),
+  crm_create_upload_intent(uuid, text, text, bigint, text, text, text), crm_get_upload_intent(uuid),
+  crm_register_uploaded_file(uuid),
   crm_add_proposal(uuid, text, uuid), crm_set_proposal_status(uuid, text, date),
   crm_upsert_zoho_reference(uuid, text, date, text, date, date, numeric),
   crm_request_availability(uuid), crm_confirm_availability(uuid, text, text),
@@ -12319,8 +12736,8 @@ grant execute on function
 -- Scheduled-job functions: the service role only (never reachable from a browser session).
 grant execute on function
   crm_generate_reminders(timestamptz), crm_claim_reminder_emails(integer, timestamptz),
-  crm_finish_reminder_email(uuid, boolean, text)
+  crm_finish_reminder_email(uuid, boolean, text), crm_mark_upload_intent(uuid, text, text), crm_expire_upload_intents()
   to service_role;
 
 -- ROLLBACK (before any CRM data exists): drop the functions above with `drop function if exists`, then
---   delete from storage.buckets where id = 'crm-files';   -- only if the bucket is empty
+--   delete from storage.buckets where id in ('crm-files', 'crm-quarantine');   -- only if both buckets are empty

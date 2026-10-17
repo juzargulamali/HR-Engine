@@ -8,9 +8,10 @@
 --   D  your companies and what the migration would seed (reference code + default currency) for each
 --   E  people who could be the first founders (active users holding a CEO or CTO role) - for the bootstrap script
 --   F  default privileges on public tables (public privilege hardening, PR #30, should already be applied)
---   G  storage: the bucket the migration creates must not exist yet; storage.objects must have row-level security on
+--   G  storage: the two buckets the migration creates must not exist yet; storage.objects must have row-level security on
 --   H  public tables WITHOUT row-level security (information only)
---   I  row counts of the HR tables the CRM migrations must NOT change (compare with verify script 20)
+--   I  row counts of the HR tables the CRM migrations must NOT change (information only; the real proof is crm_05_preservation_check_readonly.sql,
+--      which separates legitimate concurrent HR activity from changes - run it BEFORE the migrations too)
 
 select section, item, detail from (
   select 'A session' as section, 1 as ord, 'running as' as item, current_user::text || ' (superuser=' || (select rolsuper::text from pg_roles where rolname = current_user) || ')' as detail
@@ -97,10 +98,10 @@ select section, item, detail from (
 
   -- G storage ------------------------------------------------------------------------------------------------------
   union all
-  select 'G storage', 1100, 'bucket crm-files',
+  select 'G storage', 1100, 'buckets crm-files and crm-quarantine',
          case when to_regclass('storage.buckets') is null then 'storage.buckets not found - stop'
-              when exists (select 1 from storage.buckets where id = 'crm-files') then 'ALREADY EXISTS - stop; this is meant to be a first install'
-              else 'OK - does not exist yet' end
+              when exists (select 1 from storage.buckets where id in ('crm-files', 'crm-quarantine')) then 'ALREADY EXISTS - stop; this is meant to be a first install'
+              else 'OK - neither exists yet' end
   union all
   select 'G storage', 1101, 'row-level security on storage.objects',
          case when to_regclass('storage.objects') is null then 'storage.objects not found - stop'

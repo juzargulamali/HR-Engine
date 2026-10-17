@@ -9,8 +9,8 @@ with
 crm_tables as (select c.oid, c.relname, c.relrowsecurity from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind = 'r' and c.relname like 'crm\_%'),
 crm_funcs as (select p.oid, p.proname, p.prosecdef, p.proconfig from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'crm\_%')
 select check_name, result, detail from (
-  select 1 as ord, 'tables exist (17 expected)' as check_name,
-         case when (select count(*) from crm_tables) = 17 then 'PASS' else 'FAIL' end as result,
+  select 1 as ord, 'tables exist (19 expected)' as check_name,
+         case when (select count(*) from crm_tables) = 19 then 'PASS' else 'FAIL' end as result,
          (select count(*)::text || ' found: ' || coalesce(string_agg(relname, ', ' order by relname), '') from crm_tables) as detail
   union all
   select 2, 'row-level security on every CRM table', case when not exists (select 1 from crm_tables where not relrowsecurity) then 'PASS' else 'FAIL' end,
@@ -40,22 +40,22 @@ select check_name, result, detail from (
          coalesce((select string_agg(proname, ', ') from crm_funcs where has_function_privilege('anon', oid, 'execute')), 'none')
   union all
   select 8, 'signed-in users cannot execute the scheduled-job functions',
-         case when not exists (select 1 from crm_funcs where proname in ('crm_generate_reminders', 'crm_claim_reminder_emails', 'crm_finish_reminder_email') and has_function_privilege('authenticated', oid, 'execute')) then 'PASS' else 'FAIL' end,
+         case when not exists (select 1 from crm_funcs where proname in ('crm_generate_reminders', 'crm_claim_reminder_emails', 'crm_finish_reminder_email', 'crm_mark_upload_intent', 'crm_expire_upload_intents') and has_function_privilege('authenticated', oid, 'execute')) then 'PASS' else 'FAIL' end,
          'reserved to service_role'
   union all
   select 9, 'the service role can execute the scheduled-job functions',
-         case when (select count(*) from crm_funcs where proname in ('crm_generate_reminders', 'crm_claim_reminder_emails', 'crm_finish_reminder_email') and has_function_privilege('service_role', oid, 'execute')) = 3 then 'PASS' else 'FAIL' end,
-         'needed by /api/cron/crm-reminders'
+         case when (select count(*) from crm_funcs where proname in ('crm_generate_reminders', 'crm_claim_reminder_emails', 'crm_finish_reminder_email', 'crm_mark_upload_intent', 'crm_expire_upload_intents') and has_function_privilege('service_role', oid, 'execute')) = 5 then 'PASS' else 'FAIL' end,
+         'needed by /api/cron/crm-reminders and the upload checks'
   union all
-  select 10, 'storage bucket crm-files is private, size-limited and type-locked',
-         case when exists (select 1 from storage.buckets where id = 'crm-files' and not public and file_size_limit = 20971520
+  select 10, 'storage buckets crm-files and crm-quarantine are private, size-limited and type-locked',
+         case when (select count(*) from storage.buckets where id in ('crm-files', 'crm-quarantine') and not public and file_size_limit = 20971520
                            and allowed_mime_types is not null
-                           and not exists (select 1 from unnest(allowed_mime_types) m where m ~* 'macro|msdownload|octet-stream|javascript|html|x-sh')) then 'PASS' else 'FAIL' end,
-         coalesce((select 'public=' || public::text || ', limit=' || file_size_limit::text || ', types=' || array_to_string(allowed_mime_types, ', ') from storage.buckets where id = 'crm-files'), 'bucket missing')
+                           and not exists (select 1 from unnest(allowed_mime_types) m where m ~* 'macro|msdownload|octet-stream|javascript|html|x-sh')) = 2 then 'PASS' else 'FAIL' end,
+         coalesce((select string_agg(id || ': public=' || public::text || ', limit=' || file_size_limit::text, '; ') from storage.buckets where id in ('crm-files', 'crm-quarantine')), 'buckets missing')
   union all
-  select 11, 'no storage policy lets a signed-in user touch crm-files directly',
-         case when not exists (select 1 from pg_policies where schemaname = 'storage' and (coalesce(qual, '') ilike '%crm-files%' or coalesce(with_check, '') ilike '%crm-files%')) then 'PASS' else 'FAIL' end,
-         'files are written and signed only by the server with the service role'
+  select 11, 'no storage policy lets a signed-in user touch crm-files or crm-quarantine directly',
+         case when not exists (select 1 from pg_policies where schemaname = 'storage' and (coalesce(qual, '') ~* 'crm-(files|quarantine)' or coalesce(with_check, '') ~* 'crm-(files|quarantine)')) then 'PASS' else 'FAIL' end,
+         'files are moved, read and signed only by the server with the service role'
   union all
   select 12, 'commercial approval is not configured anywhere unless a founder set it',
          case when not exists (select 1 from crm_company_settings where approval_policy <> 'not_configured') then 'PASS' else 'INFO' end,
@@ -108,5 +108,23 @@ select check_name, result, detail from (
          case when not exists (select 1 from pg_constraint con join pg_class src on src.oid = con.conrelid join pg_class dst on dst.oid = con.confrelid
                                where con.contype = 'f' and src.relname like 'crm\_%' and dst.relnamespace = 'public'::regnamespace and dst.relname not like 'crm\_%' and dst.relname not in ('companies')) then 'PASS' else 'FAIL' end,
          'CRM is separate from HR data'
+  union all
+  select 25, 'upload intents are invisible to browsers (no privilege at all for signed-in users or anon)',
+         case when not exists (select 1 from crm_tables t, lateral aclexplode(coalesce((select relacl from pg_class where oid = t.oid), acldefault('r', (select relowner from pg_class where oid = t.oid)))) x
+                              where t.relname = 'crm_upload_intents' and x.grantee in (select oid from pg_roles where rolname in ('anon', 'authenticated'))) then 'PASS' else 'FAIL' end,
+         (select count(*)::text || ' intents' from crm_upload_intents)
+  union all
+  select 26, 'closure history: every Won or Lost opportunity has exactly one current closure',
+         case when not exists (select 1 from crm_opportunities o where o.stage in ('won', 'lost')
+                               and (select count(*) from crm_closures c where c.opportunity_id = o.id and c.reopened_at is null) <> 1) then 'PASS' else 'FAIL' end,
+         (select count(*)::text || ' closures, ' || count(*) filter (where reopened_at is not null) || ' reopened' from crm_closures)
+  union all
+  select 27, 'closure history: no open opportunity still has a current closure, and every reopened closure has who and why',
+         case when not exists (select 1 from crm_closures c join crm_opportunities o on o.id = c.opportunity_id where c.reopened_at is null and o.stage not in ('won', 'lost'))
+               and not exists (select 1 from crm_closures where reopened_at is not null and (reopened_by is null or length(btrim(coalesce(reopen_reason, ''))) = 0)) then 'PASS' else 'FAIL' end, ''
+  union all
+  select 28, 'no validated or registered file lives only in quarantine, and no stored file path is outside its own opportunity folder',
+         case when not exists (select 1 from crm_files f where f.kind = 'file' and f.storage_path not like f.company_id::text || '/' || f.opportunity_id::text || '/%') then 'PASS' else 'FAIL' end,
+         (select count(*)::text || ' files' from crm_files where kind = 'file')
 ) q
 order by ord;

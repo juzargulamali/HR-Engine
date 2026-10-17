@@ -183,6 +183,8 @@ Proceed to [05-automation-rules.md](./05-automation-rules.md).
 6. **Handover:** the owner prepares the package (scope, exclusions, accepted proposal, confirmation evidence, technologies,
    dates, contacts, payment terms, risks) and records the Project Manager. The Projects module is **Coming soon**, so this is a
    recorded package, not an automatic project.
-7. **Commercial approval** is *not configured* until the founders decide a policy; nothing can be requested or approved before
+7. **Contacts** can be added, linked, re-roled and unlinked after the fact (the person's record is shared and always kept); editing a person changes the shared record and is logged on every opportunity they are on.
+8. **Reopen:** if a Won or Lost job comes back, a founder (or someone they delegated) reopens it with a reason and a new next action; the earlier outcome stays in the closure history and a prepared handover is left as it was.
+9. **Commercial approval** is *not configured* until the founders decide a policy; nothing can be requested or approved before
    that, and the screens never imply approval.
 

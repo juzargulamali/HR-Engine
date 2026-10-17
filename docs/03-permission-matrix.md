@@ -137,6 +137,9 @@ CRM tables have SELECT policies only); mirrored for the UI in `packages/domain/s
 | Edit Sales settings (reference code, currency, targets, calendar, emails) | – | – | `manage_settings` | F | – |
 | Grant / revoke Sales access (cannot grant founder or `manage_access`) | – | – | `manage_access` | F (incl. founder rights) | – |
 | Read the Sales audit trail (`crm_audit_log`, not the HR audit log) | – | – | `view_audit` | F | – |
+| Reopen a Won or Lost opportunity (reason + new next action; closure kept) | – | – | `reopen_closed` | F | – |
+| Link / unlink a shared contact on an opportunity; change its role | – | F (own, not lost) | – | F (any, not lost) | – |
+| Edit a shared contact's details | creator only | F (if on one of their live opportunities) | – | F | – |
 | Complete / reschedule / cancel a follow-up | assignee only | F | – | F | – |
 
 The last founder of a company cannot be revoked. The shared `audit_log` (readable by HR) never receives CRM rows.

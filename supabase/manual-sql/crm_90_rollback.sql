@@ -13,17 +13,17 @@ declare
   v_rows bigint;
 begin
   select (select count(*) from crm_opportunities) + (select count(*) from crm_organisations) + (select count(*) from crm_contacts)
-       + (select count(*) from crm_files) + (select count(*) from crm_proposals) + (select count(*) from crm_follow_ups)
+       + (select count(*) from crm_files) + (select count(*) from crm_proposals) + (select count(*) from crm_follow_ups) + (select count(*) from crm_closures)
     into v_rows;
   if v_rows > 0 and not v_allow_data_loss then
     raise exception 'CRM data exists (% rows across opportunities, organisations, contacts, files, proposals, follow-ups). Export it first, then set v_allow_data_loss := true.', v_rows;
   end if;
-  if exists (select 1 from storage.objects where bucket_id = 'crm-files') then
-    raise exception 'The crm-files bucket still contains files. Empty it in the Storage UI first.';
+  if exists (select 1 from storage.objects where bucket_id in ('crm-files', 'crm-quarantine')) then
+    raise exception 'The crm-files or crm-quarantine bucket still contains files. Empty both in the Storage UI first.';
   end if;
 
   drop table if exists crm_reminders, crm_handovers, crm_approvals, crm_zoho_references, crm_proposals, crm_files,
-    crm_follow_ups, crm_activities, crm_opportunity_events, crm_opportunity_contacts, crm_opportunities,
+    crm_follow_ups, crm_activities, crm_opportunity_events, crm_opportunity_contacts, crm_closures, crm_upload_intents, crm_opportunities,
     crm_reference_counters, crm_contacts, crm_organisations, crm_company_settings, crm_audit_log, crm_company_grants cascade;
 
   -- Every remaining CRM function (their signatures differ, so they are discovered rather than listed).
@@ -34,7 +34,7 @@ begin
     end loop;
   end;
 
-  delete from storage.buckets where id = 'crm-files';
+  delete from storage.buckets where id in ('crm-files', 'crm-quarantine');
   raise notice 'Sales & CRM objects removed.';
 end $$;
 
