@@ -8,6 +8,7 @@ import { formatDate, formatDateTime, formatMoney } from "@/components/sales/form
 import { displayNameFor, getCrmContext } from "@/lib/crm/context";
 import { loadOpportunityDetail } from "@/lib/crm/data";
 import { createClient } from "@/lib/supabase/server";
+import { HANDOVER_REOPENED_NOTICE } from "../closure-helpers";
 import { ContactsPanel } from "../contacts-panel";
 import { buildHandoverPackage, dateRangeText, fileDisplayName, HANDOVER_STATUS_LABELS } from "../helpers";
 import { Fact, Muted, Panel } from "../parts";
@@ -29,13 +30,36 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
   );
 
   if (!view.isWon) {
+    // A handover that was prepared before the opportunity was reopened is kept exactly as it was: explain, show it read-only, never redo it.
+    const kept = detail.handover;
+    const keptPm = kept?.pm_user_id ? ctx.personName(kept.pm_user_id) : null;
     return (
       <div className="space-y-5">
         {back}
         <h1 className="text-2xl font-semibold">Handover package</h1>
-        <Alert role="status">
-          A handover package can only be prepared once the opportunity is Won, with a purchase order or authorised email on record. {opp.reference} is currently <StageBadge stage={opp.stage} />.
-        </Alert>
+        {kept ? (
+          <>
+            <Alert variant="warning" role="status">
+              <p>{HANDOVER_REOPENED_NOTICE}</p>
+              <p className="mt-1">{opp.reference} is currently <StageBadge stage={opp.stage} />. A handover package can only be prepared or changed while it is Won.</p>
+            </Alert>
+            <Panel
+              title="Handover record, kept as it was"
+              description={kept.prepared_at ? `Prepared ${formatDateTime(kept.prepared_at)}${kept.prepared_by ? ` by ${ctx.personName(kept.prepared_by)}` : ""}.${kept.handed_over_at ? ` Handed over ${formatDateTime(kept.handed_over_at)}.` : ""}` : "It was never marked ready."}
+            >
+              <dl className="grid gap-3 sm:grid-cols-3">
+                <Fact label="Status when it was left">{HANDOVER_STATUS_LABELS[kept.status] ?? kept.status}</Fact>
+                <Fact label="Project Manager">{kept.pm_user_id ? (keptPm && keptPm !== "Unknown" ? keptPm : "Chosen (name not available to you)") : "Not chosen"}</Fact>
+                <Fact label="Notes">{kept.notes ?? "None"}</Fact>
+              </dl>
+              <p className="mt-3 text-xs text-muted-foreground">This is only the record of who and what was chosen. The rest of the package is built from the opportunity when it is Won again.</p>
+            </Panel>
+          </>
+        ) : (
+          <Alert role="status">
+            A handover package can only be prepared once the opportunity is Won, with a purchase order or authorised email on record. {opp.reference} is currently <StageBadge stage={opp.stage} />.
+          </Alert>
+        )}
       </div>
     );
   }

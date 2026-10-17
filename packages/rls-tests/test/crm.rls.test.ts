@@ -542,47 +542,142 @@ describe("Sales & CRM", () => {
 
   // ---------------------------------------------------------------------------------------------------------------
   describe("files and links", () => {
-    const path = (opp: string, company: string, name = "po.pdf") => `${company}/${opp}/${id()}-${name}`;
-    it("registers a stored private file only for the right opportunity and only if the object exists", async () => {
-      const p = path(oppKsa, CO.ksa);
-      await expect(q(U.amira, `select crm_register_file('${oppKsa}', 'file', 'purchase_order', 'PO', '${p}', 'po.pdf', 'application/pdf', 1000)`)).rejects.toThrow(/not found/i);
-      await admin(`insert into storage.objects (bucket_id, name) values ('crm-files', '${p}')`);
-      expect(await q(U.amira, `select crm_register_file('${oppKsa}', 'file', 'purchase_order', 'PO', '${p}', 'po.pdf', 'application/pdf', 1000)`)).toHaveLength(1);
-      await expect(q(U.amira, `select crm_register_file('${oppKsa}', 'file', 'other', null, '${path(oppUae, CO.uae)}', 'x.pdf', 'application/pdf', 10)`)).rejects.toThrow(/does not belong/);
+    const safe = (name: string) => name.replace(/[^A-Za-z0-9._-]+/g, "_");
+    type Intent = { intent_id: string; quarantine_path: string };
+    const intentSql = (opp: string, name: string, mime: string, size: number, purpose = "purchase_order") =>
+      `select * from crm_create_upload_intent('${opp}', '${name}', '${mime}', ${size}, '${safe(name)}', '${purpose}', 'PO')`;
+    /** What the server does after a successful validation: the object is moved to the real bucket and the intent marked. */
+    async function validate(intentId: string) {
+      const [i] = await admin<{ final_path: string; quarantine_path: string }>(`select final_path, quarantine_path from crm_upload_intents where id = '${intentId}'`);
+      await admin(`insert into storage.objects (bucket_id, name) values ('crm-files', '${i.final_path}') on conflict do nothing`);
+      await admin(`select crm_mark_upload_intent('${intentId}', 'validated')`);
+      return i;
+    }
+
+    it("never accepts a file straight into the real bucket: crm_register_file records links only", async () => {
+      await expect(q(U.amira, `select crm_register_file('${oppKsa}', 'file', 'other', null, '${CO.ksa}/${oppKsa}/${id()}-a.pdf', 'a.pdf', 'application/pdf', 10)`)).rejects.toThrow(/upload flow/i);
+    });
+    it("creates an upload intent whose paths are built by the database, inside the opportunity's own folder", async () => {
+      const [i] = await commit<Intent>(U.amira, intentSql(oppKsa, "po.pdf", "application/pdf", 1000));
+      expect(i.quarantine_path).toMatch(new RegExp(`^${CO.ksa}/${oppKsa}/${i.intent_id}-po\\.pdf$`));
+      const [row] = await admin<{ final_path: string; status: string; user_id: string }>(`select final_path, status, user_id from crm_upload_intents where id = '${i.intent_id}'`);
+      expect(row.final_path).toMatch(new RegExp(`^${CO.ksa}/${oppKsa}/[0-9a-f-]{36}-po\\.pdf$`));
+      expect(row.final_path).not.toBe(i.quarantine_path);
+      expect(row).toMatchObject({ status: "pending", user_id: U.amira });
     });
     it.each([
-      ["an .exe", "setup.exe", "application/pdf"],
-      ["a macro-enabled workbook", "budget.xlsm", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
-      ["a macro-enabled document", "brief.docm", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
-      ["a double extension", "invoice.exe.pdf", "application/pdf"],
-      ["a script", "run.js", "text/plain"],
-      ["an HTML page", "page.html", "text/plain"],
-      ["a disallowed type", "movie.mp4", "video/mp4"],
-      ["a macro mime type", "sheet.xlsx", "application/vnd.ms-excel.sheet.macroEnabled.12"],
-    ])("rejects %s at the database even if the server check were bypassed", async (_label, name, mime) => {
-      const p = path(oppKsa, CO.ksa, name);
-      await admin(`insert into storage.objects (bucket_id, name) values ('crm-files', '${p}')`);
-      await expect(q(U.amira, `select crm_register_file('${oppKsa}', 'file', 'other', null, '${p}', '${name}', '${mime}', 1000)`)).rejects.toThrow(/crm_files_file_shape|check constraint/i);
+      ["an .exe", "setup.exe", "application/pdf", 1000, /Executable/],
+      ["a macro-enabled workbook", "budget.xlsm", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 1000, /Executable|macro/i],
+      ["a double extension", "invoice.exe.pdf", "application/pdf", 1000, /Executable/],
+      ["a script", "run.js", "text/plain", 1000, /Executable/],
+      ["an HTML page", "page.html", "text/plain", 1000, /Executable/],
+      ["a disallowed type", "movie.mp4", "video/mp4", 1000, /not allowed/],
+      ["a macro mime type", "sheet.xlsx", "application/vnd.ms-excel.sheet.macroEnabled.12", 1000, /not allowed/],
+      ["an empty file", "a.pdf", "application/pdf", 0, /between 1 byte and 20 MB/],
+      ["an oversize file", "a.pdf", "application/pdf", 20971521, /between 1 byte and 20 MB/],
+    ])("refuses an intent for %s before anything is uploaded", async (_l, name, mime, size, re) => {
+      await expect(q(U.amira, intentSql(oppKsa, name, mime, size))).rejects.toThrow(re);
     });
-    it("rejects empty and oversize files", async () => {
-      const p = path(oppKsa, CO.ksa);
-      await admin(`insert into storage.objects (bucket_id, name) values ('crm-files', '${p}')`);
-      await expect(q(U.amira, `select crm_register_file('${oppKsa}', 'file', 'other', null, '${p}', 'a.pdf', 'application/pdf', 0)`)).rejects.toThrow(/check constraint/i);
-      await expect(q(U.amira, `select crm_register_file('${oppKsa}', 'file', 'other', null, '${p}', 'a.pdf', 'application/pdf', 20971521)`)).rejects.toThrow(/check constraint/i);
+    it("accepts a full 20 MB file (the larger-file requirement)", async () => {
+      expect(await q(U.amira, intentSql(oppKsa, "big-deck.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", 20971520))).toHaveLength(1);
+    });
+    it("refuses an unsafe stored name and a person without access to the company", async () => {
+      await expect(q(U.amira, `select * from crm_create_upload_intent('${oppKsa}', 'a.pdf', 'application/pdf', 10, '../../x.pdf')`)).rejects.toThrow(/Invalid file name/);
+      await expect(q(U.daniel, intentSql(oppKsa, "a.pdf", "application/pdf", 10))).rejects.toThrow(/not found/i);
+      await expect(q(U.hr, intentSql(oppKsa, "a.pdf", "application/pdf", 10))).rejects.toThrow(/not found|No CRM|Not signed/i);
+    });
+    it("caps how many unfinished uploads one person can park in quarantine", async () => {
+      const rows = await db.asUser(U.rafi, async (query) => {
+        for (let n = 0; n < 20; n++) await query(intentSql(oppKsa, `f${n}.pdf`, "application/pdf", 10));
+        await query("savepoint s");
+        const failure = await query(intentSql(oppKsa, "one-too-many.pdf", "application/pdf", 10)).catch((e: Error) => e);
+        return failure instanceof Error ? failure.message : "no error";
+      });
+      expect(rows).toMatch(/Too many uploads/);
+    });
+    it("keeps intents out of reach of browsers: no one can read or write the table, not even the uploader", async () => {
+      const [i] = await commit<Intent>(U.amira, intentSql(oppKsa, "mine.pdf", "application/pdf", 10));
+      expect(await q(U.amira, "select 1 from crm_upload_intents")).toHaveLength(0);
+      const w = await q(U.amira, `update crm_upload_intents set status = 'validated' where id = '${i.intent_id}'`).then((r) => r, (e: Error) => e);
+      if (w instanceof Error) expect(w.message).toMatch(DENIED);
+      else expect(w).toHaveLength(0);
+      const status = (await admin<{ status: string }>(`select status from crm_upload_intents where id = '${i.intent_id}'`))[0].status;
+      expect(status).toBe("pending");
+    });
+    it("only the server (service role) can record a validation result", async () => {
+      const [i] = await commit<Intent>(U.amira, intentSql(oppKsa, "x.pdf", "application/pdf", 10));
+      await expect(q(U.amira, `select crm_mark_upload_intent('${i.intent_id}', 'validated')`)).rejects.toThrow(/permission denied/i);
+      await expect(q(U.juzar, `select * from crm_expire_upload_intents()`)).rejects.toThrow(/permission denied/i);
+    });
+    it("registers a file only after validation, from the intent's own values, and only for its owner, once", async () => {
+      const [i] = await commit<Intent>(U.amira, intentSql(oppKsa, "po.pdf", "application/pdf", 4321));
+      await expect(q(U.amira, `select crm_register_uploaded_file('${i.intent_id}')`)).rejects.toThrow(/not passed the file checks/);
+      const row = await validate(i.intent_id);
+      await expect(q(U.daniel, `select crm_register_uploaded_file('${i.intent_id}')`)).rejects.toThrow(/not found/i);
+      await expect(q(U.juzar, `select crm_register_uploaded_file('${i.intent_id}')`)).rejects.toThrow(/not found/i); // even a founder cannot register someone else's upload
+      const fileId = (await commit<{ id: string }>(U.amira, `select crm_register_uploaded_file('${i.intent_id}') as id`))[0].id;
+      const [f] = await admin<{ storage_path: string; original_name: string; size_bytes: string; mime_type: string; purpose: string; uploaded_by: string }>(
+        `select storage_path, original_name, size_bytes, mime_type, purpose, uploaded_by from crm_files where id = '${fileId}'`);
+      expect(f).toMatchObject({ storage_path: row.final_path, original_name: "po.pdf", mime_type: "application/pdf", purpose: "purchase_order", uploaded_by: U.amira });
+      expect(Number(f.size_bytes)).toBe(4321);
+      await expect(q(U.amira, `select crm_register_uploaded_file('${i.intent_id}')`)).rejects.toThrow(/already added/);
+    });
+    it("refuses to register when the validated object is missing, or the intent was rejected or has expired", async () => {
+      const [a] = await commit<Intent>(U.amira, intentSql(oppKsa, "a.pdf", "application/pdf", 10));
+      await admin(`select crm_mark_upload_intent('${a.intent_id}', 'validated')`);
+      await expect(q(U.amira, `select crm_register_uploaded_file('${a.intent_id}')`)).rejects.toThrow(/not found/i);
+      const [b] = await commit<Intent>(U.amira, intentSql(oppKsa, "b.pdf", "application/pdf", 10));
+      await admin(`select crm_mark_upload_intent('${b.intent_id}', 'rejected', 'macro found')`);
+      await expect(q(U.amira, `select crm_register_uploaded_file('${b.intent_id}')`)).rejects.toThrow(/not passed/);
+      const [c] = await commit<Intent>(U.amira, intentSql(oppKsa, "c.pdf", "application/pdf", 10));
+      await admin(`update crm_upload_intents set expires_at = now() - interval '1 minute' where id = '${c.intent_id}'`);
+      await expect(admin(`select crm_mark_upload_intent('${c.intent_id}', 'validated')`)).rejects.toThrow(/expired|not found/i);
+    });
+    it("sweeps finished intents' quarantine paths too, once, because a replayed upload URL could have refilled them", async () => {
+      const [r] = await commit<Intent>(U.amira, intentSql(oppKsa, "r.pdf", "application/pdf", 10));
+      await validate(r.intent_id);
+      await commit(U.amira, `select crm_register_uploaded_file('${r.intent_id}')`);
+      await admin(`update crm_upload_intents set expires_at = now() - interval '1 hour' where id = '${r.intent_id}'`);
+      const out = await admin<{ quarantine_path: string; orphaned_validated: boolean }>("select * from crm_expire_upload_intents()");
+      expect(out.find((x) => x.quarantine_path === r.quarantine_path)).toMatchObject({ orphaned_validated: false });
+      expect((await admin<{ status: string }>(`select status from crm_upload_intents where id = '${r.intent_id}'`))[0].status).toBe("registered");
+    });
+    it("expires unfinished intents and hands back what to delete (quarantine, and validated-but-unregistered files)", async () => {
+      const [p] = await commit<Intent>(U.amira, intentSql(oppKsa, "p.pdf", "application/pdf", 10));
+      const [v] = await commit<Intent>(U.amira, intentSql(oppKsa, "v.pdf", "application/pdf", 10));
+      await validate(v.intent_id);
+      await admin(`update crm_upload_intents set expires_at = now() - interval '1 hour' where id in ('${p.intent_id}', '${v.intent_id}')`);
+      const out = await admin<{ quarantine_path: string; orphaned_validated: boolean }>("select * from crm_expire_upload_intents()");
+      const byPath = new Map(out.map((r) => [r.quarantine_path, r.orphaned_validated]));
+      expect(byPath.get(p.quarantine_path)).toBe(false);
+      expect(byPath.get(v.quarantine_path)).toBe(true);
+      expect((await admin("select * from crm_expire_upload_intents()")).filter((r) => (r as { quarantine_path: string }).quarantine_path === p.quarantine_path)).toHaveLength(0); // once only
+      expect((await admin<{ status: string }>(`select status from crm_upload_intents where id = '${p.intent_id}'`))[0].status).toBe("expired");
+    });
+    it("refuses new uploads on a lost opportunity", async () => {
+      const opp = await newOpp(U.amira, CO.uae, "Lost file job");
+      await commit(U.amira, `select crm_mark_lost('${opp}', 'Went elsewhere')`);
+      await expect(q(U.amira, intentSql(opp, "late.pdf", "application/pdf", 10))).rejects.toThrow(/lost/i);
     });
     it("accepts https links only", async () => {
       expect(await q(U.amira, `select crm_register_file('${oppKsa}', 'link', 'proposal', 'Canva v2', null, null, null, null, 'https://www.canva.com/design/x')`)).toHaveLength(1);
       await expect(q(U.amira, `select crm_register_file('${oppKsa}', 'link', 'proposal', 'bad', null, null, null, null, 'javascript:alert(1)')`)).rejects.toThrow(/check constraint/i);
       await expect(q(U.amira, `select crm_register_file('${oppKsa}', 'link', 'proposal', 'bad', null, null, null, null, 'http://insecure.example')`)).rejects.toThrow(/check constraint/i);
     });
-    it("keeps the bucket private, size-limited and type-locked, with no client policies", async () => {
+    it("still refuses executables and macro files at the table even if every earlier check were bypassed", async () => {
+      for (const [name, mime] of [["setup.exe", "application/pdf"], ["b.xlsm", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"], ["c.exe.pdf", "application/pdf"]] as const) {
+        await expect(admin(`insert into crm_files (opportunity_id, company_id, kind, original_name, storage_path, mime_type, size_bytes, uploaded_by)
+          values ('${oppKsa}', '${CO.ksa}', 'file', '${name}', '${CO.ksa}/${oppKsa}/${id()}-${safe(name)}', '${mime}', 10, '${U.amira}')`)).rejects.toThrow(/crm_files_file_shape/);
+      }
+    });
+    it.each(["crm-files", "crm-quarantine"])("keeps the %s bucket private, size-limited and type-locked, with no client policies", async (bucket) => {
       const [b] = await admin<{ public: boolean; file_size_limit: string; allowed_mime_types: string[] }>(
-        "select public, file_size_limit, allowed_mime_types from storage.buckets where id = 'crm-files'");
+        `select public, file_size_limit, allowed_mime_types from storage.buckets where id = '${bucket}'`);
       expect(b.public).toBe(false);
       expect(Number(b.file_size_limit)).toBe(20971520);
       expect(b.allowed_mime_types).not.toContain("application/x-msdownload");
       expect(b.allowed_mime_types.some((m) => /macro/i.test(m))).toBe(false);
-      const pol = await admin<{ n: string }>("select count(*) n from pg_policies where schemaname = 'storage' and (qual ilike '%crm-files%' or with_check ilike '%crm-files%')");
+      const pol = await admin<{ n: string }>(`select count(*) n from pg_policies where schemaname = 'storage' and (qual ilike '%${bucket}%' or with_check ilike '%${bucket}%')`);
       expect(Number(pol[0].n)).toBe(0);
     });
     it("lets only the uploader, owner or founder remove a file", async () => {
@@ -723,6 +818,185 @@ describe("Sales & CRM", () => {
   });
 
   // ---------------------------------------------------------------------------------------------------------------
+  describe("opportunity contacts after creation", () => {
+    let hana: string;
+    let opp1: string;
+    let opp2: string;
+    beforeAll(async () => {
+      hana = (await commit<{ id: string }>(U.amira, `select crm_create_contact('${agencyId}', 'Hana Al Mansoori', 'Producer', 'hana@zeta.example', '+971500000001') as id`))[0].id;
+      opp1 = await newOpp(U.amira, CO.uae, "Contacts job one");
+      opp2 = await newOpp(U.amira, CO.uae, "Contacts job two");
+    });
+    const links = async (opp: string) => (await admin<{ contact_id: string; role: string | null }>(`select contact_id, role from crm_opportunity_contacts where opportunity_id = '${opp}'`));
+
+    it("lets the owner link a shared contact, change its role, and unlink it, without touching the contact record", async () => {
+      await commit(U.amira, `select crm_link_contact('${opp1}', '${hana}', 'Day-to-day')`);
+      await commit(U.amira, `select crm_link_contact('${opp2}', '${hana}', 'Approver')`);
+      expect(await links(opp1)).toEqual([{ contact_id: hana, role: "Day-to-day" }]);
+      await commit(U.amira, `select crm_link_contact('${opp1}', '${hana}', 'Producer')`); // upsert changes only the role
+      expect(await links(opp1)).toEqual([{ contact_id: hana, role: "Producer" }]);
+      await commit(U.amira, `select crm_unlink_contact('${opp1}', '${hana}')`);
+      expect(await links(opp1)).toEqual([]);
+      expect(await links(opp2)).toEqual([{ contact_id: hana, role: "Approver" }]); // the other opportunity keeps its link
+      expect((await admin<{ name: string; archived_at: string | null }>(`select name, archived_at from crm_contacts where id = '${hana}'`))[0]).toMatchObject({ name: "Hana Al Mansoori", archived_at: null });
+    });
+    it("is a no-op to unlink a contact that is not linked, and refuses unknown contacts", async () => {
+      expect(await q(U.amira, `select crm_unlink_contact('${opp1}', '${hana}')`)).toHaveLength(1);
+      await expect(q(U.amira, `select crm_link_contact('${opp1}', '${id()}')`)).rejects.toThrow(/not found/i);
+    });
+    it("lets only the owner or a founder change who is on an opportunity", async () => {
+      await expect(q(U.daniel, `select crm_link_contact('${opp1}', '${hana}')`)).rejects.toThrow(/owner/);
+      await expect(q(U.daniel, `select crm_unlink_contact('${opp2}', '${hana}')`)).rejects.toThrow(/owner/);
+      expect(await commit(U.juzar, `select crm_link_contact('${opp1}', '${hana}', 'Founder added')`)).toHaveLength(1);
+      await expect(q(U.hr, `select crm_link_contact('${opp1}', '${hana}')`)).rejects.toThrow(/not found|No CRM/i);
+      await expect(q(U.lena, `select crm_link_contact('${opp1}', '${hana}')`)).rejects.toThrow(/not found/i); // other company
+    });
+    it("refuses changes on a lost opportunity, allows them on a won one (handover needs the right people)", async () => {
+      const won = await newOpp(U.amira, CO.uae, "Contacts won job");
+      await commit(U.amira, `select crm_update_opportunity('${won}', null, '{"value": 1000}')`);
+      await commit(U.amira, `select crm_mark_won('${won}', 'purchase_order', 'PO-C', current_date)`);
+      expect(await q(U.amira, `select crm_link_contact('${won}', '${hana}', 'Site contact')`)).toHaveLength(1);
+      const lost = await newOpp(U.amira, CO.uae, "Contacts lost job");
+      await commit(U.amira, `select crm_mark_lost('${lost}', 'No budget')`);
+      await expect(q(U.amira, `select crm_link_contact('${lost}', '${hana}')`)).rejects.toThrow(/lost/i);
+    });
+    it("writes each change to the timeline and to the CRM audit log with who did it", async () => {
+      const kinds = await admin<{ reason: string; actor_id: string }>(`select reason, actor_id from crm_opportunity_events where opportunity_id = '${opp1}' and kind = 'contact' order by created_at`);
+      expect(kinds.map((k) => k.reason)).toEqual(expect.arrayContaining(["Contact linked", "Contact role updated", "Contact unlinked (the contact record is kept)"]));
+      const audit = await q<{ action: string; actor_id: string }>(U.juzar, `select action, actor_id from crm_audit_log where table_name = 'crm_opportunity_contacts' and company_id = '${CO.uae}'`);
+      expect(audit.map((a) => a.action)).toEqual(expect.arrayContaining(["insert", "update", "delete"]));
+      expect(audit.some((a) => a.actor_id === U.amira)).toBe(true);
+      expect(await q(U.amira, `select 1 from crm_audit_log where table_name = 'crm_opportunity_contacts'`)).toHaveLength(0); // sales staff cannot read the audit trail
+    });
+    it("lets the contact's creator, a founder, or the owner of an opportunity it is on edit the shared record; others cannot", async () => {
+      const [r] = await q<{ a: boolean; d: boolean; j: boolean; h: boolean }>(U.amira, `select crm_can_edit_contact('${hana}') a, false d, false j, false h`);
+      expect(r.a).toBe(true);
+      expect((await q<{ ok: boolean }>(U.daniel, `select crm_can_edit_contact('${hana}') ok`))[0].ok).toBe(false);
+      expect((await q<{ ok: boolean }>(U.juzar, `select crm_can_edit_contact('${hana}') ok`))[0].ok).toBe(true);
+      expect((await q<{ ok: boolean }>(U.hr, `select crm_can_edit_contact('${hana}') ok`))[0].ok).toBe(false);
+      await expect(q(U.daniel, `select crm_update_contact('${hana}', '{"phone": "+971 55 000 0000"}')`)).rejects.toThrow(/Only the person who added/);
+      // an owner of an opportunity it is linked to, who did not create it, may
+      const other = (await commit<{ id: string }>(U.daniel, `select crm_create_contact('${agencyId}', 'Omar Contact', null, null, null) as id`))[0].id;
+      const dOpp = await newOpp(U.daniel, CO.uae, "Daniel job");
+      await commit(U.daniel, `select crm_link_contact('${dOpp}', '${hana}', 'Producer')`);
+      expect((await q<{ ok: boolean }>(U.daniel, `select crm_can_edit_contact('${hana}') ok`))[0].ok).toBe(true);
+      expect((await q<{ ok: boolean }>(U.amira, `select crm_can_edit_contact('${other}') ok`))[0].ok).toBe(false);
+    });
+    it("updates the shared record once, logs it on every linked opportunity's timeline, and keeps old and new values in the audit log", async () => {
+      await commit(U.amira, `select crm_update_contact('${hana}', '{"role_title": "Senior Producer", "phone": "+971 50 111 2222"}')`);
+      expect((await admin<{ role_title: string; phone: string }>(`select role_title, phone from crm_contacts where id = '${hana}'`))[0]).toEqual({ role_title: "Senior Producer", phone: "+971 50 111 2222" });
+      const ev = await admin<{ opportunity_id: string }>(`select opportunity_id from crm_opportunity_events where kind = 'contact' and reason like 'Contact details updated%'`);
+      expect(ev.map((e) => e.opportunity_id)).toEqual(expect.arrayContaining([opp1, opp2]));
+      const aud = await q<{ old_row: { role_title: string | null }; new_row: { role_title: string } }>(U.juzar, `select old_row, new_row from crm_audit_log where table_name = 'crm_contacts' and row_id = '${hana}' and action = 'update' order by id desc limit 1`);
+      expect(aud[0].old_row.role_title).toBe("Producer");
+      expect(aud[0].new_row.role_title).toBe("Senior Producer");
+    });
+    it("validates what can be changed", async () => {
+      await expect(q(U.amira, `select crm_update_contact('${hana}', '{"created_by": "${U.daniel}"}')`)).rejects.toThrow(/cannot be changed here/);
+      await expect(q(U.amira, `select crm_update_contact('${hana}', '{}')`)).rejects.toThrow(/Nothing to change/);
+      await expect(q(U.amira, `select crm_update_contact('${hana}', '{"email": "not-an-email"}')`)).rejects.toThrow(/check constraint|crm_contacts_email_check/i);
+      await expect(q(U.amira, `select crm_update_contact('${hana}', '{"name": ""}')`)).rejects.toThrow(/check constraint/i);
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------------------------
+  describe("reopening a closed opportunity", () => {
+    async function wonOpp(title: string, stage = "qualified") {
+      const opp = await newOpp(U.amira, CO.uae, title);
+      if (stage !== "new") await commit(U.amira, `select crm_move_stage('${opp}', '${stage}')`);
+      await commit(U.amira, `select crm_update_opportunity('${opp}', null, '{"value": 90000}')`);
+      await commit(U.amira, `select crm_mark_won('${opp}', 'purchase_order', 'PO-RE-1', current_date)`);
+      return opp;
+    }
+    const NEXT = `'Call the client to restart', now() + interval '3 days'`;
+
+    it("records each closure in history when it happens", async () => {
+      const opp = await wonOpp("Closure history job");
+      const [c] = await admin<{ outcome: string; closed_from_stage: string; value_at_close: string; evidence_reference: string; reopened_at: string | null }>(
+        `select outcome, closed_from_stage, value_at_close, evidence_reference, reopened_at from crm_closures where opportunity_id = '${opp}'`);
+      expect(c).toMatchObject({ outcome: "won", closed_from_stage: "qualified", evidence_reference: "PO-RE-1", reopened_at: null });
+      expect(Number(c.value_at_close)).toBe(90000);
+      expect((await admin<{ stage_before_close: string }>(`select stage_before_close from crm_opportunities where id = '${opp}'`))[0].stage_before_close).toBe("qualified");
+    });
+    it("needs the reopen right (founders have it; owners and colleagues do not), a reason and a new next action", async () => {
+      const opp = await wonOpp("Permission job");
+      await expect(q(U.amira, `select crm_reopen_opportunity('${opp}', 'Client changed scope', ${NEXT})`)).rejects.toThrow(/Only a founder/);
+      await expect(q(U.daniel, `select crm_reopen_opportunity('${opp}', 'x', ${NEXT})`)).rejects.toThrow(/Only a founder/);
+      await expect(q(U.hr, `select crm_reopen_opportunity('${opp}', 'x', ${NEXT})`)).rejects.toThrow(/not found|No CRM/i);
+      await expect(q(U.juzar, `select crm_reopen_opportunity('${opp}', ' ', ${NEXT})`)).rejects.toThrow(/reason is required/);
+      await expect(q(U.juzar, `select crm_reopen_opportunity('${opp}', 'Scope changed', '', now() + interval '1 day')`)).rejects.toThrow(/new next action/);
+      await expect(q(U.juzar, `select crm_reopen_opportunity('${opp}', 'Scope changed', 'x', null)`)).rejects.toThrow(/new next action/);
+      await expect(q(U.juzar, `select crm_reopen_opportunity('${opp}', 'Scope changed', ${NEXT}, 'other', 'won')`)).rejects.toThrow(/working stages/);
+      await expect(q(U.juzar, `select crm_reopen_opportunity('${opp}', 'Scope changed', ${NEXT}, 'other', null, 999)`)).rejects.toThrow(/changed by someone else/);
+    });
+    it("can be delegated with the reopen_closed capability, and nothing else", async () => {
+      const opp = await wonOpp("Delegation job");
+      await admin(`update crm_company_grants set capabilities = '{reopen_closed}' where user_id = '${U.daniel}' and company_id = '${CO.uae}'`);
+      expect(await q(U.daniel, `select crm_reopen_opportunity('${opp}', 'Delegate reopens', ${NEXT})`)).toHaveLength(1);
+      await expect(q(U.daniel, `select crm_assign_owner('${opp}', '${U.daniel}')`)).rejects.toThrow(/founder/);
+      await admin(`update crm_company_grants set capabilities = '{}' where user_id = '${U.daniel}' and company_id = '${CO.uae}'`);
+    });
+    it("returns a Won opportunity to the stage it was in, keeps value and everything else, and keeps the closure as history", async () => {
+      const opp = await wonOpp("Won reopen job", "negotiation");
+      await commit(U.juzar, `select crm_reopen_opportunity('${opp}', 'Client asked to revise the scope', ${NEXT})`);
+      const [o] = await admin<{ stage: string; closed_at: string | null; closed_by: string | null; evidence_reference: string | null; lost_reason: string | null; value: string; stage_before_close: string | null; owner_id: string }>(
+        `select stage, closed_at, closed_by, evidence_reference, lost_reason, value, stage_before_close, owner_id from crm_opportunities where id = '${opp}'`);
+      expect(o).toMatchObject({ stage: "negotiation", closed_at: null, closed_by: null, evidence_reference: null, lost_reason: null, stage_before_close: null, owner_id: U.amira });
+      expect(Number(o.value)).toBe(90000);
+      const [c] = await admin<{ outcome: string; reopened_by: string; reopen_reason: string; evidence_reference: string }>(
+        `select outcome, reopened_by, reopen_reason, evidence_reference from crm_closures where opportunity_id = '${opp}'`);
+      expect(c).toEqual({ outcome: "won", reopened_by: U.juzar, reopen_reason: "Client asked to revise the scope", evidence_reference: "PO-RE-1" });
+      const fu = await admin<{ title: string; assigned_to: string }>(`select title, assigned_to from crm_follow_ups where opportunity_id = '${opp}' and status = 'open'`);
+      expect(fu).toEqual([{ title: "Call the client to restart", assigned_to: U.amira }]);
+      const ev = await admin<{ kind: string; from_value: string; to_value: string; reason: string }>(`select kind, from_value, to_value, reason from crm_opportunity_events where opportunity_id = '${opp}' and kind = 'reopened'`);
+      expect(ev).toEqual([{ kind: "reopened", from_value: "won", to_value: "negotiation", reason: "Client asked to revise the scope" }]);
+    });
+    it("leaves an already prepared handover exactly as it was, through reopen and a second Won", async () => {
+      const opp = await wonOpp("Handover survives job");
+      await commit(U.amira, `select crm_update_handover('${opp}', 'handed_over', '${U.pm}', 'Site visit booked')`);
+      const before = await admin(`select status, pm_user_id, notes, prepared_by, prepared_at, handed_over_at from crm_handovers where opportunity_id = '${opp}'`);
+      await commit(U.juzar, `select crm_reopen_opportunity('${opp}', 'Scope revision', ${NEXT})`);
+      expect(await admin(`select status, pm_user_id, notes, prepared_by, prepared_at, handed_over_at from crm_handovers where opportunity_id = '${opp}'`)).toEqual(before);
+      await expect(q(U.amira, `select crm_update_handover('${opp}', 'ready')`)).rejects.toThrow(/Won/); // not editable while open again
+      await commit(U.amira, `select crm_mark_won('${opp}', 'authorised_email', 'Mail 20 Oct', current_date)`);
+      expect(await admin(`select status, pm_user_id, notes, prepared_by, prepared_at, handed_over_at from crm_handovers where opportunity_id = '${opp}'`)).toEqual(before);
+      expect(Number((await admin<{ n: string }>(`select count(*) n from crm_handovers where opportunity_id = '${opp}'`))[0].n)).toBe(1);
+    });
+    it("keeps both closures after a second outcome, with exactly one current", async () => {
+      const opp = await wonOpp("Two closures job");
+      await commit(U.juzar, `select crm_reopen_opportunity('${opp}', 'Reopened once', ${NEXT})`);
+      await commit(U.amira, `select crm_mark_lost('${opp}', 'Went with another supplier')`);
+      const rows = await admin<{ outcome: string; reopened_at: string | null; lost_reason: string | null }>(`select outcome, reopened_at, lost_reason from crm_closures where opportunity_id = '${opp}' order by closed_at`);
+      expect(rows.map((r) => [r.outcome, r.reopened_at !== null])).toEqual([["won", true], ["lost", false]]);
+      expect(rows[1]!.lost_reason).toBe("Went with another supplier");
+      await commit(U.juzar, `select crm_reopen_opportunity('${opp}', 'Lost job came back', ${NEXT}, 'other', 'proposal_prep')`);
+      expect((await admin<{ stage: string }>(`select stage from crm_opportunities where id = '${opp}'`))[0].stage).toBe("proposal_prep");
+      expect(Number((await admin<{ n: string }>(`select count(*) n from crm_closures where opportunity_id = '${opp}'`))[0].n)).toBe(2);
+    });
+    it("refuses to reopen something that is not closed", async () => {
+      await expect(q(U.juzar, `select crm_reopen_opportunity('${oppKsa}', 'x', ${NEXT})`)).rejects.toThrow(/Only a Won or Lost/);
+    });
+    it("moves ownership to the person reopening when the owner no longer has Sales access, and says so", async () => {
+      const opp = await wonOpp("Owner left job");
+      await admin(`update crm_company_grants set revoked_at = now() where user_id = '${U.amira}' and company_id = '${CO.uae}'`);
+      await commit(U.juzar, `select crm_reopen_opportunity('${opp}', 'Reopen after the owner left', ${NEXT})`);
+      await admin(`update crm_company_grants set revoked_at = null where user_id = '${U.amira}' and company_id = '${CO.uae}'`);
+      expect((await admin<{ owner_id: string }>(`select owner_id from crm_opportunities where id = '${opp}'`))[0].owner_id).toBe(U.juzar);
+      expect(Number((await admin<{ n: string }>(`select count(*) n from crm_opportunity_events where opportunity_id = '${opp}' and kind = 'owner_changed'`))[0].n)).toBe(1);
+    });
+    it("shows closure history to people with Sales access for the company only, and audits it", async () => {
+      expect((await q(U.daniel, "select 1 from crm_closures")).length).toBeGreaterThan(0);
+      expect(await q(U.lena, `select 1 from crm_closures where company_id = '${CO.uae}'`)).toHaveLength(0);
+      expect(await q(U.hr, "select 1 from crm_closures")).toHaveLength(0);
+      expect((await q(U.juzar, "select 1 from crm_audit_log where table_name = 'crm_closures' and action = 'update'")).length).toBeGreaterThan(0);
+    });
+    it("does not let a browser write a closure", async () => {
+      const r = await q(U.juzar, `update crm_closures set outcome = 'lost'`).then((x) => x, (e: Error) => e);
+      if (r instanceof Error) expect(r.message).toMatch(DENIED); else expect(r).toHaveLength(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------------------------
   describe("people pickers", () => {
     it("lists CRM staff of the caller's companies by name only (email for founders)", async () => {
       const daniel = await q<{ user_id: string; email: string | null }>(U.daniel, "select user_id, email from crm_people()");
@@ -744,7 +1018,7 @@ describe("Sales & CRM", () => {
     const CRM_TABLES = [
       "crm_company_grants", "crm_audit_log", "crm_company_settings", "crm_organisations", "crm_contacts", "crm_reference_counters",
       "crm_opportunities", "crm_opportunity_contacts", "crm_opportunity_events", "crm_activities", "crm_follow_ups", "crm_files",
-      "crm_proposals", "crm_zoho_references", "crm_approvals", "crm_handovers", "crm_reminders",
+      "crm_proposals", "crm_zoho_references", "crm_approvals", "crm_handovers", "crm_reminders", "crm_closures", "crm_upload_intents",
     ];
     it("gives anon nothing on any CRM table, and authenticated nothing beyond what the suite grants for DML", async () => {
       const rows = await admin<{ table_name: string; grantee: string; privilege_type: string }>(`

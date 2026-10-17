@@ -2,9 +2,14 @@
 -- approval (unconfigured by default), handover, in-app reminders and the private storage bucket.
 --
 -- Hard rules encoded here:
---   * Files: private bucket, no client policies at all. The web server validates type, size and content, uploads with
---     the service role, then registers the file through crm_register_file(), which re-checks the path shape and that
---     the object exists. The table CHECKs and the bucket reject executables and macro-enabled formats a second time.
+--   * Files: two private buckets and no client policies on either. Vercel functions accept at most 4.5 MB of request
+--     body, so a browser cannot post a large file through the app. Instead: crm_create_upload_intent() records what
+--     the person says they will upload (name, type, size) after the same checks as the table; the browser sends the
+--     bytes straight to the QUARANTINE bucket with a one-time signed URL; the server then reads the object back,
+--     checks its real size and leading bytes (executables and macro-enabled Office files are refused), and only a file
+--     that passes is moved into 'crm-files' and registered by crm_register_uploaded_file() from the intent's own
+--     stored values (the client never supplies a path). Nobody can read a file that has not been validated. The table
+--     CHECKs and both buckets reject executables and macro-enabled formats again.
 --   * Commercial approval: while a company's policy is 'not_configured' nothing can be requested or decided, and the
 --     UI shows "not configured", never "approved". Policy changes need 'manage_approval_rules'.
 --   * Equipment availability is a dated check by a person with 'confirm_availability'. It is not a stock reservation
@@ -13,16 +18,25 @@
 --     and a unique dedupe key. Nothing here sends anything to a client.
 
 -- -----------------------------------------------------------------------------
--- Private bucket (no client policies: the service role is the only writer and signer)
+-- Private buckets (no client policies: the service role is the only reader, mover and signer)
 -- -----------------------------------------------------------------------------
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('crm-files', 'crm-files', false, 20971520, crm_allowed_mime_types())
 on conflict (id) do update
   set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
 
+-- Quarantine: where an upload lands BEFORE it has been validated. Private, same size and type lock, no policies,
+-- never readable by users; the server deletes the object after validating (or rejecting) it, and anything left over
+-- is purged when its intent expires.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('crm-quarantine', 'crm-quarantine', false, 20971520, crm_allowed_mime_types())
+on conflict (id) do update
+  set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
 -- -----------------------------------------------------------------------------
 -- Files and links
 -- -----------------------------------------------------------------------------
+-- Links only. (Files go through crm_create_upload_intent / crm_register_uploaded_file below.)
 create or replace function crm_register_file(
   p_opportunity_id uuid,
   p_kind text,
@@ -43,13 +57,8 @@ begin
   if v.stage = 'lost' then
     raise exception 'A lost opportunity can no longer be updated' using errcode = '23514';
   end if;
-  if p_kind = 'file' then
-    if p_storage_path is null or p_storage_path not like (v.company_id::text || '/' || v.id::text || '/%') then
-      raise exception 'The file path does not belong to this opportunity' using errcode = '22023';
-    end if;
-    if not exists (select 1 from storage.objects where bucket_id = 'crm-files' and name = p_storage_path) then
-      raise exception 'The uploaded file was not found' using errcode = 'P0002';
-    end if;
+  if p_kind <> 'link' then
+    raise exception 'Files are added through the upload flow, not here; this records links only' using errcode = '22023';
   end if;
   insert into crm_files (opportunity_id, company_id, kind, label, original_name, storage_path, mime_type, size_bytes,
                          url, purpose, uploaded_by)
@@ -58,6 +67,144 @@ begin
   returning id into v_id;
   perform crm_log_event(v.id, v.company_id, 'file', null, p_kind || ': ' || coalesce(nullif(btrim(p_label), ''), p_original_name, p_url));
   return v_id;
+end;
+$$;
+
+create or replace function crm_create_upload_intent(
+  p_opportunity_id uuid,
+  p_original_name text,
+  p_mime_type text,
+  p_size_bytes bigint,
+  p_safe_name text,
+  p_purpose text default 'other',
+  p_label text default null
+) returns table (intent_id uuid, quarantine_path text)
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities; v_id uuid := gen_random_uuid(); v_final uuid := gen_random_uuid(); v_open integer; v_qpath text;
+begin
+  v := crm_lock_opportunity(p_opportunity_id);
+  if v.stage = 'lost' then
+    raise exception 'A lost opportunity can no longer be updated' using errcode = '23514';
+  end if;
+  if length(coalesce(p_original_name, '')) not between 1 and 200 or crm_file_name_blocked(p_original_name) then
+    raise exception 'Executable, script and macro-enabled files cannot be uploaded' using errcode = '22023';
+  end if;
+  if p_mime_type is null or not (p_mime_type = any (crm_allowed_mime_types())) then
+    raise exception 'That file type is not allowed' using errcode = '22023';
+  end if;
+  if p_size_bytes is null or p_size_bytes not between 1 and 20971520 then
+    raise exception 'Files must be between 1 byte and 20 MB' using errcode = '22023';
+  end if;
+  if p_safe_name is null or p_safe_name !~ '^[A-Za-z0-9._-]{1,150}$' then
+    raise exception 'Invalid file name' using errcode = '22023';
+  end if;
+  if p_purpose not in ('proposal', 'purchase_order', 'authorised_email', 'brief', 'other') then
+    raise exception 'Unknown file purpose' using errcode = '22023';
+  end if;
+  -- A person cannot park an unlimited amount of unvalidated data in quarantine.
+  select count(*) into v_open from crm_upload_intents i
+   where i.user_id = auth.uid() and i.status in ('pending', 'validated') and i.expires_at > now();
+  if v_open >= 20 then
+    raise exception 'Too many uploads are waiting. Finish or wait for them to expire, then try again' using errcode = '53400';
+  end if;
+  v_qpath := v.company_id::text || '/' || v.id::text || '/' || v_id::text || '-' || p_safe_name;
+  insert into crm_upload_intents (id, opportunity_id, company_id, user_id, original_name, mime_type, size_bytes, purpose,
+                                  label, quarantine_path, final_path)
+  values (v_id, v.id, v.company_id, auth.uid(), p_original_name, p_mime_type, p_size_bytes, p_purpose,
+          nullif(btrim(p_label), ''), v_qpath,
+          v.company_id::text || '/' || v.id::text || '/' || v_final::text || '-' || p_safe_name);
+  return query select v_id, v_qpath;
+end;
+$$;
+
+-- The caller's own intent (used by the server to finish the upload).
+create or replace function crm_get_upload_intent(p_intent_id uuid)
+returns table (id uuid, opportunity_id uuid, company_id uuid, original_name text, mime_type text, size_bytes bigint,
+               purpose text, label text, quarantine_path text, final_path text, status text, expires_at timestamptz)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform crm_require_user();
+  return query
+    select i.id, i.opportunity_id, i.company_id, i.original_name, i.mime_type, i.size_bytes, i.purpose, i.label,
+           i.quarantine_path, i.final_path, i.status, i.expires_at
+    from crm_upload_intents i
+    where i.id = p_intent_id and i.user_id = auth.uid() and crm_has_access(i.company_id);
+end;
+$$;
+
+-- Service role only: the server records the outcome of validation. Only a pending, unexpired intent can be decided.
+create or replace function crm_mark_upload_intent(p_intent_id uuid, p_status text, p_reason text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if p_status not in ('validated', 'rejected') then raise exception 'Unknown status' using errcode = '22023'; end if;
+  update crm_upload_intents i
+     set status = p_status, reject_reason = left(p_reason, 300),
+         finished_at = case when p_status = 'rejected' then now() else i.finished_at end
+   where i.id = p_intent_id and i.status = 'pending' and i.expires_at > now();
+  if not found then raise exception 'Upload not found, already decided, or expired' using errcode = 'P0002'; end if;
+end;
+$$;
+
+-- The caller registers THEIR validated upload. Everything (path, name, type, size, purpose) comes from the intent the
+-- server validated, never from the browser; the validated object must exist in the real bucket.
+create or replace function crm_register_uploaded_file(p_intent_id uuid)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare i crm_upload_intents; v crm_opportunities; v_id uuid;
+begin
+  perform crm_require_user();
+  select * into i from crm_upload_intents where id = p_intent_id and user_id = auth.uid() for update;
+  if not found then raise exception 'Upload not found' using errcode = 'P0002'; end if;
+  if i.status = 'registered' then raise exception 'This upload was already added' using errcode = '23514'; end if;
+  if i.status <> 'validated' then
+    raise exception 'This upload has not passed the file checks' using errcode = '23514';
+  end if;
+  v := crm_lock_opportunity(i.opportunity_id);
+  if v.stage = 'lost' then
+    raise exception 'A lost opportunity can no longer be updated' using errcode = '23514';
+  end if;
+  if not exists (select 1 from storage.objects where bucket_id = 'crm-files' and name = i.final_path) then
+    raise exception 'The validated file was not found' using errcode = 'P0002';
+  end if;
+  insert into crm_files (opportunity_id, company_id, kind, label, original_name, storage_path, mime_type, size_bytes,
+                         purpose, uploaded_by)
+  values (i.opportunity_id, i.company_id, 'file', i.label, i.original_name, i.final_path, i.mime_type, i.size_bytes,
+          i.purpose, auth.uid())
+  returning id into v_id;
+  update crm_upload_intents set status = 'registered', finished_at = now() where id = i.id;
+  perform crm_log_event(i.opportunity_id, i.company_id, 'file', null, 'file: ' || coalesce(i.label, i.original_name));
+  return v_id;
+end;
+$$;
+
+-- Service role only (scheduled clean-up). Once an intent is past its expiry (which is also when its one-time upload URL
+-- stops working) it is swept exactly once: unfinished intents become 'expired', and the paths it may have left behind
+-- are returned for the server to delete: always the quarantine object (a replayed upload URL could have put something
+-- there even after the intent finished), and, for a validated-but-never-registered intent, the file in the real bucket.
+create or replace function crm_expire_upload_intents()
+returns table (quarantine_path text, final_path text, orphaned_validated boolean)
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  return query
+    with due as (select u.id, u.status from crm_upload_intents u where u.swept_at is null and u.expires_at < now() for update),
+         upd as (update crm_upload_intents i
+                    set swept_at = now(),
+                        status = case when i.status in ('pending', 'validated') then 'expired' else i.status end,
+                        finished_at = coalesce(i.finished_at, now())
+                   from due where i.id = due.id
+                 returning i.id, i.quarantine_path as qp, i.final_path as fp)
+    select upd.qp, upd.fp, (due.status = 'validated') from upd join due on due.id = upd.id;
 end;
 $$;
 
@@ -524,6 +671,8 @@ $$;
 -- -----------------------------------------------------------------------------
 revoke all on function
   crm_register_file(uuid, text, text, text, text, text, text, bigint, text), crm_remove_file(uuid),
+  crm_create_upload_intent(uuid, text, text, bigint, text, text, text), crm_get_upload_intent(uuid),
+  crm_mark_upload_intent(uuid, text, text), crm_register_uploaded_file(uuid), crm_expire_upload_intents(),
   crm_add_proposal(uuid, text, uuid), crm_set_proposal_status(uuid, text, date),
   crm_upsert_zoho_reference(uuid, text, date, text, date, date, numeric),
   crm_request_availability(uuid), crm_confirm_availability(uuid, text, text),
@@ -535,6 +684,8 @@ revoke all on function
 
 grant execute on function
   crm_register_file(uuid, text, text, text, text, text, text, bigint, text), crm_remove_file(uuid),
+  crm_create_upload_intent(uuid, text, text, bigint, text, text, text), crm_get_upload_intent(uuid),
+  crm_register_uploaded_file(uuid),
   crm_add_proposal(uuid, text, uuid), crm_set_proposal_status(uuid, text, date),
   crm_upsert_zoho_reference(uuid, text, date, text, date, date, numeric),
   crm_request_availability(uuid), crm_confirm_availability(uuid, text, text),
@@ -545,8 +696,8 @@ grant execute on function
 -- Scheduled-job functions: the service role only (never reachable from a browser session).
 grant execute on function
   crm_generate_reminders(timestamptz), crm_claim_reminder_emails(integer, timestamptz),
-  crm_finish_reminder_email(uuid, boolean, text)
+  crm_finish_reminder_email(uuid, boolean, text), crm_mark_upload_intent(uuid, text, text), crm_expire_upload_intents()
   to service_role;
 
 -- ROLLBACK (before any CRM data exists): drop the functions above with `drop function if exists`, then
---   delete from storage.buckets where id = 'crm-files';   -- only if the bucket is empty
+--   delete from storage.buckets where id in ('crm-files', 'crm-quarantine');   -- only if both buckets are empty

@@ -514,9 +514,14 @@ begin
   end if;
   update crm_opportunities set stage = 'won', stage_changed_at = now(), evidence_type = p_evidence_type,
          evidence_reference = btrim(p_evidence_reference), evidence_date = p_evidence_date,
-         closed_at = now(), closed_by = auth.uid(), version = version + 1
+         stage_before_close = v.stage, closed_at = now(), closed_by = auth.uid(), version = version + 1
    where id = p_id returning version into v_version;
+  insert into crm_closures (opportunity_id, company_id, outcome, closed_from_stage, closed_by, value_at_close, currency,
+                            evidence_type, evidence_reference, evidence_date)
+  values (p_id, v.company_id, 'won', v.stage, auth.uid(), v.value, v.currency, p_evidence_type,
+          btrim(p_evidence_reference), p_evidence_date);
   update crm_follow_ups set status = 'cancelled', updated_at = now() where opportunity_id = p_id and status = 'open';
+  -- A handover already prepared before an earlier closure (then a reopen) is kept as it is.
   insert into crm_handovers (opportunity_id, company_id) values (p_id, v.company_id) on conflict do nothing;
   perform crm_log_event(p_id, v.company_id, 'won', v.stage, 'won',
     p_evidence_type || ': ' || btrim(p_evidence_reference) || coalesce(' — ' || nullif(btrim(p_note), ''), ''));
@@ -541,9 +546,12 @@ begin
     raise exception 'A reason is required to mark an opportunity Lost' using errcode = '22023';
   end if;
   update crm_opportunities set stage = 'lost', stage_changed_at = now(), lost_reason = btrim(p_reason),
+         stage_before_close = case when v.stage = 'on_hold' then v.stage_before_hold else v.stage end,
          stage_before_hold = null, hold_reason = null, hold_review_date = null,
          closed_at = now(), closed_by = auth.uid(), version = version + 1
    where id = p_id returning version into v_version;
+  insert into crm_closures (opportunity_id, company_id, outcome, closed_from_stage, closed_by, value_at_close, currency, lost_reason)
+  values (p_id, v.company_id, 'lost', v.stage, auth.uid(), v.value, v.currency, btrim(p_reason));
   update crm_follow_ups set status = 'cancelled', updated_at = now() where opportunity_id = p_id and status = 'open';
   perform crm_log_event(p_id, v.company_id, 'lost', v.stage, 'lost', btrim(p_reason));
   return v_version;
@@ -769,6 +777,185 @@ end;
 $$;
 
 -- -----------------------------------------------------------------------------
+-- Controlled reopening of a Won or Lost opportunity.
+-- Needs the 'reopen_closed' capability (founders hold it), a reason and a NEW next action. Nothing is erased: the
+-- closure is kept in crm_closures (marked reopened, by whom, why), the timeline records it, any handover already
+-- prepared is left exactly as it was, and the evidence / lost reason leave the live row only because they are now
+-- history. A later Won or Lost starts a new closure.
+-- -----------------------------------------------------------------------------
+create or replace function crm_reopen_opportunity(
+  p_id uuid,
+  p_reason text,
+  p_next_title text,
+  p_next_due timestamptz,
+  p_next_kind text default 'other',
+  p_to_stage text default null,
+  p_expected_version integer default null
+) returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v crm_opportunities;
+  v_target text;
+  v_owner uuid;
+  v_version integer;
+begin
+  v := crm_lock_opportunity(p_id);
+  perform crm_check_version(v, p_expected_version);
+  if not crm_has_capability(v.company_id, 'reopen_closed') then
+    raise exception 'Only a founder, or someone a founder gave the reopen right to, can reopen a closed opportunity'
+      using errcode = '42501';
+  end if;
+  if v.stage not in ('won', 'lost') then
+    raise exception 'Only a Won or Lost opportunity can be reopened' using errcode = '23514';
+  end if;
+  if length(btrim(coalesce(p_reason, ''))) = 0 then
+    raise exception 'A reason is required to reopen an opportunity' using errcode = '22023';
+  end if;
+  if length(btrim(coalesce(p_next_title, ''))) = 0 or p_next_due is null then
+    raise exception 'Reopening needs a new next action with a due date' using errcode = '22023';
+  end if;
+  v_target := coalesce(p_to_stage, v.stage_before_close, 'negotiation');
+  if crm_stage_index(v_target) is null then
+    raise exception 'Choose one of the working stages to reopen into' using errcode = '22023';
+  end if;
+  -- The follow-up must have an owner who can still work it: if the owner has lost Sales access, the person
+  -- reopening takes it over (recorded on the timeline) rather than leaving a task nobody can see.
+  v_owner := v.owner_id;
+  if not crm_user_has_company_access(v_owner, v.company_id) then v_owner := auth.uid(); end if;
+
+  update crm_closures set reopened_at = now(), reopened_by = auth.uid(), reopen_reason = btrim(p_reason)
+   where opportunity_id = p_id and reopened_at is null;
+
+  update crm_opportunities set
+    stage = v_target, stage_changed_at = now(), stage_before_close = null, owner_id = v_owner,
+    evidence_type = null, evidence_reference = null, evidence_date = null, lost_reason = null,
+    closed_at = null, closed_by = null, version = version + 1
+   where id = p_id returning version into v_version;
+
+  insert into crm_follow_ups (opportunity_id, company_id, assigned_to, title, kind, due_at, created_by)
+  values (p_id, v.company_id, v_owner, btrim(p_next_title), coalesce(p_next_kind, 'other'), p_next_due, auth.uid());
+
+  perform crm_log_event(p_id, v.company_id, 'reopened', v.stage, v_target, btrim(p_reason));
+  if v_owner <> v.owner_id then
+    perform crm_log_event(p_id, v.company_id, 'owner_changed', v.owner_id::text, v_owner::text,
+                          'Previous owner no longer has Sales access; taken over when reopening');
+  end if;
+  return v_version;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Opportunity contacts after creation. A contact is a SHARED record (one person, many opportunities): linking and
+-- unlinking only touch the link, never the contact; editing a contact changes the shared record and is written to the
+-- timeline of every opportunity it is linked to. Every change is also in the CRM audit log (triggers on
+-- crm_opportunity_contacts and crm_contacts).
+-- -----------------------------------------------------------------------------
+create or replace function crm_link_contact(p_opportunity_id uuid, p_contact_id uuid, p_role text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities; c crm_contacts; v_existing boolean;
+begin
+  v := crm_lock_opportunity(p_opportunity_id);
+  perform crm_require_owner_or_founder(v);
+  if v.stage = 'lost' then
+    raise exception 'A lost opportunity can no longer be changed (reopen it first)' using errcode = '23514';
+  end if;
+  select * into c from crm_contacts where id = p_contact_id and archived_at is null;
+  if not found then raise exception 'Contact not found' using errcode = 'P0002'; end if;
+  select exists (select 1 from crm_opportunity_contacts where opportunity_id = v.id and contact_id = c.id) into v_existing;
+  insert into crm_opportunity_contacts (opportunity_id, contact_id, company_id, role)
+  values (v.id, c.id, v.company_id, nullif(btrim(p_role), ''))
+  on conflict (opportunity_id, contact_id) do update set role = excluded.role;
+  perform crm_log_event(v.id, v.company_id, 'contact', null,
+    c.name || coalesce(' (' || nullif(btrim(p_role), '') || ')', ''),
+    case when v_existing then 'Contact role updated' else 'Contact linked' end);
+end;
+$$;
+
+create or replace function crm_unlink_contact(p_opportunity_id uuid, p_contact_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities; c crm_contacts; n integer;
+begin
+  v := crm_lock_opportunity(p_opportunity_id);
+  perform crm_require_owner_or_founder(v);
+  if v.stage = 'lost' then
+    raise exception 'A lost opportunity can no longer be changed (reopen it first)' using errcode = '23514';
+  end if;
+  select * into c from crm_contacts where id = p_contact_id;
+  delete from crm_opportunity_contacts where opportunity_id = v.id and contact_id = p_contact_id;
+  get diagnostics n = row_count;
+  if n > 0 then
+    perform crm_log_event(v.id, v.company_id, 'contact', c.name, null, 'Contact unlinked (the contact record is kept)');
+  end if;
+end;
+$$;
+
+-- Who may edit the shared contact record: whoever created it, a founder of any company, or the owner of an opportunity
+-- (not lost) the contact is currently linked to. Everyone else with Sales access can read it but not change it.
+create or replace function crm_can_edit_contact(p_contact_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select crm_has_any_access() and (
+    exists (select 1 from crm_contacts c where c.id = p_contact_id and c.created_by = auth.uid())
+    or crm_is_any_founder()
+    or exists (
+      select 1 from crm_opportunity_contacts oc
+      join crm_opportunities o on o.id = oc.opportunity_id
+      where oc.contact_id = p_contact_id and o.owner_id = auth.uid() and o.stage <> 'lost' and crm_has_access(o.company_id))
+  );
+$$;
+
+create or replace function crm_update_contact(p_contact_id uuid, p_patch jsonb)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  c crm_contacts; k text; o record;
+  v_allowed text[] := array['name', 'role_title', 'email', 'phone', 'organisation_id'];
+begin
+  perform crm_require_user();
+  if not crm_can_edit_contact(p_contact_id) then
+    raise exception 'Only the person who added this contact, a founder, or the owner of an opportunity it is on can change it'
+      using errcode = '42501';
+  end if;
+  select * into c from crm_contacts where id = p_contact_id and archived_at is null for update;
+  if not found then raise exception 'Contact not found' using errcode = 'P0002'; end if;
+  if p_patch is null or jsonb_typeof(p_patch) <> 'object' or p_patch = '{}'::jsonb then
+    raise exception 'Nothing to change' using errcode = '22023';
+  end if;
+  for k in select jsonb_object_keys(p_patch) loop
+    if not (k = any (v_allowed)) then raise exception 'Field % cannot be changed here', k using errcode = '22023'; end if;
+  end loop;
+  update crm_contacts set
+    name = case when p_patch ? 'name' then btrim(p_patch->>'name') else name end,
+    role_title = case when p_patch ? 'role_title' then nullif(btrim(p_patch->>'role_title'), '') else role_title end,
+    email = case when p_patch ? 'email' then nullif(btrim(p_patch->>'email'), '') else email end,
+    phone = case when p_patch ? 'phone' then nullif(btrim(p_patch->>'phone'), '') else phone end,
+    organisation_id = case when p_patch ? 'organisation_id' then (p_patch->>'organisation_id')::uuid else organisation_id end
+   where id = p_contact_id;
+  -- One line on each opportunity's timeline (only those the editor can see) so the history shows the change.
+  for o in
+    select op.id, op.company_id from crm_opportunity_contacts oc
+    join crm_opportunities op on op.id = oc.opportunity_id
+    where oc.contact_id = p_contact_id and crm_has_access(op.company_id)
+  loop
+    perform crm_log_event(o.id, o.company_id, 'contact', c.name, (select name from crm_contacts where id = p_contact_id),
+      'Contact details updated (' || (select string_agg(x, ', ' order by x) from jsonb_object_keys(p_patch) x) || ')');
+  end loop;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
 -- Privileges: internal helpers are not callable by clients; workflow functions are, for signed-in users only.
 -- -----------------------------------------------------------------------------
 revoke all on function
@@ -777,6 +964,17 @@ revoke all on function
   crm_user_has_company_access(uuid, uuid), crm_validate_technologies(jsonb), crm_stage_index(text),
   crm_require_follow_up_actor(crm_follow_ups, crm_opportunities)
   from public, anon, authenticated;
+
+revoke all on function
+  crm_reopen_opportunity(uuid, text, text, timestamptz, text, text, integer),
+  crm_link_contact(uuid, uuid, text), crm_unlink_contact(uuid, uuid), crm_can_edit_contact(uuid),
+  crm_update_contact(uuid, jsonb)
+  from public, anon;
+grant execute on function
+  crm_reopen_opportunity(uuid, text, text, timestamptz, text, text, integer),
+  crm_link_contact(uuid, uuid, text), crm_unlink_contact(uuid, uuid), crm_can_edit_contact(uuid),
+  crm_update_contact(uuid, jsonb)
+  to authenticated;
 
 revoke all on function
   crm_create_organisation(text, text, text, text), crm_create_contact(uuid, text, text, text, text),

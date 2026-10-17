@@ -2,6 +2,7 @@ import { crmSourceLabel, isCommerciallyWon } from "@enginious-hr/domain";
 import { ApprovalBadge, AvailabilityBadge, DueText } from "@/components/sales/badges";
 import { formatDate, formatDateTime, formatMoney } from "@/components/sales/format";
 import { Badge } from "@/components/ui/badge";
+import type { ContactPickerData } from "./contact-helpers";
 import { ContactsPanel } from "./contacts-panel";
 import { FollowUpsPanel } from "./follow-ups-panel";
 import { Fact, Muted, Panel, SubHeading } from "./parts";
@@ -10,7 +11,8 @@ import type { OppView } from "./view";
 const EVIDENCE = { purchase_order: "Purchase order", authorised_email: "Authorised email" } as const;
 
 /** The first tab: what this is, who is involved, what happens next and where it stands. */
-export function OverviewPanel({ view }: { view: OppView }) {
+/** `picker` (everyone who could be added as a contact) is supplied only to people who may change contacts. */
+export function OverviewPanel({ view, picker = null }: { view: OppView; picker?: ContactPickerData | null }) {
   const { opp, detail, ctx, policy } = view;
   const { item } = detail;
   const won = isCommerciallyWon({ stage: opp.stage, evidenceReference: opp.evidence_reference });
@@ -33,7 +35,7 @@ export function OverviewPanel({ view }: { view: OppView }) {
               {item.client?.place ? <p className="break-words text-xs text-muted-foreground">{item.client.place}</p> : null}
             </div>
           </div>
-          <div className="mt-5"><SubHeading>Contacts</SubHeading><div className="mt-2"><ContactsPanel contacts={detail.contacts} /></div></div>
+          <div className="mt-5"><SubHeading>Contacts</SubHeading><div className="mt-2"><ContactsPanel contacts={detail.contacts} manage={{ view, picker }} /></div></div>
         </Panel>
         <FollowUpsPanel view={view} />
       </div>

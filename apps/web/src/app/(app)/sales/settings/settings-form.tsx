@@ -139,7 +139,7 @@ export function SettingsForm({
             <span>Also email follow-up reminders to the opportunity owner</span>
           </label>
           <p className="pl-6 text-xs text-muted-foreground">
-            Off by default. Reminders always appear inside Sales. Turn email on only after you have tested that delivery works end to end, because a reminder that never arrives looks like a missed follow-up. Sales never sends anything to clients.
+            Off by default. Reminders always appear inside Sales. Emails go out only with the daily run (about 08:00 Dubai time), not within minutes of a follow-up falling due, and a failed send is retried on the next daily run. Turn email on only after you have tested that delivery works end to end, because a reminder that never arrives looks like a missed follow-up. Sales never sends anything to clients.
           </p>
         </div>
       </fieldset>

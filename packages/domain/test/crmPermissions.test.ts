@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  canActOnFollowUp, canAssignOwner, canConfirmAvailability, canDecideApproval, canEditOpportunity, canGrantFounderRights,
+  canActOnFollowUp, canAssignOwner, canChangeOpportunityContacts, canEditContactRecord, canReopenClosed, CRM_CAPABILITIES, canConfirmAvailability, canDecideApproval, canEditOpportunity, canGrantFounderRights,
   canManageApprovalRules, canManageCrmAccess, canRemoveFile, canViewCrmAudit, crmCompanyIds, hasCrmAccess, hasCrmCapability,
   isCrmFounder, isHrAdmin, type CrmGrant,
 } from "../src";
@@ -74,5 +74,29 @@ describe("CRM permissions (mirror the SQL)", () => {
     expect(isHrAdmin(hrGrants, { companyId: UAE })).toBe(true);
     expect(hasCrmAccess([], UAE)).toBe(false);
     expect(canEditOpportunity([], { companyId: UAE, ownerId: "x" }, "hr-admin-user")).toBe(false);
+  });
+
+  it("lets only founders (or a delegate) reopen a closed opportunity, never the owner as such", () => {
+    expect(canReopenClosed(founder, UAE)).toBe(true);
+    expect(canReopenClosed(sales, UAE)).toBe(false);
+    expect(canReopenClosed([{ companyId: UAE, capabilities: ["reopen_closed"] }], UAE)).toBe(true);
+    expect(canReopenClosed([{ companyId: UAE, capabilities: ["reopen_closed"] }], KSA)).toBe(false);
+    expect(CRM_CAPABILITIES).toContain("reopen_closed");
+  });
+  it("lets the owner or a founder change an opportunity's contacts, except on a lost one", () => {
+    const opp = { companyId: UAE, ownerId: "amira", stage: "qualified" };
+    expect(canChangeOpportunityContacts(sales, opp, "amira")).toBe(true);
+    expect(canChangeOpportunityContacts(sales, opp, "daniel")).toBe(false);
+    expect(canChangeOpportunityContacts(founder, opp, "juzar")).toBe(true);
+    expect(canChangeOpportunityContacts(founder, { ...opp, stage: "lost" }, "juzar")).toBe(false);
+    expect(canChangeOpportunityContacts(sales, { ...opp, stage: "won" }, "amira")).toBe(true);
+  });
+  it("lets the contact's creator, a founder or the owner of a linked live opportunity edit the shared record", () => {
+    expect(canEditContactRecord(sales, { createdBy: "amira" }, "amira", [])).toBe(true);
+    expect(canEditContactRecord(sales, { createdBy: "amira" }, "daniel", [])).toBe(false);
+    expect(canEditContactRecord(sales, { createdBy: "amira" }, "daniel", [{ stage: "negotiation" }])).toBe(true);
+    expect(canEditContactRecord(sales, { createdBy: "amira" }, "daniel", [{ stage: "lost" }])).toBe(false);
+    expect(canEditContactRecord(founder, { createdBy: "amira" }, "juzar", [])).toBe(true);
+    expect(canEditContactRecord([], { createdBy: "amira" }, "amira", [])).toBe(false);
   });
 });

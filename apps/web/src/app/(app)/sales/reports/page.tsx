@@ -11,7 +11,7 @@ import { formatDate, formatMoney } from "@/components/sales/format";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadFollowUps, loadOpportunities, num, type FollowUpListItem, type OpportunityListItem } from "@/lib/crm/data";
 import {
-  elapsedFirstResponse, enquiriesBySource, followUpCounts, openPipelineByOwner, openPipelineByStage, resolvePeriod, timelinessByCompany, wonLostInPeriod, wonValueRows, zohoSummary,
+  elapsedFirstResponse, enquiriesBySource, followUpCounts, openPipelineByOwner, openPipelineByStage, reopenedClosures, resolvePeriod, timelinessByCompany, wonLostInPeriod, wonValueRows, zohoSummary,
   type CompanyTimeliness, type ReportOpp, type WonValueRow,
 } from "@/lib/crm/reports";
 import { createClient } from "@/lib/supabase/server";
@@ -72,6 +72,13 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     const { data, error } = await supabase.from("crm_zoho_references").select("*").limit(5000);
     if (error) zohoError = "Could not load the Zoho references.";
     else zohoRows = data ?? [];
+  }
+  // Closures that were later reopened are kept in history; they are not outcomes any more, so count them separately.
+  let reopened = { won: 0, lost: 0, total: 0 };
+  {
+    const supabase = await createClient();
+    const { data } = await supabase.from("crm_closures").select("outcome, closed_at, reopened_at").not("reopened_at", "is", null).limit(5000);
+    reopened = reopenedClosures(data ?? [], period);
   }
   const wonRows = wonValueRows(wl.wonOpps, zohoRows);
   const zoho = zohoSummary(wonRows);
@@ -184,6 +191,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
               <div className="rounded-md border border-border p-3"><div className="text-xs text-muted-foreground">Win rate</div><div className="text-2xl font-semibold tabular-nums">{wl.winRatePercent === null ? "n/a" : `${wl.winRatePercent}%`}</div></div>
             </div>
             {wl.winRatePercent === null ? <p className="mt-2 text-xs text-muted-foreground">No opportunities were closed in this period, so there is no win rate.</p> : <p className="mt-2 text-xs text-muted-foreground">Win rate is won as a share of won plus lost. Small numbers move it a lot.</p>}
+            {reopened.total > 0 ? <p className="mt-2 text-xs text-muted-foreground">{reopened.total} closure{reopened.total === 1 ? "" : "s"} in this period ({reopened.won} won, {reopened.lost} lost) {reopened.total === 1 ? "was" : "were"} later reopened. They are open again, so they are not counted above; each closure stays in that opportunity&apos;s history.</p> : null}
             {wl.wonWithoutEvidence > 0 ? <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">{wl.wonWithoutEvidence} won with no evidence recorded, not counted as won.</p> : null}
           </ReportCard>
 

@@ -3,7 +3,7 @@ import type { CrmStageId } from "@enginious-hr/domain";
 import type { CrmZohoReferenceRow } from "@/types/crm";
 import {
   addDays, attentionItems, currencyLines, elapsedFirstResponse, enquiriesBySource, filterOpportunities, followUpCounts, inPeriod, openPipelineByOwner, openPipelineByStage,
-  organisationLabel, resolvePeriod, timelinessByCompany, wonLostInPeriod, wonValueRows, zohoSummary, type ReportOpp,
+  organisationLabel, resolvePeriod, timelinessByCompany, reopenedClosures, wonLostInPeriod, wonValueRows, zohoSummary, type ReportOpp,
 } from "./reports";
 
 // 2026-10-19 is a Monday. Dubai is UTC+4, so 05:00Z = 09:00 Dubai.
@@ -257,4 +257,19 @@ describe("needs attention", () => {
     expect(attentionItems({ userId: "me", scope: "all", followUps: [], opportunities: [o("6", { owner_id: "someone-else" }, 0)] }, NOW)).toHaveLength(1);
     expect(attentionItems({ userId: "me", scope: "mine", followUps: [], opportunities: [] }, NOW)).toEqual([]);
   });
+});
+
+describe("reopenedClosures", () => {
+  const period = { from: "2026-10-01", to: "2026-10-31" } as Parameters<typeof reopenedClosures>[1];
+  const c = (outcome: "won" | "lost", closed_at: string, reopened_at: string | null) => ({ outcome, closed_at, reopened_at });
+  it("counts only closures that were later reopened, by their original closing date", () => {
+    const r = reopenedClosures([
+      c("won", "2026-10-05T08:00:00Z", "2026-10-20T08:00:00Z"),
+      c("lost", "2026-10-06T08:00:00Z", "2026-11-02T08:00:00Z"),
+      c("won", "2026-10-07T08:00:00Z", null),                     // still current: not here
+      c("won", "2026-09-30T08:00:00Z", "2026-10-02T08:00:00Z"),   // closed before the period
+    ], period);
+    expect(r).toEqual({ won: 1, lost: 1, total: 2 });
+  });
+  it("is zero with no data", () => expect(reopenedClosures([], period)).toEqual({ won: 0, lost: 0, total: 0 }));
 });

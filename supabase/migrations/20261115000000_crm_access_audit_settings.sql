@@ -30,7 +30,8 @@ as $$
     'manage_settings',        -- edit CRM settings for the company
     'manage_approval_rules',  -- configure commercial approval rules (none exist yet)
     'manage_access',          -- grant / revoke CRM access for the company
-    'view_audit'              -- read the CRM audit log for the company
+    'view_audit',             -- read the CRM audit log for the company
+    'reopen_closed'           -- reopen a Won or Lost opportunity (with a reason and a new next action)
   ]::text[];
 $$;
 

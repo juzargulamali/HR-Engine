@@ -13,6 +13,7 @@ export const CRM_CAPABILITIES = [
   "manage_approval_rules",
   "manage_access",
   "view_audit",
+  "reopen_closed",
 ] as const;
 export type CrmCapability = (typeof CRM_CAPABILITIES)[number];
 
@@ -24,6 +25,7 @@ export const CRM_CAPABILITY_LABELS: Record<CrmCapability, { label: string; descr
   manage_approval_rules: { label: "Set commercial approval policy", description: "Decide whether commercial approval is required. Nothing can be approved until a policy is set." },
   manage_access: { label: "Manage Sales access", description: "Grant and revoke Sales access for this company (cannot grant founder rights)." },
   view_audit: { label: "Read the Sales audit trail", description: "See who changed what in this company's Sales records." },
+  reopen_closed: { label: "Reopen closed opportunities", description: "Reopen a Won or Lost opportunity, with a reason and a new next action. The closure stays in the history." },
 };
 
 export interface CrmGrant {
@@ -88,4 +90,26 @@ export function canActOnFollowUp(grants: readonly CrmGrant[], followUp: { assign
 /** crm_remove_file: the uploader, the owner or a founder. */
 export function canRemoveFile(grants: readonly CrmGrant[], file: { uploadedBy: string }, opp: CrmOpportunityRef, userId: string): boolean {
   return hasCrmAccess(grants, opp.companyId) && (file.uploadedBy === userId || opp.ownerId === userId || isCrmFounder(grants, opp.companyId));
+}
+
+/** crm_reopen_opportunity — a founder or someone a founder delegated 'reopen_closed' to. Not the owner as such. */
+export const canReopenClosed = (grants: readonly CrmGrant[], companyId: string) => hasCrmCapability(grants, companyId, "reopen_closed");
+
+/** crm_link_contact / crm_unlink_contact: same rule as editing the opportunity (owner or founder), and not on a lost one. */
+export function canChangeOpportunityContacts(grants: readonly CrmGrant[], opp: CrmOpportunityRef & { stage: string }, userId: string): boolean {
+  return opp.stage !== "lost" && canEditOpportunity(grants, opp, userId);
+}
+
+/**
+ * crm_can_edit_contact: the shared contact record may be edited by whoever created it, a founder, or the owner of an
+ * opportunity (not lost) it is linked to. `linkedOwnedOpportunities` = opportunities the contact is on that the user owns.
+ */
+export function canEditContactRecord(
+  grants: readonly CrmGrant[],
+  contact: { createdBy: string | null },
+  userId: string,
+  linkedOwnedOpportunities: readonly { stage: string }[],
+): boolean {
+  if (!hasAnyCrmAccess(grants)) return false;
+  return contact.createdBy === userId || isAnyCrmFounder(grants) || linkedOwnedOpportunities.some((o) => o.stage !== "lost");
 }

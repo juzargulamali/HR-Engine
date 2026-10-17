@@ -93,6 +93,7 @@ export type CrmOpportunityRow = {
   stage: CrmStageId;
   stage_changed_at: string;
   stage_before_hold: CrmStageId | null;
+  stage_before_close: CrmStageId | null;
   waiting_on: "client" | "internal" | null;
   first_response_at: string | null;
   currency: string;
@@ -236,6 +237,40 @@ export type CrmApprovalRow = {
   decided_at: string | null;
   instruction: string | null;
 }
+
+export type CrmClosureRow = {
+  id: string;
+  opportunity_id: string;
+  company_id: string;
+  outcome: "won" | "lost";
+  closed_from_stage: string | null;
+  closed_at: string;
+  closed_by: string | null;
+  value_at_close: number | string | null;
+  currency: string | null;
+  evidence_type: string | null;
+  evidence_reference: string | null;
+  evidence_date: string | null;
+  lost_reason: string | null;
+  reopened_at: string | null;
+  reopened_by: string | null;
+  reopen_reason: string | null;
+};
+
+export type CrmUploadIntent = {
+  id: string;
+  opportunity_id: string;
+  company_id: string;
+  original_name: string;
+  mime_type: string;
+  size_bytes: number;
+  purpose: string;
+  label: string | null;
+  quarantine_path: string;
+  final_path: string;
+  status: "pending" | "validated" | "rejected" | "registered" | "expired";
+  expires_at: string;
+};
 
 export type CrmHandoverRow = {
   opportunity_id: string;

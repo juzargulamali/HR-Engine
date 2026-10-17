@@ -22,7 +22,7 @@ import type {
   CrmActivityRow, CrmApprovalRow, CrmAuditLogRow, CrmCompanyGrantRow, CrmCompanySettingsRow, CrmContactRow,
   CrmDuplicateCandidateRow, CrmFileRow, CrmFollowUpRow, CrmHandoverRow, CrmOpportunityContactRow, CrmOpportunityEventRow,
   CrmOpportunityRow, CrmOrganisationRow, CrmProposalRow, CrmReadOnlyTable, CrmReminderEmailClaim, CrmReminderRow,
-  CrmZohoReferenceRow,
+  CrmZohoReferenceRow, CrmClosureRow, CrmUploadIntent,
 } from "./crm";
 
 export type AppRole = "employee" | "line_manager" | "hr_admin" | "finance" | "ceo" | "cto" | "sys_admin";
@@ -1644,6 +1644,7 @@ export interface Database {
       crm_approvals: CrmReadOnlyTable<CrmApprovalRow>;
       crm_handovers: CrmReadOnlyTable<CrmHandoverRow>;
       crm_reminders: CrmReadOnlyTable<CrmReminderRow>;
+      crm_closures: CrmReadOnlyTable<CrmClosureRow>;
     };
     Views: {
       leave_balances: {
@@ -1740,6 +1741,23 @@ export interface Database {
       crm_finish_reminder_email: { Args: { p_reminder_id: string; p_ok: boolean; p_error?: string | null }; Returns: undefined };
       crm_people: { Args: Record<string, never>; Returns: { user_id: string; full_name: string | null; email: string | null; company_ids: string[] }[] };
       crm_staff_directory: { Args: Record<string, never>; Returns: { user_id: string; full_name: string | null; email: string | null }[] };
+      crm_reopen_opportunity: {
+        Args: { p_id: string; p_reason: string; p_next_title: string; p_next_due: string; p_next_kind?: string; p_to_stage?: string | null; p_expected_version?: number | null };
+        Returns: number;
+      };
+      crm_link_contact: { Args: { p_opportunity_id: string; p_contact_id: string; p_role?: string | null }; Returns: undefined };
+      crm_unlink_contact: { Args: { p_opportunity_id: string; p_contact_id: string }; Returns: undefined };
+      crm_update_contact: { Args: { p_contact_id: string; p_patch: Record<string, unknown> }; Returns: undefined };
+      crm_can_edit_contact: { Args: { p_contact_id: string }; Returns: boolean };
+      crm_create_upload_intent: {
+        Args: { p_opportunity_id: string; p_original_name: string; p_mime_type: string; p_size_bytes: number; p_safe_name: string; p_purpose?: string; p_label?: string | null };
+        Returns: { intent_id: string; quarantine_path: string }[];
+      };
+      crm_get_upload_intent: { Args: { p_intent_id: string }; Returns: CrmUploadIntent[] };
+      crm_register_uploaded_file: { Args: { p_intent_id: string }; Returns: string };
+      // Service role only (never callable from a browser session):
+      crm_mark_upload_intent: { Args: { p_intent_id: string; p_status: string; p_reason?: string | null }; Returns: undefined };
+      crm_expire_upload_intents: { Args: Record<string, never>; Returns: { quarantine_path: string; final_path: string; orphaned_validated: boolean }[] };
       crm_availability_needs_recheck: { Args: { p_opportunity_id: string }; Returns: boolean };
       get_contract_as_of: {
         Args: { p_employee_id: string; p_as_of: string };

@@ -2,7 +2,7 @@ import "server-only";
 import { availabilityDisplay, type AvailabilityDisplay } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import type {
-  CrmActivityRow, CrmApprovalRow, CrmContactRow, CrmFileRow, CrmFollowUpRow, CrmHandoverRow, CrmOpportunityEventRow,
+  CrmActivityRow, CrmApprovalRow, CrmClosureRow, CrmContactRow, CrmFileRow, CrmFollowUpRow, CrmHandoverRow, CrmOpportunityEventRow,
   CrmOpportunityRow, CrmOrganisationRow, CrmProposalRow, CrmReminderRow, CrmZohoReferenceRow,
 } from "@/types/crm";
 import type { CrmContext } from "./context";
@@ -90,6 +90,8 @@ export interface OpportunityDetail {
   zoho: CrmZohoReferenceRow | null;
   approvals: CrmApprovalRow[];
   handover: CrmHandoverRow | null;
+  /** Every Won/Lost the opportunity has had, newest first; a reopened one is kept with who reopened it and why. */
+  closures: CrmClosureRow[];
 }
 
 export async function loadOpportunityDetail(ctx: CrmContext, id: string): Promise<OpportunityDetail | null> {
@@ -99,7 +101,7 @@ export async function loadOpportunityDetail(ctx: CrmContext, id: string): Promis
   ok(oppRes);
   const opp = oppRes.data;
   if (!opp) return null;
-  const [orgs, links, acts, fus, evs, files, props, zoho, appr, hand] = await Promise.all([
+  const [orgs, links, acts, fus, evs, files, props, zoho, appr, hand, clos] = await Promise.all([
     supabase.from("crm_organisations").select("*").in("id", [opp.agency_org_id, opp.client_org_id].filter((x): x is string => !!x)),
     supabase.from("crm_opportunity_contacts").select("contact_id, role").eq("opportunity_id", id),
     supabase.from("crm_activities").select("*").eq("opportunity_id", id).order("occurred_at", { ascending: false }),
@@ -110,8 +112,9 @@ export async function loadOpportunityDetail(ctx: CrmContext, id: string): Promis
     supabase.from("crm_zoho_references").select("*").eq("opportunity_id", id).maybeSingle(),
     supabase.from("crm_approvals").select("*").eq("opportunity_id", id).order("requested_at", { ascending: false }),
     supabase.from("crm_handovers").select("*").eq("opportunity_id", id).maybeSingle(),
+    supabase.from("crm_closures").select("*").eq("opportunity_id", id).order("closed_at", { ascending: false }),
   ]);
-  ok(orgs, links, acts, fus, evs, files, props, zoho, appr, hand);
+  ok(orgs, links, acts, fus, evs, files, props, zoho, appr, hand, clos);
   const orgBy = new Map((orgs.data ?? []).map((o) => [o.id, o]));
   const open = (fus.data ?? []).filter((f) => f.status === "open");
   const nextBy = new Map<string, CrmFollowUpRow>();
@@ -137,6 +140,7 @@ export async function loadOpportunityDetail(ctx: CrmContext, id: string): Promis
     zoho: zoho.data ?? null,
     approvals: appr.data ?? [],
     handover: hand.data ?? null,
+    closures: clos.data ?? [],
   };
 }
 
@@ -174,6 +178,8 @@ export async function loadFollowUps(ctx: CrmContext): Promise<{ open: FollowUpLi
 
 export async function loadOrganisations(): Promise<{
   organisations: (CrmOrganisationRow & { contacts: CrmContactRow[]; opportunityCount: number; openCount: number })[];
+  /** People recorded without an organisation (so they can still be found and linked to an opportunity). */
+  unassignedContacts: CrmContactRow[];
 }> {
   const supabase = await createClient();
   const [orgsRes, contactsRes, oppsRes] = await Promise.all([
@@ -198,6 +204,7 @@ export async function loadOrganisations(): Promise<{
   }
   return {
     organisations: (orgs ?? []).map((o) => ({ ...o, contacts: contactsBy.get(o.id) ?? [], opportunityCount: total.get(o.id) ?? 0, openCount: openN.get(o.id) ?? 0 })),
+    unassignedContacts: (contacts ?? []).filter((c) => !c.organisation_id),
   };
 }
 

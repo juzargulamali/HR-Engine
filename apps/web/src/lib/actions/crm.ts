@@ -277,6 +277,91 @@ export async function checkDuplicates(subject: {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Contacts on an opportunity (shared records), and reopening a closed opportunity
+// ---------------------------------------------------------------------------------------------------------------
+
+const linkSchema_ = z.object({ opportunityId: uuid, contactId: uuid, role: optionalText });
+export async function linkContact(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const p = linkSchema_.safeParse(Object.fromEntries(formData));
+  if (!p.success) return { error: "Choose a contact." };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("crm_link_contact", { p_opportunity_id: p.data.opportunityId, p_contact_id: p.data.contactId, p_role: p.data.role ?? null });
+  if (error) return fail(error.message);
+  refresh(p.data.opportunityId);
+  return { error: null };
+}
+
+export async function unlinkContact(opportunityId: string, contactId: string): Promise<ActionState> {
+  if (!uuid.safeParse(opportunityId).success || !uuid.safeParse(contactId).success) return { error: "Missing details." };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("crm_unlink_contact", { p_opportunity_id: opportunityId, p_contact_id: contactId });
+  if (error) return fail(error.message);
+  refresh(opportunityId);
+  return { error: null };
+}
+
+/** Adds a brand-new person AND puts them on this opportunity. If linking is refused the new contact still exists (shared, unlinked). */
+export async function createAndLinkContact(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const opportunityId = uuid.safeParse(formData.get("opportunityId"));
+  if (!opportunityId.success) return { error: "Missing opportunity." };
+  const p = contactSchema.safeParse(Object.fromEntries(formData));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const role = optionalText.safeParse(formData.get("role"));
+  const supabase = await createClient();
+  const created = await supabase.rpc("crm_create_contact", { p_organisation_id: p.data.organisationId ?? null, p_name: p.data.name, p_role_title: p.data.roleTitle ?? null, p_email: p.data.email ?? null, p_phone: p.data.phone ?? null });
+  if (created.error) return fail(created.error.message);
+  const linked = await supabase.rpc("crm_link_contact", { p_opportunity_id: opportunityId.data, p_contact_id: created.data, p_role: (role.success ? role.data : undefined) ?? null });
+  if (linked.error) {
+    refresh(opportunityId.data);
+    return { error: `The contact was added to Clients but could not be put on this opportunity: ${friendlyCrmError(linked.error.message)}` };
+  }
+  refresh(opportunityId.data);
+  return { error: null };
+}
+
+const contactEditSchema = z.object({
+  contactId: uuid, opportunityId: optionalUuid, name: z.string().trim().min(1, "Enter the name").max(200), roleTitle: optionalText,
+  email: z.preprocess((v) => (v === "" ? undefined : v), z.string().trim().email("That email address does not look right").optional()), phone: optionalText,
+});
+/** Edits the SHARED contact record (it changes everywhere the person appears; each linked opportunity's timeline records it). */
+export async function updateContact(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const p = contactEditSchema.safeParse(Object.fromEntries(formData));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("crm_update_contact", {
+    p_contact_id: p.data.contactId,
+    p_patch: { name: p.data.name, role_title: p.data.roleTitle ?? null, email: p.data.email ?? null, phone: p.data.phone ?? null },
+  });
+  if (error) return fail(error.message);
+  refresh(p.data.opportunityId);
+  revalidatePath("/sales/clients");
+  return { error: null };
+}
+
+const reopenSchema = z.object({
+  id: uuid, reason: z.string().trim().min(1, "Say why it is being reopened"),
+  nextTitle: z.string().trim().min(1, "Say what the new next action is"), nextDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a date"),
+  nextTime: optionalText, nextKind: z.enum(["call", "email", "meeting", "proposal", "other"]).default("other"),
+  toStage: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.enum(["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation"]).optional()),
+  expectedVersion: z.coerce.number().int().optional(),
+});
+/** Reopens a Won or Lost opportunity. The closure stays in the history; a handover already prepared is left untouched. */
+export async function reopenOpportunity(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const p = reopenSchema.safeParse(Object.fromEntries(formData));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const due = dueIso(p.data.nextDate, p.data.nextTime);
+  if (!due) return { error: "The new next action needs a valid date and time." };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("crm_reopen_opportunity", {
+    p_id: p.data.id, p_reason: p.data.reason, p_next_title: p.data.nextTitle, p_next_due: due, p_next_kind: p.data.nextKind,
+    p_to_stage: p.data.toStage ?? null, p_expected_version: p.data.expectedVersion ?? null,
+  });
+  if (error) return fail(error.message);
+  refresh(p.data.id);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Activities and follow-ups
 // ---------------------------------------------------------------------------------------------------------------
 

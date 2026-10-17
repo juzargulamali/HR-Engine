@@ -109,7 +109,7 @@ export default async function SalesOverviewPage({ searchParams }: { searchParams
           <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
             <div className="space-y-1.5">
               <CardTitle className="flex items-center gap-2 text-base"><Bell className="h-4 w-4" aria-hidden />Reminders ({reminders.length} unread)</CardTitle>
-              <CardDescription>Internal reminders only. Nothing is sent to clients.</CardDescription>
+              <CardDescription>Internal reminders only; nothing is sent to clients. They are created once a day (about 08:00 Dubai time) and refreshed whenever someone opens this page, so they are not instant alerts. The follow-up list below is always live.</CardDescription>
             </div>
             <MarkRemindersReadButton />
           </CardHeader>

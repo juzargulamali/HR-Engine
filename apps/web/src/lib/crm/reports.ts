@@ -17,7 +17,7 @@ import {
   type FollowUpTiming,
   type ResponseKpi,
 } from "@enginious-hr/domain";
-import type { CrmOpportunityRow, CrmZohoReferenceRow } from "@/types/crm";
+import type { CrmClosureRow, CrmOpportunityRow, CrmZohoReferenceRow } from "@/types/crm";
 
 /** Per-currency totals as display lines, sorted by currency code. Empty when nothing carries a value. */
 export function currencyLines(totals: Record<string, number>): { currency: string; amount: number }[] {
@@ -145,6 +145,17 @@ export function wonLostInPeriod(opps: readonly ReportOpp[], period: Period): Won
     lostReasons: [...reasons].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason)),
     wonOpps,
   };
+}
+
+/**
+ * Closures that were later reopened. A reopened opportunity is open again, so it no longer counts as won or lost in the
+ * figures above; the closure itself is kept in history (crm_closures) and is reported here so it is neither lost nor
+ * silently counted. Counted by the date the closure originally happened.
+ */
+export function reopenedClosures(closures: readonly Pick<CrmClosureRow, "outcome" | "closed_at" | "reopened_at">[], period: Period): { won: number; lost: number; total: number } {
+  const hit = closures.filter((c) => c.reopened_at !== null && inPeriod(c.closed_at, period));
+  const won = hit.filter((c) => c.outcome === "won").length;
+  return { won, lost: hit.length - won, total: hit.length };
 }
 
 /** Enquiries logged in the period, by source (free text as entered, grouped case-insensitively). */

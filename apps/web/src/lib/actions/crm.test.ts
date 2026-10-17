@@ -9,7 +9,8 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc }) })
 
 import { friendlyCrmError } from "@/lib/crm/errors";
 import {
-  addLink, checkDuplicates, completeFollowUp, createOpportunity, grantCrmAccess, markWon, moveStage, saveCrmSettings, updateOpportunity,
+  addLink, checkDuplicates, completeFollowUp, createAndLinkContact, createOpportunity, grantCrmAccess, linkContact, markWon, moveStage, reopenOpportunity,
+  saveCrmSettings, unlinkContact, updateContact, updateOpportunity,
 } from "./crm";
 
 const U = "33333333-3333-4333-8333-333333333333";
@@ -121,5 +122,60 @@ describe("checkDuplicates", () => {
   it("never flags an enquiry that only shares the agency", async () => {
     rpc.mockResolvedValue({ data: [{ opportunity_id: "o1", company_id: C, reference: "OPP-UAE-2026-0001", title: "Museum guide", stage: "qualified", owner_id: U, agency_org_id: O, client_org_id: null, event_start: "2027-03-01", event_end: null, install_start: null, location: "Abu Dhabi", technologies: [], created_at: "2026-10-01T00:00:00Z" }], error: null });
     expect(await checkDuplicates({ agencyOrgId: O, title: "Floor projection showroom launch", eventStart: "2026-11-24", location: "Dubai Mall" })).toEqual([]);
+  });
+});
+
+describe("contacts on an opportunity", () => {
+  const CT = "55555555-5555-4555-8555-555555555555";
+  it("links an existing shared contact with an optional role, and unlinks without deleting anything", async () => {
+    expect(await linkContact({ error: null }, fd({ opportunityId: O, contactId: CT, role: "Approver" }))).toEqual({ error: null });
+    expect(rpc).toHaveBeenCalledWith("crm_link_contact", { p_opportunity_id: O, p_contact_id: CT, p_role: "Approver" });
+    expect(await unlinkContact(O, CT)).toEqual({ error: null });
+    expect(rpc).toHaveBeenLastCalledWith("crm_unlink_contact", { p_opportunity_id: O, p_contact_id: CT });
+    expect(rpc).not.toHaveBeenCalledWith("crm_update_contact", expect.anything());
+    expect((await linkContact({ error: null }, fd({ opportunityId: O, contactId: "nope" }))).error).toBeTruthy();
+    expect((await unlinkContact("nope", CT)).error).toBeTruthy();
+  });
+  it("shows the database's refusal in words", async () => {
+    rpc.mockResolvedValue({ data: null, error: { message: "Only the owner of this opportunity or a founder can do this" } });
+    expect((await linkContact({ error: null }, fd({ opportunityId: O, contactId: CT }))).error).toMatch(/Only the owner/);
+  });
+  it("creates a person then links them; if linking is refused it says the contact was still added", async () => {
+    rpc.mockResolvedValueOnce({ data: CT, error: null }).mockResolvedValueOnce({ data: null, error: null });
+    expect(await createAndLinkContact({ error: null }, fd({ opportunityId: O, name: "Hana", email: "hana@zeta.example", role: "Producer" }))).toEqual({ error: null });
+    expect(rpc).toHaveBeenNthCalledWith(1, "crm_create_contact", expect.objectContaining({ p_name: "Hana", p_email: "hana@zeta.example" }));
+    expect(rpc).toHaveBeenNthCalledWith(2, "crm_link_contact", { p_opportunity_id: O, p_contact_id: CT, p_role: "Producer" });
+    rpc.mockReset().mockResolvedValueOnce({ data: CT, error: null }).mockResolvedValueOnce({ data: null, error: { message: "A lost opportunity can no longer be changed (reopen it first)" } });
+    const r = await createAndLinkContact({ error: null }, fd({ opportunityId: O, name: "Omar" }));
+    expect(r.error).toMatch(/added to Clients but could not be put on this opportunity.*reopen it first/);
+  });
+  it("validates a new contact (name, email) before calling the database", async () => {
+    expect((await createAndLinkContact({ error: null }, fd({ opportunityId: O, name: "" }))).error).toBeTruthy();
+    expect((await createAndLinkContact({ error: null }, fd({ opportunityId: O, name: "A", email: "not-an-email" }))).error).toMatch(/email/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("edits the shared record with only the four editable fields", async () => {
+    expect(await updateContact({ error: null }, fd({ contactId: CT, opportunityId: O, name: "Hana A.", roleTitle: "Senior Producer", email: "", phone: "+971 50" }))).toEqual({ error: null });
+    expect(rpc).toHaveBeenCalledWith("crm_update_contact", { p_contact_id: CT, p_patch: { name: "Hana A.", role_title: "Senior Producer", email: null, phone: "+971 50" } });
+    expect((await updateContact({ error: null }, fd({ contactId: CT, name: "" }))).error).toBeTruthy();
+  });
+});
+
+describe("reopenOpportunity", () => {
+  const base = { id: O, reason: "Client asked to revise the scope", nextTitle: "Call the client", nextDate: "2026-10-21", nextTime: "10:00" };
+  it("needs a reason and a new next action with a date before it asks the database", async () => {
+    expect((await reopenOpportunity({ error: null }, fd({ ...base, reason: "" }))).error).toMatch(/why it is being reopened/);
+    expect((await reopenOpportunity({ error: null }, fd({ ...base, nextTitle: "" }))).error).toMatch(/new next action/);
+    expect((await reopenOpportunity({ error: null }, fd({ ...base, nextDate: "" }))).error).toBeTruthy();
+    expect((await reopenOpportunity({ error: null }, fd({ ...base, toStage: "won" }))).error).toBeTruthy();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("sends the new next action as a UTC instant from Dubai time, the optional target stage and the version seen", async () => {
+    expect(await reopenOpportunity({ error: null }, fd({ ...base, toStage: "negotiation", expectedVersion: "7" }))).toEqual({ error: null });
+    expect(rpc).toHaveBeenCalledWith("crm_reopen_opportunity", expect.objectContaining({ p_id: O, p_next_due: "2026-10-21T06:00:00.000Z", p_to_stage: "negotiation", p_expected_version: 7, p_reason: "Client asked to revise the scope" }));
+  });
+  it("lets the database decide who may reopen and shows its message", async () => {
+    rpc.mockResolvedValue({ data: null, error: { message: "Only a founder, or someone a founder gave the reopen right to, can reopen a closed opportunity" } });
+    expect((await reopenOpportunity({ error: null }, fd(base))).error).toMatch(/Only a founder/);
   });
 });

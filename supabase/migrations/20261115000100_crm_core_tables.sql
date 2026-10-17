@@ -72,6 +72,9 @@ create table if not exists crm_opportunities (
   -- Where the opportunity was before it went on hold, so Resume returns to the right place.
   stage_before_hold     text check (stage_before_hold is null or stage_before_hold in (
                           'new', 'qualified', 'proposal_prep', 'proposal_sent', 'quote_sent', 'negotiation')),
+  -- Where it was when it was closed, so a controlled reopen returns it to the right place.
+  stage_before_close    text check (stage_before_close is null or stage_before_close in (
+                          'new', 'qualified', 'proposal_prep', 'proposal_sent', 'quote_sent', 'negotiation')),
   waiting_on            text check (waiting_on is null or waiting_on in ('client', 'internal')),
   first_response_at     timestamptz,
 
@@ -147,7 +150,8 @@ create table if not exists crm_opportunity_events (
   company_id      uuid not null references companies(id),
   kind            text not null check (kind in (
                     'created', 'stage_changed', 'owner_changed', 'held', 'resumed', 'won', 'lost',
-                    'details_changed', 'value_changed', 'availability', 'approval', 'handover', 'proposal', 'file')),
+                    'details_changed', 'value_changed', 'availability', 'approval', 'handover', 'proposal', 'file',
+                    'contact', 'reopened')),
   from_value      text,
   to_value        text,
   reason          text,
@@ -210,6 +214,15 @@ as $$
   ]::text[];
 $$;
 
+-- No executable, script or macro-capable name in ANY dot-separated segment ("invoice.exe.pdf" is refused too).
+-- One definition, used by the table CHECK and by crm_create_upload_intent.
+create or replace function crm_file_name_blocked(p_name text)
+returns boolean
+language sql immutable
+as $$
+  select p_name ~* '(^|\.)(exe|dll|msi|bat|cmd|com|scr|pif|cpl|msc|lnk|hta|wsf|wsh|vbs|vbe|js|jse|ps1|psm1|sh|bash|jar|apk|app|dmg|iso|reg|docm|dotm|xlsm|xlsb|xltm|xlam|pptm|potm|ppsm|ppam|sldm|html|htm|svg)(\.|$)';
+$$;
+
 create table if not exists crm_files (
   id              uuid primary key default gen_random_uuid(),
   opportunity_id  uuid not null references crm_opportunities(id) on delete cascade,
@@ -232,8 +245,7 @@ create table if not exists crm_files (
       and url is null
       and mime_type = any (crm_allowed_mime_types())
       and size_bytes between 1 and 20971520
-      -- No executable or macro-capable name in ANY dot-separated segment ("invoice.exe.pdf" is refused too).
-      and original_name !~* '(^|\.)(exe|dll|msi|bat|cmd|com|scr|pif|cpl|msc|lnk|hta|wsf|wsh|vbs|vbe|js|jse|ps1|psm1|sh|bash|jar|apk|app|dmg|iso|reg|docm|dotm|xlsm|xlsb|xltm|xlam|pptm|potm|ppsm|ppam|sldm|html|htm|svg)(\.|$)'
+      and not crm_file_name_blocked(original_name)
       and storage_path ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}/[0-9a-f-]{36}-[A-Za-z0-9._-]{1,150}$'
     )),
   constraint crm_files_link_shape check (
@@ -336,6 +348,61 @@ create index if not exists idx_crm_reminders_user on crm_reminders(user_id, read
 create index if not exists idx_crm_reminders_email on crm_reminders(email_next_attempt_at) where email_status in ('pending', 'failed');
 
 -- -----------------------------------------------------------------------------
+-- Closure history: every Won / Lost is kept even if the opportunity is later reopened. The live columns on
+-- crm_opportunities describe only the CURRENT state; reporting on past outcomes and the audit trail read this table.
+-- -----------------------------------------------------------------------------
+create table if not exists crm_closures (
+  id                  uuid primary key default gen_random_uuid(),
+  opportunity_id      uuid not null references crm_opportunities(id) on delete cascade,
+  company_id          uuid not null references companies(id),
+  outcome             text not null check (outcome in ('won', 'lost')),
+  closed_from_stage   text,
+  closed_at           timestamptz not null default now(),
+  closed_by           uuid references auth.users(id),
+  value_at_close      numeric(14, 2),
+  currency            text,
+  evidence_type       text,
+  evidence_reference  text,
+  evidence_date       date,
+  lost_reason         text,
+  reopened_at         timestamptz,
+  reopened_by         uuid references auth.users(id),
+  reopen_reason       text,
+  constraint crm_closures_reopen_complete check (
+    (reopened_at is null) = (reopened_by is null) and (reopened_at is null or length(btrim(coalesce(reopen_reason, ''))) > 0))
+);
+-- At most one closure is "current" (not reopened) per opportunity.
+create unique index if not exists uq_crm_closures_current on crm_closures(opportunity_id) where reopened_at is null;
+create index if not exists idx_crm_closures_company_time on crm_closures(company_id, closed_at);
+
+-- -----------------------------------------------------------------------------
+-- Upload intents. A file is uploaded by the browser straight to a private QUARANTINE bucket (Vercel functions accept at
+-- most 4.5 MB of request body, so large files cannot pass through the app), then validated by the server, and only a
+-- validated file is moved into the real bucket and registered. Clients have no access to this table or to the
+-- quarantine bucket; the intent functions in migration 4 are the only way in.
+-- -----------------------------------------------------------------------------
+create table if not exists crm_upload_intents (
+  id               uuid primary key default gen_random_uuid(),
+  opportunity_id   uuid not null references crm_opportunities(id) on delete cascade,
+  company_id       uuid not null references companies(id),
+  user_id          uuid not null references auth.users(id),
+  original_name    text not null,
+  mime_type        text not null,
+  size_bytes       bigint not null check (size_bytes between 1 and 20971520),
+  purpose          text not null check (purpose in ('proposal', 'purchase_order', 'authorised_email', 'brief', 'other')),
+  label            text,
+  quarantine_path  text not null unique,
+  final_path       text not null unique,
+  status           text not null default 'pending' check (status in ('pending', 'validated', 'rejected', 'registered', 'expired')),
+  reject_reason    text,
+  created_at       timestamptz not null default now(),
+  expires_at       timestamptz not null default now() + interval '2 hours',
+  finished_at      timestamptz,
+  swept_at         timestamptz           -- set once the scheduled clean-up has removed whatever it may have left in storage
+);
+create index if not exists idx_crm_upload_intents_open on crm_upload_intents(expires_at) where swept_at is null;
+
+-- -----------------------------------------------------------------------------
 -- updated_at + audit triggers
 -- -----------------------------------------------------------------------------
 do $$
@@ -350,7 +417,7 @@ begin
   end loop;
   foreach t in array array[
     'crm_organisations', 'crm_contacts', 'crm_opportunities', 'crm_opportunity_contacts', 'crm_follow_ups',
-    'crm_files', 'crm_proposals', 'crm_zoho_references', 'crm_approvals', 'crm_handovers'
+    'crm_files', 'crm_proposals', 'crm_zoho_references', 'crm_approvals', 'crm_handovers', 'crm_closures'
   ] loop
     execute format('drop trigger if exists %I on %I', t || '_audit', t);
     execute format('create trigger %I after insert or update or delete on %I for each row execute function crm_audit_trigger()',
@@ -367,7 +434,7 @@ begin
   foreach t in array array[
     'crm_organisations', 'crm_contacts', 'crm_reference_counters', 'crm_opportunities', 'crm_opportunity_contacts',
     'crm_opportunity_events', 'crm_activities', 'crm_follow_ups', 'crm_files', 'crm_proposals',
-    'crm_zoho_references', 'crm_approvals', 'crm_handovers', 'crm_reminders'
+    'crm_zoho_references', 'crm_approvals', 'crm_handovers', 'crm_reminders', 'crm_closures', 'crm_upload_intents'
   ] loop
     execute format('alter table %I enable row level security', t);
   end loop;
@@ -383,7 +450,7 @@ declare t text;
 begin
   foreach t in array array[
     'crm_opportunities', 'crm_opportunity_contacts', 'crm_opportunity_events', 'crm_activities', 'crm_follow_ups',
-    'crm_files', 'crm_proposals', 'crm_zoho_references', 'crm_approvals', 'crm_handovers'
+    'crm_files', 'crm_proposals', 'crm_zoho_references', 'crm_approvals', 'crm_handovers', 'crm_closures'
   ] loop
     execute format('drop policy if exists %I on %I', t || '_select', t);
     execute format('create policy %I on %I for select using (crm_has_access(company_id))', t || '_select', t);
@@ -402,12 +469,12 @@ create policy crm_reminders_select on crm_reminders for select
 revoke all on table
   crm_organisations, crm_contacts, crm_reference_counters, crm_opportunities, crm_opportunity_contacts,
   crm_opportunity_events, crm_activities, crm_follow_ups, crm_files, crm_proposals, crm_zoho_references,
-  crm_approvals, crm_handovers, crm_reminders
+  crm_approvals, crm_handovers, crm_reminders, crm_closures, crm_upload_intents
   from anon, authenticated, public;
 grant select on table
   crm_organisations, crm_contacts, crm_opportunities, crm_opportunity_contacts, crm_opportunity_events,
   crm_activities, crm_follow_ups, crm_files, crm_proposals, crm_zoho_references, crm_approvals, crm_handovers,
-  crm_reminders
+  crm_reminders, crm_closures
   to authenticated;
 
 -- Equipment-availability recheck: true when the check no longer covers what the opportunity now says.
@@ -423,12 +490,12 @@ as $$
   from crm_opportunities o
   where o.id = p_opportunity_id and crm_has_access(o.company_id);
 $$;
-revoke all on function crm_availability_needs_recheck(uuid), crm_allowed_mime_types() from public, anon;
-grant execute on function crm_availability_needs_recheck(uuid), crm_allowed_mime_types() to authenticated;
+revoke all on function crm_availability_needs_recheck(uuid), crm_allowed_mime_types(), crm_file_name_blocked(text) from public, anon;
+grant execute on function crm_availability_needs_recheck(uuid), crm_allowed_mime_types(), crm_file_name_blocked(text) to authenticated;
 
 -- ROLLBACK (only before any CRM data exists; afterwards export first):
 --   drop function if exists crm_availability_needs_recheck(uuid);
---   drop table if exists crm_reminders, crm_handovers, crm_approvals, crm_zoho_references, crm_proposals, crm_files,
+--   drop table if exists crm_upload_intents, crm_closures, crm_reminders, crm_handovers, crm_approvals, crm_zoho_references, crm_proposals, crm_files,
 --     crm_follow_ups, crm_activities, crm_opportunity_events, crm_opportunity_contacts, crm_opportunities,
 --     crm_reference_counters, crm_contacts, crm_organisations cascade;
 --   drop function if exists crm_allowed_mime_types();

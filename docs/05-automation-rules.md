@@ -23,7 +23,9 @@ of how it's triggered.
 | **Recovery Leave window processor** | Every 5 minutes via `pg_cron` (owner-enabled), plus a daily Vercel safety-net route (`/api/cron/recovery-windows`) | `recovery_process_due()`: for each employee with an open working period (or a recorded failure / unrouted request) re-derives periods and 24-elapsed-hour windows from the raw clock evidence, closes windows, creates approval requests under system authority, raises deduplicated HR alerts (20 recorded hours without an 8h rest; automatic 24h rollover), retries earlier failures and records each run. Idempotent; catches up every missed boundary. Acts under no HR identity (audit origin `processor`). See [recovery-windows-deployment.md](./recovery-windows-deployment.md) | `recovery_periods`, `recovery_windows`, `recovery_window_allocations`, `recovery_window_revisions`, `recovery_alerts`, `recovery_credit_requests`, `approvals`, `recovery_processor_runs/failures` |
 | **Nightly balance materialization** | Nightly | Refreshes a materialized view/summary table of `leave_balances`/`comp_day_balances` for dashboard read performance (the live views remain the source of truth; this is a cache) | `leave_balances_cache` (materialized) |
 
-### 5.1a Sales & CRM reminders (`/api/cron/crm-reminders`, daily 04:00 UTC; also on opening Sales → Overview, throttled)
+### 5.1a Sales & CRM reminders (`/api/cron/crm-reminders`, once a day 04:00 UTC; plus a best-effort in-app refresh on opening Sales → Overview)
+
+> **Timing, honestly:** this is a daily unattended job plus a page-triggered in-app refresh. It is **not** a minutes-level background reminder service. Emails (when enabled) and email retries happen only in the daily run. The same run also sweeps abandoned private-upload intents (deleting leftover quarantine files).
 
 `crm_generate_reminders()` (service role only) creates, idempotently via a unique `dedupe_key`: *follow-up due* (assignee),
 *follow-up overdue by 24 h* (owner), *hold review date reached* (owner), *active opportunity with no next action* (owner, once a
