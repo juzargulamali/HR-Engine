@@ -10094,3 +10094,2218 @@ begin
   end loop;
 end
 $hardening$;
+
+-- ==============================================================================
+-- 18. Sales & CRM (Stage B) — migrations 20261115000000 .. 20261115000300, mirrored verbatim.
+-- Company-scoped CRM access (crm_company_grants, NOT user_roles), read-only tables, controlled functions.
+-- See docs/crm-deployment.md and docs/03-permission-matrix.md §3.8.
+-- ==============================================================================
+
+-- ---- 20261115000000_crm_access_audit_settings.sql ----
+-- Sales & CRM (Stage B), migration 1 of 4: company-scoped access, CRM audit log, per-company settings.
+--
+-- DESIGN (docs/14 §11, owner decisions 2026-10-17)
+--   * CRM access is its own table, NOT user_roles. HR admin, Finance, CEO and sys_admin roles grant no CRM access
+--     whatever; a CRM grant grants no HR access whatever. Neither table is consulted by the other's policies.
+--   * A grant is explicit and per company: (user, company, capabilities[]). A user with grants in two companies sees
+--     the shared pipeline of both; no grant in a company means no visibility of that company's CRM rows.
+--   * 'founder' is a capability on a grant (bootstrapped by the owner's manual SQL for Juzar and Rafi, see
+--     supabase/manual-sql/crm_30_bootstrap_founders.sql). A founder may assign/reassign owners, close any
+--     opportunity, grant and revoke access, edit settings and read the CRM audit log for that company.
+--   * Tables are read-only to clients: SELECT policies only. Every change goes through a SECURITY DEFINER function
+--     (migrations 2-4) that checks the capability itself.
+--   * CRM keeps its own audit table. The shared audit_log is readable by HR admin by design, which would expose
+--     commercial data to HR, so CRM tables never write to it.
+--   * Nothing here inserts a company. Settings rows are seeded only for companies that already exist.
+--
+-- Additive and idempotent where possible; ROLLBACK notes at the bottom.
+
+-- -----------------------------------------------------------------------------
+-- Capabilities vocabulary (kept in one place; mirrored in packages/domain/src/permissions/crm.ts)
+-- -----------------------------------------------------------------------------
+create or replace function crm_capability_list()
+returns text[]
+language sql immutable
+as $$
+  select array[
+    'founder',                -- implies every other capability for the company
+    'assign_owner',           -- assign / reassign opportunity owners
+    'confirm_availability',   -- record technology-availability confirmation (delegated by a founder)
+    'manage_settings',        -- edit CRM settings for the company
+    'manage_approval_rules',  -- configure commercial approval rules (none exist yet)
+    'manage_access',          -- grant / revoke CRM access for the company
+    'view_audit'              -- read the CRM audit log for the company
+  ]::text[];
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Grants
+-- -----------------------------------------------------------------------------
+create table if not exists crm_company_grants (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references auth.users(id) on delete cascade,
+  company_id    uuid not null references companies(id),
+  capabilities  text[] not null default '{}'::text[],
+  granted_by    uuid references auth.users(id),
+  granted_at    timestamptz not null default now(),
+  revoked_at    timestamptz,
+  revoked_by    uuid references auth.users(id),
+  note          text,
+  constraint crm_company_grants_caps_valid check (capabilities <@ crm_capability_list())
+);
+
+create unique index if not exists uq_crm_company_grants_active
+  on crm_company_grants(user_id, company_id) where revoked_at is null;
+create index if not exists idx_crm_company_grants_company
+  on crm_company_grants(company_id) where revoked_at is null;
+
+-- -----------------------------------------------------------------------------
+-- Access helpers. SECURITY DEFINER so policies on other tables can call them without
+-- needing SELECT on crm_company_grants; they only ever answer about auth.uid().
+-- -----------------------------------------------------------------------------
+create or replace function crm_has_access(p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from crm_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid()
+      and g.company_id = p_company_id
+      and g.revoked_at is null
+  );
+$$;
+
+create or replace function crm_has_capability(p_company_id uuid, p_capability text)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from crm_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid()
+      and g.company_id = p_company_id
+      and g.revoked_at is null
+      and ('founder' = any (g.capabilities) or p_capability = any (g.capabilities))
+  );
+$$;
+
+create or replace function crm_is_founder(p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select crm_has_capability(p_company_id, 'founder') and exists (
+    select 1 from crm_company_grants g
+    where g.user_id = auth.uid() and g.company_id = p_company_id
+      and g.revoked_at is null and 'founder' = any (g.capabilities)
+  );
+$$;
+
+-- Does the caller hold any active CRM grant? Used for company-agnostic tables (organisations, contacts).
+create or replace function crm_has_any_access()
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from crm_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid() and g.revoked_at is null
+  );
+$$;
+
+-- Is the caller a founder of at least one company? Gates audit rows that belong to no single company.
+create or replace function crm_is_any_founder()
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from crm_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid() and g.revoked_at is null and 'founder' = any (g.capabilities)
+  );
+$$;
+
+-- Companies the caller may see in CRM (for list/pipeline filters and the company switcher).
+create or replace function crm_accessible_company_ids()
+returns setof uuid
+language sql stable security definer
+set search_path = public
+as $$
+  select g.company_id
+  from crm_company_grants g
+  join profiles p on p.id = g.user_id and p.is_active
+  where g.user_id = auth.uid() and g.revoked_at is null;
+$$;
+
+alter table crm_company_grants enable row level security;
+drop policy if exists crm_company_grants_select on crm_company_grants;
+create policy crm_company_grants_select on crm_company_grants for select
+  using (user_id = auth.uid() or crm_has_capability(company_id, 'manage_access'));
+
+-- -----------------------------------------------------------------------------
+-- CRM audit log
+-- -----------------------------------------------------------------------------
+create table if not exists crm_audit_log (
+  id          bigint generated always as identity primary key,
+  table_name  text not null,
+  row_id      text,
+  company_id  uuid,
+  action      text not null check (action in ('insert', 'update', 'delete')),
+  actor_id    uuid,
+  old_row     jsonb,
+  new_row     jsonb,
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_crm_audit_company_time on crm_audit_log(company_id, created_at desc);
+create index if not exists idx_crm_audit_row on crm_audit_log(table_name, row_id);
+
+alter table crm_audit_log enable row level security;
+drop policy if exists crm_audit_log_select on crm_audit_log;
+create policy crm_audit_log_select on crm_audit_log for select
+  using (
+    (company_id is not null and crm_has_capability(company_id, 'view_audit'))
+    or (company_id is null and crm_is_any_founder())
+  );
+
+create or replace function crm_audit_trigger()
+returns trigger
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_new jsonb := case when tg_op = 'DELETE' then null else to_jsonb(new) end;
+  v_old jsonb := case when tg_op = 'INSERT' then null else to_jsonb(old) end;
+  v_row jsonb := coalesce(v_new, v_old);
+begin
+  insert into crm_audit_log (table_name, row_id, company_id, action, actor_id, old_row, new_row)
+  values (
+    tg_table_name,
+    v_row->>'id',
+    nullif(v_row->>'company_id', '')::uuid,
+    lower(tg_op),
+    auth.uid(),
+    v_old,
+    v_new
+  );
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists crm_company_grants_audit on crm_company_grants;
+create trigger crm_company_grants_audit after insert or update or delete on crm_company_grants
+  for each row execute function crm_audit_trigger();
+
+-- -----------------------------------------------------------------------------
+-- Per-company CRM settings. Blank means "not configured" (never a silent default).
+-- -----------------------------------------------------------------------------
+create table if not exists crm_company_settings (
+  company_id                 uuid primary key references companies(id),
+  reference_code             text not null,
+  default_quote_currency     text not null,
+  response_target_hours      integer check (response_target_hours is null or response_target_hours > 0),
+  working_calendar           jsonb,                      -- null = not configured; response-time KPIs are then not computed
+  duplicate_window_days      integer not null default 180 check (duplicate_window_days between 1 and 1095),
+  -- Commercial approval policy. 'not_configured' until the founders decide; never read as "approval granted".
+  approval_policy            text not null default 'not_configured'
+                               check (approval_policy in ('not_configured', 'not_required', 'required')),
+  approval_note              text,
+  owner_email_enabled        boolean not null default false,
+  updated_by                 uuid references auth.users(id),
+  created_at                 timestamptz not null default now(),
+  updated_at                 timestamptz not null default now(),
+  constraint crm_company_settings_code_format check (reference_code ~ '^[A-Z]{2,5}$'),
+  constraint crm_company_settings_currency_format check (default_quote_currency ~ '^[A-Z]{3}$')
+);
+create unique index if not exists uq_crm_company_settings_code on crm_company_settings(reference_code);
+
+drop trigger if exists crm_company_settings_set_updated_at on crm_company_settings;
+create trigger crm_company_settings_set_updated_at before update on crm_company_settings
+  for each row execute function set_updated_at();
+drop trigger if exists crm_company_settings_audit on crm_company_settings;
+create trigger crm_company_settings_audit after insert or update or delete on crm_company_settings
+  for each row execute function crm_audit_trigger();
+
+alter table crm_company_settings enable row level security;
+drop policy if exists crm_company_settings_select on crm_company_settings;
+create policy crm_company_settings_select on crm_company_settings for select
+  using (crm_has_access(company_id));
+
+-- Seed reference codes and default currencies from EXISTING companies only, and only where exactly one active
+-- company exists for the country, so a duplicate-country situation is never guessed at. AE -> UAE/AED,
+-- SA -> KSA/SAR, PL -> PL/EUR (owner decision). Anything else is configured by a founder in Settings.
+insert into crm_company_settings (company_id, reference_code, default_quote_currency)
+select c.id, m.code, m.currency
+from companies c
+join (values ('AE', 'UAE', 'AED'), ('SA', 'KSA', 'SAR'), ('PL', 'PL', 'EUR')) as m(country, code, currency)
+  on m.country = c.country_code
+where c.is_active and c.deleted_at is null
+  and (select count(*) from companies c2 where c2.country_code = c.country_code and c2.is_active and c2.deleted_at is null) = 1
+on conflict do nothing;
+
+-- -----------------------------------------------------------------------------
+-- Access management functions (founders only)
+-- -----------------------------------------------------------------------------
+create or replace function crm_grant_access(
+  p_user_id uuid,
+  p_company_id uuid,
+  p_capabilities text[] default '{}'::text[],
+  p_note text default null
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_id uuid;
+  v_caps text[] := coalesce(p_capabilities, '{}'::text[]);
+begin
+  if auth.uid() is null then raise exception 'Not signed in' using errcode = '28000'; end if;
+  if not crm_has_capability(p_company_id, 'manage_access') then
+    raise exception 'Only a CRM founder can grant Sales access for this company' using errcode = '42501';
+  end if;
+  if not (v_caps <@ crm_capability_list()) then
+    raise exception 'Unknown CRM capability in %', v_caps using errcode = '22023';
+  end if;
+  -- Only a founder may hand out founder or access-management capability.
+  if ('founder' = any (v_caps) or 'manage_access' = any (v_caps)) and not crm_is_founder(p_company_id) then
+    raise exception 'Only a CRM founder can grant founder or access-management rights' using errcode = '42501';
+  end if;
+  if not exists (select 1 from profiles where id = p_user_id and is_active) then
+    raise exception 'That user does not exist or is not active' using errcode = '22023';
+  end if;
+  if not exists (select 1 from companies where id = p_company_id and is_active and deleted_at is null) then
+    raise exception 'Unknown or inactive company' using errcode = '22023';
+  end if;
+
+  update crm_company_grants
+     set capabilities = v_caps, note = coalesce(p_note, note)
+   where user_id = p_user_id and company_id = p_company_id and revoked_at is null
+  returning id into v_id;
+
+  if v_id is null then
+    insert into crm_company_grants (user_id, company_id, capabilities, granted_by, note)
+    values (p_user_id, p_company_id, v_caps, auth.uid(), p_note)
+    returning id into v_id;
+  end if;
+  return v_id;
+end;
+$$;
+
+create or replace function crm_revoke_access(p_user_id uuid, p_company_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_target_is_founder boolean;
+  v_founders integer;
+begin
+  if auth.uid() is null then raise exception 'Not signed in' using errcode = '28000'; end if;
+  if not crm_has_capability(p_company_id, 'manage_access') then
+    raise exception 'Only a CRM founder can revoke Sales access for this company' using errcode = '42501';
+  end if;
+  select 'founder' = any (capabilities) into v_target_is_founder
+    from crm_company_grants where user_id = p_user_id and company_id = p_company_id and revoked_at is null;
+  if v_target_is_founder is null then return; end if;
+  if v_target_is_founder and not crm_is_founder(p_company_id) then
+    raise exception 'Only a CRM founder can revoke a founder' using errcode = '42501';
+  end if;
+  if v_target_is_founder then
+    select count(*) into v_founders from crm_company_grants
+     where company_id = p_company_id and revoked_at is null and 'founder' = any (capabilities);
+    if v_founders <= 1 then
+      raise exception 'Cannot revoke the last founder of this company' using errcode = '23514';
+    end if;
+  end if;
+  update crm_company_grants set revoked_at = now(), revoked_by = auth.uid()
+   where user_id = p_user_id and company_id = p_company_id and revoked_at is null;
+end;
+$$;
+
+create or replace function crm_upsert_settings(
+  p_company_id uuid,
+  p_reference_code text,
+  p_default_quote_currency text,
+  p_response_target_hours integer default null,
+  p_working_calendar jsonb default null,
+  p_duplicate_window_days integer default 180,
+  p_owner_email_enabled boolean default false,
+  p_approval_policy text default null,
+  p_approval_note text default null
+) returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then raise exception 'Not signed in' using errcode = '28000'; end if;
+  if not crm_has_capability(p_company_id, 'manage_settings') then
+    raise exception 'Not allowed to change CRM settings for this company' using errcode = '42501';
+  end if;
+  if not exists (select 1 from companies where id = p_company_id and is_active and deleted_at is null) then
+    raise exception 'Unknown or inactive company' using errcode = '22023';
+  end if;
+  -- Changing the approval policy is a rules decision, reserved to a founder or a delegated rules manager.
+  if p_approval_policy is not null then
+    if p_approval_policy not in ('not_configured', 'not_required', 'required') then
+      raise exception 'Unknown approval policy %', p_approval_policy using errcode = '22023';
+    end if;
+    if not crm_has_capability(p_company_id, 'manage_approval_rules') then
+      raise exception 'Not allowed to change the commercial approval policy' using errcode = '42501';
+    end if;
+  end if;
+  insert into crm_company_settings (company_id, reference_code, default_quote_currency, response_target_hours,
+                                    working_calendar, duplicate_window_days, owner_email_enabled, approval_policy,
+                                    approval_note, updated_by)
+  values (p_company_id, upper(p_reference_code), upper(p_default_quote_currency), p_response_target_hours,
+          p_working_calendar, coalesce(p_duplicate_window_days, 180), coalesce(p_owner_email_enabled, false),
+          coalesce(p_approval_policy, 'not_configured'), p_approval_note, auth.uid())
+  on conflict (company_id) do update set
+    reference_code = excluded.reference_code,
+    default_quote_currency = excluded.default_quote_currency,
+    response_target_hours = excluded.response_target_hours,
+    working_calendar = excluded.working_calendar,
+    duplicate_window_days = excluded.duplicate_window_days,
+    owner_email_enabled = excluded.owner_email_enabled,
+    approval_policy = case when p_approval_policy is null then crm_company_settings.approval_policy
+                           else excluded.approval_policy end,
+    approval_note = case when p_approval_policy is null then crm_company_settings.approval_note
+                         else excluded.approval_note end,
+    updated_by = excluded.updated_by;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges: clients read through RLS only; everything else is via the functions above.
+-- -----------------------------------------------------------------------------
+revoke all on table crm_company_grants, crm_audit_log, crm_company_settings from anon, authenticated, public;
+grant select on table crm_company_grants, crm_audit_log, crm_company_settings to authenticated;
+
+revoke all on function
+  crm_capability_list(), crm_is_any_founder(),
+  crm_has_access(uuid), crm_has_capability(uuid, text), crm_is_founder(uuid), crm_has_any_access(),
+  crm_accessible_company_ids(), crm_audit_trigger(),
+  crm_grant_access(uuid, uuid, text[], text), crm_revoke_access(uuid, uuid),
+  crm_upsert_settings(uuid, text, text, integer, jsonb, integer, boolean, text, text)
+  from public, anon;
+grant execute on function
+  crm_capability_list(),
+  crm_has_access(uuid), crm_has_capability(uuid, text), crm_is_founder(uuid), crm_has_any_access(), crm_is_any_founder(),
+  crm_accessible_company_ids(),
+  crm_grant_access(uuid, uuid, text[], text), crm_revoke_access(uuid, uuid),
+  crm_upsert_settings(uuid, text, text, integer, jsonb, integer, boolean, text, text)
+  to authenticated;
+
+-- ROLLBACK (no CRM data exists yet at this point of the deployment sequence):
+--   drop function if exists crm_upsert_settings(uuid, text, text, integer, jsonb, integer, boolean, text, text);
+--   drop function if exists crm_revoke_access(uuid, uuid);
+--   drop function if exists crm_grant_access(uuid, uuid, text[], text);
+--   drop table if exists crm_company_settings, crm_audit_log, crm_company_grants cascade;
+--   drop function if exists crm_accessible_company_ids(), crm_is_any_founder(), crm_has_any_access(), crm_is_founder(uuid),
+--     crm_has_capability(uuid, text), crm_has_access(uuid), crm_audit_trigger(), crm_capability_list();
+
+-- ---- 20261115000100_crm_core_tables.sql ----
+-- Sales & CRM (Stage B), migration 2 of 4: core tables.
+--
+-- Everything here is READ-ONLY to clients (SELECT policies only, no INSERT/UPDATE/DELETE policies, and no DML
+-- grants). Changes go through the SECURITY DEFINER functions in migrations 3 and 4, which enforce ownership,
+-- stage rules and capabilities. Company-scoped tables are visible only to users holding an active CRM grant for that
+-- company (crm_has_access). Organisations and contacts are shared reference data, visible to any CRM user.
+--
+-- Stage ids are stable (the labels are display text only): new, qualified, proposal_prep, proposal_sent, quote_sent,
+-- negotiation, on_hold, won, lost.
+-- Currencies are never summed across companies: every money column carries its own currency code.
+
+-- -----------------------------------------------------------------------------
+-- Organisations and contacts (agencies, end clients, direct clients)
+-- -----------------------------------------------------------------------------
+create table if not exists crm_organisations (
+  id           uuid primary key default gen_random_uuid(),
+  name         text not null check (length(btrim(name)) between 1 and 200),
+  -- Lower-cased, letters and digits only: "Zeta Media L.L.C." and "ZETA MEDIA LLC" collide here (duplicate warning).
+  name_key     text generated always as (lower(regexp_replace(name, '[^A-Za-z0-9]+', '', 'g'))) stored,
+  kind         text not null check (kind in ('agency', 'client', 'direct')),
+  place        text,
+  note         text,
+  created_by   uuid references auth.users(id),
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  archived_at  timestamptz
+);
+create index if not exists idx_crm_organisations_key on crm_organisations(name_key);
+
+create table if not exists crm_contacts (
+  id               uuid primary key default gen_random_uuid(),
+  organisation_id  uuid references crm_organisations(id),
+  name             text not null check (length(btrim(name)) between 1 and 200),
+  role_title       text,
+  email            text check (email is null or email ~* '^[^@\s]+@[^@\s]+\.[^@\s]+$'),
+  email_key        text generated always as (lower(email)) stored,
+  phone            text,
+  created_by       uuid references auth.users(id),
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  archived_at      timestamptz
+);
+create index if not exists idx_crm_contacts_org on crm_contacts(organisation_id);
+create index if not exists idx_crm_contacts_email on crm_contacts(email_key) where email_key is not null;
+
+-- -----------------------------------------------------------------------------
+-- Opportunities
+-- -----------------------------------------------------------------------------
+create table if not exists crm_reference_counters (
+  company_id  uuid not null references companies(id),
+  year        integer not null,
+  last_value  integer not null default 0,
+  primary key (company_id, year)
+);
+
+create table if not exists crm_opportunities (
+  id                    uuid primary key default gen_random_uuid(),
+  company_id            uuid not null references companies(id),
+  reference             text not null,
+  title                 text not null check (length(btrim(title)) between 1 and 200),
+  brief                 text,
+  agency_org_id         uuid references crm_organisations(id),
+  client_org_id         uuid references crm_organisations(id),
+  source                text not null check (source in (
+                          'agency_call', 'linkedin', 'direct_client', 'whatsapp', 'instagram', 'website', 'referral', 'other')),
+  owner_id              uuid not null references auth.users(id),
+  created_by            uuid not null references auth.users(id),
+  stage                 text not null default 'new' check (stage in (
+                          'new', 'qualified', 'proposal_prep', 'proposal_sent', 'quote_sent', 'negotiation',
+                          'on_hold', 'won', 'lost')),
+  stage_changed_at      timestamptz not null default now(),
+  -- Where the opportunity was before it went on hold, so Resume returns to the right place.
+  stage_before_hold     text check (stage_before_hold is null or stage_before_hold in (
+                          'new', 'qualified', 'proposal_prep', 'proposal_sent', 'quote_sent', 'negotiation')),
+  waiting_on            text check (waiting_on is null or waiting_on in ('client', 'internal')),
+  first_response_at     timestamptz,
+
+  -- Money. Quotation currency may differ from the company default. NULL value = "Value not set".
+  currency              text not null check (currency ~ '^[A-Z]{3}$'),
+  value                 numeric(14, 2) check (value is null or value >= 0),
+  budget_note           text,
+  payment_terms         text,
+
+  -- Shape of the job
+  event_start           date,
+  event_end             date,
+  install_start         date,
+  location              text,
+  technologies          jsonb not null default '[]'::jsonb check (jsonb_typeof(technologies) = 'array'),
+  scope                 text,
+  exclusions            text,
+  risks                 jsonb not null default '[]'::jsonb check (jsonb_typeof(risks) = 'array'),
+
+  -- Hold / Lost / Won
+  hold_reason           text,
+  hold_review_date      date,
+  lost_reason           text,
+  evidence_type         text check (evidence_type is null or evidence_type in ('purchase_order', 'authorised_email')),
+  evidence_reference    text,
+  evidence_date         date,
+  closed_at             timestamptz,
+  closed_by             uuid references auth.users(id),
+
+  -- Equipment availability: a recorded check, NOT a stock reservation and NOT commercial confirmation.
+  availability_state    text not null default 'unverified'
+                          check (availability_state in ('unverified', 'awaiting', 'confirmed', 'unavailable')),
+  availability_by       uuid references auth.users(id),
+  availability_at       timestamptz,
+  availability_notes    text,
+  availability_requested_by uuid references auth.users(id),
+  availability_requested_at timestamptz,
+  -- What the check covered ({install_start, event_start, event_end, technologies}). If the live values drift away
+  -- from this snapshot the check "needs recheck" (derived by crm_availability_needs_recheck()).
+  availability_covers   jsonb,
+
+  version               integer not null default 1,
+  created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now(),
+
+  constraint crm_opportunities_ref_unique unique (company_id, reference),
+  constraint crm_opportunities_party check (agency_org_id is not null or client_org_id is not null),
+  constraint crm_opportunities_dates check (event_end is null or event_start is null or event_end >= event_start),
+  constraint crm_opportunities_hold check (
+    stage <> 'on_hold' or (length(btrim(coalesce(hold_reason, ''))) > 0 and hold_review_date is not null and stage_before_hold is not null)),
+  constraint crm_opportunities_lost check (stage <> 'lost' or length(btrim(coalesce(lost_reason, ''))) > 0),
+  constraint crm_opportunities_won check (
+    stage <> 'won' or (evidence_type is not null and length(btrim(coalesce(evidence_reference, ''))) > 0 and evidence_date is not null)),
+  constraint crm_opportunities_closed check ((stage in ('won', 'lost')) = (closed_at is not null))
+);
+create index if not exists idx_crm_opp_company_stage on crm_opportunities(company_id, stage);
+create index if not exists idx_crm_opp_owner on crm_opportunities(owner_id) where stage not in ('won', 'lost');
+create index if not exists idx_crm_opp_agency on crm_opportunities(agency_org_id);
+create index if not exists idx_crm_opp_client on crm_opportunities(client_org_id);
+
+create table if not exists crm_opportunity_contacts (
+  opportunity_id  uuid not null references crm_opportunities(id) on delete cascade,
+  contact_id      uuid not null references crm_contacts(id),
+  company_id      uuid not null references companies(id),
+  role            text,
+  primary key (opportunity_id, contact_id)
+);
+
+-- One timeline for everything that changes an opportunity: stage moves, owner changes, holds, close, value changes.
+create table if not exists crm_opportunity_events (
+  id              uuid primary key default gen_random_uuid(),
+  opportunity_id  uuid not null references crm_opportunities(id) on delete cascade,
+  company_id      uuid not null references companies(id),
+  kind            text not null check (kind in (
+                    'created', 'stage_changed', 'owner_changed', 'held', 'resumed', 'won', 'lost',
+                    'details_changed', 'value_changed', 'availability', 'approval', 'handover', 'proposal', 'file')),
+  from_value      text,
+  to_value        text,
+  reason          text,
+  actor_id        uuid references auth.users(id),
+  created_at      timestamptz not null default now()
+);
+create index if not exists idx_crm_events_opp on crm_opportunity_events(opportunity_id, created_at);
+
+create table if not exists crm_activities (
+  id              uuid primary key default gen_random_uuid(),
+  opportunity_id  uuid not null references crm_opportunities(id) on delete cascade,
+  company_id      uuid not null references companies(id),
+  kind            text not null check (kind in ('call', 'email', 'meeting', 'note', 'client_response')),
+  body            text not null check (length(btrim(body)) > 0),
+  -- internal notes are still visible to every CRM user of the company; the flag only labels them in the UI.
+  is_internal     boolean not null default false,
+  occurred_at     timestamptz not null default now(),
+  created_by      uuid not null references auth.users(id),
+  created_at      timestamptz not null default now()
+);
+create index if not exists idx_crm_activities_opp on crm_activities(opportunity_id, occurred_at desc);
+
+-- A follow-up has a single due moment (stored as timestamptz, interpreted in Dubai time by the application).
+-- The earliest OPEN follow-up is the opportunity's "next action".
+create table if not exists crm_follow_ups (
+  id              uuid primary key default gen_random_uuid(),
+  opportunity_id  uuid not null references crm_opportunities(id) on delete cascade,
+  company_id      uuid not null references companies(id),
+  assigned_to     uuid not null references auth.users(id),
+  title           text not null check (length(btrim(title)) between 1 and 300),
+  kind            text not null default 'other' check (kind in ('call', 'email', 'meeting', 'proposal', 'other')),
+  due_at          timestamptz not null,
+  status          text not null default 'open' check (status in ('open', 'done', 'cancelled')),
+  completed_at    timestamptz,
+  completed_by    uuid references auth.users(id),
+  outcome         text,
+  created_by      uuid not null references auth.users(id),
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  constraint crm_follow_ups_done check (status <> 'done' or (completed_at is not null and length(btrim(coalesce(outcome, ''))) > 0))
+);
+create index if not exists idx_crm_follow_ups_open on crm_follow_ups(due_at) where status = 'open';
+create index if not exists idx_crm_follow_ups_opp on crm_follow_ups(opportunity_id);
+create index if not exists idx_crm_follow_ups_assignee on crm_follow_ups(assigned_to) where status = 'open';
+
+-- -----------------------------------------------------------------------------
+-- Files and links (private storage; see migration 4 for the bucket). Rows are registered only by crm_register_file().
+-- -----------------------------------------------------------------------------
+create or replace function crm_allowed_mime_types()
+returns text[]
+language sql immutable
+as $$
+  select array[
+    'application/pdf',
+    'image/jpeg', 'image/png', 'image/webp',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',   -- .docx (no macros)
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',         -- .xlsx (no macros)
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation', -- .pptx (no macros)
+    'text/plain', 'text/csv'
+  ]::text[];
+$$;
+
+create table if not exists crm_files (
+  id              uuid primary key default gen_random_uuid(),
+  opportunity_id  uuid not null references crm_opportunities(id) on delete cascade,
+  company_id      uuid not null references companies(id),
+  kind            text not null check (kind in ('file', 'link')),
+  label           text,
+  original_name   text,
+  storage_path    text unique,
+  mime_type       text,
+  size_bytes      bigint,
+  url             text,
+  purpose         text not null default 'other'
+                    check (purpose in ('proposal', 'purchase_order', 'authorised_email', 'brief', 'other')),
+  uploaded_by     uuid not null references auth.users(id),
+  created_at      timestamptz not null default now(),
+  deleted_at      timestamptz,
+  constraint crm_files_file_shape check (
+    kind <> 'file' or (
+      storage_path is not null and original_name is not null and mime_type is not null and size_bytes is not null
+      and url is null
+      and mime_type = any (crm_allowed_mime_types())
+      and size_bytes between 1 and 20971520
+      -- No executable or macro-capable name in ANY dot-separated segment ("invoice.exe.pdf" is refused too).
+      and original_name !~* '(^|\.)(exe|dll|msi|bat|cmd|com|scr|pif|cpl|msc|lnk|hta|wsf|wsh|vbs|vbe|js|jse|ps1|psm1|sh|bash|jar|apk|app|dmg|iso|reg|docm|dotm|xlsm|xlsb|xltm|xlam|pptm|potm|ppsm|ppam|sldm|html|htm|svg)(\.|$)'
+      and storage_path ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}/[0-9a-f-]{36}-[A-Za-z0-9._-]{1,150}$'
+    )),
+  constraint crm_files_link_shape check (
+    kind <> 'link' or (url is not null and url ~* '^https://[^\s]+$' and storage_path is null and mime_type is null and size_bytes is null))
+);
+create index if not exists idx_crm_files_opp on crm_files(opportunity_id) where deleted_at is null;
+
+-- -----------------------------------------------------------------------------
+-- Proposals (versions recorded manually; Canva/ChatGPT/Zoho stay outside the app)
+-- -----------------------------------------------------------------------------
+create table if not exists crm_proposals (
+  id              uuid primary key default gen_random_uuid(),
+  opportunity_id  uuid not null references crm_opportunities(id) on delete cascade,
+  company_id      uuid not null references companies(id),
+  version         integer not null check (version >= 1),
+  status          text not null default 'draft' check (status in ('draft', 'sent', 'superseded', 'accepted')),
+  file_id         uuid references crm_files(id),
+  note            text,
+  sent_on         date,
+  created_by      uuid not null references auth.users(id),
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  unique (opportunity_id, version),
+  constraint crm_proposals_sent check (status not in ('sent', 'accepted') or sent_on is not null)
+);
+
+-- Zoho Books stays the accounting source: only references and dated manual statuses live here.
+create table if not exists crm_zoho_references (
+  opportunity_id        uuid primary key references crm_opportunities(id) on delete cascade,
+  company_id            uuid not null references companies(id),
+  quote_ref             text,
+  quote_sent_on         date,
+  invoice_ref           text,
+  invoice_issued_on     date,
+  payment_received_on   date,
+  paid_amount           numeric(14, 2) check (paid_amount is null or paid_amount >= 0),
+  updated_by            uuid references auth.users(id),
+  updated_at            timestamptz not null default now()
+);
+
+-- -----------------------------------------------------------------------------
+-- Commercial approval: a request/decision log. With the company policy 'not_configured' (the default) no
+-- request can be decided; an absent approval is never presented as an approval.
+-- -----------------------------------------------------------------------------
+create table if not exists crm_approvals (
+  id              uuid primary key default gen_random_uuid(),
+  opportunity_id  uuid not null references crm_opportunities(id) on delete cascade,
+  company_id      uuid not null references companies(id),
+  proposal_id     uuid references crm_proposals(id),
+  state           text not null default 'pending' check (state in ('pending', 'approved', 'changes_requested')),
+  requested_by    uuid not null references auth.users(id),
+  requested_at    timestamptz not null default now(),
+  decided_by      uuid references auth.users(id),
+  decided_at      timestamptz,
+  instruction     text,
+  constraint crm_approvals_decided check (state = 'pending' or (decided_by is not null and decided_at is not null))
+);
+create index if not exists idx_crm_approvals_opp on crm_approvals(opportunity_id);
+
+-- -----------------------------------------------------------------------------
+-- Handover to the Project Manager (the package is built from the opportunity; this records its status)
+-- -----------------------------------------------------------------------------
+create table if not exists crm_handovers (
+  opportunity_id  uuid primary key references crm_opportunities(id) on delete cascade,
+  company_id      uuid not null references companies(id),
+  pm_user_id      uuid references auth.users(id),
+  status          text not null default 'draft' check (status in ('draft', 'ready', 'handed_over')),
+  notes           text,
+  prepared_by     uuid references auth.users(id),
+  prepared_at     timestamptz,
+  handed_over_at  timestamptz,
+  updated_at      timestamptz not null default now(),
+  constraint crm_handovers_done check (status <> 'handed_over' or (pm_user_id is not null and handed_over_at is not null))
+);
+
+-- -----------------------------------------------------------------------------
+-- In-app reminders (first). Owner emails are queued only when the company setting is on; dedupe_key makes every
+-- reminder idempotent so a re-run of the job never creates (or emails) twice.
+-- -----------------------------------------------------------------------------
+create table if not exists crm_reminders (
+  id                    uuid primary key default gen_random_uuid(),
+  user_id               uuid not null references auth.users(id) on delete cascade,
+  company_id            uuid not null references companies(id),
+  opportunity_id        uuid not null references crm_opportunities(id) on delete cascade,
+  follow_up_id          uuid references crm_follow_ups(id) on delete cascade,
+  kind                  text not null check (kind in ('follow_up_due', 'follow_up_overdue', 'hold_review_due', 'no_next_action')),
+  title                 text not null,
+  due_at                timestamptz,
+  dedupe_key            text not null unique,
+  created_at            timestamptz not null default now(),
+  read_at               timestamptz,
+  email_status          text not null default 'not_requested'
+                          check (email_status in ('not_requested', 'pending', 'sent', 'failed', 'skipped')),
+  email_attempts        integer not null default 0,
+  email_next_attempt_at timestamptz,
+  email_last_error      text,
+  email_sent_at         timestamptz
+);
+create index if not exists idx_crm_reminders_user on crm_reminders(user_id, read_at);
+create index if not exists idx_crm_reminders_email on crm_reminders(email_next_attempt_at) where email_status in ('pending', 'failed');
+
+-- -----------------------------------------------------------------------------
+-- updated_at + audit triggers
+-- -----------------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'crm_organisations', 'crm_contacts', 'crm_opportunities', 'crm_follow_ups', 'crm_proposals', 'crm_handovers'
+  ] loop
+    execute format('drop trigger if exists %I on %I', t || '_set_updated_at', t);
+    execute format('create trigger %I before update on %I for each row execute function set_updated_at()',
+                   t || '_set_updated_at', t);
+  end loop;
+  foreach t in array array[
+    'crm_organisations', 'crm_contacts', 'crm_opportunities', 'crm_opportunity_contacts', 'crm_follow_ups',
+    'crm_files', 'crm_proposals', 'crm_zoho_references', 'crm_approvals', 'crm_handovers'
+  ] loop
+    execute format('drop trigger if exists %I on %I', t || '_audit', t);
+    execute format('create trigger %I after insert or update or delete on %I for each row execute function crm_audit_trigger()',
+                   t || '_audit', t);
+  end loop;
+end $$;
+
+-- -----------------------------------------------------------------------------
+-- RLS: SELECT only
+-- -----------------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'crm_organisations', 'crm_contacts', 'crm_reference_counters', 'crm_opportunities', 'crm_opportunity_contacts',
+    'crm_opportunity_events', 'crm_activities', 'crm_follow_ups', 'crm_files', 'crm_proposals',
+    'crm_zoho_references', 'crm_approvals', 'crm_handovers', 'crm_reminders'
+  ] loop
+    execute format('alter table %I enable row level security', t);
+  end loop;
+end $$;
+
+drop policy if exists crm_organisations_select on crm_organisations;
+create policy crm_organisations_select on crm_organisations for select using (crm_has_any_access());
+drop policy if exists crm_contacts_select on crm_contacts;
+create policy crm_contacts_select on crm_contacts for select using (crm_has_any_access());
+
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'crm_opportunities', 'crm_opportunity_contacts', 'crm_opportunity_events', 'crm_activities', 'crm_follow_ups',
+    'crm_files', 'crm_proposals', 'crm_zoho_references', 'crm_approvals', 'crm_handovers'
+  ] loop
+    execute format('drop policy if exists %I on %I', t || '_select', t);
+    execute format('create policy %I on %I for select using (crm_has_access(company_id))', t || '_select', t);
+  end loop;
+end $$;
+
+-- Reference counters are internal: nobody reads them directly (no policy => no rows for clients).
+-- Reminders are strictly the recipient's own, and only while they still hold access to that company.
+drop policy if exists crm_reminders_select on crm_reminders;
+create policy crm_reminders_select on crm_reminders for select
+  using (user_id = auth.uid() and crm_has_access(company_id));
+
+-- -----------------------------------------------------------------------------
+-- Privileges: SELECT only for signed-in users; nothing for anon.
+-- -----------------------------------------------------------------------------
+revoke all on table
+  crm_organisations, crm_contacts, crm_reference_counters, crm_opportunities, crm_opportunity_contacts,
+  crm_opportunity_events, crm_activities, crm_follow_ups, crm_files, crm_proposals, crm_zoho_references,
+  crm_approvals, crm_handovers, crm_reminders
+  from anon, authenticated, public;
+grant select on table
+  crm_organisations, crm_contacts, crm_opportunities, crm_opportunity_contacts, crm_opportunity_events,
+  crm_activities, crm_follow_ups, crm_files, crm_proposals, crm_zoho_references, crm_approvals, crm_handovers,
+  crm_reminders
+  to authenticated;
+
+-- Equipment-availability recheck: true when the check no longer covers what the opportunity now says.
+create or replace function crm_availability_needs_recheck(p_opportunity_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select o.availability_state in ('confirmed', 'unavailable')
+     and o.availability_covers is distinct from jsonb_build_object(
+           'install_start', o.install_start, 'event_start', o.event_start, 'event_end', o.event_end,
+           'technologies', o.technologies)
+  from crm_opportunities o
+  where o.id = p_opportunity_id and crm_has_access(o.company_id);
+$$;
+revoke all on function crm_availability_needs_recheck(uuid), crm_allowed_mime_types() from public, anon;
+grant execute on function crm_availability_needs_recheck(uuid), crm_allowed_mime_types() to authenticated;
+
+-- ROLLBACK (only before any CRM data exists; afterwards export first):
+--   drop function if exists crm_availability_needs_recheck(uuid);
+--   drop table if exists crm_reminders, crm_handovers, crm_approvals, crm_zoho_references, crm_proposals, crm_files,
+--     crm_follow_ups, crm_activities, crm_opportunity_events, crm_opportunity_contacts, crm_opportunities,
+--     crm_reference_counters, crm_contacts, crm_organisations cascade;
+--   drop function if exists crm_allowed_mime_types();
+
+-- ---- 20261115000200_crm_workflow_functions.sql ----
+-- Sales & CRM (Stage B), migration 3 of 4: controlled workflow functions.
+--
+-- Every write to an opportunity goes through one of these SECURITY DEFINER functions. Each one:
+--   * requires a signed-in user and a CRM grant for the opportunity's company (crm_has_access); a user without a grant
+--     gets "not found", never confirmation that a row exists;
+--   * enforces who may act: the owner or a founder for stage, value, hold, won and lost; a founder or a user holding
+--     'assign_owner' for ownership; any CRM user of the company for notes, files and their own follow-ups;
+--   * locks the row and checks the version the caller last saw (optimistic concurrency, errcode 40001);
+--   * writes a timeline event (crm_opportunity_events). Table triggers write the CRM audit log.
+-- Errors use: 28000 not signed in, 42501 not allowed, P0002 not found, 22023 invalid input, 23514 rule violated,
+-- 40001 changed by someone else.
+
+-- -----------------------------------------------------------------------------
+-- Internal helpers (not granted to clients)
+-- -----------------------------------------------------------------------------
+create or replace function crm_today_dubai()
+returns date
+language sql stable
+as $$ select (now() at time zone 'Asia/Dubai')::date; $$;
+
+create or replace function crm_require_user()
+returns uuid
+language plpgsql stable
+as $$
+begin
+  if auth.uid() is null then raise exception 'Not signed in' using errcode = '28000'; end if;
+  return auth.uid();
+end;
+$$;
+
+-- Lock and return an opportunity the caller can see. Not-visible and not-existing are indistinguishable.
+create or replace function crm_lock_opportunity(p_id uuid)
+returns crm_opportunities
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities;
+begin
+  perform crm_require_user();
+  select * into v from crm_opportunities where id = p_id for update;
+  if not found or not crm_has_access(v.company_id) then
+    raise exception 'Opportunity not found' using errcode = 'P0002';
+  end if;
+  return v;
+end;
+$$;
+
+create or replace function crm_check_version(v crm_opportunities, p_expected integer)
+returns void
+language plpgsql
+as $$
+begin
+  if p_expected is not null and v.version <> p_expected then
+    raise exception 'This opportunity was changed by someone else. Reload and try again.' using errcode = '40001';
+  end if;
+end;
+$$;
+
+create or replace function crm_require_owner_or_founder(v crm_opportunities)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if v.owner_id <> auth.uid() and not crm_is_founder(v.company_id) then
+    raise exception 'Only the owner of this opportunity or a founder can do this' using errcode = '42501';
+  end if;
+end;
+$$;
+
+create or replace function crm_log_event(
+  p_opportunity_id uuid, p_company_id uuid, p_kind text,
+  p_from text default null, p_to text default null, p_reason text default null
+) returns void
+language sql
+as $$
+  insert into crm_opportunity_events (opportunity_id, company_id, kind, from_value, to_value, reason, actor_id)
+  values (p_opportunity_id, p_company_id, p_kind, p_from, p_to, p_reason, auth.uid());
+$$;
+
+create or replace function crm_user_has_company_access(p_user_id uuid, p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from crm_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = p_user_id and g.company_id = p_company_id and g.revoked_at is null
+  );
+$$;
+
+create or replace function crm_validate_technologies(p_tech jsonb)
+returns void
+language plpgsql immutable
+as $$
+declare e jsonb;
+begin
+  if p_tech is null or jsonb_typeof(p_tech) <> 'array' then
+    raise exception 'technologies must be a list' using errcode = '22023';
+  end if;
+  for e in select * from jsonb_array_elements(p_tech) loop
+    if jsonb_typeof(e) <> 'object'
+       or jsonb_typeof(e->'name') is distinct from 'string' or length(btrim(e->>'name')) = 0
+       or jsonb_typeof(e->'qty') is distinct from 'number' or (e->>'qty')::numeric < 1
+       or (e->>'qty')::numeric <> trunc((e->>'qty')::numeric) then
+      raise exception 'Each technology needs a name and a whole-number quantity of at least 1' using errcode = '22023';
+    end if;
+  end loop;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Organisations and contacts
+-- -----------------------------------------------------------------------------
+create or replace function crm_create_organisation(
+  p_name text, p_kind text, p_place text default null, p_note text default null
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare v_id uuid;
+begin
+  perform crm_require_user();
+  if not crm_has_any_access() then raise exception 'No CRM access' using errcode = '42501'; end if;
+  insert into crm_organisations (name, kind, place, note, created_by)
+  values (btrim(p_name), p_kind, nullif(btrim(p_place), ''), nullif(btrim(p_note), ''), auth.uid())
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+create or replace function crm_create_contact(
+  p_organisation_id uuid, p_name text, p_role_title text default null,
+  p_email text default null, p_phone text default null
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare v_id uuid;
+begin
+  perform crm_require_user();
+  if not crm_has_any_access() then raise exception 'No CRM access' using errcode = '42501'; end if;
+  insert into crm_contacts (organisation_id, name, role_title, email, phone, created_by)
+  values (p_organisation_id, btrim(p_name), nullif(btrim(p_role_title), ''), nullif(btrim(p_email), ''),
+          nullif(btrim(p_phone), ''), auth.uid())
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- Organisations whose name is the same (ignoring case, spaces and punctuation) or contains / is contained by the
+-- new name. A hint shown while typing; never blocks.
+create or replace function crm_find_similar_organisations(p_name text)
+returns table (id uuid, name text, kind text, place text)
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare v_key text := lower(regexp_replace(coalesce(p_name, ''), '[^A-Za-z0-9]+', '', 'g'));
+begin
+  perform crm_require_user();
+  if not crm_has_any_access() or length(v_key) < 3 then return; end if;
+  return query
+    select o.id, o.name, o.kind, o.place from crm_organisations o
+    where o.archived_at is null
+      and (o.name_key = v_key
+           or (length(v_key) >= 5 and position(v_key in o.name_key) > 0)
+           or (length(o.name_key) >= 5 and position(o.name_key in v_key) > 0))
+    order by (o.name_key = v_key) desc, o.name
+    limit 10;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Duplicate candidates. Returns recent opportunities (in companies the caller can see) that MIGHT be the same job:
+-- sharing the agency or end client, OR overlapping the same dates at the same location. Sharing an organisation
+-- alone is routine (one agency, many briefs), so scoring and the decision whether to warn happen in
+-- packages/domain/src/crmDuplicates.ts, which weighs title, dates, location and technologies as well.
+-- -----------------------------------------------------------------------------
+create or replace function crm_find_duplicate_candidates(
+  p_agency_org_id uuid default null,
+  p_client_org_id uuid default null,
+  p_event_start date default null,
+  p_install_start date default null,
+  p_location text default null
+) returns table (
+  opportunity_id uuid, company_id uuid, reference text, title text, stage text, owner_id uuid,
+  agency_org_id uuid, client_org_id uuid, event_start date, event_end date, install_start date,
+  location text, technologies jsonb, created_at timestamptz
+)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform crm_require_user();
+  return query
+    select o.id, o.company_id, o.reference, o.title, o.stage, o.owner_id, o.agency_org_id, o.client_org_id,
+           o.event_start, o.event_end, o.install_start, o.location, o.technologies, o.created_at
+    from crm_opportunities o
+    left join crm_company_settings s on s.company_id = o.company_id
+    where crm_has_access(o.company_id)
+      and o.created_at >= now() - make_interval(days => coalesce(s.duplicate_window_days, 180))
+      and (
+        (p_agency_org_id is not null and (o.agency_org_id = p_agency_org_id or o.client_org_id = p_agency_org_id))
+        or (p_client_org_id is not null and (o.client_org_id = p_client_org_id or o.agency_org_id = p_client_org_id))
+        or (
+          nullif(btrim(p_location), '') is not null and lower(btrim(o.location)) = lower(btrim(p_location))
+          and (
+            (p_event_start is not null and o.event_start between p_event_start - 14 and p_event_start + 14)
+            or (p_install_start is not null and o.install_start between p_install_start - 14 and p_install_start + 14)
+          )
+        )
+      )
+    order by o.created_at desc
+    limit 50;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Create an opportunity (always with an owner and a first next action)
+-- -----------------------------------------------------------------------------
+create or replace function crm_create_opportunity(
+  p_company_id uuid,
+  p_title text,
+  p_source text,
+  p_next_title text,
+  p_next_due timestamptz,
+  p_agency_org_id uuid default null,
+  p_client_org_id uuid default null,
+  p_owner_id uuid default null,
+  p_currency text default null,
+  p_value numeric default null,
+  p_budget_note text default null,
+  p_brief text default null,
+  p_event_start date default null,
+  p_event_end date default null,
+  p_install_start date default null,
+  p_location text default null,
+  p_technologies jsonb default '[]'::jsonb,
+  p_scope text default null,
+  p_waiting_on text default null,
+  p_contacts jsonb default '[]'::jsonb,
+  p_next_kind text default 'other'
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_user uuid := crm_require_user();
+  v_settings crm_company_settings;
+  v_owner uuid := coalesce(p_owner_id, auth.uid());
+  v_year integer := extract(year from (now() at time zone 'Asia/Dubai'))::integer;
+  v_seq integer;
+  v_id uuid;
+  v_ref text;
+  c jsonb;
+begin
+  if not crm_has_access(p_company_id) then
+    raise exception 'You do not have Sales access for this company' using errcode = '42501';
+  end if;
+  select * into v_settings from crm_company_settings where company_id = p_company_id;
+  if not found then
+    raise exception 'CRM settings (reference code and currency) are not configured for this company yet' using errcode = '23514';
+  end if;
+  if v_owner <> v_user then
+    if not crm_has_capability(p_company_id, 'assign_owner') then
+      raise exception 'Only a founder (or someone they delegated) can assign another owner' using errcode = '42501';
+    end if;
+    if not crm_user_has_company_access(v_owner, p_company_id) then
+      raise exception 'The chosen owner has no Sales access for this company' using errcode = '22023';
+    end if;
+  end if;
+  if p_agency_org_id is null and p_client_org_id is null then
+    raise exception 'Choose an agency or an end client (or both)' using errcode = '22023';
+  end if;
+  if length(btrim(coalesce(p_next_title, ''))) = 0 or p_next_due is null then
+    raise exception 'Every opportunity needs a next action with a due date' using errcode = '22023';
+  end if;
+  perform crm_validate_technologies(coalesce(p_technologies, '[]'::jsonb));
+
+  insert into crm_reference_counters (company_id, year, last_value) values (p_company_id, v_year, 1)
+  on conflict (company_id, year) do update set last_value = crm_reference_counters.last_value + 1
+  returning last_value into v_seq;
+  v_ref := format('OPP-%s-%s-%s', v_settings.reference_code, v_year, lpad(v_seq::text, 4, '0'));
+
+  insert into crm_opportunities (
+    company_id, reference, title, brief, agency_org_id, client_org_id, source, owner_id, created_by,
+    currency, value, budget_note, event_start, event_end, install_start, location, technologies, scope, waiting_on)
+  values (
+    p_company_id, v_ref, btrim(p_title), nullif(btrim(p_brief), ''), p_agency_org_id, p_client_org_id, p_source,
+    v_owner, v_user, coalesce(upper(p_currency), v_settings.default_quote_currency), p_value,
+    nullif(btrim(p_budget_note), ''), p_event_start, p_event_end, p_install_start, nullif(btrim(p_location), ''),
+    coalesce(p_technologies, '[]'::jsonb), nullif(btrim(p_scope), ''), p_waiting_on)
+  returning id into v_id;
+
+  for c in select * from jsonb_array_elements(coalesce(p_contacts, '[]'::jsonb)) loop
+    insert into crm_opportunity_contacts (opportunity_id, contact_id, company_id, role)
+    values (v_id, (c->>'contact_id')::uuid, p_company_id, nullif(btrim(c->>'role'), ''))
+    on conflict do nothing;
+  end loop;
+
+  insert into crm_follow_ups (opportunity_id, company_id, assigned_to, title, kind, due_at, created_by)
+  values (v_id, p_company_id, v_owner, btrim(p_next_title), coalesce(p_next_kind, 'other'), p_next_due, v_user);
+
+  perform crm_log_event(v_id, p_company_id, 'created', null, 'new', null);
+  return v_id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Edit details (owner or founder). p_patch holds only the keys being changed.
+-- -----------------------------------------------------------------------------
+create or replace function crm_update_opportunity(p_id uuid, p_expected_version integer, p_patch jsonb)
+returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v crm_opportunities;
+  k text;
+  v_allowed text[] := array['title', 'brief', 'agency_org_id', 'client_org_id', 'source', 'currency', 'value',
+    'budget_note', 'payment_terms', 'event_start', 'event_end', 'install_start', 'location', 'technologies',
+    'scope', 'exclusions', 'risks', 'waiting_on'];
+  v_money boolean;
+  v_version integer;
+begin
+  v := crm_lock_opportunity(p_id);
+  perform crm_check_version(v, p_expected_version);
+  perform crm_require_owner_or_founder(v);
+  if v.stage = 'lost' then
+    raise exception 'A lost opportunity can no longer be edited' using errcode = '23514';
+  end if;
+  if p_patch is null or jsonb_typeof(p_patch) <> 'object' then
+    raise exception 'Nothing to change' using errcode = '22023';
+  end if;
+  for k in select jsonb_object_keys(p_patch) loop
+    if not (k = any (v_allowed)) then
+      raise exception 'Field % cannot be changed here', k using errcode = '22023';
+    end if;
+  end loop;
+  v_money := p_patch ? 'value' or p_patch ? 'currency';
+  if v_money and v.stage = 'won' and not crm_is_founder(v.company_id) then
+    raise exception 'The value of a won opportunity can only be changed by a founder' using errcode = '42501';
+  end if;
+  if p_patch ? 'technologies' then perform crm_validate_technologies(p_patch->'technologies'); end if;
+  if p_patch ? 'risks' and jsonb_typeof(p_patch->'risks') <> 'array' then
+    raise exception 'risks must be a list' using errcode = '22023';
+  end if;
+
+  update crm_opportunities set
+    title = case when p_patch ? 'title' then btrim(p_patch->>'title') else title end,
+    brief = case when p_patch ? 'brief' then nullif(btrim(p_patch->>'brief'), '') else brief end,
+    agency_org_id = case when p_patch ? 'agency_org_id' then (p_patch->>'agency_org_id')::uuid else agency_org_id end,
+    client_org_id = case when p_patch ? 'client_org_id' then (p_patch->>'client_org_id')::uuid else client_org_id end,
+    source = case when p_patch ? 'source' then p_patch->>'source' else source end,
+    currency = case when p_patch ? 'currency' then upper(p_patch->>'currency') else currency end,
+    value = case when p_patch ? 'value' then (p_patch->>'value')::numeric else value end,
+    budget_note = case when p_patch ? 'budget_note' then nullif(btrim(p_patch->>'budget_note'), '') else budget_note end,
+    payment_terms = case when p_patch ? 'payment_terms' then nullif(btrim(p_patch->>'payment_terms'), '') else payment_terms end,
+    event_start = case when p_patch ? 'event_start' then (p_patch->>'event_start')::date else event_start end,
+    event_end = case when p_patch ? 'event_end' then (p_patch->>'event_end')::date else event_end end,
+    install_start = case when p_patch ? 'install_start' then (p_patch->>'install_start')::date else install_start end,
+    location = case when p_patch ? 'location' then nullif(btrim(p_patch->>'location'), '') else location end,
+    technologies = case when p_patch ? 'technologies' then p_patch->'technologies' else technologies end,
+    scope = case when p_patch ? 'scope' then nullif(btrim(p_patch->>'scope'), '') else scope end,
+    exclusions = case when p_patch ? 'exclusions' then nullif(btrim(p_patch->>'exclusions'), '') else exclusions end,
+    risks = case when p_patch ? 'risks' then p_patch->'risks' else risks end,
+    waiting_on = case when p_patch ? 'waiting_on' then nullif(p_patch->>'waiting_on', '') else waiting_on end,
+    version = version + 1
+  where id = p_id
+  returning version into v_version;
+
+  if v_money then
+    perform crm_log_event(p_id, v.company_id, 'value_changed',
+      coalesce(v.currency || ' ' || v.value::text, 'not set'),
+      (select coalesce(currency || ' ' || value::text, 'not set') from crm_opportunities where id = p_id));
+  end if;
+  if p_patch - 'value' - 'currency' <> '{}'::jsonb then
+    perform crm_log_event(p_id, v.company_id, 'details_changed', null,
+      (select string_agg(x, ', ' order by x) from jsonb_object_keys(p_patch - 'value' - 'currency') x));
+  end if;
+  return v_version;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Stage moves. Won, Lost and On hold are never plain moves.
+-- -----------------------------------------------------------------------------
+create or replace function crm_stage_index(p_stage text)
+returns integer
+language sql immutable
+as $$
+  select array_position(array['new', 'qualified', 'proposal_prep', 'proposal_sent', 'quote_sent', 'negotiation'], p_stage);
+$$;
+
+create or replace function crm_move_stage(p_id uuid, p_to text, p_expected_version integer default null)
+returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v crm_opportunities;
+  v_from_i integer;
+  v_to_i integer;
+  v_version integer;
+begin
+  v := crm_lock_opportunity(p_id);
+  perform crm_check_version(v, p_expected_version);
+  perform crm_require_owner_or_founder(v);
+  v_from_i := crm_stage_index(v.stage);
+  v_to_i := crm_stage_index(p_to);
+  if v.stage in ('won', 'lost') then
+    raise exception 'A closed opportunity cannot change stage' using errcode = '23514';
+  elsif v.stage = 'on_hold' then
+    raise exception 'Resume the opportunity before moving it' using errcode = '23514';
+  elsif v_to_i is null then
+    raise exception 'Use the Hold, Won or Lost action for that change' using errcode = '23514';
+  elsif v_to_i = v_from_i or v_to_i < v_from_i - 1 then
+    raise exception 'That stage move is not allowed (only one step back or any step forward)' using errcode = '23514';
+  end if;
+  -- Sent is not approved, and "sent" must be a recorded fact, not a label.
+  if p_to = 'proposal_sent' and not exists (
+       select 1 from crm_proposals where opportunity_id = p_id and status in ('sent', 'accepted')) then
+    raise exception 'Record a proposal as sent before moving to Proposal sent' using errcode = '23514';
+  end if;
+  if p_to = 'quote_sent' and not exists (
+       select 1 from crm_zoho_references where opportunity_id = p_id and length(btrim(coalesce(quote_ref, ''))) > 0) then
+    raise exception 'Record the Zoho Books quote reference before moving to Quote sent' using errcode = '23514';
+  end if;
+  update crm_opportunities set stage = p_to, stage_changed_at = now(), version = version + 1
+   where id = p_id returning version into v_version;
+  perform crm_log_event(p_id, v.company_id, 'stage_changed', v.stage, p_to);
+  return v_version;
+end;
+$$;
+
+create or replace function crm_hold_opportunity(
+  p_id uuid, p_reason text, p_review_date date, p_expected_version integer default null
+) returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities; v_version integer;
+begin
+  v := crm_lock_opportunity(p_id);
+  perform crm_check_version(v, p_expected_version);
+  perform crm_require_owner_or_founder(v);
+  if crm_stage_index(v.stage) is null then
+    raise exception 'Only an open opportunity can be put on hold' using errcode = '23514';
+  end if;
+  if length(btrim(coalesce(p_reason, ''))) = 0 then
+    raise exception 'A reason is required to put an opportunity on hold' using errcode = '22023';
+  end if;
+  if p_review_date is null or p_review_date < crm_today_dubai() then
+    raise exception 'Choose a review date that is today or later' using errcode = '22023';
+  end if;
+  update crm_opportunities set stage = 'on_hold', stage_before_hold = v.stage, hold_reason = btrim(p_reason),
+         hold_review_date = p_review_date, stage_changed_at = now(), version = version + 1
+   where id = p_id returning version into v_version;
+  perform crm_log_event(p_id, v.company_id, 'held', v.stage, 'on_hold', btrim(p_reason));
+  return v_version;
+end;
+$$;
+
+create or replace function crm_resume_opportunity(
+  p_id uuid, p_next_title text, p_next_due timestamptz, p_next_kind text default 'other',
+  p_expected_version integer default null
+) returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities; v_version integer;
+begin
+  v := crm_lock_opportunity(p_id);
+  perform crm_check_version(v, p_expected_version);
+  perform crm_require_owner_or_founder(v);
+  if v.stage <> 'on_hold' then
+    raise exception 'This opportunity is not on hold' using errcode = '23514';
+  end if;
+  if length(btrim(coalesce(p_next_title, ''))) = 0 or p_next_due is null then
+    raise exception 'Resuming needs a next action with a due date' using errcode = '22023';
+  end if;
+  update crm_opportunities set stage = v.stage_before_hold, stage_before_hold = null, hold_reason = null,
+         hold_review_date = null, stage_changed_at = now(), version = version + 1
+   where id = p_id returning version into v_version;
+  insert into crm_follow_ups (opportunity_id, company_id, assigned_to, title, kind, due_at, created_by)
+  values (p_id, v.company_id, v.owner_id, btrim(p_next_title), coalesce(p_next_kind, 'other'), p_next_due, auth.uid());
+  perform crm_log_event(p_id, v.company_id, 'resumed', 'on_hold', v.stage_before_hold);
+  return v_version;
+end;
+$$;
+
+create or replace function crm_mark_won(
+  p_id uuid, p_evidence_type text, p_evidence_reference text, p_evidence_date date, p_note text default null,
+  p_expected_version integer default null
+) returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities; v_version integer;
+begin
+  v := crm_lock_opportunity(p_id);
+  perform crm_check_version(v, p_expected_version);
+  perform crm_require_owner_or_founder(v);
+  if crm_stage_index(v.stage) is null then
+    raise exception 'Only an open opportunity (not on hold) can be marked Won' using errcode = '23514';
+  end if;
+  if p_evidence_type not in ('purchase_order', 'authorised_email')
+     or length(btrim(coalesce(p_evidence_reference, ''))) = 0 or p_evidence_date is null then
+    raise exception 'Won needs evidence: a purchase order or authorised email, its reference and its date' using errcode = '22023';
+  end if;
+  if v.value is null then
+    raise exception 'Set the confirmed value before marking Won' using errcode = '23514';
+  end if;
+  update crm_opportunities set stage = 'won', stage_changed_at = now(), evidence_type = p_evidence_type,
+         evidence_reference = btrim(p_evidence_reference), evidence_date = p_evidence_date,
+         closed_at = now(), closed_by = auth.uid(), version = version + 1
+   where id = p_id returning version into v_version;
+  update crm_follow_ups set status = 'cancelled', updated_at = now() where opportunity_id = p_id and status = 'open';
+  insert into crm_handovers (opportunity_id, company_id) values (p_id, v.company_id) on conflict do nothing;
+  perform crm_log_event(p_id, v.company_id, 'won', v.stage, 'won',
+    p_evidence_type || ': ' || btrim(p_evidence_reference) || coalesce(' — ' || nullif(btrim(p_note), ''), ''));
+  return v_version;
+end;
+$$;
+
+create or replace function crm_mark_lost(p_id uuid, p_reason text, p_expected_version integer default null)
+returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities; v_version integer;
+begin
+  v := crm_lock_opportunity(p_id);
+  perform crm_check_version(v, p_expected_version);
+  perform crm_require_owner_or_founder(v);
+  if v.stage in ('won', 'lost') then
+    raise exception 'This opportunity is already closed' using errcode = '23514';
+  end if;
+  if length(btrim(coalesce(p_reason, ''))) = 0 then
+    raise exception 'A reason is required to mark an opportunity Lost' using errcode = '22023';
+  end if;
+  update crm_opportunities set stage = 'lost', stage_changed_at = now(), lost_reason = btrim(p_reason),
+         stage_before_hold = null, hold_reason = null, hold_review_date = null,
+         closed_at = now(), closed_by = auth.uid(), version = version + 1
+   where id = p_id returning version into v_version;
+  update crm_follow_ups set status = 'cancelled', updated_at = now() where opportunity_id = p_id and status = 'open';
+  perform crm_log_event(p_id, v.company_id, 'lost', v.stage, 'lost', btrim(p_reason));
+  return v_version;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Ownership: Juzar / Rafi (founders) and anyone they delegate 'assign_owner' to
+-- -----------------------------------------------------------------------------
+create or replace function crm_assign_owner(p_id uuid, p_new_owner uuid, p_reason text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities;
+begin
+  v := crm_lock_opportunity(p_id);
+  if not crm_has_capability(v.company_id, 'assign_owner') then
+    raise exception 'Only a founder (or someone they delegated) can assign or reassign owners' using errcode = '42501';
+  end if;
+  if v.stage in ('won', 'lost') then
+    raise exception 'A closed opportunity cannot be reassigned' using errcode = '23514';
+  end if;
+  if not crm_user_has_company_access(p_new_owner, v.company_id) then
+    raise exception 'The chosen owner has no Sales access for this company' using errcode = '22023';
+  end if;
+  if p_new_owner = v.owner_id then return; end if;
+  update crm_opportunities set owner_id = p_new_owner, version = version + 1 where id = p_id;
+  -- Open follow-ups that belonged to the previous owner move with the opportunity, so reminders reach the new owner.
+  update crm_follow_ups set assigned_to = p_new_owner, updated_at = now()
+   where opportunity_id = p_id and status = 'open' and assigned_to = v.owner_id;
+  perform crm_log_event(p_id, v.company_id, 'owner_changed', v.owner_id::text, p_new_owner::text, nullif(btrim(p_reason), ''));
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Activities
+-- -----------------------------------------------------------------------------
+create or replace function crm_add_activity(
+  p_id uuid, p_kind text, p_body text, p_occurred_at timestamptz default now(), p_internal boolean default false
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities; v_id uuid;
+begin
+  v := crm_lock_opportunity(p_id);
+  if v.stage = 'lost' then
+    raise exception 'A lost opportunity can no longer be updated' using errcode = '23514';
+  end if;
+  if p_occurred_at > now() + interval '5 minutes' then
+    raise exception 'An activity cannot be dated in the future' using errcode = '22023';
+  end if;
+  insert into crm_activities (opportunity_id, company_id, kind, body, is_internal, occurred_at, created_by)
+  values (p_id, v.company_id, p_kind, btrim(p_body), coalesce(p_internal, false), coalesce(p_occurred_at, now()), auth.uid())
+  returning id into v_id;
+  -- First outbound contact (call, email or meeting) sets the first-response time used by response KPIs.
+  if v.first_response_at is null and p_kind in ('call', 'email', 'meeting') then
+    update crm_opportunities set first_response_at = coalesce(p_occurred_at, now()) where id = p_id;
+  end if;
+  return v_id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Follow-ups
+-- -----------------------------------------------------------------------------
+create or replace function crm_create_follow_up(
+  p_id uuid, p_title text, p_due_at timestamptz, p_kind text default 'other', p_assigned_to uuid default null
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities; v_assignee uuid; v_new uuid;
+begin
+  v := crm_lock_opportunity(p_id);
+  if v.stage in ('won', 'lost') then
+    raise exception 'A closed opportunity has no follow-ups' using errcode = '23514';
+  end if;
+  v_assignee := coalesce(p_assigned_to, auth.uid());
+  if v_assignee <> auth.uid() and v_assignee <> v.owner_id then
+    -- Putting a task on another person's list (other than the owner's) is an assignment decision.
+    if not crm_has_capability(v.company_id, 'assign_owner') and v.owner_id <> auth.uid() then
+      raise exception 'Only the owner or a founder can assign follow-ups to others' using errcode = '42501';
+    end if;
+  end if;
+  if not crm_user_has_company_access(v_assignee, v.company_id) then
+    raise exception 'The assignee has no Sales access for this company' using errcode = '22023';
+  end if;
+  insert into crm_follow_ups (opportunity_id, company_id, assigned_to, title, kind, due_at, created_by)
+  values (p_id, v.company_id, v_assignee, btrim(p_title), coalesce(p_kind, 'other'), p_due_at, auth.uid())
+  returning id into v_new;
+  return v_new;
+end;
+$$;
+
+create or replace function crm_require_follow_up_actor(f crm_follow_ups, o crm_opportunities)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if f.assigned_to <> auth.uid() and o.owner_id <> auth.uid() and not crm_is_founder(o.company_id) then
+    raise exception 'Only the assignee, the opportunity owner or a founder can change this follow-up' using errcode = '42501';
+  end if;
+end;
+$$;
+
+-- Complete with an outcome. If that leaves an active opportunity with no open follow-up, the caller must say what
+-- happens next: a new follow-up, or putting the opportunity on hold (with reason and review date).
+create or replace function crm_complete_follow_up(
+  p_follow_up_id uuid,
+  p_outcome text,
+  p_next_title text default null,
+  p_next_due timestamptz default null,
+  p_next_kind text default 'other',
+  p_hold_reason text default null,
+  p_hold_review_date date default null
+) returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  f crm_follow_ups;
+  o crm_opportunities;
+  v_has_next boolean := length(btrim(coalesce(p_next_title, ''))) > 0 and p_next_due is not null;
+  v_has_hold boolean := length(btrim(coalesce(p_hold_reason, ''))) > 0 and p_hold_review_date is not null;
+  v_remaining integer;
+begin
+  perform crm_require_user();
+  select * into f from crm_follow_ups where id = p_follow_up_id;
+  if not found or not crm_has_access(f.company_id) then
+    raise exception 'Follow-up not found' using errcode = 'P0002';
+  end if;
+  o := crm_lock_opportunity(f.opportunity_id);
+  select * into f from crm_follow_ups where id = p_follow_up_id for update;
+  perform crm_require_follow_up_actor(f, o);
+  if f.status <> 'open' then
+    raise exception 'This follow-up is already closed' using errcode = '23514';
+  end if;
+  if length(btrim(coalesce(p_outcome, ''))) = 0 then
+    raise exception 'Record the outcome of this follow-up' using errcode = '22023';
+  end if;
+
+  update crm_follow_ups set status = 'done', completed_at = now(), completed_by = auth.uid(), outcome = btrim(p_outcome),
+         updated_at = now()
+   where id = p_follow_up_id;
+
+  if crm_stage_index(o.stage) is not null then      -- active (open, not on hold, not closed)
+    select count(*) into v_remaining from crm_follow_ups where opportunity_id = o.id and status = 'open';
+    if v_remaining = 0 then
+      if v_has_next then
+        insert into crm_follow_ups (opportunity_id, company_id, assigned_to, title, kind, due_at, created_by)
+        values (o.id, o.company_id, o.owner_id, btrim(p_next_title), coalesce(p_next_kind, 'other'), p_next_due, auth.uid());
+      elsif v_has_hold then
+        if p_hold_review_date < crm_today_dubai() then
+          raise exception 'Choose a review date that is today or later' using errcode = '22023';
+        end if;
+        update crm_opportunities set stage = 'on_hold', stage_before_hold = o.stage, hold_reason = btrim(p_hold_reason),
+               hold_review_date = p_hold_review_date, stage_changed_at = now(), version = version + 1
+         where id = o.id;
+        perform crm_log_event(o.id, o.company_id, 'held', o.stage, 'on_hold', btrim(p_hold_reason));
+      else
+        raise exception 'Add a next action or put the opportunity on hold before completing the last follow-up'
+          using errcode = '23514';
+      end if;
+    elsif v_has_next then
+      insert into crm_follow_ups (opportunity_id, company_id, assigned_to, title, kind, due_at, created_by)
+      values (o.id, o.company_id, o.owner_id, btrim(p_next_title), coalesce(p_next_kind, 'other'), p_next_due, auth.uid());
+    end if;
+  end if;
+  insert into crm_activities (opportunity_id, company_id, kind, body, is_internal, occurred_at, created_by)
+  values (o.id, o.company_id, 'note', 'Follow-up done: ' || f.title || '. ' || btrim(p_outcome), true, now(), auth.uid());
+end;
+$$;
+
+create or replace function crm_reschedule_follow_up(p_follow_up_id uuid, p_due_at timestamptz)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare f crm_follow_ups; o crm_opportunities;
+begin
+  perform crm_require_user();
+  select * into f from crm_follow_ups where id = p_follow_up_id;
+  if not found or not crm_has_access(f.company_id) then
+    raise exception 'Follow-up not found' using errcode = 'P0002';
+  end if;
+  o := crm_lock_opportunity(f.opportunity_id);
+  perform crm_require_follow_up_actor(f, o);
+  if f.status <> 'open' then raise exception 'This follow-up is already closed' using errcode = '23514'; end if;
+  update crm_follow_ups set due_at = p_due_at, updated_at = now() where id = p_follow_up_id;
+  -- A rescheduled follow-up is a new reminder moment.
+  delete from crm_reminders where follow_up_id = p_follow_up_id;
+end;
+$$;
+
+create or replace function crm_cancel_follow_up(p_follow_up_id uuid, p_reason text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare f crm_follow_ups; o crm_opportunities; v_others integer;
+begin
+  perform crm_require_user();
+  select * into f from crm_follow_ups where id = p_follow_up_id;
+  if not found or not crm_has_access(f.company_id) then
+    raise exception 'Follow-up not found' using errcode = 'P0002';
+  end if;
+  o := crm_lock_opportunity(f.opportunity_id);
+  perform crm_require_follow_up_actor(f, o);
+  if f.status <> 'open' then raise exception 'This follow-up is already closed' using errcode = '23514'; end if;
+  if length(btrim(coalesce(p_reason, ''))) = 0 then
+    raise exception 'Say why this follow-up is being cancelled' using errcode = '22023';
+  end if;
+  select count(*) into v_others from crm_follow_ups where opportunity_id = o.id and status = 'open' and id <> f.id;
+  if v_others = 0 and crm_stage_index(o.stage) is not null then
+    raise exception 'This is the only next action. Complete it with a new next action, or put the opportunity on hold.'
+      using errcode = '23514';
+  end if;
+  update crm_follow_ups set status = 'cancelled', outcome = btrim(p_reason), updated_at = now() where id = p_follow_up_id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges: internal helpers are not callable by clients; workflow functions are, for signed-in users only.
+-- -----------------------------------------------------------------------------
+revoke all on function
+  crm_today_dubai(), crm_require_user(), crm_lock_opportunity(uuid), crm_check_version(crm_opportunities, integer),
+  crm_require_owner_or_founder(crm_opportunities), crm_log_event(uuid, uuid, text, text, text, text),
+  crm_user_has_company_access(uuid, uuid), crm_validate_technologies(jsonb), crm_stage_index(text),
+  crm_require_follow_up_actor(crm_follow_ups, crm_opportunities)
+  from public, anon, authenticated;
+
+revoke all on function
+  crm_create_organisation(text, text, text, text), crm_create_contact(uuid, text, text, text, text),
+  crm_find_similar_organisations(text), crm_find_duplicate_candidates(uuid, uuid, date, date, text),
+  crm_create_opportunity(uuid, text, text, text, timestamptz, uuid, uuid, uuid, text, numeric, text, text, date, date, date, text, jsonb, text, text, jsonb, text),
+  crm_update_opportunity(uuid, integer, jsonb), crm_move_stage(uuid, text, integer),
+  crm_hold_opportunity(uuid, text, date, integer), crm_resume_opportunity(uuid, text, timestamptz, text, integer),
+  crm_mark_won(uuid, text, text, date, text, integer), crm_mark_lost(uuid, text, integer),
+  crm_assign_owner(uuid, uuid, text), crm_add_activity(uuid, text, text, timestamptz, boolean),
+  crm_create_follow_up(uuid, text, timestamptz, text, uuid),
+  crm_complete_follow_up(uuid, text, text, timestamptz, text, text, date),
+  crm_reschedule_follow_up(uuid, timestamptz), crm_cancel_follow_up(uuid, text)
+  from public, anon;
+grant execute on function
+  crm_create_organisation(text, text, text, text), crm_create_contact(uuid, text, text, text, text),
+  crm_find_similar_organisations(text), crm_find_duplicate_candidates(uuid, uuid, date, date, text),
+  crm_create_opportunity(uuid, text, text, text, timestamptz, uuid, uuid, uuid, text, numeric, text, text, date, date, date, text, jsonb, text, text, jsonb, text),
+  crm_update_opportunity(uuid, integer, jsonb), crm_move_stage(uuid, text, integer),
+  crm_hold_opportunity(uuid, text, date, integer), crm_resume_opportunity(uuid, text, timestamptz, text, integer),
+  crm_mark_won(uuid, text, text, date, text, integer), crm_mark_lost(uuid, text, integer),
+  crm_assign_owner(uuid, uuid, text), crm_add_activity(uuid, text, text, timestamptz, boolean),
+  crm_create_follow_up(uuid, text, timestamptz, text, uuid),
+  crm_complete_follow_up(uuid, text, text, timestamptz, text, text, date),
+  crm_reschedule_follow_up(uuid, timestamptz), crm_cancel_follow_up(uuid, text)
+  to authenticated;
+
+-- ROLLBACK (before any CRM data exists): drop every function created in this file with `drop function if exists`,
+-- using the signatures in the revoke list above.
+
+-- ---- 20261115000300_crm_proposals_files_reminders.sql ----
+-- Sales & CRM (Stage B), migration 4 of 4: files, proposals, Zoho references, equipment availability, commercial
+-- approval (unconfigured by default), handover, in-app reminders and the private storage bucket.
+--
+-- Hard rules encoded here:
+--   * Files: private bucket, no client policies at all. The web server validates type, size and content, uploads with
+--     the service role, then registers the file through crm_register_file(), which re-checks the path shape and that
+--     the object exists. The table CHECKs and the bucket reject executables and macro-enabled formats a second time.
+--   * Commercial approval: while a company's policy is 'not_configured' nothing can be requested or decided, and the
+--     UI shows "not configured", never "approved". Policy changes need 'manage_approval_rules'.
+--   * Equipment availability is a dated check by a person with 'confirm_availability'. It is not a stock reservation
+--     and not a commercial confirmation, and it needs repeating when dates, technologies or quantities change.
+--   * Reminders are in-app first. Email is queued only when the company setting owner_email_enabled is on, with retries
+--     and a unique dedupe key. Nothing here sends anything to a client.
+
+-- -----------------------------------------------------------------------------
+-- Private bucket (no client policies: the service role is the only writer and signer)
+-- -----------------------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('crm-files', 'crm-files', false, 20971520, crm_allowed_mime_types())
+on conflict (id) do update
+  set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+-- -----------------------------------------------------------------------------
+-- Files and links
+-- -----------------------------------------------------------------------------
+create or replace function crm_register_file(
+  p_opportunity_id uuid,
+  p_kind text,
+  p_purpose text default 'other',
+  p_label text default null,
+  p_storage_path text default null,
+  p_original_name text default null,
+  p_mime_type text default null,
+  p_size_bytes bigint default null,
+  p_url text default null
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities; v_id uuid;
+begin
+  v := crm_lock_opportunity(p_opportunity_id);
+  if v.stage = 'lost' then
+    raise exception 'A lost opportunity can no longer be updated' using errcode = '23514';
+  end if;
+  if p_kind = 'file' then
+    if p_storage_path is null or p_storage_path not like (v.company_id::text || '/' || v.id::text || '/%') then
+      raise exception 'The file path does not belong to this opportunity' using errcode = '22023';
+    end if;
+    if not exists (select 1 from storage.objects where bucket_id = 'crm-files' and name = p_storage_path) then
+      raise exception 'The uploaded file was not found' using errcode = 'P0002';
+    end if;
+  end if;
+  insert into crm_files (opportunity_id, company_id, kind, label, original_name, storage_path, mime_type, size_bytes,
+                         url, purpose, uploaded_by)
+  values (v.id, v.company_id, p_kind, nullif(btrim(p_label), ''), p_original_name, p_storage_path, p_mime_type,
+          p_size_bytes, p_url, coalesce(p_purpose, 'other'), auth.uid())
+  returning id into v_id;
+  perform crm_log_event(v.id, v.company_id, 'file', null, p_kind || ': ' || coalesce(nullif(btrim(p_label), ''), p_original_name, p_url));
+  return v_id;
+end;
+$$;
+
+-- Soft-removes the record. The server deletes the stored object with the service role afterwards.
+create or replace function crm_remove_file(p_file_id uuid)
+returns text
+language plpgsql security definer
+set search_path = public
+as $$
+declare f crm_files; v crm_opportunities;
+begin
+  perform crm_require_user();
+  select * into f from crm_files where id = p_file_id and deleted_at is null;
+  if not found or not crm_has_access(f.company_id) then
+    raise exception 'File not found' using errcode = 'P0002';
+  end if;
+  v := crm_lock_opportunity(f.opportunity_id);
+  if f.uploaded_by <> auth.uid() and v.owner_id <> auth.uid() and not crm_is_founder(v.company_id) then
+    raise exception 'Only the uploader, the owner or a founder can remove this' using errcode = '42501';
+  end if;
+  update crm_files set deleted_at = now() where id = p_file_id;
+  update crm_proposals set file_id = null where file_id = p_file_id;
+  return f.storage_path;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Proposals ("sent" is a recorded fact and is never the same as "approved" or "accepted")
+-- -----------------------------------------------------------------------------
+create or replace function crm_add_proposal(p_opportunity_id uuid, p_note text default null, p_file_id uuid default null)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities; v_id uuid; v_next integer;
+begin
+  v := crm_lock_opportunity(p_opportunity_id);
+  perform crm_require_owner_or_founder(v);
+  if v.stage in ('won', 'lost') then
+    raise exception 'A closed opportunity cannot get new proposals' using errcode = '23514';
+  end if;
+  if p_file_id is not null and not exists (
+       select 1 from crm_files where id = p_file_id and opportunity_id = v.id and deleted_at is null) then
+    raise exception 'That file does not belong to this opportunity' using errcode = '22023';
+  end if;
+  select coalesce(max(version), 0) + 1 into v_next from crm_proposals where opportunity_id = v.id;
+  insert into crm_proposals (opportunity_id, company_id, version, note, file_id, created_by)
+  values (v.id, v.company_id, v_next, nullif(btrim(p_note), ''), p_file_id, auth.uid())
+  returning id into v_id;
+  perform crm_log_event(v.id, v.company_id, 'proposal', null, 'v' || v_next || ' draft');
+  return v_id;
+end;
+$$;
+
+create or replace function crm_set_proposal_status(p_proposal_id uuid, p_status text, p_sent_on date default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare p crm_proposals; v crm_opportunities;
+begin
+  perform crm_require_user();
+  select * into p from crm_proposals where id = p_proposal_id;
+  if not found or not crm_has_access(p.company_id) then
+    raise exception 'Proposal not found' using errcode = 'P0002';
+  end if;
+  v := crm_lock_opportunity(p.opportunity_id);
+  perform crm_require_owner_or_founder(v);
+  if v.stage in ('won', 'lost') and p_status <> 'accepted' then
+    raise exception 'A closed opportunity cannot change proposals' using errcode = '23514';
+  end if;
+  if p_status = 'sent' then
+    if p.status not in ('draft', 'sent') then
+      raise exception 'Only a draft proposal can be recorded as sent' using errcode = '23514';
+    end if;
+    if p_sent_on is null or p_sent_on > crm_today_dubai() then
+      raise exception 'Give the date it was actually sent (not in the future)' using errcode = '22023';
+    end if;
+    update crm_proposals set status = 'superseded' where opportunity_id = p.opportunity_id and status = 'sent' and id <> p.id;
+    update crm_proposals set status = 'sent', sent_on = p_sent_on where id = p.id;
+  elsif p_status = 'accepted' then
+    if p.status <> 'sent' then
+      raise exception 'Only a sent proposal can be recorded as accepted' using errcode = '23514';
+    end if;
+    update crm_proposals set status = 'accepted' where id = p.id;
+  elsif p_status = 'superseded' then
+    update crm_proposals set status = 'superseded' where id = p.id;
+  else
+    raise exception 'Unknown proposal status' using errcode = '22023';
+  end if;
+  perform crm_log_event(v.id, v.company_id, 'proposal', p.status, 'v' || p.version || ' ' || p_status);
+end;
+$$;
+
+create or replace function crm_upsert_zoho_reference(
+  p_opportunity_id uuid,
+  p_quote_ref text default null, p_quote_sent_on date default null,
+  p_invoice_ref text default null, p_invoice_issued_on date default null,
+  p_payment_received_on date default null, p_paid_amount numeric default null
+) returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities;
+begin
+  v := crm_lock_opportunity(p_opportunity_id);
+  perform crm_require_owner_or_founder(v);
+  insert into crm_zoho_references (opportunity_id, company_id, quote_ref, quote_sent_on, invoice_ref, invoice_issued_on,
+                                   payment_received_on, paid_amount, updated_by)
+  values (v.id, v.company_id, nullif(btrim(p_quote_ref), ''), p_quote_sent_on, nullif(btrim(p_invoice_ref), ''),
+          p_invoice_issued_on, p_payment_received_on, p_paid_amount, auth.uid())
+  on conflict (opportunity_id) do update set
+    quote_ref = excluded.quote_ref, quote_sent_on = excluded.quote_sent_on, invoice_ref = excluded.invoice_ref,
+    invoice_issued_on = excluded.invoice_issued_on, payment_received_on = excluded.payment_received_on,
+    paid_amount = excluded.paid_amount, updated_by = excluded.updated_by, updated_at = now();
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Equipment availability
+-- -----------------------------------------------------------------------------
+create or replace function crm_request_availability(p_opportunity_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities;
+begin
+  v := crm_lock_opportunity(p_opportunity_id);
+  perform crm_require_owner_or_founder(v);
+  if v.stage in ('won', 'lost') then
+    raise exception 'A closed opportunity needs no availability check' using errcode = '23514';
+  end if;
+  update crm_opportunities set availability_state = 'awaiting', availability_requested_by = auth.uid(),
+         availability_requested_at = now(), version = version + 1
+   where id = v.id;
+  perform crm_log_event(v.id, v.company_id, 'availability', v.availability_state, 'awaiting');
+end;
+$$;
+
+create or replace function crm_confirm_availability(p_opportunity_id uuid, p_state text, p_notes text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities;
+begin
+  v := crm_lock_opportunity(p_opportunity_id);
+  if not crm_has_capability(v.company_id, 'confirm_availability') then
+    raise exception 'Only a founder (or someone they delegated) can record equipment availability' using errcode = '42501';
+  end if;
+  if p_state not in ('confirmed', 'unavailable') then
+    raise exception 'State must be confirmed or unavailable' using errcode = '22023';
+  end if;
+  if length(btrim(coalesce(p_notes, ''))) = 0 then
+    raise exception 'Add a note: what was checked, or the alternative if unavailable' using errcode = '22023';
+  end if;
+  if v.stage in ('won', 'lost') then
+    raise exception 'A closed opportunity needs no availability check' using errcode = '23514';
+  end if;
+  update crm_opportunities set availability_state = p_state, availability_by = auth.uid(), availability_at = now(),
+         availability_notes = btrim(p_notes),
+         availability_covers = jsonb_build_object('install_start', install_start, 'event_start', event_start,
+                                                  'event_end', event_end, 'technologies', technologies),
+         version = version + 1
+   where id = v.id;
+  perform crm_log_event(v.id, v.company_id, 'availability', v.availability_state, p_state, btrim(p_notes));
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Commercial approval. Default policy is 'not_configured': nothing may be requested or decided.
+-- -----------------------------------------------------------------------------
+create or replace function crm_request_approval(p_opportunity_id uuid, p_proposal_id uuid default null)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities; v_policy text; v_id uuid;
+begin
+  v := crm_lock_opportunity(p_opportunity_id);
+  perform crm_require_owner_or_founder(v);
+  select approval_policy into v_policy from crm_company_settings where company_id = v.company_id;
+  if coalesce(v_policy, 'not_configured') = 'not_configured' then
+    raise exception 'Commercial approval rules are not configured for this company. Nothing can be approved yet.'
+      using errcode = '23514';
+  elsif v_policy = 'not_required' then
+    raise exception 'The founders decided commercial approval is not required for this company' using errcode = '23514';
+  end if;
+  if exists (select 1 from crm_approvals where opportunity_id = v.id and state = 'pending') then
+    raise exception 'An approval request is already waiting for a decision' using errcode = '23514';
+  end if;
+  if p_proposal_id is not null and not exists (select 1 from crm_proposals where id = p_proposal_id and opportunity_id = v.id) then
+    raise exception 'That proposal does not belong to this opportunity' using errcode = '22023';
+  end if;
+  insert into crm_approvals (opportunity_id, company_id, proposal_id, requested_by)
+  values (v.id, v.company_id, p_proposal_id, auth.uid()) returning id into v_id;
+  perform crm_log_event(v.id, v.company_id, 'approval', null, 'requested');
+  return v_id;
+end;
+$$;
+
+create or replace function crm_decide_approval(p_approval_id uuid, p_state text, p_instruction text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare a crm_approvals; v_policy text;
+begin
+  perform crm_require_user();
+  select * into a from crm_approvals where id = p_approval_id;
+  if not found or not crm_has_access(a.company_id) then
+    raise exception 'Approval request not found' using errcode = 'P0002';
+  end if;
+  if not crm_is_founder(a.company_id) then
+    raise exception 'Only a founder can decide a commercial approval' using errcode = '42501';
+  end if;
+  select approval_policy into v_policy from crm_company_settings where company_id = a.company_id;
+  if coalesce(v_policy, 'not_configured') <> 'required' then
+    raise exception 'Commercial approval rules are not configured for this company. Nothing can be approved yet.'
+      using errcode = '23514';
+  end if;
+  if a.state <> 'pending' then raise exception 'This request has already been decided' using errcode = '23514'; end if;
+  if p_state not in ('approved', 'changes_requested') then
+    raise exception 'Decision must be approved or changes_requested' using errcode = '22023';
+  end if;
+  if p_state = 'changes_requested' and length(btrim(coalesce(p_instruction, ''))) = 0 then
+    raise exception 'Say what needs to change' using errcode = '22023';
+  end if;
+  update crm_approvals set state = p_state, decided_by = auth.uid(), decided_at = now(),
+         instruction = nullif(btrim(p_instruction), '')
+   where id = a.id;
+  perform crm_log_event(a.opportunity_id, a.company_id, 'approval', 'pending', p_state, nullif(btrim(p_instruction), ''));
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Handover to the Project Manager (record of readiness; the Projects module will consume it later)
+-- -----------------------------------------------------------------------------
+create or replace function crm_update_handover(
+  p_opportunity_id uuid, p_status text, p_pm_user_id uuid default null, p_notes text default null
+) returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v crm_opportunities;
+begin
+  v := crm_lock_opportunity(p_opportunity_id);
+  perform crm_require_owner_or_founder(v);
+  if v.stage <> 'won' then
+    raise exception 'Handover is only available once the opportunity is Won' using errcode = '23514';
+  end if;
+  if p_status not in ('draft', 'ready', 'handed_over') then
+    raise exception 'Unknown handover status' using errcode = '22023';
+  end if;
+  if p_status = 'handed_over' and p_pm_user_id is null then
+    raise exception 'Choose the Project Manager before handing over' using errcode = '22023';
+  end if;
+  if p_pm_user_id is not null and not exists (select 1 from profiles where id = p_pm_user_id and is_active) then
+    raise exception 'That Project Manager is not an active user' using errcode = '22023';
+  end if;
+  insert into crm_handovers (opportunity_id, company_id) values (v.id, v.company_id) on conflict do nothing;
+  update crm_handovers set
+    status = p_status,
+    pm_user_id = p_pm_user_id,
+    notes = nullif(btrim(p_notes), ''),
+    prepared_by = case when p_status in ('ready', 'handed_over') then auth.uid() else prepared_by end,
+    prepared_at = case when p_status in ('ready', 'handed_over') then coalesce(prepared_at, now()) else prepared_at end,
+    handed_over_at = case when p_status = 'handed_over' then coalesce(handed_over_at, now()) else null end
+  where opportunity_id = v.id;
+  perform crm_log_event(v.id, v.company_id, 'handover', null, p_status);
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Reminders
+-- -----------------------------------------------------------------------------
+create or replace function crm_mark_reminder_read(p_reminder_id uuid default null)
+returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare n integer;
+begin
+  perform crm_require_user();
+  update crm_reminders set read_at = now()
+   where user_id = auth.uid() and read_at is null and (p_reminder_id is null or id = p_reminder_id);
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- Scheduled job (service role only). Idempotent: dedupe_key is unique, so running twice, or overlapping runs,
+-- create nothing new. Recipients must still hold CRM access to the company. Email is only queued when the company
+-- setting is on; sending, retries and backoff happen in crm_claim_reminder_emails / crm_finish_reminder_email.
+create or replace function crm_generate_reminders(p_now timestamptz default now())
+returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  n integer := 0;
+  c integer;
+  v_today date := (p_now at time zone 'Asia/Dubai')::date;
+begin
+  -- 1. Follow-ups that have fallen due.
+  insert into crm_reminders (user_id, company_id, opportunity_id, follow_up_id, kind, title, due_at, dedupe_key,
+                             email_status, email_next_attempt_at)
+  select f.assigned_to, f.company_id, f.opportunity_id, f.id, 'follow_up_due', f.title, f.due_at,
+         'fu:' || f.id || ':due:' || to_char(f.due_at at time zone 'UTC', 'YYYYMMDD"T"HH24MI'),
+         case when coalesce(s.owner_email_enabled, false) then 'pending' else 'not_requested' end,
+         case when coalesce(s.owner_email_enabled, false) then p_now end
+  from crm_follow_ups f
+  join crm_opportunities o on o.id = f.opportunity_id and o.stage not in ('won', 'lost')
+  left join crm_company_settings s on s.company_id = f.company_id
+  where f.status = 'open' and f.due_at <= p_now and crm_user_has_company_access(f.assigned_to, f.company_id)
+  on conflict (dedupe_key) do nothing;
+  get diagnostics c = row_count; n := n + c;
+
+  -- 2. Follow-ups more than a day overdue: a second, louder reminder to the opportunity owner.
+  insert into crm_reminders (user_id, company_id, opportunity_id, follow_up_id, kind, title, due_at, dedupe_key,
+                             email_status, email_next_attempt_at)
+  select o.owner_id, f.company_id, f.opportunity_id, f.id, 'follow_up_overdue', f.title, f.due_at,
+         'fu:' || f.id || ':overdue:' || to_char(f.due_at at time zone 'UTC', 'YYYYMMDD"T"HH24MI'),
+         case when coalesce(s.owner_email_enabled, false) then 'pending' else 'not_requested' end,
+         case when coalesce(s.owner_email_enabled, false) then p_now end
+  from crm_follow_ups f
+  join crm_opportunities o on o.id = f.opportunity_id and o.stage not in ('won', 'lost')
+  left join crm_company_settings s on s.company_id = f.company_id
+  where f.status = 'open' and f.due_at <= p_now - interval '24 hours' and crm_user_has_company_access(o.owner_id, f.company_id)
+  on conflict (dedupe_key) do nothing;
+  get diagnostics c = row_count; n := n + c;
+
+  -- 3. Holds whose review date has arrived.
+  insert into crm_reminders (user_id, company_id, opportunity_id, kind, title, due_at, dedupe_key,
+                             email_status, email_next_attempt_at)
+  select o.owner_id, o.company_id, o.id, 'hold_review_due', 'Review the hold on ' || o.reference, o.hold_review_date::timestamptz,
+         'hold:' || o.id || ':' || o.hold_review_date,
+         case when coalesce(s.owner_email_enabled, false) then 'pending' else 'not_requested' end,
+         case when coalesce(s.owner_email_enabled, false) then p_now end
+  from crm_opportunities o
+  left join crm_company_settings s on s.company_id = o.company_id
+  where o.stage = 'on_hold' and o.hold_review_date <= v_today and crm_user_has_company_access(o.owner_id, o.company_id)
+  on conflict (dedupe_key) do nothing;
+  get diagnostics c = row_count; n := n + c;
+
+  -- 4. Active opportunities with no open follow-up (should not happen; this makes it visible once per day).
+  insert into crm_reminders (user_id, company_id, opportunity_id, kind, title, dedupe_key,
+                             email_status, email_next_attempt_at)
+  select o.owner_id, o.company_id, o.id, 'no_next_action', o.reference || ' has no next action',
+         'noaction:' || o.id || ':' || v_today,
+         case when coalesce(s.owner_email_enabled, false) then 'pending' else 'not_requested' end,
+         case when coalesce(s.owner_email_enabled, false) then p_now end
+  from crm_opportunities o
+  left join crm_company_settings s on s.company_id = o.company_id
+  where o.stage in ('new', 'qualified', 'proposal_prep', 'proposal_sent', 'quote_sent', 'negotiation')
+    and not exists (select 1 from crm_follow_ups f where f.opportunity_id = o.id and f.status = 'open')
+    and crm_user_has_company_access(o.owner_id, o.company_id)
+  on conflict (dedupe_key) do nothing;
+  get diagnostics c = row_count; n := n + c;
+
+  -- Reminders that no longer apply (follow-up done, cancelled or rescheduled) stop being emailed.
+  update crm_reminders r set email_status = 'skipped', email_next_attempt_at = null
+   where r.email_status in ('pending', 'failed') and r.kind in ('follow_up_due', 'follow_up_overdue')
+     and not exists (select 1 from crm_follow_ups f where f.id = r.follow_up_id and f.status = 'open');
+  return n;
+end;
+$$;
+
+-- Claim a batch of reminder emails to send. Pushes next_attempt_at forward at claim time so an overlapping run
+-- cannot claim (and so cannot double-send) the same row. Rows are only ever sent to the opportunity's own staff.
+create or replace function crm_claim_reminder_emails(p_limit integer default 25, p_now timestamptz default now())
+returns table (reminder_id uuid, recipient_email text, recipient_name text, title text, kind text,
+               opportunity_reference text, opportunity_title text, due_at timestamptz, attempt integer)
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  return query
+  with claimed as (
+    select r.id from crm_reminders r
+    where r.email_status in ('pending', 'failed') and r.email_attempts < 5
+      and r.email_next_attempt_at is not null and r.email_next_attempt_at <= p_now
+    order by r.email_next_attempt_at
+    limit greatest(1, least(coalesce(p_limit, 25), 100))
+    for update skip locked
+  ), bumped as (
+    update crm_reminders r
+       set email_attempts = r.email_attempts + 1,
+           email_next_attempt_at = p_now + interval '15 minutes'
+      from claimed where r.id = claimed.id
+    returning r.id, r.user_id, r.title, r.kind, r.opportunity_id, r.due_at, r.email_attempts
+  )
+  select b.id, p.email, p.full_name, b.title, b.kind, o.reference, o.title, b.due_at, b.email_attempts
+  from bumped b
+  join profiles p on p.id = b.user_id
+  join crm_opportunities o on o.id = b.opportunity_id;
+end;
+$$;
+
+create or replace function crm_finish_reminder_email(p_reminder_id uuid, p_ok boolean, p_error text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare r crm_reminders;
+begin
+  select * into r from crm_reminders where id = p_reminder_id for update;
+  if not found or r.email_status = 'sent' then return; end if;     -- never overwrite a sent row
+  if p_ok then
+    update crm_reminders set email_status = 'sent', email_sent_at = now(), email_next_attempt_at = null,
+           email_last_error = null where id = r.id;
+  else
+    update crm_reminders set email_status = 'failed', email_last_error = left(coalesce(p_error, 'unknown error'), 500),
+           -- 15 min, 1 h, 4 h, 12 h, then stop (attempts is already incremented at claim time).
+           email_next_attempt_at = case when r.email_attempts >= 5 then null
+             else now() + (array[interval '15 minutes', interval '1 hour', interval '4 hours', interval '12 hours', interval '12 hours'])[least(r.email_attempts, 5)] end
+     where id = r.id;
+  end if;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- People pickers. Sales needs names (owner, assignee, Project Manager) without being given read access to the HR
+-- tables. crm_people lists holders of an active CRM grant in companies the caller can access; crm_staff_directory
+-- lists active staff (names only) for the Project Manager and access pickers. Email addresses are returned only to a
+-- founder, who needs them to tell two people apart when granting access.
+-- -----------------------------------------------------------------------------
+create or replace function crm_people()
+returns table (user_id uuid, full_name text, email text, company_ids uuid[])
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform crm_require_user();
+  if not crm_has_any_access() then return; end if;
+  return query
+    select g.user_id, p.full_name, case when crm_is_any_founder() then p.email end, array_agg(distinct g.company_id)
+    from crm_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.revoked_at is null and crm_has_access(g.company_id)
+    group by g.user_id, p.full_name, p.email
+    order by p.full_name nulls last;
+end;
+$$;
+
+create or replace function crm_staff_directory()
+returns table (user_id uuid, full_name text, email text)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform crm_require_user();
+  if not crm_has_any_access() then return; end if;
+  return query
+    select p.id, p.full_name, case when crm_is_any_founder() then p.email end
+    from profiles p where p.is_active
+    order by p.full_name nulls last, p.email;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges
+-- -----------------------------------------------------------------------------
+revoke all on function
+  crm_register_file(uuid, text, text, text, text, text, text, bigint, text), crm_remove_file(uuid),
+  crm_add_proposal(uuid, text, uuid), crm_set_proposal_status(uuid, text, date),
+  crm_upsert_zoho_reference(uuid, text, date, text, date, date, numeric),
+  crm_request_availability(uuid), crm_confirm_availability(uuid, text, text),
+  crm_request_approval(uuid, uuid), crm_decide_approval(uuid, text, text),
+  crm_update_handover(uuid, text, uuid, text), crm_mark_reminder_read(uuid), crm_people(), crm_staff_directory(),
+  crm_generate_reminders(timestamptz), crm_claim_reminder_emails(integer, timestamptz),
+  crm_finish_reminder_email(uuid, boolean, text)
+  from public, anon, authenticated;
+
+grant execute on function
+  crm_register_file(uuid, text, text, text, text, text, text, bigint, text), crm_remove_file(uuid),
+  crm_add_proposal(uuid, text, uuid), crm_set_proposal_status(uuid, text, date),
+  crm_upsert_zoho_reference(uuid, text, date, text, date, date, numeric),
+  crm_request_availability(uuid), crm_confirm_availability(uuid, text, text),
+  crm_request_approval(uuid, uuid), crm_decide_approval(uuid, text, text),
+  crm_update_handover(uuid, text, uuid, text), crm_mark_reminder_read(uuid), crm_people(), crm_staff_directory()
+  to authenticated;
+
+-- Scheduled-job functions: the service role only (never reachable from a browser session).
+grant execute on function
+  crm_generate_reminders(timestamptz), crm_claim_reminder_emails(integer, timestamptz),
+  crm_finish_reminder_email(uuid, boolean, text)
+  to service_role;
+
+-- ROLLBACK (before any CRM data exists): drop the functions above with `drop function if exists`, then
+--   delete from storage.buckets where id = 'crm-files';   -- only if the bucket is empty
