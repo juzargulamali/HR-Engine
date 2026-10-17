@@ -229,6 +229,17 @@ describe("Sales & CRM", () => {
       await expect(q(U.pm, `select crm_grant_access('${U.daniel}', '${CO.uae}', '{founder}')`)).rejects.toThrow(/founder/i);
       await admin(`delete from crm_company_grants where user_id = '${U.pm}'`);
     });
+    it("does not let a non-founder access manager demote a founder, nor anyone demote the last founder", async () => {
+      await admin(`insert into crm_company_grants (user_id, company_id, capabilities) values ('${U.pm}', '${CO.uae}', '{manage_access}')`);
+      await expect(q(U.pm, `select crm_grant_access('${U.juzar}', '${CO.uae}', '{}')`)).rejects.toThrow(/founder/i);
+      await admin(`delete from crm_company_grants where user_id = '${U.pm}'`);
+      // A founder may step another founder down while a second founder remains...
+      expect(await q(U.juzar, `select crm_grant_access('${U.rafi}', '${CO.uae}', '{assign_owner}')`)).toHaveLength(1);
+      // ...but not the last one.
+      await admin(`update crm_company_grants set revoked_at = now() where user_id = '${U.rafi}' and company_id = '${CO.pl}'`);
+      await expect(q(U.juzar, `select crm_grant_access('${U.juzar}', '${CO.pl}', '{}')`)).rejects.toThrow(/last founder/i);
+      await admin(`update crm_company_grants set revoked_at = null where user_id = '${U.rafi}' and company_id = '${CO.pl}'`);
+    });
     it("refuses to revoke the last founder", async () => {
       await admin(`update crm_company_grants set revoked_at = now() where user_id = '${U.rafi}' and company_id = '${CO.pl}'`);
       await expect(q(U.juzar, `select crm_revoke_access('${U.juzar}', '${CO.pl}')`)).rejects.toThrow(/last founder/i);

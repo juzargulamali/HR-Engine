@@ -483,7 +483,7 @@ export async function grantCrmAccess(_prev: ActionState, formData: FormData): Pr
   const supabase = await createClient();
   const { error } = await supabase.rpc("crm_grant_access", { p_user_id: p.data.userId, p_company_id: p.data.companyId, p_capabilities: caps, p_note: p.data.note ?? null });
   if (error) return fail(error.message);
-  revalidatePath("/admin/sales-access");
+  revalidatePath("/sales/access");
   revalidatePath("/sales", "layout");
   return { error: null };
 }
@@ -493,7 +493,7 @@ export async function revokeCrmAccess(userId: string, companyId: string): Promis
   const supabase = await createClient();
   const { error } = await supabase.rpc("crm_revoke_access", { p_user_id: userId, p_company_id: companyId });
   if (error) return fail(error.message);
-  revalidatePath("/admin/sales-access");
+  revalidatePath("/sales/access");
   revalidatePath("/sales", "layout");
   return { error: null };
 }

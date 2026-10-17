@@ -7,6 +7,11 @@ import type {
 } from "@/types/crm";
 import type { CrmContext } from "./context";
 
+/** A failed query must surface as an error, never as "no data". */
+function ok(...results: { error?: { message: string } | null }[]): void {
+  for (const r of results) if (r.error) throw new Error(`Sales data could not be loaded: ${r.error.message}`);
+}
+
 export const num = (v: number | string | null | undefined): number | null => (v == null ? null : Number(v));
 
 export interface OpportunityListItem {
@@ -24,14 +29,19 @@ export interface OpportunityListItem {
 /** Everything the signed-in user may see (RLS decides), with names and the next follow-up resolved. */
 export async function loadOpportunities(ctx: CrmContext): Promise<OpportunityListItem[]> {
   const supabase = await createClient();
-  const { data: opps } = await supabase.from("crm_opportunities").select("*").order("created_at", { ascending: false }).limit(2000);
+  const oppsRes = await supabase.from("crm_opportunities").select("*").order("created_at", { ascending: false }).limit(2000);
+  ok(oppsRes);
+  const opps = oppsRes.data;
   const rows = opps ?? [];
   if (rows.length === 0) return [];
   const orgIds = [...new Set(rows.flatMap((o) => [o.agency_org_id, o.client_org_id]).filter((x): x is string => !!x))];
-  const [{ data: orgs }, { data: followUps }] = await Promise.all([
-    orgIds.length ? supabase.from("crm_organisations").select("*").in("id", orgIds) : Promise.resolve({ data: [] as CrmOrganisationRow[] }),
+  const [orgsRes, fuRes] = await Promise.all([
+    orgIds.length ? supabase.from("crm_organisations").select("*").in("id", orgIds) : Promise.resolve({ data: [] as CrmOrganisationRow[], error: null }),
     supabase.from("crm_follow_ups").select("*").eq("status", "open").order("due_at"),
   ]);
+  ok(orgsRes, fuRes);
+  const orgs = orgsRes.data;
+  const followUps = fuRes.data;
   const orgBy = new Map((orgs ?? []).map((o) => [o.id, o]));
   const nextBy = new Map<string, CrmFollowUpRow>();
   const countBy = new Map<string, number>();
@@ -85,7 +95,9 @@ export interface OpportunityDetail {
 export async function loadOpportunityDetail(ctx: CrmContext, id: string): Promise<OpportunityDetail | null> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
   const supabase = await createClient();
-  const { data: opp } = await supabase.from("crm_opportunities").select("*").eq("id", id).maybeSingle();
+  const oppRes = await supabase.from("crm_opportunities").select("*").eq("id", id).maybeSingle();
+  ok(oppRes);
+  const opp = oppRes.data;
   if (!opp) return null;
   const [orgs, links, acts, fus, evs, files, props, zoho, appr, hand] = await Promise.all([
     supabase.from("crm_organisations").select("*").in("id", [opp.agency_org_id, opp.client_org_id].filter((x): x is string => !!x)),
@@ -99,6 +111,7 @@ export async function loadOpportunityDetail(ctx: CrmContext, id: string): Promis
     supabase.from("crm_approvals").select("*").eq("opportunity_id", id).order("requested_at", { ascending: false }),
     supabase.from("crm_handovers").select("*").eq("opportunity_id", id).maybeSingle(),
   ]);
+  ok(orgs, links, acts, fus, evs, files, props, zoho, appr, hand);
   const orgBy = new Map((orgs.data ?? []).map((o) => [o.id, o]));
   const open = (fus.data ?? []).filter((f) => f.status === "open");
   const nextBy = new Map<string, CrmFollowUpRow>();
@@ -136,10 +149,13 @@ export interface FollowUpListItem {
 /** Open follow-ups across everything the user can see, soonest first, plus the most recent completed ones. */
 export async function loadFollowUps(ctx: CrmContext): Promise<{ open: FollowUpListItem[]; done: FollowUpListItem[] }> {
   const supabase = await createClient();
-  const [{ data: open }, { data: done }] = await Promise.all([
+  const [openRes, doneRes] = await Promise.all([
     supabase.from("crm_follow_ups").select("*").eq("status", "open").order("due_at").limit(1000),
     supabase.from("crm_follow_ups").select("*").eq("status", "done").order("completed_at", { ascending: false }).limit(30),
   ]);
+  ok(openRes, doneRes);
+  const open = openRes.data;
+  const done = doneRes.data;
   const all = [...(open ?? []), ...(done ?? [])];
   const oppIds = [...new Set(all.map((f) => f.opportunity_id))];
   const { data: opps } = oppIds.length
@@ -160,11 +176,15 @@ export async function loadOrganisations(): Promise<{
   organisations: (CrmOrganisationRow & { contacts: CrmContactRow[]; opportunityCount: number; openCount: number })[];
 }> {
   const supabase = await createClient();
-  const [{ data: orgs }, { data: contacts }, { data: opps }] = await Promise.all([
+  const [orgsRes, contactsRes, oppsRes] = await Promise.all([
     supabase.from("crm_organisations").select("*").is("archived_at", null).order("name"),
     supabase.from("crm_contacts").select("*").is("archived_at", null).order("name"),
     supabase.from("crm_opportunities").select("agency_org_id, client_org_id, stage"),
   ]);
+  ok(orgsRes, contactsRes, oppsRes);
+  const orgs = orgsRes.data;
+  const contacts = contactsRes.data;
+  const opps = oppsRes.data;
   const contactsBy = new Map<string, CrmContactRow[]>();
   for (const c of contacts ?? []) if (c.organisation_id) contactsBy.set(c.organisation_id, [...(contactsBy.get(c.organisation_id) ?? []), c]);
   const total = new Map<string, number>();
@@ -183,11 +203,14 @@ export async function loadOrganisations(): Promise<{
 
 export async function loadProposals(ctx: CrmContext): Promise<{ proposal: CrmProposalRow; opportunity: OpportunityListItem | null; file: CrmFileRow | null }[]> {
   const supabase = await createClient();
-  const [{ data: props }, items, { data: files }] = await Promise.all([
+  const [propsRes, items, filesRes] = await Promise.all([
     supabase.from("crm_proposals").select("*").order("created_at", { ascending: false }).limit(500),
     loadOpportunities(ctx),
     supabase.from("crm_files").select("*").is("deleted_at", null).eq("purpose", "proposal"),
   ]);
+  ok(propsRes, filesRes);
+  const props = propsRes.data;
+  const files = filesRes.data;
   const oppBy = new Map(items.map((i) => [i.opp.id, i]));
   const fileBy = new Map((files ?? []).map((f) => [f.id, f]));
   return (props ?? []).map((p) => ({ proposal: p, opportunity: oppBy.get(p.opportunity_id) ?? null, file: p.file_id ? (fileBy.get(p.file_id) ?? null) : null }));
@@ -195,6 +218,7 @@ export async function loadProposals(ctx: CrmContext): Promise<{ proposal: CrmPro
 
 export async function loadMyReminders(): Promise<CrmReminderRow[]> {
   const supabase = await createClient();
-  const { data } = await supabase.from("crm_reminders").select("*").is("read_at", null).order("created_at", { ascending: false }).limit(50);
-  return data ?? [];
+  const res = await supabase.from("crm_reminders").select("*").is("read_at", null).order("created_at", { ascending: false }).limit(50);
+  ok(res);
+  return res.data ?? [];
 }

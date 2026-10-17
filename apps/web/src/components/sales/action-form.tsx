@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { startTransition, useActionState, useEffect, useRef } from "react";
 import type { ActionState } from "@/lib/actions/companies";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,16 @@ export function ActionForm({
     handled.current = state;
   }, [state, onDone, resetOnSuccess]);
   return (
-    <form ref={formRef} action={formAction} className={className ?? "space-y-4"}>
+    <form
+      ref={formRef}
+      // Submitting through onSubmit (not <form action>) stops React 19 resetting the fields after a REFUSED save, so a
+      // person never loses what they typed; a successful save resets or closes it explicitly (resetOnSuccess / onDone).
+      onSubmit={(e) => {
+        e.preventDefault();
+        const data = new FormData(e.currentTarget);
+        startTransition(() => formAction(data));
+      }}
+      className={className ?? "space-y-4"}>
       {children}
       {state.error ? <Alert variant="destructive" role="alert">{state.error}</Alert> : null}
       {state.warning ? <Alert role="status">{state.warning}</Alert> : null}
