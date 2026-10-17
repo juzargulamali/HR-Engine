@@ -1,60 +1,78 @@
-# 14. Enginious OS — architecture and phased roadmap (proposal)
+# 14. Enginious OS — architecture and phased roadmap (v2)
 
-> **Status: proposal only.** Nothing described as *proposed* here is built. This document changes no code, no database, no
-> Supabase project and nothing in Production. No new Supabase project has been created. Everything marked **[EXISTS]** was
-> inspected in this repository on 2026-10-17 (HR Engine, `main` at the time of writing); everything marked **[NEW]** is a
-> proposal; **[CHANGE]** means "exists today, and would have to change".
+> **Status: roadmap v2, 2026-10-17.** Updated with the owner's decisions: **design the whole OS first (Stage A: a design
+> preview with clearly labelled sample data), then implement Sales & CRM as the first new working module (Stage B).** This
+> supersedes the "Projects first" release order of v1. Existing HR stays operational and unchanged and becomes **People & HR**
+> at the approved rollout. Stage A changes no database, no Production setting and creates no hosted service.
+>
+> **HR is not described here as proven in company use.** The HR team-testing week was postponed; automated tests passing is not
+> the same as staff relying on it every day. Labels: **[EXISTS]** = built and inspected in this repository, **[CHANGE]** = exists
+> but must change, **[NEW]** = proposed, does not exist yet.
 
-**How to read this document.** §1 is the one-page summary and the decisions we need from you. §2 shows what the application
-really is today. §3–§7 are the design (architecture, project leadership, the CRM-to-delivery workflow, staff-only versus outside
-access, approvals). §8 is test environments and costs, kept separate on purpose. §9 is the phased roadmap with the smallest useful
-first release. §10 is the page and menu map, §11 the decisions, §12 the risks.
-
-| Label | Meaning |
-|---|---|
-| **[EXISTS]** | Built, deployed, inspected in the repository |
-| **[CHANGE]** | Exists, but would need modification for Enginious OS |
-| **[NEW]** | Proposed; does not exist yet |
+**How to read this document.** §1 summary and what changed. §2 what exists today (inspected). §3–§8 the design: architecture,
+project leadership, the enquiry-to-delivery workflow, staff-only versus outside access, approvals, test environments and costs.
+§9 the roadmap. §10 the menu and page map. §11 the Sales & CRM specification for Stage B. §12 the Stage A design preview.
+§13 decisions (resolved and still open). §14 risks. §15 what was and was not done.
 
 ---
 
 ## 1. Summary
 
-**The idea.** Keep **one login and one application** for staff. HR Engine becomes the *HR module* of a bigger platform called
-(working name) **Enginious OS**, next to new modules: Projects & Tasks, CRM, Procurement (equipment and vendors) and later KPIs.
-The business chain we are designing for is:
+### 1.1 What changed in v2
 
-> **CRM** (lead → deal won) → **confirmed project** → **tasks and team allocation** → **equipment / vendor requirements** → **delivery**
+| Topic | Decision (owner brief, 2026-10-17) |
+|---|---|
+| Order of work | Design the whole OS first (Stage A), then build **Sales & CRM** first (Stage B). Projects & Tasks is no longer first |
+| Stage A | A design preview of the overall OS and a detailed Sales & CRM experience, **sample data only**, deployed as a preview, then a **stop for visual review** |
+| Stage B | Working Sales & CRM (database, permissions, tests, manual deployment instructions) **only after** design approval. Design approval is **not** permission to run Production SQL, merge or deploy to Production |
+| Existing application | Authentication, HR permissions, attendance, Recovery Leave, leave, expenses, payroll and appraisals keep working. No rewrite of HR calculations, no refactor of the shared approval engine for the shell or preview |
+| Infrastructure | Production database stays **Enginious HR Engine_V2**. No new hosted Supabase project, no purchases, no credential or database moves. Repository, Supabase project name and live URL unchanged for now |
+| Branding | User-facing rename to **ENGINIOUS OS** at the approved rollout; existing HR becomes **People & HR** |
+| Access | One staff login and one application, with protected modules |
+| Sales visibility | Staff granted Sales access see **all** opportunities in their authorised scope; CRM is **not** visible to every employee |
+| Sales authority | Juzar and Rafi assign and reassign ownership; the owner (or a founder) closes an opportunity; HR/Finance/technical-admin roles grant none of this |
+| Data entry | Manual only (website enquiries included). No WhatsApp, Instagram, LinkedIn or website integrations in this release |
+| Proposals and pricing | Canva/ChatGPT stay outside the app; **Zoho Books stays the source** for quotations, invoices and payments (references and dated manual statuses only) |
+| Project Head | "Project Head" and "PM" are the same person |
 
-**What we recommend**
+### 1.2 The ten modules
 
-1. **One codebase, one Supabase project, one login, separate modules** ("modular monolith"), not several apps.
-2. **Module access is its own thing.** A new, small access table says who may open which module. It does **not** reuse the seven HR
-   roles, so HR permissions stay exactly as they are.
-3. **Project leadership is separate from HR management.** A project lead is a *time-limited membership of one project*, never a
-   change to who someone's line manager is, and it never reveals HR data (see §4).
-4. **Reuse the approvals idea, but not by piling on to today's code** (§7): the engine is generic in its tables, but the "what
-   happens when approved" logic lives in one very large function. The smallest first release needs no approvals at all.
-5. **Staff-only first.** Vendors and clients come later, through a separate restricted door (§6), never by giving them staff accounts.
-6. **A test environment is needed before the second module ships** (§8). We do not create one now.
+| # | Module | Covers | Today | Stage A preview | First real release |
+|---|---|---|---|---|---|
+| 1 | **My Day** | Role-appropriate home: tasks, follow-ups, clock, decisions | **[CHANGE]** existing dashboard | Five role homes | Stage B: adds Sales items for Sales users; others unchanged |
+| 2 | **Sales & CRM** | Enquiries, pipeline, follow-ups, proposals, confirmation, handover | **[NEW]** | **Detailed design** (12 pages + states) | **Stage B** |
+| 3 | **Projects & Tasks** | Projects, PM, department heads, assignments, milestones, tasks, site reservations | **[NEW]** | Representative screens | *Coming soon* |
+| 4 | **People & HR** | Everything HR does today | **[EXISTS]** | Not redrawn; link to the live app | Unchanged (renamed) |
+| 5 | **Inventory** | Technology stock, components, dispatch, return, condition | **[NEW]** (distinct from Assets) | Representative screens | *Coming soon* |
+| 6 | **Vendors & Purchasing** | Vendors, purchase and rental requests (Admin) | **[NEW]** | Representative screens | *Coming soon* |
+| 7 | **Performance & KPIs** | Appraisals (existing) plus KPIs | appraisals **[EXISTS]**; KPIs **[NEW]** | "Not collecting data yet" | *Coming soon* (appraisals unchanged) |
+| 8 | **Approvals** | One inbox of decisions | **[EXISTS]** (HR flows) | Unified-inbox design | Unchanged in Stage B; commercial approvals live inside Sales & CRM |
+| 9 | **Reports** | Cross-module reporting | **[NEW]** | Catalogue + sales reports | Sales reports only, inside Sales & CRM |
+| 10 | **Administration** | Users, roles, module access, settings, audit | **[EXISTS]** users/roles/companies | Module-access design | Stage B: module access and Sales settings |
 
-**Smallest useful first release (Release 1): "Projects & Tasks, staff only."** Module access + a module switcher; projects with a
-status; team members with an optional temporary project lead; tasks with assignee, status and due date; a "My work" view; email on
-assignment. No CRM, no approvals, no vendors, no changes to attendance. Details in §9.
+### 1.3 How Enginious operates (the design input)
 
-**Decisions we need from you** (the nine most urgent here; all fourteen, with options and timing, in §11):
+We deliver experiential technology projects for agencies and end clients, mainly in the UAE, KSA and Europe.
 
-| # | Decision | Our recommendation |
-|---|---|---|
-| D1 | Which first: Projects & Tasks, or CRM? | Projects & Tasks |
-| D2 | Confirm the single-platform approach and the name | Yes |
-| D3 | Who gets which module by default | All staff: Projects & Tasks as members; CRM/Procurement by invitation |
-| D4 | What a temporary project lead may do | Manage tasks and team of that project only; no HR data |
-| D5 | Reuse the existing `projects` table or start a new one | Reuse and tighten (after a read-only check that it is unused) |
-| D6 | What makes a project "confirmed", and who confirms it | Deal won (or internal request) + lead + team + dates; confirmed by a Projects manager |
-| D7 | Which new flows need approval, by whom, from what amount | Decide before Release 4 |
-| D8 | Test environment option and budget | Local + one separate staging project (§8) |
-| D9 | When do we start | After HR go-live and the postponed HR test |
+- **Enquiries** arrive from outbound agency calls, LinkedIn, direct clients, WhatsApp, Instagram, website enquiries and referrals. We record the agency, end client, contacts, location, installation/show dates, scope, requested technologies and budget if known.
+- **Proposals** are prepared manually (Canva and ChatGPT). **Quotes and invoices** are issued in Zoho Books. Pricing is mainly Juzar or Rafi, sometimes Sales.
+- **Confirmation:** a purchase order is the main evidence; an authorised email can also confirm a job.
+- **Handover:** Sales hands over to a **Project Manager (PM)**. The PM agrees scope and deadlines with the **Programming, Content and Engineering heads**, who assign their people, milestones and daily tasks. The PM coordinates delivery and client feedback.
+- **Staff** in Programming and Content work across several projects at once; heads plan in **days and deadlines**, not hourly timesheets. **Physical/site assignments** need exact, non-overlapping time reservations (allowing travel and preparation), applied **by assignment type, not job title**.
+- **Technology availability:** Sales checks technology-level availability; PM and Warehouse handle components, dispatch, return and condition; Admin arranges purchasing and rentals.
+- **Money:** before site work the PM requests an **expense advance** (people, days, categories); Finance issues cash or Pluto-card funding and reconciles actuals; **Accounts** invoices and collects in Zoho Books.
+- **The two immediate problems:** (1) enquiries and follow-ups get missed; (2) project ownership, staffing, priorities and client feedback are poorly coordinated.
+
+### 1.4 The two stages
+
+- **Stage A (this PR): design.** The OS shell, five role homes, the detailed Sales & CRM pages with loading/empty/error/permission-denied/overdue states, and representative screens for the later modules. Sample data only, in an isolated route that is **hidden in Production**. Stops for your visual review.
+- **Stage B (after approval): working Sales & CRM.** Database changes (applied by you manually), permissions enforced in the database, tests, and manual deployment instructions. Later modules show **Coming soon** with no working-looking actions.
+
+### 1.5 Recommendations that still stand from v1
+
+One codebase, one Supabase project, one login, separate modules; module access in its own table (not new HR roles); project leadership is a time-limited membership, never a change to HR management; staff-only first with a restricted vendor/client door later; no new test project until you choose (§8).
+
+The decisions that are **resolved by your brief**, and the **genuinely open** ones for Stage B, are listed in §13.
 
 ---
 
@@ -77,7 +95,7 @@ Production changes to the database are applied **manually** as reviewed SQL; CI 
 | **Line-manager hierarchy** | **[EXISTS]** | `is_manager_of()` walks the **whole chain** of `employees.manager_id`: a manager sees leave, claims, allocations of everyone below them | Must **not** be reused for project leadership (§4) |
 | **Menus and screens** | **[EXISTS]** | About 30 screens; one function builds the menu per role (`components/nav/nav-groups.ts`) | Extend with a module switcher |
 | **Approvals engine** | **[EXISTS]** | See §7: tables `approval_workflows`, `approval_workflow_steps`, `approvals`; approver types; the shared CEO/CTO queue; the Approvals page | Reuse the concept; refactor before adding many new request types |
-| **Projects** | **[EXISTS], no screens** | Tables `projects` (code, name, client text, billable, active) and `project_allocations` (employee, %, dates). **No page uses them** except the hidden Timesheets. Readable by **every signed-in user**; writable by HR Admin only | **[CHANGE]**: extend and tighten (D5) |
+| **Projects** | **[EXISTS], no screens** | Tables `projects` (code, name, client text, billable, active) and `project_allocations` (employee, %, dates). **No page uses them** except the hidden Timesheets. Readable by **every signed-in user**; writable by HR Admin only | **[CHANGE]**: extend and tighten in Release 2 (Projects & Tasks) |
 | **"Project lead" today** | **[EXISTS]** | Only a field (`project_lead_employee_id`) on attendance sessions and Recovery requests. It gives the lead **one approval step** on a request, nothing more | The right model to copy: narrow, time-limited, no HR access |
 | **Assets** | **[EXISTS]** | `assets`, `asset_assignments`: company equipment issued to employees; page `/assets` visible to HR Admin and Finance only | Different thing from *project* equipment; link later |
 | **Expenses** | **[EXISTS]** | `reimbursement_claims` and lines; each line can carry a `project_id` | Natural link: project cost |
@@ -88,11 +106,11 @@ Production changes to the database are applied **manually** as reviewed SQL; CI 
 | **AI drafts** | **[EXISTS]** | `ai_drafts`: proposals that a human authorises | Reuse the pattern for suggestions |
 | **Appraisals** | **[EXISTS]** | `/performance`: goals, cycles, appraisals | Later: KPIs feed it |
 | **Module checklist** | **[EXISTS]** | `docs/09-extending-the-system.md`: migration, RLS from day one, RLS tests, domain permission file, UI route, docs | We follow it for every module |
-| **CRM** (customers, contacts, leads, deals) | **[NEW]** | Nothing exists | Release 3 |
-| **Tasks** | **[NEW]** | Nothing exists | Release 1 |
-| **Vendors, requirements, purchasing, delivery** | **[NEW]** | Nothing exists | Releases 4–5 |
-| **KPIs** | **[NEW]** | Nothing exists | Release 6 |
-| **Module access** | **[NEW]** | No way today to say "this person may open Projects" | Release 1 |
+| **CRM** (customers, contacts, leads, deals) | **[NEW]** | Nothing exists | **Stage B** (first working module) |
+| **Tasks** | **[NEW]** | Nothing exists | Release 2 (Projects & Tasks) |
+| **Vendors, requirements, purchasing, delivery** | **[NEW]** | Nothing exists | Releases 3–4 (Inventory, Vendors & Purchasing) |
+| **KPIs** | **[NEW]** | Nothing exists | Release 5 (Performance & KPIs) |
+| **Module access** | **[NEW]** | No way today to say "this person may open Sales" | **Stage B** |
 | **External (vendor/client) users** | **[NEW]** | Every account today is an employee | Later option (§6) |
 
 ### 2.3 Findings that shape the design
@@ -122,25 +140,27 @@ Production changes to the database are applied **manually** as reviewed SQL; CI 
 
 ```mermaid
 flowchart TB
-  user["Staff member<br/>one login"] --> shell["Enginious OS shell<br/>menu + module switcher + My work"]
-  shell --> hr["HR module<br/>EXISTS today"]
-  shell --> pm["Projects and Tasks<br/>NEW - Release 1"]
-  shell --> crm["CRM<br/>NEW - Release 3"]
-  shell --> proc["Procurement<br/>equipment and vendors<br/>NEW - Releases 4-5"]
-  shell --> kpi["KPIs<br/>NEW - Release 6"]
+  user["Staff member<br/>one login"] --> shell["ENGINIOUS OS shell<br/>module menu + My Day"]
+  shell --> sales["Sales and CRM<br/>NEW - Stage B"]
+  shell --> hr["People and HR<br/>EXISTS today"]
+  shell --> pm["Projects and Tasks<br/>NEW - Release 2"]
+  shell --> inv["Inventory<br/>NEW - Release 3"]
+  shell --> ven["Vendors and Purchasing<br/>NEW - Release 4"]
+  shell --> kpi["Performance and KPIs<br/>NEW - Release 5"]
+  sales --> shared
   hr --> shared
   pm --> shared
-  crm --> shared
-  proc --> shared
+  inv --> shared
+  ven --> shared
   kpi --> shared
   subgraph shared["Shared services"]
     id["People and companies<br/>EXISTS"]
-    acc["Module access<br/>NEW"]
-    appr["Approvals<br/>EXISTS, refactor first"]
-    note["Email and notifications<br/>EXISTS / extend"]
+    acc["Module access and capability grants<br/>NEW - Stage B"]
+    appr["Approvals<br/>EXISTS for HR; commercial approvals live in CRM"]
+    note["Email and notifications<br/>EXISTS, extend"]
     aud["Audit log and files<br/>EXISTS"]
   end
-  shared --> db[("One Supabase database<br/>row-level security on every table")]
+  shared --> db[("One Supabase database<br/>Enginious HR Engine_V2<br/>row-level security on every table")]
   portal["Vendor / client portal<br/>NEW - later option"] -. "separate restricted door" .-> db
 ```
 
@@ -149,28 +169,37 @@ flowchart TB
 - **One login, one app.** Modules are folders in the same app, behind the same sign-in. Staff never switch apps or accounts.
 - **Each module follows the existing module checklist** (`docs/09`): its own migration, row-level security from the first commit,
   RLS tests that try to *fail* each policy, a domain permission file, UI routes, docs.
-- **Modules link by IDs, not by reaching into each other's tables:** a project has a `customer_id`, an equipment requirement has a
-  `project_id`, an expense line already has `project_id`.
-- **Table names carry a module prefix** (`pm_`, `crm_`, `proc_`, `kpi_`) in the existing `public` schema, so the privilege
-  hardening already applied to `public` (PR #30) covers new tables automatically, and nothing needs extra API configuration.
-- **Each module can be switched on per person**, and hidden entirely until it is ready.
-- **HR behaviour does not change.** The first release touches HR only by adding a switcher to the menu.
+- **Modules link by IDs, not by reaching into each other's tables.**
+- **Table names carry a module prefix** (`crm_`, `pm_`, `inv_`, `proc_`, `kpi_`) in the existing `public` schema, so the privilege
+  hardening already applied to `public` (PR #30) covers new tables automatically.
+- **Each module is hidden from anyone without access**, and unfinished modules show **Coming soon** with no working-looking actions.
+- **HR behaviour does not change.** The shell adds a module menu around today's HR screens; it does not alter an HR rule.
 
-### 3.3 Module access (proposed, **[NEW]**)
+### 3.3 Module access and capability grants (proposed, **[NEW]**, Stage B)
 
-A small table, separate from `user_roles`:
+Two small tables, separate from `user_roles` so the seven HR roles stay purely HR-shaped.
+
+**`module_access`**: who may open which module.
 
 | Column | Meaning |
 |---|---|
 | `user_id` | the staff login |
-| `module` | `projects`, `crm`, `procurement`, `kpi` (HR keeps using roles) |
-| `access_level` | `member` (use it), `manager` (create/confirm/administer within the module) |
-| `company_id` | optional: limit to one company |
+| `module` | `sales`, later `projects`, `inventory`, `procurement`, `performance` (People & HR keeps using roles) |
+| `company_id` | optional: limit to one owning company (the authorised scope) |
 | `granted_by`, `granted_at`, `revoked_at` | who/when; revocable, audited |
 
-A helper `has_module_access(module, level, company)` is used by every module's row-level security and by the menu builder.
-Sys Admin manages it on the existing **Users & Roles** page. Why not new roles: the seven roles stay purely HR-shaped, and a
-person can be a Sales manager without touching anything HR-related.
+**`capability_grants`**: narrow, named powers that are **never derived from an HR, Finance or technical-admin role**.
+
+| Capability | Meaning | Initial holders |
+|---|---|---|
+| `crm.assign_owner` | assign and reassign opportunity ownership | Juzar and Rafi only |
+| `crm.cross_company_overview` | see Sales totals across owning companies | authorised founders (to be named) |
+| `crm.approve_pricing` | record an internal commercial approval | **not decided** (see §13, open) |
+| `crm.configure` | change Sales settings (stages labels, targets, calendar) | **not decided** |
+
+Helpers `has_module_access(module, company)` and `has_capability(capability, company)` are used by every Sales policy and by
+the menu builder. Having Sales access never grants salary or any other confidential HR data, and the reverse holds: a Sys Admin, HR
+Admin or Finance role does **not** by itself confer Sales access, assignment rights or commercial powers.
 
 ---
 
@@ -195,53 +224,50 @@ approval step on one request without any role: the same narrow idea, now made ex
 
 ---
 
-## 5. The workflow: CRM to delivery
+## 5. The workflow: enquiry to delivery
 
 ```mermaid
 flowchart TB
-  subgraph S["SALES - CRM (NEW, Release 3)"]
+  subgraph S["SALES AND CRM (Stage B, working)"]
     direction LR
-    L["1 Lead"] --> Q["2 Qualified"] --> P["3 Proposal / quote"] --> W{"4 Deal won?"}
+    E["1 Enquiry<br/>recorded manually"] --> Q["2 Qualified"] --> PP["3 Proposal prep"] --> PS["4 Proposal and quote sent"] --> N["5 Negotiation"] --> W{"6 Won?"}
     W -- no --> X["Lost, reason kept"]
   end
-  subgraph PR["PROJECTS (NEW, Release 1; handover Release 3)"]
+  subgraph H["HANDOVER (Stage B: package only)"]
     direction LR
-    H["5 Handover: draft project from the deal"] --> C{"6 Confirm: lead + team + dates"} --> T["7 Tasks and team plan"]
+    HP["7 Handover package<br/>scope, latest accepted quote,<br/>confirmation, risks"] --> PMA["8 PM accepts<br/>later release"]
   end
-  subgraph PC["PROCUREMENT (NEW, Releases 4-5)"]
+  subgraph D["DELIVERY (later releases)"]
     direction LR
-    R["8 Requirements: equipment, vendors, services"] --> A{"Approval needed? cost / vendor"} --> O["Ordered or sourced"] --> V["Received and allocated"]
+    TK["9 Scope and deadlines agreed with<br/>department heads"] --> AL["10 People, milestones, daily tasks"] --> EQ["11 Technology availability,<br/>dispatch, purchase or rental"] --> DL["12 Delivery, site work,<br/>client feedback"] --> FI["13 Expense advance, invoicing,<br/>collection in Zoho Books"]
   end
-  subgraph DL["DELIVERY (NEW, Release 5)"]
-    direction LR
-    D["9 Delivery: milestones + sign-off"] --> Z["10 Close: actuals, KPIs"]
-  end
-  S -- "deal won" --> PR
-  PR --> PC
-  PC --> DL
+  S -- "commercially won" --> H
+  H --> D
 ```
 
-| Step | Who (proposed) | What happens | Exists today? |
+| Step | Who | What happens | Exists today? |
 |---|---|---|---|
-| 1–3 Lead → Proposal | Sales (CRM `member`) | Customers, contacts, deals with stages, next-action reminders | **[NEW]** (Release 3) |
-| 4 Deal won | Sales manager | Deal marked won; value, scope notes, customer recorded | **[NEW]** |
-| 5 Handover | Sales manager | One click creates a **draft project** copying customer, value, dates; the deal stays linked | **[NEW]** |
-| 6 Confirm | Projects manager | Draft becomes **confirmed** only when it has a lead, at least one team member and start/end dates (D6) | **[NEW]**; `projects` table **[CHANGE]** |
-| 7 Tasks and team | Project lead | Team with allocation and dates; tasks with assignee, status, due date | Allocation table **[EXISTS]**, tasks **[NEW]** (Release 1) |
-| 8 Requirements | Project lead | Equipment/vendor/service lines per project; request → approval → ordered → received | **[NEW]**; reuses approvals (§7) |
-| 9 Delivery | Project lead | Milestones, delivery note, internal sign-off (customer sign-off only in the later portal) | **[NEW]** |
-| 10 Close | Projects manager | Actuals recorded; feeds KPIs; expenses already link by `project_id` | Expense link **[EXISTS]** |
+| 1 Enquiry | Sales user (any source, entered by hand) | Title/brief, source, agency or client, next action and date. Unknown dates, budget and scope are allowed | **[NEW]** Stage B |
+| 2–5 Qualification to negotiation | Owner, with others collaborating | Controlled stage transitions; activities; proposal and quote **references and versions**; internal commercial approval where configured | **[NEW]** Stage B |
+| 6 Won / Lost | The owner (or an authorised founder) | **Won** needs PO or authorised-email evidence (type and date). **Lost** needs a reason. Reopening and corrections are audited | **[NEW]** Stage B |
+| 7 Handover | Owner | Builds a **handover package**: accepted scope and exclusions, latest accepted proposal/quote, confirmation, promised technologies, dates, contacts, payment terms, unresolved risks. It is **not a project** | **[NEW]** Stage B |
+| 8 PM accepts | Project Manager | "Commercially won", "Handover prepared" and "PM accepted" are three separate states | **[NEW]** Release 2 |
+| 9–10 Scope, people, tasks | PM, Programming/Content/Engineering heads | Deadlines in **days**; heads assign people, milestones, daily tasks; site work uses exact non-overlapping reservations by **assignment type** | **[NEW]** Release 2; allocations table **[EXISTS]** |
+| 11 Technology | Sales (availability), PM and Warehouse, Admin | Technology-level availability, components, dispatch, return, condition, purchase or rental requests | **[NEW]** Releases 3–4 |
+| 12 Delivery | PM | Delivery and client feedback | **[NEW]** Release 2 |
+| 13 Money | PM requests advance; Finance reconciles; Accounts invoices | Zoho Books remains the source of quotes, invoices and payments | Expense claims **[EXISTS]**; links **[NEW]** later |
 
-**Project status (proposed):** `draft → confirmed → active → delivered → closed` (plus `cancelled`).
-Existing touch-points we deliberately **leave alone at first:** attendance still uses free-text project name and lead for Site work
-(**[EXISTS]**, live and under test). Replacing that with a project picker is a later, separate change (D14 in §11),
-because it touches the live Recovery Leave rules.
+**Three things that must never be conflated:** *quotation sent* ≠ *invoice issued* ≠ *payment received*. They are dated, separate
+manual statuses with a Zoho reference each.
+
+Existing touch-points deliberately **left alone**: attendance still uses free-text project name and project lead for Site work
+(**[EXISTS]**), because it carries the live Recovery Leave rules, and **the narrow project-lead approval right for Recovery Leave is preserved**.
 
 ---
 
 ## 6. Staff-only first; restricted vendor/client access later
 
-**Release 1–5: staff only.** Every user is an employee with a normal login. Vendors and customers appear only as *records*.
+**Stage B and every release in §9 until further notice: staff only.** Every user is an employee with a normal login. Vendors and customers appear only as *records*.
 
 **Later option (not designed in detail, not scheduled):** a separate, narrow door for outside people. Principles to keep open now:
 
@@ -258,33 +284,36 @@ margin, internal notes) in the same row as anything an outsider could see.
 
 ## 7. Approvals: what exists, and what reuse would involve
 
-### 7.1 What was inspected
+### 7.1 What was inspected (unchanged from v1)
 
 - **Tables [EXISTS]:** `approval_workflows` (per company/country and entity type), `approval_workflow_steps` (ordered steps), `approvals`
   (one row per step: entity, approver, decision, comments). Each (entity, step) exists once.
 - **Approver types [EXISTS]:** `direct_manager`, `manager_of_manager`, `role:hr_admin`, `role:finance`, `role:ceo` (CEO or CTO),
-  `role_queue:hr_admin` (anyone holding the role may decide), and a per-request **queue of roles** (used for the shared CEO/CTO queue).
-  `role:*` picks **one person** (the earliest grant), which is why a person holding many roles can end up approving their own items.
+  `role_queue:hr_admin`, and a per-request **queue of roles** (used for the shared CEO/CTO queue). `role:*` picks **one person**.
 - **Conditions [EXISTS]:** a step can be skipped by an amount threshold (`amount_gt`) and nothing else.
-- **Special rules [EXISTS]:** a CEO/CTO's own leave is approved automatically and their expense claims skip the manager and go
-  straight to Finance; self-approval of step 1 is blocked; Recovery credit has its own route (employee: project lead → HR; manager: HR;
-  HR: the shared CEO/CTO queue).
-- **Where decisions happen [EXISTS]:** `decide_leave_approval()` (~420 lines): checks who may decide, then separate branches for
-  finalise / reject / advance **per entity type**. Queue-role steps are currently allowed **only** for Recovery credit.
-- **Screen [EXISTS]:** `/approvals` loads the waiting items with **one query per entity type** and renders per-type cards.
-- **Not supported today [NEW needed]:** an approver who is a *project lead*, a *module manager*, or "the person who owns this vendor";
-  generic "on approved / on rejected" actions; approval conditions other than amount.
+- **Special rules [EXISTS]:** CEO/CTO leave is auto-approved; their claims go straight to Finance; self-approval of step 1 is blocked;
+  Recovery credit has its own route (employee: project lead → HR; manager: HR; HR: the shared CEO/CTO queue).
+- **Where decisions happen [EXISTS]:** `decide_leave_approval()` (~420 lines) with separate branches per entity type; `/approvals`
+  runs one query per entity type (838 lines).
 
-### 7.2 Options
+### 7.2 Decision for Stage B (changed in v2)
 
-| Option | What it means | Verdict |
-|---|---|---|
-| **A. Add new entity types to today's code** | Add values to `approvable_entity`, add branches to the big function and cards to the Approvals page | Fast for one flow; every addition edits code that also guards leave, claims and payroll. Acceptable for **one** low-risk flow, not for many |
-| **B. Refactor first, then reuse** | Introduce a small registry: each entity type registers its "on approved / rejected / next step" action; the big function becomes a dispatcher; the Approvals page gets a pluggable card per type. Add approver types `module_manager:<module>` and `project_lead` | **Recommended** before Release 4 (first new approval flow). Needs its own RLS/regression tests proving leave, claims and payroll behave identically |
-| **C. A separate approvals table for new modules** | Build a second, simpler engine for Enginious OS | Two engines to maintain and two inboxes for staff: **not recommended** |
+**Do not edit the shared approval engine for Sales.** The brief asks for a *configurable internal commercial approval* with no invented
+thresholds, margins or approvers, and for the **approver's instruction to be distinct from the preparer/sender**. That is a small,
+self-contained record inside Sales & CRM:
 
-**Recommendation:** Release 1 needs no approvals. Do option B as the first task of Release 4, with the existing 586-test RLS suite
-as the safety net, then register the new flows (requirement approval, vendor approval) on top.
+- `crm_commercial_approvals`: opportunity, proposal/quote version, requested by, approver, decision, instruction text, decided at.
+- Who may approve is a **capability** (`crm.approve_pricing`, §3.3), not an HR role. Whether approval is needed at all, and above
+  what value per currency, is **configuration** and starts **switched off** until the owner supplies the rule.
+- An approved price/version is **locked**; a change creates a new version and needs a new approval. It is never silently edited.
+- The existing `/approvals` page is **unchanged** in Stage B. The design preview shows how a unified inbox could later list
+  commercial items next to HR items; that is a future refactor (option B in the v1 analysis), not part of Stage B.
+
+| Option for the *future* unified inbox | Verdict |
+|---|---|
+| A. Add entity types to today's code | Acceptable for one low-risk flow; not for many |
+| B. Refactor first (registry of "on approved/rejected" actions), then reuse | **Recommended later**, with the existing RLS suite as safety net |
+| C. A second approvals engine | Not recommended |
 
 ---
 
@@ -306,9 +335,9 @@ company data is not acceptable, and previews must never be pointed at Production
 | **1. Local Supabase on a developer machine** (Docker) | Full app against a throwaway local database | $0 | One developer at a time; not shareable with the team |
 | **2. A second Supabase project, "staging"** | A permanent shared test copy: real screens, real logins, test data only | Free plan: $0 but small (500 MB), may pause when idle, limit of two active free projects per organisation. Paid plan: about **$10/month** extra for another small project (the $10 monthly compute credit covers only one) | You apply migrations to it first, exactly as you would to Production; Vercel previews would point here |
 | **3. Supabase branching** | A temporary database per pull request, deleted afterwards | Paid-plan feature; billed per branch-hour, reported at about **$0.01344/hour** (≈ $10/month if one branch ran all month) on top of the plan | Best once PRs are frequent; more automation to set up |
-| **4. Do nothing** | – | $0 | **Not recommended** beyond Release 1 |
+| **4. Do nothing** | – | $0 | **Not recommended** once more than one working module exists |
 
-**Recommendation (D8):** Options 0 + 1 now (free), and **Option 2** before Release 2 (the first release that needs real previews
+**Recommendation:** Options 0 + 1 now (free), and **Option 2** before Release 2 (the first release after Sales & CRM that needs real previews
 and shared testing). Branching (3) can be reconsidered when several people open PRs weekly. We create nothing until you choose.
 
 ### 8.3 Hosting plan (Vercel)
@@ -317,7 +346,7 @@ The Vercel organisation is on the **Hobby** plan. Vercel's own documentation say
 personal use**; commercial use needs the **Pro** plan, reported at about **$20 per user per month**. Hobby also limits how often a
 scheduled job can run (our five crons are daily or monthly; the 5-minute Recovery processor runs inside the database instead).
 This is outside the scope of this proposal, but a company platform should be on a plan that permits it: **please check your plan
-against Vercel's terms** (D8).
+against Vercel's terms**.
 
 *Sources for the figures above (third-party summaries; the official pricing pages could not be fetched from this environment, so
 confirm on them before budgeting):* [Supabase pricing](https://supabase.com/pricing.md) ·
@@ -328,140 +357,202 @@ confirm on them before budgeting):* [Supabase pricing](https://supabase.com/pric
 
 ## 9. Phased roadmap
 
-**Gate before anything below starts:** the HR Engine is tested by the team and live (the postponed test week), and the corrections
-we chose from `docs/13-post-test-corrections.md` are done or consciously deferred (D9). Sizes are relative (S/M/L), not time promises.
+| Step | Name | Scope | Gate |
+|---|---|---|---|
+| **Stage A** | **Design preview** (this PR) | OS shell, five role homes, detailed Sales & CRM pages with states, representative screens for later modules; sample data only; isolated route hidden in Production | Owner's **visual review** |
+| **Stage B** | **Sales & CRM, working** | `module_access` + `capability_grants`; `crm_*` tables with RLS, audit, tests; opportunities, follow-ups, activities, proposals/quote references, won/lost, handover package, Sales reports, Sales settings; optional reviewed import. Manual deployment instructions (read-only preflight → tested migration → verify SQL) | Design approval **and** your separate approval to proceed; migrations applied by you manually |
+| **Release 2** | **Projects & Tasks** | PM acceptance of handover, projects, department-head assignment, milestones, tasks, site reservations (by assignment type) | Stage B in daily use |
+| **Release 3** | **Inventory** | Technology stock, components, dispatch, return, condition. Distinct from Purchasing and from the existing employee **Assets** | Release 2 |
+| **Release 4** | **Vendors & Purchasing** | Vendors; purchase and rental requests for Admin; links to project requirements | Release 3; decision on approvals refactor |
+| **Release 5** | **Performance & KPIs, Reports** | KPIs from collected data (appraisals stay as today); cross-module Reports | Data exists to measure |
+| **Later** | **Restricted vendor/client access** | Separate narrow door (§6) | Earlier releases stable |
 
-| Release | Name | Scope | Depends on | Size |
-|---|---|---|---|---|
-| **0** | **HR go-live** | Run the postponed HR test; fix the agreed items (PTC list) | – | – |
-| **1** | **Projects & Tasks (staff only)** | See below | Release 0, decisions D1–D6 | **M** |
-| **2** | **Staging + project depth** | Staging environment (§8); project files; project page polish; attendance project picker *only if* HR is stable | Release 1 live; D8 | S–M |
-| **3** | **CRM lite → project handover** | Customers, contacts, deals with stages and reminders; "deal won → create draft project"; restricted visibility of deal values | Release 1; decision D10 (pipeline and data) | **M–L** |
-| **4** | **Requirements and approvals** | Approvals refactor (§7 option B); equipment/vendor/service requirements per project with request → approval → ordered → received | Releases 1, 2 | **L** |
-| **5** | **Vendors and delivery** | Vendor master and onboarding (documents with expiry reminders, approvals); delivery milestones and internal sign-off | Release 4 | **M** |
-| **6** | **KPIs** | Dashboards derived from the other modules (sales value, pipeline, project on-time, task completion, utilisation); link to appraisals | Releases 3–5 | **M** |
-| **Later** | **Restricted vendor/client access** | Separate narrow door (§6) | Releases 4–5 stable | **L** |
+**HR:** People & HR is not scheduled work; it stays operational. The postponed HR team-test week remains a separate matter and HR is
+**not** described as proven in company use.
 
-### 9.1 The smallest useful first release — Release 1: "Projects & Tasks, staff only"
+### 9.1 What Stage B contains (the smallest useful working module)
 
-**What is in**
+- Module access and the two capabilities `crm.assign_owner`, `crm.cross_company_overview` (others added when decided).
+- Opportunities with controlled stages, owner and next action; clients/agencies and contacts; activities and follow-ups with
+  configurable targets; proposal/quote references with versions; availability states; won/lost; handover package; reports; settings.
+- **Out of Stage B:** integrations (WhatsApp, Instagram, LinkedIn, website), automatic client messages, quote/invoice creation
+  (Zoho Books stays the source), projects, tasks, inventory, purchasing, KPIs, outside users.
 
-- **Module access and switcher [NEW]:** the access table (§3.3), `has_module_access()`, a menu switcher; Sys Admin grants access on the existing Users & Roles page. Everyone keeps their HR menu unchanged.
-- **Projects [CHANGE]:** reuse the `projects` table (D5) with a status (`draft → confirmed → active → delivered → closed`), dates, owner, a customer **name** (text until CRM exists). Tighten reading to members, leads, Projects managers, HR/Finance/CEO where needed.
-- **Team and temporary lead [NEW]:** `pm_project_members` with role and dates (§4).
-- **Tasks [NEW]:** `pm_tasks` (title, description, assignee, status todo/doing/blocked/done, due date, priority) and simple comments.
-- **My work [NEW]:** a section on the existing Dashboard and a page listing my tasks and the projects I am on.
-- **Email on assignment [EXISTS channel]:** reuse the Microsoft Graph sender.
-- **Audit and tests [EXISTS pattern]:** audit triggers on the new tables; RLS tests for every policy, including "a lead cannot see HR data" and "a lead's rights end on the end date".
-
-**What is deliberately out:** CRM, approvals, vendors/equipment, KPIs, attendance linkage, outside users, notifications inside the app.
-
-**Why this one:** staff use it every day (building the habit that the later modules rely on); it creates the *project* object that
-CRM, requirements and delivery all hang off; it exercises the new access model on low-sensitivity data; and it needs **no change to
-approvals, attendance or any HR rule**.
-
-**Alternative (if sales is your biggest pain):** CRM first. The trade-off is a pipeline that ends in a spreadsheet-style "won" with
-nowhere for the work to go, and a bigger decision load up front (stages, data import, who sees values).
-
-**Definition of done for Release 1**
-
-1. A staff member with Projects access sees the module; one without it does not.
-2. A Projects manager creates a project, adds a team, appoints a lead with an end date.
-3. The lead creates and assigns tasks; assignees get an email and see them in My work.
-4. The lead cannot open any HR page for team members; after the end date, lead rights disappear on their own.
-5. Existing HR screens, tests and behaviour are unchanged (full RLS suite still green).
-6. Applied to Production only after a read-only check and a staged manual SQL run, like every earlier change.
+**Definition of done for Stage B:** a Sales user (and only a user with Sales access) can record an enquiry in seconds, nobody
+without access sees CRM data, only authorised users can assign owners or close, nothing here reveals HR data, all RLS tests
+including negative ones pass, the full existing suite is unchanged and green, and the Production SQL is applied manually by you
+after read-only checks.
 
 ---
 
 ## 10. Page and menu map
 
-### 10.1 Menu today versus proposed
+### 10.1 Navigation
+
+A **left module sidebar** (collapsing to a bottom bar / drawer on mobile) lists the ten modules; opening a module shows its own
+secondary navigation. This replaces one long role-based list.
 
 ```
-TODAY (EXISTS)                         PROPOSED (adds a module switcher at the top)
-Overview     Dashboard                 [ HR | Projects | Sales | Procurement | KPIs ]   <- switcher, NEW
-             My Profile                (shown only for modules you have access to)
-             My Attendance Clock
-People       Employees                 HR   (all of today's menu, unchanged)
-             Attendance                Projects  (NEW)  My work · Projects · (project page)
-             Leave                     Sales     (NEW, Release 3)  Pipeline · Deals · Customers · Contacts
-             Reimbursements            Procurement (NEW, Releases 4-5)  Requirements · Vendors · Orders
-             Performance               KPIs      (NEW, Release 6)  Dashboards · Targets
-Workflow     Approvals  Alerts
-             Letters  Payroll          Dashboard (EXISTS, CHANGE): adds "My work today":
-Organisation Assets  Policies                      tasks due, approvals waiting, my clock
-             Holidays  Companies
-Insights     AI Suggestions  Audit Log
-System       Users & Roles             Users & Roles (EXISTS, CHANGE): adds module access
+My Day                      (role home)
+Sales & CRM                 Overview · Opportunities · Pipeline · New enquiry · Clients · Follow-ups · Proposals · Reports · Settings
+Projects & Tasks            (Coming soon)
+People & HR                 today's existing menu, unchanged (opens the live HR screens)
+Inventory                   (Coming soon)
+Vendors & Purchasing        (Coming soon)
+Performance & KPIs          (Coming soon; appraisals unchanged)
+Approvals                   (existing inbox)
+Reports                     (Coming soon; Sales reports live in Sales)
+Administration              Users & roles (existing) · Module access (Stage B) · Companies · Audit log
 ```
 
-### 10.2 Pages by module
+### 10.2 Sales & CRM pages (Stage A designs these in detail)
 
-| Module | Page | Who | Purpose | Status | Release |
-|---|---|---|---|---|---|
-| Shell | Module switcher, My work on Dashboard | everyone | One place for today's work | **[CHANGE]/[NEW]** | 1 |
-| Admin | Users & Roles → module access | Sys Admin | Grant or revoke a module | **[CHANGE]** | 1 |
-| Projects | Projects list | module members | Find projects I belong to or manage | **[NEW]** | 1 |
-| Projects | Project page: Overview · Team · Tasks | members/lead/manager | Status, dates, team, tasks | **[NEW]** | 1 |
-| Projects | My tasks | everyone with access | What is assigned to me | **[NEW]** | 1 |
-| Projects | Project files, timeline | members | Documents, key dates | **[NEW]** | 2 |
-| Sales | Pipeline board, Deals, Customers, Contacts, Activities | sales users | Run the funnel | **[NEW]** | 3 |
-| Sales | "Create project from won deal" | sales manager | Handover | **[NEW]** | 3 |
-| Procurement | Requirements (per project and overall) | lead, procurement | Needs → request → status | **[NEW]** | 4 |
-| Procurement | Vendors, Vendor onboarding | procurement | Master list, documents, approval | **[NEW]** | 5 |
-| Approvals | Existing Approvals page gains new cards | approvers | One inbox for everything | **[CHANGE]** | 4 |
-| Delivery | Milestones, delivery sign-off (project tab) | lead | Prove completion | **[NEW]** | 5 |
-| KPIs | Dashboards, targets | managers | Measure | **[NEW]** | 6 |
-| Portal | Vendor/client views | outsiders | Narrow, optional | **[NEW]** | Later |
+| # | Page | Purpose | Who |
+|---|---|---|---|
+| 1 | Sales overview | What needs attention now: awaiting first response, due today, overdue, waiting for client, proposal prep overdue, installs without confirmation | Sales access |
+| 2 | Opportunity list | Search, filter, sort; duplicate warnings | Sales access |
+| 3 | Pipeline board | Stages as columns; controlled moves | Sales access (moves by owner/founder) |
+| 4 | Quick enquiry | Five required fields only | Sales access |
+| 5 | Opportunity detail | Overview · Scope & Dates · Activities · Proposals & Quotes · Confirmation & Handover · History | Sales access |
+| 6 | Clients / agencies and contacts | Agency and end client as separate relationships; contacts with roles | Sales access |
+| 7 | Follow-ups and activities | Queue by due state; internal notes vs recorded client responses | Sales access |
+| 8 | Proposals and quotes | Versions, files/links, sent status, Zoho references, internal approval | Sales access |
+| 9 | Won / Lost confirmation | Evidence or reason | Owner / founder |
+| 10 | Handover package | The structured package, not a project | Owner |
+| 11 | Sales reports | Pipeline, follow-up timeliness, won/lost, with periods and sample sizes | Sales access (cross-company for authorised) |
+| 12 | Sales settings | Stage labels, response targets, working calendar, reasons, reminders | `crm.configure` |
 
-### 10.3 Proposed new tables (sketch, not final)
+### 10.3 Proposed tables for Stage B (sketch, not final)
 
-`module_access` · `pm_project_members` · `pm_tasks` · `pm_task_comments` · (`projects` extended) · `crm_customers` · `crm_contacts` ·
-`crm_deals` · `crm_activities` · `proc_requirements` · `proc_vendors` · `proc_vendor_documents` · `proc_orders` · `pm_milestones` ·
-`kpi_targets`. Every table: company-scoped where relevant, row-level security from the first migration, an audit trigger, an RLS test file.
+`module_access` · `capability_grants` · `crm_organisations` · `crm_contacts` · `crm_opportunities` · `crm_opportunity_contacts` ·
+`crm_activities` · `crm_followups` · `crm_proposals` · `crm_proposal_versions` · `crm_commercial_approvals` ·
+`crm_availability_checks` · `crm_handovers` · `crm_stage_history` · `crm_settings` and `crm_settings_history` · reason lists.
+Every table: company-scoped where relevant, RLS from the first migration, an audit trigger, an RLS test file.
 
 ---
 
-## 11. Decisions we need from you
+## 11. Sales & CRM specification (input to Stage B)
 
-| # | Decision | Options | Our recommendation | Needed before |
-|---|---|---|---|---|
-| D1 | First module | Projects & Tasks · CRM | Projects & Tasks | Release 1 |
-| D2 | Single platform and name | One app "Enginious OS" · separate apps | One app, modular | Release 1 |
-| D3 | Default module access | All staff / by invitation / by department | Projects & Tasks: all staff as members. CRM, Procurement, KPIs: by invitation | Release 1 |
-| D4 | Temporary project lead powers | Manage tasks/team of that project only · plus budget view · plus approvals | Tasks and team of that project only; budget and approvals later and explicit | Release 1 |
-| D5 | The existing `projects` table | Reuse and tighten · start a new table | Reuse and tighten, after we check (read-only) that V2 has no rows or only test rows | Release 1 |
-| D6 | "Confirmed project" | Rule and who confirms | Needs a lead, one member and dates; confirmed by a Projects manager; from a won deal or an internal request | Release 1 |
-| D7 | Which new flows need approval, by whom, above what amount (and currency) | Project confirmation · requirement over a threshold · vendor onboarding | Decide with Finance/CEO; none in Release 1 | Release 4 |
-| D8 | Test environment and plans | Options in §8.2; Vercel plan (§8.3) | Local + one staging project before Release 2; check the Vercel plan | Release 2 |
-| D9 | Start date | After HR go-live and the postponed HR test | Agree a date; do not overlap | Release 1 |
-| D10 | CRM data | Is there an existing CRM/spreadsheet to import? What are the pipeline stages? Who may see deal values? | Answer before Release 3 | Release 3 |
-| D11 | What "equipment" means | Individually tracked items (like Assets) · quantities/stock · both | Start with "requirement lines" only; stock later | Release 4 |
-| D12 | Companies and countries | Projects per company (UAE only now) · cross-company | Per company, like everything else | Release 1 |
-| D13 | Vendors and clients later | Who, what they may see/do | Confirm staff-only until Release 5 is stable | Later |
-| D14 | Attendance project picker | Keep free text · switch to project list | Switch only after HR is stable, in its own change | Release 2+ |
+### 11.1 Permissions (final, from the brief)
+
+| Rule | Detail |
+|---|---|
+| No Sales Head | Staff granted Sales access see **all** opportunities and shared CRM records within their authorised scope, including Juzar and Rafi |
+| Not for everyone | CRM is invisible to employees without Sales access |
+| Ownership | Creator is the initial owner (cannot reassign). **Only Juzar and Rafi** assign/reassign (`crm.assign_owner`), never via an HR/Finance/technical-admin role |
+| Closing | The owner marks Won/Lost with evidence/reason; only the owner or an authorised founder changes commercial stage/value or closes |
+| Collaboration | Others record activities and notes |
+| Scope | Owning company and currency per opportunity; cross-company overview only for authorised users |
+| Separation | Sales access or commercial rights never grant salary or confidential HR access |
+| Enforcement | In the **database** (RLS and controlled functions), not only the UI; every rule gets a negative test |
+
+### 11.2 Lifecycle
+
+Stages (stable ids; labels configurable; renaming never rewrites historical metrics):
+`new → qualified → proposal_prep → proposal_sent → quote_sent → negotiation → won | lost | on_hold`.
+
+- Unique, human-readable **reference** per opportunity.
+- Every actionable open opportunity has an **owner and a next action** (with date).
+- **On hold** requires a reason and a review date.
+- **Duplicate warning** (same agency/client/event) with a justified override; **never auto-merge**.
+- Required to create: brief requirement/title, source, agency or client name or contact, next action and date. Event dates, budget and scope may be unknown.
+- Manual entry only.
+
+### 11.3 Follow-ups
+
+Configurable: response targets, defaults, reminders, escalation, working hours and calendar. **No deadline is hardcoded**; values
+are blank until the owner supplies them. Calculations use the **configured Sales operating timezone/calendar**, not the event's country or the browser. Configuration changes are audited and history is preserved. Both the scheduled and the completion timestamp are kept.
+Internal notes are distinguished from **recorded client responses**. A failed email never loses the activity. **No automatic client messages.**
+
+### 11.4 Proposals, pricing and Zoho Books
+
+Canva/ChatGPT stay outside the app. The app stores a secure file or link, version, author, date and sent status. Zoho Books remains the
+source for quotes, invoices and payments: the app keeps references/links and **dated manual statuses**. Internal commercial approval
+is configurable (§7.2); thresholds, margins and approvers are not invented.
+
+### 11.5 Technology availability
+
+States only: **Availability unverified** · **Awaiting internal confirmation** · **Confirmed by [person] at [time] with notes** ·
+**Unavailable – alternative proposed**. No fabricated stock calendar. A material change (dates, quantities, location, technology)
+**invalidates** a prior confirmation.
+
+### 11.6 Won, Lost, handover
+
+Won needs a **PO or authorised email** (type + date). Three separate states: *Commercially won* · *Handover prepared* · *PM accepted* (later).
+Lost needs a reason. Reopening and corrections are audited.
+
+### 11.7 Reporting and import
+
+Open pipeline by stage/owner/company; follow-ups due/overdue; first-response and follow-up completion timeliness; won/lost and reasons;
+**won value distinct from invoiced and collected**; **currencies never summed together**; every figure shows period and sample size.
+An optional, reviewed Excel/CSV import comes later in Stage B (template, validation, preview, duplicate warnings, no overwrite) and **nothing
+is imported until you supply and approve a source**.
 
 ---
 
-## 12. Risks and how this plan handles them
+## 12. Stage A: the design preview
+
+- **Where:** an isolated route `/os-preview` **outside** the authenticated HR app and its routes; separate layout; static sample data only.
+- **Production safety:** returns "not found" when `VERCEL_ENV` is `production`; excluded from the auth proxy matcher; `noindex`.
+  It **reads and writes no database** and uses no Supabase credentials. No schema change, no sample data written to V2.
+- **Labels:** every screen carries a banner "Design preview – fictional sample data". Sample names/companies/figures are invented and obviously fictional.
+  No fake live counters; where data would not exist yet, the screen says **Not collecting data yet**.
+- **Role view:** a preview-only switcher (`?role=`) changes which sample home/menu is drawn. It switches **no real identity**, calls no API, and must not become an impersonation feature; it does not exist in the real release.
+- **State toggles:** `?state=loading|empty|error|denied|overdue` render each state on the real layouts.
+- **Fixed sample "today":** Monday 19 October 2026 (GST), so overdue/due-today states are deterministic.
+- **Constraints to know:** Vercel previews have no Supabase settings, so the real signed-in app cannot run there; the preview therefore stands alone. Links to People & HR point to the live app and are labelled.
+
+---
+
+## 13. Decisions
+
+### 13.1 Resolved by the owner's brief
+
+Sales & CRM first; Stage A before B; ten modules; no Sales Head; the Sales permission model (§11.1); manual entry only; Zoho Books as the
+financial source; PO/authorised email as win evidence; PM is "Project Head"; single login/one app; V2 stays; no new hosted project;
+visual direction (evolve the current HR look); rename to ENGINIOUS OS at rollout.
+
+### 13.2 Genuinely open for Stage B (the owner must supply or decide)
+
+| # | Decision | Notes |
+|---|---|---|
+| O1 | Response targets and follow-up defaults (values) | Left blank by design |
+| O2 | Sales working calendar and timezone per owning company | |
+| O3 | Commercial approval: whether, thresholds per currency, who approves | `crm.approve_pricing` holders |
+| O4 | How leadership sees multiple currencies | Separate lines vs a reviewed reporting rate |
+| O5 | Lost and on-hold reason lists; source list | Seed lists proposed in Stage B |
+| O6 | Technology catalogue for "requested technologies" | |
+| O7 | Who may see value/budget | Within Sales access, or narrower |
+| O8 | Who may confirm technology availability | |
+| O9 | Reference numbering per company | e.g. company code + year + sequence |
+| O10 | Attachment types and size limits | |
+| O11 | Duplicate-matching rules | |
+| O12 | Import source for existing enquiries | Nothing imported until supplied |
+| O13 | Notification channels for reminders | In-app, email, both |
+| O14 | How the PM is chosen at handover | |
+| O15 | Who manages capability grants | Founders only, or also a technical admin |
+
+---
+
+## 14. Risks
 
 | Risk | Handling |
 |---|---|
-| New modules destabilise HR | Release 1 changes no HR table and no HR rule; the full RLS suite must stay green; HR keeps its own menu |
-| HR is not yet proven with real users | Gate: HR go-live first (D9) |
-| A project lead ends up seeing HR data | Separate membership table; RLS tests that try to read HR data as a lead; no reuse of the manager chain |
-| Customer/vendor data too widely visible (the `projects` table is open today) | Tighten `projects`; new tables get restrictive policies and tests from day one |
-| Approvals code becomes unmaintainable | Refactor first (§7 option B), with the existing suite as safety net |
-| No safe place to test | Staging before Release 2 (§8) |
-| Scope creep ("one more module") | Releases are small and sequential; each must be in daily use before the next starts |
-| Production changes stay manual | Keep the proven routine (read-only preflight → tested migration → verify SQL); revisit automation once staging exists |
+| Preview is mistaken for the real product | Banner on every screen; "Design preview" in the title; hidden in Production |
+| Preview leaks into Production | Gate by `VERCEL_ENV`, test for it, proxy exclusion, noindex |
+| Sample figures read as real | Fictional names, labelled data, no live counters, "Not collecting data yet" |
+| Role preview misused as impersonation | Preview-only, no identity, no API, absent in Stage B |
+| Sales access leaks HR data | Separate tables and helpers; negative RLS tests |
+| Commercial powers inherited from HR roles | Explicit `capability_grants`; tests that HR/Finance/Sys Admin alone grant nothing |
+| Invented business rules hardcoded | Configuration blank until supplied; audited history |
+| HR destabilised by the shell | HR menu and screens unchanged; full suite must stay green |
+| Production changes stay manual | Keep the proven routine: preflight → migration → verify |
 
 ---
 
-## 13. What was and was not done to produce this
+## 15. What was and was not done to produce this
 
-- **Done:** read the repository (schema, migrations, approvals engine, permission helpers, navigation, tests, CI, docs) and the
-  earlier read-only Production checks recorded in this repository's history.
-- **Not done:** no code, no migration, no Supabase project, no change to Production, no Vercel change. Cost figures come from
-  public web summaries and must be confirmed on the official pricing pages.
+- **Done (Stage A):** this roadmap v2; the isolated design preview with fictional data; automated checks and screenshots (see the PR).
+- **Not done:** no migration, no SQL, no Production change, no Supabase project, no paid service, no merge, no deployment to Production.
+  Cost figures in §8 remain third-party summaries to confirm on official pages.
+
