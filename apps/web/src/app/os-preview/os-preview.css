@@ -1,0 +1,15 @@
+/*
+ * Preview-only text colours for small status text. The app's semantic tokens (--destructive, --success, --accent)
+ * are tuned for fills and large text; on the tinted chip backgrounds used here they fall under 4.5:1 for 12px text.
+ * These variants meet WCAG AA on both themes without changing any shared token.
+ */
+:root {
+  --os-bad: 355 86% 74%;
+  --os-good: 152 58% 58%;
+  --os-link: 187 85% 62%;
+}
+:root[data-theme="light"] {
+  --os-bad: 355 70% 38%;
+  --os-good: 152 66% 22%;
+  --os-link: 187 90% 24%;
+}

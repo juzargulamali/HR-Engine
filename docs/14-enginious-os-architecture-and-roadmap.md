@@ -500,6 +500,9 @@ is imported until you supply and approve a source**.
 - **Role view:** a preview-only switcher (`?role=`) changes which sample home/menu is drawn. It switches **no real identity**, calls no API, and must not become an impersonation feature; it does not exist in the real release.
 - **State toggles:** `?state=loading|empty|error|denied|overdue` render each state on the real layouts.
 - **Fixed sample "today":** Monday 19 October 2026 (GST), so overdue/due-today states are deterministic.
+- **Where the code is:** `apps/web/src/app/os-preview/` (its own layout, components, sample data and CSS). It reuses the existing design tokens, fonts, theme toggle and UI primitives, adds no UI library, and touches no HR route. The only change outside that folder is one line in `apps/web/src/proxy.ts` (the auth-proxy matcher skips `/os-preview`), covered by a test.
+- **How it was checked:** lint, typecheck and 173 unit tests (including the gate, the proxy matcher and sample-data integrity); a scripted run of 44 interaction checks (validation, duplicate warning, controlled stage moves, permission-denied pages, availability invalidation, won/lost evidence, clock, theme, role switch, mobile overflow); an automated accessibility scan (axe, WCAG 2.1 AA) of 40 pages in desktop and mobile, dark and light, with zero findings after fixes; a production build with `VERCEL_ENV=production`, where every preview route returns 404 and no sample data is in the response. Screenshots: `docs/os-preview-screenshots/`.
+- **Known limitation:** the preview's JavaScript (including the fictional sample data) is part of the application bundle, so on Production the pages are hidden but the static bundle files exist. Nothing in them is real data.
 - **Constraints to know:** Vercel previews have no Supabase settings, so the real signed-in app cannot run there; the preview therefore stands alone. Links to People & HR point to the live app and are labelled.
 
 ---
