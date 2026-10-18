@@ -37,3 +37,17 @@ checks remain the enforcement, and a Sales grant adds no HR link while an HR rol
 See the pull request for results. Everything was run against the repository's local full stack (throwaway Postgres + PostgREST +
 a local sign-in stand-in), never a hosted database. Not verifiable there: hosted Supabase Auth and Storage, Vercel cron, Microsoft 365
 delivery, real accounts, and the large-file upload (the local stack has no Storage service; unchanged by this work).
+
+## Preview deployments and the Supabase settings
+
+The signed-in application needs `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in whichever Vercel environment it runs in
+(`NEXT_PUBLIC_*` values are read when the build runs, so enabling one for Preview needs a new Preview build, not just a reload).
+The authentication proxy runs before every page and API route and builds its Supabase client from them. In an environment where they
+are missing, every request used to end in a bare `Internal Server Error` (the real reason, "Your project's URL and Key are required to
+create a Supabase client!", only in the runtime log). The proxy now fails closed with a clear page, HTTP 503, naming the missing
+settings (never their values) and logging the same line; it never skips the sign-in check. Only `/os-preview`, which has no database,
+is served without them (as before). Covered by `src/proxy-config.test.ts`.
+
+The Stage A roadmap (`docs/14`) already recorded that Vercel previews may have no Supabase settings; `docs/recovery-windows-deployment.md`
+describes the intended arrangement as Production and Preview both carrying them, with Preview pointing at the same database as Production.
+Which is true for this project is visible only in Vercel (Settings → Environment Variables, names and environment tags only).
