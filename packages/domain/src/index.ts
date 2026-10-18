@@ -19,3 +19,7 @@ export * from "./crmStages";
 export * from "./crmDuplicates";
 export * from "./crmFiles";
 export * from "./crmDeadlines";
+export * from "./projectLifecycle";
+export * from "./projectTemplates";
+export * from "./projectCalendar";
+export * from "./projectPlan";
