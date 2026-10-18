@@ -24,6 +24,14 @@ import type {
   CrmOpportunityRow, CrmOrganisationRow, CrmProposalRow, CrmReadOnlyTable, CrmReminderEmailClaim, CrmReminderRow,
   CrmZohoReferenceRow, CrmClosureRow, CrmUploadIntent,
 } from "./crm";
+import type {
+  ProjAuditLogRow, ProjBookingConflictRow, ProjChangeLogRow, ProjCompanyCalendarRow, ProjCompanyGrantRow, ProjCompanySettingsRow, ProjCompletionReviewRow,
+  ProjCompletionRow, ProjDeliverableRow, ProjDirectoryRow, ProjExternalDependencyRow, ProjFeedbackRow, ProjFileRow, ProjHandoverRow, ProjHandoverStatusRow,
+  ProjIssuedPlanRow, ProjMemberRow, ProjMessageFeedRow, ProjMessageMentionRow, ProjMessageRow, ProjMessageTombstoneRow, ProjMilestoneProgressRow,
+  ProjMilestoneRow, ProjMyCalendarRow, ProjNotificationRow, ProjPersonRow, ProjPlanItemRow, ProjProjectCalendarRow, ProjProjectDetailsRow, ProjProjectPersonRow,
+  ProjProjectRow, ProjReadOnlyTable, ProjReadStateRow, ProjSalesLinkRow, ProjScopeChangeCommercialRow, ProjScopeChangeRow, ProjSiteBookingRow,
+  ProjTaskAffectedRow, ProjTaskCollaboratorRow, ProjTaskCommentRow, ProjTaskDependencyRow, ProjTaskEventRow, ProjTaskRow, ProjTeamRow, ProjUnreadRow, ProjUploadIntent,
+} from "./projects";
 
 export type AppRole = "employee" | "line_manager" | "hr_admin" | "finance" | "ceo" | "cto" | "sys_admin";
 export type AccountStatus = "invited" | "active" | "deactivated";
@@ -1627,6 +1635,37 @@ export interface Database {
         Update: { status?: AiDraftStatus; authorized_by?: string | null; authorized_at?: string | null; reference_id?: string | null };
         Relationships: [];
       };
+      // Projects & Tasks (20261120000000-500): read-only to clients; every write is a proj_* function below.
+      proj_company_grants: ProjReadOnlyTable<ProjCompanyGrantRow>;
+      proj_audit_log: ProjReadOnlyTable<ProjAuditLogRow>;
+      proj_company_settings: ProjReadOnlyTable<ProjCompanySettingsRow>;
+      proj_projects: ProjReadOnlyTable<ProjProjectRow>;
+      proj_project_details: ProjReadOnlyTable<ProjProjectDetailsRow>;
+      proj_teams: ProjReadOnlyTable<ProjTeamRow>;
+      proj_project_members: ProjReadOnlyTable<ProjMemberRow>;
+      proj_sales_links: ProjReadOnlyTable<ProjSalesLinkRow>;
+      proj_handovers: ProjReadOnlyTable<ProjHandoverRow>;
+      proj_milestones: ProjReadOnlyTable<ProjMilestoneRow>;
+      proj_deliverables: ProjReadOnlyTable<ProjDeliverableRow>;
+      proj_tasks: ProjReadOnlyTable<ProjTaskRow>;
+      proj_task_collaborators: ProjReadOnlyTable<ProjTaskCollaboratorRow>;
+      proj_task_dependencies: ProjReadOnlyTable<ProjTaskDependencyRow>;
+      proj_task_events: ProjReadOnlyTable<ProjTaskEventRow>;
+      proj_task_comments: ProjReadOnlyTable<ProjTaskCommentRow>;
+      proj_change_log: ProjReadOnlyTable<ProjChangeLogRow>;
+      proj_plan_items: ProjReadOnlyTable<ProjPlanItemRow>;
+      proj_external_dependencies: ProjReadOnlyTable<ProjExternalDependencyRow>;
+      proj_site_bookings: ProjReadOnlyTable<ProjSiteBookingRow>;
+      proj_messages: ProjReadOnlyTable<ProjMessageRow>;
+      proj_message_mentions: ProjReadOnlyTable<ProjMessageMentionRow>;
+      proj_message_tombstones: ProjReadOnlyTable<ProjMessageTombstoneRow>;
+      proj_read_state: ProjReadOnlyTable<ProjReadStateRow>;
+      proj_files: ProjReadOnlyTable<ProjFileRow>;
+      proj_feedback: ProjReadOnlyTable<ProjFeedbackRow>;
+      proj_scope_changes: ProjReadOnlyTable<ProjScopeChangeRow>;
+      proj_scope_change_commercial: ProjReadOnlyTable<ProjScopeChangeCommercialRow>;
+      proj_issued_plans: ProjReadOnlyTable<ProjIssuedPlanRow>;
+      proj_completions: ProjReadOnlyTable<ProjCompletionRow>;
       // Sales & CRM (20261115000000-300): read-only to clients; every write is a crm_* function below.
       crm_company_grants: CrmReadOnlyTable<CrmCompanyGrantRow>;
       crm_audit_log: CrmReadOnlyTable<CrmAuditLogRow>;
@@ -1759,6 +1798,97 @@ export interface Database {
       crm_mark_upload_intent: { Args: { p_intent_id: string; p_status: string; p_reason?: string | null }; Returns: undefined };
       crm_expire_upload_intents: { Args: Record<string, never>; Returns: { quarantine_path: string; final_path: string; orphaned_validated: boolean }[] };
       crm_availability_needs_recheck: { Args: { p_opportunity_id: string }; Returns: boolean };
+      // Projects & Tasks functions (20261120000000-500). Writes are only these; the database enforces who may call what.
+      proj_has_access: { Args: { p_company_id: string }; Returns: boolean };
+      proj_has_capability: { Args: { p_company_id: string; p_capability: string }; Returns: boolean };
+      proj_grant_access: { Args: { p_user_id: string; p_company_id: string; p_capabilities?: string[]; p_note?: string | null }; Returns: string };
+      proj_revoke_access: { Args: { p_user_id: string; p_company_id: string }; Returns: undefined };
+      proj_set_company_code: { Args: { p_company_id: string; p_reference_code: string }; Returns: undefined };
+      proj_people: { Args: Record<string, never>; Returns: ProjPersonRow[] };
+      proj_staff_directory: { Args: Record<string, never>; Returns: { user_id: string; full_name: string | null; email: string | null }[] };
+      proj_directory: { Args: Record<string, never>; Returns: ProjDirectoryRow[] };
+      proj_handover_for_opportunity: { Args: { p_opportunity_id: string }; Returns: ProjHandoverStatusRow[] };
+      proj_save_handover: { Args: { p_opportunity_id: string; p_fields?: Record<string, unknown>; p_expected_version?: number | null }; Returns: string };
+      proj_submit_handover: { Args: { p_handover_id: string }; Returns: undefined };
+      proj_assign_handover_pm: { Args: { p_handover_id: string; p_pm_user_id: string }; Returns: undefined };
+      proj_request_handover_clarification: { Args: { p_handover_id: string; p_note: string }; Returns: undefined };
+      proj_withdraw_handover: { Args: { p_handover_id: string; p_reason: string }; Returns: undefined };
+      proj_accept_handover: { Args: { p_handover_id: string }; Returns: string };
+      proj_create_internal_project: {
+        Args: { p_company_id: string; p_name: string; p_owner_user_id: string; p_is_ongoing?: boolean; p_priority?: string; p_start_date?: string | null; p_end_date?: string | null; p_summary?: string | null; p_site_timezone?: string };
+        Returns: string;
+      };
+      proj_assign_pm: { Args: { p_project_id: string; p_pm_user_id: string }; Returns: undefined };
+      proj_set_acting_pm: { Args: { p_project_id: string; p_user_id: string; p_until: string }; Returns: undefined };
+      proj_end_acting_pm: { Args: { p_project_id: string; p_user_id: string }; Returns: undefined };
+      proj_update_project: { Args: { p_project_id: string; p_patch: Record<string, unknown>; p_expected_version?: number | null }; Returns: undefined };
+      proj_set_status: { Args: { p_project_id: string; p_to: string; p_reason?: string | null; p_review_date?: string | null; p_expected_version?: number | null }; Returns: undefined };
+      proj_add_member: { Args: { p_project_id: string; p_user_id: string; p_team_id?: string | null }; Returns: undefined };
+      proj_set_member_team: { Args: { p_project_id: string; p_user_id: string; p_team_id: string | null }; Returns: undefined };
+      proj_remove_member: { Args: { p_project_id: string; p_user_id: string; p_reason?: string | null; p_reassign_to?: string | null }; Returns: undefined };
+      proj_save_team: { Args: { p_project_id: string; p_team_id: string | null; p_name: string; p_head_user_id: string; p_department_id?: string | null }; Returns: string };
+      proj_remove_team: { Args: { p_project_id: string; p_team_id: string }; Returns: undefined };
+      proj_set_sales_link: { Args: { p_project_id: string; p_user_id: string; p_linked: boolean }; Returns: undefined };
+      proj_project_people: { Args: { p_project_id: string }; Returns: ProjProjectPersonRow[] };
+      proj_milestone_progress: { Args: { p_project_id: string }; Returns: ProjMilestoneProgressRow[] };
+      proj_save_milestone: { Args: { p_project_id: string; p_milestone_id: string | null; p_fields: Record<string, unknown> }; Returns: string };
+      proj_set_milestone_status: { Args: { p_milestone_id: string; p_to: string; p_note?: string | null }; Returns: undefined };
+      proj_save_deliverable: { Args: { p_project_id: string; p_deliverable_id: string | null; p_fields: Record<string, unknown> }; Returns: string };
+      proj_set_deliverable_status: { Args: { p_deliverable_id: string; p_to: string; p_note?: string | null }; Returns: undefined };
+      proj_create_task: { Args: { p_project_id: string; p_fields: Record<string, unknown> }; Returns: string };
+      proj_update_task: { Args: { p_task_id: string; p_fields: Record<string, unknown>; p_expected_version?: number | null }; Returns: number };
+      proj_reassign_task: { Args: { p_task_id: string; p_assignee_id: string; p_note?: string | null }; Returns: undefined };
+      proj_set_task_status: { Args: { p_task_id: string; p_to: string; p_note?: string | null; p_expected_version?: number | null }; Returns: undefined };
+      proj_block_task: { Args: { p_task_id: string; p_reason: string; p_unblock_owner?: string | null; p_unblock_action?: string | null }; Returns: undefined };
+      proj_unblock_task: { Args: { p_task_id: string; p_note?: string | null }; Returns: undefined };
+      proj_comment_task: { Args: { p_task_id: string; p_body: string }; Returns: string };
+      proj_edit_task_comment: { Args: { p_comment_id: string; p_body: string }; Returns: undefined };
+      proj_task_affected: { Args: { p_task_id: string; p_new_due?: string | null }; Returns: ProjTaskAffectedRow[] };
+      proj_save_plan_item: { Args: { p_project_id: string; p_item_id: string | null; p_fields: Record<string, unknown> }; Returns: string };
+      proj_delete_plan_item: { Args: { p_item_id: string }; Returns: undefined };
+      proj_apply_plan_template: { Args: { p_project_id: string; p_plan: string; p_items: Record<string, unknown>[]; p_base_date?: string | null }; Returns: number };
+      proj_save_external_dependency: { Args: { p_project_id: string; p_dependency_id: string | null; p_fields: Record<string, unknown> }; Returns: string };
+      proj_delete_external_dependency: { Args: { p_dependency_id: string }; Returns: undefined };
+      proj_save_booking: { Args: { p_project_id: string; p_booking_id: string | null; p_fields: Record<string, unknown> }; Returns: string };
+      proj_booking_conflicts: { Args: { p_booking_id: string }; Returns: ProjBookingConflictRow[] };
+      proj_confirm_booking: { Args: { p_booking_id: string; p_override_reason?: string | null }; Returns: { confirmed: boolean; conflicts: number; overridden: boolean } };
+      proj_cancel_booking: { Args: { p_booking_id: string; p_reason?: string | null }; Returns: undefined };
+      proj_my_calendar: { Args: { p_from: string; p_to: string; p_view_tz?: string }; Returns: ProjMyCalendarRow[] };
+      proj_company_calendar: { Args: { p_company_id: string; p_from: string; p_to: string }; Returns: ProjCompanyCalendarRow[] };
+      proj_project_calendar: { Args: { p_project_id: string; p_from: string; p_to: string; p_view_tz?: string }; Returns: ProjProjectCalendarRow[] };
+      proj_post_message: { Args: { p_project_id: string; p_body: string; p_parent_id?: string | null; p_nonce?: string | null; p_mentions?: string[] }; Returns: string };
+      proj_edit_message: { Args: { p_message_id: string; p_body: string }; Returns: undefined };
+      proj_delete_message: { Args: { p_message_id: string; p_reason?: string | null }; Returns: undefined };
+      proj_messages_since: { Args: { p_project_id: string; p_after_seq?: number; p_changed_since?: string | null; p_limit?: number }; Returns: ProjMessageFeedRow[] };
+      proj_mark_read: { Args: { p_project_id: string }; Returns: undefined };
+      proj_unread_counts: { Args: Record<string, never>; Returns: ProjUnreadRow[] };
+      proj_my_notifications: { Args: { p_limit?: number; p_only_unread?: boolean }; Returns: ProjNotificationRow[] };
+      proj_mark_notifications_read: { Args: { p_ids?: string[] | null }; Returns: number };
+      proj_create_upload_intent: {
+        Args: { p_project_id: string; p_original_name: string; p_mime_type: string; p_size_bytes: number; p_safe_name: string; p_purpose?: string; p_label?: string | null; p_restricted?: boolean };
+        Returns: { intent_id: string; quarantine_path: string }[];
+      };
+      proj_get_upload_intent: { Args: { p_intent_id: string }; Returns: ProjUploadIntent[] };
+      proj_register_uploaded_file: { Args: { p_intent_id: string }; Returns: string };
+      proj_add_link: { Args: { p_project_id: string; p_label: string; p_url: string; p_purpose?: string; p_restricted?: boolean }; Returns: string };
+      proj_remove_file: { Args: { p_file_id: string }; Returns: string | null };
+      // Service role only (never callable from a browser session):
+      proj_mark_upload_intent: { Args: { p_intent_id: string; p_status: string; p_reason?: string | null }; Returns: undefined };
+      proj_expire_upload_intents: { Args: Record<string, never>; Returns: { quarantine_path: string; final_path: string; orphaned_validated: boolean }[] };
+      proj_record_feedback: { Args: { p_project_id: string; p_fields: Record<string, unknown> }; Returns: string };
+      proj_update_feedback: { Args: { p_feedback_id: string; p_fields: Record<string, unknown> }; Returns: undefined };
+      proj_propose_scope_change: { Args: { p_project_id: string; p_fields: Record<string, unknown> }; Returns: string };
+      proj_set_scope_change_commercial: { Args: { p_scope_change_id: string; p_currency: string | null; p_amount: number | null; p_note: string | null }; Returns: undefined };
+      proj_withdraw_scope_change: { Args: { p_scope_change_id: string }; Returns: undefined };
+      proj_decide_scope_change: { Args: { p_scope_change_id: string; p_decision: string; p_note?: string | null }; Returns: undefined };
+      proj_current_plan_payload: { Args: { p_project_id: string }; Returns: Record<string, unknown> | null };
+      proj_issue_plan: { Args: { p_project_id: string; p_client_reference?: string | null; p_note?: string | null }; Returns: string };
+      proj_plan_outdated: { Args: { p_project_id: string }; Returns: boolean | null };
+      proj_record_plan_sent: { Args: { p_plan_id: string; p_note: string }; Returns: undefined };
+      proj_record_plan_accepted: { Args: { p_plan_id: string; p_accepted_on: string; p_contact: string; p_note?: string | null }; Returns: undefined };
+      proj_completion_review: { Args: { p_project_id: string }; Returns: ProjCompletionReviewRow[] };
+      proj_complete_project: { Args: { p_project_id: string; p_fields: Record<string, unknown>; p_resolutions?: Record<string, unknown>[] }; Returns: string };
+      proj_reopen_project: { Args: { p_project_id: string; p_reason: string }; Returns: undefined };
       get_contract_as_of: {
         Args: { p_employee_id: string; p_as_of: string };
         Returns: Database["public"]["Tables"]["employment_contracts"]["Row"][];

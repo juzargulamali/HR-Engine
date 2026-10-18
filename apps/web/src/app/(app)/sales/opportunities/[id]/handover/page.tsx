@@ -14,6 +14,7 @@ import { buildHandoverPackage, dateRangeText, fileDisplayName, HANDOVER_STATUS_L
 import { Fact, Muted, Panel } from "../parts";
 import { buildOppView } from "../view";
 import { HandoverForm } from "./handover-form";
+import { loadProjectHandover, ProjectHandoverPanel } from "./project-handover";
 
 export const metadata = { title: "Handover" };
 
@@ -80,6 +81,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
   // Keep the currently chosen Project Manager selectable even if the directory did not return them.
   const people = pmId && !staff.some((p) => p.id === pmId) ? [...staff, { id: pmId, name: pmName ?? "Former colleague" }] : staff;
 
+  const projectHandover = await loadProjectHandover(opp.id);
   const pkg = buildHandoverPackage({ opp, proposals: detail.proposals, files: detail.files, contactCount: detail.contacts.length, availability: detail.item.availability });
   const latestSent = detail.proposals.find((p) => p.status === "sent");
   const show = dateRangeText(opp.event_start, opp.event_end, formatDate);
@@ -87,7 +89,9 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
   const steps = [
     { label: "Commercially won", done: true, detail: `${pkg.evidenceLabel ?? "Evidence"} ${pkg.evidenceReference ?? ""}, dated ${formatDate(pkg.evidenceDate)}` },
     { label: "Handover package", done: status !== "draft", detail: HANDOVER_STATUS_LABELS[status] ?? status },
-    { label: "Project created", done: false, detail: "Coming soon. The Projects module is not built yet." },
+    projectHandover.status?.status === "accepted"
+      ? { label: "Project created", done: true, detail: `${projectHandover.status.project_reference ?? "The project"} was created when the Project Manager accepted the project handover.` }
+      : { label: "Project created", done: false, detail: "Created when the Project Manager accepts the project handover below." },
   ];
 
   return (
@@ -99,7 +103,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
           <h1 className="mt-1 break-words text-2xl font-semibold">{opp.title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">Everything the Project Manager needs to start, taken from the opportunity as it stands. It is a summary of agreed facts, not a project.</p>
         </div>
-        <Alert role="status"><strong>Projects: coming soon.</strong> The Projects module is not built yet, so this handover is a recorded package. Handing over does not create a project or notify anyone automatically.</Alert>
+        <Alert role="status"><strong>Two separate records.</strong> The package and Project Manager choice below are the Sales-side record and notify nobody. The delivery brief further down (Project handover) is what starts delivery: when you submit it, a founder names the Project Manager, who accepts it to create the project.</Alert>
       </header>
 
       <ol className="grid gap-3 sm:grid-cols-3" aria-label="Handover progress">
@@ -136,6 +140,17 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
         )}
         {!canEdit ? <p className="mt-3 text-sm text-muted-foreground">Only the owner ({view.ownerName}) or a founder can change this.</p> : null}
       </Panel>
+
+      <ProjectHandoverPanel
+        state={projectHandover}
+        opportunityId={opp.id}
+        canEdit={canEdit}
+        personName={(id) => (id ? ctx.personName(id) : "Unknown")}
+        defaults={{
+          title: opp.title, clientName: "", location: opp.location ?? "", siteTimezone: "Asia/Dubai", installStart: opp.install_start ?? "", eventStart: opp.event_start ?? "",
+          eventEnd: opp.event_end ?? "", scope: opp.scope ?? "", exclusions: opp.exclusions ?? "", notes: "", technologies: opp.technologies,
+        }}
+      />
 
       <div className="grid gap-6 md:grid-cols-2">
         <Panel title="Accepted scope">

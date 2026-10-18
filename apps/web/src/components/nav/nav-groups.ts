@@ -1,5 +1,5 @@
-import { canViewHrAlerts, hasCrmCapability, hasRoleAnyScope, isAnyCrmFounder, isSysAdmin } from "@enginious-hr/domain";
-import type { CrmGrant, RoleGrant } from "@enginious-hr/domain";
+import { canViewHrAlerts, hasCrmCapability, hasProjCapability, hasRoleAnyScope, isAnyCrmFounder, isSysAdmin } from "@enginious-hr/domain";
+import type { CrmGrant, ProjGrant, RoleGrant } from "@enginious-hr/domain";
 
 /**
  * String keys only — never a component reference. This data crosses from
@@ -68,6 +68,11 @@ export interface NavOptions {
   hasPendingApprovals?: boolean;
   /** The person's own Sales (CRM) grants, from crm_company_grants — never HR roles. Empty/undefined means no Sales access. */
   crmGrants?: readonly CrmGrant[];
+  /**
+   * Projects & Tasks access: the person's own grants from proj_company_grants (never HR roles or Sales grants), whether they are
+   * linked to a project as a Sales relationship, and whether a handover is waiting on them. No access means no module.
+   */
+  projects?: { grants: readonly ProjGrant[]; salesLinked?: boolean; pendingHandovers?: boolean };
 }
 
 /**
@@ -186,9 +191,25 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
   }
   modules.push({ id: "people", label: "People & HR", iconKey: "people", href: "/employees", sections: peopleSections });
 
+  // Projects & Tasks has its own company-scoped access (proj_company_grants), independent of HR roles and Sales grants: shown only
+  // to people granted it, or linked to a project as Sales (who see their own projects and nothing else). Handovers, new internal
+  // projects and Access appear only to those who can use them (the same rule the pages and the database apply).
+  const proj = options.projects;
+  const projGrants = proj?.grants ?? [];
+  if (projGrants.length > 0 || proj?.salesLinked) {
+    const anyCap = (cap: Parameters<typeof hasProjCapability>[2]) => projGrants.some((g) => hasProjCapability([g], g.companyId, cap));
+    const projLinks: NavLinkData[] = [{ href: "/projects", label: "Projects", iconKey: "projects" }];
+    if (projGrants.length > 0) {
+      projLinks.push({ href: "/projects/work", label: "My Work", iconKey: "projects" }, { href: "/projects/calendar", label: "Calendar", iconKey: "projects" });
+      if (anyCap("assign_pm") || proj?.pendingHandovers) projLinks.push({ href: "/projects/handovers", label: "Handovers", iconKey: "projects" });
+      if (anyCap("assign_pm")) projLinks.push({ href: "/projects/new", label: "New internal project", iconKey: "projects" });
+      if (anyCap("manage_access")) projLinks.push({ href: "/projects/access", label: "Access", iconKey: "projects" });
+    }
+    modules.push({ id: "projects", label: "Projects & Tasks", iconKey: "projects", href: "/projects", sections: [{ label: "Projects & Tasks", links: projLinks }] });
+  }
+
   // Modules that are planned but not built: visible to everyone so the roadmap is honest, never links, never any data.
   modules.push(
-    { id: "projects", label: "Projects & Tasks", iconKey: "projects", href: "", comingSoon: true, sections: [] },
     { id: "inventory", label: "Inventory", iconKey: "inventory", href: "", comingSoon: true, sections: [] },
     { id: "vendors", label: "Vendors & Purchasing", iconKey: "vendors", href: "", comingSoon: true, sections: [] },
     // The existing HR appraisals and goals stay reachable (and are called what they are); the future KPI module is marked.

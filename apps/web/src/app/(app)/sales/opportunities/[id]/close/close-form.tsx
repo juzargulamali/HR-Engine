@@ -129,7 +129,7 @@ export function CloseForm(p: CloseFormProps) {
               <>
                 <Step>The stage becomes Won and the evidence (type, reference and date) is recorded on the opportunity.</Step>
                 <Step>{followUpText}</Step>
-                <Step>A handover draft is created for the Project Manager. The Projects module is not built yet, so it stays a recorded package.</Step>
+                <Step>A Sales handover draft is created for the Project Manager. Delivery starts later, when you submit the project handover and the Project Manager accepts it.</Step>
                 <Step>Afterwards only the handover, files, proposal acceptance and (for founders) the value can change.</Step>
               </>
             ) : (
