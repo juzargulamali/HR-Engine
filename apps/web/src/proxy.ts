@@ -56,5 +56,7 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  // `os-preview` is the design-only ENGINIOUS OS preview: static sample data, no session, no database.
+  // It is hidden in Production by its own layout gate (app/os-preview/_lib/gate.ts).
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|os-preview(?:/|$)|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
 };
