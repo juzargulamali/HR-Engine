@@ -51,6 +51,8 @@ export default async function ProjectPeoplePage({ params }: { params: Promise<{ 
     ...links.filter((l) => !memberIds.has(l.user_id) && !companyPeople.some((p) => p.id === l.user_id)).map((l) => ({ id: l.user_id, name: nameFor(l.user_id), note: "Sales link" })),
   ];
   const pmCandidates = companyPeople.map((p) => ({ id: p.id, name: p.name }));
+  // A department head may be a member already or anyone with Projects access (the database adds them as a member).
+  const headOptions = [...memberOptions, ...companyPeople.filter((p) => !memberIds.has(p.id)).map((p) => ({ id: p.id, name: p.name }))];
   const salesCandidates = [...staff.entries()].filter(([uid]) => !links.some((l) => l.user_id === uid)).map(([uid, name]) => ({ id: uid, name }));
   const actingNow = people.filter((p) => p.role === "acting_pm");
 
@@ -113,7 +115,7 @@ export default async function ProjectPeoplePage({ params }: { params: Promise<{ 
       <Panel
         title="Department teams"
         description="Each team has a head who manages the team's deliverables and tasks. They are teams inside this project, not HR departments."
-        actions={canEdit ? <TeamButton projectId={id} members={memberOptions} /> : undefined}
+        actions={canEdit ? <TeamButton projectId={id} members={headOptions} /> : undefined}
       >
         {teams.length === 0 ? (
           <EmptyState dense title="No department teams yet" description={canEdit ? "Add one for each department that delivers part of this project, such as Programming or Content." : "The Project Manager adds department teams when departments deliver part of the project."} />
@@ -126,7 +128,7 @@ export default async function ProjectPeoplePage({ params }: { params: Promise<{ 
                   <TableCell className="font-medium">{t.name}</TableCell>
                   <TableCell>{view.nameOf(t.head_user_id)}</TableCell>
                   <TableCell>{people.filter((p) => p.team_id === t.id).length}</TableCell>
-                  {canEdit ? <TableCell><div className="flex flex-wrap gap-2"><TeamButton projectId={id} team={{ id: t.id, name: t.name, headUserId: t.head_user_id }} members={memberOptions} /></div></TableCell> : null}
+                  {canEdit ? <TableCell><div className="flex flex-wrap gap-2"><TeamButton projectId={id} team={{ id: t.id, name: t.name, headUserId: t.head_user_id }} members={headOptions} /></div></TableCell> : null}
                 </TableRow>
               ))}
             </TableBody>

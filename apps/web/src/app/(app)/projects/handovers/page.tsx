@@ -40,7 +40,8 @@ export default async function HandoversPage() {
     const { data: staff } = await supabase.rpc("proj_staff_directory");
     for (const s of staff ?? []) names.set(s.user_id, s.full_name?.trim() || s.email?.split("@")[0] || "Unnamed");
   }
-  const nameOf = (id: string | null) => (id ? (names.get(id) ?? ctx.personName(id)) : "Not chosen yet");
+  // Sales people usually hold no Projects grant, so only people who assign PMs can read their names; everyone else sees a plain label.
+  const nameOf = (id: string | null) => (id ? (names.get(id) ?? ctx.people.find((p) => p.id === id)?.name ?? (id === ctx.userId ? "you" : "a Sales colleague")) : "Not chosen yet");
 
   const mine = handovers.filter((h) => h.pm_user_id === ctx.userId && (h.status === "pm_assigned" || h.status === "clarification_requested"));
   const rest = handovers.filter((h) => !mine.includes(h));
