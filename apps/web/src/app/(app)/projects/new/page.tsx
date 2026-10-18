@@ -26,7 +26,7 @@ export default async function NewInternalProjectPage() {
           <NewProjectForm companies={companies} />
         </Panel>
       )}
-      <Muted>Client projects are not created here: they start when a Project Manager accepts a Sales handover.</Muted>
+      <Muted>Client projects are not created here: they start when a Project Manager accepts a Sales handover. The same short form is on the Projects page (New internal project).</Muted>
     </div>
   );
 }

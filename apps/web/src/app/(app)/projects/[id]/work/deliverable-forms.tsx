@@ -23,7 +23,7 @@ export interface DeliverableFormValues {
  * Add or edit a deliverable. The PM sets title, department team and milestone; the head of the responsible team may only
  * refine the description and the date (`leaderOnly` false), as the database enforces.
  */
-function DeliverableForm({ projectId, deliverable, teams, milestones, leaderOnly, onDone }: {
+export function DeliverableForm({ projectId, deliverable, teams, milestones, leaderOnly, onDone }: {
   projectId: string; deliverable?: DeliverableFormValues; teams: PickOption[]; milestones: PickOption[]; leaderOnly: boolean; onDone: () => void;
 }) {
   const [due, setDue] = useState(deliverable?.due_date ?? "");

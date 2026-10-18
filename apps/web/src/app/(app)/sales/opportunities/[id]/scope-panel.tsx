@@ -17,13 +17,13 @@ export function toEditable(view: OppView): EditableOpportunity {
 }
 
 /** Scope, dates and quantities as they stand now. Equipment availability is judged against exactly these. */
-export function ScopePanel({ view }: { view: OppView }) {
+export function ScopePanel({ view, compact = false }: { view: OppView; compact?: boolean }) {
   const { opp, detail, editMode } = view;
   const display = detail.item.availability;
   const show = dateRangeText(opp.event_start, opp.event_end, formatDate);
   return (
-    <div className="grid gap-6 lg:grid-cols-3">
-      <div className="space-y-6 lg:col-span-2">
+    <div className={compact ? "space-y-6" : "grid gap-6 lg:grid-cols-3"}>
+      <div className={compact ? "space-y-6" : "space-y-6 lg:col-span-2"}>
         <Panel
           title="Scope"
           actions={editMode ? <EditDetailsButton data={toEditable(view)} mode={editMode} availabilityWillNeedRecheck={display === "confirmed" || display === "unavailable"} /> : undefined}

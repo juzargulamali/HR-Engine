@@ -106,7 +106,8 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
   });
   if (error) return fail(error.message);
   refresh();
-  redirect(`/sales/opportunities/${data}`);
+  // The quick-add dialog asks to land on the list with the new enquiry open in the side panel; anything else keeps the full page.
+  redirect(formData.get("after") === "panel" ? `/sales/opportunities?open=${data}` : `/sales/opportunities/${data}`);
 }
 
 const patchFields = {
@@ -198,6 +199,8 @@ export async function markWon(_prev: ActionState, formData: FormData): Promise<A
   const { error } = await supabase.rpc("crm_mark_won", { p_id: p.data.id, p_evidence_type: p.data.evidenceType, p_evidence_reference: p.data.evidenceReference, p_evidence_date: p.data.evidenceDate, p_note: p.data.note ?? null, p_expected_version: p.data.expectedVersion ?? null });
   if (error) return fail(error.message);
   refresh(p.data.id);
+  // From a dialog (side panel, board) the person stays where they are; the page behind refreshes with the new stage.
+  if (formData.get("after") === "stay") return { error: null };
   redirect(`/sales/opportunities/${p.data.id}`);
 }
 
@@ -209,6 +212,7 @@ export async function markLost(_prev: ActionState, formData: FormData): Promise<
   const { error } = await supabase.rpc("crm_mark_lost", { p_id: p.data.id, p_reason: p.data.reason, p_expected_version: p.data.expectedVersion ?? null });
   if (error) return fail(error.message);
   refresh(p.data.id);
+  if (formData.get("after") === "stay") return { error: null };
   redirect(`/sales/opportunities/${p.data.id}`);
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterDirectory, groupTasksByDue, handoverWaitsOnMe, isWaitingOnMyReview, type DirectoryItem } from "./work-logic";
+import { filterDirectory, groupTasksByDue, handoverWaitsOnMe, isWaitingOnMyReview, narrowMyWork, parseMyWorkShow, selectMyWorkRows, type DirectoryItem } from "./work-logic";
 
 describe("groupTasksByDue", () => {
   const tasks = [
@@ -64,5 +64,31 @@ describe("handoverWaitsOnMe", () => {
     expect(handoverWaitsOnMe({ status: "pm_assigned", pm_user_id: "me", company_id: "c2" }, "me", canAssign)).toBe(true);
     expect(handoverWaitsOnMe({ status: "pm_assigned", pm_user_id: "x", company_id: "c1" }, "me", canAssign)).toBe(false);
     expect(handoverWaitsOnMe({ status: "draft", pm_user_id: "me", company_id: "c1" }, "me", canAssign)).toBe(false);
+  });
+});
+
+describe("My Work selection", () => {
+  const row = (id: string, dueDate: string | null, open = true) => ({ id, dueDate, open, title: id, projectName: "Orbit", projectReference: "UAE-P-1", projectId: id.startsWith("b") ? "p2" : "p1" });
+  const sets = { mine: [row("a1", "2026-10-10"), row("a2", "2026-10-30"), row("a3", null)], team: [row("a1", "2026-10-10"), row("b1", "2026-10-01")], reviews: [row("b2", null)] };
+  it("parses only the four choices and refuses My team to someone who leads nothing", () => {
+    expect(parseMyWorkShow("team", true)).toBe("team");
+    expect(parseMyWorkShow("team", false)).toBe("mine");
+    expect(parseMyWorkShow("review", false)).toBe("review");
+    expect(parseMyWorkShow("everyone", true)).toBe("mine");
+    expect(parseMyWorkShow("", true)).toBe("mine");
+  });
+  it("shows my tasks, my team's, the review queue, or only my overdue ones (plain dates, today is not overdue)", () => {
+    expect(selectMyWorkRows(sets, "mine", "2026-10-20").map((r) => r.id)).toEqual(["a1", "a2", "a3"]);
+    expect(selectMyWorkRows(sets, "team", "2026-10-20").map((r) => r.id)).toEqual(["a1", "b1"]);
+    expect(selectMyWorkRows(sets, "review", "2026-10-20").map((r) => r.id)).toEqual(["b2"]);
+    expect(selectMyWorkRows(sets, "overdue", "2026-10-20").map((r) => r.id)).toEqual(["a1"]);
+    expect(selectMyWorkRows(sets, "overdue", "2026-10-10").map((r) => r.id)).toEqual([]);
+  });
+  it("narrows by search text and by one project", () => {
+    const rows = [row("a1", null), row("b1", null)];
+    expect(narrowMyWork(rows, "", "").map((r) => r.id)).toEqual(["a1", "b1"]);
+    expect(narrowMyWork(rows, "", "p2").map((r) => r.id)).toEqual(["b1"]);
+    expect(narrowMyWork(rows, "UAE-P", "").length).toBe(2);
+    expect(narrowMyWork(rows, "zzz", "")).toEqual([]);
   });
 });

@@ -118,16 +118,23 @@ export function mapMyRows(rows: readonly ProjMyCalendarRow[]): DisplayEntry[] {
   return rows.map((r) => ({
     kind: r.kind, id: `${r.kind}:${r.item_id}`, title: r.title, onDate: r.on_date, endDate: r.end_date ?? r.on_date, startsAt: r.starts_at, endsAt: r.ends_at, tz: r.tz,
     kindLabel: kindLabel(r.kind), status: r.status, statusLabel: statusText(r.status), projectRef: r.project_reference, projectName: r.project_name,
-    href: r.kind === "task" || r.kind === "review" ? `/projects/${r.project_id}/work` : r.kind === "booking" ? `/projects/${r.project_id}/timeline` : `/projects/${r.project_id}/work`,
+    href: r.kind === "booking" ? `/projects/${r.project_id}/plan?plan=site` : `/projects/${r.project_id}/work`,
     detail: r.detail,
   }));
+}
+
+/** Where an entry of the project calendar leads: timeline items, bookings and dependencies are in the Plan section, the rest in Work. */
+function planEntryHref(projectId: string, kind: string): string {
+  if (kind === "plan_delivery") return `/projects/${projectId}/plan?plan=delivery`;
+  if (kind === "booking" || kind === "plan_site" || kind === "dependency") return `/projects/${projectId}/plan?plan=site`;
+  return `/projects/${projectId}/work`;
 }
 
 export function mapProjectRows(rows: readonly ProjProjectCalendarRow[], projectId: string, reference: string, name: string): DisplayEntry[] {
   return rows.map((r) => ({
     kind: r.kind, id: `${r.kind}:${r.item_id}`, title: r.title, onDate: r.on_date, endDate: r.end_date ?? r.on_date, startsAt: r.starts_at, endsAt: r.ends_at, tz: r.tz,
     kindLabel: kindLabel(r.kind), status: r.status, statusLabel: statusText(r.status), projectRef: reference, projectName: name,
-    href: r.kind === "booking" || r.kind.startsWith("plan_") || r.kind === "dependency" ? `/projects/${projectId}/timeline` : `/projects/${projectId}/work`,
+    href: planEntryHref(projectId, r.kind),
     detail: [r.who, r.kind === "dependency" && r.detail ? `at ${r.detail.slice(0, 5)} site time` : r.detail].filter(Boolean).join(" · ") || null,
   }));
 }

@@ -6,6 +6,7 @@ import type {
   CrmOpportunityRow, CrmOrganisationRow, CrmProposalRow, CrmReminderRow, CrmZohoReferenceRow,
 } from "@/types/crm";
 import type { CrmContext } from "./context";
+import { organisationLabel } from "./reports";
 
 /** A failed query must surface as an error, never as "no data". */
 function ok(...results: { error?: { message: string } | null }[]): void {
@@ -148,6 +149,8 @@ export interface FollowUpListItem {
   followUp: CrmFollowUpRow;
   opportunity: Pick<CrmOpportunityRow, "id" | "reference" | "title" | "stage" | "company_id" | "owner_id">;
   assigneeName: string;
+  /** "Agency for Client", or whichever exists (same wording as the enquiry list). */
+  party: string;
 }
 
 /** Open follow-ups across everything the user can see, soonest first, plus the most recent completed ones. */
@@ -162,13 +165,21 @@ export async function loadFollowUps(ctx: CrmContext): Promise<{ open: FollowUpLi
   const done = doneRes.data;
   const all = [...(open ?? []), ...(done ?? [])];
   const oppIds = [...new Set(all.map((f) => f.opportunity_id))];
+  type OppBits = Pick<CrmOpportunityRow, "id" | "reference" | "title" | "stage" | "company_id" | "owner_id" | "agency_org_id" | "client_org_id">;
   const { data: opps } = oppIds.length
-    ? await supabase.from("crm_opportunities").select("id, reference, title, stage, company_id, owner_id").in("id", oppIds)
-    : { data: [] as Pick<CrmOpportunityRow, "id" | "reference" | "title" | "stage" | "company_id" | "owner_id">[] };
+    ? await supabase.from("crm_opportunities").select("id, reference, title, stage, company_id, owner_id, agency_org_id, client_org_id").in("id", oppIds)
+    : { data: [] as OppBits[] };
+  const orgIds = [...new Set((opps ?? []).flatMap((o) => [o.agency_org_id, o.client_org_id]).filter((x): x is string => !!x))];
+  const { data: orgRows } = orgIds.length ? await supabase.from("crm_organisations").select("id, name").in("id", orgIds) : { data: [] as { id: string; name: string }[] };
+  const orgName = new Map((orgRows ?? []).map((o) => [o.id, o.name]));
   const oppBy = new Map((opps ?? []).map((o) => [o.id, o]));
   const wrap = (f: CrmFollowUpRow): FollowUpListItem | null => {
     const o = oppBy.get(f.opportunity_id);
-    return o ? { followUp: f, opportunity: o, assigneeName: ctx.personName(f.assigned_to) } : null;
+    if (!o) return null;
+    const agency = o.agency_org_id ? (orgName.get(o.agency_org_id) ?? null) : null;
+    const client = o.client_org_id ? (orgName.get(o.client_org_id) ?? null) : null;
+    const { agency_org_id: _a, client_org_id: _c, ...opportunity } = o;
+    return { followUp: f, opportunity, assigneeName: ctx.personName(f.assigned_to), party: organisationLabel({ agency: agency ? { name: agency } : null, client: client ? { name: client } : null }) };
   };
   return {
     open: (open ?? []).map(wrap).filter((x): x is FollowUpListItem => !!x),

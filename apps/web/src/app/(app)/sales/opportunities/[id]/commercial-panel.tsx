@@ -12,9 +12,10 @@ const AVAILABILITY_RESULT = { confirmed: "Available for the dates and quantities
 const APPROVAL_STATE = { pending: "Waiting for a founder's decision", approved: "Approved", changes_requested: "Changes requested" } as const;
 
 /** Equipment availability, commercial approval and Zoho Books references: three separate things, never merged into one "confirmed". */
-export function CommercialPanel({ view }: { view: OppView }) {
+/** `compact` stacks the sections (for the narrow side panel, where a viewport breakpoint would squeeze columns). */
+export function CommercialPanel({ view, compact = false }: { view: OppView; compact?: boolean }) {
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className={compact ? "space-y-6" : "grid gap-6 lg:grid-cols-2"}>
       <div className="space-y-6">
         <AvailabilitySection view={view} />
       </div>

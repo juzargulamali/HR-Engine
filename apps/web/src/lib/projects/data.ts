@@ -27,12 +27,17 @@ export interface ProjectView {
 
 const todayUtc = () => new Date().toISOString().slice(0, 10);
 
-/** One read of the directory per request (it already carries the PM's name, which a summary-only viewer cannot get elsewhere). */
-export const loadDirectory = cache(async (): Promise<ProjDirectoryRow[]> => {
+/**
+ * One read of the directory per request (it already carries the PM's name, which a summary-only viewer cannot get elsewhere). A failed
+ * read is reported as an error, so the directory page can say so instead of presenting it as "no projects".
+ */
+export const loadDirectoryResult = cache(async (): Promise<{ rows: ProjDirectoryRow[]; error: string | null }> => {
   const supabase = await createClient();
-  const { data } = await supabase.rpc("proj_directory");
-  return data ?? [];
+  const { data, error } = await supabase.rpc("proj_directory");
+  return { rows: data ?? [], error: error ? error.message : null };
 });
+
+export const loadDirectory = cache(async (): Promise<ProjDirectoryRow[]> => (await loadDirectoryResult()).rows);
 
 /**
  * Loads a project the person can see. Returns null when it does not exist or they may not see it (the two are not told apart).

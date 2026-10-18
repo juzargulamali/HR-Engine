@@ -9,13 +9,13 @@ export interface SalesTab {
   label: string;
 }
 
-/** Secondary navigation inside Sales & CRM. Active state is by path prefix; "Overview" matches only /sales itself. */
+/** Secondary navigation inside Sales & CRM. Active state is by path prefix. */
 export function SalesTabs({ tabs }: { tabs: SalesTab[] }) {
   const pathname = usePathname();
   return (
     <nav aria-label="Sales sections" className="-mx-1 flex gap-1 overflow-x-auto border-b border-border pb-px">
       {tabs.map((t) => {
-        const active = t.href === "/sales" ? pathname === "/sales" : pathname === t.href || pathname.startsWith(`${t.href}/`);
+        const active = pathname === t.href || pathname.startsWith(`${t.href}/`);
         return (
           <Link
             key={t.href}

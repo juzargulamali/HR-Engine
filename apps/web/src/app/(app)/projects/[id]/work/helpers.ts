@@ -15,9 +15,18 @@ export interface TaskFilters {
   mine: boolean;
   overdue: boolean;
   blocked: boolean;
+  /** Free-text search of the title and description (case-insensitive). */
+  q: string;
 }
 
-export const DEFAULT_TASK_FILTERS: TaskFilters = { assignee: null, status: "open", team: null, deliverable: null, mine: false, overdue: false, blocked: false };
+export const DEFAULT_TASK_FILTERS: TaskFilters = { assignee: null, status: "open", team: null, deliverable: null, mine: false, overdue: false, blocked: false, q: "" };
+
+/** The single "Show" choice of the toolbar. Old bookmarks with mine=1, overdue=1 or blocked=1 keep working: they are read as the same filters. */
+export const SHOW_CHOICES = ["mine", "overdue", "blocked"] as const;
+export type ShowChoice = (typeof SHOW_CHOICES)[number];
+
+/** The toolbar value that represents these filters ("" for none; the first of several flags, as the toolbar can only show one). */
+export const showChoiceOf = (f: Pick<TaskFilters, "mine" | "overdue" | "blocked">): ShowChoice | "" => (f.mine ? "mine" : f.overdue ? "overdue" : f.blocked ? "blocked" : "");
 
 type Params = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
@@ -31,18 +40,25 @@ const flag = (v: string | string[] | undefined) => one(v) === "1";
 export function parseTaskFilters(sp: Params): TaskFilters {
   const raw = one(sp.status);
   const status: TaskFilters["status"] = raw === "all" ? "all" : raw && (TASK_STATUSES as readonly string[]).includes(raw) ? (raw as TaskStatus) : "open";
-  return { assignee: id(sp.assignee), status, team: id(sp.team), deliverable: id(sp.deliverable), mine: flag(sp.mine), overdue: flag(sp.overdue), blocked: flag(sp.blocked) };
+  const show = one(sp.show);
+  return {
+    assignee: id(sp.assignee), status, team: id(sp.team), deliverable: id(sp.deliverable),
+    mine: flag(sp.mine) || show === "mine", overdue: flag(sp.overdue) || show === "overdue", blocked: flag(sp.blocked) || show === "blocked",
+    q: (one(sp.q) ?? "").trim().slice(0, 100),
+  };
 }
 
 /** True when the filters differ from the default view (to show a "Clear filters" link). */
 export const hasActiveFilters = (f: TaskFilters) =>
-  f.assignee !== null || f.status !== "open" || f.team !== null || f.deliverable !== null || f.mine || f.overdue || f.blocked;
+  f.assignee !== null || f.status !== "open" || f.team !== null || f.deliverable !== null || f.mine || f.overdue || f.blocked || f.q !== "";
 
 /** Plain-date overdue test: an open task whose due date is before today. No time zone, no Date objects. */
 export const isTaskOverdue = (t: Pick<ProjTaskRow, "status" | "due_date">, today: string) => isOpenTask(t.status) && !!t.due_date && t.due_date < today;
 
 export function filterTasks(tasks: readonly ProjTaskRow[], f: TaskFilters, userId: string, today: string): ProjTaskRow[] {
+  const needle = f.q.toLowerCase();
   return tasks.filter((t) => {
+    if (needle && !`${t.title} ${t.description ?? ""}`.toLowerCase().includes(needle)) return false;
     if (f.status === "open" ? !isOpenTask(t.status) : f.status !== "all" && t.status !== f.status) return false;
     if (f.assignee && t.assignee_id !== f.assignee) return false;
     if (f.mine && t.assignee_id !== userId) return false;
@@ -176,6 +192,26 @@ export function newTaskOptions(input: {
     deliverablesByTeam,
     canRequireReview: manager || standing.headOfTeamIds.length > 0,
   };
+}
+
+export interface QuickAssignee extends PickOption {
+  /** The department team the task is filed under when this person is chosen ("" = none). */
+  teamId: string;
+}
+
+/**
+ * The people the short Add-task form offers, each with the team the task then belongs to. A Project Manager / founder: anyone, no team
+ * (the team is chosen under "more details"). Anyone else: the people the existing rules allow (themself; a department head's team),
+ * filed under no team where that is allowed and under the team where it is needed (a head distributing to team members). Nothing is
+ * offered that newTaskOptions (and so the database) would refuse.
+ */
+export function quickAssigneeChoices(options: NewTaskOptions, manager: boolean): QuickAssignee[] {
+  const out = new Map<string, QuickAssignee>();
+  for (const a of options.assigneesByTeam[""] ?? []) out.set(a.id, { ...a, teamId: "" });
+  if (!manager) {
+    for (const t of options.teams) for (const a of options.assigneesByTeam[t.id] ?? []) if (!out.has(a.id)) out.set(a.id, { ...a, teamId: t.id });
+  }
+  return [...out.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 }
 
 export interface StatusOption {

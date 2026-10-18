@@ -12,18 +12,22 @@ import { withParams } from "./url-state";
  * `?add=1`, so an empty state or another page can link straight to it. The form is passed in (it keeps its own server action);
  * `close` is handed to it so it can shut the dialog after a successful save.
  */
-export function QuickAdd({ label, title, description, children, size = "default" }: { label: string; title: string; description?: string; children: React.ReactNode | ((api: { close: () => void }) => React.ReactNode); size?: "default" | "wide" }) {
+export function QuickAdd({ label, title, description, children, size = "default", closeOnParam = "open" }: { label: string; title: string; description?: string; children: React.ReactNode | ((api: { close: () => void }) => React.ReactNode); size?: "default" | "wide"; closeOnParam?: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
-  const [open, setOpen] = useState(sp.get("add") === "1");
+  // The dialog remembers which record was open in the side panel when it was opened, and closes itself as soon as that changes: a
+  // successful add redirects to the new record (?open=<id>), and the dialog must not stay on top of it.
+  const watched = sp.get(closeOnParam) ?? "";
+  const [openedAt, setOpenedAt] = useState<string | null>(sp.get("add") === "1" ? watched : null);
+  const open = openedAt !== null && openedAt === watched;
   const close = () => {
-    setOpen(false);
+    setOpenedAt(null);
     if (sp.get("add")) router.replace(withParams(pathname, sp, { add: null }), { scroll: false });
   };
   return (
     <>
-      <Button type="button" onClick={() => setOpen(true)}>
+      <Button type="button" onClick={() => setOpenedAt(watched)}>
         <Plus className="h-4 w-4" aria-hidden /> {label}
       </Button>
       <Modal open={open} onClose={close} title={title} description={description} size={size}>

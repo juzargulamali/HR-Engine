@@ -1,49 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { PRIORITY_LABELS, type StatusMove } from "@enginious-hr/domain";
+import { PRIORITY_LABELS } from "@enginious-hr/domain";
 import { reopenProject } from "@/lib/actions/projectsClose";
-import { setProjectStatus, updateProject } from "@/lib/actions/projectsCore";
+import { updateProject } from "@/lib/actions/projectsCore";
 import { COMMON_TIME_ZONES } from "@/lib/projects/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ActionForm, Field } from "@/components/sales/action-form";
-import { Modal } from "@/components/sales/modal";
-
-/** Change the lifecycle state: forward is one click, going back or skipping needs a reason, holding needs a reason and a review date. */
-export function StatusControls({ projectId, moves, currentLabel }: { projectId: string; moves: StatusMove[]; currentLabel: string }) {
-  const [open, setOpen] = useState(false);
-  const [to, setTo] = useState(moves[0]?.to ?? "");
-  const move = moves.find((m) => m.to === to) ?? moves[0];
-  if (moves.length === 0) return null;
-  return (
-    <>
-      <Button type="button" variant="outline" onClick={() => setOpen(true)}>Change status</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Change status" description={`Now: ${currentLabel}.`}>
-        <ActionForm action={setProjectStatus} submitLabel="Save status" onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
-          <input type="hidden" name="projectId" value={projectId} />
-          <Field label="Move to" htmlFor="ps-to">
-            <Select id="ps-to" name="to" value={to} onChange={(e) => setTo(e.target.value)}>
-              {moves.map((m) => <option key={m.to} value={m.to}>{m.label}</option>)}
-            </Select>
-          </Field>
-          {move?.needsReason ? (
-            <Field label={move.needsReviewDate ? "Why is it on hold?" : "Reason"} htmlFor="ps-reason" hint={move.needsReviewDate ? undefined : "Moving backwards or skipping a state needs a reason. It is kept in the history."}>
-              <Textarea id="ps-reason" name="reason" required rows={3} />
-            </Field>
-          ) : (
-            <Field label="Note (optional)" htmlFor="ps-note"><Textarea id="ps-note" name="reason" rows={2} /></Field>
-          )}
-          {move?.needsReviewDate ? (
-            <Field label="Review date" htmlFor="ps-review" hint="When someone will look at this again."><Input id="ps-review" name="reviewDate" type="date" required /></Field>
-          ) : null}
-        </ActionForm>
-      </Modal>
-    </>
-  );
-}
+import { Modal } from "@/components/ui/modal";
 
 export interface EditableProject {
   id: string;
@@ -65,15 +31,13 @@ export interface EditableProject {
 }
 
 /** Edit the project's details. A client project's agreed scope is not editable here: it changes only through a recorded scope change. */
-export function EditDetailsButton({ p }: { p: EditableProject }) {
-  const [open, setOpen] = useState(false);
+export function EditDetailsDialog({ p, open, onClose }: { p: EditableProject; open: boolean; onClose: () => void }) {
   const internal = p.kind === "internal";
   const zones = COMMON_TIME_ZONES.includes(p.siteTimezone) ? COMMON_TIME_ZONES : [p.siteTimezone, ...COMMON_TIME_ZONES];
   return (
     <>
-      <Button type="button" variant="outline" onClick={() => setOpen(true)}>Edit details</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Edit project details" description={internal ? undefined : "The agreed scope of a client project is not changed here. Use a scope change on the Feedback & changes tab."}>
-        <ActionForm action={updateProject} submitLabel="Save details" onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
+      <Modal open={open} onClose={onClose} title="Edit project details" description={internal ? undefined : "The agreed scope of a client project is not changed here. Use a scope change under Manage project, Feedback & changes."}>
+        <ActionForm action={updateProject} submitLabel="Save details" onDone={onClose} secondary={<Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>}>
           <input type="hidden" name="projectId" value={p.id} />
           <input type="hidden" name="expectedVersion" value={p.version} />
           <Field label="Name" htmlFor="ed-name"><Input id="ed-name" name="name" required defaultValue={p.name} maxLength={200} /></Field>
@@ -110,13 +74,11 @@ export function EditDetailsButton({ p }: { p: EditableProject }) {
 }
 
 /** Reopen a completed project. Needs the reopen capability (the database checks) and a reason; the completion record stays. */
-export function ReopenButton({ projectId }: { projectId: string }) {
-  const [open, setOpen] = useState(false);
+export function ReopenDialog({ projectId, open, onClose }: { projectId: string; open: boolean; onClose: () => void }) {
   return (
     <>
-      <Button type="button" variant="outline" onClick={() => setOpen(true)}>Reopen project</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Reopen project" description="The earlier completion stays in the history. Anything cancelled or deferred when it was completed stays that way until the Project Manager reinstates it.">
-        <ActionForm action={reopenProject} submitLabel="Reopen" onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
+      <Modal open={open} onClose={onClose} title="Reopen project" description="The earlier completion stays in the history. Anything cancelled or deferred when it was completed stays that way until the Project Manager reinstates it.">
+        <ActionForm action={reopenProject} submitLabel="Reopen" onDone={onClose} secondary={<Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>}>
           <input type="hidden" name="projectId" value={projectId} />
           <Field label="Why is it being reopened?" htmlFor="ro-reason"><Textarea id="ro-reason" name="reason" required rows={3} /></Field>
         </ActionForm>

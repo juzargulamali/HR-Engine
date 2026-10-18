@@ -20,13 +20,10 @@ export default async function SalesLayout({ children }: { children: React.ReactN
   }
   const manageSettings = ctx.grants.some((g) => hasCrmCapability([g], g.companyId, "manage_settings"));
   const manageAccess = ctx.grants.some((g) => hasCrmCapability([g], g.companyId, "manage_access"));
+  // The same short list as the sidebar: contacts and proposals are reached from Enquiries, settings and access from Manage.
   const tabs: SalesTab[] = [
-    { href: "/sales", label: "Overview" },
-    { href: "/sales/opportunities", label: "Opportunities" },
-    { href: "/sales/pipeline", label: "Pipeline" },
     { href: "/sales/follow-ups", label: "Follow-ups" },
-    { href: "/sales/proposals", label: "Proposals" },
-    { href: "/sales/clients", label: "Clients" },
+    { href: "/sales/opportunities", label: "Enquiries" },
     { href: "/sales/reports", label: "Reports" },
     ...(manageSettings || isAnyCrmFounder(ctx.grants) ? [{ href: "/sales/settings", label: "Settings" }] : []),
     ...(manageAccess ? [{ href: "/sales/access", label: "Access" }] : []),

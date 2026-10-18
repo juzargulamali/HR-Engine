@@ -11,14 +11,14 @@ import type { OppView } from "./view";
 const KIND_LABEL = { call: "Call", email: "Email", meeting: "Meeting", note: "Note", client_response: "Client response" } as const;
 
 /** What people did (calls, notes, client replies) and what changed on the record (stage, owner, value…), newest first, in one list. */
-export function ActivityPanel({ view }: { view: OppView }) {
+export function ActivityPanel({ view, showForm = true }: { view: OppView; showForm?: boolean }) {
   const { detail, ctx, opp, isLost } = view;
   const timeline = buildTimeline(detail.activities, detail.events);
   return (
     <div className="space-y-6">
       {isLost ? (
         <Muted>A lost opportunity can no longer be updated until it is reopened. The history below is kept.</Muted>
-      ) : (
+      ) : !showForm ? null : (
         <Panel title="Log an activity" description="Anyone with Sales access can add to the timeline.">
           <AddActivityForm opportunityId={opp.id} />
         </Panel>
