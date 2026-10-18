@@ -70,6 +70,76 @@ for (const [name, email] of Object.entries(PERSONAS)) {
   await ctx.close();
 }
 
+console.log("\n=== simplified Sales menu: Follow-ups, Enquiries, Reports; Manage only for the authorised; secondary pages by link and by search");
+{
+  const hasAll = (links, want) => want.every((w) => links.includes(w));
+  const none = (links, bad) => bad.every((b) => !links.includes(b));
+  const SECONDARY = ["Pipeline", "Pipeline board", "New enquiry", "Clients & contacts", "Proposals & quotes"];
+  for (const [name, email, manage] of [["founder", PERSONAS.founder, true], ["sales", PERSONAS.sales, false]]) {
+    const { ctx, page } = await session(email, { width: 1440, height: 900 });
+    await page.goto(`${BASE}/sales/follow-ups`, { waitUntil: "networkidle" }); const links = await sidebarLinks(page); const t = await sideText(page);
+    ok(hasAll(links, ["Follow-ups", "Enquiries", "Reports"]), `${name}: Sales menu lists Follow-ups, Enquiries, Reports`);
+    ok(none(links, SECONDARY), `${name}: secondary pages (${SECONDARY.join(", ")}) are not menu items`);
+    ok(manage ? hasAll(links, ["Settings", "Access"]) && /Manage/i.test(t) : none(links, ["Settings", "Access"]) && !/Manage/i.test(t.split("People & HR")[0]), `${name}: Manage menu (Settings, Access) ${manage ? "shown" : "absent"}`);
+    ok((await sidebarLinks(page)).filter((l) => l === "Follow-ups").length === 1, `${name}: Follow-ups is marked once`);
+    { const cur = await page.locator("aside[aria-label='ENGINIOUS OS modules'] a[aria-current='page']").allInnerTexts(); ok(cur.length === 1 && /Follow-ups/.test(cur[0]), `${name}: exactly one menu link is marked as the current page (${cur.map((c) => c.trim()).join(" | ")})`); }
+    await page.goto(`${BASE}/sales`, { waitUntil: "networkidle" }); ok(/\/sales\/follow-ups$/.test(page.url()), `${name}: /sales opens Follow-ups (${new URL(page.url()).pathname})`);
+    for (const [path, expect] of [["/sales/pipeline", /\/sales\/opportunities\?.*view=board/], ["/sales/clients", /\/sales\/clients$/], ["/sales/proposals", /\/sales\/proposals$/], ["/sales/opportunities?add=1", /add=1/]]) {
+      await page.goto(`${BASE}${path}`, { waitUntil: "networkidle" }); ok(expect.test(page.url()) && !/not found|404/i.test(await page.locator("main").innerText()), `${name}: ${path} still works (lands on ${new URL(page.url()).pathname + new URL(page.url()).search})`);
+    }
+    ok(await page.getByRole("dialog", { name: /add an enquiry/i }).isVisible(), `${name}: /sales/opportunities?add=1 opens Quick Add`);
+    await page.goto(`${BASE}/sales/opportunities`, { waitUntil: "networkidle" }); await page.getByRole("button", { name: /shared lists/i }).click();
+    ok((await page.getByRole("menuitem").allInnerTexts()).join("|").includes("Clients & contacts") && (await page.getByRole("menuitem").allInnerTexts()).join("|").includes("Proposals & quotes"), `${name}: Enquiries > Shared lists reaches Clients & contacts and Proposals & quotes`);
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Control+k"); const pal = page.getByRole("dialog", { name: "Search navigation" }); await pal.waitFor(); await pal.getByRole("textbox").fill("clients");
+    ok(/Clients & contacts/.test(await pal.innerText()), `${name}: the search finds Clients & contacts although it is not in the menu`); await pal.getByRole("textbox").fill("pipeline"); ok(/Pipeline/.test(await pal.innerText()), `${name}: the search finds the Pipeline board`);
+    await page.keyboard.press("Escape"); await ctx.close();
+  }
+}
+
+console.log("\n=== simplified Projects menu: My Work, Projects, Calendar; entry page by role; Manage only for the authorised");
+{
+  const WHO = [
+    ["founder (ceo)", "ceo@e2e.local", { entry: "/projects", main: ["My Work", "Projects", "Calendar"], manage: true }],
+    ["project manager (mgr; no handover is waiting, so no Handovers entry)", "mgr@e2e.local", { entry: "/projects", main: ["My Work", "Projects", "Calendar"], manage: false }],
+    ["department head (lead)", "lead@e2e.local", { entry: "/projects/work", main: ["My Work", "Projects", "Calendar"], manage: false }],
+    ["project member who is HR (hr)", "hr@e2e.local", { entry: "/projects/work", main: ["My Work", "Projects", "Calendar"], manage: false }],
+    ["Sales owner linked to a project (emp)", "emp@e2e.local", { entry: "/projects", main: ["Projects"], manage: false }],
+  ];
+  for (const [label, email, want] of WHO) {
+    const { ctx, page } = await session(email, { width: 1440, height: 900 });
+    await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    const href = await page.locator("aside[aria-label='ENGINIOUS OS modules'] a", { hasText: /^Projects & Tasks$/ }).first().getAttribute("href");
+    ok(href === want.entry, `${label}: the Projects & Tasks module opens ${href} (expected ${want.entry})`);
+    await page.locator("aside[aria-label='ENGINIOUS OS modules'] a", { hasText: /^Projects & Tasks$/ }).first().click(); await page.waitForURL((u) => u.pathname === want.entry);
+    await page.waitForLoadState("networkidle"); const links = await sidebarLinks(page); const t = await sideText(page);
+    ok(want.main.every((l) => links.includes(l)) && (want.main.length === 3 || !links.includes("My Work")), `${label}: menu shows ${want.main.join(", ")}`);
+    ok(!links.includes("New internal project"), `${label}: 'New internal project' is a button on Projects, not a menu item`);
+    ok(want.manage ? links.includes("Handovers") && /Manage/i.test(t) : !links.includes("Handovers"), `${label}: Manage > Handovers ${want.manage ? "shown" : "absent"}`);
+    await ctx.close();
+  }
+  const { ctx, page } = await session("admin@e2e.local", { width: 1440, height: 900 }); await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  ok((await sidebarLinks(page)).every((l) => !/Projects & Tasks/.test(l)), "admin@ (no Projects access): the module is absent from the menu"); await ctx.close();
+}
+
+console.log("\n=== header user menu: mouse and keyboard");
+{
+  const { ctx, page } = await session(PERSONAS.founder, { width: 1440, height: 900 });
+  await page.goto(`${BASE}/sales/follow-ups`, { waitUntil: "networkidle" });
+  const trigger = page.locator("aside[aria-label='ENGINIOUS OS modules'] button[aria-expanded]").last(); const item = page.getByRole("menuitem", { name: /account & security/i });
+  const shut = () => page.locator("aside[aria-label='ENGINIOUS OS modules'] [role=menu]").last().evaluate((m) => m.hasAttribute("inert"));
+  ok(await trigger.getAttribute("aria-expanded") === "false" && (await shut()), "closed: the menu is inert (its items cannot be reached by keyboard or screen reader)");
+  await trigger.click(); await item.waitFor(); ok(await trigger.getAttribute("aria-expanded") === "true", "a click opens the user menu");
+  await page.keyboard.press("Escape"); await page.waitForTimeout(250); ok(await trigger.getAttribute("aria-expanded") === "false" && (await shut()), "Escape closes it again");
+  await trigger.click(); await item.waitFor(); await page.mouse.click(700, 400); await page.waitForTimeout(250); ok(await trigger.getAttribute("aria-expanded") === "false", "a click elsewhere closes it");
+  await trigger.focus(); await page.keyboard.press("Enter"); await item.waitFor(); ok(await trigger.getAttribute("aria-expanded") === "true", "Enter on the focused button opens it");
+  await page.keyboard.press("Tab"); ok(await page.evaluate(() => document.activeElement?.textContent?.includes("Account & security") === true), "Tab moves into the menu (Account & security first)");
+  await page.keyboard.press("Tab"); await page.keyboard.press("Tab"); const last = await page.evaluate(() => document.activeElement?.textContent?.trim() ?? ""); ok(/sign out/i.test(last) || /light|dark|theme/i.test(last), `Tab reaches the rest of the menu (${last})`);
+  await page.keyboard.press("Escape"); await page.waitForTimeout(250); ok(await trigger.getAttribute("aria-expanded") === "false", "Escape closes the keyboard-opened menu");
+  await trigger.click(); await item.click(); await page.waitForURL(/account\/security/); ok(true, "Account & security opens from the menu");
+  await ctx.close();
+}
+
 console.log("\n=== keyboard, focus and theme persistence (founder)");
 {
   const { ctx, page } = await session(PERSONAS.founder, { width: 1440, height: 900 }, "dark");

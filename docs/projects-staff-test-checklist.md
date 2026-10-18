@@ -9,18 +9,18 @@ Suggested people: **Founder** (Juzar or Rafi), **Sales** (an opportunity owner),
 ## A. Access
 - [ ] Outsider: no "Projects & Tasks" in the menu; opening `/projects` explains they have no access.
 - [ ] Founder: Projects → Access: give PM, Head and Member plain access; give one person *Assign Project Managers* only.
-- [ ] A person with plain access can open the directory and see ongoing projects (name, status, PM, dates) but not open any tab.
+- [ ] A person with plain access can open the directory and see ongoing projects (name, status, PM, dates) but not open the project's Work, Plan or Discussion (a summary panel only).
 - [ ] HR admin (no Projects grant) sees nothing; giving a project role does not change their HR pages or leave/attendance.
 
 ## B. Sales → PM handover (client project)
 - [ ] Sales: on a Won opportunity, Handover page → fill the delivery brief (no prices!) → Submit. Status: waiting for a Project Manager.
-- [ ] Founder: Projects → Handovers → choose the PM. The PM sees a notification in My Work.
+- [ ] Founder: Projects → Manage → Handovers (or the handover strip on Projects) → choose the PM. The PM sees a notification in My Work.
 - [ ] PM: Request clarification with a note → Sales sees it, edits, resubmits → PM accepts.
 - [ ] Accepting twice (double click, or two tabs) creates **one** project. Its reference looks like `UAE-P-2026-0001`.
 - [ ] Sales now sees that project's summary and handover status only (no tabs, no discussion, no tasks), with the correct company name (not "Unknown").
 - [ ] A PM, department head and ordinary employee with Projects access each see the company's ongoing projects in the list; opening one they are not on shows the summary only (no tabs, no tasks, no discussion, no files) and the correct company name.
 - [ ] Change the opportunity in Sales afterwards: the accepted handover and project scope do **not** change.
-- [ ] No price, budget, PO number or payment terms appears anywhere in the project, the handover, or its History tab.
+- [ ] No price, budget, PO number or payment terms appears anywhere in the project, the handover, or its History (Manage project → History).
 
 ## C. Team and structure
 - [ ] PM: People → add the Member and the Head; create the "Programming" team with the Head; appoint a temporary leader until a date.

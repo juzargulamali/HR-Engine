@@ -14,6 +14,9 @@ cd apps/web && VERCEL_ENV=production npx next build && VERCEL_ENV=production npx
 # 2. checks (each prints PASS/FAIL lines and a verdict)
 node os-shell-checks/sales-actions.mjs                       # the real Sales operations end to end (create, stages, hold, availability, links,
                                                              # proposal, Zoho reference, contacts, Won + handover, founder reopen, reports)
+node os-shell-checks/sales-workspace.mjs                     # the simplified Sales workspace (needs the sample scenario below, reseed before each run): Follow-ups groups, completing a
+                                                             # follow-up never marks Won, Enquiries table (search, filters, sort, Columns), Table/Board, side panel (?open=, Back, unsaved
+                                                             # prompt, stale edit), Board moves and refusals, Quick Add, owner picker, authorisation boundaries
 node os-shell-checks/projects-flow.mjs                      # Projects & Tasks end to end (needs the Projects seed: see below): Sales handover, PM acceptance, team, milestones, tasks and review,
                                                              # timelines, site bookings and overlaps, calendars, discussion, scope change, client timeline PDF, completion and reopening, internal project
 node os-shell-checks/shell-checks.mjs                        # navigation per persona, Coming soon, titles, mobile bar/drawer, keyboard, theme persistence,
@@ -33,3 +36,13 @@ The token-level guard that runs in CI is `src/app/theme-contrast.test.ts`.
 reference code, Projects access (`proj_company_grants`: ceo@ founder; mgr@ = the Project Manager, lead@ = a department head, hr@ = a project
 member who is also an HR admin, hr1@ = directory only; admin@ none), `proj_company_settings` (UAE), and one **Won** opportunity owned by emp@. It then
 does everything else through the real screens. `phone-fit.mjs` and `contrast-audit.mjs` include the Projects pages when a project exists.
+
+## Sample scenario (local stack only)
+
+`sales-workspace.mjs`, `workflow-steps.mjs` and the Projects checks expect the shared sample scenario: the Projects seed above plus four open
+enquiries owned by emp@ (one overdue, one due today, two upcoming), a Won enquiry with an accepted handover, one client project with a
+Programming team, tasks (one overdue, one waiting for review) and a short discussion. `sales-actions.mjs` instead starts from the Sales grants
+only (an empty Sales database). Both write to the database they drive: reseed before every run.
+
+`phone-fit.mjs` and `contrast-audit.mjs` cover the list, board, side panel, Quick Add and menu states of the new Sales and Projects workspaces
+(and skip a panel only where the signed-in person legitimately has no access, for example Sales for a Projects-only user).

@@ -5,7 +5,10 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 class Redirect extends Error { constructor(public to: string) { super(`redirect:${to}`); } }
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw new Redirect(to); } }));
 const rpc = vi.fn();
-vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc }) }));
+// `current` is the version the (mocked) database holds for the enquiry; null = no such row, so the stale check stays silent.
+let current: number | null = null;
+const from = () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: current === null ? null : { version: current } }) }) }) });
+vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc, from }) }));
 
 import { friendlyCrmError } from "@/lib/crm/errors";
 import {
@@ -23,7 +26,7 @@ const fd = (o: Record<string, string | string[]>) => {
 };
 const base = { companyId: C, title: "Floor projection", source: "agency_call", agencyOrgId: O, nextTitle: "Call agency", nextDate: "2026-10-20", nextTime: "11:00" };
 
-beforeEach(() => rpc.mockReset().mockResolvedValue({ data: "new-id", error: null }));
+beforeEach(() => { current = null; rpc.mockReset().mockResolvedValue({ data: "new-id", error: null }); });
 
 describe("friendlyCrmError", () => {
   it("never shows raw database wording for permission and constraint failures", () => {
@@ -31,6 +34,7 @@ describe("friendlyCrmError", () => {
     expect(friendlyCrmError('new row violates row-level security policy')).toBe("You are not allowed to do that.");
     expect(friendlyCrmError('violates check constraint "crm_files_file_shape"')).toMatch(/not allowed/);
     expect(friendlyCrmError("Only the owner of this opportunity or a founder can do this")).toMatch(/Only the owner/);
+    expect(friendlyCrmError("TimeoutError: The operation was aborted due to timeout")).toMatch(/did not finish in time/);
   });
 });
 
@@ -68,6 +72,15 @@ describe("updateOpportunity", () => {
     const r = await updateOpportunity({ error: null }, fd({ id: O, expectedVersion: "4", value: "90000", payment_terms: "" }));
     expect(r.error).toBeNull();
     expect(rpc).toHaveBeenCalledWith("crm_update_opportunity", { p_id: O, p_expected_version: 4, p_patch: { value: 90000, payment_terms: null } });
+  });
+  it("answers a stale edit in words, at once, without calling the database function (which would not answer)", async () => {
+    current = 5;
+    const r = await updateOpportunity({ error: null }, fd({ id: O, expectedVersion: "4", value: "90000" }));
+    expect(r.error).toMatch(/changed by someone else/);
+    expect(rpc).not.toHaveBeenCalled();
+    expect((await moveStage(O, "qualified", 4)).error).toMatch(/changed by someone else/);
+    current = 4;
+    expect((await moveStage(O, "qualified", 4)).error).toBeNull();
   });
   it("refuses a negative value and an empty patch", async () => {
     expect((await updateOpportunity({ error: null }, fd({ id: O, value: "-5" }))).error).toMatch(/zero or more/);

@@ -6,7 +6,11 @@ const vp = vpName === "mobile" ? { width: 390, height: 844 } : { width: 1440, he
 const oppId = psql("select id from crm_opportunities order by created_at desc limit 1");
 const projId = psql("select id from proj_projects where kind='client' limit 1");
 const taskId = psql("select id from proj_tasks limit 1");
-const PAGES = [...(projId ? ["/projects", "/projects/work", "/projects/calendar", "/projects/handovers", "/projects/new", "/projects/access", `/projects/${projId}`, `/projects/${projId}/work`, `/projects/${projId}/work/tasks/${taskId}`, `/projects/${projId}/timeline`, `/projects/${projId}/calendar`, `/projects/${projId}/people`, `/projects/${projId}/discussion`, `/projects/${projId}/changes`, `/projects/${projId}/documents`, `/projects/${projId}/history`, `/projects/${projId}/complete`] : []), "/", "/sales", "/sales/opportunities", `/sales/opportunities/${oppId}`, "/sales/pipeline", "/sales/follow-ups", "/sales/proposals", "/sales/clients", "/sales/reports", "/sales/settings", "/sales/access", "/sales/new",
+const P = projId ? `/projects/${projId}` : "";
+const PAGES = [...(projId ? ["/projects", "/projects?view=board", "/projects?show=finished", `/projects?open=${projId}`, "/projects/work", "/projects/work?view=board", `/projects/work?task=${taskId}`, "/projects/calendar", "/projects/handovers", "/projects/new", "/projects/access",
+    P, `${P}/work`, `${P}/work?view=board`, `${P}/work?task=${taskId}`, `${P}/work/tasks/${taskId}`, `${P}/plan`, `${P}/plan?plan=site`, `${P}/plan?mode=calendar`, `${P}/plan?mode=timeline`, `${P}/discussion`, `${P}/people`, `${P}/changes`, `${P}/documents`, `${P}/history`, `${P}/complete`] : []),
+  "/", "/sales", "/sales/follow-ups", "/sales/follow-ups?view=done&who=all", `/sales/follow-ups?open=${oppId}`, "/sales/opportunities", "/sales/opportunities?status=all", "/sales/opportunities?view=board&status=all", `/sales/opportunities?open=${oppId}`, "/sales/opportunities?add=1", `/sales/opportunities/${oppId}`,
+  "/sales/proposals", "/sales/clients", "/sales/reports", "/sales/settings", "/sales/access", "/sales/new",
   "/attendance", "/employees", "/leave", "/leave/new", "/approvals", "/alerts", "/payroll", "/reimbursements", "/performance", "/policies", "/holidays", "/profile", "/attendance-clock", "/letters", "/admin/users", "/admin/companies", "/audit-log", "/ai-suggestions", "/account/security"];
 
 const evalFn = () => {
@@ -71,6 +75,38 @@ for (const theme of ["dark", "light"]) {
     if (p === "/") { // also the open command palette and user menu
       await page.keyboard.press("Control+k"); await page.waitForTimeout(250); all[`${theme} palette-open`] = await page.evaluate(evalFn); await page.keyboard.press("Escape");
       await page.getByRole("button", { name: /ceo@e2e.local/i }).first().click().catch(() => {}); await page.waitForTimeout(250); all[`${theme} user-menu-open`] = await page.evaluate(evalFn); await page.keyboard.press("Escape");
+    }
+    // Interactive states of the new workspaces: menus and dialogs opened from the list, the board and the side panel (nothing is submitted).
+    if (p === "/sales/opportunities") {
+      await page.getByRole("button", { name: /columns/i }).click().catch(() => {}); await page.waitForTimeout(250); all[`${theme} sales columns-menu-open`] = await page.evaluate(evalFn); await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: /shared lists/i }).click().catch(() => {}); await page.waitForTimeout(250); all[`${theme} sales shared-lists-open`] = await page.evaluate(evalFn); await page.keyboard.press("Escape");
+    }
+    if (p === "/sales/opportunities?add=1") { await page.getByText("Add more details").click().catch(() => {}); await page.waitForTimeout(250); all[`${theme} quick-add-more-details`] = await page.evaluate(evalFn); }
+    if (p.startsWith("/sales/opportunities?open=")) {
+      const panel = page.locator("aside[role=dialog]");
+      for (const tabName of ["Updates", "Proposals & files", "Scope & dates", "Commercial"]) { await panel.getByRole("tab", { name: tabName }).click().catch(() => {}); await page.waitForTimeout(250); all[`${theme} sales panel tab ${tabName}`] = await page.evaluate(evalFn); }
+      await panel.getByRole("button", { name: /more actions/i }).click().catch(() => {}); await page.waitForTimeout(250); all[`${theme} sales panel more-actions-open`] = await page.evaluate(evalFn);
+      for (const item of [/move to another stage/i, /put on hold/i, /close as won/i, /edit details/i]) {
+        await page.getByRole("menuitem", { name: item }).click().catch(() => {}); await page.waitForTimeout(300); all[`${theme} sales panel dialog ${item}`] = await page.evaluate(evalFn); await page.keyboard.press("Escape"); await page.waitForTimeout(150);
+        await panel.getByRole("button", { name: /more actions/i }).click().catch(() => {}); await page.waitForTimeout(200);
+      }
+      await page.keyboard.press("Escape");
+      for (const name of [/^add update$/i, /complete follow-up/i, /schedule next action/i]) { await panel.getByRole("button", { name }).first().click().catch(() => {}); await page.waitForTimeout(300); all[`${theme} sales panel dialog ${name}`] = await page.evaluate(evalFn); await page.keyboard.press("Escape"); await page.waitForTimeout(150); }
+    }
+    if (p === "/sales/opportunities?view=board&status=all") {
+      const sel = page.getByLabel(/^Move .* to$/).first();
+      if (await sel.count()) { const t = await sel.locator("option").allInnerTexts(); const hold = t.find((x) => /on hold/i.test(x)); if (hold) { await sel.selectOption({ label: hold }).catch(() => {}); await page.waitForTimeout(500); all[`${theme} board hold-dialog`] = await page.evaluate(evalFn); await page.keyboard.press("Escape"); } }
+    }
+    if (p === "/sales/follow-ups") {
+      await page.getByRole("button", { name: /^Complete follow-up: / }).first().click().catch(() => {}); await page.waitForTimeout(300); all[`${theme} follow-up complete dialog`] = await page.evaluate(evalFn); await page.keyboard.press("Escape"); await page.waitForTimeout(150);
+      await page.getByRole("button", { name: /^more$/i }).first().click().catch(() => {}); await page.waitForTimeout(250); all[`${theme} follow-up row more menu`] = await page.evaluate(evalFn); await page.keyboard.press("Escape");
+    }
+    if (p === "/projects") {
+      await page.getByRole("button", { name: /columns/i }).click().catch(() => {}); await page.waitForTimeout(250); all[`${theme} projects columns-menu-open`] = await page.evaluate(evalFn); await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: /new internal project|add project|new project/i }).first().click().catch(() => {}); await page.waitForTimeout(300); all[`${theme} projects quick-new-project`] = await page.evaluate(evalFn); await page.keyboard.press("Escape");
+    }
+    if (p.endsWith("/work") && projId && p.startsWith(`/projects/${projId}`)) {
+      await page.getByRole("button", { name: /add task|new task/i }).first().click().catch(() => {}); await page.waitForTimeout(300); all[`${theme} project quick-add-task`] = await page.evaluate(evalFn); await page.keyboard.press("Escape");
     }
     if (p.startsWith("/sales/opportunities/")) {
       for (const name of [/^move stage$/i, /^close as won$/i, /^put on hold$/i, /^add a contact$/i, /^add follow-up$/i]) {

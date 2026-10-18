@@ -74,7 +74,8 @@ export function Board({ columns, items, onMove, ariaLabel, emptyColumnText = "No
   return (
     <>
       <p id={liveId} role="status" aria-live="polite" className="sr-only">{announce}</p>
-      <div className="-mx-4 overflow-x-auto px-4 pb-3 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0" tabIndex={0} role="region" aria-label={`${ariaLabel}. Scroll sideways for more columns.`}>
+      {/* `relative`: the visually hidden labels inside are absolutely positioned; without a positioned scroller they escape its clipping and widen the whole page. */}
+      <div className="relative -mx-4 overflow-x-auto px-4 pb-3 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0" tabIndex={0} role="region" aria-label={`${ariaLabel}. Scroll sideways for more columns.`}>
         <div className="flex gap-3 lg:min-w-max">
           {columns.map((col) => {
             const cards = items.filter((i) => i.columnId === col.id);

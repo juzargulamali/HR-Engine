@@ -83,7 +83,7 @@ export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: 
           isActive ? "bg-accent/15 font-semibold text-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground",
         );
         const link = (
-          <Link href={m.href} onClick={onNavigate} aria-current={isActive && (!hasSub || sub === m.href) ? "page" : undefined} className={rowClass}>
+          <Link href={m.href} onClick={onNavigate} aria-current={isActive && (!hasSub || (!open && sub === m.href)) ? "page" : undefined} className={rowClass}>
             {isActive ? <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-accent" aria-hidden /> : null}
             <Icon className="h-4 w-4 flex-none" aria-hidden />
             {collapsed ? <span className="sr-only">{m.label}</span> : <span className="truncate">{m.label}</span>}
