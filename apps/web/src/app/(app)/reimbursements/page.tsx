@@ -8,6 +8,8 @@ import { DeleteDraftClaimButton } from "./delete-draft-claim-button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
 
+export const metadata = { title: "Reimbursements" };
+
 export default async function ReimbursementsPage() {
   const session = await getCurrentSession();
   if (!session) return null;

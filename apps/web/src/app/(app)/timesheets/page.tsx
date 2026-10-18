@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { NewTimesheetForm } from "./new-timesheet-form";
 import { EmptyState } from "@/components/ui/empty-state";
 
+export const metadata = { title: "Timesheets" };
+
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   draft: "outline",
   submitted: "secondary",

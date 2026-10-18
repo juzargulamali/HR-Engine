@@ -18,6 +18,8 @@ import type { CrmActivityRow, CrmReminderRow } from "@/types/crm";
 import { CurrencyTotals } from "./currency-totals";
 import { MarkRemindersReadButton } from "./mark-reminders-read";
 
+export const metadata = { title: "Sales overview" };
+
 const REMINDER_LABEL: Record<CrmReminderRow["kind"], string> = {
   follow_up_due: "Follow-up due",
   follow_up_overdue: "Follow-up overdue",
@@ -143,7 +145,7 @@ export default async function SalesOverviewPage({ searchParams }: { searchParams
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+        <Card className="min-w-0 lg:col-span-2">
           <CardHeader className="flex-row flex-wrap items-start justify-between gap-3 space-y-0">
             <div className="space-y-1.5">
               <CardTitle className="text-base">Needs attention now</CardTitle>
@@ -165,7 +167,7 @@ export default async function SalesOverviewPage({ searchParams }: { searchParams
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="min-w-0">
           <CardHeader className="space-y-1.5">
             <CardTitle className="text-base">Open pipeline</CardTitle>
             <CardDescription>{openCount} open. Each currency on its own line, never added together.</CardDescription>
@@ -188,7 +190,7 @@ export default async function SalesOverviewPage({ searchParams }: { searchParams
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+        <Card className="min-w-0 lg:col-span-2">
           <CardHeader className="space-y-1.5">
             <CardTitle className="text-base">My open opportunities</CardTitle>
             <CardDescription>Opportunities you own, soonest next follow-up first.</CardDescription>
@@ -277,7 +279,7 @@ function AttentionRow({ item }: { item: AttentionItem }) {
         <p className="text-xs text-muted-foreground">{item.reference} · {item.detail}</p>
       </div>
       <div className="text-right text-xs">
-        {isFollowUp && item.at ? <DueText dueAt={item.at} /> : item.kind === "hold_review" && item.at ? <span className="whitespace-nowrap font-medium text-amber-700 dark:text-amber-300">{ATTENTION_LABEL[item.kind]} · {formatDate(item.at)}</span> : <span className="whitespace-nowrap font-medium text-amber-700 dark:text-amber-300">{ATTENTION_LABEL[item.kind]}</span>}
+        {isFollowUp && item.at ? <DueText dueAt={item.at} /> : item.kind === "hold_review" && item.at ? <span className="whitespace-nowrap font-medium text-amber-800 dark:text-amber-300">{ATTENTION_LABEL[item.kind]} · {formatDate(item.at)}</span> : <span className="whitespace-nowrap font-medium text-amber-800 dark:text-amber-300">{ATTENTION_LABEL[item.kind]}</span>}
       </div>
     </li>
   );

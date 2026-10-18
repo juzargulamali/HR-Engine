@@ -12,6 +12,8 @@ import { RecoveryWindowEvidence, type WindowEvidenceData } from "./recovery-wind
 import { getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { CLASSIFICATION_LABELS, ROUTE_LABELS, formatHoursMinutes } from "@/lib/recovery/labels";
 
+export const metadata = { title: "Approvals" };
+
 export default async function ApprovalsPage() {
   const session = await getCurrentSession();
   if (!session) return null;

@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChangePasswordForm } from "./change-password-form";
 import { SessionControls } from "./session-controls";
 
+export const metadata = { title: "Account & security" };
+
 export default async function AccountSecurityPage() {
   const supabase = await createClient();
   const {

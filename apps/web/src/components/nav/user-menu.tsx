@@ -72,13 +72,13 @@ export function UserMenu({
         {roleLabels.length > 0 ? (
           <div className="mt-1.5 flex flex-wrap gap-1">
             {roleLabels.map((label) => (
-              <Badge key={label} variant="brand" className="text-[10px]">
+              <Badge key={label} variant="brand" className="text-xs">
                 {label}
               </Badge>
             ))}
           </div>
         ) : (
-          <Badge variant="outline" className="mt-1.5 text-[10px]">
+          <Badge variant="outline" className="mt-1.5 text-xs">
             No role assigned yet
           </Badge>
         )}

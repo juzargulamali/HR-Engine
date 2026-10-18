@@ -1,6 +1,8 @@
 import { AuthPageShell } from "@/components/auth/auth-page-shell";
 import { PasswordResetForm } from "@/components/auth/password-reset-form";
 
+export const metadata = { title: "Reset password" };
+
 export default function ResetPasswordPage() {
   // Same shape as /set-password: no session cookie exists yet, the recovery
   // link's token arrives as a URL hash fragment that PasswordResetForm

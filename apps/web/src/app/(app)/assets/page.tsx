@@ -9,6 +9,8 @@ import { NewAssetForm } from "./new-asset-form";
 import { RetireAssetButton } from "./retire-asset-button";
 import { EmptyState } from "@/components/ui/empty-state";
 
+export const metadata = { title: "Assets" };
+
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   in_stock: "outline",
   issued: "default",

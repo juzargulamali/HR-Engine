@@ -7,6 +7,8 @@ import { Alert } from "@/components/ui/alert";
 import { DraftDecisionButtons } from "./draft-decision-buttons";
 import { EmptyState } from "@/components/ui/empty-state";
 
+export const metadata = { title: "AI suggestions" };
+
 export default async function AiSuggestionsPage() {
   const session = await getCurrentSession();
   if (!session) return null;

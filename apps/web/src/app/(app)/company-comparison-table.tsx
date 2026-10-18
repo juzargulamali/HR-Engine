@@ -84,7 +84,7 @@ export function CompanyComparisonTable({
                 <span className="col-span-2 flex items-center gap-2 font-medium sm:col-span-1">
                   {s.companyName}
                   {s.isRecoveryDay ? (
-                    <Badge variant="outline" className="text-[10px]">
+                    <Badge variant="outline" className="text-xs">
                       {s.holidayName ?? "Weekend"}
                     </Badge>
                   ) : null}

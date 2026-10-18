@@ -11,6 +11,8 @@ import { DeleteUserButton } from "./delete-user-button";
 import { RevokeRoleButton } from "./revoke-role-button";
 import { AccountStatusBadge, AccountStatusControls } from "./account-status-controls";
 
+export const metadata = { title: "Users & roles" };
+
 export default async function UsersPage() {
   const session = await getCurrentSession();
   const supabase = await createClient();

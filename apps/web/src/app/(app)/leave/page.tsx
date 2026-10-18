@@ -13,6 +13,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
 import type { RequestStatus } from "@/types/database.types";
 
+export const metadata = { title: "Leave" };
+
 const STATUS_VALUES: RequestStatus[] = ["submitted", "pending_approval", "approved", "rejected", "cancelled"];
 
 export default async function LeavePage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {

@@ -14,6 +14,8 @@ import { getCrmContext } from "@/lib/crm/context";
 import { loadOpportunities, type OpportunityListItem } from "@/lib/crm/data";
 import { filterOpportunities, organisationLabel, type OppStatusFilter } from "@/lib/crm/reports";
 
+export const metadata = { title: "Opportunities" };
+
 const MAX_ROWS = 300;
 
 type Params = Record<string, string | string[] | undefined>;
@@ -104,14 +106,11 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
             <p className="text-xs text-muted-foreground" role="status">
               {rows.length} of {items.length} opportunities{rows.length > MAX_ROWS ? `, showing the first ${MAX_ROWS}. Narrow the filters to see the rest` : ""}
             </p>
-            <Table className="min-w-[60rem]">
+            <Table className="min-w-[52rem]">
               <caption className="sr-only">Opportunities</caption>
               <TableHeader>
                 <TableRow>
-                  <TableHead scope="col">Reference</TableHead>
-                  <TableHead scope="col">Title</TableHead>
-                  <TableHead scope="col">Agency / client</TableHead>
-                  <TableHead scope="col">Company</TableHead>
+                  <TableHead scope="col">Opportunity</TableHead>
                   <TableHead scope="col">Stage</TableHead>
                   <TableHead scope="col">Owner</TableHead>
                   <TableHead scope="col" className="text-right">Value</TableHead>
@@ -122,10 +121,12 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
               <TableBody>
                 {shown.map((i) => (
                   <TableRow key={i.opp.id} className="align-top">
-                    <TableCell className="whitespace-nowrap font-mono text-xs"><Link href={`/sales/opportunities/${i.opp.id}`} className="font-medium underline-offset-2 hover:underline">{i.opp.reference}</Link></TableCell>
-                    <TableCell className="min-w-[12rem] max-w-[18rem] break-words">{i.opp.title}</TableCell>
-                    <TableCell className="min-w-[10rem] text-muted-foreground">{organisationLabel(i)}</TableCell>
-                    <TableCell className="whitespace-nowrap">{i.companyName}</TableCell>
+                    <TableCell className="min-w-[14rem] max-w-[22rem]">
+                      <Link href={`/sales/opportunities/${i.opp.id}`} className="break-words font-medium underline-offset-2 hover:underline">{i.opp.title}</Link>
+                      <div className="mt-0.5 break-words text-xs text-muted-foreground">
+                        <span className="font-mono">{i.opp.reference}</span> · {organisationLabel(i)}{ctx.companies.length > 1 ? ` · ${i.companyName}` : ""}
+                      </div>
+                    </TableCell>
                     <TableCell><StageBadge stage={i.opp.stage} /></TableCell>
                     <TableCell className="whitespace-nowrap">{i.ownerName}</TableCell>
                     <TableCell className="whitespace-nowrap text-right tabular-nums">{formatMoney(i.value, i.opp.currency)}</TableCell>

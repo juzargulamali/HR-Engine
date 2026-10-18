@@ -11,6 +11,8 @@ import { loadOpportunities, type OpportunityListItem } from "@/lib/crm/data";
 import { openPipelineByStage, organisationLabel } from "@/lib/crm/reports";
 import { CurrencyTotals } from "../currency-totals";
 
+export const metadata = { title: "Pipeline" };
+
 type Params = Record<string, string | string[] | undefined>;
 
 export default async function PipelinePage({ searchParams }: { searchParams: Promise<Params> }) {
@@ -89,7 +91,7 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
                             <p className="mt-2 text-sm font-medium tabular-nums">{formatMoney(i.value, i.opp.currency)}</p>
                             <p className="text-xs text-muted-foreground">{i.opp.reference} · Owner {i.ownerName}{!company && ctx.companies.length > 1 ? ` · ${i.companyName}` : ""}</p>
                             <div className="mt-2 space-y-1 text-xs">
-                              <div>{i.nextFollowUp ? <><span className="text-muted-foreground">Next: </span><DueText dueAt={i.nextFollowUp.due_at} /></> : <span className="font-medium text-amber-700 dark:text-amber-300">No next action planned</span>}</div>
+                              <div>{i.nextFollowUp ? <><span className="text-muted-foreground">Next: </span><DueText dueAt={i.nextFollowUp.due_at} /></> : <span className="font-medium text-amber-800 dark:text-amber-300">No next action planned</span>}</div>
                               {stage !== "new" ? <AvailabilityBadge state={i.availability} /> : null}
                             </div>
                           </li>

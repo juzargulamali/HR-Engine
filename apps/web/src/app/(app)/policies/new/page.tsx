@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
 import { DraftPolicyForm } from "./draft-policy-form";
 
+export const metadata = { title: "New policy draft" };
+
 export default async function NewPolicyPage() {
   const session = await getCurrentSession();
   if (!session) return null;

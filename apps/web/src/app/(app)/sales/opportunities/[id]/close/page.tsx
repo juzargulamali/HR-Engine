@@ -10,6 +10,8 @@ import { loadOpportunityDetail } from "@/lib/crm/data";
 import { buildOppView } from "../view";
 import { CloseForm } from "./close-form";
 
+export const metadata = { title: "Close opportunity" };
+
 export default async function CloseOpportunityPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ outcome?: string }> }) {
   const [{ id }, { outcome }] = await Promise.all([params, searchParams]);
   const ctx = await getCrmContext();

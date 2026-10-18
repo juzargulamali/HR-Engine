@@ -8,6 +8,8 @@ import { AddHolidayForm } from "./add-holiday-form";
 import { DeleteHolidayButton } from "./delete-holiday-button";
 import { EmptyState } from "@/components/ui/empty-state";
 
+export const metadata = { title: "Holidays" };
+
 // 2026 dates deliberately left unconfirmed (never guessed) by the Phase 2b
 // leave-policy-configuration migration — each row's date isn't added until
 // HR enters it below, once officially announced/decided.

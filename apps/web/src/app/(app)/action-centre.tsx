@@ -26,12 +26,17 @@ export function ActionCentre({
   probationDueCount,
   docsExpiringCount,
   identityExpiringCount,
+  extraItems = [],
+  title = "Needs your attention",
 }: {
   myPendingApprovals: number;
   contractsEndingCount?: number;
   probationDueCount?: number;
   docsExpiringCount?: number;
   identityExpiringCount?: number;
+  /** Rows from other modules (e.g. Sales follow-ups), already permission-scoped by the caller. */
+  extraItems?: { key: string; icon: LucideIcon; label: string; count: number; href: string }[];
+  title?: string;
 }) {
   const items: ActionItem[] = [
     { key: "approvals", icon: ClipboardCheck, label: "Waiting on your decision", count: myPendingApprovals, href: "/approvals" },
@@ -47,12 +52,13 @@ export function ActionCentre({
     ...(identityExpiringCount !== undefined
       ? [{ key: "identity", icon: IdCard, label: "Identity documents expiring soon", count: identityExpiringCount, href: "/alerts" }]
       : []),
+    ...extraItems,
   ].filter((item) => item.count > 0);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Needs your attention</CardTitle>
+        <CardTitle>{title}</CardTitle>
       </CardHeader>
       <CardContent>
         {items.length === 0 ? (

@@ -10,6 +10,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ClockControls } from "./clock-controls";
 import { ResolveProjectLeadForm } from "./resolve-project-lead-form";
 
+export const metadata = { title: "Attendance clock" };
+
 const WORK_MODE_LABELS: Record<string, string> = {
   office: "Office",
   wfh: "Work from home",

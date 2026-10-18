@@ -11,6 +11,8 @@ import { EditPayrollLineForm } from "./edit-payroll-line-form";
 import { DeletePayrollLineButton } from "./delete-payroll-line-button";
 import { AddManualPayrollLineForm } from "./add-manual-payroll-line-form";
 
+export const metadata = { title: "Payroll run" };
+
 const COMPONENT_LABELS: Record<string, string> = {
   basic_salary: "Basic salary",
   other_allowance: "Other allowance",
@@ -111,7 +113,7 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
                         <span className="capitalize">{COMPONENT_LABELS[l.component_code] ?? l.component_code.replace(/_/g, " ")}</span>
                         {l.label ? <span className="ml-2 text-sm text-muted-foreground">— {l.label}</span> : null}
                         {l.is_manual ? (
-                          <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 text-xs uppercase tracking-wide text-muted-foreground">
                             manual
                           </span>
                         ) : null}

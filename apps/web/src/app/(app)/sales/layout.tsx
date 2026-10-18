@@ -33,7 +33,10 @@ export default async function SalesLayout({ children }: { children: React.ReactN
   ];
   return (
     <div className="space-y-6">
-      <SalesTabs tabs={tabs} />
+      {/* On desktop the same pages are in the sidebar under Sales & CRM; the strip stays for small screens, where the sidebar is a drawer. */}
+      <div className="lg:hidden">
+        <SalesTabs tabs={tabs} />
+      </div>
       {children}
     </div>
   );

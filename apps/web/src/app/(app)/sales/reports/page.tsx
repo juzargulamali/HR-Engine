@@ -18,6 +18,8 @@ import { createClient } from "@/lib/supabase/server";
 import type { CrmZohoReferenceRow } from "@/types/crm";
 import { CurrencyTotals } from "../currency-totals";
 
+export const metadata = { title: "Sales reports" };
+
 type Params = Record<string, string | string[] | undefined>;
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 const LOAD_LIMIT = 2000; // loadOpportunities caps at this many (newest first)
@@ -192,7 +194,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             </div>
             {wl.winRatePercent === null ? <p className="mt-2 text-xs text-muted-foreground">No opportunities were closed in this period, so there is no win rate.</p> : <p className="mt-2 text-xs text-muted-foreground">Win rate is won as a share of won plus lost. Small numbers move it a lot.</p>}
             {reopened.total > 0 ? <p className="mt-2 text-xs text-muted-foreground">{reopened.total} closure{reopened.total === 1 ? "" : "s"} in this period ({reopened.won} won, {reopened.lost} lost) {reopened.total === 1 ? "was" : "were"} later reopened. They are open again, so they are not counted above; each closure stays in that opportunity&apos;s history.</p> : null}
-            {wl.wonWithoutEvidence > 0 ? <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">{wl.wonWithoutEvidence} won with no evidence recorded, not counted as won.</p> : null}
+            {wl.wonWithoutEvidence > 0 ? <p className="mt-2 text-xs text-amber-800 dark:text-amber-300">{wl.wonWithoutEvidence} won with no evidence recorded, not counted as won.</p> : null}
           </ReportCard>
 
           <ReportCard title="Lost reasons" note={`n = ${wl.lost} lost opportunities`}>

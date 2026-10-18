@@ -9,6 +9,8 @@ import { CreatePhase2bDraftsButton } from "./create-phase2b-drafts-button";
 import { CreateRecoveryWindowsDraftsButton } from "./create-recovery-windows-drafts-button";
 import { PolicyVersionsTable, type PolicyVersionRow } from "./policy-versions-table";
 
+export const metadata = { title: "Policies" };
+
 export default async function PoliciesPage() {
   const session = await getCurrentSession();
   if (!session) return null;

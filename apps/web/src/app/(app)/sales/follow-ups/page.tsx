@@ -11,6 +11,8 @@ import { getCrmContext } from "@/lib/crm/context";
 import { loadFollowUps, type FollowUpListItem } from "@/lib/crm/data";
 import { cn } from "@/lib/utils";
 
+export const metadata = { title: "Follow-ups" };
+
 type View = "overdue" | "today" | "upcoming" | "done";
 const VIEWS: { value: View; label: string }[] = [
   { value: "overdue", label: "Overdue" },

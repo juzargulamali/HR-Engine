@@ -10,6 +10,8 @@ import { ClaimActions } from "./claim-actions";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
 
+export const metadata = { title: "Reimbursement" };
+
 export default async function ClaimDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await getCurrentSession();

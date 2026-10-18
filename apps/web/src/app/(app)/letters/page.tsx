@@ -10,6 +10,8 @@ import { DeleteLetterButton } from "./delete-letter-button";
 import { DeleteTemplateButton } from "./delete-template-button";
 import { EmptyState } from "@/components/ui/empty-state";
 
+export const metadata = { title: "Letters" };
+
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   draft: "outline",
   pending_approval: "secondary",

@@ -26,6 +26,8 @@ import { ScopePanel, toEditable } from "./scope-panel";
 import { HoldButton, MoveStageButton, ResumeButton } from "./stage-actions";
 import { buildOppView } from "./view";
 
+export const metadata = { title: "Opportunity" };
+
 const EVIDENCE = { purchase_order: "purchase order", authorised_email: "authorised email" } as const;
 const LINK_OUTLINE = cn(buttonVariants({ variant: "outline", size: "sm" }));
 

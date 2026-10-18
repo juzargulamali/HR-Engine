@@ -40,6 +40,8 @@ import { AssetsSection } from "./assets-section";
 import { AttendanceSection } from "./attendance-section";
 import { PerformanceSection } from "./performance-section";
 
+export const metadata = { title: "Employee" };
+
 export default async function EmployeeDetailPage({
   params,
   searchParams,

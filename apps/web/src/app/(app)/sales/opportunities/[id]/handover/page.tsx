@@ -15,6 +15,8 @@ import { Fact, Muted, Panel } from "../parts";
 import { buildOppView } from "../view";
 import { HandoverForm } from "./handover-form";
 
+export const metadata = { title: "Handover" };
+
 export default async function HandoverPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const ctx = await getCrmContext();

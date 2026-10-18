@@ -27,7 +27,7 @@ const STATUS_HELP: Record<Status, string> = {
 };
 
 function StatusBadge({ status }: { status: Status }) {
-  const tone = status === "accepted" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : status === "sent" ? "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300" : "text-muted-foreground";
+  const tone = status === "accepted" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300" : status === "sent" ? "border-sky-500/40 bg-sky-500/10 text-sky-800 dark:text-sky-300" : "text-muted-foreground";
   return <Badge variant="outline" className={cn("whitespace-nowrap", tone)}>{STATUSES.find((s) => s.id === status)?.label ?? status}</Badge>;
 }
 

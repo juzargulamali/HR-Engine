@@ -19,6 +19,8 @@ import { DeactivateRecoveryWindowsForm } from "./deactivate-recovery-windows-for
 import { AddLeaveTypeForm } from "./add-leave-type-form";
 import { EmptyState } from "@/components/ui/empty-state";
 
+export const metadata = { title: "Policy" };
+
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await getCurrentSession();

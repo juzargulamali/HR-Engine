@@ -102,7 +102,7 @@ export default async function SalesSettingsPage() {
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle className="break-words">{c.name}</CardTitle>
-                {c.settings ? <Badge variant="outline">Settings saved</Badge> : <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300">Not set up yet</Badge>}
+                {c.settings ? <Badge variant="outline">Settings saved</Badge> : <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300">Not set up yet</Badge>}
               </div>
               <CardDescription>
                 {canEdit ? "You can change these settings." : "You can read these settings but not change them. Ask a founder, or someone allowed to manage Sales settings, to change them."}

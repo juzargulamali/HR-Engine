@@ -11,6 +11,8 @@ import { GoalForm } from "./goal-form";
 import { GoalRowControls } from "./goal-row-controls";
 import { EmptyState } from "@/components/ui/empty-state";
 
+export const metadata = { title: "Performance reviews" };
+
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   in_progress: "secondary",
   achieved: "default",

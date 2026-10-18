@@ -11,6 +11,8 @@ import { AutoRefresh } from "@/components/attendance/auto-refresh";
 import { ALERT_TYPE_LABELS } from "@/lib/recovery/labels";
 import { AcknowledgeAlertForm } from "./acknowledge-alert-form";
 
+export const metadata = { title: "Alerts" };
+
 const HORIZON_DAYS = 30;
 
 function daysUntil(dateStr: string, today: Date): number {

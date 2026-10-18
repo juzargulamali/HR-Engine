@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { AppraisalForm } from "./appraisal-form";
 import { AppraisalActions } from "./appraisal-actions";
 
+export const metadata = { title: "Appraisal" };
+
 export default async function AppraisalDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await getCurrentSession();

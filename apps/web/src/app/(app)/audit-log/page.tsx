@@ -13,6 +13,8 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 
+export const metadata = { title: "Audit log" };
+
 const PAGE_SIZE = 50;
 
 // Mirrors audit_log_select_hr / audit_log_select_sysadmin in schema.sql

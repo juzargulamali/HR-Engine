@@ -17,6 +17,8 @@ import { workModeLabel } from "@/lib/recovery/labels";
 import { RegisterTable } from "./register-table";
 import type { Colleague, RegisterDetail, RegisterRowView, SessionDetail, WindowDetail } from "./register-types";
 
+export const metadata = { title: "Attendance" };
+
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   not_recorded: "outline",
   present: "default",
