@@ -115,8 +115,8 @@ export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: 
               <div className="mb-1.5 ml-[1.4rem] mt-0.5 flex flex-col gap-0.5 border-l border-border pl-2.5">
                 {m.sections.map((s) => (
                   <div key={s.label} className="flex flex-col gap-px">
-                    {m.sections.length > 1 ? <p className="px-2.5 pb-0.5 pt-2 text-[13px] font-semibold uppercase tracking-[0.08em] text-subtle">{s.label}</p> : null}
-                    {s.links.map((l) => {
+                    {m.sections.length > 1 && s.label !== m.label ? <p className="px-2.5 pb-0.5 pt-2 text-[13px] font-semibold uppercase tracking-[0.08em] text-subtle">{s.label}</p> : null}
+                    {s.links.filter((l) => !l.secondary).map((l) => {
                       if (l.comingSoon) {
                         return (
                           <div key={l.label} aria-disabled="true" className="rounded-md px-2.5 py-1.5 text-subtle">

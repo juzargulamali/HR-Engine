@@ -44,6 +44,12 @@ export interface NavLinkData {
   iconKey: NavIconKey;
   /** A module that is planned but not built yet: shown muted with the words "Coming soon", never a working link. */
   comingSoon?: boolean;
+  /**
+   * A real destination that is deliberately kept out of the sidebar so the menu stays short (shared contacts, a proposals search,
+   * the full new-enquiry form…). It is still found by search (the command palette), still lights up its module and still works as
+   * a bookmark; the pages that own the workflow link to it where it is needed.
+   */
+  secondary?: boolean;
 }
 
 export interface NavGroupData {
@@ -72,7 +78,7 @@ export interface NavOptions {
    * Projects & Tasks access: the person's own grants from proj_company_grants (never HR roles or Sales grants), whether they are
    * linked to a project as a Sales relationship, and whether a handover is waiting on them. No access means no module.
    */
-  projects?: { grants: readonly ProjGrant[]; salesLinked?: boolean; pendingHandovers?: boolean };
+  projects?: { grants: readonly ProjGrant[]; salesLinked?: boolean; pendingHandovers?: boolean; managesProjects?: boolean };
 }
 
 /**
@@ -117,27 +123,31 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
   if (hasCrmAccess) {
     const manageSettings = crmGrants.some((g) => hasCrmCapability([g], g.companyId, "manage_settings"));
     const manageAccess = crmGrants.some((g) => hasCrmCapability([g], g.companyId, "manage_access"));
+    const manage: NavLinkData[] = [
+      ...(manageSettings || isAnyCrmFounder(crmGrants) ? [{ href: "/sales/settings", label: "Settings", iconKey: "sales" as const }] : []),
+      ...(manageAccess ? [{ href: "/sales/access", label: "Access", iconKey: "sales" as const }] : []),
+    ];
     modules.push({
       id: "sales",
       label: "Sales & CRM",
       iconKey: "sales",
-      href: "/sales",
+      href: "/sales/follow-ups",
       sections: [
         {
           label: "Sales & CRM",
           links: [
-            { href: "/sales", label: "Overview", iconKey: "sales" },
-            { href: "/sales/opportunities", label: "Opportunities", iconKey: "sales" },
-            { href: "/sales/pipeline", label: "Pipeline", iconKey: "sales" },
-            { href: "/sales/new", label: "New enquiry", iconKey: "sales" },
             { href: "/sales/follow-ups", label: "Follow-ups", iconKey: "sales" },
-            { href: "/sales/proposals", label: "Proposals & quotes", iconKey: "sales" },
-            { href: "/sales/clients", label: "Clients & contacts", iconKey: "sales" },
+            { href: "/sales/opportunities", label: "Enquiries", iconKey: "sales" },
             { href: "/sales/reports", label: "Reports", iconKey: "sales" },
-            ...(manageSettings || isAnyCrmFounder(crmGrants) ? [{ href: "/sales/settings", label: "Settings", iconKey: "sales" as const }] : []),
-            ...(manageAccess ? [{ href: "/sales/access", label: "Access", iconKey: "sales" as const }] : []),
+            // Reachable from Enquiries and by search; not in the menu.
+            { href: "/sales/opportunities?add=1", label: "New enquiry", iconKey: "sales", secondary: true },
+            { href: "/sales/clients", label: "Clients & contacts", iconKey: "sales", secondary: true },
+            { href: "/sales/proposals", label: "Proposals & quotes", iconKey: "sales", secondary: true },
+            { href: "/sales/pipeline", label: "Pipeline board", iconKey: "sales", secondary: true },
           ],
         },
+        // Specialist settings live under their own heading, shown only to the people who can use them.
+        ...(manage.length > 0 ? [{ label: "Manage", links: manage }] : []),
       ],
     });
   }
@@ -198,14 +208,31 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
   const projGrants = proj?.grants ?? [];
   if (projGrants.length > 0 || proj?.salesLinked) {
     const anyCap = (cap: Parameters<typeof hasProjCapability>[2]) => projGrants.some((g) => hasProjCapability([g], g.companyId, cap));
-    const projLinks: NavLinkData[] = [{ href: "/projects", label: "Projects", iconKey: "projects" }];
+    const leads = anyCap("founder") || anyCap("assign_pm") || proj?.managesProjects === true;
+    // People who only take part in projects land on their own work; founders, PM assigners and Project Managers land on the directory.
+    // Either way the other one is one click away.
+    const entry = projGrants.length > 0 && !leads ? "/projects/work" : "/projects";
+    const mainLinks: NavLinkData[] =
+      projGrants.length > 0
+        ? [
+            { href: "/projects/work", label: "My Work", iconKey: "projects" },
+            { href: "/projects", label: "Projects", iconKey: "projects" },
+            { href: "/projects/calendar", label: "Calendar", iconKey: "projects" },
+          ]
+        : [{ href: "/projects", label: "Projects", iconKey: "projects" }];
+    if (projGrants.length > 0 && anyCap("assign_pm")) mainLinks.push({ href: "/projects/new", label: "New internal project", iconKey: "projects", secondary: true });
+    const manage: NavLinkData[] = [];
     if (projGrants.length > 0) {
-      projLinks.push({ href: "/projects/work", label: "My Work", iconKey: "projects" }, { href: "/projects/calendar", label: "Calendar", iconKey: "projects" });
-      if (anyCap("assign_pm") || proj?.pendingHandovers) projLinks.push({ href: "/projects/handovers", label: "Handovers", iconKey: "projects" });
-      if (anyCap("assign_pm")) projLinks.push({ href: "/projects/new", label: "New internal project", iconKey: "projects" });
-      if (anyCap("manage_access")) projLinks.push({ href: "/projects/access", label: "Access", iconKey: "projects" });
+      if (anyCap("assign_pm") || proj?.pendingHandovers) manage.push({ href: "/projects/handovers", label: "Handovers", iconKey: "projects" });
+      if (anyCap("manage_access")) manage.push({ href: "/projects/access", label: "Access", iconKey: "projects" });
     }
-    modules.push({ id: "projects", label: "Projects & Tasks", iconKey: "projects", href: "/projects", sections: [{ label: "Projects & Tasks", links: projLinks }] });
+    modules.push({
+      id: "projects",
+      label: "Projects & Tasks",
+      iconKey: "projects",
+      href: entry,
+      sections: [{ label: "Projects & Tasks", links: mainLinks }, ...(manage.length > 0 ? [{ label: "Manage", links: manage }] : [])],
+    });
   }
 
   // Modules that are planned but not built: visible to everyone so the roadmap is honest, never links, never any data.

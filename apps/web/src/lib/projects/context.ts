@@ -111,20 +111,22 @@ async function loadCompanyLabels(supabase: ServerClient): Promise<Map<string, st
  * handover is waiting on this person. One light read; degrades to "no access" on any failure (including the tables not existing
  * yet), so the HR and Sales shell can never be broken by it.
  */
-export async function loadProjectsNavAccess(userId: string): Promise<{ grants: ProjGrant[]; salesLinked: boolean; pendingHandovers: boolean }> {
+export async function loadProjectsNavAccess(userId: string): Promise<{ grants: ProjGrant[]; salesLinked: boolean; pendingHandovers: boolean; managesProjects: boolean }> {
   try {
     const supabase = await createClient();
-    const [g, l, h] = await Promise.all([
+    const [g, l, h, m] = await Promise.all([
       supabase.from("proj_company_grants").select("company_id, capabilities").eq("user_id", userId).is("revoked_at", null),
       supabase.from("proj_sales_links").select("project_id", { count: "exact", head: true }).eq("user_id", userId).is("removed_at", null),
       supabase.from("proj_handovers").select("company_id, status, pm_user_id").in("status", ["submitted", "pm_assigned"]).limit(100),
+      // Whether this person is the Project Manager of a project that is still running (decides which page the module opens on).
+      supabase.from("proj_projects").select("id", { count: "exact", head: true }).eq("pm_user_id", userId).not("status", "in", "(completed,archived)"),
     ]);
-    if (g.error) return { grants: [], salesLinked: false, pendingHandovers: false };
+    if (g.error) return { grants: [], salesLinked: false, pendingHandovers: false, managesProjects: false };
     const grants = (g.data ?? []).map((x) => ({ companyId: x.company_id, capabilities: x.capabilities as ProjCapability[] }));
     // "Waiting on me": a submitted handover needs a PM from someone who can assign one; an assigned one needs its PM to accept.
     const pending = (h.data ?? []).some((x) => (x.status === "submitted" && hasProjCapability(grants, x.company_id, "assign_pm")) || (x.status === "pm_assigned" && x.pm_user_id === userId));
-    return { grants, salesLinked: (l.count ?? 0) > 0, pendingHandovers: !h.error && pending };
+    return { grants, salesLinked: (l.count ?? 0) > 0, pendingHandovers: !h.error && pending, managesProjects: !m.error && (m.count ?? 0) > 0 };
   } catch {
-    return { grants: [], salesLinked: false, pendingHandovers: false };
+    return { grants: [], salesLinked: false, pendingHandovers: false, managesProjects: false };
   }
 }

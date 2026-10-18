@@ -104,7 +104,7 @@ export function ShellChrome({ modules, showAlertsLink, isEmployee, clockOpenSinc
           <span>My Day</span>
         </Link>
         {hasSales ? (
-          <Link href="/sales" aria-current={active === "sales" ? "page" : undefined} className={tabClass(active === "sales")}>
+          <Link href="/sales/follow-ups" aria-current={active === "sales" ? "page" : undefined} className={tabClass(active === "sales")}>
             <Briefcase className="h-5 w-5" aria-hidden />
             <span>Sales</span>
           </Link>
