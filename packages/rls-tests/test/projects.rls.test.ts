@@ -949,7 +949,7 @@ describe("Projects & Tasks", () => {
       const rows = await admin<Row>(`select version, superseded_at, client_reference from proj_issued_plans where project_id = '${P1}' order by version`);
       expect(rows.map((r) => r.version)).toEqual([1, 2]);
       expect(rows[0].superseded_at).not.toBeNull();
-      expect(rows[1].client_reference).toBe("ACME-REF-7");
+      expect(rows[1]!.client_reference).toBe("ACME-REF-7");
       expect((await q<{ o: boolean }>(U.member, `select proj_plan_outdated('${P1}') as o`))[0].o).toBe(false);
       plan1 = v2;
     });

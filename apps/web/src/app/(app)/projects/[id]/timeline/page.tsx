@@ -147,7 +147,7 @@ function BookingCard({ b, projectId, name, mayBook, canOverride, people, siteIte
   const when = describeTimedEvent(b.starts_at, b.ends_at, b.tz, VIEW_TZ);
   const cancelled = b.state === "cancelled";
   return (
-    <article className={`rounded-lg border border-border p-3 ${cancelled ? "opacity-70" : ""}`}>
+    <article className={`rounded-lg border border-border p-3`}>
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-sm font-semibold">{name}</h3>
         <BookingStateBadge state={b.state} />
