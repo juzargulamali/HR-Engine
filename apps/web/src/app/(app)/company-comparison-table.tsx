@@ -31,12 +31,12 @@ export function CompanyComparisonTable({
         <CardTitle>Companies</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        <div className="hidden grid-cols-[1.6fr_0.8fr_0.8fr_0.8fr_0.8fr_0.9fr_auto] gap-2 px-3 text-xs font-medium text-muted-foreground sm:grid">
+        <div className="hidden grid-cols-[1.6fr_0.8fr_0.8fr_0.8fr_0.8fr_0.9fr_auto] gap-2 px-3 text-sm font-medium text-muted-foreground sm:grid">
           <span>Company</span>
           <span className="text-right">Employees</span>
           <span className="text-right">Present</span>
           <span className="text-right">On leave</span>
-          <span className="text-right">Missing</span>
+          <span className="text-right" title="No attendance recorded on a scheduled workday">No record</span>
           <span className="text-right">In review</span>
           <span />
         </div>
@@ -83,37 +83,47 @@ export function CompanyComparisonTable({
               >
                 <span className="col-span-2 flex items-center gap-2 font-medium sm:col-span-1">
                   {s.companyName}
-                  {s.isRecoveryDay ? (
+                  {s.restDayLabel ? (
                     <Badge variant="outline" className="text-xs">
-                      {s.holidayName ?? "Weekend"}
+                      {s.restDayLabel}
                     </Badge>
                   ) : null}
                 </span>
                 <span className="text-right sm:text-right">{s.totalEmployees}</span>
                 <span className="text-right text-success">{s.presentCount}</span>
                 <span className="text-right">{s.leaveCount}</span>
-                <span className={cn("text-right", s.notRecordedCount > 0 && "text-warning")}>{s.notRecordedCount}</span>
+                <span className={cn("text-right", s.notRecordedScheduledCount > 0 && "text-warning")}>{s.notRecordedScheduledCount}</span>
                 <span className={cn("text-right", s.leaveRequestsAwaitingDecision > 0 && "text-accent")}>{s.leaveRequestsAwaitingDecision}</span>
                 <ChevronDown className={cn("hidden h-4 w-4 justify-self-end text-muted-foreground transition-transform duration-150 sm:block", isOpen && "rotate-180")} aria-hidden />
               </button>
               {isOpen ? (
-                <div className="grid grid-cols-2 gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-3 border-t border-border px-4 py-3 text-sm text-muted-foreground sm:grid-cols-3">
                   <div>
                     <div className="text-foreground">{s.presentCount}</div>
-                    Present today
+                    Recorded present today
                   </div>
                   <div>
                     <div className="text-foreground">{s.leaveCount}</div>
-                    On leave today
+                    Recorded on leave today
                   </div>
                   <div>
                     <div className="text-foreground">{s.absentCount}</div>
-                    Absent today
+                    Recorded absent today
                   </div>
                   <div>
-                    <div className="text-foreground">{s.notRecordedCount}</div>
-                    Not recorded yet
+                    <div className="text-foreground">{s.notRecordedScheduledCount}</div>
+                    No record, scheduled workday
                   </div>
+                  <div>
+                    <div className="text-foreground">{s.notRecordedRestCount}</div>
+                    Rest day or holiday, no record expected
+                  </div>
+                  {s.notRecordedUnknownCount > 0 ? (
+                    <div>
+                      <div className="text-foreground">{s.notRecordedUnknownCount}</div>
+                      No record, day type not known
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>

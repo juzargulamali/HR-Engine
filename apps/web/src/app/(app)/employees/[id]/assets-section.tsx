@@ -51,7 +51,7 @@ export async function AssetsSection({
                 <TableCell>
                   {asset ? (
                     <>
-                      <span className="font-mono text-xs">{asset.asset_tag}</span>{" "}
+                      <span className="font-mono text-sm">{asset.asset_tag}</span>{" "}
                       <span className="capitalize text-muted-foreground">{asset.category}</span>
                     </>
                   ) : (

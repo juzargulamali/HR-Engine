@@ -145,7 +145,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                 </div>
               ) : null}
               {typeof policy.payload?.statutory_safeguard === "string" ? (
-                <p className="text-xs text-muted-foreground">{policy.payload.statutory_safeguard as string}</p>
+                <p className="text-sm text-muted-foreground">{policy.payload.statutory_safeguard as string}</p>
               ) : null}
             </CardContent>
           </Card>
@@ -202,7 +202,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           <CardTitle>Payload</CardTitle>
         </CardHeader>
         <CardContent>
-          <pre className="overflow-x-auto rounded-md bg-secondary/60 p-4 text-xs">{JSON.stringify(policy.payload, null, 2)}</pre>
+          <pre className="overflow-x-auto rounded-md bg-secondary/60 p-4 text-sm">{JSON.stringify(policy.payload, null, 2)}</pre>
         </CardContent>
       </Card>
 
@@ -226,7 +226,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
               <TableBody>
                 {(leaveTypes ?? []).map((lt) => (
                   <TableRow key={lt.id}>
-                    <TableCell className="font-mono text-xs">{lt.leave_type_code}</TableCell>
+                    <TableCell className="font-mono text-sm">{lt.leave_type_code}</TableCell>
                     <TableCell>{lt.name}</TableCell>
                     <TableCell>{lt.accrual_method.replace(/_/g, " ")}</TableCell>
                     <TableCell>{lt.accrual_rate_per_period ?? "—"}</TableCell>

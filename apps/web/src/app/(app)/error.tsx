@@ -35,7 +35,7 @@ export default function AppSegmentError({ error, reset }: { error: Error & { dig
         </p>
       </div>
       {error.digest ? (
-        <p className="rounded-md border border-border bg-secondary/50 px-3 py-1.5 font-mono text-xs text-muted-foreground">
+        <p className="rounded-md border border-border bg-secondary/50 px-3 py-1.5 font-mono text-sm text-muted-foreground">
           Reference: {error.digest}
         </p>
       ) : null}

@@ -102,7 +102,7 @@ export default async function UsersPage() {
                         </span>
                       ))}
                       {(grantsByUser.get(p.id) ?? []).length === 0 ? (
-                        <span className="text-xs text-muted-foreground">No role yet</span>
+                        <span className="text-sm text-muted-foreground">No role yet</span>
                       ) : null}
                     </div>
                   </TableCell>

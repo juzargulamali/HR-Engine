@@ -110,7 +110,7 @@ export function ActivateRecoveryWindowsForm({
           </Button>
         </div>
       )}
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         The earliest date allowed is {minDate} (tomorrow in {countryName}). Nothing already calculated is changed.
         {canChooseDate ? " Saving a planned date lets the CEO/CTO activate on exactly that date; they cannot change it." : ""}
       </p>

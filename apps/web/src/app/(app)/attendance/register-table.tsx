@@ -86,7 +86,7 @@ export function RegisterTable({
                 <TableCell>
                   <ClockStatus status={r.clockStatus} />
                   {r.clockStatus === "clocked_in" && r.openSince ? (
-                    <div className="text-xs text-muted-foreground">since {fmtTime(r.openSince, r.timeZone)}</div>
+                    <div className="text-sm text-muted-foreground">since {fmtTime(r.openSince, r.timeZone)}</div>
                   ) : null}
                 </TableCell>
                 <TableCell>
@@ -101,12 +101,12 @@ export function RegisterTable({
                     </Badge>
                   ) : null}
                   {r.attendanceSource && r.attendanceSource !== "self_clock" ? (
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-sm text-muted-foreground">
                       Manual entry{r.manualHours != null ? ` · ${r.manualHours} h` : ""}
                     </div>
                   ) : null}
                   {r.presenceConflict ? (
-                    <div className="text-xs text-warning" title={r.presenceConflict}>
+                    <div className="text-sm text-warning" title={r.presenceConflict}>
                       Manual and clock records differ — review
                     </div>
                   ) : null}
@@ -120,10 +120,10 @@ export function RegisterTable({
                   ) : (
                     <>
                       {formatHoursMinutes(r.recordedSeconds)}
-                      {r.isProvisional ? <div className="text-xs text-muted-foreground">so far — still clocked in</div> : null}
+                      {r.isProvisional ? <div className="text-sm text-muted-foreground">so far — still clocked in</div> : null}
                     </>
                   )}
-                  {r.hrRecorded ? <div className="text-xs text-muted-foreground">Recorded by HR</div> : null}
+                  {r.hrRecorded ? <div className="text-sm text-muted-foreground">Recorded by HR</div> : null}
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-wrap items-center gap-1">
@@ -134,7 +134,7 @@ export function RegisterTable({
                     )}
                     {r.openAlertCount > 0 ? <Badge variant="warning">HR alert</Badge> : null}
                   </div>
-                  {r.reviewFlags.length > 0 ? <div className="mt-1 text-xs text-muted-foreground">{r.reviewFlags.map(reviewFlagLabel).join(" · ")}</div> : null}
+                  {r.reviewFlags.length > 0 ? <div className="mt-1 text-sm text-muted-foreground">{r.reviewFlags.map(reviewFlagLabel).join(" · ")}</div> : null}
                 </TableCell>
                 <TableCell>
                   {canEdit ? (
@@ -168,9 +168,9 @@ export function RegisterTable({
                             {s.hrClosedReason ? <Badge variant="warning">Clock-out closed by HR</Badge> : null}
                             {s.recoveryModel === "legacy" ? <Badge variant="outline">Previous calculation</Badge> : null}
                           </div>
-                          {s.recordedByHrReason ? <p className="text-xs text-muted-foreground">HR note: {s.recordedByHrReason}</p> : null}
-                          {s.hrClosedReason ? <p className="text-xs text-muted-foreground">Closing reason: {s.hrClosedReason}</p> : null}
-                          <ul className="space-y-1 text-xs">
+                          {s.recordedByHrReason ? <p className="text-sm text-muted-foreground">HR note: {s.recordedByHrReason}</p> : null}
+                          {s.hrClosedReason ? <p className="text-sm text-muted-foreground">Closing reason: {s.hrClosedReason}</p> : null}
+                          <ul className="space-y-1 text-sm">
                             {s.segments.map((seg) => (
                               <li key={seg.id}>
                                 {fmtTime(seg.start, r.timeZone)}–{seg.end ? fmtTime(seg.end, r.timeZone) : "now"} · {workModeLabel(seg.mode)}
@@ -181,7 +181,7 @@ export function RegisterTable({
                             ))}
                           </ul>
                           {s.corrections.map((c) => (
-                            <p key={c.id} className="rounded bg-secondary/50 p-2 text-xs">
+                            <p key={c.id} className="rounded bg-secondary/50 p-2 text-sm">
                               {c.kind === "add_missing" ? "Added by HR" : "Corrected by HR"} ({c.actorName}, {fmtDateTime(c.createdAt, r.timeZone)}):{" "}
                               {c.originalIn ? `${fmtDateTime(c.originalIn, r.timeZone)}–${c.originalOut ? fmtDateTime(c.originalOut, r.timeZone) : "open"} → ` : ""}
                               {fmtDateTime(c.correctedIn, r.timeZone)}–{fmtDateTime(c.correctedOut, r.timeZone)}. Reason: {c.reason}
@@ -192,7 +192,7 @@ export function RegisterTable({
                           ) : null}
                           {canEdit && editing === r.employeeId && s.status === "open" ? <CorrectSessionForm session={s} timeZone={r.timeZone} /> : null}
                           {canEdit && editing === r.employeeId && s.recoveryModel === "legacy" && s.status === "closed" ? (
-                            <p className="text-xs text-muted-foreground">
+                            <p className="text-sm text-muted-foreground">
                               This session was recorded under the previous Recovery Leave calculation and keeps it, so its times are not edited here.
                             </p>
                           ) : null}
@@ -203,7 +203,7 @@ export function RegisterTable({
                         <div className="space-y-1 text-sm">
                           <p className="font-medium">Recovery windows starting on this date</p>
                           {(detail?.windows ?? []).map((w) => (
-                            <p key={w.id} className="text-xs">
+                            <p key={w.id} className="text-sm">
                               {fmtDateTime(w.start, r.timeZone)} → {fmtDateTime(w.end, r.timeZone)} · {CLASSIFICATION_LABELS[w.classification as keyof typeof CLASSIFICATION_LABELS] ?? w.classification} ·{" "}
                               {formatHoursMinutes(w.recordedSeconds)} recorded ·{" "}
                               {w.status === "open" ? "window still open (provisional)" : `${w.entitlementDays} day${w.entitlementDays === 1 ? "" : "s"}`}

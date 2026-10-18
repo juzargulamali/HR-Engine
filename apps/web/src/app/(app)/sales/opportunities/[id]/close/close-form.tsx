@@ -70,14 +70,14 @@ export function CloseForm(p: CloseFormProps) {
             <h2 className="mb-1 text-sm font-semibold">Evidence of the win</h2>
             <p className="mb-4 text-sm text-muted-foreground">Winning needs a purchase order or an authorised email. A sent or accepted proposal, or an equipment check, is not enough.</p>
             <div className="mb-4 rounded-md border border-border p-3 text-sm">
-              <p className="text-xs text-muted-foreground">Confirmed value</p>
+              <p className="text-sm text-muted-foreground">Confirmed value</p>
               <p className="font-medium">{p.valueText}</p>
               {!p.hasValue ? (
                 <Alert className="mt-2" variant="warning">
                   The value must be set before it can be marked Won. <Link href={`/sales/opportunities/${p.opportunityId}?tab=scope`} className="font-medium underline">Go to the opportunity and use Edit details</Link>, then come back.
                 </Alert>
               ) : (
-                <p className="mt-1 text-xs text-muted-foreground">This is the value that will be recorded as won. Wrong? <Link href={`/sales/opportunities/${p.opportunityId}?tab=scope`} className="font-medium underline">Edit it first</Link>.</p>
+                <p className="mt-1 text-sm text-muted-foreground">This is the value that will be recorded as won. Wrong? <Link href={`/sales/opportunities/${p.opportunityId}?tab=scope`} className="font-medium underline">Edit it first</Link>.</p>
               )}
             </div>
             <ActionForm action={markWon} submitLabel="Confirm as won" pendingLabel="Saving…" secondary={back}>
@@ -95,7 +95,7 @@ export function CloseForm(p: CloseFormProps) {
                 <Input id="won-date" name="evidenceDate" type="date" required max={p.today} />
               </Field>
               <Field label="Note (optional)" htmlFor="won-note"><Textarea id="won-note" name="note" rows={2} /></Field>
-              <p className="text-xs text-muted-foreground">Add the purchase order or the email itself under Files (purpose: Purchase order or Authorised email) so the document is kept with the reference. <Link href={`/sales/opportunities/${p.opportunityId}?tab=proposals`} className="font-medium underline">Open Files</Link></p>
+              <p className="text-sm text-muted-foreground">Add the purchase order or the email itself under Files (purpose: Purchase order or Authorised email) so the document is kept with the reference. <Link href={`/sales/opportunities/${p.opportunityId}?tab=proposals`} className="font-medium underline">Open Files</Link></p>
               {!p.hasValue ? <Alert variant="destructive">Set the value first: the database will not record a win without one.</Alert> : null}
             </ActionForm>
           </Card>
@@ -141,7 +141,7 @@ export function CloseForm(p: CloseFormProps) {
             )}
           </ul>
         </Card>
-        <p className="text-xs text-muted-foreground">Only the owner or a founder can do this. It is recorded in the history. Nothing is sent to anyone.</p>
+        <p className="text-sm text-muted-foreground">Only the owner or a founder can do this. It is recorded in the history. Nothing is sent to anyone.</p>
       </aside>
     </div>
   );

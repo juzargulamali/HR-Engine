@@ -38,11 +38,11 @@ export function ProposalsPanel({ view }: { view: OppView }) {
                     {p.id === latestSentId ? <Badge variant="outline">Latest sent</Badge> : null}
                   </div>
                   {p.note ? <p className="break-words text-sm">{p.note}</p> : null}
-                  <p className="break-words text-xs text-muted-foreground">
+                  <p className="break-words text-sm text-muted-foreground">
                     {file ? `Document: ${fileDisplayName(file)}` : "No document linked"} · added by {ctx.personName(p.created_by)} on {formatDate(p.created_at)}
                     {p.sent_on ? ` · recorded as sent on ${formatDate(p.sent_on)}` : ""}
                   </p>
-                  {unapproved ? <p className="text-xs text-warning">No founder approval on record for this opportunity. Recording a proposal as sent is not an approval.</p> : null}
+                  {unapproved ? <p className="text-sm text-warning">No founder approval on record for this opportunity. Recording a proposal as sent is not an approval.</p> : null}
                   {actions.send || actions.accept || actions.supersede ? (
                     <div className="flex flex-wrap gap-1.5">
                       {actions.send ? <ProposalStatusButton proposalId={p.id} opportunityId={opp.id} version={p.version} status="sent" /> : null}

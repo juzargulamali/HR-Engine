@@ -38,7 +38,7 @@ export async function InsuranceSection({ employeeId, canEdit }: { employeeId: st
           {policiesWithUrl.map((p) => (
             <TableRow key={p.id}>
               <TableCell>{p.insurance_name}</TableCell>
-              <TableCell className="font-mono text-xs">{p.policy_number}</TableCell>
+              <TableCell className="font-mono text-sm">{p.policy_number}</TableCell>
               <TableCell>{p.expiry_date ?? "—"}</TableCell>
               <TableCell>
                 <div className="flex items-center gap-3">

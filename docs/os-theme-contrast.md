@@ -70,19 +70,19 @@ Minimum required: 4.5:1 for normal text, 3:1 for large text and for control boun
 
 | Run (production build, local stack) | Page states | Text elements checked | Below AA |
 |---|---|---|---|
-| Founder, desktop 1440 px, both themes | 74 | 4,646 | 0 |
-| Founder, phone 390 px, both themes | 74 | 3,668 | 0 |
-| Sales user, desktop, both themes | 68 | 3,208 | 0 |
-| HR Admin, desktop, both themes | 66 | 3,072 | 0 |
-| Employee without Sales access, desktop, both themes | 66 | 1,792 | 0 |
+| Founder, desktop 1440 px, both themes | 74 | 4,626 | 0 |
+| Founder, phone 390 px, both themes | 74 | 3,648 | 0 |
+| Sales user, desktop, both themes | 68 | 3,158 | 0 |
+| HR Admin, desktop, both themes | 66 | 3,050 | 0 |
+| Employee without Sales access, desktop, both themes | 66 | 1,742 | 0 |
 
-Across all runs: 16,386 text elements, none below AA. Form controls: the weakest input/select/textarea border measured against the surface behind it was 3.76:1 (need 3:1).
+Across all runs: 16,224 text elements, none below AA. Form controls: the weakest input/select/textarea border measured against the surface behind it was 3.76:1 (need 3:1).
 
 Closest to the limit (rendered): 4.53:1 (need 4.5) in light theme, "5-minute processor: not veri"; 4.53:1 (need 4.5) in light theme, "No job title set."; 4.53:1 (need 4.5) in light theme, "No job title set.".
 
 ## What the measurements found while building it
 
-- Honest baseline: the old secondary-text colour already measured 7.15:1 (dark) and 5.40:1 (light) on cards, so the complaint was less about the ratio than about how it felt: the dark page and panels were nearly the same near-black (card against page 1.07:1), light cards were pure white on a bright page (1.06:1), 10 to 11 px labels were common, and decorative grids and glows competed with content. The new surfaces step apart more (card against page 1.19:1 dark, 1.12:1 light, plus a visible border), secondary text is stronger (8.1:1 dark, 8.3:1 light), the smallest text is 12 px, and the grid and glow are removed from the app.
+- Honest baseline: the old secondary-text colour already measured 7.15:1 (dark) and 5.40:1 (light) on cards, so the complaint was less about the ratio than about how it felt: the dark page and panels were nearly the same near-black (card against page 1.07:1), light cards were pure white on a bright page (1.06:1), 10 to 11 px labels were common, and decorative grids and glows competed with content. The new surfaces step apart more (card against page 1.19:1 dark, 1.12:1 light, plus a visible border), secondary text is stronger (8.1:1 dark, 8.3:1 light), the text people read is about 14 px (12 px only for badges, shortcut chips, tooltips and footnotes), and the grid and glow are removed from the app.
 - The old tokens used the OS colour-scheme for Tailwind's `dark:` classes while the app switches by attribute, so Sales badges could show light-theme colours on a dark page. The `dark:` variant now follows the app's own theme.
 - In the first draft of the new light theme, section labels in the sidebar measured 4.25:1; the tertiary token was darkened.
 - The "Sent" proposal badge in light measured 4.49:1 on first measurement; the badge text colours were deepened one step.

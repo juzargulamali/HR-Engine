@@ -21,7 +21,7 @@ export function RetireAssetButton({ assetId }: { assetId: string }) {
       >
         {pending ? "Retiring…" : "Retire"}
       </Button>
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

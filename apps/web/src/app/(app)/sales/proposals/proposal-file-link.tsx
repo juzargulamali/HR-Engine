@@ -20,7 +20,7 @@ export function OpenFileButton({ fileId, name }: { fileId: string; name: string 
       <button type="button" onClick={open} disabled={pending} className="max-w-full break-words text-left text-sm underline underline-offset-2 hover:no-underline disabled:opacity-60">
         {pending ? "Opening…" : name}
       </button>
-      {error ? <span role="alert" className="text-xs text-destructive">{error}</span> : null}
+      {error ? <span role="alert" className="text-sm text-destructive">{error}</span> : null}
     </span>
   );
 }

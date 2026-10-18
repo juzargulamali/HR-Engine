@@ -102,7 +102,7 @@ export function LeaveRequestForm({ versions, leaveTypesByVersion, today }: Leave
           Cancel
         </Link>
       </div>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         Days are counted automatically from your country&apos;s working week and public holidays, then routed to your
         approver.
       </p>

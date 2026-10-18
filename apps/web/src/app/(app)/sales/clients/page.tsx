@@ -29,13 +29,13 @@ function ContactCard({ contact }: { contact: CrmContactRow }) {
       {contact.role_title ? <p className="break-words text-muted-foreground">{contact.role_title}</p> : null}
       <dl className="mt-2 space-y-1 text-sm">
         <div className="flex gap-2">
-          <dt className="w-12 flex-none text-xs text-muted-foreground">Email</dt>
+          <dt className="w-12 flex-none text-sm text-muted-foreground">Email</dt>
           <dd className="min-w-0 flex-1 [overflow-wrap:anywhere]">
             {contact.email ? <a href={`mailto:${contact.email}`} className="break-all underline-offset-2 hover:underline">{contact.email}</a> : <span className="text-muted-foreground">Not recorded</span>}
           </dd>
         </div>
         <div className="flex gap-2">
-          <dt className="w-12 flex-none text-xs text-muted-foreground">Phone</dt>
+          <dt className="w-12 flex-none text-sm text-muted-foreground">Phone</dt>
           <dd className="min-w-0 flex-1 [overflow-wrap:anywhere]">
             {contact.phone ? <a href={`tel:${contact.phone.replace(/[^+\d]/g, "")}`} className="break-words tabular-nums underline-offset-2 hover:underline">{contact.phone}</a> : <span className="text-muted-foreground">Not recorded</span>}
           </dd>

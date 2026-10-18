@@ -47,8 +47,8 @@ function ReadOnlySettings({ company, ctx }: { company: CrmCompanyInfo; ctx: CrmC
     ["Commercial approval policy", (
       <span key="p">
         {APPROVAL_POLICY_LABEL[s.approval_policy]}
-        <span className="block text-xs text-muted-foreground">{APPROVAL_POLICY_EXPLANATION[s.approval_policy]}</span>
-        {s.approval_note ? <span className="block break-words text-xs text-muted-foreground">Note: {s.approval_note}</span> : null}
+        <span className="block text-sm text-muted-foreground">{APPROVAL_POLICY_EXPLANATION[s.approval_policy]}</span>
+        {s.approval_note ? <span className="block break-words text-sm text-muted-foreground">Note: {s.approval_note}</span> : null}
       </span>
     )],
   ];

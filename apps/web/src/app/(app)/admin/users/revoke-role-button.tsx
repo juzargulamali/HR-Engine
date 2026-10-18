@@ -14,7 +14,7 @@ export function RevokeRoleButton({ roleGrantId }: { roleGrantId: string }) {
         type="button"
         variant="ghost"
         size="sm"
-        className="h-5 px-1 text-xs"
+        className="h-5 px-1 text-sm"
         disabled={pending}
         onClick={() => {
           if (!window.confirm("Revoke this role? They lose the access it grants immediately.")) return;
@@ -23,7 +23,7 @@ export function RevokeRoleButton({ roleGrantId }: { roleGrantId: string }) {
       >
         {pending ? "revoking…" : "revoke"}
       </Button>
-      {error ? <span className="text-xs text-destructive">{error}</span> : null}
+      {error ? <span className="text-sm text-destructive">{error}</span> : null}
     </span>
   );
 }

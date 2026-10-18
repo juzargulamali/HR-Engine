@@ -39,7 +39,7 @@ export function ActivityPanel({ view }: { view: OppView }) {
                       {t.activity.is_internal ? <Badge variant="secondary">Internal note</Badge> : null}
                     </div>
                     <p className="mt-1 whitespace-pre-wrap break-words text-sm">{t.activity.body}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{ctx.personName(t.activity.created_by)} · {formatDateTime(t.at)}</p>
+                    <p className="mt-0.5 text-sm text-muted-foreground">{ctx.personName(t.activity.created_by)} · {formatDateTime(t.at)}</p>
                   </div>
                 </li>
               ) : (
@@ -47,7 +47,7 @@ export function ActivityPanel({ view }: { view: OppView }) {
                   <History className="mt-0.5 h-4 w-4 flex-none text-muted-foreground" aria-hidden />
                   <div className="min-w-0 flex-1">
                     <p className="break-words text-sm">{describeHistoryEvent(t.event) ?? describeEvent(t.event, ctx.personName)}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{t.event.actor_id ? ctx.personName(t.event.actor_id) : "System"} · {formatDateTime(t.at)}</p>
+                    <p className="mt-0.5 text-sm text-muted-foreground">{t.event.actor_id ? ctx.personName(t.event.actor_id) : "System"} · {formatDateTime(t.at)}</p>
                   </div>
                 </li>
               ),

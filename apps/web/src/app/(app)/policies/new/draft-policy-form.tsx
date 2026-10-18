@@ -68,9 +68,9 @@ export function DraftPolicyForm({ countries }: { countries: { code: string; name
           name="payloadJson"
           rows={5}
           defaultValue={PAYLOAD_PLACEHOLDERS.leave_rules}
-          className="w-full rounded-md border border-input bg-field px-3 py-2 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="w-full rounded-md border border-input bg-field px-3 py-2 font-mono text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           For leave rules, per-leave-type numbers (annual, sick…) are added on the policy&apos;s own page after
           drafting — this payload is context/metadata for the version as a whole.
         </p>
@@ -85,7 +85,7 @@ export function DraftPolicyForm({ countries }: { countries: { code: string; name
           Cancel
         </Link>
       </div>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         This saves as a draft. A <em>different</em> HR Admin or the CEO/CTO for this country must activate it before it
         takes effect.
       </p>

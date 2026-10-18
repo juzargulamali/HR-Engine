@@ -27,7 +27,7 @@ export function InviteUserForm() {
       <Button type="submit" disabled={pending}>
         {pending ? "Sending invite…" : "Send invite"}
       </Button>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         They&apos;ll get an email to set a password. A profile is created for them automatically —
         grant a role once they&apos;ve accepted.
       </p>

@@ -196,8 +196,8 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
               {(rows ?? []).map((r) => (
                 <TableRow key={r.id}>
                   <TableCell>{new Date(r.occurred_at).toLocaleString()}</TableCell>
-                  <TableCell className="font-mono text-xs">{r.table_name}</TableCell>
-                  <TableCell className="font-mono text-xs">{r.record_id ? `${r.record_id.slice(0, 8)}…` : "—"}</TableCell>
+                  <TableCell className="font-mono text-sm">{r.table_name}</TableCell>
+                  <TableCell className="font-mono text-sm">{r.record_id ? `${r.record_id.slice(0, 8)}…` : "—"}</TableCell>
                   <TableCell className="capitalize">{r.action}</TableCell>
                   <TableCell>{r.actor_id ? (actorLabel.get(r.actor_id) ?? r.actor_id) : "System"}</TableCell>
                   <TableCell>

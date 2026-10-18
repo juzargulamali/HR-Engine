@@ -83,7 +83,7 @@ function ExistingContactForm({ opportunityId, contacts, onDone, cancel, onNew }:
           {matches.map((c) => <option key={c.id} value={c.id}>{pickerOptionLabel(c)}</option>)}
         </Select>
       </Field>
-      <p id="add-contact-count" role="status" className="text-xs text-muted-foreground">
+      <p id="add-contact-count" role="status" className="text-sm text-muted-foreground">
         {matches.length === 0 ? "Nobody matches that search. Try fewer words, or add a new person." : `${matches.length} ${matches.length === 1 ? "person" : "people"} shown.`}
         {selected ? ` Selected: ${selected.name}${selected.organisationName ? `, ${selected.organisationName}` : ""}${selected.email ? `, ${selected.email}` : ""}.` : ""}
       </p>

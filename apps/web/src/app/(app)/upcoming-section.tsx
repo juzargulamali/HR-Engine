@@ -27,7 +27,7 @@ export function UpcomingSection({
                     <Landmark className="h-4 w-4 flex-none text-muted-foreground" aria-hidden />
                     {h.name}
                   </span>
-                  <span className="text-xs text-muted-foreground">{h.holiday_date}</span>
+                  <span className="text-sm text-muted-foreground">{h.holiday_date}</span>
                 </li>
               ))}
             </ul>
@@ -41,7 +41,7 @@ export function UpcomingSection({
         </CardHeader>
         <CardContent>
           {onLeaveToday.length === 0 ? (
-            <EmptyState dense icon={CalendarDays} title="Everyone's in today." description="No one is recorded on leave for today." />
+            <EmptyState dense icon={CalendarDays} title="No one is recorded on leave today." description="This lists recorded leave only. It does not show who is present or clocked in." />
           ) : (
             <ul className="divide-y divide-border text-sm">
               {onLeaveToday.map((e) => (
@@ -49,7 +49,7 @@ export function UpcomingSection({
                   <Link href={`/employees/${e.id}`} className="hover:underline">
                     {e.name}
                   </Link>
-                  <span className="text-xs text-muted-foreground">{e.companyName}</span>
+                  <span className="text-sm text-muted-foreground">{e.companyName}</span>
                 </li>
               ))}
             </ul>

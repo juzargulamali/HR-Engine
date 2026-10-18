@@ -94,7 +94,7 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
           {filtered ? <Link href="/sales/opportunities" className={buttonVariants({ variant: "ghost", size: "sm" })}>Clear</Link> : null}
         </div>
       </form>
-      <p className="-mt-3 text-xs text-muted-foreground">Choosing a stage overrides the status. Won and lost are under Closed.</p>
+      <p className="-mt-3 text-sm text-muted-foreground">Choosing a stage overrides the status. Won and lost are under Closed.</p>
 
       {items.length === 0 ? (
         <EmptyState title="No opportunities yet" description="Record an enquiry with a few quick fields. Unknown dates, budget and scope are fine." action={<Link href="/sales/new" className={buttonVariants({ size: "sm" })}>New enquiry</Link>} />
@@ -103,7 +103,7 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
       ) : (
         <Card>
           <CardContent className="space-y-3 p-4">
-            <p className="text-xs text-muted-foreground" role="status">
+            <p className="text-sm text-muted-foreground" role="status">
               {rows.length} of {items.length} opportunities{rows.length > MAX_ROWS ? `, showing the first ${MAX_ROWS}. Narrow the filters to see the rest` : ""}
             </p>
             <Table className="min-w-[52rem]">
@@ -123,7 +123,7 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
                   <TableRow key={i.opp.id} className="align-top">
                     <TableCell className="min-w-[14rem] max-w-[22rem]">
                       <Link href={`/sales/opportunities/${i.opp.id}`} className="break-words font-medium underline-offset-2 hover:underline">{i.opp.title}</Link>
-                      <div className="mt-0.5 break-words text-xs text-muted-foreground">
+                      <div className="mt-0.5 break-words text-sm text-muted-foreground">
                         <span className="font-mono">{i.opp.reference}</span> · {organisationLabel(i)}{ctx.companies.length > 1 ? ` · ${i.companyName}` : ""}
                       </div>
                     </TableCell>
@@ -134,7 +134,7 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
                       {i.nextFollowUp ? (
                         <>
                           <DueText dueAt={i.nextFollowUp.due_at} />
-                          <div className="text-xs text-muted-foreground">{i.nextFollowUp.title}</div>
+                          <div className="text-sm text-muted-foreground">{i.nextFollowUp.title}</div>
                         </>
                       ) : (
                         <span className="text-muted-foreground">{i.opp.stage === "won" || i.opp.stage === "lost" ? `Closed: ${crmStageLabel(i.opp.stage).toLowerCase()}` : "None planned"}</span>

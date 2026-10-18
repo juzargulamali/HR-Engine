@@ -94,7 +94,7 @@ export default async function AssetsPage() {
                 const canManageThisOne = canManageAssets(session.grants, a.company_id);
                 return (
                   <TableRow key={a.id}>
-                    <TableCell className="font-mono text-xs">{a.asset_tag}</TableCell>
+                    <TableCell className="font-mono text-sm">{a.asset_tag}</TableCell>
                     <TableCell className="capitalize">{a.category}</TableCell>
                     <TableCell>{companyName.get(a.company_id) ?? "—"}</TableCell>
                     <TableCell>

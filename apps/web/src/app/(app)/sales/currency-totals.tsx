@@ -12,7 +12,7 @@ export function CurrencyTotals({ totals, unvalued = 0, emptyText = "No value rec
   return (
     <ul className={cn("tabular-nums", className)}>
       {lines.map((l) => <li key={l.currency}>{formatMoney(l.amount, l.currency)}</li>)}
-      {unvalued > 0 ? <li className="text-xs text-muted-foreground">+ {unvalued} without a value</li> : null}
+      {unvalued > 0 ? <li className="text-sm text-muted-foreground">+ {unvalued} without a value</li> : null}
     </ul>
   );
 }

@@ -88,7 +88,7 @@ export function AppraisalForm({
       <div className="space-y-1.5">
         <Label>Overall (auto-calculated)</Label>
         <div className="text-sm font-medium">{computedOverall ?? "Not set"}</div>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Computed as the rounded average of the competency ratings above once saved — shown here for immediate feedback.
         </p>
       </div>

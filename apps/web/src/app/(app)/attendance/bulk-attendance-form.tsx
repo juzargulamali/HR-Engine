@@ -112,7 +112,7 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
                   <Select
                     value={edit.status}
                     onChange={(e) => updateRow(r.employeeId, { status: e.target.value })}
-                    className="h-8 w-36 text-xs"
+                    className="h-8 w-36 text-sm"
                   >
                     <option value="not_recorded">Not recorded</option>
                     <option value="present">Present</option>
@@ -125,7 +125,7 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
                   <Select
                     value={edit.workMode}
                     onChange={(e) => updateRow(r.employeeId, { workMode: e.target.value })}
-                    className="h-8 w-36 text-xs"
+                    className="h-8 w-36 text-sm"
                   >
                     <option value="">—</option>
                     <option value="office">Office</option>
@@ -148,7 +148,7 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
                     max="24"
                     value={edit.hoursWorked}
                     onChange={(e) => updateRow(r.employeeId, { hoursWorked: e.target.value })}
-                    className="h-8 w-20 text-xs"
+                    className="h-8 w-20 text-sm"
                   />
                 </TableCell>
               </TableRow>
@@ -158,7 +158,7 @@ export function BulkAttendanceForm({ workDate, rows, isRecoveryDay }: { workDate
       </Table>
 
       {isRecoveryDay ? (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Anyone marked Present today may earn a recovery day, per your country&apos;s policy — the exact credit (or
           whether one applies at all) is decided when you save, not shown here in advance.
         </p>

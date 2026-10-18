@@ -42,10 +42,10 @@ export async function CompensationSection({
           {current.bank_iban ? (
             <>
               <dt className="text-muted-foreground">Bank IBAN</dt>
-              <dd className="font-mono text-xs">{current.bank_iban}</dd>
+              <dd className="font-mono text-sm">{current.bank_iban}</dd>
             </>
           ) : null}
-          {isSelf ? <dd className="col-span-2 text-xs text-muted-foreground">Read-only — HR or Finance updates this on your behalf.</dd> : null}
+          {isSelf ? <dd className="col-span-2 text-sm text-muted-foreground">Read-only — HR or Finance updates this on your behalf.</dd> : null}
         </dl>
       ) : (
         <p className="text-sm text-muted-foreground">No compensation on record yet.</p>

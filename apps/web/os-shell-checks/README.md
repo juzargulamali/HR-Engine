@@ -16,6 +16,7 @@ node os-shell-checks/sales-actions.mjs                       # the real Sales op
                                                              # proposal, Zoho reference, contacts, Won + handover, founder reopen, reports)
 node os-shell-checks/shell-checks.mjs                        # navigation per persona, Coming soon, titles, mobile bar/drawer, keyboard, theme persistence,
                                                              # clock status, /os-preview blocked
+node os-shell-checks/phone-fit.mjs                           # 360 and 390 px, dark + light, 26 pages: no horizontal scroll, no clipped bottom-bar label, nothing under the bar
 node os-shell-checks/contrast-audit.mjs out.json ceo@e2e.local desktop   # rendered WCAG contrast of every text node on ~35 pages x 2 themes
 node os-shell-checks/screenshots.mjs out-dir                 # dashboard, Sales opportunity, attendance, Sales list, mobile menu; dark + light
 ```

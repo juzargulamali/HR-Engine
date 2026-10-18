@@ -130,7 +130,7 @@ export function PasswordResetForm({ mode }: { mode: "invite" | "reset" }) {
           onChange={(e) => setPassword(e.target.value)}
           aria-describedby="password-requirements"
         />
-        <p id="password-requirements" className="text-xs text-muted-foreground">
+        <p id="password-requirements" className="text-sm text-muted-foreground">
           {PASSWORD_REQUIREMENTS_TEXT}
         </p>
       </div>

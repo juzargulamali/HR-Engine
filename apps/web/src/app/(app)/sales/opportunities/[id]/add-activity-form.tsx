@@ -24,7 +24,7 @@ export function AddActivityForm({ opportunityId }: { opportunityId: string }) {
         <input type="checkbox" name="internal" className="mt-1" />
         <span>Internal note <span className="text-muted-foreground">(about our own thinking, not something the client said or did)</span></span>
       </label>
-      <p className="text-xs text-muted-foreground">This only records it. Nothing is sent to the client or anyone else. A first call, email or meeting sets the first-response time.</p>
+      <p className="text-sm text-muted-foreground">This only records it. Nothing is sent to the client or anyone else. A first call, email or meeting sets the first-response time.</p>
     </ActionForm>
   );
 }

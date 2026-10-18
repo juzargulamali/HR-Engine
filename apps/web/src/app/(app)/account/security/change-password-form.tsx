@@ -29,7 +29,7 @@ export function ChangePasswordForm() {
           required
           aria-describedby="new-password-requirements"
         />
-        <p id="new-password-requirements" className="text-xs text-muted-foreground">
+        <p id="new-password-requirements" className="text-sm text-muted-foreground">
           {PASSWORD_REQUIREMENTS_TEXT}
         </p>
       </div>

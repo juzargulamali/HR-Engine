@@ -27,11 +27,11 @@ function Row({ item }: { item: AttentionItem }) {
         <Link href={`/sales/opportunities/${item.opportunityId}`} className="break-words font-medium underline-offset-2 hover:underline">
           {item.title}
         </Link>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           {item.reference} · {item.detail}
         </p>
       </div>
-      <div className="text-right text-xs">
+      <div className="text-right text-sm">
         {isFollowUp && item.at ? (
           <DueText dueAt={item.at} />
         ) : (
@@ -87,7 +87,7 @@ export function SalesToday({ result }: { result: SalesTodayResult }) {
               ))}
             </ul>
             {result.data.attention.length > MAX_ITEMS ? (
-              <p className="mt-3 text-xs text-muted-foreground">
+              <p className="mt-3 text-sm text-muted-foreground">
                 Showing {MAX_ITEMS} of {result.data.attention.length}.{" "}
                 <Link href="/sales/follow-ups" className="underline underline-offset-2 hover:text-foreground">
                   Open follow-ups

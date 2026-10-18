@@ -66,7 +66,7 @@ export function AddManualPayrollLineForm({
         <div className="space-y-1.5">
           <Label htmlFor="amount">Amount</Label>
           <Input id="amount" name="amount" type="number" step="0.01" min="0.01" required />
-          <p className="text-xs text-muted-foreground">Always enter a positive number — deductions are stored negative automatically.</p>
+          <p className="text-sm text-muted-foreground">Always enter a positive number — deductions are stored negative automatically.</p>
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="currency">Currency</Label>

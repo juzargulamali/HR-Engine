@@ -44,7 +44,7 @@ export async function IdentityDocumentsSection({
           {documentsWithUrl.map((d) => (
             <TableRow key={d.id}>
               <TableCell className="capitalize">{d.document_type.replace("_", " ")}</TableCell>
-              <TableCell className="font-mono text-xs">{d.document_number}</TableCell>
+              <TableCell className="font-mono text-sm">{d.document_number}</TableCell>
               <TableCell>{d.expiry_date ?? "—"}</TableCell>
               <TableCell>
                 <div className="flex items-center gap-3">

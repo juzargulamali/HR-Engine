@@ -80,13 +80,13 @@ export default async function OpportunityPage({ params, searchParams }: { params
             <StageBadge stage={opp.stage} />
           </div>
           <dl className="mt-3 grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-            <div className="min-w-0"><dt className="text-xs text-muted-foreground">{partyLabel}</dt><dd className="break-words">{clientLine}</dd></div>
-            <div className="min-w-0"><dt className="text-xs text-muted-foreground">Owner</dt><dd className="break-words font-medium">{view.ownerName}</dd></div>
-            <div className="min-w-0"><dt className="text-xs text-muted-foreground">Value</dt><dd className="font-medium">{formatMoney(item.value, opp.currency)}</dd></div>
+            <div className="min-w-0"><dt className="text-sm text-muted-foreground">{partyLabel}</dt><dd className="break-words">{clientLine}</dd></div>
+            <div className="min-w-0"><dt className="text-sm text-muted-foreground">Owner</dt><dd className="break-words font-medium">{view.ownerName}</dd></div>
+            <div className="min-w-0"><dt className="text-sm text-muted-foreground">Value</dt><dd className="font-medium">{formatMoney(item.value, opp.currency)}</dd></div>
             <div className="min-w-0">
-              <dt className="text-xs text-muted-foreground">Next action</dt>
+              <dt className="text-sm text-muted-foreground">Next action</dt>
               <dd className="break-words">
-                {next ? <>{next.title} <span className="block text-xs"><DueText dueAt={next.due_at} /></span></> : <span className="text-muted-foreground">{isOpen ? (isHold ? "None (on hold)" : "None scheduled") : "Closed"}</span>}
+                {next ? <>{next.title} <span className="block text-sm"><DueText dueAt={next.due_at} /></span></> : <span className="text-muted-foreground">{isOpen ? (isHold ? "None (on hold)" : "None scheduled") : "Closed"}</span>}
               </dd>
             </div>
           </dl>
@@ -102,13 +102,13 @@ export default async function OpportunityPage({ params, searchParams }: { params
           <Alert variant="success" role="status">
             <p><strong>Won</strong> on {formatDate(opp.closed_at)}{opp.evidence_type ? `, confirmed by ${EVIDENCE[opp.evidence_type]} ${opp.evidence_reference ?? ""} dated ${formatDate(opp.evidence_date)}` : ""}.</p>
             <p className="mt-1"><Link href={`/sales/opportunities/${opp.id}/handover`} className="font-medium underline">Open the handover package</Link></p>
-            {reopenNote ? <p className="mt-1 text-xs">{reopenNote}</p> : <p className="mt-1 text-xs">If it was recorded by mistake or has changed, use Reopen. The win stays in the history.</p>}
+            {reopenNote ? <p className="mt-1 text-sm">{reopenNote}</p> : <p className="mt-1 text-sm">If it was recorded by mistake or has changed, use Reopen. The win stays in the history.</p>}
           </Alert>
         ) : null}
         {isLost ? (
           <Alert role="status">
             <p><strong>Lost</strong> on {formatDate(opp.closed_at)}. Reason: {opp.lost_reason}. A lost opportunity is read-only, including its contacts, until it is reopened.</p>
-            {reopenNote ? <p className="mt-1 text-xs">{reopenNote}</p> : <p className="mt-1 text-xs">Use Reopen if it was recorded by mistake or the client is back. The loss stays in the history.</p>}
+            {reopenNote ? <p className="mt-1 text-sm">{reopenNote}</p> : <p className="mt-1 text-sm">Use Reopen if it was recorded by mistake or the client is back. The loss stays in the history.</p>}
           </Alert>
         ) : null}
         {handoverKeptAfterReopen ? (

@@ -57,7 +57,7 @@ export function ShellChrome({ modules, showAlertsLink, isEmployee, clockOpenSinc
   const hasSales = modules.some((m) => m.id === "sales");
   const onClockPage = pathname === "/attendance-clock" || pathname.startsWith("/attendance-clock/");
 
-  const tab = "flex min-h-[3.5rem] flex-1 flex-col items-center justify-center gap-0.5 px-1 text-xs";
+  const tab = "flex min-h-[3.5rem] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 text-center text-[13px] leading-tight";
   const tabClass = (on: boolean) => cn(tab, on ? "font-semibold text-accent" : "font-medium text-muted-foreground hover:text-foreground");
 
   return (

@@ -87,7 +87,7 @@ export function ThemeToggle({ variant = "icon", className }: { variant?: "icon" 
           {isLight ? <Sun className="h-4 w-4" aria-hidden /> : <Moon className="h-4 w-4" aria-hidden />}
           Appearance
         </span>
-        <span className="text-xs text-muted-foreground">{isLight ? "Light" : "Dark"}</span>
+        <span className="text-sm text-muted-foreground">{isLight ? "Light" : "Dark"}</span>
       </button>
     );
   }

@@ -3,6 +3,7 @@ export * from "./types";
 export * from "./contracts";
 export * from "./policies";
 export * from "./leaveDays";
+export * from "./scheduledDay";
 export * from "./leaveDeduction";
 export * from "./compDayExpiry";
 export * from "./addMonthsClamped";

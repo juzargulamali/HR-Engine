@@ -135,7 +135,7 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
                   <TableCell>
                     <div className="space-y-0.5">
                       <StatusBadge status={r.status} />
-                      <p className="text-xs text-muted-foreground">{statusNextAction(r.status)}</p>
+                      <p className="text-sm text-muted-foreground">{statusNextAction(r.status)}</p>
                     </div>
                   </TableCell>
                   <TableCell>

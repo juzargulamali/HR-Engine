@@ -66,7 +66,7 @@ export function RecoveryWindowEvidence({ data }: { data: WindowEvidenceData }) {
   const wasChanged = data.revisions.length > 1 && original && latest && (original.recordedSeconds !== latest.recordedSeconds || original.entitlementDays !== latest.entitlementDays);
 
   return (
-    <div className="space-y-2 text-xs text-muted-foreground" data-testid="window-evidence">
+    <div className="space-y-2 text-sm text-muted-foreground" data-testid="window-evidence">
       <p>
         <span className="font-medium text-foreground">{EVENT_TYPE_LABELS[data.eventType] ?? data.eventType}</span>
         {data.eventType === "window_top_up" ? " — only the difference is requested" : null}

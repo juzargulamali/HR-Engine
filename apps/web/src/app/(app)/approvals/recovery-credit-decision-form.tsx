@@ -105,12 +105,12 @@ export function RecoveryCreditDecisionForm({
   return (
     <div className="flex w-72 flex-col gap-2 rounded-md border border-border p-3">
       {windowMode ? (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Amount: {currentDays} day{currentDays === 1 ? "" : "s"}, calculated from the recorded clock time (see the evidence). To change it, correct the
           attendance evidence from Attendance → Edit; the request is recalculated and the change is recorded.
         </p>
       ) : (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Original: {originalWorkDate}
           {originalHours != null ? `, ${originalHours}h` : ""}
           {wasCorrected ? " — HR corrected below" : ""}
@@ -120,13 +120,13 @@ export function RecoveryCreditDecisionForm({
         <>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
-              <Label htmlFor={`work-date-${requestId}`} className="text-xs">
+              <Label htmlFor={`work-date-${requestId}`} className="text-sm">
                 Work date
               </Label>
-              <Input id={`work-date-${requestId}`} type="date" value={workDate} onChange={(e) => setWorkDate(e.target.value)} className="h-8 text-xs" />
+              <Input id={`work-date-${requestId}`} type="date" value={workDate} onChange={(e) => setWorkDate(e.target.value)} className="h-8 text-sm" />
             </div>
             <div className="space-y-1">
-              <Label htmlFor={`hours-${requestId}`} className="text-xs">
+              <Label htmlFor={`hours-${requestId}`} className="text-sm">
                 Hours
               </Label>
               <Input
@@ -136,7 +136,7 @@ export function RecoveryCreditDecisionForm({
                 min="0"
                 value={hours}
                 onChange={(e) => setHours(e.target.value)}
-                className="h-8 text-xs"
+                className="h-8 text-sm"
               />
             </div>
           </div>
@@ -145,17 +145,17 @@ export function RecoveryCreditDecisionForm({
             onChange={(e) => setReason(e.target.value)}
             placeholder="Reason for correction (required if you change date/hours)"
             rows={2}
-            className="text-xs"
+            className="text-sm"
           />
           <Button size="sm" variant="outline" disabled={pending} onClick={saveCorrection}>
             Save correction
           </Button>
-          {saved ? <p className="text-xs text-muted-foreground">Saved — current proposed credit: {currentDays} day(s).</p> : null}
+          {saved ? <p className="text-sm text-muted-foreground">Saved — current proposed credit: {currentDays} day(s).</p> : null}
         </>
       ) : null}
 
       <div className="space-y-1 border-t border-border pt-2">
-        <Label htmlFor={`checked-with-${requestId}`} className="text-xs">
+        <Label htmlFor={`checked-with-${requestId}`} className="text-sm">
           Checked with {checkedWithRequired ? "(required to approve)" : "(optional)"}
         </Label>
         <Input
@@ -163,13 +163,13 @@ export function RecoveryCreditDecisionForm({
           value={checkedWith}
           onChange={(e) => setCheckedWith(e.target.value)}
           placeholder="e.g. Project lead's name"
-          className="h-8 text-xs"
+          className="h-8 text-sm"
         />
       </div>
 
       {rejecting ? (
         <div className="flex flex-col gap-1.5">
-          <Textarea value={comments} onChange={(e) => setComments(e.target.value)} placeholder="Reason for rejecting" rows={2} className="text-xs" />
+          <Textarea value={comments} onChange={(e) => setComments(e.target.value)} placeholder="Reason for rejecting" rows={2} className="text-sm" />
           <div className="flex gap-2">
             <Button size="sm" variant="outline" disabled={pending} onClick={() => setRejecting(false)}>
               Cancel

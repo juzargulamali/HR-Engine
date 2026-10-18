@@ -77,15 +77,15 @@ export function PolicyVersionsTable({ rows }: { rows: PolicyVersionRow[] }) {
                 <div className="flex items-center gap-2">
                   {p.canActivate && !p.isWindowsPolicy ? <ActivateButton policyVersionId={p.id} /> : null}
                   {p.canActivate && p.isWindowsPolicy ? (
-                    <Link href={`/policies/${p.id}`} className="text-xs underline">
+                    <Link href={`/policies/${p.id}`} className="text-sm underline">
                       Review &amp; activate with an effective date
                     </Link>
                   ) : null}
                   {p.canDelete && !p.hasDependentConfig ? <DeletePolicyVersionButton policyVersionId={p.id} /> : null}
                   {p.canDelete && p.hasDependentConfig ? (
-                    <span className="text-xs text-muted-foreground">has configured leave types — remove them first</span>
+                    <span className="text-sm text-muted-foreground">has configured leave types — remove them first</span>
                   ) : null}
-                  {p.status === "draft" && p.isDrafter ? <span className="text-xs text-muted-foreground">awaiting a different approver</span> : null}
+                  {p.status === "draft" && p.isDrafter ? <span className="text-sm text-muted-foreground">awaiting a different approver</span> : null}
                 </div>
               </TableCell>
             </TableRow>

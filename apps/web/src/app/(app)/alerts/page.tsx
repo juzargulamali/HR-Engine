@@ -140,7 +140,7 @@ export default async function AlertsPage() {
             {schedulerStatus.stale ? "It is overdue, so windows may close and alerts may appear late. " : ""}
             {schedulerStatus.open_failures > 0 ? `${schedulerStatus.open_failures} employee(s) failed on the last run and will be retried. ` : ""}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-sm text-muted-foreground">
             Work still being finished: {schedulerStatus.work_remaining.open_periods} open working period(s), {schedulerStatus.work_remaining.open_windowed_sessions} open
             session(s), {schedulerStatus.work_remaining.unresolved_failures} failure(s), {schedulerStatus.work_remaining.unrouted_window_requests} unrouted request(s). The
             scheduler must stay enabled until all are 0, even after a policy is switched off.{" "}
@@ -158,7 +158,7 @@ export default async function AlertsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Recovery Leave work alerts</CardTitle>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Warnings only: recording continues and none of these creates a recovery day by itself. Times are in each employee&apos;s own country
               time zone. Elapsed hours (the whole stretch) are not the same as recorded hours (clocked-in time only).
             </p>
@@ -197,7 +197,7 @@ export default async function AlertsPage() {
                       <TableCell>{formatRecordedDuration(Number(a.recorded_seconds))}</TableCell>
                       <TableCell>{formatRecordedDuration(Number(a.elapsed_seconds))}</TableCell>
                       <TableCell>{fmtLocal(a.triggered_at, a.employee_id)}</TableCell>
-                      <TableCell className="max-w-xs text-xs text-muted-foreground">
+                      <TableCell className="max-w-xs text-sm text-muted-foreground">
                         {a.alert_type === "window_rollover"
                           ? `Window ${d.window_index ?? "?"} rolled over automatically at 24 elapsed hours without a completed rest; no manual clock-out was made.`
                           : `${d.threshold_hours ?? 20} recorded hours reached without a completed rest${d.still_open ? " — still clocked in" : ""}; ${(d.gaps ?? []).length} clocked-out gap(s) shorter than the rest threshold.`}
@@ -209,7 +209,7 @@ export default async function AlertsPage() {
               </TableBody>
             </Table>
             {acknowledgedAlerts.length > 0 ? (
-              <p className="mt-3 text-xs text-muted-foreground">
+              <p className="mt-3 text-sm text-muted-foreground">
                 Recently acknowledged: {acknowledgedAlerts.map((a) => `${employeeName.get(a.employee_id) ?? "—"} (${ALERT_TYPE_LABELS[a.alert_type]})`).join(", ")}.
               </p>
             ) : null}
@@ -354,7 +354,7 @@ export default async function AlertsPage() {
                       </Link>
                     </TableCell>
                     <TableCell className="capitalize">{d.document_type.replace(/_/g, " ")}</TableCell>
-                    <TableCell className="font-mono text-xs">{d.document_number}</TableCell>
+                    <TableCell className="font-mono text-sm">{d.document_number}</TableCell>
                     <TableCell>{d.expiry_date}</TableCell>
                     <TableCell>
                       <UrgencyBadge days={d.days} />

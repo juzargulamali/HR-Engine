@@ -34,7 +34,7 @@ export function HandoverForm({ opportunityId, status, pmUserId, notes, people }:
       <Field label="Notes for the Project Manager" htmlFor="ho-notes">
         <Textarea id="ho-notes" name="notes" rows={4} defaultValue={notes ?? ""} placeholder="Anything the package above does not say: site access, client preferences, open questions." />
       </Field>
-      <p className="text-xs text-muted-foreground">Projects is coming soon. Marking this handed over records that the package was given to the Project Manager; it does not create a project or notify anyone.</p>
+      <p className="text-sm text-muted-foreground">Projects is coming soon. Marking this handed over records that the package was given to the Project Manager; it does not create a project or notify anyone.</p>
     </ActionForm>
   );
 }

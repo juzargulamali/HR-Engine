@@ -34,15 +34,15 @@ export function FollowUpsPanel({ view }: { view: OppView }) {
                   <p className="min-w-0 break-words text-sm font-medium">{f.title}</p>
                   <Badge variant="outline">{KIND_LABEL[f.kind]}</Badge>
                 </div>
-                <p className="text-xs text-muted-foreground"><DueText dueAt={f.due_at} /> · assigned to {ctx.personName(f.assigned_to)}</p>
+                <p className="text-sm text-muted-foreground"><DueText dueAt={f.due_at} /> · assigned to {ctx.personName(f.assigned_to)}</p>
                 {mine ? (
                   <div className="flex flex-wrap gap-1.5">
                     <CompleteFollowUpButton followUp={{ id: f.id, title: f.title, opportunityId: opp.id, isOnlyOpen: onlyOpen }} />
                     <RescheduleFollowUpButton followUp={{ id: f.id, title: f.title, opportunityId: opp.id }} />
                     {onlyOpen ? null : <CancelFollowUpButton followUp={{ id: f.id, title: f.title, opportunityId: opp.id }} />}
                   </div>
-                ) : <p className="text-xs text-muted-foreground">Only the assignee, the owner or a founder can change this.</p>}
-                {onlyOpen && mine ? <p className="text-xs text-muted-foreground">This is the only next action. Completing it asks for the next one, or to put the opportunity on hold.</p> : null}
+                ) : <p className="text-sm text-muted-foreground">Only the assignee, the owner or a founder can change this.</p>}
+                {onlyOpen && mine ? <p className="text-sm text-muted-foreground">This is the only next action. Completing it asks for the next one, or to put the opportunity on hold.</p> : null}
               </li>
             );
           })}
@@ -55,7 +55,7 @@ export function FollowUpsPanel({ view }: { view: OppView }) {
             {closed.map((f) => (
               <li key={f.id} className="text-sm">
                 <p className="break-words">{f.title} <span className="text-muted-foreground">· {f.status === "done" ? `done ${formatDateTime(f.completed_at)}` : "cancelled"}</span></p>
-                {f.outcome ? <p className="break-words text-xs text-muted-foreground">{f.status === "done" ? "Outcome" : "Reason"}: {f.outcome}</p> : null}
+                {f.outcome ? <p className="break-words text-sm text-muted-foreground">{f.status === "done" ? "Outcome" : "Reason"}: {f.outcome}</p> : null}
               </li>
             ))}
           </ul>

@@ -28,7 +28,7 @@ export function DeleteEmployeeDocumentButton({
         >
           {pending ? "Restoring…" : "Restore"}
         </Button>
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </div>
     );
   }
@@ -47,7 +47,7 @@ export function DeleteEmployeeDocumentButton({
       >
         {pending ? "Removing…" : "Remove"}
       </Button>
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

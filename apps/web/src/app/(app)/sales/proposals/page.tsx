@@ -112,10 +112,10 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
                       {r.opportunity ? (
                         <>
                           <Link href={`/sales/opportunities/${r.opportunity.opp.id}`} className="break-words font-medium underline-offset-2 hover:underline">{r.opportunity.opp.title}</Link>
-                          <p className="text-xs text-muted-foreground">{r.opportunity.opp.reference}{showCompany ? ` · ${r.opportunity.companyName}` : ""}</p>
+                          <p className="text-sm text-muted-foreground">{r.opportunity.opp.reference}{showCompany ? ` · ${r.opportunity.companyName}` : ""}</p>
                         </>
                       ) : <span className="text-muted-foreground">Opportunity not available</span>}
-                      {r.proposal.note ? <p className="mt-1 break-words text-xs text-muted-foreground">{r.proposal.note}</p> : null}
+                      {r.proposal.note ? <p className="mt-1 break-words text-sm text-muted-foreground">{r.proposal.note}</p> : null}
                     </TableCell>
                     <TableCell className="whitespace-nowrap">v{r.proposal.version}</TableCell>
                     <TableCell><StatusBadge status={r.proposal.status} /></TableCell>
@@ -137,10 +137,10 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
                   ) : <span className="text-muted-foreground">Opportunity not available</span>}
                   <StatusBadge status={r.proposal.status} />
                 </div>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   {r.opportunity ? `${r.opportunity.opp.reference} · ` : ""}v{r.proposal.version} · Sent: {sentText(r.proposal)}{r.opportunity ? ` · Owner ${r.opportunity.ownerName}` : ""}
                 </p>
-                {r.proposal.note ? <p className="break-words text-xs text-muted-foreground">{r.proposal.note}</p> : null}
+                {r.proposal.note ? <p className="break-words text-sm text-muted-foreground">{r.proposal.note}</p> : null}
                 <div className="text-sm"><FileCell row={r} /></div>
               </li>
             ))}

@@ -60,7 +60,7 @@ function AvailabilitySection({ view }: { view: OppView }) {
             {canConfirm ? <ConfirmAvailabilityButton opportunityId={opp.id} recheck={checked} /> : null}
           </div>
         ) : null}
-        {isOpen && !canConfirm ? <p className="text-xs text-muted-foreground">Only a founder, or someone they gave the permission to, can record the result. The owner cannot on their own.</p> : null}
+        {isOpen && !canConfirm ? <p className="text-sm text-muted-foreground">Only a founder, or someone they gave the permission to, can record the result. The owner cannot on their own.</p> : null}
       </div>
     </Panel>
   );
@@ -83,9 +83,9 @@ function ApprovalSection({ view }: { view: OppView }) {
             {pending ? (
               <div className="rounded-md border border-border p-3 text-sm">
                 <p className="font-medium">Waiting for a founder&apos;s decision</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">Requested by {ctx.personName(pending.requested_by)} on {formatDateTime(pending.requested_at)}{versionOf(pending.proposal_id) ? ` for proposal version ${versionOf(pending.proposal_id)}` : ""}.</p>
+                <p className="mt-0.5 text-sm text-muted-foreground">Requested by {ctx.personName(pending.requested_by)} on {formatDateTime(pending.requested_at)}{versionOf(pending.proposal_id) ? ` for proposal version ${versionOf(pending.proposal_id)}` : ""}.</p>
                 <div className="mt-2">
-                  {canDecide ? <DecideApprovalButton approvalId={pending.id} opportunityId={opp.id} /> : <p className="text-xs text-muted-foreground">Only a founder can decide.</p>}
+                  {canDecide ? <DecideApprovalButton approvalId={pending.id} opportunityId={opp.id} /> : <p className="text-sm text-muted-foreground">Only a founder can decide.</p>}
                 </div>
               </div>
             ) : isOpen && canEdit ? (
@@ -97,15 +97,15 @@ function ApprovalSection({ view }: { view: OppView }) {
         ) : null}
         {policy === "required" && detail.approvals.length > 0 ? (
           <div className="border-t border-border/70 pt-3">
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Requests so far</h3>
+            <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">Requests so far</h3>
             <ul className="space-y-2">
               {detail.approvals.map((a) => (
                 <li key={a.id} className="text-sm">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={a.state === "approved" ? "success" : a.state === "changes_requested" ? "warning" : "outline"}>{APPROVAL_STATE[a.state]}</Badge>
-                    {versionOf(a.proposal_id) ? <span className="text-xs text-muted-foreground">Proposal version {versionOf(a.proposal_id)}</span> : null}
+                    {versionOf(a.proposal_id) ? <span className="text-sm text-muted-foreground">Proposal version {versionOf(a.proposal_id)}</span> : null}
                   </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
+                  <p className="mt-0.5 text-sm text-muted-foreground">
                     Requested by {ctx.personName(a.requested_by)}, {formatDateTime(a.requested_at)}
                     {a.decided_at ? ` · decided by ${ctx.personName(a.decided_by)}, ${formatDateTime(a.decided_at)}` : ""}
                   </p>
@@ -134,13 +134,13 @@ function ZohoSection({ view }: { view: OppView }) {
         <ZohoForm opportunityId={opp.id} values={values} currency={opp.currency} />
       ) : (
         <ol className="space-y-3 text-sm">
-          <li><p className="font-medium">1. Quote sent</p><p className="text-xs text-muted-foreground">{values.quoteRef ? `${values.quoteRef} · ${formatDate(values.quoteSentOn)}` : "Not recorded"}</p></li>
-          <li><p className="font-medium">2. Invoice issued</p><p className="text-xs text-muted-foreground">{values.invoiceRef ? `${values.invoiceRef} · ${formatDate(values.invoiceIssuedOn)}` : "Not recorded"}</p></li>
-          <li><p className="font-medium">3. Payment received</p><p className="text-xs text-muted-foreground">{values.paymentReceivedOn ? `${formatDate(values.paymentReceivedOn)}${paid != null ? ` · ${formatMoney(paid, opp.currency)}` : ""}` : "Not recorded"}</p></li>
+          <li><p className="font-medium">1. Quote sent</p><p className="text-sm text-muted-foreground">{values.quoteRef ? `${values.quoteRef} · ${formatDate(values.quoteSentOn)}` : "Not recorded"}</p></li>
+          <li><p className="font-medium">2. Invoice issued</p><p className="text-sm text-muted-foreground">{values.invoiceRef ? `${values.invoiceRef} · ${formatDate(values.invoiceIssuedOn)}` : "Not recorded"}</p></li>
+          <li><p className="font-medium">3. Payment received</p><p className="text-sm text-muted-foreground">{values.paymentReceivedOn ? `${formatDate(values.paymentReceivedOn)}${paid != null ? ` · ${formatMoney(paid, opp.currency)}` : ""}` : "Not recorded"}</p></li>
         </ol>
       )}
-      {z ? <p className="mt-3 text-xs text-muted-foreground">Last updated {formatDateTime(z.updated_at)}{z.updated_by ? ` by ${view.ctx.personName(z.updated_by)}` : ""}.</p> : null}
-      {!canEdit && !isLost ? <p className="mt-3 text-xs text-muted-foreground">Only the owner ({view.ownerName}) or a founder can change these.</p> : null}
+      {z ? <p className="mt-3 text-sm text-muted-foreground">Last updated {formatDateTime(z.updated_at)}{z.updated_by ? ` by ${view.ctx.personName(z.updated_by)}` : ""}.</p> : null}
+      {!canEdit && !isLost ? <p className="mt-3 text-sm text-muted-foreground">Only the owner ({view.ownerName}) or a founder can change these.</p> : null}
     </Panel>
   );
 }

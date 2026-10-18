@@ -85,7 +85,7 @@ export default async function ReimbursementsPage() {
                   <TableCell>
                     <div className="space-y-0.5">
                       <StatusBadge status={c.status} />
-                      <p className="text-xs text-muted-foreground">{statusNextAction(c.status)}</p>
+                      <p className="text-sm text-muted-foreground">{statusNextAction(c.status)}</p>
                     </div>
                   </TableCell>
                   <TableCell>{c.status === "draft" ? <DeleteDraftClaimButton claimId={c.id} /> : null}</TableCell>

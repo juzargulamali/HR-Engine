@@ -48,7 +48,7 @@ function ComingSoonRow({ m, collapsed }: { m: NavModuleData; collapsed?: boolean
       ) : (
         <span className="min-w-0 leading-tight">
           <span className="block truncate text-sm font-medium">{m.label}</span>
-          <span className="block text-xs">Coming soon</span>
+          <span className="block text-sm">Coming soon</span>
         </span>
       )}
     </div>
@@ -115,13 +115,13 @@ export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: 
               <div className="mb-1.5 ml-[1.4rem] mt-0.5 flex flex-col gap-0.5 border-l border-border pl-2.5">
                 {m.sections.map((s) => (
                   <div key={s.label} className="flex flex-col gap-px">
-                    {m.sections.length > 1 ? <p className="px-2.5 pb-0.5 pt-2 text-xs font-semibold uppercase tracking-[0.08em] text-subtle">{s.label}</p> : null}
+                    {m.sections.length > 1 ? <p className="px-2.5 pb-0.5 pt-2 text-[13px] font-semibold uppercase tracking-[0.08em] text-subtle">{s.label}</p> : null}
                     {s.links.map((l) => {
                       if (l.comingSoon) {
                         return (
                           <div key={l.label} aria-disabled="true" className="rounded-md px-2.5 py-1.5 text-subtle">
                             <span className="block text-sm">{l.label}</span>
-                            <span className="block text-xs">Coming soon</span>
+                            <span className="block text-sm">Coming soon</span>
                           </div>
                         );
                       }
@@ -213,7 +213,7 @@ export function DesktopSidebar({
         type="button"
         onClick={toggleCollapsed}
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        className="flex items-center justify-center gap-2 border-t border-border py-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        className="flex items-center justify-center gap-2 border-t border-border py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
       >
         {collapsed ? <PanelLeftOpen className="h-4 w-4" aria-hidden /> : <PanelLeftClose className="h-4 w-4" aria-hidden />}
         {collapsed ? null : "Collapse"}

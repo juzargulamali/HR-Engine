@@ -67,7 +67,7 @@ export function ScopePanel({ view }: { view: OppView }) {
         </Panel>
         <Panel title="Equipment availability">
           <AvailabilityBadge state={display} />
-          <p className="mt-2 text-xs text-muted-foreground">A dated check against these dates and quantities. Change them and it must be repeated. Details are on the Commercial tab.</p>
+          <p className="mt-2 text-sm text-muted-foreground">A dated check against these dates and quantities. Change them and it must be repeated. Details are on the Commercial tab.</p>
         </Panel>
       </div>
     </div>

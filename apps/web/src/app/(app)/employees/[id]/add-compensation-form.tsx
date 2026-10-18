@@ -27,7 +27,7 @@ export function AddCompensationForm({
       <input type="hidden" name="employeeId" value={employeeId} />
       <input type="hidden" name="currentCompensationId" value={currentCompensationId ?? ""} />
       <p className="text-sm font-medium">Record a new compensation version</p>
-      <p className="text-xs text-muted-foreground">Use this for a promotion or appraisal raise — it&apos;s saved as a new version, the old one is kept for the record.</p>
+      <p className="text-sm text-muted-foreground">Use this for a promotion or appraisal raise — it&apos;s saved as a new version, the old one is kept for the record.</p>
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="effectiveFrom">Effective from</Label>

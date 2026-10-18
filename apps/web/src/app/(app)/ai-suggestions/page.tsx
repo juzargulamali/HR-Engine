@@ -52,10 +52,10 @@ export default async function AiSuggestionsPage() {
             <TableBody>
               {(drafts ?? []).map((d) => (
                 <TableRow key={d.id}>
-                  <TableCell className="font-mono text-xs">{d.created_by_agent}</TableCell>
+                  <TableCell className="font-mono text-sm">{d.created_by_agent}</TableCell>
                   <TableCell>
                     <span className="font-medium">{d.proposed_action}</span> on {d.entity_type}
-                    <pre className="mt-1 max-w-sm overflow-x-auto rounded bg-secondary/50 p-2 text-xs">
+                    <pre className="mt-1 max-w-sm overflow-x-auto rounded bg-secondary/50 p-2 text-sm">
                       {JSON.stringify(d.proposed_payload, null, 2)}
                     </pre>
                   </TableCell>

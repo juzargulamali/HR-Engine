@@ -107,7 +107,7 @@ export default async function PerformancePage() {
                   </TableCell>
                   <TableCell>{g.weight_percent ? `${g.weight_percent}%` : "—"}</TableCell>
                   <TableCell>{g.target_date ?? "—"}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-sm text-muted-foreground">
                     Self: {g.self_rating ?? "—"} · Manager: {g.manager_rating ?? "—"}
                   </TableCell>
                   <TableCell>

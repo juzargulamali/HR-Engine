@@ -25,7 +25,7 @@ export function DeletePayrollLineButton({ lineId, runId }: { lineId: string; run
       >
         {pending ? "Deleting…" : "Delete"}
       </Button>
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

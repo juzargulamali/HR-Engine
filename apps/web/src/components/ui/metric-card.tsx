@@ -33,11 +33,11 @@ export function MetricCard({
   const body = (
     <>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+        <span className="text-sm font-medium text-muted-foreground">{label}</span>
         {Icon ? <Icon className="h-4 w-4 text-muted-foreground" aria-hidden /> : null}
       </div>
       <div className={cn("mt-1.5 font-heading text-2xl font-semibold", TONE_CLASSES[tone])}>{value}</div>
-      {hint ? <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div> : null}
+      {hint ? <div className="mt-0.5 text-sm text-muted-foreground">{hint}</div> : null}
     </>
   );
 

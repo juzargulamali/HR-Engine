@@ -137,7 +137,7 @@ export function CommandPalette({ groups }: { groups: NavGroupData[] }) {
                     })()}
                     {l.label}
                   </span>
-                  <span className="text-xs text-muted-foreground">{l.group}</span>
+                  <span className="text-sm text-muted-foreground">{l.group}</span>
                 </button>
               ))
             )}
