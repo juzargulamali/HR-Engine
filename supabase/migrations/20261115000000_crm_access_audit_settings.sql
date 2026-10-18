@@ -398,6 +398,9 @@ $$;
 -- Privileges: clients read through RLS only; everything else is via the functions above.
 -- -----------------------------------------------------------------------------
 revoke all on table crm_company_grants, crm_audit_log, crm_company_settings from anon, authenticated, public;
+-- Supabase's default privileges also hand every new sequence to anon and authenticated (usage, select AND update, which
+-- includes setval). The audit log's identity sequence is only ever advanced by the SECURITY DEFINER trigger.
+revoke all on sequence crm_audit_log_id_seq from public, anon, authenticated;
 grant select on table crm_company_grants, crm_audit_log, crm_company_settings to authenticated;
 
 revoke all on function

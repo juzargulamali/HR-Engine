@@ -126,5 +126,11 @@ select check_name, result, detail from (
   select 28, 'no validated or registered file lives only in quarantine, and no stored file path is outside its own opportunity folder',
          case when not exists (select 1 from crm_files f where f.kind = 'file' and f.storage_path not like f.company_id::text || '/' || f.opportunity_id::text || '/%') then 'PASS' else 'FAIL' end,
          (select count(*)::text || ' files' from crm_files where kind = 'file')
+  union all
+  select 29, 'neither anon nor signed-in users hold any privilege on a CRM sequence (identity counters are advanced only by the audit trigger)',
+         case when not exists (select 1 from pg_class c, lateral aclexplode(coalesce(c.relacl, acldefault('S', c.relowner))) x
+                              where c.relnamespace = 'public'::regnamespace and c.relkind = 'S' and c.relname like 'crm\_%'
+                                and x.grantee in (select oid from pg_roles where rolname in ('anon', 'authenticated'))) then 'PASS' else 'FAIL' end,
+         (select count(*)::text || ' CRM sequences' from pg_class where relnamespace = 'public'::regnamespace and relkind = 'S' and relname like 'crm\_%')
 ) q
 order by ord;
