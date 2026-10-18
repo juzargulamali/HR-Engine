@@ -17,7 +17,8 @@ Suggested people: **Founder** (Juzar or Rafi), **Sales** (an opportunity owner),
 - [ ] Founder: Projects → Handovers → choose the PM. The PM sees a notification in My Work.
 - [ ] PM: Request clarification with a note → Sales sees it, edits, resubmits → PM accepts.
 - [ ] Accepting twice (double click, or two tabs) creates **one** project. Its reference looks like `UAE-P-2026-0001`.
-- [ ] Sales now sees that project's summary and handover status only (no tabs, no discussion, no tasks).
+- [ ] Sales now sees that project's summary and handover status only (no tabs, no discussion, no tasks), with the correct company name (not "Unknown").
+- [ ] A PM, department head and ordinary employee with Projects access each see the company's ongoing projects in the list; opening one they are not on shows the summary only (no tabs, no tasks, no discussion, no files) and the correct company name.
 - [ ] Change the opportunity in Sales afterwards: the accepted handover and project scope do **not** change.
 - [ ] No price, budget, PO number or payment terms appears anywhere in the project, the handover, or its History tab.
 
@@ -54,6 +55,7 @@ Suggested people: **Founder** (Juzar or Rafi), **Sales** (an opportunity owner),
 - [ ] Leave the page open on a second device: new messages appear without refreshing; "N new messages" appears if you scrolled up.
 - [ ] Edit your message (shows "edited"); delete one (shows "Message deleted").
 - [ ] Outsider and the Sales person (not a member) cannot read or post.
+- [ ] In a project with more than 100 messages, the page opens on the latest ones and **Show earlier messages** loads older ones (the view does not jump); keep pressing until the button disappears: the very first message is there.
 
 ## H. Feedback, scope, client timeline
 - [ ] Record client feedback against a task (correction) and a proposed change; resolve the correction with evidence.

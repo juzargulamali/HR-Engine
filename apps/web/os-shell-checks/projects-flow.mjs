@@ -349,6 +349,7 @@ await step("Sales (linked, not a member): sees only the summary and handover sta
   await go("/projects"); await expectText(/Floor projection for the Orbit launch/);
   const t0 = await mainText(); if (/Showroom technology refresh/.test(t0)) throw new Error("an unrelated internal project is visible to Sales");
   await go(`/projects/${P}`); await expectText(/summary only/);
+  await expectText(/Enginious Local AE/); await expectNoText(/Unknown/);
   const nav = (await page.locator("main nav[aria-label='Project sections']").count()); if (nav > 0) throw new Error("tabs shown to a summary-only viewer");
   for (const sub of ["work", "people", "discussion", "documents", "timeline", "history", "changes"]) {
     const r = await page.goto(`${BASE}/projects/${P}/${sub}`, { waitUntil: "networkidle" });
@@ -363,12 +364,31 @@ await as("hr1@e2e.local");
 await step("Directory-only person: sees ongoing projects in summary, cannot open any detail page", async () => {
   await go("/projects"); await expectText(/Floor projection for the Orbit launch/); await expectText(/Showroom technology refresh/);
   await go(`/projects/${P}`); await expectText(/summary only/);
+  await expectText(/Enginious Local AE/); await expectNoText(/Unknown/);
   for (const sub of ["work", "people", "discussion", "documents", "timeline", "history", "changes", "calendar"]) {
     await page.goto(`${BASE}/projects/${P}/${sub}`, { waitUntil: "networkidle" });
     const body = await page.locator("main").innerText();
     if (/Shader prototype|Interactive floor build|LED floor|Expo Hall 3|Power drop/.test(body)) throw new Error(`/${sub} leaks details to a directory-only person`);
   }
 });
+const INTERNAL = db("select id from proj_projects where kind = 'internal' order by created_at limit 1");
+db(`update proj_project_details set scope = 'INTERNAL-ONLY scope: rack inventory and wiring plan' where project_id = '${INTERNAL}' and coalesce(btrim(scope), '') = ''`);
+// Text that exists only inside the internal project's member-only tables (scope, and any milestone, task or booking titles).
+const PRIVATE_OF_INTERNAL = db(`select coalesce(scope, '') from proj_project_details where project_id = '${INTERNAL}' union all select title from proj_milestones where project_id = '${INTERNAL}' union all select title from proj_tasks where project_id = '${INTERNAL}'`).split("\n").map((x) => x.trim()).filter((x) => x.length >= 6);
+if (PRIVATE_OF_INTERNAL.length === 0) throw new Error("the internal project has no private text to check against");
+for (const who of ["mgr@e2e.local", "lead@e2e.local"]) {
+  await as(who);
+  await step(`${who}: sees the company's ongoing projects in the list and, on one they are not on, the summary only with the right company name`, async () => {
+    await go("/projects"); await expectText(/Showroom technology refresh/); await expectText(/Floor projection for the Orbit launch/);
+    await go(`/projects/${INTERNAL}`); await expectText(/summary only/); await expectText(/Enginious Local AE/); await expectNoText(/Unknown/);
+    if ((await page.locator("main nav[aria-label='Project sections']").count()) > 0) throw new Error("tabs shown to a summary-only viewer");
+    for (const sub of ["work", "people", "discussion", "documents", "timeline", "history", "changes", "calendar"]) {
+      await page.goto(`${BASE}/projects/${INTERNAL}/${sub}`, { waitUntil: "networkidle" });
+      const body = await page.locator("main").innerText();
+      for (const secret of PRIVATE_OF_INTERNAL) if (body.includes(secret)) throw new Error(`/${sub} leaks "${secret}" to someone who is not on the project`);
+    }
+  });
+}
 
 
 // ---- discussion, mentions, notifications -----------------------------------------------------------------------------
@@ -397,6 +417,24 @@ await lp.context().close();
 await as("emp@e2e.local");
 await step("Discussion: a linked Sales person who is not a member cannot read it", async () => {
   await go(`/projects/${P}/discussion`); if (/Truss arrives/.test(await mainText())) throw new Error("discussion visible to Sales");
+});
+await as("hr@e2e.local");
+await step("Discussion history: the page opens on the latest 100; Show earlier messages reaches the very first message, without losing the live ones", async () => {
+  db(`insert into proj_messages (project_id, author_id, body, created_at) select '${P}', '${U(4)}', 'History note ' || g, now() - interval '30 days' + (g || ' minutes')::interval from generate_series(1, 130) g`);
+  await go(`/projects/${P}/discussion`);
+  let t = await mainText();
+  if (!/History note 130\b/.test(t)) throw new Error("the latest message is missing");
+  if (/Truss arrives Thursday/.test(t)) throw new Error("the oldest message should not be loaded up front");
+  const more = page.getByRole("button", { name: /show earlier messages/i });
+  if ((await more.count()) !== 1) throw new Error("no Show earlier messages button");
+  for (let i = 0; i < 6 && (await more.count()) > 0; i++) { await more.click(); await page.waitForTimeout(900); }
+  if ((await more.count()) !== 0) throw new Error("the button never went away");
+  t = await mainText();
+  if (!/Truss arrives Thursday/.test(t)) throw new Error("the first message was not reached");
+  if (!/History note 1\b/.test(t) || !/History note 130\b/.test(t)) throw new Error("history is incomplete");
+  const n = await page.locator("[id^='msg-']").count();
+  const total = Number(db(`select count(*) from proj_messages where project_id = '${P}'`));
+  if (n !== total) throw new Error(`${n} messages shown, ${total} stored`);
 });
 
 // ---- feedback, scope change, client timeline ---------------------------------------------------------------------------

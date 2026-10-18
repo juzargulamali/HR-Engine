@@ -1,5 +1,5 @@
--- READ-ONLY. Run in the SQL Editor of "Enginious HR Engine_V2" AFTER the six Projects & Tasks migrations
--- (20261120000000 ... 20261120000500). Run the WHOLE file; it returns ONE result table (check | result | detail).
+-- READ-ONLY. Run in the SQL Editor of "Enginious HR Engine_V2" AFTER the seven Projects & Tasks migrations
+-- (20261120000000 ... 20261120000600). Run the WHOLE file; it returns ONE result table (check | result | detail).
 -- Every row in the "result" column must read PASS (INFO rows are information). It changes nothing. Send me the full result.
 --
 -- Also compare section 'I HR and Sales row counts' with the same section of proj_00_preflight_readonly.sql: the numbers must be
@@ -13,7 +13,7 @@ internal_fns as (select unnest(array[
   'proj_require_user', 'proj_audit_trigger', 'proj_handover_frozen', 'proj_issued_plan_guard', 'proj_display_name', 'proj_lock_project', 'proj_require_manager',
   'proj_check_version', 'proj_log_change', 'proj_notify', 'proj_next_reference', 'proj_add_member_row', 'proj_text_or_null', 'proj_lock_handover', 'proj_status_rank',
   'proj_member_blockers', 'proj_require_member_or_founder', 'proj_require_open_project', 'proj_task_event', 'proj_member_in_team', 'proj_set_task_dependencies',
-  'proj_set_task_collaborators', 'proj_task_actor_role', 'proj_build_plan_payload', 'proj_mark_upload_intent', 'proj_expire_upload_intents']) as proname)
+  'proj_set_task_collaborators', 'proj_task_actor_role', 'proj_build_plan_payload', 'proj_mark_upload_intent', 'proj_expire_upload_intents', 'proj_abandoned_upload_objects']) as proname)
 select check_name, result, detail from (
   select 1 as ord, 'Projects tables exist (32 expected)' as check_name,
          case when (select count(*) from proj_tables) = 32 then 'PASS' else 'FAIL' end as result,
@@ -53,9 +53,9 @@ select check_name, result, detail from (
          case when not exists (select 1 from proj_funcs f join internal_fns i on i.proname = f.proname where has_function_privilege('authenticated', f.oid, 'execute')) then 'PASS' else 'FAIL' end,
          coalesce((select string_agg(f.proname, ', ') from proj_funcs f join internal_fns i on i.proname = f.proname where has_function_privilege('authenticated', f.oid, 'execute')), 'none reachable')
   union all
-  select 10, 'the service role can execute the two upload-intent functions it needs',
-         case when (select count(*) from proj_funcs where proname in ('proj_mark_upload_intent', 'proj_expire_upload_intents') and has_function_privilege('service_role', oid, 'execute')) = 2 then 'PASS' else 'FAIL' end,
-         'needed to validate uploads; nothing here is scheduled'
+  select 10, 'the service role can execute the three upload functions it needs (validate, expire, and the read-only clean-up report)',
+         case when (select count(*) from proj_funcs where proname in ('proj_mark_upload_intent', 'proj_expire_upload_intents', 'proj_abandoned_upload_objects') and has_function_privilege('service_role', oid, 'execute')) = 3 then 'PASS' else 'FAIL' end,
+         'needed to validate uploads and to list abandoned ones; nothing here is scheduled'
   union all
   select 11, 'neither anon nor signed-in users hold any privilege on a Projects sequence',
          case when not exists (select 1 from pg_class c, lateral aclexplode(coalesce(c.relacl, acldefault('S', c.relowner))) x
@@ -185,7 +185,16 @@ select check_name, result, detail from (
   select 37, 'no scheduled job, e-mail setting or cron route was added by Projects (nothing in this release sends anything)',
          case when not exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'proj\_%' and p.prosrc ~* '(cron|net\.http|pg_net|send_mail|smtp)') then 'PASS' else 'FAIL' end, 'in-app notifications only'
   union all
-  select 38, 'INFO: project notifications are ordinary rows in the shared notifications table, type project_*',
+  select 38, 'earlier discussion messages and company labels: callable by signed-in users, never by anon, and checked inside the function',
+         case when (select count(*) from proj_funcs where proname in ('proj_messages_before', 'proj_company_labels') and has_function_privilege('authenticated', oid, 'execute') and not has_function_privilege('anon', oid, 'execute')) = 2
+               and (select count(*) from proj_funcs where proname = 'proj_messages_before' and prosrc like '%proj_can_view_details%') = 1
+               and (select count(*) from proj_funcs where proname = 'proj_company_labels' and prosrc like '%proj_has_access%' and prosrc like '%proj_can_view_summary%') = 1 then 'PASS' else 'FAIL' end,
+         'the page loads the latest messages and pages backwards through the rest; a company name is shown only where you hold a Projects grant or can open one of its projects'
+  union all
+  select 39, 'INFO: project notifications are ordinary rows in the shared notifications table, type project_*',
          'INFO', (select count(*)::text || ' project notifications' from notifications where type like 'project\_%')
+  union all
+  select 40, 'INFO: abandoned temporary uploads waiting to be cleaned up (run proj_85_abandoned_uploads_readonly.sql for the list)',
+         'INFO', (select count(*) filter (where safe_to_delete)::text || ' removable, ' || count(*) filter (where not safe_to_delete)::text || ' to look at by hand' from proj_abandoned_upload_objects())
 ) q
 order by ord;

@@ -1,4 +1,4 @@
--- Projects & Tasks (Release 2), migration 6 of 6: client feedback and scope changes, issued client timelines, private files,
+-- Projects & Tasks (Release 2), migration 6 of 7: client feedback and scope changes, issued client timelines, private files,
 -- completion evidence and reopening.
 --
 -- Rules encoded here:

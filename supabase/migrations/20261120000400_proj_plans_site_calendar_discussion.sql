@@ -1,4 +1,4 @@
--- Projects & Tasks (Release 2), migration 5 of 6: timelines, external dependencies, site bookings, calendars and discussion.
+-- Projects & Tasks (Release 2), migration 5 of 7: timelines, external dependencies, site bookings, calendars and discussion.
 --
 -- Rules encoded here:
 --   * Delivery timeline and site production timeline are ordinary editable rows (templates are applied by a function and

@@ -8,7 +8,8 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/sales/action-form";
 import { formatDateTime } from "@/lib/projects/format";
-import { deleteProjectMessage, editProjectMessage, fetchProjectMessages, markProjectRead, postProjectMessage } from "@/lib/actions/projectsDiscussion";
+import { deleteProjectMessage, editProjectMessage, fetchEarlierProjectMessages, fetchProjectMessages, markProjectRead, postProjectMessage } from "@/lib/actions/projectsDiscussion";
+import { advanceCursor, oldestSeq } from "@/lib/projects/discussion-paging";
 import type { ProjMessageFeedRow } from "@/types/projects";
 import { DialogForm } from "../changes/dialog-form";
 import { connectionState, countNewFromOthers, extractMentionIds, groupThreads, highlightMentions, maxChangedAt, maxSeq, mergeMessages, nextPollDelay, type Mentionable } from "./discussion-helpers";
@@ -27,7 +28,7 @@ interface Props {
   people: Mentionable[];
 }
 
-export function DiscussionClient({ projectId, me, canModerate, readOnly, initial, hasEarlier, people }: Props) {
+export function DiscussionClient({ projectId, me, canModerate, readOnly, initial, hasEarlier: hasEarlierInitially, people }: Props) {
   const [messages, setMessages] = useState<ProjMessageFeedRow[]>(initial);
   const [failures, setFailures] = useState(0);
   const [newCount, setNewCount] = useState(0);
@@ -36,6 +37,9 @@ export function DiscussionClient({ projectId, me, canModerate, readOnly, initial
   const [picked, setPicked] = useState<Mentionable[]>([]);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [hasEarlier, setHasEarlier] = useState(hasEarlierInitially);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const [earlierError, setEarlierError] = useState<string | null>(null);
 
   const scroller = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -45,6 +49,10 @@ export function DiscussionClient({ projectId, me, canModerate, readOnly, initial
   const nonce = useRef<string | null>(null);
   const lastMarked = useRef(0);
   const didInitialScroll = useRef(false);
+  // Where the reader was before older messages were added above them, so the view does not jump.
+  const keepPlace = useRef<{ height: number; top: number } | null>(null);
+  // The oldest message loaded so far; only "Show earlier messages" moves it back.
+  const earliest = useRef(oldestSeq(initial));
   const polling = useRef(false);
   const mounted = useRef(true);
   const failuresRef = useRef(0);
@@ -84,7 +92,7 @@ export function DiscussionClient({ projectId, me, canModerate, readOnly, initial
         const before = messagesRef.current;
         const fresh = countNewFromOthers(before, res.messages, me);
         const merged = mergeMessages(before, res.messages);
-        cursor.current = { seq: maxSeq(merged), changed: maxChangedAt(merged) };
+        cursor.current = advanceCursor(cursor.current, res.messages);
         if (atBottom.current) stickNext.current = true;
         else if (fresh > 0) setNewCount((n) => n + fresh);
         messagesRef.current = merged;
@@ -128,6 +136,11 @@ export function DiscussionClient({ projectId, me, canModerate, readOnly, initial
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
+    if (keepPlace.current) {
+      el.scrollTop = el.scrollHeight - keepPlace.current.height + keepPlace.current.top;
+      keepPlace.current = null;
+      return;
+    }
     if (stickNext.current || !didInitialScroll.current) {
       el.scrollTop = el.scrollHeight;
       didInitialScroll.current = true;
@@ -152,6 +165,32 @@ export function DiscussionClient({ projectId, me, canModerate, readOnly, initial
     atBottom.current = true;
     setNewCount(0);
     markReadIfSeen();
+  };
+
+  const showEarlier = async () => {
+    const before = earliest.current;
+    if (loadingEarlier || before === null) return;
+    setLoadingEarlier(true);
+    setEarlierError(null);
+    try {
+      const res = await fetchEarlierProjectMessages(projectId, before);
+      if (!mounted.current) return;
+      if (res.error) {
+        setEarlierError(res.error);
+        return;
+      }
+      const el = scroller.current;
+      if (el) keepPlace.current = { height: el.scrollHeight, top: el.scrollTop };
+      const merged = mergeMessages(messagesRef.current, res.messages);
+      messagesRef.current = merged;
+      setMessages(merged);
+      earliest.current = oldestSeq(res.messages) ?? before;
+      setHasEarlier(res.hasMore);
+    } catch {
+      setEarlierError("Earlier messages could not be loaded. Check your connection and try again.");
+    } finally {
+      setLoadingEarlier(false);
+    }
   };
 
   const changeText = (v: string) => {
@@ -243,7 +282,13 @@ export function DiscussionClient({ projectId, me, canModerate, readOnly, initial
 
   return (
     <div className="space-y-3">
-      {hasEarlier ? <Alert role="status">Earlier messages are not shown here: this page loads the latest 100.</Alert> : null}
+      {hasEarlier ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="button" size="sm" variant="outline" onClick={showEarlier} disabled={loadingEarlier}>{loadingEarlier ? "Loading…" : "Show earlier messages"}</Button>
+          <span className="text-sm text-muted-foreground">Showing the latest messages. Older ones are kept in full.</span>
+        </div>
+      ) : null}
+      {earlierError ? <Alert variant="destructive" role="alert">{earlierError}</Alert> : null}
       <div className="relative">
         <div ref={scroller} onScroll={onScroll} tabIndex={0} aria-label="Project discussion messages" className="max-h-[60vh] min-h-48 overflow-y-auto rounded-md border border-border bg-card p-3">
           {threads.length === 0 ? (

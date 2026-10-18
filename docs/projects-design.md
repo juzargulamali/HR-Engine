@@ -54,12 +54,26 @@ Founders are *grants*, never hard-coded people. The first founders are bootstrap
 
 | Data (table) | Founder (company) | PM / acting PM | Department head | Member | Employee with Projects access only | Sales (linked, no member row) |
 |---|---|---|---|---|---|---|
-| Summary: reference, name, company, kind, status, PM, start/end (`proj_projects`) | all | own projects | ✓ own | ✓ own | ongoing projects in the company | only linked projects |
+| Summary: reference, name, company, kind, status, PM, start/end (`proj_projects`) | all | every ongoing project of the company, and their own at any status | every ongoing project of the company, and their own at any status | every ongoing project of the company, and their own at any status | every ongoing project of the company | only linked projects (any status) |
 | Details: client name, location, scope, site timezone, key install/event dates (`proj_project_details`) | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
 | Members, teams, milestones, deliverables, tasks, discussion, timelines, bookings, feedback | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
 | Handover (member-safe brief, status) | ✓ | the PM it is assigned to | ✗ until project exists, then via details | ✗ | ✗ | own handover |
 | Audit | `view_audit` / founder | ✗ | ✗ | ✗ | ✗ | ✗ |
 | Restricted scope-change cost notes | `view_commercial` / founder | ✗ | ✗ | ✗ | ✗ | ✗ |
+
+Everyone who holds an active Projects grant in a company sees the **summary** of that company's *ongoing* projects (planning, in
+progress, ready for installation, on site, on hold) whether or not they are on the project, and only that: the detail, member-only and
+restricted tables stay closed to them (`proj_can_view_summary` versus `proj_can_view_details`, proved in the "review follow-ups" tests for a
+PM of another project, a department head, an employee member of another project and a directory-only user). Completed and archived
+projects drop out of everyone's summary except founders, members and linked Sales people. Another company's projects never appear.
+
+**Company label.** The company shown on a summary-only page comes from `proj_company_labels()`, which returns a company's legal name only where the
+caller holds a Projects grant or can already open one of its projects in summary (so a linked Sales colleague with no Projects grant sees it too, and
+only while the link works). It returns the name and nothing else of the company record.
+
+**Discussion history.** The discussion page opens on the latest 100 messages; `proj_messages_before(project, cursor, limit)` pages backwards (50 at
+a time, capped at 200) with the same access rule as the live feed, so the oldest message is always reachable and a removed member gets nothing. The
+live polling cursor only ever moves on what the live feed returns, never on older pages loaded by hand.
 
 Membership is revocable: setting `removed_at` removes access in the same transaction because every policy and function
 evaluates *active* membership (`removed_at is null`) at read time. Notifications for a project are filtered by active

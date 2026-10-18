@@ -1860,6 +1860,8 @@ export interface Database {
       proj_edit_message: { Args: { p_message_id: string; p_body: string }; Returns: undefined };
       proj_delete_message: { Args: { p_message_id: string; p_reason?: string | null }; Returns: undefined };
       proj_messages_since: { Args: { p_project_id: string; p_after_seq?: number; p_changed_since?: string | null; p_limit?: number }; Returns: ProjMessageFeedRow[] };
+      proj_messages_before: { Args: { p_project_id: string; p_before_seq?: number | null; p_limit?: number }; Returns: ProjMessageFeedRow[] };
+      proj_company_labels: { Args: Record<string, never>; Returns: { company_id: string; name: string }[] };
       proj_mark_read: { Args: { p_project_id: string }; Returns: undefined };
       proj_unread_counts: { Args: Record<string, never>; Returns: ProjUnreadRow[] };
       proj_my_notifications: { Args: { p_limit?: number; p_only_unread?: boolean }; Returns: ProjNotificationRow[] };
@@ -1875,6 +1877,10 @@ export interface Database {
       // Service role only (never callable from a browser session):
       proj_mark_upload_intent: { Args: { p_intent_id: string; p_status: string; p_reason?: string | null }; Returns: undefined };
       proj_expire_upload_intents: { Args: Record<string, never>; Returns: { quarantine_path: string; final_path: string; orphaned_validated: boolean }[] };
+      proj_abandoned_upload_objects: {
+        Args: { p_grace?: string };
+        Returns: { bucket: string; object_name: string; size_bytes: number; uploaded_at: string; reason: string; safe_to_delete: boolean; intent_id: string | null; intent_status: string | null }[];
+      };
       proj_record_feedback: { Args: { p_project_id: string; p_fields: Record<string, unknown> }; Returns: string };
       proj_update_feedback: { Args: { p_feedback_id: string; p_fields: Record<string, unknown> }; Returns: undefined };
       proj_propose_scope_change: { Args: { p_project_id: string; p_fields: Record<string, unknown> }; Returns: string };

@@ -1,4 +1,4 @@
--- Projects & Tasks (Release 2), migration 1 of 5: access, audit and company settings.
+-- Projects & Tasks (Release 2), migration 1 of 7: access, audit and company settings.
 --
 -- Projects access is its own company-scoped grant table (proj_company_grants), deliberately NOT user_roles and NOT
 -- crm_company_grants: an HR role, a Sales grant, an employee record or an e-mail domain confers no Projects access,

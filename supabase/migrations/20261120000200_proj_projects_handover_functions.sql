@@ -1,4 +1,4 @@
--- Projects & Tasks (Release 2), migration 3 of 6: handover from Sales, project creation, ownership, status, members and teams.
+-- Projects & Tasks (Release 2), migration 3 of 7: handover from Sales, project creation, ownership, status, members and teams.
 --
 -- Hard rules encoded here:
 --   * Sales-to-PM handover is a Projects record (proj_handovers) built from a WON opportunity. It never writes to CRM

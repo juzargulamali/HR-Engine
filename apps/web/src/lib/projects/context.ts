@@ -5,6 +5,9 @@ import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { isNotInstalled } from "./errors";
 
+/** Shown only when a company's name could not be read at all (never for a company the person is authorised for). */
+export const COMPANY_NOT_SHOWN = "Company not shown";
+
 export interface ProjCompanyInfo {
   id: string;
   name: string;
@@ -47,7 +50,7 @@ export const getProjectsContext = cache(async (): Promise<ProjectsContext | null
   const supabase = await createClient();
   const empty = (installed: boolean): ProjectsContext => ({
     userId: session.userId, fullName: session.fullName, installed, grants: [], salesLinkedProjectIds: [], companies: [], people: [], hasAnyAccess: false,
-    personName: (id) => (id === session.userId ? (session.fullName ?? "You") : "Unknown"), companyName: () => "Unknown",
+    personName: (id) => (id === session.userId ? (session.fullName ?? "You") : "Unknown"), companyName: () => COMPANY_NOT_SHOWN,
   });
 
   const [{ data: grantRows, error: grantError }, { data: linkRows, error: linkError }] = await Promise.all([
@@ -57,13 +60,18 @@ export const getProjectsContext = cache(async (): Promise<ProjectsContext | null
   if (isNotInstalled(grantError) || isNotInstalled(linkError)) return empty(false);
   const grants: ProjGrant[] = (grantRows ?? []).map((g) => ({ companyId: g.company_id, capabilities: g.capabilities as ProjCapability[] }));
   const salesLinkedProjectIds = (linkRows ?? []).map((l) => l.project_id);
-  if (grants.length === 0) return { ...empty(true), salesLinkedProjectIds, hasAnyAccess: salesLinkedProjectIds.length > 0 };
+  if (grants.length === 0) {
+    // A Sales colleague with a linked project has no Projects grant but is authorised to see that company's name on it.
+    const labels = salesLinkedProjectIds.length > 0 ? await loadCompanyLabels(supabase) : new Map<string, string>();
+    return { ...empty(true), salesLinkedProjectIds, hasAnyAccess: salesLinkedProjectIds.length > 0, companyName: (id) => labels.get(id) ?? COMPANY_NOT_SHOWN };
+  }
 
   const companyIds = grants.map((g) => g.companyId);
-  const [{ data: companyRows }, { data: settingsRows }, { data: peopleRows }] = await Promise.all([
+  const [{ data: companyRows }, { data: settingsRows }, { data: peopleRows }, labels] = await Promise.all([
     supabase.from("companies").select("id, legal_name, country_code").in("id", companyIds).order("legal_name"),
     supabase.from("proj_company_settings").select("company_id, reference_code").in("company_id", companyIds),
     supabase.rpc("proj_people"),
+    loadCompanyLabels(supabase),
   ]);
   const codeBy = new Map((settingsRows ?? []).map((s) => [s.company_id, s.reference_code]));
   const companies: ProjCompanyInfo[] = (companyRows ?? []).map((c) => ({ id: c.id, name: c.legal_name, countryCode: c.country_code, referenceCode: codeBy.get(c.id) ?? null }));
@@ -71,7 +79,7 @@ export const getProjectsContext = cache(async (): Promise<ProjectsContext | null
     id: p.user_id, name: p.full_name?.trim() || p.email?.split("@")[0] || "Unnamed user", companyIds: p.company_ids,
   }));
   const nameById = new Map(people.map((p) => [p.id, p.name]));
-  const companyById = new Map(companies.map((c) => [c.id, c.name]));
+  const companyById = new Map([...labels, ...companies.map((c): [string, string] => [c.id, c.name])]);
   return {
     userId: session.userId,
     fullName: session.fullName,
@@ -82,9 +90,21 @@ export const getProjectsContext = cache(async (): Promise<ProjectsContext | null
     people,
     hasAnyAccess: true,
     personName: (id) => (id ? (nameById.get(id) ?? (id === session.userId ? (session.fullName ?? "You") : "Former colleague")) : "Nobody"),
-    companyName: (id) => companyById.get(id) ?? "Unknown company",
+    companyName: (id) => companyById.get(id) ?? COMPANY_NOT_SHOWN,
   };
 });
+
+type ServerClient = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * Company names for exactly the companies this person is authorised to see in Projects: where they hold a grant, or where a
+ * project they may open lives (a Sales colleague linked to a project). Decided by the database, not by this app.
+ */
+async function loadCompanyLabels(supabase: ServerClient): Promise<Map<string, string>> {
+  const { data, error } = await supabase.rpc("proj_company_labels");
+  if (error || !data) return new Map();
+  return new Map(data.map((r): [string, string] => [r.company_id, r.name]));
+}
 
 /**
  * What the app shell needs to decide whether to show the Projects module: Projects grants, a Sales link, and whether a

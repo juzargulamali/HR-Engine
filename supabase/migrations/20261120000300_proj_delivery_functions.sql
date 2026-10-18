@@ -1,4 +1,4 @@
--- Projects & Tasks (Release 2), migration 4 of 6: milestones, deliverables and tasks.
+-- Projects & Tasks (Release 2), migration 4 of 7: milestones, deliverables and tasks.
 --
 -- Roles (checked in every function, never inferred from HR roles or the reporting line):
 --   * PM / acting PM / founder  manage scope: milestones, deliverables, any task, reassignment, acceptance of milestones.

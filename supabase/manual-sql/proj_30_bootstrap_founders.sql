@@ -1,4 +1,4 @@
--- WRITES (only proj_company_grants). Run in the SQL Editor of "Enginious HR Engine_V2" AFTER the six Projects & Tasks
+-- WRITES (only proj_company_grants). Run in the SQL Editor of "Enginious HR Engine_V2" AFTER the seven Projects & Tasks
 -- migrations and after proj_20_verify_readonly.sql shows every row as PASS.
 --
 -- WHY: Projects access is granted from inside the app by a founder (Projects > Access). The very first founders cannot be

@@ -1,5 +1,5 @@
--- READ-ONLY. Run in the SQL Editor of "Enginious HR Engine_V2" BEFORE the six Projects & Tasks migrations
--- (20261120000000 ... 20261120000500). Run the WHOLE file; it returns ONE result table (section | item | detail).
+-- READ-ONLY. Run in the SQL Editor of "Enginious HR Engine_V2" BEFORE the seven Projects & Tasks migrations
+-- (20261120000000 ... 20261120000600). Run the WHOLE file; it returns ONE result table (section | item | detail).
 -- It creates, changes and deletes nothing. Send me the full result (screenshot or Export -> CSV).
 --
 --   A  who is running this, server version

@@ -6,7 +6,7 @@ import { Panel, PageHeader } from "@/components/projects/parts";
 import { CalendarShell } from "@/components/projects/calendar/calendar-views";
 import { SpanBars } from "@/components/projects/calendar/span-bars";
 import { calendarHref, fetchRange, filterKinds, mapCompanyRows, mapMyRows, parseCalendarParams, visibleRange } from "@/components/projects/calendar/helpers";
-import { getProjectsContext } from "@/lib/projects/context";
+import { COMPANY_NOT_SHOWN, getProjectsContext } from "@/lib/projects/context";
 import { loadDirectory } from "@/lib/projects/data";
 import { todayIso } from "@/lib/projects/format";
 import { createClient } from "@/lib/supabase/server";
@@ -63,7 +63,7 @@ export default async function ProjectsCalendarPage({ searchParams }: { searchPar
           <input type="hidden" name="view" value={params.view} />
           <input type="hidden" name="date" value={params.date} />
           <label className="space-y-1 text-sm"><span className="block font-medium">Company</span>
-            <Select name="company" defaultValue={companyId} className="w-64">{companyIds.map((id) => <option key={id} value={id}>{ctx.companyName(id) === "Unknown company" ? "Company" : ctx.companyName(id)}</option>)}</Select>
+            <Select name="company" defaultValue={companyId} className="w-64">{companyIds.map((id) => <option key={id} value={id}>{ctx.companyName(id) === COMPANY_NOT_SHOWN ? "Company" : ctx.companyName(id)}</option>)}</Select>
           </label>
           <Button type="submit" variant="outline" size="sm">Show</Button>
         </form>

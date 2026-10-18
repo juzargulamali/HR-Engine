@@ -1,4 +1,4 @@
--- Projects & Tasks (Release 2), migration 2 of 5: core tables, visibility helpers and row-level security.
+-- Projects & Tasks (Release 2), migration 2 of 7: core tables, visibility helpers and row-level security.
 --
 -- Everything here is READ-ONLY to clients (SELECT policies only, no INSERT/UPDATE/DELETE policies, no DML grants).
 -- Changes go through the SECURITY DEFINER functions in migrations 3-5, which enforce role rules.

@@ -150,13 +150,13 @@ describe("Projects & Tasks", () => {
         "proj_require_manager", "proj_text_or_null", "proj_lock_handover", "proj_task_event", "proj_set_task_dependencies", "proj_set_task_collaborators",
         "proj_task_actor_role", "proj_member_in_team", "proj_build_plan_payload", "proj_audit_trigger", "proj_member_blockers", "proj_status_rank",
         "proj_require_user", "proj_handover_frozen", "proj_issued_plan_guard", "proj_require_open_project", "proj_require_member_or_founder",
-        "proj_mark_upload_intent", "proj_expire_upload_intents"];
+        "proj_mark_upload_intent", "proj_expire_upload_intents", "proj_abandoned_upload_objects"];
       for (const name of internal) {
         const f = functionGrants.find((x) => x.proname === name);
         expect(f, name).toBeDefined();
         expect([name, f?.anon, f?.auth]).toEqual([name, false, false]);
       }
-      for (const name of ["proj_mark_upload_intent", "proj_expire_upload_intents"]) expect(functionGrants.find((x) => x.proname === name)?.svc).toBe(true);
+      for (const name of ["proj_mark_upload_intent", "proj_expire_upload_intents", "proj_abandoned_upload_objects"]) expect(functionGrants.find((x) => x.proname === name)?.svc).toBe(true);
     });
     it("grants no proj_ function to anon, and the public API to authenticated", async () => {
       expect(functionGrants.filter((f) => f.anon).map((f) => f.proname)).toEqual([]);
@@ -1114,6 +1114,215 @@ describe("Projects & Tasks", () => {
       await commit(U.pm2, `select proj_set_status('${P2}', 'resume')`);
       expect((await admin<Row>(`select status from proj_projects where id = '${P2}'`))[0].status).toBe("planning");
       await fails(U.pm2, `select proj_set_status('${P2}', 'completed')`, /Complete project/);
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------------------------
+  describe("review follow-ups: summaries for everyone with access, company labels, discussion history, upload clean-up", () => {
+    const MEMBER_ONLY = ["proj_project_details", "proj_project_members", "proj_teams", "proj_milestones", "proj_deliverables", "proj_tasks", "proj_task_events", "proj_task_comments",
+      "proj_change_log", "proj_plan_items", "proj_site_bookings", "proj_external_dependencies", "proj_messages", "proj_message_mentions", "proj_feedback", "proj_scope_changes",
+      "proj_issued_plans", "proj_files", "proj_completions", "proj_handovers", "proj_sales_links"];
+    const ids = (rows: readonly Row[]) => rows.map((r) => r.id).sort();
+    const nm = (u: string) => Object.entries(U).find(([, v]) => v === u)?.[0] ?? u;
+
+    it("shows every ongoing company project in summary to a PM, a department head and an employee with Projects access", async () => {
+      for (const who of [U.pm, U.pm2, U.head, U.member2, U.acting, U.dir]) {
+        expect(ids(await q<Row>(who, `select id from proj_projects`)), nm(who)).toEqual(expect.arrayContaining([P1, P2]));
+        expect(ids(await q<Row>(who, `select id from proj_directory()`)), nm(who)).toEqual(expect.arrayContaining([P1, P2]));
+      }
+    });
+    it("gives them no private detail of a project they are not on, by table, by id or by function", async () => {
+      // Every person with Projects access in the company, against every ongoing project they are NOT an active member of (founders excluded).
+      const members = new Set((await admin<Row>(`select project_id || ':' || user_id as k from proj_project_members where removed_at is null`)).map((r) => String(r.k)));
+      const outside: [string, string][] = [];
+      for (const who of [U.pm, U.pm2, U.head, U.member, U.member2, U.acting, U.dir]) for (const pid of [P1, P2]) if (!members.has(`${pid}:${who}`)) outside.push([who, pid]);
+      const covered = new Set(outside.map(([who]) => nm(who)));
+      for (const kind of ["head", "dir", "pm2"]) expect(covered.has(kind), `${kind} has a project they are not on`).toBe(true);
+      expect(["member", "member2", "acting"].some((k) => covered.has(k)), "an employee has a project they are not on").toBe(true);
+      expect(outside.length).toBeGreaterThanOrEqual(5);
+      for (const [who, pid] of outside) {
+        for (const t of MEMBER_ONLY) {
+          expect(await q(who, `select 1 from ${t} where project_id = '${pid}'`), `${t} ${nm(who)} on ${pid === P1 ? "P1" : "P2"}`).toHaveLength(0);
+        }
+        expect(await q(who, `select * from proj_messages_since('${pid}')`)).toHaveLength(0);
+        expect(await q(who, `select * from proj_messages_before('${pid}')`)).toHaveLength(0);
+        expect(await q(who, `select * from proj_project_people('${pid}')`)).toHaveLength(0);
+        expect(await q(who, `select * from proj_completion_review('${pid}')`)).toHaveLength(0);
+        await fails(who, `select proj_post_message('${pid}', 'let me in')`, /not found/i);
+        await fails(who, `select proj_create_task('${pid}', ${j({ title: "Not mine" })})`, /not found|Only|not a member|access/i);
+      }
+      const hidden = await q<Row>(U.head, `select project_id from proj_project_details where project_id = '${P2}'`);
+      expect(hidden).toHaveLength(0);
+    });
+    it("keeps the summary row itself free of client, location, scope, money and Sales fields", async () => {
+      const cols = (await admin<Row>(`select column_name from information_schema.columns where table_schema = 'public' and table_name = 'proj_projects'`)).map((c) => String(c.column_name));
+      expect(cols.filter((c) => /client|location|scope|value|budget|price|cost|amount|payment|po_|evidence|opportunity|sales|contact|note/i.test(c.replace("crm_opportunity_id", "")))).toEqual([]);
+      const [row] = await q<Row>(U.pm, `select * from proj_projects where id = '${P2}'`);
+      expect(JSON.stringify(row)).not.toMatch(/PO-SECRET|BUDGET-SECRET|TERMS-SECRET|LED floor|Expo Hall|250000/);
+    });
+    it("shows planning, in progress, ready for installation, on site and on hold, but not completed or archived, to people who are not on the project", async () => {
+      for (const status of ["in_progress", "ready_for_installation", "on_site", "on_hold"]) {
+        await admin(`update proj_projects set status = '${status}' where id = '${P2}'`);
+        expect(await q(U.head, `select 1 from proj_projects where id = '${P2}'`), status).toHaveLength(1);
+      }
+      for (const status of ["completed", "archived"]) {
+        await admin(`update proj_projects set status = '${status}' where id = '${P2}'`);
+        expect(await q(U.head, `select 1 from proj_projects where id = '${P2}'`), status).toHaveLength(0);
+        expect(await q(U.pm2, `select 1 from proj_projects where id = '${P2}'`), `${status} (its own PM)`).toHaveLength(1);
+      }
+      await admin(`update proj_projects set status = 'planning' where id = '${P2}'`);
+    });
+    it("leaves Sales, HR and other companies exactly as they were: Sales sees only its linked project, HR and the other company nothing", async () => {
+      expect((await q<Row>(U.salesA, `select id from proj_projects`)).map((r) => r.id)).toEqual([P1]);
+      expect((await q<Row>(U.salesB, `select id from proj_projects`)).map((r) => r.id)).toEqual([P2]);
+      for (const who of [U.hr, U.outsider, U.ksaOnly, U.ksaFounder]) expect(await q(who, `select 1 from proj_projects`), who).toHaveLength(0);
+    });
+
+    it("labels a company only for people who already have a Projects relationship with it", async () => {
+      const label = async (who: string) => (await q<Row>(who, `select company_id, name from proj_company_labels()`)).map((r) => `${r.company_id}:${r.name}`);
+      for (const who of [U.dir, U.pm, U.head, U.member2, U.founder]) expect(await label(who), who).toEqual([`${CO.uae}:Enginious UAE`]);
+      expect(await label(U.ksaOnly)).toEqual([`${CO.ksa}:Enginious KSA`]);
+      expect(await label(U.ksaFounder)).toEqual([`${CO.ksa}:Enginious KSA`]);
+      // A Sales colleague with no Projects grant sees the label through the project they are linked to, and only for as long as that holds.
+      expect(await label(U.salesA)).toEqual([`${CO.uae}:Enginious UAE`]);
+      expect(await label(U.salesB)).toEqual([`${CO.uae}:Enginious UAE`]);
+      await admin(`update crm_company_grants set revoked_at = now() where user_id = '${U.salesA}' and company_id = '${CO.uae}'`);
+      expect(await label(U.salesA)).toEqual([]);
+      await admin(`update crm_company_grants set revoked_at = null where user_id = '${U.salesA}' and company_id = '${CO.uae}'`);
+      for (const who of [U.hr, U.outsider]) expect(await label(who), who).toEqual([]);
+      await expect(q(null, `select * from proj_company_labels()`)).rejects.toThrow(/permission denied/i);
+    });
+    it("returns the legal name only: no other company column", async () => {
+      const [row] = await q<Row>(U.dir, `select * from proj_company_labels()`);
+      expect(Object.keys(row).sort()).toEqual(["company_id", "name"]);
+    });
+
+    describe("discussion history", () => {
+      let all: Row[] = [];
+      it("pages backwards without gaps or repeats until the first message", async () => {
+        await admin(`insert into proj_messages (project_id, author_id, body) select '${P1}', '${U.member}', 'Archive note ' || g from generate_series(1, 130) g`);
+        const total = Number((await admin<{ n: string }>(`select count(*) n from proj_messages where project_id = '${P1}'`))[0].n);
+        expect(total).toBeGreaterThan(130);
+        const latest = await q<Row>(U.member, `select * from proj_messages_since('${P1}', 0, null, 500)`);
+        expect(latest.length).toBe(total);                                      // the cursor feed already covers everything; paging must agree with it
+        let cursor: number | null = null;
+        const seen: Row[] = [];
+        for (let i = 0; i < 20; i++) {
+          const page: Row[] = await q<Row>(U.member, `select * from proj_messages_before('${P1}', ${cursor === null ? "null" : cursor}, 100)`);
+          if (page.length === 0) break;
+          expect(page.length).toBeLessThanOrEqual(100);
+          expect(page.map((m) => Number(m.seq))).toEqual([...page.map((m) => Number(m.seq))].sort((a, b) => b - a));
+          if (cursor !== null) expect(page.every((m) => Number(m.seq) < Number(cursor))).toBe(true);
+          seen.push(...page);
+          cursor = Number(page[page.length - 1]!.seq);
+        }
+        all = seen;
+        expect(new Set(seen.map((m) => m.id)).size).toBe(total);
+        expect(seen.length).toBe(total);
+        expect(seen.some((m) => m.body === "Archive note 1")).toBe(true);        // the oldest of the 130 is reachable
+      });
+      it("carries deletions as tombstones and never the deleted text", async () => {
+        const gone = all.filter((m) => m.deleted_at !== null);
+        expect(gone.length).toBeGreaterThan(0);
+        expect(gone.every((m) => m.body === "")).toBe(true);
+        expect(JSON.stringify(all)).not.toContain("Truss arrives Friday");
+      });
+      it("caps a page at 200 and treats a missing cursor as the newest", async () => {
+        await admin(`insert into proj_messages (project_id, author_id, body) select '${P1}', '${U.member}', 'Second batch ' || g from generate_series(1, 120) g`);
+        expect((await q<Row>(U.founder, `select * from proj_messages_before('${P1}', null, 100000)`)).length).toBe(200);
+        const newest = await q<Row>(U.founder, `select seq from proj_messages_before('${P1}', null, 1)`);
+        const max = Number((await admin<Row>(`select max(seq) s from proj_messages where project_id = '${P1}'`))[0].s);
+        expect(Number(newest[0].seq)).toBe(max);
+      });
+      it("is open to members and founders only, and closes the moment someone is removed", async () => {
+        expect((await q<Row>(U.founder, `select * from proj_messages_before('${P1}', null, 5)`)).length).toBe(5);
+        for (const who of [U.dir, U.salesA, U.outsider, U.hr, U.ksaFounder, U.pm2]) {
+          expect(await q(who, `select * from proj_messages_before('${P1}', null, 5)`), who).toHaveLength(0);
+        }
+        await commit(U.pm, `select proj_add_member('${P1}', '${U.salesA}')`);
+        expect((await q<Row>(U.salesA, `select * from proj_messages_before('${P1}', null, 5)`)).length).toBe(5);
+        await commit(U.pm, `select proj_remove_member('${P1}', '${U.salesA}', 'Not needed')`);
+        expect(await q(U.salesA, `select * from proj_messages_before('${P1}', null, 5)`)).toHaveLength(0);
+        await expect(q(null, `select * from proj_messages_before('${P1}')`)).rejects.toThrow(/permission denied/i);
+      });
+    });
+
+    describe("abandoned temporary uploads", () => {
+      const old = (h: number) => `now() - interval '${h} hours'`;
+      const tag = id().slice(0, 8);
+      const path = (n: string) => `${CO.uae}/${P1}/${id()}-${tag}-${n}.pdf`;
+      const cases: Record<string, { q?: string; f?: string; status: string; expires: string }> = {};
+      let listing: Row[] = [];
+      const intent = async (key: string, status: string, expires: string, withQuarantine: boolean, withFinal: boolean) => {
+        const qp = path(`${key}-q`);
+        const fp = path(`${key}-f`);
+        cases[key] = { q: withQuarantine ? qp : undefined, f: withFinal ? fp : undefined, status, expires };
+        await admin(`insert into proj_upload_intents (project_id, company_id, user_id, original_name, mime_type, size_bytes, purpose, quarantine_path, final_path, status, expires_at)
+                     values ('${P1}', '${CO.uae}', '${U.member}', '${key}.pdf', 'application/pdf', 1000, 'document', '${qp}', '${fp}', '${status}', ${expires})`);
+        if (withQuarantine) await admin(`insert into storage.objects (bucket_id, name, metadata) values ('proj-quarantine', '${qp}', '{"size": 1000}'::jsonb)`);
+        if (withFinal) await admin(`insert into storage.objects (bucket_id, name, metadata) values ('proj-files', '${fp}', '{"size": 1000}'::jsonb)`);
+      };
+      const listed = (key: string, which: "q" | "f") => listing.find((r) => r.object_name === cases[key]![which]);
+
+      it("lists what is abandoned, and only that", async () => {
+        await intent("expired_pending", "pending", old(72), true, false);
+        await intent("just_expired", "pending", old(2), true, false);
+        await intent("still_open", "pending", `now() + interval '1 hour'`, true, false);
+        await intent("rejected_old", "rejected", old(72), true, false);
+        await intent("registered_leftover", "registered", old(1), true, true);
+        await intent("validated_never_added", "validated", old(72), false, true);
+        await intent("validated_but_listed_as_file", "validated", old(72), false, true);
+        await admin(`insert into proj_files (project_id, kind, purpose, original_name, storage_path, mime_type, size_bytes, uploaded_by)
+                     values ('${P1}', 'file', 'document', 'kept.pdf', '${cases.validated_but_listed_as_file!.f}', 'application/pdf', 1000, '${U.member}')`);
+        await intent("registered_kept", "registered", old(72), false, true);
+        await admin(`insert into proj_files (project_id, kind, purpose, original_name, storage_path, mime_type, size_bytes, uploaded_by)
+                     values ('${P1}', 'file', 'document', 'kept2.pdf', '${cases.registered_kept!.f}', 'application/pdf', 1000, '${U.member}')`);
+        await admin(`insert into storage.objects (bucket_id, name, metadata) values ('proj-files', '${CO.uae}/${P1}/${tag}-mystery.pdf', '{"size": 7}'::jsonb)`);
+        listing = await admin<Row>(`select * from proj_abandoned_upload_objects()`);
+
+        expect(listed("expired_pending", "q")).toMatchObject({ bucket: "proj-quarantine", safe_to_delete: true, intent_status: "pending" });
+        expect(listed("rejected_old", "q")).toMatchObject({ bucket: "proj-quarantine", safe_to_delete: true, intent_status: "rejected" });
+        expect(listed("registered_leftover", "q")).toMatchObject({ bucket: "proj-quarantine", safe_to_delete: true, intent_status: "registered" });
+        expect(listed("validated_never_added", "f")).toMatchObject({ bucket: "proj-files", safe_to_delete: true, intent_status: "validated" });
+        // not abandoned: inside the grace period, still open, or a stored file refers to it
+        expect(listed("just_expired", "q")).toBeUndefined();
+        expect(listed("still_open", "q")).toBeUndefined();
+        expect(listed("registered_leftover", "f")).toBeUndefined();            // its final file is the registered one
+        expect(listed("validated_but_listed_as_file", "f")).toBeUndefined();   // a stored file refers to it
+        expect(listed("registered_kept", "f")).toBeUndefined();
+        // nothing explains this one: reported, never offered as removable
+        const mystery = listing.find((r) => String(r.object_name).endsWith(`${tag}-mystery.pdf`));
+        expect(mystery).toMatchObject({ bucket: "proj-files", safe_to_delete: false, intent_id: null });
+        expect(Number(mystery!.size_bytes)).toBe(7);
+      });
+      it("never offers an object that a stored file refers to, in either bucket", async () => {
+        const referenced = new Set((await admin<Row>(`select storage_path from proj_files where kind = 'file'`)).map((r) => String(r.storage_path)));
+        expect(listing.filter((r) => r.safe_to_delete && referenced.has(String(r.object_name)))).toEqual([]);
+      });
+      it("honours a longer grace period and refuses one below an hour", async () => {
+        const wide = await admin<Row>(`select * from proj_abandoned_upload_objects(interval '5 days')`);
+        expect(wide.find((r) => r.object_name === cases.expired_pending!.q)).toBeUndefined();
+        const narrow = await admin<Row>(`select * from proj_abandoned_upload_objects(interval '1 hour')`);
+        expect(narrow.find((r) => r.object_name === cases.just_expired!.q)).toBeDefined();
+        await expect(admin(`select * from proj_abandoned_upload_objects(interval '10 minutes')`)).rejects.toThrow(/at least one hour/);
+      });
+      it("is closed to browser sessions", async () => {
+        for (const who of [U.founder, U.pm, U.member]) await expect(q(who, `select * from proj_abandoned_upload_objects()`), who).rejects.toThrow(/permission denied/i);
+        await expect(q(null, `select * from proj_abandoned_upload_objects()`)).rejects.toThrow(/permission denied/i);
+      });
+      it("changes nothing by itself, and stays accurate after the bookkeeping sweep until the files are really removed", async () => {
+        const objectsBefore = Number((await admin<{ n: string }>(`select count(*) n from storage.objects`))[0].n);
+        const swept = await admin<Row>(`select * from proj_expire_upload_intents()`);
+        expect(swept.length).toBeGreaterThan(0);
+        expect(Number((await admin<{ n: string }>(`select count(*) n from storage.objects`))[0].n)).toBe(objectsBefore);   // the sweep never deletes a file
+        const again = await admin<Row>(`select * from proj_abandoned_upload_objects()`);
+        expect(again.filter((r) => r.safe_to_delete).map((r) => r.object_name).sort()).toEqual(listing.filter((r) => r.safe_to_delete).map((r) => r.object_name).sort());
+        // The owner then removes the listed files in the Storage UI; the next report is empty (except for what nothing explains).
+        await admin(`delete from storage.objects where name in (${listing.filter((r) => r.safe_to_delete).map((r) => `'${r.object_name}'`).join(", ")})`);
+        const done = await admin<Row>(`select * from proj_abandoned_upload_objects()`);
+        expect(done.filter((r) => r.safe_to_delete)).toEqual([]);
+        expect(done.filter((r) => !r.safe_to_delete).length).toBe(1);
+      });
     });
   });
 

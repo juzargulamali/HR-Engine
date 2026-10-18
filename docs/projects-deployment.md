@@ -41,7 +41,8 @@ client evidence and explicit handling of unfinished work; in-app notifications a
 - `…000300_proj_delivery_functions.sql` — milestones, deliverables, tasks (review, blocking, dependencies, history).
 - `…000400_proj_plans_site_calendar_discussion.sql` — timelines, external dependencies, site bookings, calendars, discussion, notifications.
 - `…000500_proj_feedback_plans_files_completion.sql` — feedback and scope changes, issued client timelines, files (quarantine flow), completion and reopening, the two buckets.
-- `supabase/manual-sql/proj_00_preflight_readonly.sql`, `proj_05_preservation_check_readonly.sql`, `proj_20_verify_readonly.sql` (read-only), `proj_30_bootstrap_founders.sql` (writes grants only), `proj_80_safe_disable_and_restore.sql`, `proj_90_rollback.sql`.
+- `…000600_proj_history_labels_upload_cleanup.sql` — three small additions: paging back through older discussion messages, the company name on summary-only pages (shown only where you are authorised), and a read-only report of abandoned temporary uploads.
+- `supabase/manual-sql/proj_00_preflight_readonly.sql`, `proj_05_preservation_check_readonly.sql`, `proj_20_verify_readonly.sql` (read-only), `proj_85_abandoned_uploads_readonly.sql` (read-only, optional, run when you want it), `proj_30_bootstrap_founders.sql` (writes grants only), `proj_80_safe_disable_and_restore.sql`, `proj_90_rollback.sql`.
 - Application: `apps/web/src/app/(app)/projects/**`, `lib/projects/**`, `lib/actions/projects*.ts`, `components/projects/**`, domain logic in `packages/domain/src/proj*.ts`, `project*.ts`, tests.
 
 ## 4. Before you start (nothing here changes anything)
@@ -59,7 +60,7 @@ client evidence and explicit handling of unfinished work; in-app notifications a
 | Step | What | Check |
 |---|---|---|
 | 1 | Preflight (§4.2) and snapshot (§4.3) | All OK; paste lines saved |
-| 2 | Run, **one at a time and in this order**, the six migration files in `supabase/migrations/` named `20261120000000_…` to `20261120000500_…` | Each ends without an error |
+| 2 | Run, **one at a time and in this order**, the seven migration files in `supabase/migrations/` named `20261120000000_…` to `20261120000600_…` | Each ends without an error |
 | 3 | `proj_20_verify_readonly.sql` | Every row **PASS** (the last row is information) |
 | 4 | `proj_05_preservation_check_readonly.sql` in "compare" mode (paste the saved lines where it says) | Summary says **PASS: nothing HR, Sales or the legacy projects own changed** |
 | 5 | Merge the pull request when you are ready; Vercel deploys the app | The app opens; **people without Projects access see no Projects menu** |
@@ -121,15 +122,40 @@ See the table at the end of the pull request description for the test counts of 
 ## 10. Environment and schedulers
 
 **No new environment variable, no new scheduled job, no new e-mail.** The upload flow reuses the existing server-side Supabase service
-key (already required by Sales). `proj_expire_upload_intents()` exists for a future housekeeping run but nothing calls it. Deadline reminders and
+key (already required by Sales). `proj_expire_upload_intents()` exists for a future housekeeping run but nothing calls it; abandoned uploads are listed and cleaned up by hand (§12). Deadline reminders and
 e-mail are deliberately not built; adding them needs a scheduled route and your separate authorisation (see `05-automation-rules.md` §5.1b).
 
 ## 11. Known limitations
 
-- Discussion updates by polling (about every 8 s while the tab is visible), not push; it shows the latest 100 messages.
+- Discussion updates by polling (about every 8 s while the tab is visible), not push. The page opens on the latest 100 messages; **Show earlier messages** loads older ones 50 at a time, back to the very first message. Nothing is ever dropped.
 - No deadline reminders or overdue digests (by decision); notifications appear in My Work only.
 - Completed or archived projects are read-only for everything except reopening.
 - A removed member's earlier discussion messages stay (author name kept); their project notifications are deleted.
 - Sales people's names in the Sales-relationship list are shown only to founders and PM assigners (others see "Sales colleague").
-- Uploads need Supabase Storage and the service key on the host; abandoned uploads are not swept automatically.
+- Uploads need Supabase Storage and the service key on the host; abandoned uploads are not swept automatically: you list and remove them by hand, safely (§12).
 - Timeline bars are a secondary view: the table is always the primary, accessible form.
+
+## 12. Cleaning up abandoned temporary uploads (optional, by hand, nothing automatic)
+
+**What they are.** When someone adds a file, the browser first sends it to a private *quarantine* folder; the server checks it, stores
+the checked copy in the project's private folder and removes the quarantine copy. If the person closes the tab, loses the connection
+or is refused (wrong type, too large), a file can stay behind. It is private (no signed-in user can read it) and harmless; it only
+takes space. They are never in a project's file list.
+
+**The safe procedure** (every step is yours; nothing is scheduled and the app deletes nothing on its own):
+
+1. In the SQL Editor run `supabase/manual-sql/proj_85_abandoned_uploads_readonly.sql`. It is read-only. It lists, with a safety margin
+   of one day (change the interval at the top for longer; never less than an hour):
+   - **REMOVE**: a temporary copy of an upload that ended or expired, or a checked file that was never added to a project, which no
+     project file refers to;
+   - **LOOK AT BY HAND**: a file in a Projects folder that no upload record and no project file explains. Never remove these on the
+     list's say-so.
+2. If there are no REMOVE rows, stop.
+3. In Supabase → **Storage**, open the bucket named in the *bucket* column (`proj-quarantine` or `proj-files`), open the folders named in
+   *object_name* (company / project / file) and delete **only the REMOVE files**. Use the Storage page's Delete button. **Do not delete
+   rows from `storage.objects` with SQL**: that removes the record and leaves the file stored.
+4. Run the file again: the REMOVE rows are gone.
+5. Optional bookkeeping that deletes no file: `select * from proj_expire_upload_intents();` marks the finished upload records as expired.
+
+A file that a project file refers to is never listed as REMOVE (checked in both buckets). `proj_20_verify_readonly.sql` shows a count of
+what is waiting (an INFO row). An upload that is still in progress is never listed: it must be older than its expiry plus the margin.

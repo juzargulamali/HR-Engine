@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { fail, firstIssue, ok, optionalText, refreshProjects, uuid, type ProjectActionState } from "@/lib/projects/action-utils";
+import { EARLIER_PAGE, splitEarlierPage } from "@/lib/projects/discussion-paging";
 import type { ProjMessageFeedRow } from "@/types/projects";
 
 /**
@@ -28,6 +29,15 @@ export async function fetchProjectMessages(projectId: string, afterSeq: number, 
   const { data, error } = await supabase.rpc("proj_messages_since", { p_project_id: projectId, p_after_seq: Math.max(0, Math.floor(afterSeq) || 0), p_changed_since: changedSince, p_limit: 200 });
   if (error) return { error: fail(error.message).error, messages: [] };
   return { error: null, messages: data ?? [] };
+}
+
+/** The page before `beforeSeq`, oldest first, with whether even older messages remain. Same access rule as the live feed: members and founders. */
+export async function fetchEarlierProjectMessages(projectId: string, beforeSeq: number): Promise<{ error: string | null; messages: ProjMessageFeedRow[]; hasMore: boolean }> {
+  if (!uuid.safeParse(projectId).success || !Number.isFinite(beforeSeq) || beforeSeq < 1) return { error: "Missing project.", messages: [], hasMore: false };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("proj_messages_before", { p_project_id: projectId, p_before_seq: Math.floor(beforeSeq), p_limit: EARLIER_PAGE + 1 });
+  if (error) return { error: fail(error.message).error, messages: [], hasMore: false };
+  return { error: null, ...splitEarlierPage(data ?? []) };
 }
 
 export async function markProjectRead(projectId: string): Promise<void> {
