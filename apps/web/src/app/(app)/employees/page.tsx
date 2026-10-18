@@ -13,6 +13,8 @@ import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 
+export const metadata = { title: "Employees" };
+
 const PAGE_SIZE = 20;
 const STATUS_VALUES: EmploymentStatus[] = ["active", "on_leave", "suspended", "terminated"];
 
@@ -192,7 +194,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
                       {e.first_name} {e.last_name}
                     </Link>
                     {e.deleted_at ? (
-                      <Badge variant="destructive" className="ml-2 text-[10px]">
+                      <Badge variant="destructive" className="ml-2 text-xs">
                         deleted
                       </Badge>
                     ) : null}

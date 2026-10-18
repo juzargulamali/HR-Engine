@@ -1,5 +1,5 @@
-import { canViewHrAlerts, hasRoleAnyScope, isSysAdmin } from "@enginious-hr/domain";
-import type { RoleGrant } from "@enginious-hr/domain";
+import { canViewHrAlerts, hasCrmCapability, hasRoleAnyScope, isAnyCrmFounder, isSysAdmin } from "@enginious-hr/domain";
+import type { CrmGrant, RoleGrant } from "@enginious-hr/domain";
 
 /**
  * String keys only — never a component reference. This data crosses from
@@ -31,13 +31,18 @@ export type NavIconKey =
   | "audit"
   | "users"
   | "sales"
+  | "projects"
+  | "inventory"
+  | "vendors"
+  | "kpis"
+  | "people"
   | "soon";
 
 export interface NavLinkData {
   href: string;
   label: string;
   iconKey: NavIconKey;
-  /** A module that is planned but not built yet: shown muted, never a working link. */
+  /** A module that is planned but not built yet: shown muted with the words "Coming soon", never a working link. */
   comingSoon?: boolean;
 }
 
@@ -46,16 +51,34 @@ export interface NavGroupData {
   links: NavLinkData[];
 }
 
+export type NavModuleId = "my-day" | "approvals" | "sales" | "people" | "projects" | "inventory" | "vendors" | "kpis";
+
+export interface NavModuleData {
+  id: NavModuleId;
+  label: string;
+  iconKey: NavIconKey;
+  /** Where the module's own row goes. Empty for a module that is not built yet. */
+  href: string;
+  comingSoon?: boolean;
+  /** Sub-navigation, shown while the module is open. Same permission checks as before, just grouped under the module. */
+  sections: NavGroupData[];
+}
+
+export interface NavOptions {
+  hasPendingApprovals?: boolean;
+  /** The person's own Sales (CRM) grants, from crm_company_grants — never HR roles. Empty/undefined means no Sales access. */
+  crmGrants?: readonly CrmGrant[];
+}
+
 /**
- * Pure function, no React/JSX — every permission gate here mirrors the
- * exact same checks AppShell used before this was extracted (isSysAdmin,
- * hasRoleAnyScope, canViewHrAlerts). Kept separate from AppShell so it can
- * be unit tested directly without rendering anything.
+ * Pure function, no React/JSX — every permission gate here mirrors the exact checks AppShell used before the move to the
+ * ENGINIOUS OS module navigation (isSysAdmin, hasRoleAnyScope, canViewHrAlerts). Kept separate from AppShell so it can be
+ * unit tested directly without rendering anything. Navigation only shapes what is offered: RLS and the page's own checks
+ * remain the real enforcement.
  */
-export function buildNavGroups(
-  grants: readonly RoleGrant[],
-  options: { hasPendingApprovals?: boolean; hasCrmAccess?: boolean } = {},
-): NavGroupData[] {
+export function buildNavModules(grants: readonly RoleGrant[], options: NavOptions = {}): NavModuleData[] {
+  const crmGrants = options.crmGrants ?? [];
+  const hasCrmAccess = crmGrants.length > 0;
   const showAdminLink = isSysAdmin(grants);
   const showInsightsLinks = hasRoleAnyScope(grants, "hr_admin") || hasRoleAnyScope(grants, "sys_admin");
   const showAlertsLink = canViewHrAlerts(grants);
@@ -66,11 +89,10 @@ export function buildNavGroups(
   // (cto is a full peer of ceo — see isCLevel's own comment). sys_admin and a
   // plain employee hold none of these, so the link would only ever show an
   // empty "nothing waiting on you" page for them — hidden rather than shown
-  // and immediately empty. Purely a UI affordance, same caveat as every
-  // other check here: RLS on the approvals table is the real enforcement.
-  // ...plus anyone who currently HAS something waiting on their own decision:
-  // a project lead is an ordinary employee with no approval-capable role, yet
-  // the lead's step of a Recovery Leave request lands in their own Approvals.
+  // and immediately empty. ...plus anyone who currently HAS something waiting
+  // on their own decision: a project lead is an ordinary employee with no
+  // approval-capable role, yet the lead's step of a Recovery Leave request
+  // lands in their own Approvals.
   const showApprovalsLink =
     options.hasPendingApprovals === true ||
     (["line_manager", "hr_admin", "finance", "ceo", "cto"] as const).some((role) => hasRoleAnyScope(grants, role));
@@ -79,11 +101,46 @@ export function buildNavGroups(
   // manager acting only as an approver.
   const showPayrollLink = (["hr_admin", "finance", "ceo", "cto"] as const).some((role) => hasRoleAnyScope(grants, role));
 
-  const groups: NavGroupData[] = [
+  const modules: NavModuleData[] = [{ id: "my-day", label: "My Day", iconKey: "dashboard", href: "/", sections: [] }];
+
+  if (showApprovalsLink) {
+    modules.push({ id: "approvals", label: "Approvals", iconKey: "approvals", href: "/approvals", sections: [] });
+  }
+
+  // Sales & CRM has its own company-scoped access (crm_company_grants), independent of HR roles: shown only to people
+  // granted it. Settings and Access appear only to those who can use them (the same rule the Sales pages apply).
+  if (hasCrmAccess) {
+    const manageSettings = crmGrants.some((g) => hasCrmCapability([g], g.companyId, "manage_settings"));
+    const manageAccess = crmGrants.some((g) => hasCrmCapability([g], g.companyId, "manage_access"));
+    modules.push({
+      id: "sales",
+      label: "Sales & CRM",
+      iconKey: "sales",
+      href: "/sales",
+      sections: [
+        {
+          label: "Sales & CRM",
+          links: [
+            { href: "/sales", label: "Overview", iconKey: "sales" },
+            { href: "/sales/opportunities", label: "Opportunities", iconKey: "sales" },
+            { href: "/sales/pipeline", label: "Pipeline", iconKey: "sales" },
+            { href: "/sales/new", label: "New enquiry", iconKey: "sales" },
+            { href: "/sales/follow-ups", label: "Follow-ups", iconKey: "sales" },
+            { href: "/sales/proposals", label: "Proposals & quotes", iconKey: "sales" },
+            { href: "/sales/clients", label: "Clients & contacts", iconKey: "sales" },
+            { href: "/sales/reports", label: "Reports", iconKey: "sales" },
+            ...(manageSettings || isAnyCrmFounder(crmGrants) ? [{ href: "/sales/settings", label: "Settings", iconKey: "sales" as const }] : []),
+            ...(manageAccess ? [{ href: "/sales/access", label: "Access", iconKey: "sales" as const }] : []),
+          ],
+        },
+      ],
+    });
+  }
+
+  const peopleSections: NavGroupData[] = [
     {
-      label: "Overview",
+      label: "Me",
       links: [
-        { href: "/", label: "Dashboard", iconKey: "dashboard" },
         { href: "/profile", label: "My Profile", iconKey: "profile" },
         { href: "/attendance-clock", label: "My Attendance Clock", iconKey: "clock" },
       ],
@@ -95,13 +152,11 @@ export function buildNavGroups(
         { href: "/attendance", label: "Attendance", iconKey: "attendance" },
         { href: "/leave", label: "Leave", iconKey: "leave" },
         { href: "/reimbursements", label: "Reimbursements", iconKey: "reimbursements" },
-        { href: "/performance", label: "Performance", iconKey: "performance" },
       ],
     },
     {
       label: "Workflow",
       links: [
-        ...(showApprovalsLink ? [{ href: "/approvals", label: "Approvals", iconKey: "approvals" as const }] : []),
         ...(showAlertsLink ? [{ href: "/alerts", label: "Alerts", iconKey: "alerts" as const }] : []),
         { href: "/letters", label: "Letters", iconKey: "letters" },
         ...(showPayrollLink ? [{ href: "/payroll", label: "Payroll", iconKey: "payroll" as const }] : []),
@@ -117,9 +172,8 @@ export function buildNavGroups(
       ],
     },
   ];
-
   if (showInsightsLinks) {
-    groups.push({
+    peopleSections.push({
       label: "Insights",
       links: [
         { href: "/ai-suggestions", label: "AI Suggestions", iconKey: "ai" },
@@ -127,31 +181,81 @@ export function buildNavGroups(
       ],
     });
   }
-
-  // Sales & CRM has its own company-scoped access (crm_company_grants), independent of HR roles: shown only to people
-  // granted it. The planned modules appear as "Coming soon" next to it and are not links.
-  if (options.hasCrmAccess === true) {
-    groups.splice(1, 0, {
-      label: "Sales",
-      links: [{ href: "/sales", label: "Sales & CRM", iconKey: "sales" }],
-    });
-    groups.push({
-      label: "Coming soon",
-      links: [
-        { href: "#projects", label: "Projects & Tasks", iconKey: "soon", comingSoon: true },
-        { href: "#inventory", label: "Inventory", iconKey: "soon", comingSoon: true },
-        { href: "#vendors", label: "Vendors & Purchasing", iconKey: "soon", comingSoon: true },
-        { href: "#kpis", label: "Performance & KPIs", iconKey: "soon", comingSoon: true },
-      ],
-    });
-  }
-
   if (showAdminLink) {
-    groups.push({
-      label: "System",
-      links: [{ href: "/admin/users", label: "Users & Roles", iconKey: "users" }],
-    });
+    peopleSections.push({ label: "System", links: [{ href: "/admin/users", label: "Users & Roles", iconKey: "users" }] });
   }
+  modules.push({ id: "people", label: "People & HR", iconKey: "people", href: "/employees", sections: peopleSections });
 
-  return groups;
+  // Modules that are planned but not built: visible to everyone so the roadmap is honest, never links, never any data.
+  modules.push(
+    { id: "projects", label: "Projects & Tasks", iconKey: "projects", href: "", comingSoon: true, sections: [] },
+    { id: "inventory", label: "Inventory", iconKey: "inventory", href: "", comingSoon: true, sections: [] },
+    { id: "vendors", label: "Vendors & Purchasing", iconKey: "vendors", href: "", comingSoon: true, sections: [] },
+    // The existing HR appraisals and goals stay reachable (and are called what they are); the future KPI module is marked.
+    {
+      id: "kpis",
+      label: "KPIs & Performance",
+      iconKey: "kpis",
+      href: "/performance",
+      sections: [
+        {
+          label: "KPIs & Performance",
+          links: [
+            { href: "/performance", label: "Performance reviews (HR)", iconKey: "performance" },
+            { href: "", label: "KPIs", iconKey: "soon", comingSoon: true },
+          ],
+        },
+      ],
+    },
+  );
+
+  return modules;
+}
+
+/** Every real (non-"coming soon") link a person can reach through the module navigation, grouped by module, for search. */
+export function navGroupsFromModules(modules: readonly NavModuleData[]): NavGroupData[] {
+  return modules
+    .filter((m) => !m.comingSoon)
+    .map((m) => ({
+      label: m.label,
+      links: m.sections.length > 0 ? m.sections.flatMap((s) => s.links.filter((l) => !l.comingSoon)) : [{ href: m.href, label: m.label, iconKey: m.iconKey }],
+    }));
+}
+
+/** True when `pathname` belongs to this link (exact for "/", prefix otherwise). */
+export function isLinkActive(pathname: string, href: string): boolean {
+  if (!href) return false;
+  if (href === "/") return pathname === "/";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/**
+ * Which module owns `pathname`. The most specific link wins, so "/attendance-clock" is not swallowed by "/attendance", and
+ * a Sales page never lights up People & HR.
+ */
+export function activeModuleId(pathname: string, modules: readonly NavModuleData[]): NavModuleId | null {
+  let best: { id: NavModuleId; len: number } | null = null;
+  for (const m of modules) {
+    if (m.comingSoon) continue;
+    const hrefs = [m.href, ...m.sections.flatMap((s) => s.links.filter((l) => !l.comingSoon).map((l) => l.href))];
+    for (const h of hrefs) {
+      if (isLinkActive(pathname, h) && (best === null || h.length > best.len)) best = { id: m.id, len: h.length };
+    }
+  }
+  return best?.id ?? null;
+}
+
+/** "Module / Page" for the header. The page part is omitted on a module's own landing page and on pages that are not in the navigation. */
+export function breadcrumbFor(pathname: string, modules: readonly NavModuleData[]): { module: string | null; page: string | null } {
+  const id = activeModuleId(pathname, modules);
+  const m = modules.find((x) => x.id === id);
+  if (!m) return { module: null, page: null };
+  let best: NavLinkData | null = null;
+  for (const s of m.sections) {
+    for (const l of s.links) {
+      if (!l.comingSoon && isLinkActive(pathname, l.href) && (best === null || l.href.length > best.href.length)) best = l;
+    }
+  }
+  const page = best && best.href !== m.href ? best.label : null;
+  return { module: m.label, page };
 }

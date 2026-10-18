@@ -63,7 +63,7 @@ export function Drawer({
         aria-modal="true"
         aria-label={title}
         className={cn(
-          "absolute top-0 flex h-full w-72 max-w-[85vw] flex-col bg-card shadow-2xl transition-transform duration-200 ease-out",
+          "absolute top-0 flex h-full w-72 max-w-[85vw] flex-col border-r border-border bg-chrome shadow-[var(--shadow-pop)] transition-transform duration-200 ease-out",
           side === "left" ? "left-0" : "right-0",
           open ? "translate-x-0" : side === "left" ? "-translate-x-full" : "translate-x-full",
         )}

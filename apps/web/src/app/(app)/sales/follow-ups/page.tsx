@@ -11,6 +11,8 @@ import { getCrmContext } from "@/lib/crm/context";
 import { loadFollowUps, type FollowUpListItem } from "@/lib/crm/data";
 import { cn } from "@/lib/utils";
 
+export const metadata = { title: "Follow-ups" };
+
 type View = "overdue" | "today" | "upcoming" | "done";
 const VIEWS: { value: View; label: string }[] = [
   { value: "overdue", label: "Overdue" },
@@ -121,11 +123,11 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                     <TableRow key={fu.id} className="align-top">
                       <TableCell className="min-w-[12rem]">
                         <div className="font-medium">{fu.title}</div>
-                        <div className="text-xs text-muted-foreground">{KIND_LABEL[fu.kind] ?? fu.kind}</div>
+                        <div className="text-sm text-muted-foreground">{KIND_LABEL[fu.kind] ?? fu.kind}</div>
                       </TableCell>
                       <TableCell className="min-w-[12rem]">
                         <Link href={`/sales/opportunities/${f.opportunity.id}`} className="underline-offset-2 hover:underline">{f.opportunity.title}</Link>
-                        <div className="font-mono text-xs text-muted-foreground">{f.opportunity.reference}</div>
+                        <div className="font-mono text-sm text-muted-foreground">{f.opportunity.reference}</div>
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{f.assigneeName}</TableCell>
                       <TableCell>{view === "done" ? <span className="whitespace-nowrap">{formatDateTime(fu.completed_at)}</span> : <DueText dueAt={fu.due_at} />}</TableCell>
@@ -139,7 +141,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                             {isOnlyOpen ? null : <CancelFollowUpButton followUp={ref} />}
                           </div>
                         ) : (
-                          <span className="text-xs text-muted-foreground">Only the assignee, the owner ({ctx.personName(f.opportunity.owner_id)}) or a founder can change this.</span>
+                          <span className="text-sm text-muted-foreground">Only the assignee, the owner ({ctx.personName(f.opportunity.owner_id)}) or a founder can change this.</span>
                         )}
                       </TableCell>
                     </TableRow>
@@ -147,8 +149,8 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                 })}
               </TableBody>
             </Table>
-            {view !== "done" && loaded.open.length >= 1000 ? <p className="mt-3 text-xs text-muted-foreground">Showing the first 1,000 open follow-ups.</p> : null}
-            {view === "done" ? <p className="mt-3 text-xs text-muted-foreground">The 30 most recently completed follow-ups.</p> : null}
+            {view !== "done" && loaded.open.length >= 1000 ? <p className="mt-3 text-sm text-muted-foreground">Showing the first 1,000 open follow-ups.</p> : null}
+            {view === "done" ? <p className="mt-3 text-sm text-muted-foreground">The 30 most recently completed follow-ups.</p> : null}
           </CardContent>
         </Card>
       )}

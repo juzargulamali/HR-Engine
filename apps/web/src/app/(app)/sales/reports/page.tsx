@@ -18,6 +18,8 @@ import { createClient } from "@/lib/supabase/server";
 import type { CrmZohoReferenceRow } from "@/types/crm";
 import { CurrencyTotals } from "../currency-totals";
 
+export const metadata = { title: "Sales reports" };
+
 type Params = Record<string, string | string[] | undefined>;
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 const LOAD_LIMIT = 2000; // loadOpportunities caps at this many (newest first)
@@ -112,7 +114,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         <Button type="submit" size="sm">Apply</Button>
         {!isDefaultPeriod || company ? <Link href="/sales/reports" className={buttonVariants({ variant: "ghost", size: "sm" })}>Reset</Link> : null}
       </form>
-      <p className="-mt-3 text-xs text-muted-foreground">
+      <p className="-mt-3 text-sm text-muted-foreground">
         Period: {formatDate(period.from)} to {formatDate(period.to)} (Dubai dates){isDefaultPeriod ? ", the last 90 days" : ""}. It applies to won and lost (by closing date), enquiries by source and timeliness (by date logged). Pipeline and follow-up figures are as of now.
       </p>
       {items.length >= LOAD_LIMIT ? <Alert variant="warning">Only the newest {LOAD_LIMIT.toLocaleString("en-US")} opportunities are included, so older figures may be incomplete.</Alert> : null}
@@ -161,7 +163,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             <dl className="grid grid-cols-3 gap-3 text-center">
               {[{ l: "Overdue", n: fuCounts.overdue }, { l: "Due today", n: fuCounts.dueToday }, { l: "Upcoming", n: fuCounts.upcoming }].map((x) => (
                 <div key={x.l} className="rounded-md border border-border p-3">
-                  <dt className="text-xs text-muted-foreground">{x.l}</dt>
+                  <dt className="text-sm text-muted-foreground">{x.l}</dt>
                   <dd className="text-2xl font-semibold tabular-nums">{x.n}</dd>
                 </div>
               ))}
@@ -186,13 +188,13 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
           <ReportCard title="Won and lost" description="Closed in the period, by closing date. Won means a Won stage with purchase-order or authorised-email evidence." note={`n = ${wl.won + wl.lost} closed opportunities`}>
             <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="rounded-md border border-border p-3"><div className="text-xs text-muted-foreground">Won</div><div className="text-2xl font-semibold tabular-nums">{wl.won}</div></div>
-              <div className="rounded-md border border-border p-3"><div className="text-xs text-muted-foreground">Lost</div><div className="text-2xl font-semibold tabular-nums">{wl.lost}</div></div>
-              <div className="rounded-md border border-border p-3"><div className="text-xs text-muted-foreground">Win rate</div><div className="text-2xl font-semibold tabular-nums">{wl.winRatePercent === null ? "n/a" : `${wl.winRatePercent}%`}</div></div>
+              <div className="rounded-md border border-border p-3"><div className="text-sm text-muted-foreground">Won</div><div className="text-2xl font-semibold tabular-nums">{wl.won}</div></div>
+              <div className="rounded-md border border-border p-3"><div className="text-sm text-muted-foreground">Lost</div><div className="text-2xl font-semibold tabular-nums">{wl.lost}</div></div>
+              <div className="rounded-md border border-border p-3"><div className="text-sm text-muted-foreground">Win rate</div><div className="text-2xl font-semibold tabular-nums">{wl.winRatePercent === null ? "n/a" : `${wl.winRatePercent}%`}</div></div>
             </div>
-            {wl.winRatePercent === null ? <p className="mt-2 text-xs text-muted-foreground">No opportunities were closed in this period, so there is no win rate.</p> : <p className="mt-2 text-xs text-muted-foreground">Win rate is won as a share of won plus lost. Small numbers move it a lot.</p>}
-            {reopened.total > 0 ? <p className="mt-2 text-xs text-muted-foreground">{reopened.total} closure{reopened.total === 1 ? "" : "s"} in this period ({reopened.won} won, {reopened.lost} lost) {reopened.total === 1 ? "was" : "were"} later reopened. They are open again, so they are not counted above; each closure stays in that opportunity&apos;s history.</p> : null}
-            {wl.wonWithoutEvidence > 0 ? <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">{wl.wonWithoutEvidence} won with no evidence recorded, not counted as won.</p> : null}
+            {wl.winRatePercent === null ? <p className="mt-2 text-sm text-muted-foreground">No opportunities were closed in this period, so there is no win rate.</p> : <p className="mt-2 text-sm text-muted-foreground">Win rate is won as a share of won plus lost. Small numbers move it a lot.</p>}
+            {reopened.total > 0 ? <p className="mt-2 text-sm text-muted-foreground">{reopened.total} closure{reopened.total === 1 ? "" : "s"} in this period ({reopened.won} won, {reopened.lost} lost) {reopened.total === 1 ? "was" : "were"} later reopened. They are open again, so they are not counted above; each closure stays in that opportunity&apos;s history.</p> : null}
+            {wl.wonWithoutEvidence > 0 ? <p className="mt-2 text-sm text-amber-800 dark:text-amber-300">{wl.wonWithoutEvidence} won with no evidence recorded, not counted as won.</p> : null}
           </ReportCard>
 
           <ReportCard title="Lost reasons" note={`n = ${wl.lost} lost opportunities`}>
@@ -274,7 +276,7 @@ function ReportCard({ title, description, note, className, children }: { title: 
       </CardHeader>
       <CardContent>
         {children}
-        {note ? <p className="mt-3 text-xs text-muted-foreground">{note}</p> : null}
+        {note ? <p className="mt-3 text-sm text-muted-foreground">{note}</p> : null}
       </CardContent>
     </Card>
   );
@@ -309,7 +311,7 @@ function WonRow({ row, title }: { row: WonValueRow; title: OpportunityListItem |
     <TableRow className="align-top">
       <TableHead scope="row" className="h-auto p-4 align-top text-sm font-normal normal-case tracking-normal text-foreground">
         <Link href={`/sales/opportunities/${opp.id}`} className="underline-offset-2 hover:underline">{title?.opp.title ?? opp.id}</Link>
-        <div className="font-mono text-xs text-muted-foreground">{title?.opp.reference}</div>
+        <div className="font-mono text-sm text-muted-foreground">{title?.opp.reference}</div>
       </TableHead>
       <TableCell className="whitespace-nowrap text-right tabular-nums">{formatMoney(opp.value, opp.currency)}</TableCell>
       <TableCell>{zoho?.invoice_ref || zoho?.invoice_issued_on ? [zoho.invoice_ref, zoho.invoice_issued_on ? formatDate(zoho.invoice_issued_on) : null].filter(Boolean).join(", ") : <span className="text-muted-foreground">Not recorded</span>}</TableCell>

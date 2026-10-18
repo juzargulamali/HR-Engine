@@ -9,6 +9,8 @@ import { Alert } from "@/components/ui/alert";
 import { NewPayrollRunForm } from "./new-payroll-run-form";
 import { EmptyState } from "@/components/ui/empty-state";
 
+export const metadata = { title: "Payroll" };
+
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   draft: "outline",
   submitted: "secondary",

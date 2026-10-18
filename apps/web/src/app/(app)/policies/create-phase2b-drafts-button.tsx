@@ -47,7 +47,7 @@ export function CreatePhase2bDraftsButton({ allCreated }: { allCreated: boolean 
       </Button>
       {error ? <Alert variant="destructive">{error}</Alert> : null}
       {results && results.length > 0 ? (
-        <ul className="rounded-md border border-border p-2 text-xs text-muted-foreground">
+        <ul className="rounded-md border border-border p-2 text-sm text-muted-foreground">
           {results.map((r) => (
             <li key={`${r.countryCode}-${r.policyType}`}>
               {r.countryCode} {r.policyType}: {r.action}

@@ -8,6 +8,8 @@ import { DeleteDraftClaimButton } from "./delete-draft-claim-button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
 
+export const metadata = { title: "Reimbursements" };
+
 export default async function ReimbursementsPage() {
   const session = await getCurrentSession();
   if (!session) return null;
@@ -83,7 +85,7 @@ export default async function ReimbursementsPage() {
                   <TableCell>
                     <div className="space-y-0.5">
                       <StatusBadge status={c.status} />
-                      <p className="text-xs text-muted-foreground">{statusNextAction(c.status)}</p>
+                      <p className="text-sm text-muted-foreground">{statusNextAction(c.status)}</p>
                     </div>
                   </TableCell>
                   <TableCell>{c.status === "draft" ? <DeleteDraftClaimButton claimId={c.id} /> : null}</TableCell>

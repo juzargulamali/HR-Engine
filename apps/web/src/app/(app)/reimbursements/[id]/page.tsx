@@ -10,6 +10,8 @@ import { ClaimActions } from "./claim-actions";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
 
+export const metadata = { title: "Reimbursement" };
+
 export default async function ClaimDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await getCurrentSession();
@@ -55,7 +57,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
         </div>
         <div className="space-y-0.5 text-right">
           <StatusBadge status={claim.status} />
-          <p className="text-xs text-muted-foreground">{statusNextAction(claim.status)}</p>
+          <p className="text-sm text-muted-foreground">{statusNextAction(claim.status)}</p>
         </div>
       </div>
 

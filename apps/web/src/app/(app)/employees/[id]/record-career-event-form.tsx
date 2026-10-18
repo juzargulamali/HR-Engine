@@ -30,7 +30,7 @@ export function RecordCareerEventForm({
     <form action={formAction} className="space-y-3 border-t border-border pt-4">
       <input type="hidden" name="employeeId" value={employeeId} />
       <p className="text-sm font-medium">Record a promotion, title change, or salary change</p>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         Fill in whichever applies — a new title alone, a new salary alone, or both together for a promotion. Leave blank
         anything that isn&apos;t changing.
       </p>

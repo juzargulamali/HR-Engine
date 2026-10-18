@@ -75,11 +75,12 @@ export function CommandPalette({ groups }: { groups: NavGroupData[] }) {
       <button
         type="button"
         onClick={openPalette}
-        className="flex h-9 w-full items-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-muted-foreground transition-colors hover:border-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:max-w-xs"
+        aria-label="Search or jump to a page"
+        className="flex h-9 w-9 items-center justify-center gap-2 rounded-md border border-input bg-field text-sm text-muted-foreground transition-colors hover:border-accent/60 hover:text-foreground lg:w-full lg:max-w-sm lg:justify-start lg:px-3"
       >
         <Search className="h-4 w-4 flex-none" aria-hidden />
-        <span className="flex-1 truncate text-left">Search or jump to…</span>
-        <kbd className="hidden flex-none rounded border border-border bg-secondary px-1.5 py-0.5 text-[10px] font-medium sm:inline">⌘K</kbd>
+        <span className="hidden flex-1 truncate text-left lg:inline">Search or jump to…</span>
+        <kbd className="hidden flex-none rounded border border-border bg-secondary px-1.5 py-0.5 text-xs font-medium lg:inline">⌘K</kbd>
       </button>
 
       {/* Always mounted (never unmounted while closed) so the close
@@ -116,7 +117,7 @@ export function CommandPalette({ groups }: { groups: NavGroupData[] }) {
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               aria-label="Search navigation"
             />
-            <kbd className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">Esc</kbd>
+            <kbd className="rounded border border-border px-1.5 py-0.5 text-xs text-muted-foreground">Esc</kbd>
           </div>
           <div className="max-h-80 overflow-y-auto p-1.5">
             {results.length === 0 ? (
@@ -136,7 +137,7 @@ export function CommandPalette({ groups }: { groups: NavGroupData[] }) {
                     })()}
                     {l.label}
                   </span>
-                  <span className="text-xs text-muted-foreground">{l.group}</span>
+                  <span className="text-sm text-muted-foreground">{l.group}</span>
                 </button>
               ))
             )}

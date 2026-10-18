@@ -52,7 +52,7 @@ export function RestoreOrRemoveEmployeeButton({
             {permanentPending ? "Deleting…" : "Permanently delete"}
           </Button>
         </div>
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </div>
     );
   }
@@ -73,7 +73,7 @@ export function RestoreOrRemoveEmployeeButton({
       >
         {pending ? "Removing…" : "Remove"}
       </Button>
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

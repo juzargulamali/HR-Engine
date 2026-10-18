@@ -12,6 +12,8 @@ import { RecoveryWindowEvidence, type WindowEvidenceData } from "./recovery-wind
 import { getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { CLASSIFICATION_LABELS, ROUTE_LABELS, formatHoursMinutes } from "@/lib/recovery/labels";
 
+export const metadata = { title: "Approvals" };
+
 export default async function ApprovalsPage() {
   const session = await getCurrentSession();
   if (!session) return null;
@@ -440,7 +442,7 @@ export default async function ApprovalsPage() {
                       <TableCell>
                         <div className="space-y-0.5">
                           <StatusBadge status="pending_approval" />
-                          <p className="text-xs text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                          <p className="text-sm text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -478,7 +480,7 @@ export default async function ApprovalsPage() {
                   return (
                     <TableRow key={a.id}>
                       <TableCell>{employeeName(claim.employee_id)}</TableCell>
-                      <TableCell className="font-mono text-xs">
+                      <TableCell className="font-mono text-sm">
                         <Link href={`/reimbursements/${claim.id}`} className="hover:underline">
                           {claim.id.slice(0, 8)}…
                         </Link>
@@ -490,7 +492,7 @@ export default async function ApprovalsPage() {
                       <TableCell>
                         <div className="space-y-0.5">
                           <StatusBadge status="pending_approval" />
-                          <p className="text-xs text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                          <p className="text-sm text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -532,7 +534,7 @@ export default async function ApprovalsPage() {
                       <TableCell>
                         <div className="space-y-0.5">
                           <StatusBadge status="pending_approval" />
-                          <p className="text-xs text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                          <p className="text-sm text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -572,7 +574,7 @@ export default async function ApprovalsPage() {
                       <TableCell>
                         <div className="space-y-0.5">
                           <StatusBadge status="pending_approval" />
-                          <p className="text-xs text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                          <p className="text-sm text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -612,7 +614,7 @@ export default async function ApprovalsPage() {
                       <TableCell>
                         <div className="space-y-0.5">
                           <StatusBadge status="pending_approval" />
-                          <p className="text-xs text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                          <p className="text-sm text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -631,7 +633,7 @@ export default async function ApprovalsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Recovery Leave credits</CardTitle>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Routed per each request&apos;s own applicant tier (see the Route column) — a shared queue means ANY current holder of that
               step&apos;s role may decide it, not one assigned person.
             </p>
@@ -749,10 +751,10 @@ export default async function ApprovalsPage() {
                     <TableRow key={a.id}>
                       <TableCell>{employeeName(recoveryRequest.employee_id)}</TableCell>
                       <TableCell>{EVENT_TYPE_CELL[recoveryRequest.event_type] ?? recoveryRequest.event_type}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="text-sm text-muted-foreground">
                         {recoveryRequest.applicant_route ? APPLICANT_ROUTE_LABELS[recoveryRequest.applicant_route] ?? recoveryRequest.applicant_route : "Legacy HR queue"}
                       </TableCell>
-                      <TableCell className="max-w-md space-y-1 text-xs text-muted-foreground">
+                      <TableCell className="max-w-md space-y-1 text-sm text-muted-foreground">
                         {windowEvidence ? (
                           <RecoveryWindowEvidence data={windowEvidence} />
                         ) : isSelfClock ? (
@@ -800,7 +802,7 @@ export default async function ApprovalsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Unresolved recovery credit routing</CardTitle>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               These self-clock candidates could not be routed automatically — never discarded, never guessed. Resolve the missing detail to
               route them for approval.
             </p>
@@ -821,7 +823,7 @@ export default async function ApprovalsPage() {
                     <TableCell>{unresolvedEmployeeById.get(r.employee_id) ? `${unresolvedEmployeeById.get(r.employee_id)!.first_name} ${unresolvedEmployeeById.get(r.employee_id)!.last_name}` : "—"}</TableCell>
                     <TableCell>{r.work_date}</TableCell>
                     <TableCell>{Number(r.proposed_days)}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-sm text-muted-foreground">
                       {r.awaiting_project_lead
                         ? "Awaiting a project lead — the employee or HR can supply one from the employee's own Attendance Clock page."
                         : (r.routing_issue ?? "Unknown routing issue.")}

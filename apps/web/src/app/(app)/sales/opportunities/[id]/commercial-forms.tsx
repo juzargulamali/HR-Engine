@@ -31,7 +31,7 @@ export function ZohoForm({ opportunityId, values, currency }: { opportunityId: s
         <Field label="Payment received on" htmlFor="z-pdate"><Input id="z-pdate" name="paymentReceivedOn" type="date" defaultValue={values.paymentReceivedOn ?? ""} /></Field>
         <Field label={`Amount paid (${currency})`} htmlFor="z-paid"><Input id="z-paid" name="paidAmount" type="number" min={0} step="0.01" inputMode="decimal" defaultValue={values.paidAmount ?? ""} /></Field>
       </div>
-      <p className="text-xs text-muted-foreground">Entered by hand from Zoho Books. A quote sent, an invoice issued and a payment received are three separate facts.</p>
+      <p className="text-sm text-muted-foreground">Entered by hand from Zoho Books. A quote sent, an invoice issued and a payment received are three separate facts.</p>
     </ActionForm>
   );
 }

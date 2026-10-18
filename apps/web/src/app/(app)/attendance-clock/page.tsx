@@ -10,6 +10,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ClockControls } from "./clock-controls";
 import { ResolveProjectLeadForm } from "./resolve-project-lead-form";
 
+export const metadata = { title: "Attendance clock" };
+
 const WORK_MODE_LABELS: Record<string, string> = {
   office: "Office",
   wfh: "Work from home",
@@ -222,7 +224,7 @@ export default async function AttendanceClockPage() {
                   <TableRow key={s.id}>
                     <TableCell>{formatDateTimeInZone(s.clock_in_at, timeZone)}</TableCell>
                     <TableCell>{s.clock_out_at ? formatDateTimeInZone(s.clock_out_at, timeZone) : "—"}</TableCell>
-                    <TableCell className="max-w-sm text-xs text-muted-foreground">
+                    <TableCell className="max-w-sm text-sm text-muted-foreground">
                       {(segmentsBySession.get(s.id) ?? [])
                         .map((seg) => {
                           const label = WORK_MODE_LABELS[seg.work_mode] ?? seg.work_mode;
@@ -246,7 +248,7 @@ export default async function AttendanceClockPage() {
               </TableBody>
             </Table>
           )}
-          <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <p className="mt-3 flex items-center gap-1.5 text-sm text-muted-foreground">
             <MapPin className="h-3.5 w-3.5" aria-hidden />
             Location is only ever captured at a Site work / Installation clock-in or clock-out — never continuously, and never for any other
             work mode.

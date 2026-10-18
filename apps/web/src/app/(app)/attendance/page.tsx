@@ -17,6 +17,8 @@ import { workModeLabel } from "@/lib/recovery/labels";
 import { RegisterTable } from "./register-table";
 import type { Colleague, RegisterDetail, RegisterRowView, SessionDetail, WindowDetail } from "./register-types";
 
+export const metadata = { title: "Attendance" };
+
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   not_recorded: "outline",
   present: "default",
@@ -437,7 +439,7 @@ export default async function AttendancePage({
               ) : (
                 <p className="text-muted-foreground">No active employees in this company yet.</p>
               )}
-              <p className="mt-3 text-xs text-muted-foreground">
+              <p className="mt-3 text-sm text-muted-foreground">
                 Recorded hours count clocked-in time only (lunch while clocked in counts; clocked-out gaps never do). While someone is still clocked
                 in the figure is provisional and no verdict is shown.{" "}
                 <Link href={`/attendance?${hrLinkParams.toString()}&manual=1`} className="underline">
@@ -472,7 +474,7 @@ export default async function AttendancePage({
               )}
             </Alert>
             <BulkAttendanceForm workDate={workDate} rows={manualRows} isRecoveryDay={isRecoveryDay} />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               <Link href={`/attendance?${hrLinkParams.toString()}`} className="underline">
                 Back to the automatic register
               </Link>
@@ -505,7 +507,7 @@ function SummaryTile({ label, value, hint }: { label: string; value: number; hin
         <p className="text-3xl font-semibold" data-testid={`tile-${label.toLowerCase().replace(/[^a-z]+/g, "-")}`}>
           {value}
         </p>
-        <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{hint}</p>
       </CardContent>
     </Card>
   );

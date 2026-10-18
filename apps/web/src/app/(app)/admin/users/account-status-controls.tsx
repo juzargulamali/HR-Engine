@@ -58,7 +58,7 @@ export function AccountStatusControls({
   const [checkError, setCheckError] = useState<string | null>(null);
 
   if (isSelf) {
-    return <p className="text-xs text-muted-foreground">You can&apos;t change your own account status.</p>;
+    return <p className="text-sm text-muted-foreground">You can&apos;t change your own account status.</p>;
   }
 
   return (
@@ -104,7 +104,7 @@ export function AccountStatusControls({
           {pending ? "Deactivating…" : "Deactivate"}
         </Button>
       )}
-      {error ? <p className="max-w-[220px] text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="max-w-[220px] text-sm text-destructive">{error}</p> : null}
 
       {status !== "invited" ? (
         <div className="space-y-1">
@@ -121,7 +121,7 @@ export function AccountStatusControls({
           >
             {resetPending ? "Sending…" : "Send password reset"}
           </Button>
-          {resetError ? <p className="max-w-[220px] text-xs text-destructive">{resetError}</p> : null}
+          {resetError ? <p className="max-w-[220px] text-sm text-destructive">{resetError}</p> : null}
         </div>
       ) : null}
 
@@ -141,9 +141,9 @@ export function AccountStatusControls({
         >
           {checkPending ? "Checking…" : "Check status"}
         </Button>
-        {checkError ? <p className="max-w-[220px] text-xs text-destructive">{checkError}</p> : null}
+        {checkError ? <p className="max-w-[220px] text-sm text-destructive">{checkError}</p> : null}
         {checkResult ? (
-          <p className={`max-w-[220px] text-xs ${checkResult.consistent ? "text-muted-foreground" : "text-destructive"}`}>
+          <p className={`max-w-[220px] text-sm ${checkResult.consistent ? "text-muted-foreground" : "text-destructive"}`}>
             {checkResult.detail}
           </p>
         ) : null}

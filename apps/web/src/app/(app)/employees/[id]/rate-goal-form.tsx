@@ -14,7 +14,7 @@ export function RateGoalForm({ goalId, managerRating }: { goalId: string; manage
   return (
     <form action={formAction} className="flex items-center gap-2">
       <input type="hidden" name="goalId" value={goalId} />
-      <Select name="managerRating" defaultValue={managerRating?.toString() ?? ""} className="h-8 w-20 text-xs">
+      <Select name="managerRating" defaultValue={managerRating?.toString() ?? ""} className="h-8 w-20 text-sm">
         <option value="" disabled>
           Rate
         </option>
@@ -27,7 +27,7 @@ export function RateGoalForm({ goalId, managerRating }: { goalId: string; manage
       <Button type="submit" size="sm" variant="outline" disabled={pending}>
         {pending ? "Saving…" : "Save"}
       </Button>
-      {state.error ? <p className="text-xs text-destructive">{state.error}</p> : null}
+      {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
     </form>
   );
 }

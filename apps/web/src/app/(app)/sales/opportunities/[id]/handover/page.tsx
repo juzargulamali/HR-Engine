@@ -15,6 +15,8 @@ import { Fact, Muted, Panel } from "../parts";
 import { buildOppView } from "../view";
 import { HandoverForm } from "./handover-form";
 
+export const metadata = { title: "Handover" };
+
 export default async function HandoverPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const ctx = await getCrmContext();
@@ -52,7 +54,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
                 <Fact label="Project Manager">{kept.pm_user_id ? (keptPm && keptPm !== "Unknown" ? keptPm : "Chosen (name not available to you)") : "Not chosen"}</Fact>
                 <Fact label="Notes">{kept.notes ?? "None"}</Fact>
               </dl>
-              <p className="mt-3 text-xs text-muted-foreground">This is only the record of who and what was chosen. The rest of the package is built from the opportunity when it is Won again.</p>
+              <p className="mt-3 text-sm text-muted-foreground">This is only the record of who and what was chosen. The rest of the package is built from the opportunity when it is Won again.</p>
             </Panel>
           </>
         ) : (
@@ -106,7 +108,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
             {s.done ? <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none text-success" aria-hidden /> : <Circle className="mt-0.5 h-4 w-4 flex-none text-muted-foreground" aria-hidden />}
             <div className="min-w-0">
               <p className="text-sm font-medium">{s.label} <span className="font-normal text-muted-foreground">· {s.done ? "Done" : "Not yet"}</span></p>
-              <p className="break-words text-xs text-muted-foreground">{s.detail}</p>
+              <p className="break-words text-sm text-muted-foreground">{s.detail}</p>
             </div>
           </li>
         ))}
@@ -132,22 +134,22 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
             <Fact label="Notes">{handover?.notes ?? "None"}</Fact>
           </dl>
         )}
-        {!canEdit ? <p className="mt-3 text-xs text-muted-foreground">Only the owner ({view.ownerName}) or a founder can change this.</p> : null}
+        {!canEdit ? <p className="mt-3 text-sm text-muted-foreground">Only the owner ({view.ownerName}) or a founder can change this.</p> : null}
       </Panel>
 
       <div className="grid gap-6 md:grid-cols-2">
         <Panel title="Accepted scope">
           {pkg.scope ? <p className="whitespace-pre-wrap break-words text-sm">{pkg.scope}</p> : <Muted>Not written down.</Muted>}
-          <h3 className="mb-1 mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Exclusions</h3>
+          <h3 className="mb-1 mt-4 text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">Exclusions</h3>
           {pkg.exclusions ? <p className="whitespace-pre-wrap break-words text-sm">{pkg.exclusions}</p> : <Muted>None recorded.</Muted>}
         </Panel>
         <Panel title="Accepted proposal">
           {pkg.acceptedProposal ? (
             <div className="space-y-1 text-sm">
               <p className="font-medium">Version {pkg.acceptedProposal.version} <Badge variant="success">Accepted</Badge></p>
-              {pkg.acceptedProposal.sent_on ? <p className="text-xs text-muted-foreground">Sent {formatDate(pkg.acceptedProposal.sent_on)}</p> : null}
+              {pkg.acceptedProposal.sent_on ? <p className="text-sm text-muted-foreground">Sent {formatDate(pkg.acceptedProposal.sent_on)}</p> : null}
               {pkg.acceptedProposal.note ? <p className="break-words">{pkg.acceptedProposal.note}</p> : null}
-              <p className="break-words text-xs text-muted-foreground">{pkg.acceptedProposalFile ? `Document: ${fileDisplayName(pkg.acceptedProposalFile)}` : "No document linked to this version."}</p>
+              <p className="break-words text-sm text-muted-foreground">{pkg.acceptedProposalFile ? `Document: ${fileDisplayName(pkg.acceptedProposalFile)}` : "No document linked to this version."}</p>
             </div>
           ) : (
             <Muted>No proposal is recorded as accepted.{latestSent ? ` The latest sent is version ${latestSent.version} (${formatDate(latestSent.sent_on)}); it was not recorded as accepted.` : ""}</Muted>
@@ -156,10 +158,10 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
         <Panel title="Confirmation of the win">
           <div className="space-y-1 text-sm">
             <p className="font-medium">{pkg.evidenceLabel ?? "Evidence"}: {pkg.evidenceReference}</p>
-            <p className="text-xs text-muted-foreground">Dated {formatDate(pkg.evidenceDate)}</p>
+            <p className="text-sm text-muted-foreground">Dated {formatDate(pkg.evidenceDate)}</p>
             {pkg.evidenceFiles.length > 0 ? (
               <ul className="mt-2 list-disc space-y-0.5 pl-5">{pkg.evidenceFiles.map((f) => <li key={f.id} className="break-words">{fileDisplayName(f)}</li>)}</ul>
-            ) : <p className="text-xs text-muted-foreground">No document attached under Files.</p>}
+            ) : <p className="text-sm text-muted-foreground">No document attached under Files.</p>}
           </div>
         </Panel>
         <Panel title="Promised technologies">
@@ -168,8 +170,8 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
           )}
           <div className="mt-3 space-y-1 border-t border-border/70 pt-3">
             <AvailabilityBadge state={detail.item.availability} />
-            {opp.availability_by ? <p className="text-xs text-muted-foreground">Checked by {ctx.personName(opp.availability_by)} on {formatDateTime(opp.availability_at)}. {opp.availability_notes ?? ""}</p> : <p className="text-xs text-muted-foreground">No availability check is recorded.</p>}
-            <p className="text-xs text-muted-foreground">A dated check, not a reservation.</p>
+            {opp.availability_by ? <p className="text-sm text-muted-foreground">Checked by {ctx.personName(opp.availability_by)} on {formatDateTime(opp.availability_at)}. {opp.availability_notes ?? ""}</p> : <p className="text-sm text-muted-foreground">No availability check is recorded.</p>}
+            <p className="text-sm text-muted-foreground">A dated check, not a reservation.</p>
           </div>
         </Panel>
         <Panel title="Dates and place">
@@ -193,7 +195,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
           {opp.risks.length === 0 ? <Muted>None recorded.</Muted> : <ul className="list-disc space-y-1 pl-5 text-sm">{opp.risks.map((r, i) => <li key={`${i}-${r}`} className="break-words">{r}</li>)}</ul>}
         </Panel>
       </div>
-      <p className="text-xs text-muted-foreground">Won {formatDate(opp.closed_at)}. To correct something in this package, change it on the opportunity; this page always shows the current facts.</p>
+      <p className="text-sm text-muted-foreground">Won {formatDate(opp.closed_at)}. To correct something in this package, change it on the opportunity; this page always shows the current facts.</p>
     </div>
   );
 }

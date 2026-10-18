@@ -56,7 +56,7 @@ export function NewEmployeeForm({
             ))}
           </Select>
           <input type="hidden" name="countryCode" value={selectedCompany?.country_code ?? ""} />
-          <p className="text-xs text-muted-foreground">Set by the company&apos;s registered country.</p>
+          <p className="text-sm text-muted-foreground">Set by the company&apos;s registered country.</p>
         </div>
       </div>
 
@@ -90,7 +90,7 @@ export function NewEmployeeForm({
         <div className="space-y-1.5">
           <Label htmlFor="dateOfBirth">Date of birth</Label>
           <Input id="dateOfBirth" name="dateOfBirth" type="date" />
-          <p className="text-xs text-muted-foreground">Optional, but needed for their birthday to show up on the dashboard.</p>
+          <p className="text-sm text-muted-foreground">Optional, but needed for their birthday to show up on the dashboard.</p>
         </div>
       </div>
 
@@ -161,14 +161,14 @@ export function NewEmployeeForm({
         <p className="text-sm text-muted-foreground">
           Total: <span className="font-medium text-foreground">{totalSalary.toFixed(2)}</span>
         </p>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           This breakdown (Basic / Others / Total) is what an end-of-service settlement calculates from later.
         </p>
       </fieldset>
 
       <fieldset className="space-y-4 rounded-md border border-border p-4">
         <legend className="px-1 text-sm font-medium">Opening balances (optional)</legend>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           For a mid-year hire or a transfer who already has leave or comp days earned elsewhere — leave blank for a fresh start
           with nothing carried over.
         </p>

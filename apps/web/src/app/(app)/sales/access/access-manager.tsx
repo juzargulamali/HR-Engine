@@ -60,7 +60,7 @@ function CapabilityChecklist({
   return (
     <fieldset className="space-y-2">
       <legend className="text-sm font-medium">Extra capabilities</legend>
-      <p className="text-xs text-muted-foreground">Without any of these, a person can still see Sales for this company and work on their own opportunities and follow-ups.</p>
+      <p className="text-sm text-muted-foreground">Without any of these, a person can still see Sales for this company and work on their own opportunities and follow-ups.</p>
       <ul className="space-y-2">
         {allowedCapabilities(isFounder).map((cap) => {
           const locked = lockFounder && cap === "founder";
@@ -70,14 +70,14 @@ function CapabilityChecklist({
                 <input type="checkbox" className="mt-0.5" checked={selected.has(cap)} disabled={locked} onChange={(e) => onToggle(cap, e.target.checked)} id={`${idPrefix}-${cap}`} />
                 <span className="min-w-0">
                   <span className="font-medium">{CRM_CAPABILITY_LABELS[cap].label}</span>
-                  <span className="block text-xs text-muted-foreground">{CRM_CAPABILITY_LABELS[cap].description}{locked ? " This is the company's only founder, so founder rights cannot be removed." : ""}</span>
+                  <span className="block text-sm text-muted-foreground">{CRM_CAPABILITY_LABELS[cap].description}{locked ? " This is the company's only founder, so founder rights cannot be removed." : ""}</span>
                 </span>
               </label>
             </li>
           );
         })}
       </ul>
-      {!isFounder ? <p className="text-xs text-muted-foreground">Founder and access-management rights can only be given by a founder.</p> : null}
+      {!isFounder ? <p className="text-sm text-muted-foreground">Founder and access-management rights can only be given by a founder.</p> : null}
     </fieldset>
   );
 }
@@ -288,12 +288,12 @@ function CompanyAccess({ company, grants, currentUserId, showEmails }: { company
                 <li key={g.userId} className="space-y-2 px-4 py-3">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="break-words font-medium">{g.name}{self ? <span className="ml-2 text-xs font-normal text-muted-foreground">(you)</span> : null}</p>
-                      {showEmails && g.email ? <p className="break-all text-xs text-muted-foreground">{g.email}</p> : null}
+                      <p className="break-words font-medium">{g.name}{self ? <span className="ml-2 text-sm font-normal text-muted-foreground">(you)</span> : null}</p>
+                      {showEmails && g.email ? <p className="break-all text-sm text-muted-foreground">{g.email}</p> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-1">
                       {locked ? (
-                        <span className="text-xs text-muted-foreground">Only a founder can change this</span>
+                        <span className="text-sm text-muted-foreground">Only a founder can change this</span>
                       ) : (
                         <>
                           <ChangeAccessButton grant={g} company={company} founderCount={founderCount} />
@@ -303,7 +303,7 @@ function CompanyAccess({ company, grants, currentUserId, showEmails }: { company
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-1.5"><CapabilityBadges capabilities={g.capabilities} /></div>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-sm text-muted-foreground">
                     Access given {formatDate(g.grantedAt)}{g.grantedByName ? ` by ${g.grantedByName}` : ""}{g.note ? ` · ${g.note}` : ""}
                   </p>
                 </li>

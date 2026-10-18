@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
 import { LeaveRequestForm } from "./leave-request-form";
 
+export const metadata = { title: "Request leave" };
+
 export default async function NewLeaveRequestPage() {
   const session = await getCurrentSession();
   if (!session) return null;

@@ -31,7 +31,7 @@ export function NewPayrollRunForm({ companyId }: { companyId: string }) {
       <Button type="submit" disabled={pending}>
         {pending ? "Generating…" : "Generate lines"}
       </Button>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         Aggregates approved reimbursements and leave encashments for the period. You&apos;ll review the lines before
         submitting for approval.
       </p>

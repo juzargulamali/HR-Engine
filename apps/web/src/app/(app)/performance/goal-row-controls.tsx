@@ -26,12 +26,12 @@ export function GoalRowControls({
     <div className="flex flex-wrap items-center gap-2">
       <form action={formAction} className="flex items-center gap-2">
         <input type="hidden" name="goalId" value={goalId} />
-        <Select name="status" defaultValue={status} className="h-8 w-32 text-xs">
+        <Select name="status" defaultValue={status} className="h-8 w-32 text-sm">
           <option value="in_progress">In progress</option>
           <option value="achieved">Achieved</option>
           <option value="missed">Missed</option>
         </Select>
-        <Select name="selfRating" defaultValue={selfRating?.toString() ?? ""} className="h-8 w-20 text-xs">
+        <Select name="selfRating" defaultValue={selfRating?.toString() ?? ""} className="h-8 w-20 text-sm">
           <option value="">Rate</option>
           {[1, 2, 3, 4, 5].map((n) => (
             <option key={n} value={n}>
@@ -57,8 +57,8 @@ export function GoalRowControls({
       >
         {deletePending ? "Removing…" : "Remove"}
       </Button>
-      {state.error ? <p className="w-full text-xs text-destructive">{state.error}</p> : null}
-      {deleteError ? <p className="w-full text-xs text-destructive">{deleteError}</p> : null}
+      {state.error ? <p className="w-full text-sm text-destructive">{state.error}</p> : null}
+      {deleteError ? <p className="w-full text-sm text-destructive">{deleteError}</p> : null}
     </div>
   );
 }

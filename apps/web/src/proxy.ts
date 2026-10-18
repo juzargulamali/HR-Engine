@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { configurationErrorPage, missingSettings } from "@/lib/config-check";
 
 // /set-password and /reset-password must stay public: they're where an
 // invite/recovery email lands before the recipient has any session cookie
@@ -15,6 +16,18 @@ import { NextResponse, type NextRequest } from "next/server";
 const PUBLIC_PATHS = ["/login", "/set-password", "/forgot-password", "/reset-password", "/api/cron/crm-reminders"];
 
 export async function proxy(request: NextRequest) {
+  // An environment without the Supabase settings (for example a Preview whose variables are not enabled) cannot authenticate
+  // anyone. Say so, naming the settings (never their values), instead of crashing every request with a bare 500. This denies
+  // access exactly as the crash did; it does not skip the sign-in check.
+  const missing = missingSettings({
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  });
+  if (missing.length > 0) {
+    console.error(`[config] ${request.nextUrl.pathname}: refusing to serve because these settings are missing in this environment: ${missing.join(", ")}`);
+    return new NextResponse(configurationErrorPage(missing), { status: 503, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-robots-tag": "noindex" } });
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(

@@ -41,7 +41,7 @@ export function OvernightRecoveryForm({ employeeId }: { employeeId: string }) {
           </label>
         </div>
       </div>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         Attendance for this day must already be recorded. Up to and including 4 active hours after midnight credits 0.5
         day; more than 4 credits 1 day — pending Line Manager then HR Admin approval.
       </p>

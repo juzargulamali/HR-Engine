@@ -13,6 +13,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
 import type { RequestStatus } from "@/types/database.types";
 
+export const metadata = { title: "Leave" };
+
 const STATUS_VALUES: RequestStatus[] = ["submitted", "pending_approval", "approved", "rejected", "cancelled"];
 
 export default async function LeavePage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
@@ -133,7 +135,7 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
                   <TableCell>
                     <div className="space-y-0.5">
                       <StatusBadge status={r.status} />
-                      <p className="text-xs text-muted-foreground">{statusNextAction(r.status)}</p>
+                      <p className="text-sm text-muted-foreground">{statusNextAction(r.status)}</p>
                     </div>
                   </TableCell>
                   <TableCell>

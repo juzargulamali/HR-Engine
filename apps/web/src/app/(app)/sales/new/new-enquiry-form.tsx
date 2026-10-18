@@ -98,8 +98,8 @@ function OrganisationPicker({
         {preferred.length > 0 ? <optgroup label={preferredKinds.map((k) => ORGANISATION_KIND_LABEL[k]).join(" / ")}>{preferred.map(option)}</optgroup> : null}
         {others.length > 0 ? <optgroup label="Other organisations">{others.map(option)}</optgroup> : null}
       </Select>
-      {needle !== "" && matching.length === 0 ? <p className="text-xs text-muted-foreground">Nothing matches “{search.trim()}”. Add it as a new organisation below.</p> : null}
-      <p className="text-xs text-muted-foreground">{hint}</p>
+      {needle !== "" && matching.length === 0 ? <p className="text-sm text-muted-foreground">Nothing matches “{search.trim()}”. Add it as a new organisation below.</p> : null}
+      <p className="text-sm text-muted-foreground">{hint}</p>
       <Button type="button" size="sm" variant="ghost" onClick={onAdd}><Plus className="h-4 w-4" aria-hidden /> Add organisation</Button>
     </div>
   );
@@ -121,7 +121,7 @@ function DuplicateWarning({ matches, onDismiss }: { matches: DuplicateMatch[]; o
                 <Link href={`/sales/opportunities/${m.candidate.id}`} target="_blank" rel="noopener noreferrer" className="break-words font-medium underline-offset-2 hover:underline">
                   {m.candidate.reference} · {m.candidate.title ?? "Untitled enquiry"}<span className="sr-only"> (opens in a new tab)</span>
                 </Link>
-                <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <p className="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                   <Badge variant="outline" className="whitespace-nowrap">{m.level === "likely" ? "Likely the same" : "Possibly the same"}</Badge>
                   <span>Stage: {crmStageLabel(m.candidate.stage)}</span>
                 </p>
@@ -131,7 +131,7 @@ function DuplicateWarning({ matches, onDismiss }: { matches: DuplicateMatch[]; o
               </Button>
             </div>
             {m.reasons.length > 0 ? (
-              <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
+              <ul className="mt-2 list-disc space-y-0.5 pl-5 text-sm text-muted-foreground">
                 {m.reasons.map((r) => <li key={r}>{r}</li>)}
               </ul>
             ) : null}
@@ -316,7 +316,7 @@ export function NewEnquiryForm({
                           <input type="checkbox" name="contactIds" value={c.id} checked={checkedContacts.has(c.id)} onChange={(e) => toggleContact(c.id, e.target.checked)} className="mt-0.5" />
                           <span className="min-w-0 break-words">
                             <span className="font-medium">{c.name}</span>
-                            <span className="block text-xs text-muted-foreground">{[c.roleTitle, org?.name].filter(Boolean).join(" · ")}</span>
+                            <span className="block text-sm text-muted-foreground">{[c.roleTitle, org?.name].filter(Boolean).join(" · ")}</span>
                           </span>
                         </label>
                       </li>
@@ -327,7 +327,7 @@ export function NewEnquiryForm({
               <Button type="button" size="sm" variant="ghost" disabled={selectedOrgs.length === 0} onClick={() => setContactDialog(true)}>
                 <Plus className="h-4 w-4" aria-hidden /> Add contact
               </Button>
-              {selectedOrgs.length === 0 ? <p className="text-xs text-muted-foreground">Choose an agency or end client first, then add contacts to it.</p> : null}
+              {selectedOrgs.length === 0 ? <p className="text-sm text-muted-foreground">Choose an agency or end client first, then add contacts to it.</p> : null}
             </fieldset>
           </Section>
 
@@ -389,7 +389,7 @@ export function NewEnquiryForm({
                   </li>
                 ))}
               </ul>
-              {tech.error ? <p role="alert" className="text-xs text-destructive">{tech.error}</p> : null}
+              {tech.error ? <p role="alert" className="text-sm text-destructive">{tech.error}</p> : null}
               <Button type="button" size="sm" variant="ghost" onClick={() => setTechRows((rows) => [...rows, emptyTechRow()])}><Plus className="h-4 w-4" aria-hidden /> Add technology</Button>
             </fieldset>
 

@@ -38,13 +38,13 @@ export function EditPayrollLineForm({ lineId, runId, currentAmount }: { lineId: 
         min="0.01"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        className="h-8 w-28 text-xs"
+        className="h-8 w-28 text-sm"
         aria-label="Amount"
       />
       <Button type="submit" size="sm" variant="outline" disabled={pending}>
         {pending ? "Saving…" : "Save"}
       </Button>
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </form>
   );
 }

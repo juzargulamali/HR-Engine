@@ -7,8 +7,8 @@ const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope" });
 const sora = Sora({ subsets: ["latin"], variable: "--font-sora" });
 
 export const metadata: Metadata = {
-  title: "Enginious HR Engine",
-  description: "HR management for Enginious LLC FZ — driven by innovation.",
+  title: { default: "ENGINIOUS OS", template: "%s · ENGINIOUS OS" },
+  description: "ENGINIOUS OS — Enginious's internal operations platform: people, attendance, leave and Sales & CRM.",
 };
 
 // Runs before paint, straight from the server-rendered <head> — the only
@@ -24,7 +24,7 @@ try {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>

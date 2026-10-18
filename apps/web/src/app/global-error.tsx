@@ -21,7 +21,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
     <html lang="en">
       <body style={{ margin: 0, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", background: "#0a1414", color: "#eef5f4" }}>
         <div style={{ textAlign: "center", maxWidth: 360, padding: 24 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px" }}>Enginious HR Engine couldn&apos;t load</h1>
+          <h1 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px" }}>ENGINIOUS OS couldn&apos;t load</h1>
           <p style={{ fontSize: 14, color: "#9fb3b0", margin: "0 0 16px" }}>
             Something went wrong. Your data is safe — try again, and if it keeps happening, share the reference below with support.
           </p>

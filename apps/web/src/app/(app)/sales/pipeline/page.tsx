@@ -11,6 +11,8 @@ import { loadOpportunities, type OpportunityListItem } from "@/lib/crm/data";
 import { openPipelineByStage, organisationLabel } from "@/lib/crm/reports";
 import { CurrencyTotals } from "../currency-totals";
 
+export const metadata = { title: "Pipeline" };
+
 type Params = Record<string, string | string[] | undefined>;
 
 export default async function PipelinePage({ searchParams }: { searchParams: Promise<Params> }) {
@@ -74,22 +76,22 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
                         {crmStageLabel(stage)}
                         <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-medium tabular-nums" aria-label={`${cards.length} opportunities`}>{cards.length}</span>
                       </h2>
-                      <div className="mt-0.5 min-h-4 text-xs text-muted-foreground">
+                      <div className="mt-0.5 min-h-4 text-sm text-muted-foreground">
                         <CurrencyTotals totals={s?.totals ?? {}} unvalued={s?.unvalued ?? 0} emptyText="No value yet" />
                       </div>
                     </header>
                     {cards.length === 0 ? (
-                      <p className="rounded-md border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">Nothing in this stage</p>
+                      <p className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">Nothing in this stage</p>
                     ) : (
                       <ul className="space-y-2.5">
                         {cards.map((i) => (
                           <li key={i.opp.id} className="rounded-lg border border-border bg-card p-3 shadow-sm">
                             <Link href={`/sales/opportunities/${i.opp.id}`} className="break-words text-sm font-medium leading-snug underline-offset-2 hover:underline">{i.opp.title}</Link>
-                            <p className="mt-0.5 break-words text-xs text-muted-foreground">{organisationLabel(i)}</p>
+                            <p className="mt-0.5 break-words text-sm text-muted-foreground">{organisationLabel(i)}</p>
                             <p className="mt-2 text-sm font-medium tabular-nums">{formatMoney(i.value, i.opp.currency)}</p>
-                            <p className="text-xs text-muted-foreground">{i.opp.reference} · Owner {i.ownerName}{!company && ctx.companies.length > 1 ? ` · ${i.companyName}` : ""}</p>
-                            <div className="mt-2 space-y-1 text-xs">
-                              <div>{i.nextFollowUp ? <><span className="text-muted-foreground">Next: </span><DueText dueAt={i.nextFollowUp.due_at} /></> : <span className="font-medium text-amber-700 dark:text-amber-300">No next action planned</span>}</div>
+                            <p className="text-sm text-muted-foreground">{i.opp.reference} · Owner {i.ownerName}{!company && ctx.companies.length > 1 ? ` · ${i.companyName}` : ""}</p>
+                            <div className="mt-2 space-y-1 text-sm">
+                              <div>{i.nextFollowUp ? <><span className="text-muted-foreground">Next: </span><DueText dueAt={i.nextFollowUp.due_at} /></> : <span className="font-medium text-amber-800 dark:text-amber-300">No next action planned</span>}</div>
                               {stage !== "new" ? <AvailabilityBadge state={i.availability} /> : null}
                             </div>
                           </li>
@@ -106,23 +108,23 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
             <h2 id="col-on_hold" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-semibold">
               On hold <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-medium tabular-nums" aria-label={`${held.length} opportunities`}>{held.length}</span>
             </h2>
-            {held.length > 0 ? <div className="mt-0.5 text-xs text-muted-foreground"><CurrencyTotals totals={heldSummary?.totals ?? {}} unvalued={heldSummary?.unvalued ?? 0} emptyText="No value yet" /></div> : null}
+            {held.length > 0 ? <div className="mt-0.5 text-sm text-muted-foreground"><CurrencyTotals totals={heldSummary?.totals ?? {}} unvalued={heldSummary?.unvalued ?? 0} emptyText="No value yet" /></div> : null}
             {held.length === 0 ? (
-              <p className="mt-2 text-xs text-muted-foreground">Nothing is on hold.</p>
+              <p className="mt-2 text-sm text-muted-foreground">Nothing is on hold.</p>
             ) : (
               <ul className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {held.map((i) => (
                   <li key={i.opp.id} className="rounded-md border border-border bg-card p-2.5 text-sm">
                     <Link href={`/sales/opportunities/${i.opp.id}`} className="break-words font-medium underline-offset-2 hover:underline">{i.opp.title}</Link>
-                    <p className="text-xs text-muted-foreground">{i.opp.reference} · {organisationLabel(i)} · {formatMoney(i.value, i.opp.currency)}</p>
-                    <p className="text-xs">{i.opp.hold_review_date ? `Review on ${formatDate(i.opp.hold_review_date)}` : "No review date set"}{i.opp.hold_reason ? ` · ${i.opp.hold_reason}` : ""}</p>
+                    <p className="text-sm text-muted-foreground">{i.opp.reference} · {organisationLabel(i)} · {formatMoney(i.value, i.opp.currency)}</p>
+                    <p className="text-sm">{i.opp.hold_review_date ? `Review on ${formatDate(i.opp.hold_review_date)}` : "No review date set"}{i.opp.hold_reason ? ` · ${i.opp.hold_reason}` : ""}</p>
                   </li>
                 ))}
               </ul>
             )}
           </section>
 
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Move an opportunity between stages on its own page. Won and lost opportunities are under <Link href="/sales/opportunities?status=closed" className="underline-offset-2 hover:underline">Opportunities</Link>.
           </p>
         </>

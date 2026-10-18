@@ -5,7 +5,9 @@ const SEGMENTS = [
   { key: "present", label: "Present", colorVar: "--success" },
   { key: "leave", label: "On leave", colorVar: "--accent" },
   { key: "absent", label: "Absent", colorVar: "--destructive" },
-  { key: "notRecorded", label: "Not recorded", colorVar: "--muted-foreground" },
+  { key: "notRecorded", label: "No record, scheduled workday", colorVar: "--warning" },
+  { key: "rest", label: "Rest day or holiday, no record expected", colorVar: "--muted-foreground" },
+  { key: "unknown", label: "No record, day type not known", colorVar: "--muted-foreground" },
 ] as const;
 
 /**
@@ -20,14 +22,22 @@ export function AttendanceCompletionBar({
   leave,
   absent,
   notRecorded,
+  rest,
+  unknown,
 }: {
   present: number;
   leave: number;
   absent: number;
+  /** No record on a scheduled workday of the employee's own country. */
   notRecorded: number;
+  /** No record on a weekly rest day or public holiday: not an attendance gap. */
+  rest: number;
+  /** No record and the day could not be classified. */
+  unknown: number;
 }) {
-  const total = present + leave + absent + notRecorded;
-  const values = { present, leave, absent, notRecorded };
+  const total = present + leave + absent + notRecorded + rest + unknown;
+  const values = { present, leave, absent, notRecorded, rest, unknown };
+  const segments = SEGMENTS.filter((seg) => seg.key !== "unknown" || unknown > 0);
 
   return (
     <Card>
@@ -43,24 +53,24 @@ export function AttendanceCompletionBar({
               <title>Attendance completion for today</title>
               {(() => {
                 let x = 0;
-                return SEGMENTS.map((seg) => {
+                return segments.map((seg) => {
                   const value = values[seg.key];
                   const width = (value / total) * 100;
                   const rect =
                     width > 0 ? (
-                      <rect key={seg.key} x={x} y={0} width={width} height={10} fill={`hsl(var(${seg.colorVar}))`} opacity={seg.key === "notRecorded" ? 0.35 : 0.9} />
+                      <rect key={seg.key} x={x} y={0} width={width} height={10} fill={`hsl(var(${seg.colorVar}))`} opacity={seg.key === "rest" || seg.key === "unknown" ? 0.35 : 0.9} />
                     ) : null;
                   x += width;
                   return rect;
                 });
               })()}
             </svg>
-            <ul className="flex flex-wrap gap-x-5 gap-y-1.5 text-xs">
-              {SEGMENTS.map((seg) => (
+            <ul className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm">
+              {segments.map((seg) => (
                 <li key={seg.key} className="flex items-center gap-1.5 text-muted-foreground">
                   <span
                     className="h-2 w-2 flex-none rounded-full"
-                    style={{ backgroundColor: `hsl(var(${seg.colorVar}))`, opacity: seg.key === "notRecorded" ? 0.35 : 0.9 }}
+                    style={{ backgroundColor: `hsl(var(${seg.colorVar}))`, opacity: seg.key === "rest" || seg.key === "unknown" ? 0.35 : 0.9 }}
                     aria-hidden
                   />
                   {seg.label}: <span className="font-medium text-foreground">{values[seg.key]}</span>

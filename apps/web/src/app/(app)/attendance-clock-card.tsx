@@ -91,7 +91,7 @@ export async function AttendanceClockCard({ employeeId }: { employeeId: string }
                 <dt className="text-muted-foreground">Recorded in this 24-hour window</dt>
                 <dd className="font-medium">
                   {formatHoursMinutes(window.recorded_seconds)}
-                  {!window.closed ? <span className="ml-2 text-xs font-normal text-muted-foreground">so far</span> : null}
+                  {!window.closed ? <span className="ml-2 text-sm font-normal text-muted-foreground">so far</span> : null}
                 </dd>
               </div>
             ) : null}
@@ -114,7 +114,7 @@ export async function AttendanceClockCard({ employeeId }: { employeeId: string }
                   ) : (
                     <>
                       {window.entitlement_days} day{window.entitlement_days === 1 ? "" : "s"} — <Badge variant="secondary">{recovery.label}</Badge>
-                      <span className="ml-2 text-xs font-normal text-muted-foreground">Provisional: not part of your available balance until approved.</span>
+                      <span className="ml-2 text-sm font-normal text-muted-foreground">Provisional: not part of your available balance until approved.</span>
                     </>
                   )}
                 </dd>
@@ -130,7 +130,7 @@ export async function AttendanceClockCard({ employeeId }: { employeeId: string }
           </Alert>
         ) : null}
         {period && period.rollover_count > 0 && clockedIn ? (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Your 24-hour recovery window rolled over automatically — you do not need to clock out for that.
           </p>
         ) : null}

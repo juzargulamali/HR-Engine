@@ -20,7 +20,7 @@ export function SettlementRateForm({ employeeId }: { employeeId: string }) {
       <div className="space-y-1.5">
         <Label htmlFor="leaveEncashmentDailyRate">Statutory leave-encashment daily rate</Label>
         <Input id="leaveEncashmentDailyRate" name="leaveEncashmentDailyRate" type="number" step="0.01" min="0.01" required />
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           The per-day figure required by local law for this settlement (not necessarily basic salary ÷ 30).
         </p>
       </div>

@@ -7,7 +7,7 @@ import { Muted } from "./parts";
 import { canEditSharedContact, type OppView } from "./view";
 
 const KIND_LABEL = { agency: "Agency", client: "End client", direct: "Direct client" } as const;
-const LINK = "inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-secondary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const LINK = "inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-sm font-medium hover:bg-secondary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 /**
  * Everything needed to reach each person. The links open your own phone or mail app; nothing is sent from here.
@@ -35,7 +35,7 @@ export function ContactsPanel({ contacts, manage }: { contacts: OpportunityDetai
           </div>
           <dl className="mt-3 space-y-2.5 border-t border-border/70 pt-3 text-sm">
             <div className="grid grid-cols-[3.25rem_minmax(0,1fr)] gap-x-2">
-              <dt className="pt-0.5 text-xs text-muted-foreground">Phone</dt>
+              <dt className="pt-0.5 text-sm text-muted-foreground">Phone</dt>
               <dd className="min-w-0">
                 {contact.phone ? (
                   <>
@@ -46,7 +46,7 @@ export function ContactsPanel({ contacts, manage }: { contacts: OpportunityDetai
               </dd>
             </div>
             <div className="grid grid-cols-[3.25rem_minmax(0,1fr)] gap-x-2">
-              <dt className="pt-0.5 text-xs text-muted-foreground">Email</dt>
+              <dt className="pt-0.5 text-sm text-muted-foreground">Email</dt>
               <dd className="min-w-0">
                 {contact.email ? (
                   <>

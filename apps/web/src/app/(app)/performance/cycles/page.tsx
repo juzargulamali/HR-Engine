@@ -9,6 +9,8 @@ import { NewCycleForm } from "./new-cycle-form";
 import { CloseCycleButton } from "./close-cycle-button";
 import { EmptyState } from "@/components/ui/empty-state";
 
+export const metadata = { title: "Appraisal cycles" };
+
 export default async function PerformanceCyclesPage() {
   const session = await getCurrentSession();
   if (!session) return null;

@@ -23,7 +23,7 @@ export function ActivateButton({ policyVersionId }: { policyVersionId: string })
       >
         {pending ? "Activating…" : "Activate"}
       </Button>
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

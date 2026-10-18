@@ -9,6 +9,8 @@ import { NewAssetForm } from "./new-asset-form";
 import { RetireAssetButton } from "./retire-asset-button";
 import { EmptyState } from "@/components/ui/empty-state";
 
+export const metadata = { title: "Assets" };
+
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   in_stock: "outline",
   issued: "default",
@@ -92,7 +94,7 @@ export default async function AssetsPage() {
                 const canManageThisOne = canManageAssets(session.grants, a.company_id);
                 return (
                   <TableRow key={a.id}>
-                    <TableCell className="font-mono text-xs">{a.asset_tag}</TableCell>
+                    <TableCell className="font-mono text-sm">{a.asset_tag}</TableCell>
                     <TableCell className="capitalize">{a.category}</TableCell>
                     <TableCell>{companyName.get(a.company_id) ?? "—"}</TableCell>
                     <TableCell>

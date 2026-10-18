@@ -34,17 +34,17 @@ export function FilesPanel({ view }: { view: OppView }) {
                       <Badge variant="secondary">{filePurposeLabel(f.purpose)}</Badge>
                       {version ? <Badge variant="outline">Proposal version {version}</Badge> : null}
                     </div>
-                    {note ? <p className="mt-1 text-xs text-muted-foreground">{note}{f.purpose !== "proposal" ? ". Adding it does not by itself make the opportunity Won." : "."}</p> : null}
-                    <p className="mt-0.5 break-words text-xs text-muted-foreground">
+                    {note ? <p className="mt-1 text-sm text-muted-foreground">{note}{f.purpose !== "proposal" ? ". Adding it does not by itself make the opportunity Won." : "."}</p> : null}
+                    <p className="mt-0.5 break-words text-sm text-muted-foreground">
                       {f.kind === "file" && f.original_name && f.label ? `${f.original_name} · ` : ""}
                       {formatFileSize(f.size_bytes)}{f.size_bytes != null ? " · " : ""}added by {ctx.personName(f.uploaded_by)} on {formatDate(f.created_at)}
                     </p>
-                    {f.kind === "link" && f.url ? <p className="mt-0.5 break-all text-xs text-muted-foreground">{f.url}</p> : null}
+                    {f.kind === "link" && f.url ? <p className="mt-0.5 break-all text-sm text-muted-foreground">{f.url}</p> : null}
                   </div>
                 </div>
                 <div className="flex flex-wrap items-start gap-1.5">
                   {f.kind === "file" ? <OpenFileButton fileId={f.id} name={name} /> : isHttpsUrl(f.url) ? (
-                    <a href={f.url} target="_blank" rel="noopener noreferrer" aria-label={`Open ${name} (opens in a new tab)`} className="inline-flex h-8 items-center rounded-md border border-input px-3 text-xs font-medium hover:border-accent/60 hover:bg-secondary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Open link</a>
+                    <a href={f.url} target="_blank" rel="noopener noreferrer" aria-label={`Open ${name} (opens in a new tab)`} className="inline-flex h-8 items-center rounded-md border border-input px-3 text-sm font-medium hover:border-accent/60 hover:bg-secondary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Open link</a>
                   ) : null}
                   {canRemoveFile(ctx.grants, { uploadedBy: f.uploaded_by }, ref, ctx.userId) && !isLost ? <RemoveFileButton fileId={f.id} name={name} isLink={f.kind === "link"} /> : null}
                 </div>
@@ -58,7 +58,7 @@ export function FilesPanel({ view }: { view: OppView }) {
       ) : (
         <div className="mt-5 border-t border-border/70 pt-4">
           <h3 className="mb-2 text-sm font-semibold">Add a file or link</h3>
-          <p className="mb-3 text-xs text-muted-foreground">Allowed: {CRM_ALLOWED_FILE_SUMMARY}. Executables and macro-enabled files are refused. Choose what it is so the history can tell a proposal from a purchase order.</p>
+          <p className="mb-3 text-sm text-muted-foreground">Allowed: {CRM_ALLOWED_FILE_SUMMARY}. Executables and macro-enabled files are refused. Choose what it is so the history can tell a proposal from a purchase order.</p>
           <AddFileForms opportunityId={opp.id} />
         </div>
       )}

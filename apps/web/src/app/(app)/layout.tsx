@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { CrmCapability, CrmGrant } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "@/components/nav/app-shell";
@@ -11,22 +12,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // /login before it reaches here. This only fires if that ever changes.
   if (!session) redirect("/login");
 
-  // Drives the mobile ClockFab's badge (clocked in vs. not) — a failure
-  // here should never break the whole authenticated shell, so it degrades
-  // to "not clocked in" rather than throwing.
-  let clockedIn = false;
+  // Drives the header's attendance status (clocked in since when, or not) — a failure here should never break the whole
+  // authenticated shell, so it degrades to "not clocked in" rather than throwing.
+  let clockOpenSince: string | null = null;
   if (session.employeeId) {
     try {
       const supabase = await createClient();
       const { data } = await supabase
         .from("attendance_sessions")
-        .select("id")
+        .select("clock_in_at")
         .eq("employee_id", session.employeeId)
         .eq("status", "open")
         .maybeSingle();
-      clockedIn = !!data;
+      clockOpenSince = data?.clock_in_at ?? null;
     } catch {
-      clockedIn = false;
+      clockOpenSince = null;
     }
   }
 
@@ -47,23 +47,20 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     hasPendingApprovals = false;
   }
 
-  // Sales & CRM is shown only to people holding a CRM grant (its own table, not an HR role). Degrades to "no access" on
-  // any failure — including the CRM tables not existing yet — so the HR shell can never be broken by it.
-  let hasCrmAccess = false;
+  // Sales & CRM is shown only to people holding a CRM grant (its own table, not an HR role); the grants themselves (company +
+  // capabilities) decide which Sales pages appear. Degrades to "no access" on any failure — including the CRM tables not
+  // existing yet — so the HR shell can never be broken by it.
+  let crmGrants: CrmGrant[] = [];
   try {
     const supabase = await createClient();
-    const { count, error } = await supabase
-      .from("crm_company_grants")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", session.userId)
-      .is("revoked_at", null);
-    hasCrmAccess = !error && (count ?? 0) > 0;
+    const { data, error } = await supabase.from("crm_company_grants").select("company_id, capabilities").eq("user_id", session.userId).is("revoked_at", null);
+    if (!error) crmGrants = (data ?? []).map((g) => ({ companyId: g.company_id, capabilities: g.capabilities as CrmCapability[] }));
   } catch {
-    hasCrmAccess = false;
+    crmGrants = [];
   }
 
   return (
-    <AppShell session={session} clockedIn={clockedIn} hasPendingApprovals={hasPendingApprovals} hasCrmAccess={hasCrmAccess}>
+    <AppShell session={session} clockOpenSince={clockOpenSince} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants}>
       {children}
     </AppShell>
   );

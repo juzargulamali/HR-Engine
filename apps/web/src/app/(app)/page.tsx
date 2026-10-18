@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarDays, ClipboardCheck, ReceiptText, UserPlus, Users } from "lucide-react";
+import { AlarmClock, CalendarClock, CalendarDays, ClipboardCheck, Inbox, ReceiptText, UserPlus, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
   canCreateEmployee,
@@ -24,11 +24,16 @@ import { BirthdaysSection } from "./birthdays-section";
 import { getCompanySnapshot } from "./dashboard-data";
 import { WorkforceSnapshot } from "./workforce-snapshot";
 import { CompanyComparisonTable } from "./company-comparison-table";
-import { ActionCentre } from "./action-centre";
+import { attendanceSentence, CALENDAR_NOTE } from "./attendance-summary";
+import { ActionCentre, attentionSentence, buildActionItems, type ActionItem } from "./action-centre";
 import { AttendanceClockCard } from "./attendance-clock-card";
 import { AttendanceCompletionBar } from "./attendance-completion-bar";
 import { UpcomingSection } from "./upcoming-section";
 import { DashboardHeader } from "./dashboard-header";
+import { SalesToday } from "./sales-today";
+import { loadSalesToday } from "@/lib/crm/my-day";
+
+export const metadata = { title: "My Day" };
 
 const HORIZON_DAYS = 30;
 const ROUTE = "/";
@@ -209,9 +214,22 @@ export default async function DashboardPage() {
       leaveCount: acc.leaveCount + s.leaveCount,
       absentCount: acc.absentCount + s.absentCount,
       notRecordedCount: acc.notRecordedCount + s.notRecordedCount,
+      notRecordedScheduledCount: acc.notRecordedScheduledCount + s.notRecordedScheduledCount,
+      notRecordedRestCount: acc.notRecordedRestCount + s.notRecordedRestCount,
+      notRecordedUnknownCount: acc.notRecordedUnknownCount + s.notRecordedUnknownCount,
       leaveRequestsAwaitingDecision: acc.leaveRequestsAwaitingDecision + s.leaveRequestsAwaitingDecision,
     }),
-    { totalEmployees: 0, presentCount: 0, leaveCount: 0, absentCount: 0, notRecordedCount: 0, leaveRequestsAwaitingDecision: 0 },
+    {
+      totalEmployees: 0,
+      presentCount: 0,
+      leaveCount: 0,
+      absentCount: 0,
+      notRecordedCount: 0,
+      notRecordedScheduledCount: 0,
+      notRecordedRestCount: 0,
+      notRecordedUnknownCount: 0,
+      leaveRequestsAwaitingDecision: 0,
+    },
   );
 
   // Real, permission-scoped, and role-prioritized — never a decorative
@@ -232,17 +250,30 @@ export default async function DashboardPage() {
     { href: "/employees", label: "View employees", icon: Users },
   ].filter((a): a is { href: string; label: string; icon: LucideIcon } => a !== null && a.href !== primaryAction.href);
 
-  const recordedToday = totals.totalEmployees - totals.notRecordedCount;
-  const totalActionItems = myPendingApprovals + contractsEndingCount + probationDueCount + docsExpiringCount + identityExpiringCount;
+  // Sales follow-ups for people with a Sales grant (same loaders and rules as the Sales overview; "none" for everyone else).
+  const salesToday = await loadSalesToday();
+  const salesActionItems: ActionItem[] =
+    salesToday.status === "ok"
+      ? [
+          { key: "sales-overdue", icon: AlarmClock, label: "Sales follow-ups overdue", count: salesToday.data.overdue, href: "/sales/follow-ups" },
+          { key: "sales-today", icon: CalendarClock, label: "Sales follow-ups due today", count: salesToday.data.dueToday, href: "/sales/follow-ups?view=today" },
+          { key: "sales-response", icon: Inbox, label: "Enquiries awaiting a first response", count: salesToday.data.noFirstResponse, href: "/sales/opportunities" },
+        ]
+      : [];
+
+  // ONE list of what needs attention, from the same authorised data the card shows; the sentence under the greeting is derived
+  // from it, so the two can never disagree (Sales follow-ups are in the list, so they count in the sentence too).
+  const actionItems = buildActionItems({
+    myPendingApprovals,
+    ...(showHrView ? { contractsEndingCount, probationDueCount, docsExpiringCount, identityExpiringCount } : {}),
+    extraItems: salesActionItems,
+  });
 
   const summarySentence = hrSectionError
     ? "Workforce data couldn't be loaded right now — the numbers below may be incomplete."
     : showHrView
-      ? `${recordedToday} of ${totals.totalEmployees} employee${totals.totalEmployees === 1 ? "" : "s"} have recorded attendance today.` +
-        (totalActionItems > 0 ? ` ${totalActionItems} item${totalActionItems === 1 ? "" : "s"} need attention.` : " Nothing urgent is waiting.")
-      : myPendingApprovals > 0
-        ? `${myPendingApprovals} approval${myPendingApprovals === 1 ? "" : "s"} ${myPendingApprovals === 1 ? "is" : "are"} waiting on your decision.`
-        : "Nothing is waiting on you right now.";
+      ? `${attendanceSentence(totals)} ${attentionSentence(actionItems)}`
+      : attentionSentence(actionItems);
 
   // Cross-company CEO/HR view -> Dubai; an employee-only view -> that
   // employee's own company's country (myCountryCode, resolved above
@@ -268,44 +299,36 @@ export default async function DashboardPage() {
         </Alert>
       ) : null}
 
-      <div className="brand-corner relative overflow-hidden rounded-xl border border-border bg-card p-6 sm:p-8">
-        <div className="brand-grid pointer-events-none absolute inset-0" aria-hidden />
-        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">Driven by innovation</span>
-            <h1 className="mt-2 font-heading text-2xl font-bold sm:text-3xl">
-              Good {greetingPeriod(getBusinessHour(dashboardTimeZone, now))}
-              {firstName ? (
-                <>
-                  , <span className="brand-gradient-text">{firstName}</span>
-                </>
-              ) : null}
-            </h1>
-            <div className="mt-1">
-              <DashboardHeader
-                timeZone={dashboardTimeZone}
-                locationLabel={headerLocationLabel}
-                initialDateLabel={headerInitialDateLabel}
-                initialTimeLabel={headerInitialTimeLabel}
-                weather={headerWeather}
-              />
-            </div>
-            <p className="mt-2 max-w-xl text-sm text-muted-foreground sm:text-base">{summarySentence}</p>
+      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h1 className="font-heading text-2xl font-bold sm:text-3xl">
+            Good {greetingPeriod(getBusinessHour(dashboardTimeZone, now))}
+            {firstName ? `, ${firstName}` : ""}
+          </h1>
+          <div className="mt-1">
+            <DashboardHeader
+              timeZone={dashboardTimeZone}
+              locationLabel={headerLocationLabel}
+              initialDateLabel={headerInitialDateLabel}
+              initialTimeLabel={headerInitialTimeLabel}
+              weather={headerWeather}
+            />
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Link href={primaryAction.href} className={cn(buttonVariants({ variant: "default" }))}>
-              <primaryAction.icon className="h-4 w-4" aria-hidden />
-              {primaryAction.label}
-            </Link>
-            {secondaryActions.map((action) => (
-              <Link key={action.href} href={action.href} className={cn(buttonVariants({ variant: "outline" }))}>
-                <action.icon className="h-4 w-4" aria-hidden />
-                {action.label}
-              </Link>
-            ))}
-          </div>
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground sm:text-base">{summarySentence}</p>
         </div>
-      </div>
+        <div className="flex flex-wrap gap-2">
+          <Link href={primaryAction.href} className={cn(buttonVariants({ variant: "default" }))}>
+            <primaryAction.icon className="h-4 w-4" aria-hidden />
+            {primaryAction.label}
+          </Link>
+          {secondaryActions.map((action) => (
+            <Link key={action.href} href={action.href} className={cn(buttonVariants({ variant: "outline" }))}>
+              <action.icon className="h-4 w-4" aria-hidden />
+              {action.label}
+            </Link>
+          ))}
+        </div>
+      </header>
 
       {hrSectionError ? (
         <Alert variant="warning">
@@ -314,43 +337,60 @@ export default async function DashboardPage() {
         </Alert>
       ) : null}
 
-      {session.employeeId ? <AttendanceClockCard employeeId={session.employeeId} /> : null}
+      {/* The clock comes first on a phone (order-1); on a wide screen it and today's attendance completion share the right-hand column
+          beside what needs attention. */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        {session.employeeId ? (
+          <div className="order-1 lg:col-start-3 lg:row-start-1">
+            <AttendanceClockCard employeeId={session.employeeId} />
+          </div>
+        ) : null}
+        <div className="order-2 space-y-6 lg:col-span-2 lg:col-start-1 lg:row-span-3 lg:row-start-1">
+          <ActionCentre title="Needs you today" items={actionItems} />
+          <SalesToday result={salesToday} />
+          {showHrView ? <UpcomingSection holidays={upcomingHolidays} onLeaveToday={onLeaveToday} /> : null}
+        </div>
+        {showHrView ? (
+          <div className="order-3 lg:col-start-3">
+            <AttendanceCompletionBar
+              present={totals.presentCount}
+              leave={totals.leaveCount}
+              absent={totals.absentCount}
+              notRecorded={totals.notRecordedScheduledCount}
+              rest={totals.notRecordedRestCount}
+              unknown={totals.notRecordedUnknownCount}
+            />
+          </div>
+        ) : null}
+      </div>
 
       {showHrView ? (
-        <>
+        <section aria-labelledby="hr-today" className="space-y-6">
+          <h2 id="hr-today" className="font-heading text-xl font-semibold">
+            People &amp; HR today
+          </h2>
+          <p className="-mt-3 text-sm text-muted-foreground">{CALENDAR_NOTE}</p>
           <WorkforceSnapshot
             totalEmployees={totals.totalEmployees}
             presentCount={totals.presentCount}
             leaveCount={totals.leaveCount}
-            notRecordedCount={totals.notRecordedCount}
+            notRecordedScheduledCount={totals.notRecordedScheduledCount}
+            notRecordedRestCount={totals.notRecordedRestCount}
+            notRecordedUnknownCount={totals.notRecordedUnknownCount}
             leaveRequestsAwaitingDecision={totals.leaveRequestsAwaitingDecision}
           />
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            <div className="lg:col-span-2">
-              <CompanyComparisonTable
-                snapshots={snapshots}
-                canAssignByCompany={Object.fromEntries(overviewCompanies.map((c) => [c.id, canCreateEmployee(session.grants, c.id)]))}
-              />
-            </div>
-            <ActionCentre
-              myPendingApprovals={myPendingApprovals}
-              contractsEndingCount={contractsEndingCount}
-              probationDueCount={probationDueCount}
-              docsExpiringCount={docsExpiringCount}
-              identityExpiringCount={identityExpiringCount}
-            />
-          </div>
-
-          <AttendanceCompletionBar present={totals.presentCount} leave={totals.leaveCount} absent={totals.absentCount} notRecorded={totals.notRecordedCount} />
-
-          <UpcomingSection holidays={upcomingHolidays} onLeaveToday={onLeaveToday} />
+          <CompanyComparisonTable
+            snapshots={snapshots}
+            canAssignByCompany={Object.fromEntries(overviewCompanies.map((c) => [c.id, canCreateEmployee(session.grants, c.id)]))}
+          />
 
           <BirthdaysSection />
-        </>
-      ) : (
-        <ActionCentre myPendingApprovals={myPendingApprovals} />
-      )}
+        </section>
+      ) : null}
+
+      {/* The sidebar already lists these; this is only a quiet reminder, with no figures. */}
+      <p className="text-sm text-muted-foreground">Coming soon to ENGINIOUS OS: Projects &amp; Tasks, Inventory, Vendors &amp; Purchasing and KPIs.</p>
     </div>
   );
 }

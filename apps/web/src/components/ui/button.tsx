@@ -8,7 +8,7 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "brand-gradient text-primary-foreground shadow-[0_1px_0_0_rgba(255,255,255,0.12)_inset] hover:brightness-110 hover:shadow-[0_0_0_1px_hsl(var(--brand-glow)/0.5),0_6px_18px_-6px_hsl(var(--brand-glow)/0.55)]",
+          "brand-gradient text-primary-foreground hover:brightness-110",
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/70",
         outline: "border border-input bg-transparent hover:border-accent/60 hover:bg-secondary/70",
         ghost: "hover:bg-secondary/70",
@@ -16,7 +16,7 @@ export const buttonVariants = cva(
       },
       size: {
         default: "h-9 px-4 py-2",
-        sm: "h-8 px-3 text-xs",
+        sm: "h-8 px-3 text-sm",
         lg: "h-10 px-6",
       },
     },

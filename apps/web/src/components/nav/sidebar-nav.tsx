@@ -4,132 +4,148 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronDown, Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { ChevronDown, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "@/components/ui/tooltip";
-import { Drawer } from "@/components/ui/drawer";
 import { UserMenu } from "./user-menu";
 import { NAV_ICONS } from "./nav-icons";
-import type { NavGroupData } from "./nav-groups";
+import { activeModuleId, isLinkActive, type NavModuleData } from "./nav-groups";
 
 const COLLAPSE_STORAGE_KEY = "sidebar-collapsed";
 
-function isActive(pathname: string, href: string) {
-  if (href === "/") return pathname === "/";
-  return pathname === href || pathname.startsWith(`${href}/`);
+/** The most specific link of a module that matches the path, so only one sub-link is ever marked as the current page. */
+function currentSubHref(pathname: string, m: NavModuleData): string | null {
+  let best: string | null = null;
+  for (const s of m.sections) {
+    for (const l of s.links) {
+      if (!l.comingSoon && isLinkActive(pathname, l.href) && (best === null || l.href.length > best.length)) best = l.href;
+    }
+  }
+  return best;
 }
 
-function BrandMark({ compact }: { compact?: boolean }) {
+export function BrandMark({ compact }: { compact?: boolean }) {
   return (
-    <Link href="/" className={cn("brand-grid-tight flex items-center gap-2.5 px-4 py-4", compact && "justify-center px-2")}>
-      <Image src="/brand/enginious-icon.png" alt="" width={28} height={28} priority className="flex-none" />
+    <Link href="/" className={cn("flex items-center gap-2.5 px-4 py-4", compact && "justify-center px-2")} aria-label="ENGINIOUS OS, My Day">
+      <Image src="/brand/enginious-icon.png" alt="" width={28} height={28} priority style={{ width: 28, height: 28 }} className="flex-none" />
       {compact ? null : (
         <div className="min-w-0 leading-tight">
-          <div className="truncate font-heading text-sm font-bold tracking-tight">ENGINIOUS</div>
-          <div className="truncate text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">HR Engine</div>
+          <div className="truncate font-heading text-sm font-bold tracking-tight">ENGINIOUS OS</div>
         </div>
       )}
     </Link>
   );
 }
 
-function NavLinks({ groups, collapsed, onNavigate }: { groups: NavGroupData[]; collapsed?: boolean; onNavigate?: () => void }) {
-  const pathname = usePathname();
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+/** "Coming soon" is written out, on its own line, so it never truncates a long module name and never relies on colour. */
+function ComingSoonRow({ m, collapsed }: { m: NavModuleData; collapsed?: boolean }) {
+  const Icon = NAV_ICONS[m.iconKey];
+  const row = (
+    <div aria-disabled="true" className={cn("flex cursor-default items-center gap-2.5 rounded-md px-2.5 py-1.5 text-subtle", collapsed && "justify-center px-0 py-2.5")}>
+      <Icon className="h-4 w-4 flex-none" aria-hidden />
+      {collapsed ? (
+        <span className="sr-only">{m.label}, coming soon</span>
+      ) : (
+        <span className="min-w-0 leading-tight">
+          <span className="block truncate text-sm font-medium">{m.label}</span>
+          <span className="block text-sm">Coming soon</span>
+        </span>
+      )}
+    </div>
+  );
+  return collapsed ? (
+    <Tooltip label={`${m.label} (coming soon)`} side="right">
+      {row}
+    </Tooltip>
+  ) : (
+    row
+  );
+}
 
-  function toggleGroup(label: string) {
-    setCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(label)) next.delete(label);
-      else next.add(label);
-      return next;
-    });
-  }
+export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: NavModuleData[]; collapsed?: boolean; onNavigate?: () => void }) {
+  const pathname = usePathname();
+  const active = activeModuleId(pathname, modules);
+  // Explicit open/close choices; a module with no choice is open exactly while it is the one you are in.
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
 
   return (
-    <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2.5 py-3">
-      {groups.map((group) => {
-        const groupCollapsed = !collapsed && collapsedGroups.has(group.label);
+    <nav aria-label="Modules" className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2.5 py-3">
+      {modules.map((m) => {
+        if (m.comingSoon) return <ComingSoonRow key={m.id} m={m} collapsed={collapsed} />;
+        const Icon = NAV_ICONS[m.iconKey];
+        const isActive = active === m.id;
+        const hasSub = m.sections.length > 0;
+        const open = !collapsed && hasSub && (overrides[m.id] ?? isActive);
+        const sub = currentSubHref(pathname, m);
+        const rowClass = cn(
+          "relative flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
+          collapsed && "justify-center px-0 py-2.5",
+          isActive ? "bg-accent/15 font-semibold text-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+        );
+        const link = (
+          <Link href={m.href} onClick={onNavigate} aria-current={isActive && (!hasSub || sub === m.href) ? "page" : undefined} className={rowClass}>
+            {isActive ? <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-accent" aria-hidden /> : null}
+            <Icon className="h-4 w-4 flex-none" aria-hidden />
+            {collapsed ? <span className="sr-only">{m.label}</span> : <span className="truncate">{m.label}</span>}
+          </Link>
+        );
         return (
-          <div key={group.label}>
-            {collapsed ? (
-              <div className="mb-1 h-px bg-border/70" />
-            ) : (
-              <button
-                type="button"
-                onClick={() => toggleGroup(group.label)}
-                aria-expanded={!groupCollapsed}
-                className="mb-1 flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-left transition-colors hover:bg-secondary/50"
-              >
-                <span className="h-3 w-0.5 flex-none rounded-full brand-gradient" aria-hidden />
-                <span className="flex-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{group.label}</span>
-                <ChevronDown
-                  className={cn("h-3.5 w-3.5 flex-none text-muted-foreground transition-transform duration-150", groupCollapsed && "-rotate-90")}
-                  aria-hidden
-                />
-              </button>
-            )}
-            {groupCollapsed ? null : (
-              <div className="flex flex-col gap-0.5">
-                {group.links.map((link) => {
-                  const Icon = NAV_ICONS[link.iconKey];
-                  if (link.comingSoon) {
-                    const soonEl = (
-                      <div
-                        key={link.href}
-                        aria-disabled="true"
-                        className={cn("flex cursor-default items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-muted-foreground/60", collapsed && "justify-center px-0 py-2.5")}
-                      >
-                        <Icon className="h-4 w-4 flex-none" aria-hidden />
-                        {collapsed ? null : (
-                          <>
-                            <span className="truncate">{link.label}</span>
-                            <span className="ml-auto rounded-full border border-border px-1.5 py-px text-[10px] font-medium uppercase tracking-wide">Soon</span>
-                          </>
-                        )}
-                      </div>
-                    );
-                    return collapsed ? (
-                      <Tooltip key={link.href} label={`${link.label} (coming soon)`} side="right">
-                        {soonEl}
-                      </Tooltip>
-                    ) : (
-                      soonEl
-                    );
-                  }
-                  const active = isActive(pathname, link.href);
-                  const linkEl = (
-                    <Link
-                      key={link.href}
-                      href={link.href}
-                      onClick={onNavigate}
-                      aria-current={active ? "page" : undefined}
-                      className={cn(
-                        "relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        collapsed && "justify-center px-0 py-2.5",
-                        active ? "bg-accent/10 text-foreground" : "text-muted-foreground hover:bg-secondary/70 hover:text-foreground",
-                      )}
-                    >
-                      {active ? (
-                        <span
-                          className={cn("absolute rounded-full brand-gradient", collapsed ? "inset-y-1.5 left-0.5 w-[3px]" : "inset-y-1 left-0 w-[3px]")}
-                          aria-hidden
-                        />
-                      ) : null}
-                      <Icon className="h-4 w-4 flex-none" aria-hidden />
-                      {collapsed ? null : <span className="truncate">{link.label}</span>}
-                    </Link>
-                  );
-                  return collapsed ? (
-                    <Tooltip key={link.href} label={link.label} side="right">
-                      {linkEl}
-                    </Tooltip>
-                  ) : (
-                    linkEl
-                  );
-                })}
+          <div key={m.id}>
+            <div className="flex items-center gap-0.5">
+              {collapsed ? (
+                <Tooltip label={m.label} side="right">
+                  {link}
+                </Tooltip>
+              ) : (
+                link
+              )}
+              {hasSub && !collapsed ? (
+                <button
+                  type="button"
+                  onClick={() => setOverrides((o) => ({ ...o, [m.id]: !open }))}
+                  aria-expanded={open}
+                  aria-label={`${open ? "Hide" : "Show"} ${m.label} pages`}
+                  className="flex h-8 w-8 flex-none items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                >
+                  <ChevronDown className={cn("h-4 w-4 transition-transform", !open && "-rotate-90")} aria-hidden />
+                </button>
+              ) : null}
+            </div>
+            {open ? (
+              <div className="mb-1.5 ml-[1.4rem] mt-0.5 flex flex-col gap-0.5 border-l border-border pl-2.5">
+                {m.sections.map((s) => (
+                  <div key={s.label} className="flex flex-col gap-px">
+                    {m.sections.length > 1 ? <p className="px-2.5 pb-0.5 pt-2 text-[13px] font-semibold uppercase tracking-[0.08em] text-subtle">{s.label}</p> : null}
+                    {s.links.map((l) => {
+                      if (l.comingSoon) {
+                        return (
+                          <div key={l.label} aria-disabled="true" className="rounded-md px-2.5 py-1.5 text-subtle">
+                            <span className="block text-sm">{l.label}</span>
+                            <span className="block text-sm">Coming soon</span>
+                          </div>
+                        );
+                      }
+                      const subActive = sub === l.href;
+                      return (
+                        <Link
+                          key={l.href}
+                          href={l.href}
+                          onClick={onNavigate}
+                          aria-current={subActive ? "page" : undefined}
+                          className={cn(
+                            "relative rounded-md px-2.5 py-1.5 text-sm transition-colors",
+                            subActive ? "bg-secondary font-semibold text-foreground" : "text-muted-foreground hover:bg-secondary/70 hover:text-foreground",
+                          )}
+                        >
+                          {subActive ? <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-accent" aria-hidden /> : null}
+                          {l.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
-            )}
+            ) : null}
           </div>
         );
       })}
@@ -137,20 +153,19 @@ function NavLinks({ groups, collapsed, onNavigate }: { groups: NavGroupData[]; c
   );
 }
 
-export function SidebarNav({
-  groups,
+export function DesktopSidebar({
+  modules,
   fullName,
   email,
   roleLabels,
   signOutSlot,
 }: {
-  groups: NavGroupData[];
+  modules: NavModuleData[];
   fullName: string;
   email: string | null;
   roleLabels: string[];
   signOutSlot: React.ReactNode;
 }) {
-  const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [collapseReady, setCollapseReady] = useState(false);
 
@@ -181,54 +196,28 @@ export function SidebarNav({
   }
 
   return (
-    <>
-      {/* Mobile top bar */}
-      <div className="flex items-center justify-between border-b border-border bg-card px-4 py-3 md:hidden">
-        <Link href="/" className="flex items-center gap-2">
-          <Image src="/brand/enginious-icon.png" alt="" width={26} height={26} priority />
-          <span className="font-heading text-sm font-bold tracking-tight">ENGINIOUS HR</span>
-        </Link>
-        <button
-          type="button"
-          aria-label="Open menu"
-          onClick={() => setMobileOpen(true)}
-          className="flex h-9 w-9 items-center justify-center rounded-md border border-border text-foreground transition-colors hover:bg-secondary/70"
-        >
-          <Menu className="h-5 w-5" aria-hidden />
-        </button>
+    <aside
+      aria-label="ENGINIOUS OS modules"
+      className={cn(
+        "sticky top-0 hidden h-screen flex-none flex-col border-r border-border bg-chrome transition-[width] duration-200 lg:flex",
+        collapseReady ? "" : "duration-0",
+        collapsed ? "w-[4.5rem]" : "w-[17rem]",
+      )}
+    >
+      <BrandMark compact={collapsed} />
+      <ModuleNavigation modules={modules} collapsed={collapsed} />
+      <div className="border-t border-border p-2">
+        <UserMenu fullName={fullName} email={email} roleLabels={roleLabels} signOutSlot={signOutSlot} collapsed={collapsed} side="top" />
       </div>
-
-      {/* Desktop sidebar */}
-      <aside
-        className={cn(
-          "hidden flex-none flex-col border-r border-border bg-card transition-[width] duration-200 md:flex",
-          collapseReady ? "" : "duration-0",
-          collapsed ? "w-[4.5rem]" : "w-64",
-        )}
+      <button
+        type="button"
+        onClick={toggleCollapsed}
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        className="flex items-center justify-center gap-2 border-t border-border py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
       >
-        <BrandMark compact={collapsed} />
-        <NavLinks groups={groups} collapsed={collapsed} />
-        <div className="border-t border-border p-2">
-          <UserMenu fullName={fullName} email={email} roleLabels={roleLabels} signOutSlot={signOutSlot} collapsed={collapsed} side="top" />
-        </div>
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="flex items-center justify-center gap-2 border-t border-border py-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary/70 hover:text-foreground"
-        >
-          {collapsed ? <PanelLeftOpen className="h-4 w-4" aria-hidden /> : <PanelLeftClose className="h-4 w-4" aria-hidden />}
-          {collapsed ? null : "Collapse"}
-        </button>
-      </aside>
-
-      {/* Mobile drawer */}
-      <Drawer open={mobileOpen} onClose={() => setMobileOpen(false)} title="Navigation">
-        <NavLinks groups={groups} onNavigate={() => setMobileOpen(false)} />
-        <div className="border-t border-border p-2">
-          <UserMenu fullName={fullName} email={email} roleLabels={roleLabels} signOutSlot={signOutSlot} side="top" />
-        </div>
-      </Drawer>
-    </>
+        {collapsed ? <PanelLeftOpen className="h-4 w-4" aria-hidden /> : <PanelLeftClose className="h-4 w-4" aria-hidden />}
+        {collapsed ? null : "Collapse"}
+      </button>
+    </aside>
   );
 }

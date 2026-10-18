@@ -23,8 +23,8 @@ export function ResendInviteButton({ email }: { email: string }) {
       >
         {pending ? "Sending…" : "Resend invite"}
       </Button>
-      {result?.error ? <p className="text-xs text-destructive">{result.error}</p> : null}
-      {result && !result.error ? <p className="text-xs text-muted-foreground">Sent.</p> : null}
+      {result?.error ? <p className="text-sm text-destructive">{result.error}</p> : null}
+      {result && !result.error ? <p className="text-sm text-muted-foreground">Sent.</p> : null}
     </div>
   );
 }

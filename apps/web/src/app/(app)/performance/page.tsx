@@ -11,6 +11,8 @@ import { GoalForm } from "./goal-form";
 import { GoalRowControls } from "./goal-row-controls";
 import { EmptyState } from "@/components/ui/empty-state";
 
+export const metadata = { title: "Performance reviews" };
+
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   in_progress: "secondary",
   achieved: "default",
@@ -105,7 +107,7 @@ export default async function PerformancePage() {
                   </TableCell>
                   <TableCell>{g.weight_percent ? `${g.weight_percent}%` : "—"}</TableCell>
                   <TableCell>{g.target_date ?? "—"}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-sm text-muted-foreground">
                     Self: {g.self_rating ?? "—"} · Manager: {g.manager_rating ?? "—"}
                   </TableCell>
                   <TableCell>

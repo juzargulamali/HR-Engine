@@ -12,9 +12,9 @@ export function Card({ className, interactive = false, ...props }: React.HTMLAtt
   return (
     <div
       className={cn(
-        "rounded-lg border border-border bg-card text-card-foreground shadow-sm",
+        "rounded-lg border border-border bg-card text-card-foreground shadow-[var(--shadow-soft)]",
         interactive &&
-          "transition-shadow duration-150 hover:shadow-[0_0_0_1px_hsl(var(--border)),0_10px_28px_-14px_hsl(var(--brand-glow)/0.35)]",
+          "transition-shadow duration-150 hover:border-accent/50",
         className,
       )}
       {...props}

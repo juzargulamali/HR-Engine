@@ -46,7 +46,7 @@ export function NewTimesheetForm() {
       <Button type="submit" disabled={pending}>
         {pending ? "Creating…" : "Start timesheet"}
       </Button>
-      <p className="text-xs text-muted-foreground">You&apos;ll add daily entries and submit for approval on the next screen.</p>
+      <p className="text-sm text-muted-foreground">You&apos;ll add daily entries and submit for approval on the next screen.</p>
     </form>
   );
 }

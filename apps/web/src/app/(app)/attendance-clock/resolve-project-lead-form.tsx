@@ -53,7 +53,7 @@ export function ResolveProjectLeadForm({
         <p className="text-sm font-medium">
           {workDate} — {proposedDays} day(s)
         </p>
-        <Label htmlFor={`lead-${requestId}`} className="text-xs">
+        <Label htmlFor={`lead-${requestId}`} className="text-sm">
           Project lead
         </Label>
         <Select id={`lead-${requestId}`} value={projectLeadEmployeeId} onChange={(e) => setProjectLeadEmployeeId(e.target.value)} className="w-56">

@@ -5,6 +5,8 @@ import { CreateCompanyForm } from "./create-company-form";
 import { DeactivateOrRestoreCompanyButton } from "./deactivate-or-restore-company-button";
 import { EmptyState } from "@/components/ui/empty-state";
 
+export const metadata = { title: "Companies" };
+
 export default async function CompaniesPage() {
   const supabase = await createClient();
   const [{ data: companies }, { data: countries }] = await Promise.all([

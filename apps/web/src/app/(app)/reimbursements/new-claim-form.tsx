@@ -23,7 +23,7 @@ export function NewClaimForm({ defaultCurrency }: { defaultCurrency: string }) {
       <Button type="submit" disabled={pending}>
         {pending ? "Creating…" : "Start claim"}
       </Button>
-      <p className="text-xs text-muted-foreground">You&apos;ll add expense lines and a receipt on the next screen.</p>
+      <p className="text-sm text-muted-foreground">You&apos;ll add expense lines and a receipt on the next screen.</p>
     </form>
   );
 }

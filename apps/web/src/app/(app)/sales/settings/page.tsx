@@ -47,8 +47,8 @@ function ReadOnlySettings({ company, ctx }: { company: CrmCompanyInfo; ctx: CrmC
     ["Commercial approval policy", (
       <span key="p">
         {APPROVAL_POLICY_LABEL[s.approval_policy]}
-        <span className="block text-xs text-muted-foreground">{APPROVAL_POLICY_EXPLANATION[s.approval_policy]}</span>
-        {s.approval_note ? <span className="block break-words text-xs text-muted-foreground">Note: {s.approval_note}</span> : null}
+        <span className="block text-sm text-muted-foreground">{APPROVAL_POLICY_EXPLANATION[s.approval_policy]}</span>
+        {s.approval_note ? <span className="block break-words text-sm text-muted-foreground">Note: {s.approval_note}</span> : null}
       </span>
     )],
   ];
@@ -102,7 +102,7 @@ export default async function SalesSettingsPage() {
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle className="break-words">{c.name}</CardTitle>
-                {c.settings ? <Badge variant="outline">Settings saved</Badge> : <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300">Not set up yet</Badge>}
+                {c.settings ? <Badge variant="outline">Settings saved</Badge> : <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300">Not set up yet</Badge>}
               </div>
               <CardDescription>
                 {canEdit ? "You can change these settings." : "You can read these settings but not change them. Ask a founder, or someone allowed to manage Sales settings, to change them."}

@@ -21,7 +21,7 @@ export function CloseCycleButton({ cycleId }: { cycleId: string }) {
       >
         {pending ? "Closing…" : "Close cycle"}
       </Button>
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

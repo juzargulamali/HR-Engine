@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { AppraisalForm } from "./appraisal-form";
 import { AppraisalActions } from "./appraisal-actions";
 
+export const metadata = { title: "Appraisal" };
+
 export default async function AppraisalDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await getCurrentSession();
@@ -74,7 +76,7 @@ export default async function AppraisalDetailPage({ params }: { params: Promise<
               <div>
                 <div className="font-medium text-muted-foreground">Overall rating</div>
                 <div>{appraisal.overall_rating ?? "Not set"}</div>
-                <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-3">
+                <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-muted-foreground sm:grid-cols-3">
                   <div className="flex justify-between gap-2">
                     <dt>Quality of work</dt>
                     <dd className="font-medium text-foreground">{appraisal.quality_of_work_rating ?? "—"}</dd>
@@ -113,7 +115,7 @@ export default async function AppraisalDetailPage({ params }: { params: Promise<
       <Card>
         <CardHeader>
           <CardTitle>Career history (for context)</CardTitle>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Dates only, no amounts — for comparing this appraisal against when the employee was last promoted or given a raise, without
             showing compensation figures.
           </p>

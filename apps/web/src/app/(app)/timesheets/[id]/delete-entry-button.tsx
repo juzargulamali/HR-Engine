@@ -24,7 +24,7 @@ export function DeleteEntryButton({ entryId, timesheetId }: { entryId: string; t
       >
         {pending ? "Removing…" : "Remove"}
       </Button>
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

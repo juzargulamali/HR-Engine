@@ -108,7 +108,7 @@ export function CancelFollowUpButton({ followUp }: { followUp: Pick<FollowUpRef,
           <input type="hidden" name="followUpId" value={followUp.id} />
           <input type="hidden" name="opportunityId" value={followUp.opportunityId} />
           <Field label="Why is it no longer needed?" htmlFor={`cr-${followUp.id}`}><Input id={`cr-${followUp.id}`} name="reason" required /></Field>
-          <p className="text-xs text-muted-foreground">The only next action of an active opportunity cannot be cancelled. Complete it with a new next action instead.</p>
+          <p className="text-sm text-muted-foreground">The only next action of an active opportunity cannot be cancelled. Complete it with a new next action instead.</p>
         </ActionForm>
       </Modal>
     </>

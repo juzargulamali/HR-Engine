@@ -18,6 +18,8 @@ import type { CrmActivityRow, CrmReminderRow } from "@/types/crm";
 import { CurrencyTotals } from "./currency-totals";
 import { MarkRemindersReadButton } from "./mark-reminders-read";
 
+export const metadata = { title: "Sales overview" };
+
 const REMINDER_LABEL: Record<CrmReminderRow["kind"], string> = {
   follow_up_due: "Follow-up due",
   follow_up_overdue: "Follow-up overdue",
@@ -124,7 +126,7 @@ export default async function SalesOverviewPage({ searchParams }: { searchParams
                       <Link href={`/sales/opportunities/${r.opportunity_id}`} className="text-muted-foreground underline-offset-2 hover:underline">{o ? `${o.opp.reference} · ${o.opp.title}` : "Open opportunity"}</Link>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">{formatDateTime(r.due_at ?? r.created_at)}</span>
+                      <span className="text-sm text-muted-foreground">{formatDateTime(r.due_at ?? r.created_at)}</span>
                       <MarkRemindersReadButton reminderId={r.id} label="Dismiss" />
                     </div>
                   </li>
@@ -143,7 +145,7 @@ export default async function SalesOverviewPage({ searchParams }: { searchParams
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+        <Card className="min-w-0 lg:col-span-2">
           <CardHeader className="flex-row flex-wrap items-start justify-between gap-3 space-y-0">
             <div className="space-y-1.5">
               <CardTitle className="text-base">Needs attention now</CardTitle>
@@ -159,13 +161,13 @@ export default async function SalesOverviewPage({ searchParams }: { searchParams
                 <ul className="divide-y divide-border">
                   {attention.slice(0, MAX_ATTENTION).map((a, i) => <AttentionRow key={`${a.kind}-${a.opportunityId}-${i}`} item={a} />)}
                 </ul>
-                {attention.length > MAX_ATTENTION ? <p className="mt-3 text-xs text-muted-foreground">Showing {MAX_ATTENTION} of {attention.length}. <Link href="/sales/follow-ups" className="underline-offset-2 hover:underline">Open follow-ups</Link></p> : null}
+                {attention.length > MAX_ATTENTION ? <p className="mt-3 text-sm text-muted-foreground">Showing {MAX_ATTENTION} of {attention.length}. <Link href="/sales/follow-ups" className="underline-offset-2 hover:underline">Open follow-ups</Link></p> : null}
               </>
             )}
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="min-w-0">
           <CardHeader className="space-y-1.5">
             <CardTitle className="text-base">Open pipeline</CardTitle>
             <CardDescription>{openCount} open. Each currency on its own line, never added together.</CardDescription>
@@ -177,7 +179,7 @@ export default async function SalesOverviewPage({ searchParams }: { searchParams
                   <span className="text-muted-foreground">{crmStageLabel(s.stage)}</span>
                   <span className="text-right">
                     <span className="font-medium tabular-nums">{s.count}</span>
-                    {s.count > 0 ? <CurrencyTotals totals={s.totals} unvalued={s.unvalued} emptyText="No value yet" className="block text-xs text-muted-foreground" /> : null}
+                    {s.count > 0 ? <CurrencyTotals totals={s.totals} unvalued={s.unvalued} emptyText="No value yet" className="block text-sm text-muted-foreground" /> : null}
                   </span>
                 </li>
               ))}
@@ -188,7 +190,7 @@ export default async function SalesOverviewPage({ searchParams }: { searchParams
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+        <Card className="min-w-0 lg:col-span-2">
           <CardHeader className="space-y-1.5">
             <CardTitle className="text-base">My open opportunities</CardTitle>
             <CardDescription>Opportunities you own, soonest next follow-up first.</CardDescription>
@@ -211,7 +213,7 @@ export default async function SalesOverviewPage({ searchParams }: { searchParams
                     <TableRow key={i.opp.id}>
                       <TableCell>
                         <Link href={`/sales/opportunities/${i.opp.id}`} className="font-medium underline-offset-2 hover:underline">{i.opp.title}</Link>
-                        <div className="text-xs text-muted-foreground">{i.opp.reference} · {organisationLabel(i)}</div>
+                        <div className="text-sm text-muted-foreground">{i.opp.reference} · {organisationLabel(i)}</div>
                       </TableCell>
                       <TableCell><StageBadge stage={i.opp.stage} /></TableCell>
                       <TableCell className="whitespace-nowrap tabular-nums">{formatMoney(i.value, i.opp.currency)}</TableCell>
@@ -238,7 +240,7 @@ export default async function SalesOverviewPage({ searchParams }: { searchParams
                   return (
                     <li key={a.id} className="py-2 text-sm">
                       <p className="line-clamp-2 break-words">{a.body}</p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-sm text-muted-foreground">
                         {ctx.personName(a.created_by)} · {formatDateTime(a.occurred_at)} · {a.is_internal ? "Internal note" : ACTIVITY_LABEL[a.kind]}
                         {o ? <> · <Link href={`/sales/opportunities/${o.opp.id}`} className="underline-offset-2 hover:underline">{o.opp.reference}</Link></> : null}
                       </p>
@@ -274,10 +276,10 @@ function AttentionRow({ item }: { item: AttentionItem }) {
     <li className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2.5 text-sm">
       <div className="min-w-0">
         <Link href={`/sales/opportunities/${item.opportunityId}`} className="break-words font-medium underline-offset-2 hover:underline">{item.title}</Link>
-        <p className="text-xs text-muted-foreground">{item.reference} · {item.detail}</p>
+        <p className="text-sm text-muted-foreground">{item.reference} · {item.detail}</p>
       </div>
-      <div className="text-right text-xs">
-        {isFollowUp && item.at ? <DueText dueAt={item.at} /> : item.kind === "hold_review" && item.at ? <span className="whitespace-nowrap font-medium text-amber-700 dark:text-amber-300">{ATTENTION_LABEL[item.kind]} · {formatDate(item.at)}</span> : <span className="whitespace-nowrap font-medium text-amber-700 dark:text-amber-300">{ATTENTION_LABEL[item.kind]}</span>}
+      <div className="text-right text-sm">
+        {isFollowUp && item.at ? <DueText dueAt={item.at} /> : item.kind === "hold_review" && item.at ? <span className="whitespace-nowrap font-medium text-amber-800 dark:text-amber-300">{ATTENTION_LABEL[item.kind]} · {formatDate(item.at)}</span> : <span className="whitespace-nowrap font-medium text-amber-800 dark:text-amber-300">{ATTENTION_LABEL[item.kind]}</span>}
       </div>
     </li>
   );

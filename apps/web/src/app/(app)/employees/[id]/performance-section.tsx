@@ -64,7 +64,7 @@ export async function PerformanceSection({
                     {g.status.replace(/_/g, " ")}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
+                <TableCell className="text-sm text-muted-foreground">
                   Self: {g.self_rating ?? "—"} · Manager: {g.manager_rating ?? "—"}
                 </TableCell>
                 <TableCell>{canManage ? <RateGoalForm goalId={g.id} managerRating={g.manager_rating} /> : null}</TableCell>

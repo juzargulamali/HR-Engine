@@ -25,7 +25,7 @@ export function DeleteUserButton({ userId, email }: { userId: string; email: str
       >
         {pending ? "Deleting…" : "Delete"}
       </Button>
-      {error ? <p className="max-w-[220px] text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="max-w-[220px] text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

@@ -18,7 +18,7 @@ export function VerifyWindowForm({ windowId }: { windowId: string }) {
         onChange={(e) => setNote(e.target.value)}
         placeholder="What did you verify, and with whom? (required)"
         rows={2}
-        className="min-h-16 text-xs"
+        className="min-h-16 text-sm"
         aria-label="Verification note"
       />
       <Button
@@ -51,7 +51,7 @@ export function AcknowledgeReductionForm({ requestId }: { requestId: string }) {
         onChange={(e) => setNote(e.target.value)}
         placeholder="How will the already-used balance be handled? (required)"
         rows={2}
-        className="min-h-16 text-xs"
+        className="min-h-16 text-sm"
         aria-label="Acknowledgement note"
       />
       <Button

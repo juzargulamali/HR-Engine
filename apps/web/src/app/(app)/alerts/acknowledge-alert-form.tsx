@@ -21,11 +21,11 @@ export function AcknowledgeAlertForm({ alertId }: { alertId: string }) {
         });
       }}
     >
-      <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className="h-8 text-xs" aria-label="Acknowledgement note" />
+      <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className="h-8 text-sm" aria-label="Acknowledgement note" />
       <Button type="submit" size="sm" variant="outline" disabled={pending}>
         {pending ? "Saving…" : "Acknowledge"}
       </Button>
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </form>
   );
 }

@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChangePasswordForm } from "./change-password-form";
 import { SessionControls } from "./session-controls";
 
+export const metadata = { title: "Account & security" };
+
 export default async function AccountSecurityPage() {
   const supabase = await createClient();
   const {
@@ -31,7 +33,7 @@ export default async function AccountSecurityPage() {
             Signed in as <span className="font-medium text-foreground">{user.email}</span>
           </p>
           <p className="text-muted-foreground">Last sign-in: {lastSignIn}</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Your sign-in email is managed by a System Administrator and can&apos;t be changed here yet.
           </p>
         </CardContent>

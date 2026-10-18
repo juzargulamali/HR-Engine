@@ -1,6 +1,8 @@
 import { AuthPageShell } from "@/components/auth/auth-page-shell";
 import { PasswordResetForm } from "@/components/auth/password-reset-form";
 
+export const metadata = { title: "Set your password" };
+
 export default function SetPasswordPage() {
   // No session cookie exists yet at this point — the invite link's token
   // arrives as a URL hash fragment, which the server never sees, only the
@@ -10,7 +12,7 @@ export default function SetPasswordPage() {
     <AuthPageShell
       title={
         <>
-          Welcome to <span className="brand-gradient-text">Enginious HR</span>
+          Welcome to <span className="brand-gradient-text">ENGINIOUS</span> OS
         </>
       }
       subtitle="Set a password to activate your account."

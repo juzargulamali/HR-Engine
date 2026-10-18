@@ -69,7 +69,7 @@ export function DashboardHeader({
   const WeatherIcon = weather ? (WEATHER_ICONS[weather.condition] ?? Cloud) : null;
 
   return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
       <span>{dateLabel}</span>
       <span aria-hidden>·</span>
       <span>{timeLabel}</span>

@@ -153,7 +153,7 @@ export async function FinalSettlementSection({
           {compensation.currency} {result.totalAmount}
         </div>
       </div>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         Estimate only — verify against local labor law before processing final payment (see
         docs/05-automation-rules.md §5.2).
       </p>

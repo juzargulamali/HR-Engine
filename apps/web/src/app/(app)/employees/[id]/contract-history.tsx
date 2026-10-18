@@ -105,14 +105,14 @@ export function ContractHistory({
             <div className="space-y-1.5">
               <Label htmlFor="fteFraction">FTE fraction</Label>
               <Input id="fteFraction" name="fteFraction" type="number" defaultValue={1} step="0.05" min="0.05" max="1" />
-              <p className="text-xs text-muted-foreground">1.0 = full-time. Prorates Poland Annual Leave for part-time contracts.</p>
+              <p className="text-sm text-muted-foreground">1.0 = full-time. Prorates Poland Annual Leave for part-time contracts.</p>
             </div>
           </div>
           {state.error ? <Alert variant="destructive">{state.error}</Alert> : null}
           <Button type="submit" size="sm" disabled={pending}>
             {pending ? "Saving…" : "Supersede with new version"}
           </Button>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             This becomes the current version; version {currentRow?.version_no ?? "—"} stays on record for history.
           </p>
         </form>

@@ -138,7 +138,7 @@ export function SettingsForm({
             <input type="checkbox" name="ownerEmailEnabled" defaultChecked={initial.ownerEmailEnabled} className="mt-0.5" />
             <span>Also email follow-up reminders to the opportunity owner</span>
           </label>
-          <p className="pl-6 text-xs text-muted-foreground">
+          <p className="pl-6 text-sm text-muted-foreground">
             Off by default. Reminders always appear inside Sales. Emails go out only with the daily run (about 08:00 Dubai time), not within minutes of a follow-up falling due, and a failed send is retried on the next daily run. Turn email on only after you have tested that delivery works end to end, because a reminder that never arrives looks like a missed follow-up. Sales never sends anything to clients.
           </p>
         </div>
@@ -163,7 +163,7 @@ export function SettingsForm({
             <p><span className="font-medium">Current policy:</span> {APPROVAL_POLICY_LABEL[initial.approvalPolicy]}</p>
             <p>{APPROVAL_POLICY_EXPLANATION[initial.approvalPolicy]}</p>
             {initial.approvalNote ? <p className="break-words text-muted-foreground">Note: {initial.approvalNote}</p> : null}
-            <p className="text-xs text-muted-foreground">Only a founder, or someone they have given approval-rule access, can change this. Saving the other settings leaves it as it is.</p>
+            <p className="text-sm text-muted-foreground">Only a founder, or someone they have given approval-rule access, can change this. Saving the other settings leaves it as it is.</p>
           </div>
         )}
       </fieldset>

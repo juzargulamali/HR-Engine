@@ -59,7 +59,7 @@ export function AutoRefresh({ generatedAt, timeZone, intervalSeconds = 30 }: { g
   const time = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(generated);
 
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" role="status" aria-live="polite">
+    <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" role="status" aria-live="polite">
       <span>Last updated {time}</span>
       {!online ? (
         <Badge variant="destructive">Disconnected — showing the last data received</Badge>

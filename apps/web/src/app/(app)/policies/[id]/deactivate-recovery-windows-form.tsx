@@ -45,7 +45,7 @@ export function DeactivateRecoveryWindowsForm({ policyVersionId, minDate, countr
           {pending ? "Working…" : "Stop after this date"}
         </Button>
       </div>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         The earliest date allowed is {minDate} (tomorrow in {countryName}). Keep the background processor running until the alerts page shows no work remaining.
       </p>
       {error ? <Alert variant="destructive">{error}</Alert> : null}

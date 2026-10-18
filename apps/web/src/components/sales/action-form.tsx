@@ -71,7 +71,7 @@ export function Field({ label, htmlFor, hint, children, className }: { label: st
     <div className={className ?? "space-y-1.5"}>
       <label htmlFor={htmlFor} className="text-sm font-medium leading-none">{label}</label>
       {children}
-      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+      {hint ? <p className="text-sm text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }

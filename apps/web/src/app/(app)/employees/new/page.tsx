@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
 import { NewEmployeeForm } from "./new-employee-form";
 
+export const metadata = { title: "Add employee" };
+
 export default async function NewEmployeePage() {
   const session = await getCurrentSession();
   // hasRoleAnyScope, not a bare isHrAdmin(grants) — hr_admin is always

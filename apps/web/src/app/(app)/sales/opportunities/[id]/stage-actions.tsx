@@ -57,7 +57,7 @@ export function MoveStageButton({ opportunityId, version, stage, options }: { op
           </Field>
           {chosen?.requirement ? <Alert variant="warning">{chosen.requirement}</Alert> : null}
           {error ? <Alert variant="destructive">{error}</Alert> : null}
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Winning or losing needs evidence or a reason: use <Link href={`/sales/opportunities/${opportunityId}/close?outcome=won`} className="font-medium underline">Close as won</Link> or{" "}
             <Link href={`/sales/opportunities/${opportunityId}/close?outcome=lost`} className="font-medium underline">Close as lost</Link>. To pause it, use Put on hold.
           </p>

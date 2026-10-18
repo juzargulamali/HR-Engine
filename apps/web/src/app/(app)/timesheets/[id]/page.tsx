@@ -10,6 +10,8 @@ import { DeleteEntryButton } from "./delete-entry-button";
 import { TimesheetActions } from "./timesheet-actions";
 import { EmptyState } from "@/components/ui/empty-state";
 
+export const metadata = { title: "Timesheet" };
+
 export default async function TimesheetDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await getCurrentSession();

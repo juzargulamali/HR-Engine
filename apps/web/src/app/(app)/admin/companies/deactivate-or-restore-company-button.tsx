@@ -20,7 +20,7 @@ export function DeactivateOrRestoreCompanyButton({ companyId, deactivated }: { c
         >
           {pending ? "Restoring…" : "Restore"}
         </Button>
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </div>
     );
   }
@@ -39,7 +39,7 @@ export function DeactivateOrRestoreCompanyButton({ companyId, deactivated }: { c
       >
         {pending ? "Deactivating…" : "Deactivate"}
       </Button>
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

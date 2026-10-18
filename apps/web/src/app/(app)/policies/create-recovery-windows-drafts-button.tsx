@@ -42,7 +42,7 @@ export function CreateRecoveryWindowsDraftsButton({ allCreated }: { allCreated: 
       </Button>
       {outcome?.error ? <Alert variant="destructive">{outcome.error}</Alert> : null}
       {outcome && outcome.results.length > 0 ? (
-        <ul className="rounded-md border border-border p-2 text-xs text-muted-foreground">
+        <ul className="rounded-md border border-border p-2 text-sm text-muted-foreground">
           {outcome.results.map((r) => (
             <li key={r.countryCode}>
               {r.countryCode}: {r.action === "created" ? `draft v${r.versionNo} created` : "already created — skipped"}

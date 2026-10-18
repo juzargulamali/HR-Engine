@@ -44,7 +44,7 @@ export function DropdownMenu({
       <div
         role="menu"
         className={cn(
-          "absolute z-50 min-w-[15rem] rounded-lg border border-border bg-card p-1.5 shadow-xl transition-all duration-150",
+          "absolute z-50 min-w-[15rem] rounded-lg border border-border bg-raised p-1.5 shadow-[var(--shadow-pop)] transition-all duration-150",
           side === "bottom" ? "top-full mt-2" : "bottom-full mb-2",
           align === "end" ? "right-0" : "left-0",
           open ? "scale-100 opacity-100" : "pointer-events-none scale-95 opacity-0",
