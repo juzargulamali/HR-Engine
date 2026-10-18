@@ -24,7 +24,7 @@ import { BirthdaysSection } from "./birthdays-section";
 import { getCompanySnapshot } from "./dashboard-data";
 import { WorkforceSnapshot } from "./workforce-snapshot";
 import { CompanyComparisonTable } from "./company-comparison-table";
-import { attendanceSentence } from "./attendance-summary";
+import { attendanceSentence, CALENDAR_NOTE } from "./attendance-summary";
 import { ActionCentre, attentionSentence, buildActionItems, type ActionItem } from "./action-centre";
 import { AttendanceClockCard } from "./attendance-clock-card";
 import { AttendanceCompletionBar } from "./attendance-completion-bar";
@@ -369,6 +369,7 @@ export default async function DashboardPage() {
           <h2 id="hr-today" className="font-heading text-xl font-semibold">
             People &amp; HR today
           </h2>
+          <p className="-mt-3 text-sm text-muted-foreground">{CALENDAR_NOTE}</p>
           <WorkforceSnapshot
             totalEmployees={totals.totalEmployees}
             presentCount={totals.presentCount}

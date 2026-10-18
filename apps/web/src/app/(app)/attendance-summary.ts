@@ -41,3 +41,7 @@ export function noRecordHint(t: Pick<AttendanceTotals, "notRecordedScheduledCoun
   if (unknown > 0) parts.push(`${unknown} ${scheduled > 0 || rest > 0 ? "more " : ""}not classified (no workweek data for their country)`);
   return parts.join(". ");
 }
+
+/** Said wherever "no attendance recorded" is explained: what counts as expected follows the country calendar only. */
+export const CALENDAR_NOTE =
+  "Attendance expectations follow each employee's country calendar (weekly rest days and public holidays), not individual rosters or shifts.";

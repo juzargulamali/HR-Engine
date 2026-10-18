@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attendanceSentence, noRecordHint } from "./attendance-summary";
+import { attendanceSentence, CALENDAR_NOTE, noRecordHint } from "./attendance-summary";
 import { attentionSentence, buildActionItems, type ActionItem } from "./action-centre";
 
 const base = { totalEmployees: 11, notRecordedCount: 10, notRecordedScheduledCount: 0, notRecordedRestCount: 0, notRecordedUnknownCount: 0 };
@@ -67,5 +67,12 @@ describe("noRecordHint", () => {
     expect(h).toContain("Scheduled to work, nothing recorded yet");
     expect(h).toContain("3 more on a weekly rest day or public holiday (no attendance expected)");
     expect(h).toContain("1 more not classified (no workweek data for their country)");
+  });
+});
+
+describe("calendar note", () => {
+  it("says expectations follow the country calendar and not individual rosters", () => {
+    expect(CALENDAR_NOTE).toMatch(/country calendar/);
+    expect(CALENDAR_NOTE).toMatch(/not individual rosters/);
   });
 });
