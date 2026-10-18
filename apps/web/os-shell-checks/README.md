@@ -17,8 +17,14 @@ node os-shell-checks/sales-actions.mjs                       # the real Sales op
 node os-shell-checks/sales-workspace.mjs                     # the simplified Sales workspace (needs the sample scenario below, reseed before each run): Follow-ups groups, completing a
                                                              # follow-up never marks Won, Enquiries table (search, filters, sort, Columns), Table/Board, side panel (?open=, Back, unsaved
                                                              # prompt, stale edit), Board moves and refusals, Quick Add, owner picker, authorisation boundaries
-node os-shell-checks/projects-flow.mjs                      # Projects & Tasks end to end (needs the Projects seed: see below): Sales handover, PM acceptance, team, milestones, tasks and review,
-                                                             # timelines, site bookings and overlaps, calendars, discussion, scope change, client timeline PDF, completion and reopening, internal project
+node os-shell-checks/projects-flow.mjs                      # Projects & Tasks end to end through the simplified screens (needs the Projects seed: see below; reseed before each run): Sales handover,
+                                                             # PM acceptance, team, milestones (Plan menu), Add task, in-place status and review rules, due-date change with dependents, Plan (Delivery / Site,
+                                                             # List / Calendar / Timeline, legacy addresses), site bookings and overlaps, Quick Add internal project, calendars, summary-only access,
+                                                             # discussion, scope change, client timeline PDF, completion, reopening (Manage menu)
+node os-shell-checks/projects-workspace.mjs                  # the simplified Projects workspace (needs the sample scenario below, reseed before each run): directory table (search, filters, sort), Board and its status
+                                                             # form, summary panel, Next milestone only for members and founders (also absent from the page HTML), My Work (filters, Board, columns, My projects),
+                                                             # quick changes by role, task panel (Back, direct address, unsaved text, stale edit), Work grouping, review queue, Jump to task, Manage menu,
+                                                             # cross-company isolation, revoked grant and membership, HR tables unchanged
 node os-shell-checks/shell-checks.mjs                        # navigation per persona, Coming soon, titles, mobile bar/drawer, keyboard, theme persistence,
                                                              # clock status, /os-preview blocked
 node os-shell-checks/phone-fit.mjs                           # 360 and 390 px, dark + light, 26 pages: no horizontal scroll, no clipped bottom-bar label, nothing under the bar

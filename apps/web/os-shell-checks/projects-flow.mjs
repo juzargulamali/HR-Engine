@@ -1,6 +1,7 @@
 // Real-browser regression of Projects & Tasks through the ENGINIOUS OS interface (LOCAL STACK ONLY; see README.md).
 // Seed first with the local stack (founder ceo@, PM mgr@, department head lead@, member hr@, directory-only hr1@, Sales emp@ who owns a Won
 // opportunity, admin@ with no Projects access), then run this against the production build. Writes to the local database only.
+import { execSync } from "node:child_process";
 import { chromium, newPage, login, BASE, psql as sql } from "./lib.mjs";
 const SHOTS = process.env.SHOTS_DIR ?? "/tmp";
 const browser = await chromium.launch();
@@ -15,7 +16,9 @@ const step = async (name, fn) => {
     if (url) await page.goto(url, { waitUntil: "networkidle" }).catch(() => {});
   }
 };
-const dialog = () => page.getByRole("dialog");
+// A modal form (native <dialog>); the side panel is an <aside role=dialog> and is addressed separately.
+const dialog = () => page.locator("dialog[open]");
+const panel = () => page.locator("aside[role=dialog]");
 const mainText = async () => (await page.locator("main").innerText()).replace(/\s+/g, " ");
 const seen = (re, ms = 12000) => page.waitForFunction((src) => new RegExp(src).test(document.querySelector("main").innerText), re.source, { timeout: ms });
 const gone = (re, ms = 12000) => page.waitForFunction((src) => !new RegExp(src).test(document.querySelector("main").innerText), re.source, { timeout: ms });
@@ -28,6 +31,33 @@ const until = async (fn, ms = 12000) => { const t = Date.now(); for (;;) { try {
 const U = (n) => `00000000-0000-4000-8000-0000000000a${n}`;
 const OPP = db("select id from crm_opportunities limit 1");
 let P = ""; let HANDOVER = "";
+// Run SQL as a signed-in person, through the same function the app calls. Returns the last line printed.
+const asDb = (n, stmt) => execSync(`psql -h 127.0.0.1 -U postgres -d ${process.env.LOCAL_DB_NAME ?? "hr_local_stack"} -v ON_ERROR_STOP=1 -Atq`, { env: { ...process.env, PGPASSWORD: process.env.PGPASSWORD ?? "postgres" }, input: `begin;\nset local role authenticated;\nselect set_config('request.jwt.claims', '{"sub":"${U(n)}","role":"authenticated"}', true);\n${stmt};\ncommit;\n` }).toString().trim().split("\n").filter(Boolean).pop();
+const dayIso = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+
+// ---- helpers for the simplified screens ----------------------------------------------------------------------------------
+// A MoreMenu ("Plan", "Manage project", "More"): open it, read or pick an item.
+// (Scoped to <main>: the account menu in the header is also a menu.)
+const openMenu = async (button) => { await page.locator("main").getByRole("button", { name: button, exact: true }).first().click(); await page.locator("main").getByRole("menu").first().waitFor(); };
+const menuItems = async (button) => { await openMenu(button); const t = (await page.locator("main").getByRole("menu").first().locator("[role=menuitem]").allInnerTexts()).map((x) => x.replace(/\s+/g, " ").trim()); await page.keyboard.press("Escape"); return t; };
+const pick = async (button, item) => { await openMenu(button); await page.locator("main").getByRole("menuitem", { name: item }).first().click(); };
+// The Milestones & deliverables section is collapsed once milestones exist.
+const openMilestones = async () => { const d = page.locator("details#milestones"); if (!(await d.evaluate((e) => e.open))) await d.locator("summary").first().click(); };
+const taskRow = (title) => page.locator("main tbody tr", { hasText: title }).first();
+const optionTexts = (sel) => sel.locator("option").allInnerTexts();
+const choose = async (sel, re) => { const opts = await optionTexts(sel); const o = opts.find((x) => re.test(x)); if (!o) throw new Error(`no option ${re} among: ${opts.join(" | ")}`); await sel.selectOption({ label: o }); return o; };
+// Add task (Quick Add): what, who, when; "more" fills the optional details first.
+const addTask = async (t, { assignee, due, more, dbl = false } = {}) => {
+  await page.getByRole("button", { name: /^Add task$/ }).first().click();
+  const d = dialog(); await d.waitFor();
+  await d.getByLabel("What needs doing").fill(t);
+  if (more) { await d.locator("summary", { hasText: "Add more details" }).click(); await more(d); }
+  if (assignee) await d.getByLabel("Assignee", { exact: true }).selectOption({ label: assignee });
+  if (due) await d.getByLabel("Due", { exact: true }).fill(due);
+  const submit = d.getByRole("button", { name: /^Add task$/ });
+  if (dbl) await submit.dblclick(); else await submit.click();
+  await closed();
+};
 
 // ---- access ------------------------------------------------------------------------------------------------------
 await as("admin@e2e.local");
@@ -38,8 +68,10 @@ await step("a person with no Projects grant sees no module and an explanation", 
   await go("/projects/work"); await expectText(/do not have Projects access/);
 });
 await as("hr@e2e.local");
-await step("an HR admin with a plain Projects grant sees the directory and the module; HR pages unchanged", async () => {
-  await go("/projects"); await expectText(/Ongoing projects/);
+await step("an HR admin with a plain Projects grant sees the module and the directory; HR pages unchanged", async () => {
+  await go("/projects"); await expectText(/No projects yet|Ongoing \(\d+\)/);
+  const nav = (await page.locator("aside nav[aria-label='Modules']").innerText()).replace(/\s+/g, " ");
+  if (!/Projects & Tasks/.test(nav)) throw new Error("module missing from the menu: " + nav);
   await go("/employees"); await expectText(/Employees|employee/i);
 });
 
@@ -70,6 +102,11 @@ await step("Founder: Handovers lists it first and the PM can be chosen", async (
   if (db("select status from proj_handovers") !== "pm_assigned") throw new Error("PM not assigned");
 });
 await as("mgr@e2e.local");
+await step("PM: the waiting handover is called out in My Work and on Projects, one click from the handover itself", async () => {
+  await go("/projects/work"); await expectText(/1 handover waiting on you/);
+  await page.getByRole("link", { name: /open handovers/i }).click(); await page.waitForURL(/\/projects\/handovers$/); await seen(/Waiting on you as Project Manager/);
+  await go("/projects"); await expectText(/1 handover waiting on you/);
+});
 await step("PM: asks Sales to clarify; Sales answers; PM accepts; exactly one project", async () => {
   await go("/projects/handovers");
   await page.getByRole("button", { name: /ask sales to clarify/i }).first().click();
@@ -95,6 +132,10 @@ await step("PM: accept (double click safe) opens the new project", async () => {
   await seen(/Floor projection for the Orbit launch/);
   if (db("select count(*) from proj_projects") !== "1") throw new Error("not exactly one project");
   if (!/^UAE-P-\d{4}-0001$/.test(db("select reference from proj_projects"))) throw new Error("reference");
+  // Accepting the same handover again (a retried request, a second tab) returns the same project: nothing is duplicated.
+  const again = asDb(4, `select proj_accept_handover('${HANDOVER}')`);
+  if (again !== P) throw new Error(`a second accept returned ${again}, not the project ${P}`);
+  if (db("select count(*) from proj_projects") !== "1" || db("select count(*) from proj_handovers where project_id is not null") !== "1") throw new Error("a second accept created another project");
 });
 await step("project overview: summary facts, scope as agreed, no commercial data, no invented percentage", async () => {
   await go(`/projects/${P}`); const t = await mainText();
@@ -104,8 +145,8 @@ await step("project overview: summary facts, scope as agreed, no commercial data
 });
 
 
+
 // ---- people, departments, temporary leadership --------------------------------------------------------------------
-const dayIso = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 const label = (t, scope = page) => scope.getByLabel(t, { exact: false }).first();
 const pickByText = async (scope, labelText, optionText) => { const sel = scope.getByLabel(labelText, { exact: false }).first(); await sel.selectOption({ label: optionText }); };
 await as("mgr@e2e.local");
@@ -137,140 +178,161 @@ await step("PM: appoint and end temporary leadership; it grants no HR rights", a
   await until(() => db(`select role from proj_project_members where user_id='${U(2)}' and removed_at is null`) === "member");
 });
 await as("hr@e2e.local");
-await step("Member: cannot manage people or milestones (no controls, and the database refuses)", async () => {
+await step("Member: cannot manage people or milestones (no controls, a short Manage menu, and the database refuses)", async () => {
   await go(`/projects/${P}/people`); const t = await mainText();
   if (/Add department team|Add to project|Appoint/.test(t)) throw new Error("management controls shown to a member");
   await go(`/projects/${P}/work`);
-  if ((await page.getByRole("button", { name: /add milestone/i }).count()) > 0) throw new Error("Add milestone shown to a member");
+  if ((await page.getByRole("button", { name: /^Plan$/, exact: true }).count()) > 0) throw new Error("Plan menu (add milestone / deliverable) shown to a member");
+  const items = await menuItems("Manage project");
+  if (items.some((i) => /Edit details|Change status|Complete project|Reopen/.test(i))) throw new Error("manager items in a member's Manage menu: " + items.join(" | "));
+  if (!items.some((i) => /People & access/.test(i)) || !items.some((i) => /Files & client plan/.test(i)) || !items.some((i) => /History/.test(i))) throw new Error("secondary pages missing from Manage: " + items.join(" | "));
+  if (db(`select count(*) from proj_milestones`) !== "0") throw new Error("milestones exist before the PM added any");
 });
 
 // ---- milestones, deliverables, tasks ---------------------------------------------------------------------------------
 await as("mgr@e2e.local");
 let MS1 = ""; let DL = "";
-await step("PM: add two milestones and a deliverable for Programming", async () => {
+await step("PM: add two milestones and a deliverable for Programming (Plan menu on Work)", async () => {
   await go(`/projects/${P}/work`);
-  await page.getByRole("button", { name: /add milestone/i }).first().click();
+  await pick("Plan", /Add milestone/);
   await dialog().getByLabel("Title").fill("First draft approved"); await dialog().getByLabel("Due date").fill(dayIso(30));
-  await dialog().getByRole("button", { name: /save|add/i }).last().click(); await closed();
-  await page.getByRole("button", { name: /add milestone/i }).first().click();
+  await dialog().getByRole("button", { name: /^Add milestone$/ }).click(); await closed();
+  await pick("Plan", /Add milestone/);
   await dialog().getByLabel("Title").fill("Final render approved"); await dialog().getByLabel("Due date").fill(dayIso(45));
-  await dialog().getByRole("button", { name: /save|add/i }).last().click(); await closed();
+  await dialog().getByRole("button", { name: /^Add milestone$/ }).click(); await closed();
   MS1 = db("select id from proj_milestones where title='First draft approved'");
-  await page.getByRole("button", { name: /add deliverable/i }).first().click();
+  await pick("Plan", /Add deliverable/);
   await dialog().getByLabel("Title").fill("Interactive floor build"); await dialog().getByLabel("Department team").selectOption({ label: "Programming" });
   await dialog().getByLabel("Milestone").selectOption({ label: "First draft approved" }); await dialog().getByLabel("Due date").fill(dayIso(25));
-  await dialog().getByRole("button", { name: /save|add/i }).last().click(); await closed();
+  await dialog().getByRole("button", { name: /^Add deliverable$/ }).click(); await closed();
   DL = db("select id from proj_deliverables"); if (!DL || db("select count(*) from proj_milestones") !== "2") throw new Error("not saved");
-  await seen(/Interactive floor build/);
+  await openMilestones(); await seen(/Interactive floor build/);
 });
 await as("lead@e2e.local");
 let T1 = ""; let T2 = "";
-await step("Department head: distribute a review-required task to a team member; cannot assign outside the team", async () => {
+await step("Department head: Add task for a team member with the review rule; cannot assign outside the team", async () => {
   await go(`/projects/${P}/work`);
-  await page.getByRole("button", { name: /new task/i }).first().click();
-  await dialog().getByLabel("Title").fill("Shader prototype"); await dialog().getByLabel("Department team").selectOption({ label: "Programming" }); await dialog().getByLabel("Assigned to").selectOption({ label: "hr" });
-  await dialog().getByLabel("Deliverable").selectOption({ label: "Interactive floor build" }); await dialog().getByLabel("Start date").fill(dayIso(3)); await dialog().getByLabel("Due date").fill(dayIso(10));
-  await dialog().getByLabel(/needs review|requires review|review/i).first().check();
-  await dialog().getByRole("button", { name: /create task/i }).click(); await closed();
+  await addTask("Shader prototype", {
+    assignee: "hr", due: dayIso(10),
+    more: async (d) => {
+      await d.getByLabel("Department team").selectOption({ label: "Programming" });
+      await d.getByLabel("Deliverable").selectOption({ label: "Interactive floor build" });
+      await d.getByLabel("Start date").fill(dayIso(3));
+      await d.getByLabel("Needs review").check();
+    },
+  });
   T1 = db("select id from proj_tasks where title='Shader prototype'"); if (!T1) throw new Error("not created");
   if (db(`select requires_review from proj_tasks where id='${T1}'`) !== "t") throw new Error("review flag lost");
-  const opts = await (async () => { await page.getByRole("button", { name: /new task/i }).first().click(); const o = await dialog().getByLabel("Assigned to").locator("option").allInnerTexts(); await page.keyboard.press("Escape"); return o; })();
-  if (opts.some((o) => /mgr/.test(o))) throw new Error("head can assign outside the team: " + opts.join(","));
+  if (db(`select assignee_id from proj_tasks where id='${T1}'`) !== U(2)) throw new Error("wrong assignee");
+  await page.getByRole("button", { name: /^Add task$/ }).first().click();
+  const o = await optionTexts(dialog().getByLabel("Assignee", { exact: true })); await page.keyboard.press("Escape"); await closed();
+  if (o.some((x) => /mgr/.test(x))) throw new Error("head can assign outside the team: " + o.join(","));
+  if (!o.some((x) => /hr/.test(x))) throw new Error("head cannot assign inside the team: " + o.join(","));
 });
 await as("hr@e2e.local");
-await step("Member: starts the task, sends it for review, and cannot complete it themself", async () => {
+await step("Member: starts the task in place, sends it for review through its form, and is never offered completion", async () => {
   await go(`/projects/${P}/work/tasks/${T1}`);
-  await page.getByRole("button", { name: /^start$/i }).click(); await seen(/In progress/);
-  if ((await page.getByRole("button", { name: /accept and complete|mark done/i }).count()) > 0) throw new Error("self-completion offered for a review task");
-  await page.getByRole("button", { name: /send for review/i }).click(); await seen(/Ready for review/);
-  if ((await page.getByRole("button", { name: /accept and complete/i }).count()) > 0) throw new Error("self-review offered");
-  if (db(`select status from proj_tasks where id='${T1}'`) !== "ready_for_review") throw new Error("db status");
+  const status = page.getByLabel(/^Status of Shader prototype/);
+  let opts = await optionTexts(status);
+  if (opts.some((o) => /Accept and complete|Mark done/.test(o))) throw new Error("completion offered on a review task: " + opts.join(" | "));
+  await choose(status, /^Start/); await until(() => db(`select status from proj_tasks where id='${T1}'`) === "in_progress");
+  await page.waitForFunction(() => /In progress/.test(document.body.innerText), null, { timeout: 12000 });
+  opts = await optionTexts(page.getByLabel(/^Status of Shader prototype/));
+  if (opts.some((o) => /Accept and complete|Mark done/.test(o))) throw new Error("completion offered after starting: " + opts.join(" | "));
+  await choose(page.getByLabel(/^Status of Shader prototype/), /Send for review/);
+  await dialog().getByRole("button", { name: /^Send for review$/ }).click(); await closed();
+  await until(() => db(`select status from proj_tasks where id='${T1}'`) === "ready_for_review");
+  opts = await optionTexts(page.getByLabel(/^Status of Shader prototype/));
+  if (opts.some((o) => /Accept and complete|Mark done|Request changes/.test(o))) throw new Error("self-review offered: " + opts.join(" | "));
 });
-await step("Member: creates a task for themself only; routine tasks finish without review; blocking needs a reason", async () => {
+await step("Member: adds a task for themself only (one click, no duplicate); routine tasks finish without review; blocking needs a reason", async () => {
   await go(`/projects/${P}/work`);
-  await page.getByRole("button", { name: /new task/i }).first().click();
-  const opts = await dialog().getByLabel("Assigned to").locator("option").allInnerTexts(); if (opts.length !== 1) throw new Error("member can assign to others: " + opts.join(","));
-  await dialog().getByLabel("Title").fill("Prepare test rig"); await dialog().getByLabel("Due date").fill(dayIso(12));
-  await dialog().getByRole("button", { name: /create task/i }).click(); await closed();
+  await page.getByRole("button", { name: /^Add task$/ }).first().click();
+  const o = await optionTexts(dialog().getByLabel("Assignee", { exact: true })); await page.keyboard.press("Escape"); await closed();
+  if (o.length !== 1) throw new Error("member can assign to others: " + o.join(","));
+  await addTask("Prepare test rig", { due: dayIso(12), dbl: true });
+  if (db("select count(*) from proj_tasks where title='Prepare test rig'") !== "1") throw new Error("double click created " + db("select count(*) from proj_tasks where title='Prepare test rig'") + " tasks");
   T2 = db("select id from proj_tasks where title='Prepare test rig'");
   await go(`/projects/${P}/work/tasks/${T2}`);
-  await page.getByRole("button", { name: /block task/i }).click();
+  await pick("More", /Block task/);
   await dialog().getByRole("button", { name: /mark as blocked/i }).click(); await page.waitForTimeout(800);
   if (db(`select blocked_at is null from proj_tasks where id='${T2}'`) !== "t") throw new Error("blocked without a reason");
   await dialog().getByLabel("What is blocking it").fill("Truss not delivered"); await dialog().getByLabel(/Or what action/).fill("Standbuilder delivers the truss");
-  await dialog().getByRole("button", { name: /mark as blocked/i }).click(); await closed(); await seen(/Truss not delivered/);
-  if ((await page.getByRole("button", { name: /mark done/i }).count()) > 0) throw new Error("Mark done offered while blocked");
-  await page.getByRole("button", { name: /clear blocker/i }).first().click(); await dialog().getByRole("button", { name: /clear blocker/i }).click(); await closed(); await until(() => db(`select blocked_at is null from proj_tasks where id='${T2}'`) === "t");
-  await page.getByRole("button", { name: /^start$/i }).click(); await seen(/In progress/);
-  await page.getByRole("button", { name: /mark done/i }).click(); await seen(/Done/);
+  await dialog().getByRole("button", { name: /mark as blocked/i }).click(); await closed(); await until(() => db(`select blocked_at is not null from proj_tasks where id='${T2}'`) === "t");
+  await seen(/Truss not delivered/);
+  const blockedOpts = await optionTexts(page.getByLabel(/^Status of Prepare test rig/));
+  if (blockedOpts.some((x) => /Mark done/.test(x))) throw new Error("Mark done offered while blocked: " + blockedOpts.join(" | "));
+  await pick("More", /Clear blocker/); await dialog().getByRole("button", { name: /^Clear blocker$/ }).click(); await closed();
+  await until(() => db(`select blocked_at is null from proj_tasks where id='${T2}'`) === "t");
+  await choose(page.getByLabel(/^Status of Prepare test rig/), /^Start/); await until(() => db(`select status from proj_tasks where id='${T2}'`) === "in_progress");
+  await choose(page.getByLabel(/^Status of Prepare test rig/), /Mark done/); await until(() => db(`select status from proj_tasks where id='${T2}'`) === "done");
 });
 await as("lead@e2e.local");
-await step("Department head: accepts the reviewed task and the deliverable's status can then move", async () => {
+await step("Department head: accepts the reviewed task (confirm form) so the deliverable can move", async () => {
   await go(`/projects/${P}/work/tasks/${T1}`);
-  await page.getByRole("button", { name: /accept and complete/i }).click(); await seen(/Done/);
-  if (db(`select completed_by from proj_tasks where id='${T1}'`) !== U(7)) throw new Error("not completed by the head");
+  await choose(page.getByLabel(/^Status of Shader prototype/), /Accept and complete/);
+  await dialog().getByRole("button", { name: /^Accept and complete$/ }).click(); await closed();
+  await until(() => db(`select completed_by from proj_tasks where id='${T1}'`) === U(7));
 });
 await as("mgr@e2e.local");
-await step("Changing a due date lists dependent work and moves nothing", async () => {
+await step("Changing a due date in the table lists dependent work and moves nothing", async () => {
   await go(`/projects/${P}/work`);
-  await page.getByRole("button", { name: /new task/i }).first().click();
-  await dialog().getByLabel("Title").fill("Rig test"); await dialog().getByLabel("Assigned to").selectOption({ label: "hr" });
-  await dialog().getByLabel("Start date").fill(dayIso(5)); await dialog().getByLabel("Due date").fill(dayIso(12));
-  await dialog().getByRole("button", { name: /create task/i }).click(); await closed();
-  const A = db("select id from proj_tasks where title='Rig test'");
-  await page.getByRole("button", { name: /new task/i }).first().click();
-  await dialog().getByLabel("Title").fill("Hardware demo"); await dialog().getByLabel("Assigned to").selectOption({ label: "hr" });
-  await dialog().getByLabel("Start date").fill(dayIso(13)); await dialog().getByLabel("Due date").fill(dayIso(16));
-  await dialog().getByLabel(/Depends on/).selectOption({ label: "Rig test" });
-  await dialog().getByRole("button", { name: /create task/i }).click(); await closed();
+  await addTask("Rig test", { assignee: "hr", due: dayIso(12), more: async (d) => { await d.getByLabel("Start date").fill(dayIso(5)); } });
+  await addTask("Hardware demo", { assignee: "hr", due: dayIso(16), more: async (d) => { await d.getByLabel("Start date").fill(dayIso(13)); await d.getByLabel(/Depends on/).selectOption({ label: "Rig test" }); } });
   if (db("select count(*) from proj_task_dependencies") !== "1") throw new Error("dependency not stored");
-  await go(`/projects/${P}/work/tasks/${A}`);
+  const A = db("select id from proj_tasks where title='Rig test'");
   const before = db("select due_date::text || start_date::text from proj_tasks where title='Hardware demo'");
-  await page.getByRole("button", { name: /edit task/i }).click();
+  const dueBefore = db(`select string_agg(title || ':' || coalesce(due_date::text,''), ',' order by title) from proj_tasks where title not in ('Rig test')`);
+  await taskRow("Rig test").getByRole("button", { name: /Change due date of Rig test/ }).click();
   await dialog().getByLabel("Due date").fill(dayIso(20)); await dialog().getByLabel(/Why is the date changing/).fill("Truss delivery slipped");
   await page.waitForTimeout(1500);
   const text = (await dialog().innerText()).replace(/\s+/g, " ");
   if (!/Hardware demo/.test(text)) throw new Error("dependent task not listed before saving: " + text.slice(0, 300));
   await dialog().getByLabel(/I have seen this/).check();
-  await dialog().getByRole("button", { name: /save task/i }).click(); await closed();
-  if (db("select due_date::text || start_date::text from proj_tasks where title='Hardware demo'") !== before) throw new Error("dependent task was moved automatically");
+  await dialog().getByRole("button", { name: /save due date/i }).click(); await closed();
   await until(() => db(`select count(*) from proj_task_events where task_id='${A}' and kind='due_date_changed'`) === "1");
-  await seen(/Due date changed|moved from|due date/i);
+  if (db("select due_date::text || start_date::text from proj_tasks where title='Hardware demo'") !== before) throw new Error("dependent task was moved automatically");
+  if (db(`select string_agg(title || ':' || coalesce(due_date::text,''), ',' order by title) from proj_tasks where title not in ('Rig test')`) !== dueBefore) throw new Error("another task's date changed");
+  await seen(/dependent task/i);
+  if (db(`select due_date::text from proj_tasks where id='${A}'`) !== dayIso(20)) throw new Error("new date not saved");
 });
 await as("lead@e2e.local");
-await step("Department head: accepts the team's deliverable (only theirs)", async () => {
+await step("Department head: accepts the team's deliverable (only theirs); has no milestone or deliverable creation", async () => {
   await go(`/projects/${P}/work`);
+  if ((await page.getByRole("button", { name: /^Plan$/, exact: true }).count()) > 0) throw new Error("PM-only Plan menu shown to a head");
+  await openMilestones();
   if ((await page.getByRole("button", { name: /add milestone|add deliverable/i }).count()) > 0) throw new Error("PM-only controls shown to a head");
-  await page.getByRole("button", { name: /change status/i }).first().click();
+  await page.locator("#deliverables li", { hasText: "Interactive floor build" }).getByRole("button", { name: /change status/i }).click();
   await dialog().getByLabel("New status").selectOption({ label: "Accepted" });
   await dialog().getByRole("button", { name: /change status/i }).click(); await closed();
   await until(() => db("select status from proj_deliverables") === "accepted");
 });
 await as("mgr@e2e.local");
 await step("PM: accepts the milestone; progress states its basis (1 of 2 required milestones accepted)", async () => {
-  await go(`/projects/${P}/work`);
-  await page.getByRole("button", { name: /change status/i }).first().click();
+  await go(`/projects/${P}/work`); await openMilestones();
+  await page.locator("#milestone-list li", { hasText: "First draft approved" }).getByRole("button", { name: /change status/i }).click();
   await dialog().getByLabel("New status").selectOption({ label: "Accepted" });
   await dialog().getByRole("button", { name: /change status/i }).click(); await closed();
   await seen(/1 of 2 required milestones accepted/);
   if (db("select count(*) from proj_milestones where status='accepted'") !== "1") throw new Error("not accepted");
 });
 
-// ---- timelines, dependencies, site bookings ---------------------------------------------------------------------------
+// ---- plans: delivery and site, dependencies, site bookings ---------------------------------------------------------------
 await as("mgr@e2e.local");
-await step("PM: start the delivery and site timelines from the suggestions (editable, nothing client-visible)", async () => {
-  await go(`/projects/${P}/timeline`);
+await step("PM: start the delivery and site plans from the suggestions (editable, nothing client-visible)", async () => {
+  await go(`/projects/${P}/plan`);
   await page.getByLabel(/First day of work/).fill(dayIso(7));
   await page.getByRole("button", { name: /create suggested stages/i }).first().click();
   await until(() => db("select count(*) from proj_plan_items where plan='delivery'") === "7");
-  await page.reload({ waitUntil: "networkidle" });
+  await go(`/projects/${P}/plan?plan=site`);
   await page.getByRole("button", { name: /create suggested stages/i }).first().click();
   await until(() => db("select count(*) from proj_plan_items where plan='site'") === "8");
   if (db("select count(*) from proj_plan_items where client_facing") !== "0") throw new Error("something is client-visible by default");
-  await expectText(/Moodboard/); await expectText(/Dismantling/);
+  await expectText(/Dismantling/);
+  await go(`/projects/${P}/plan`); await expectText(/Moodboard/);
 });
 await step("PM: mark the site installation client-facing and add an external dependency", async () => {
-  await go(`/projects/${P}/timeline`);
+  await go(`/projects/${P}/plan?plan=site`);
   await page.locator("tr", { hasText: "Installation" }).getByRole("button", { name: /edit/i }).first().click();
   await dialog().getByLabel(/client/i).first().check();
   await dialog().getByRole("button", { name: /save/i }).last().click(); await closed();
@@ -281,8 +343,22 @@ await step("PM: mark the site installation client-facing and add an external dep
   await dialog().getByRole("button", { name: /save|add/i }).last().click(); await closed();
   await until(() => db("select count(*) from proj_external_dependencies") === "1");
 });
-await step("PM: book hr@ on site with allowances and confirm it", async () => {
-  await go(`/projects/${P}/timeline`);
+await step("Plan: List, Calendar and Timeline are views of the same dates; switching writes nothing; legacy addresses forward here", async () => {
+  const snapshot = () => db("select (select string_agg(id::text || coalesce(start_date::text,'') || coalesce(end_date::text,'') || coalesce(starts_at::text,'') || version::text, ',' order by id) from proj_plan_items) || '|' || (select count(*) from proj_plan_items) || '|' || (select count(*) from proj_site_bookings) || '|' || (select count(*) from proj_external_dependencies)");
+  const before = snapshot();
+  for (const q of ["plan=delivery&mode=list", "plan=delivery&mode=timeline", "plan=delivery&mode=calendar", "plan=site&mode=list", "plan=site&mode=timeline", "plan=site&mode=calendar"]) {
+    await go(`/projects/${P}/plan?${q}`);
+    const t = await mainText(); if (/Application error|could not be loaded/i.test(t)) throw new Error(`/plan?${q} failed: ${t.slice(0, 160)}`);
+    if (/plan=site/.test(q) && !/Site/.test(t)) throw new Error("site plan not shown for " + q);
+  }
+  await go(`/projects/${P}/plan?plan=delivery&mode=timeline`); if ((await page.getByRole("img", { name: /as bars/i }).count()) + (await page.locator("[aria-label$='as bars']").count()) === 0) throw new Error("timeline bars missing");
+  if (snapshot() !== before) throw new Error("switching plan views changed data");
+  await go(`/projects/${P}/timeline`); if (!/\/plan/.test(page.url())) throw new Error("/timeline did not forward: " + page.url());
+  await go(`/projects/${P}/calendar?view=agenda&date=${dayIso(10)}`); if (!/\/plan\?/.test(page.url()) || !/mode=calendar/.test(page.url()) || !new RegExp(`date=${dayIso(10)}`).test(page.url())) throw new Error("/calendar did not forward with its view and date: " + page.url());
+  await go(`/projects/${P}/timeline?check=00000000-0000-4000-8000-000000000001`); if (!/plan=site/.test(page.url())) throw new Error("a conflict-check address did not open the Site plan: " + page.url());
+});
+await step("PM: book hr@ on site with allowances and confirm it (Site plan)", async () => {
+  await go(`/projects/${P}/plan?plan=site`);
   await page.getByRole("button", { name: /add booking/i }).first().click();
   await dialog().getByLabel("Who is booked").selectOption({ label: "hr" }); await dialog().getByLabel(/Site \/ location/).fill("Expo Hall 3");
   await dialog().getByLabel("Starts").fill(`${dayIso(60)}T09:00`); await dialog().getByLabel("Ends").fill(`${dayIso(60)}T17:00`);
@@ -294,22 +370,26 @@ await step("PM: book hr@ on site with allowances and confirm it", async () => {
 });
 await as("ceo@e2e.local");
 let INT = "";
-await step("Founder: create an internal project owned by hr1@ (no opportunity, no PO), ongoing", async () => {
-  await go("/projects/new");
-  await page.getByLabel(/Project name/).fill("Showroom technology refresh");
-  await page.getByLabel(/Accountable owner/).selectOption({ label: "hr1" });
-  await page.getByLabel(/Ongoing work/).check();
-  await Promise.all([page.waitForURL(/\/projects\/[0-9a-f-]{36}$/, { timeout: 20000 }), page.getByRole("button", { name: /create project/i }).click()]);
+await step("Founder: Quick Add an internal project owned by hr1@ (no opportunity, no PO), ongoing; /projects/new still works", async () => {
+  await go("/projects/new"); await expectText(/internal project/i);
+  await go("/projects?add=1");
+  const d = dialog(); await d.waitFor();
+  await d.getByLabel(/Project name/).fill("Showroom technology refresh");
+  await d.getByLabel(/Accountable owner/).selectOption({ label: "hr1" });
+  await d.locator("summary", { hasText: "Add more details" }).click();
+  await d.getByLabel(/Ongoing work/).check();
+  await Promise.all([page.waitForURL(/\/projects\/[0-9a-f-]{36}$/, { timeout: 20000 }), d.getByRole("button", { name: /^create project$/i }).click()]);
   INT = page.url().split("/").pop();
   const row = db(`select kind || '|' || coalesce(crm_opportunity_id::text,'none') || '|' || is_ongoing::text || '|' || pm_user_id from proj_projects where id='${INT}'`);
   if (row !== `internal|none|true|${U(1)}`) throw new Error("internal project row: " + row);
+  if (db("select count(*) from proj_projects where kind='internal'") !== "1") throw new Error("more than one internal project");
 });
 await as("hr1@e2e.local");
 await step("Internal project: owner adds hr@ and books them overlapping the client project; the clash message never names a project they cannot see", async () => {
   await go(`/projects/${INT}/people`);
   await page.getByLabel("Person").selectOption({ label: "hr" }); await page.getByRole("button", { name: /add to project/i }).click();
   await until(() => db(`select count(*) from proj_project_members where project_id='${INT}' and user_id='${U(2)}' and removed_at is null`) === "1");
-  await go(`/projects/${INT}/timeline`);
+  await go(`/projects/${INT}/plan?plan=site`);
   await page.getByRole("button", { name: /add booking/i }).first().click();
   await dialog().getByLabel("Who is booked").selectOption({ label: "hr" }); await dialog().getByLabel(/Site \/ location/).fill("Showroom");
   await dialog().getByLabel("Starts").fill(`${dayIso(60)}T18:30`); await dialog().getByLabel("Ends").fill(`${dayIso(60)}T20:00`);
@@ -319,20 +399,20 @@ await step("Internal project: owner adds hr@ and books them overlapping the clie
   await page.getByRole("button", { name: /^confirm booking$/i }).first().click();
   await page.waitForFunction(() => /confirmed site booking\(s\) that overlap/i.test(document.querySelector("main").innerText), null, { timeout: 12000 });
   const t = await mainText();
-  if (/Floor projection|UAE-P-2026-0001|Expo Hall 3/.test(t.replace(/Floor projection for the Orbit launch/g, "XX").replace(/UAE-P-2026-0002/g, "")) && /UAE-P-2026-0001|Expo Hall 3/.test(t)) throw new Error("clash message names a project the booker cannot see");
+  if (/UAE-P-2026-0001|Expo Hall 3|Floor projection/.test(t)) throw new Error("clash message names a project the booker cannot see");
   if (!/cannot see|you cannot see/i.test(t)) throw new Error("hidden-project wording missing: " + t.slice(0, 300));
   if (db(`select state from proj_site_bookings where project_id='${INT}'`) !== "tentative") throw new Error("confirmed despite overlap");
 });
 await as("ceo@e2e.local");
-await step("Founder: confirms the overlapping booking anyway, with a recorded reason", async () => {
-  await go(`/projects/${INT}/timeline`);
+await step("Founder: confirms the overlapping booking anyway, with a recorded reason (from the Site plan)", async () => {
+  await go(`/projects/${INT}/plan?plan=site`);
   await page.getByText(/Confirm even if it overlaps/).first().click();
   await page.getByLabel("Why this is acceptable").fill("Both rigs tested the same evening, agreed with both managers.");
   await page.getByRole("button", { name: /confirm despite the overlap/i }).click();
   await until(() => db(`select state || '|' || coalesce(override_by::text,'') from proj_site_bookings where project_id='${INT}'`) === `confirmed|${U(3)}`);
 });
 await as("hr@e2e.local");
-await step("Calendars: My calendar keeps plain-date deadlines in any viewing zone; company calendar is spans only", async () => {
+await step("Calendars: My calendar keeps plain-date deadlines in any viewing zone; company calendar is spans only; the project's Plan calendar shows the booking", async () => {
   const due = db("select due_date::text from proj_tasks where title='Rig test'");
   for (const tz of ["Pacific/Kiritimati", "Pacific/Pago_Pago", "Asia/Dubai"]) {
     await go(`/projects/calendar?view=agenda&date=${due}&tz=${encodeURIComponent(tz)}`);
@@ -342,17 +422,19 @@ await step("Calendars: My calendar keeps plain-date deadlines in any viewing zon
   await go(`/projects/calendar?scope=company&view=agenda&date=${start}`); const t = await mainText();
   if (!/Floor projection for the Orbit launch/.test(t)) throw new Error("company calendar misses the project");
   if (/Rig test|Hardware demo|Shader prototype/.test(t)) throw new Error("company calendar leaks task titles");
-  await go(`/projects/${P}/calendar?view=agenda&date=${dayIso(60)}`); await expectText(/Expo Hall 3|Site/);
+  await go(`/projects/${P}/plan?plan=site&mode=calendar&view=agenda&date=${dayIso(60)}`); await expectText(/Expo Hall 3|Site/);
 });
+
 await as("emp@e2e.local");
 await step("Sales (linked, not a member): sees only the summary and handover status, company calendar limited to their project", async () => {
   await go("/projects"); await expectText(/Floor projection for the Orbit launch/);
   const t0 = await mainText(); if (/Showroom technology refresh/.test(t0)) throw new Error("an unrelated internal project is visible to Sales");
-  await go(`/projects/${P}`); await expectText(/summary only/);
+  await go(`/projects/${P}`); await expectText(/summary only/i);
   await expectText(/Enginious Local AE/); await expectNoText(/Unknown/);
   const nav = (await page.locator("main nav[aria-label='Project sections']").count()); if (nav > 0) throw new Error("tabs shown to a summary-only viewer");
-  for (const sub of ["work", "people", "discussion", "documents", "timeline", "history", "changes"]) {
-    const r = await page.goto(`${BASE}/projects/${P}/${sub}`, { waitUntil: "networkidle" });
+  if ((await page.getByRole("button", { name: "Manage project" }).count()) > 0) throw new Error("Manage project shown to a summary-only viewer");
+  for (const sub of ["work", "people", "discussion", "documents", "plan", "timeline", "history", "changes"]) {
+    await page.goto(`${BASE}/projects/${P}/${sub}`, { waitUntil: "networkidle" });
     const body = await page.locator("main").innerText();
     if (/Shader prototype|Interactive floor build|LED floor|Expo Hall 3/.test(body)) throw new Error(`/${sub} leaks details to a Sales viewer`);
   }
@@ -363,9 +445,9 @@ await step("Sales (linked, not a member): sees only the summary and handover sta
 await as("hr1@e2e.local");
 await step("Directory-only person: sees ongoing projects in summary, cannot open any detail page", async () => {
   await go("/projects"); await expectText(/Floor projection for the Orbit launch/); await expectText(/Showroom technology refresh/);
-  await go(`/projects/${P}`); await expectText(/summary only/);
+  await go(`/projects/${P}`); await expectText(/summary only/i);
   await expectText(/Enginious Local AE/); await expectNoText(/Unknown/);
-  for (const sub of ["work", "people", "discussion", "documents", "timeline", "history", "changes", "calendar"]) {
+  for (const sub of ["work", "people", "discussion", "documents", "plan", "timeline", "history", "changes", "calendar"]) {
     await page.goto(`${BASE}/projects/${P}/${sub}`, { waitUntil: "networkidle" });
     const body = await page.locator("main").innerText();
     if (/Shader prototype|Interactive floor build|LED floor|Expo Hall 3|Power drop/.test(body)) throw new Error(`/${sub} leaks details to a directory-only person`);
@@ -380,9 +462,9 @@ for (const who of ["mgr@e2e.local", "lead@e2e.local"]) {
   await as(who);
   await step(`${who}: sees the company's ongoing projects in the list and, on one they are not on, the summary only with the right company name`, async () => {
     await go("/projects"); await expectText(/Showroom technology refresh/); await expectText(/Floor projection for the Orbit launch/);
-    await go(`/projects/${INTERNAL}`); await expectText(/summary only/); await expectText(/Enginious Local AE/); await expectNoText(/Unknown/);
+    await go(`/projects/${INTERNAL}`); await expectText(/summary only/i); await expectText(/Enginious Local AE/); await expectNoText(/Unknown/);
     if ((await page.locator("main nav[aria-label='Project sections']").count()) > 0) throw new Error("tabs shown to a summary-only viewer");
-    for (const sub of ["work", "people", "discussion", "documents", "timeline", "history", "changes", "calendar"]) {
+    for (const sub of ["work", "people", "discussion", "documents", "plan", "timeline", "history", "changes", "calendar"]) {
       await page.goto(`${BASE}/projects/${INTERNAL}/${sub}`, { waitUntil: "networkidle" });
       const body = await page.locator("main").innerText();
       for (const secret of PRIVATE_OF_INTERNAL) if (body.includes(secret)) throw new Error(`/${sub} leaks "${secret}" to someone who is not on the project`);
@@ -542,11 +624,12 @@ await step("Completion: complete with explicit decisions and the client's e-mail
   if ((await page.getByRole("button", { name: /new task/i }).count()) > 0) throw new Error("New task offered on a completed project");
 });
 await as("mgr@e2e.local");
-await step("Reopen: a PM without the right cannot; a founder can, with a reason; the earlier completion is kept", async () => {
+await step("Reopen: a PM without the right cannot (no menu item); a founder can, with a reason; the earlier completion is kept", async () => {
   await go(`/projects/${P}`);
-  if ((await page.getByRole("button", { name: /reopen/i }).count()) > 0) throw new Error("reopen offered to a PM without the right");
+  const items = await menuItems("Manage project");
+  if (items.some((i) => /Reopen/.test(i))) throw new Error("reopen offered to a PM without the right: " + items.join(" | "));
   await as("ceo@e2e.local"); await go(`/projects/${P}`);
-  await page.getByRole("button", { name: /reopen/i }).first().click();
+  await pick("Manage project", /Reopen project/);
   await dialog().getByRole("textbox").first().fill("Client found a defect on site.");
   await dialog().getByRole("button", { name: /^reopen$/i }).click(); await closed();
   await until(() => db("select status from proj_projects where kind='client'") === "in_progress");
@@ -563,6 +646,12 @@ await step("Internal project: completes with the owner's note only (no client ev
   await page.getByRole("button", { name: /^complete project$/i }).click();
   await until(() => db(`select status from proj_projects where id='${INT}'`) === "completed", 20000);
 });
-
+await as("ceo@e2e.local");
+await step("Completed projects are listed under Show: Completed and archived (no Board), and drop out of Ongoing", async () => {
+  await go("/projects"); const t = await mainText(); if (/Showroom technology refresh/.test(t)) throw new Error("a completed project is still in Ongoing");
+  await go("/projects?show=finished"); await expectText(/Showroom technology refresh/); await expectText(/Completed/);
+  if (await page.getByRole("navigation", { name: "View" }).count()) throw new Error("Table/Board switch offered for completed projects");
+  await go(`/projects/${INT}/work`); if ((await page.getByRole("button", { name: /^Add task$/ }).count()) > 0) throw new Error("Add task offered on a completed project");
+});
 console.log(`\nverdict: ${fails === 0 ? "ALL PASS" : `${fails} FAIL`} (${passes} passed)`);
 await browser.close(); process.exit(fails === 0 ? 0 : 1);
