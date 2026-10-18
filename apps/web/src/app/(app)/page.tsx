@@ -408,7 +408,7 @@ export default async function DashboardPage() {
       ) : null}
 
       {/* The sidebar already lists these; this is only a quiet reminder, with no figures. */}
-      <p className="text-sm text-muted-foreground">Coming soon to ENGINIOUS OS: Projects &amp; Tasks, Inventory, Vendors &amp; Purchasing and KPIs.</p>
+      <p className="text-sm text-muted-foreground">Coming soon to ENGINIOUS OS: Inventory, Vendors &amp; Purchasing and KPIs.</p>
     </div>
   );
 }

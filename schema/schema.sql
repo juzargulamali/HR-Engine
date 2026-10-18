@@ -12744,3 +12744,4614 @@ grant execute on function
 
 -- ROLLBACK (before any CRM data exists): drop the functions above with `drop function if exists`, then
 --   delete from storage.buckets where id in ('crm-files', 'crm-quarantine');   -- only if both buckets are empty
+
+-- ==============================================================================
+-- 19. Projects & Tasks (Release 2) — migrations 20261120000000 .. 20261120000500, mirrored verbatim.
+-- Company-scoped Projects access (proj_company_grants, NOT user_roles or crm_company_grants), three data tiers, read-only tables,
+-- controlled functions. Prerequisite: Sales & CRM (section 18). See docs/projects-design.md and docs/projects-deployment.md.
+-- ==============================================================================
+
+-- ---- 20261120000000_proj_access_audit.sql ----
+-- Projects & Tasks (Release 2), migration 1 of 5: access, audit and company settings.
+--
+-- Projects access is its own company-scoped grant table (proj_company_grants), deliberately NOT user_roles and NOT
+-- crm_company_grants: an HR role, a Sales grant, an employee record or an e-mail domain confers no Projects access,
+-- and a Projects grant confers no HR or Sales access. A grant with an empty capability list means "Projects access":
+-- the basic directory only. Founders are grants (capability 'founder'), never hard-coded people.
+--
+-- Prerequisite: the Sales & CRM migrations (20261115*) are applied (Sales-link visibility uses crm_has_access()).
+-- Nothing here reads or writes any HR or CRM table. Additive: no existing object is altered.
+
+-- -----------------------------------------------------------------------------
+-- Capability vocabulary
+-- -----------------------------------------------------------------------------
+create or replace function proj_capability_list()
+returns text[]
+language sql immutable
+as $$
+  select array['founder', 'assign_pm', 'manage_access', 'approve_scope', 'view_commercial', 'view_audit',
+               'reopen_project', 'override_site_conflict']::text[];
+$$;
+
+create table if not exists proj_company_grants (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references auth.users(id),
+  company_id    uuid not null references companies(id),
+  capabilities  text[] not null default '{}'::text[],
+  note          text,
+  granted_by    uuid references auth.users(id),
+  granted_at    timestamptz not null default now(),
+  revoked_at    timestamptz,
+  revoked_by    uuid references auth.users(id),
+  constraint proj_company_grants_caps check (capabilities <@ proj_capability_list())
+);
+create unique index if not exists uq_proj_grants_active on proj_company_grants(user_id, company_id) where revoked_at is null;
+create index if not exists idx_proj_grants_company on proj_company_grants(company_id) where revoked_at is null;
+
+-- -----------------------------------------------------------------------------
+-- Helpers. SECURITY DEFINER + stable so policies can call them without recursion; every one joins to an ACTIVE profile,
+-- so a deactivated account loses access at once.
+-- -----------------------------------------------------------------------------
+create or replace function proj_require_user()
+returns uuid
+language plpgsql stable
+as $$
+begin
+  if auth.uid() is null then raise exception 'Not signed in' using errcode = '28000'; end if;
+  return auth.uid();
+end;
+$$;
+
+create or replace function proj_has_access(p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from proj_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid() and g.company_id = p_company_id and g.revoked_at is null);
+$$;
+
+create or replace function proj_has_capability(p_company_id uuid, p_capability text)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from proj_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid() and g.company_id = p_company_id and g.revoked_at is null
+      and ('founder' = any (g.capabilities) or p_capability = any (g.capabilities)));
+$$;
+
+create or replace function proj_is_founder(p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from proj_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid() and g.company_id = p_company_id and g.revoked_at is null
+      and 'founder' = any (g.capabilities));
+$$;
+
+create or replace function proj_has_any_access()
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from proj_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid() and g.revoked_at is null);
+$$;
+
+create or replace function proj_is_any_founder()
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from proj_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid() and g.revoked_at is null and 'founder' = any (g.capabilities));
+$$;
+
+create or replace function proj_accessible_company_ids()
+returns setof uuid
+language sql stable security definer
+set search_path = public
+as $$
+  select g.company_id
+  from proj_company_grants g
+  join profiles p on p.id = g.user_id and p.is_active
+  where g.user_id = auth.uid() and g.revoked_at is null;
+$$;
+
+alter table proj_company_grants enable row level security;
+drop policy if exists proj_company_grants_select on proj_company_grants;
+create policy proj_company_grants_select on proj_company_grants for select
+  using (user_id = auth.uid() or proj_has_capability(company_id, 'manage_access'));
+
+-- -----------------------------------------------------------------------------
+-- Projects audit log. The HR audit_log is readable by HR roles, so Projects keeps its own, readable only with
+-- 'view_audit' (founders hold it implicitly). Rows store the old and new row images.
+-- -----------------------------------------------------------------------------
+create table if not exists proj_audit_log (
+  id          bigint generated always as identity primary key,
+  table_name  text not null,
+  row_id      text,
+  company_id  uuid,
+  action      text not null check (action in ('insert', 'update', 'delete')),
+  actor_id    uuid,
+  old_row     jsonb,
+  new_row     jsonb,
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_proj_audit_company_time on proj_audit_log(company_id, created_at desc);
+create index if not exists idx_proj_audit_row on proj_audit_log(table_name, row_id);
+
+alter table proj_audit_log enable row level security;
+drop policy if exists proj_audit_log_select on proj_audit_log;
+create policy proj_audit_log_select on proj_audit_log for select
+  using (company_id is not null and proj_has_capability(company_id, 'view_audit'));
+
+-- Every audited table has a uuid "id". company_id is read from the row when present; tables that only carry a
+-- project_id resolve the company from proj_projects (a row without either is logged with a null company and is
+-- therefore readable by nobody through RLS).
+create or replace function proj_audit_trigger()
+returns trigger
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_new jsonb := case when tg_op = 'DELETE' then null else to_jsonb(new) end;
+  v_old jsonb := case when tg_op = 'INSERT' then null else to_jsonb(old) end;
+  v_row jsonb := coalesce(v_new, v_old);
+  v_company uuid := nullif(v_row->>'company_id', '')::uuid;
+begin
+  if v_company is null and nullif(v_row->>'project_id', '') is not null then
+    select company_id into v_company from proj_projects where id = (v_row->>'project_id')::uuid;
+  end if;
+  insert into proj_audit_log (table_name, row_id, company_id, action, actor_id, old_row, new_row)
+  values (tg_table_name, v_row->>'id', v_company, lower(tg_op), auth.uid(), v_old, v_new);
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists proj_company_grants_audit on proj_company_grants;
+create trigger proj_company_grants_audit after insert or update or delete on proj_company_grants
+  for each row execute function proj_audit_trigger();
+
+-- -----------------------------------------------------------------------------
+-- Per-company settings: the project reference code ("UAE" -> UAE-P-2026-0001). Blank means "not configured": a
+-- project cannot be created until a founder sets it (never a silent default).
+-- -----------------------------------------------------------------------------
+create table if not exists proj_company_settings (
+  company_id      uuid primary key references companies(id),
+  reference_code  text not null,
+  updated_by      uuid references auth.users(id),
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  constraint proj_company_settings_code check (reference_code ~ '^[A-Z]{2,5}$')
+);
+create unique index if not exists uq_proj_company_settings_code on proj_company_settings(reference_code);
+
+create table if not exists proj_reference_counters (
+  company_id  uuid not null references companies(id),
+  year        integer not null,
+  last_value  integer not null default 0,
+  primary key (company_id, year)
+);
+
+drop trigger if exists proj_company_settings_set_updated_at on proj_company_settings;
+create trigger proj_company_settings_set_updated_at before update on proj_company_settings
+  for each row execute function set_updated_at();
+
+alter table proj_company_settings enable row level security;
+drop policy if exists proj_company_settings_select on proj_company_settings;
+create policy proj_company_settings_select on proj_company_settings for select
+  using (proj_has_access(company_id));
+alter table proj_reference_counters enable row level security;   -- no policy: only the SECURITY DEFINER code reads it
+
+-- Seed from the Sales reference codes of EXISTING companies only (same codes, so UAE-... stays UAE-P-...), never creating a company.
+insert into proj_company_settings (company_id, reference_code)
+select s.company_id, s.reference_code from crm_company_settings s
+where exists (select 1 from companies c where c.id = s.company_id and c.is_active and c.deleted_at is null)
+on conflict do nothing;
+
+-- -----------------------------------------------------------------------------
+-- Access management functions
+-- -----------------------------------------------------------------------------
+create or replace function proj_grant_access(
+  p_user_id uuid,
+  p_company_id uuid,
+  p_capabilities text[] default '{}'::text[],
+  p_note text default null
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_id uuid;
+  v_caps text[] := coalesce(p_capabilities, '{}'::text[]);
+  v_existing text[];
+begin
+  perform proj_require_user();
+  if not proj_has_capability(p_company_id, 'manage_access') then
+    raise exception 'Only a founder, or someone a founder gave access management to, can grant Projects access for this company' using errcode = '42501';
+  end if;
+  if not (v_caps <@ proj_capability_list()) then
+    raise exception 'Unknown Projects capability in %', v_caps using errcode = '22023';
+  end if;
+  if ('founder' = any (v_caps) or 'manage_access' = any (v_caps)) and not proj_is_founder(p_company_id) then
+    raise exception 'Only a Projects founder can grant founder or access-management rights' using errcode = '42501';
+  end if;
+  if not exists (select 1 from profiles where id = p_user_id and is_active) then
+    raise exception 'That user does not exist or is not active' using errcode = '22023';
+  end if;
+  if not exists (select 1 from companies where id = p_company_id and is_active and deleted_at is null) then
+    raise exception 'Unknown or inactive company' using errcode = '22023';
+  end if;
+  select capabilities into v_existing from proj_company_grants
+   where user_id = p_user_id and company_id = p_company_id and revoked_at is null;
+  if v_existing is not null and ('founder' = any (v_existing) or 'manage_access' = any (v_existing)) then
+    if not proj_is_founder(p_company_id) then
+      raise exception 'Only a Projects founder can change a founder''s or access manager''s rights' using errcode = '42501';
+    end if;
+    if 'founder' = any (v_existing) and not ('founder' = any (v_caps)) and (
+         select count(*) from proj_company_grants
+          where company_id = p_company_id and revoked_at is null and 'founder' = any (capabilities)) <= 1 then
+      raise exception 'Cannot remove founder rights from the last founder of this company' using errcode = '23514';
+    end if;
+  end if;
+
+  update proj_company_grants set capabilities = v_caps, note = coalesce(p_note, note)
+   where user_id = p_user_id and company_id = p_company_id and revoked_at is null
+  returning id into v_id;
+  if v_id is null then
+    insert into proj_company_grants (user_id, company_id, capabilities, granted_by, note)
+    values (p_user_id, p_company_id, v_caps, auth.uid(), p_note)
+    returning id into v_id;
+  end if;
+  return v_id;
+end;
+$$;
+
+-- Revoking Projects access also ends the person's active memberships in that company's projects and any open site
+-- bookings handled by them are left in place (history), but they can no longer read anything. The membership clean-up is
+-- done in migration 2 (proj_revoke_access is replaced there once proj_project_members exists).
+create or replace function proj_revoke_access(p_user_id uuid, p_company_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_target_is_founder boolean;
+  v_founders integer;
+begin
+  perform proj_require_user();
+  if not proj_has_capability(p_company_id, 'manage_access') then
+    raise exception 'Only a Projects founder can revoke Projects access for this company' using errcode = '42501';
+  end if;
+  select 'founder' = any (capabilities) into v_target_is_founder
+    from proj_company_grants where user_id = p_user_id and company_id = p_company_id and revoked_at is null;
+  if v_target_is_founder is null then return; end if;
+  if v_target_is_founder and not proj_is_founder(p_company_id) then
+    raise exception 'Only a Projects founder can revoke a founder' using errcode = '42501';
+  end if;
+  if v_target_is_founder then
+    select count(*) into v_founders from proj_company_grants
+     where company_id = p_company_id and revoked_at is null and 'founder' = any (capabilities);
+    if v_founders <= 1 then
+      raise exception 'Cannot revoke the last founder of this company' using errcode = '23514';
+    end if;
+  end if;
+  update proj_company_grants set revoked_at = now(), revoked_by = auth.uid()
+   where user_id = p_user_id and company_id = p_company_id and revoked_at is null;
+end;
+$$;
+
+create or replace function proj_set_company_code(p_company_id uuid, p_reference_code text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v_code text := upper(btrim(coalesce(p_reference_code, '')));
+begin
+  perform proj_require_user();
+  if not proj_is_founder(p_company_id) then
+    raise exception 'Only a Projects founder can set the project reference code' using errcode = '42501';
+  end if;
+  if v_code !~ '^[A-Z]{2,5}$' then
+    raise exception 'The reference code is 2 to 5 capital letters' using errcode = '22023';
+  end if;
+  if not exists (select 1 from companies where id = p_company_id and is_active and deleted_at is null) then
+    raise exception 'Unknown or inactive company' using errcode = '22023';
+  end if;
+  if exists (select 1 from proj_company_settings where reference_code = v_code and company_id <> p_company_id) then
+    raise exception 'That reference code is used by another company' using errcode = '23505';
+  end if;
+  insert into proj_company_settings (company_id, reference_code, updated_by) values (p_company_id, v_code, auth.uid())
+  on conflict (company_id) do update set reference_code = excluded.reference_code, updated_by = excluded.updated_by;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- People pickers. Names only (never HR data): holders of an active Projects grant in companies the caller can
+-- access, so a PM can name members without reading HR tables. E-mail only to a founder, who needs it to tell two
+-- people apart. crm-style staff directory for granting access: all active staff, to access managers only.
+-- -----------------------------------------------------------------------------
+create or replace function proj_people()
+returns table (user_id uuid, full_name text, email text, company_ids uuid[])
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform proj_require_user();
+  if not proj_has_any_access() then return; end if;
+  return query
+    select g.user_id, coalesce(nullif(btrim(p.full_name), ''), split_part(p.email, '@', 1)),
+           case when proj_is_any_founder() then p.email end, array_agg(distinct g.company_id)
+    from proj_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.revoked_at is null and proj_has_access(g.company_id)
+    group by g.user_id, p.full_name, p.email
+    order by 2;
+end;
+$$;
+
+create or replace function proj_staff_directory()
+returns table (user_id uuid, full_name text, email text)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform proj_require_user();
+  if not exists (
+    select 1 from proj_company_grants g join profiles p on p.id = g.user_id and p.is_active
+     where g.user_id = auth.uid() and g.revoked_at is null
+       and ('founder' = any (g.capabilities) or 'manage_access' = any (g.capabilities) or 'assign_pm' = any (g.capabilities))
+  ) then return; end if;
+  return query
+    select p.id, coalesce(nullif(btrim(p.full_name), ''), split_part(p.email, '@', 1)), case when proj_is_any_founder() then p.email end
+    from profiles p where p.is_active
+    order by 2, p.email;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges: clients read through RLS only; everything else is via the functions above.
+-- -----------------------------------------------------------------------------
+revoke all on table proj_company_grants, proj_audit_log, proj_company_settings, proj_reference_counters from anon, authenticated, public;
+revoke all on sequence proj_audit_log_id_seq from public, anon, authenticated;
+grant select on table proj_company_grants, proj_audit_log, proj_company_settings to authenticated;
+
+revoke all on function
+  proj_capability_list(), proj_require_user(), proj_has_access(uuid), proj_has_capability(uuid, text), proj_is_founder(uuid),
+  proj_has_any_access(), proj_is_any_founder(), proj_accessible_company_ids(), proj_audit_trigger(),
+  proj_grant_access(uuid, uuid, text[], text), proj_revoke_access(uuid, uuid), proj_set_company_code(uuid, text),
+  proj_people(), proj_staff_directory()
+  from public, anon, authenticated;
+grant execute on function
+  proj_capability_list(), proj_has_access(uuid), proj_has_capability(uuid, text), proj_is_founder(uuid),
+  proj_has_any_access(), proj_is_any_founder(), proj_accessible_company_ids(),
+  proj_grant_access(uuid, uuid, text[], text), proj_revoke_access(uuid, uuid), proj_set_company_code(uuid, text),
+  proj_people(), proj_staff_directory()
+  to authenticated;
+
+-- ---- 20261120000100_proj_core_tables.sql ----
+-- Projects & Tasks (Release 2), migration 2 of 5: core tables, visibility helpers and row-level security.
+--
+-- Everything here is READ-ONLY to clients (SELECT policies only, no INSERT/UPDATE/DELETE policies, no DML grants).
+-- Changes go through the SECURITY DEFINER functions in migrations 3-5, which enforce role rules.
+--
+-- Three data tiers are kept in DIFFERENT tables because row-level security cannot hide columns:
+--   summary-safe        proj_projects                 (any Projects-access holder sees ongoing projects in their company)
+--   member-only         proj_project_details and every other table about a project (members, founders)
+--   commercially restricted  proj_scope_change_commercial (migration 5)
+-- No Sales value, budget, PO or evidence reference is ever copied into any of them.
+
+-- -----------------------------------------------------------------------------
+-- Tables
+-- -----------------------------------------------------------------------------
+create table if not exists proj_projects (
+  id                  uuid primary key default gen_random_uuid(),
+  company_id          uuid not null references companies(id),
+  reference           text not null,
+  name                text not null check (length(btrim(name)) between 1 and 200),
+  kind                text not null check (kind in ('client', 'internal')),
+  status              text not null default 'planning' check (status in (
+                        'planning', 'in_progress', 'ready_for_installation', 'on_site', 'on_hold', 'completed', 'archived')),
+  priority            text not null default 'normal' check (priority in ('low', 'normal', 'high', 'urgent')),
+  pm_user_id          uuid not null references auth.users(id),
+  -- Internal projects only: continuing work that is never forced through installation / show states.
+  is_ongoing          boolean not null default false,
+  start_date          date,
+  end_date            date,
+  crm_opportunity_id  uuid references crm_opportunities(id),
+  handover_id         uuid,
+  created_by          uuid not null references auth.users(id),
+  version             integer not null default 1,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+  completed_at        timestamptz,
+  archived_at         timestamptz,
+  constraint proj_projects_ref_unique unique (company_id, reference),
+  constraint proj_projects_dates check (end_date is null or start_date is null or end_date >= start_date),
+  constraint proj_projects_kind_link check ((kind = 'client') = (crm_opportunity_id is not null)),
+  constraint proj_projects_ongoing_internal check (not is_ongoing or kind = 'internal'),
+  constraint proj_projects_internal_states check (kind = 'client' or status not in ('ready_for_installation', 'on_site'))
+);
+create unique index if not exists uq_proj_projects_opportunity on proj_projects(crm_opportunity_id) where crm_opportunity_id is not null;
+create unique index if not exists uq_proj_projects_handover on proj_projects(handover_id) where handover_id is not null;
+create index if not exists idx_proj_projects_company_status on proj_projects(company_id, status);
+create index if not exists idx_proj_projects_pm on proj_projects(pm_user_id);
+
+create table if not exists proj_project_details (
+  project_id        uuid primary key references proj_projects(id) on delete cascade,
+  client_name       text,
+  location          text,
+  -- IANA zone of the event / site: installation and show bookings are expressed in it.
+  site_timezone     text not null default 'Asia/Dubai',
+  install_start     date,
+  event_start       date,
+  event_end         date,
+  scope             text,
+  exclusions        text,
+  technologies      jsonb not null default '[]'::jsonb check (jsonb_typeof(technologies) = 'array'),
+  risks             jsonb not null default '[]'::jsonb check (jsonb_typeof(risks) = 'array'),
+  hold_reason       text,
+  hold_review_date  date,
+  status_before_hold text,
+  updated_at        timestamptz not null default now(),
+  constraint proj_details_event_dates check (event_end is null or event_start is null or event_end >= event_start)
+);
+
+create table if not exists proj_teams (
+  id             uuid primary key default gen_random_uuid(),
+  project_id     uuid not null references proj_projects(id) on delete cascade,
+  name           text not null check (length(btrim(name)) between 1 and 80),
+  -- Optional pointer to an HR department for display only; never used to authorise anything.
+  department_id  uuid references departments(id),
+  head_user_id   uuid not null references auth.users(id),
+  created_by     uuid references auth.users(id),
+  created_at     timestamptz not null default now(),
+  removed_at     timestamptz
+);
+create unique index if not exists uq_proj_teams_name on proj_teams(project_id, lower(btrim(name))) where removed_at is null;
+
+create table if not exists proj_project_members (
+  id              uuid primary key default gen_random_uuid(),
+  project_id      uuid not null references proj_projects(id) on delete cascade,
+  user_id         uuid not null references auth.users(id),
+  -- pm / acting_pm are project-level leadership; a department head is a plain member who heads a proj_teams row.
+  role            text not null default 'member' check (role in ('pm', 'acting_pm', 'member')),
+  team_id         uuid references proj_teams(id),
+  acting_until    date,
+  added_by        uuid references auth.users(id),
+  added_at        timestamptz not null default now(),
+  removed_at      timestamptz,
+  removed_by      uuid references auth.users(id),
+  removal_reason  text,
+  constraint proj_members_acting check ((role = 'acting_pm') = (acting_until is not null))
+);
+create unique index if not exists uq_proj_members_active on proj_project_members(project_id, user_id) where removed_at is null;
+create index if not exists idx_proj_members_user on proj_project_members(user_id) where removed_at is null;
+
+create table if not exists proj_sales_links (
+  id          uuid primary key default gen_random_uuid(),
+  project_id  uuid not null references proj_projects(id) on delete cascade,
+  user_id     uuid not null references auth.users(id),
+  source      text not null check (source in ('handover_owner', 'handover_preparer', 'added')),
+  added_by    uuid references auth.users(id),
+  added_at    timestamptz not null default now(),
+  removed_at  timestamptz
+);
+create unique index if not exists uq_proj_sales_links_active on proj_sales_links(project_id, user_id) where removed_at is null;
+create index if not exists idx_proj_sales_links_user on proj_sales_links(user_id) where removed_at is null;
+
+-- Handover from Sales: the member-safe delivery brief only. No value, budget, payment terms, PO or evidence reference.
+create table if not exists proj_handovers (
+  id                          uuid primary key default gen_random_uuid(),
+  company_id                  uuid not null references companies(id),
+  crm_opportunity_id          uuid not null references crm_opportunities(id),
+  crm_reference               text not null,
+  status                      text not null default 'draft' check (status in (
+                                'draft', 'submitted', 'pm_assigned', 'clarification_requested', 'accepted', 'withdrawn')),
+  prepared_by                 uuid not null references auth.users(id),
+  sales_owner_id              uuid not null references auth.users(id),
+  title                       text not null check (length(btrim(title)) between 1 and 200),
+  client_name                 text,
+  location                    text,
+  site_timezone               text not null default 'Asia/Dubai',
+  install_start               date,
+  event_start                 date,
+  event_end                   date,
+  technologies                jsonb not null default '[]'::jsonb check (jsonb_typeof(technologies) = 'array'),
+  scope                       text,
+  exclusions                  text,
+  risks                       jsonb not null default '[]'::jsonb check (jsonb_typeof(risks) = 'array'),
+  notes                       text,
+  pm_user_id                  uuid references auth.users(id),
+  pm_assigned_by              uuid references auth.users(id),
+  pm_assigned_at              timestamptz,
+  clarification_note          text,
+  clarification_requested_at  timestamptz,
+  clarification_requested_by  uuid references auth.users(id),
+  submitted_at                timestamptz,
+  accepted_by                 uuid references auth.users(id),
+  accepted_at                 timestamptz,
+  project_id                  uuid references proj_projects(id),
+  revision                    integer not null default 1,
+  version                     integer not null default 1,
+  created_at                  timestamptz not null default now(),
+  updated_at                  timestamptz not null default now(),
+  constraint proj_handovers_dates check (event_end is null or event_start is null or event_end >= event_start),
+  constraint proj_handovers_accepted check ((status = 'accepted') = (project_id is not null and accepted_at is not null))
+);
+create unique index if not exists uq_proj_handovers_open on proj_handovers(crm_opportunity_id) where status <> 'withdrawn';
+create index if not exists idx_proj_handovers_company_status on proj_handovers(company_id, status);
+
+alter table proj_projects drop constraint if exists proj_projects_handover_fk;
+alter table proj_projects add constraint proj_projects_handover_fk foreign key (handover_id) references proj_handovers(id);
+
+create table if not exists proj_milestones (
+  id             uuid primary key default gen_random_uuid(),
+  project_id     uuid not null references proj_projects(id) on delete cascade,
+  title          text not null check (length(btrim(title)) between 1 and 200),
+  description    text,
+  due_date       date,
+  -- Only required milestones count toward the stated progress.
+  is_required    boolean not null default true,
+  -- Whether the milestone may appear on a client timeline once the PM selects it (never automatic).
+  client_facing  boolean not null default false,
+  status         text not null default 'planned' check (status in (
+                   'planned', 'in_progress', 'ready_for_acceptance', 'accepted', 'cancelled', 'deferred')),
+  sort_order     integer not null default 0,
+  accepted_by    uuid references auth.users(id),
+  accepted_at    timestamptz,
+  created_by     uuid references auth.users(id),
+  version        integer not null default 1,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  constraint proj_milestones_accepted check ((status = 'accepted') = (accepted_at is not null))
+);
+create index if not exists idx_proj_milestones_project on proj_milestones(project_id, sort_order, due_date);
+
+create table if not exists proj_deliverables (
+  id            uuid primary key default gen_random_uuid(),
+  project_id    uuid not null references proj_projects(id) on delete cascade,
+  milestone_id  uuid references proj_milestones(id),
+  team_id       uuid references proj_teams(id),
+  title         text not null check (length(btrim(title)) between 1 and 200),
+  description   text,
+  due_date      date,
+  status        text not null default 'open' check (status in (
+                  'open', 'in_progress', 'ready_for_review', 'accepted', 'cancelled', 'deferred')),
+  accepted_by   uuid references auth.users(id),
+  accepted_at   timestamptz,
+  created_by    uuid references auth.users(id),
+  version       integer not null default 1,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
+  constraint proj_deliverables_accepted check ((status = 'accepted') = (accepted_at is not null))
+);
+create index if not exists idx_proj_deliverables_project on proj_deliverables(project_id, due_date);
+
+create table if not exists proj_tasks (
+  id                 uuid primary key default gen_random_uuid(),
+  project_id         uuid not null references proj_projects(id) on delete cascade,
+  deliverable_id     uuid references proj_deliverables(id),
+  milestone_id       uuid references proj_milestones(id),
+  team_id            uuid references proj_teams(id),
+  title              text not null check (length(btrim(title)) between 1 and 200),
+  description        text,
+  assignee_id        uuid not null references auth.users(id),
+  priority           text not null default 'normal' check (priority in ('low', 'normal', 'high', 'urgent')),
+  start_date         date,
+  due_date           date,
+  status             text not null default 'todo' check (status in (
+                       'todo', 'in_progress', 'ready_for_review', 'done', 'cancelled', 'deferred')),
+  requires_review    boolean not null default false,
+  -- Blocked is a flag beside the status, never a status: it needs a reason and a person or action to unblock.
+  blocked_at         timestamptz,
+  blocked_reason     text,
+  unblock_owner_id   uuid references auth.users(id),
+  unblock_action     text,
+  completed_at       timestamptz,
+  completed_by       uuid references auth.users(id),
+  created_by         uuid not null references auth.users(id),
+  version            integer not null default 1,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now(),
+  constraint proj_tasks_dates check (due_date is null or start_date is null or due_date >= start_date),
+  constraint proj_tasks_blocked check (
+    blocked_at is null or (length(btrim(coalesce(blocked_reason, ''))) > 0
+                           and (unblock_owner_id is not null or length(btrim(coalesce(unblock_action, ''))) > 0))),
+  constraint proj_tasks_done check ((status = 'done') = (completed_at is not null))
+);
+create index if not exists idx_proj_tasks_project on proj_tasks(project_id, status);
+create index if not exists idx_proj_tasks_assignee on proj_tasks(assignee_id, due_date) where status in ('todo', 'in_progress', 'ready_for_review');
+create index if not exists idx_proj_tasks_deliverable on proj_tasks(deliverable_id);
+
+create table if not exists proj_task_collaborators (
+  task_id     uuid not null references proj_tasks(id) on delete cascade,
+  user_id     uuid not null references auth.users(id),
+  project_id  uuid not null references proj_projects(id) on delete cascade,
+  added_at    timestamptz not null default now(),
+  primary key (task_id, user_id)
+);
+
+create table if not exists proj_task_dependencies (
+  task_id             uuid not null references proj_tasks(id) on delete cascade,
+  depends_on_task_id  uuid not null references proj_tasks(id) on delete cascade,
+  project_id          uuid not null references proj_projects(id) on delete cascade,
+  primary key (task_id, depends_on_task_id),
+  constraint proj_task_deps_not_self check (task_id <> depends_on_task_id)
+);
+
+-- Append-only task history: reassignment, date changes, status, blockers, reviews.
+create table if not exists proj_task_events (
+  id          bigint generated always as identity primary key,
+  task_id     uuid not null references proj_tasks(id) on delete cascade,
+  project_id  uuid not null references proj_projects(id) on delete cascade,
+  actor_id    uuid,
+  kind        text not null,
+  from_value  text,
+  to_value    text,
+  note        text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_proj_task_events_task on proj_task_events(task_id, created_at);
+
+create table if not exists proj_task_comments (
+  id          uuid primary key default gen_random_uuid(),
+  task_id     uuid not null references proj_tasks(id) on delete cascade,
+  project_id  uuid not null references proj_projects(id) on delete cascade,
+  author_id   uuid not null references auth.users(id),
+  body        text not null check (length(btrim(body)) between 1 and 4000),
+  created_at  timestamptz not null default now(),
+  edited_at   timestamptz
+);
+create index if not exists idx_proj_task_comments_task on proj_task_comments(task_id, created_at);
+
+-- Member-readable change history for dates, ownership and status of projects, milestones and deliverables
+-- (tasks keep theirs in proj_task_events). Complements the restricted audit log; never edited or deleted.
+create table if not exists proj_change_log (
+  id           bigint generated always as identity primary key,
+  project_id   uuid not null references proj_projects(id) on delete cascade,
+  entity_type  text not null check (entity_type in ('project', 'milestone', 'deliverable', 'plan_item', 'booking', 'member', 'message', 'external_dependency')),
+  entity_id    uuid not null,
+  field        text not null,
+  from_value   text,
+  to_value     text,
+  note         text,
+  actor_id     uuid,
+  created_at   timestamptz not null default now()
+);
+create index if not exists idx_proj_change_log_entity on proj_change_log(project_id, entity_type, entity_id, created_at);
+
+-- -----------------------------------------------------------------------------
+-- Timestamps, a valid IANA zone, optimistic-lock versions
+-- -----------------------------------------------------------------------------
+create or replace function proj_valid_timezone(p_tz text)
+returns boolean
+language sql stable
+as $$ select p_tz is not null and exists (select 1 from pg_timezone_names where name = p_tz); $$;
+
+alter table proj_project_details drop constraint if exists proj_details_tz;
+alter table proj_project_details add constraint proj_details_tz check (proj_valid_timezone(site_timezone));
+alter table proj_handovers drop constraint if exists proj_handovers_tz;
+alter table proj_handovers add constraint proj_handovers_tz check (proj_valid_timezone(site_timezone));
+
+do $$
+declare t text;
+begin
+  foreach t in array array['proj_projects', 'proj_project_details', 'proj_handovers', 'proj_milestones', 'proj_deliverables', 'proj_tasks'] loop
+    execute format('drop trigger if exists %I on %I', t || '_set_updated_at', t);
+    execute format('create trigger %I before update on %I for each row execute function set_updated_at()', t || '_set_updated_at', t);
+  end loop;
+end $$;
+
+-- An accepted handover is the historical snapshot of what was agreed: it never changes again.
+create or replace function proj_handover_frozen()
+returns trigger
+language plpgsql
+as $$
+begin
+  if old.status = 'accepted' then
+    raise exception 'An accepted handover is a historical record and cannot be changed' using errcode = '23514';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists proj_handovers_frozen on proj_handovers;
+create trigger proj_handovers_frozen before update on proj_handovers
+  for each row execute function proj_handover_frozen();
+
+-- -----------------------------------------------------------------------------
+-- Visibility helpers (SECURITY DEFINER stable; they read the tables as the owner, so the policies below never recurse).
+-- Every one evaluates ACTIVE membership at read time: revoking a member removes access immediately and consistently.
+-- -----------------------------------------------------------------------------
+-- Eligible to hold a role in a project of this company: an active Projects grant, or (for a project's own Sales link)
+-- an active Sales grant. Nothing is inferred from HR roles, e-mail domain or employment.
+create or replace function proj_user_eligible(p_company_id uuid, p_user_id uuid, p_project_id uuid default null)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (select 1 from profiles p where p.id = p_user_id and p.is_active)
+     and (
+       exists (select 1 from proj_company_grants g where g.user_id = p_user_id and g.company_id = p_company_id and g.revoked_at is null)
+       or (p_project_id is not null
+           and exists (select 1 from proj_sales_links l where l.project_id = p_project_id and l.user_id = p_user_id and l.removed_at is null)
+           and exists (select 1 from crm_company_grants c where c.user_id = p_user_id and c.company_id = p_company_id and c.revoked_at is null))
+     );
+$$;
+
+create or replace function proj_project_company(p_project_id uuid)
+returns uuid
+language sql stable security definer
+set search_path = public
+as $$ select company_id from proj_projects where id = p_project_id; $$;
+
+create or replace function proj_is_active_member(p_project_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  -- An active membership counts only while the person is still eligible: revoking their Projects access (or Sales access,
+  -- for a Sales participant) ends their project access at once, without having to touch each membership.
+  select exists (
+    select 1 from proj_project_members m
+    join proj_projects pr on pr.id = m.project_id
+    where m.project_id = p_project_id and m.user_id = auth.uid() and m.removed_at is null
+      and proj_user_eligible(pr.company_id, m.user_id, pr.id));
+$$;
+
+-- The accountable PM, or someone holding temporary project leadership that has not expired.
+create or replace function proj_is_pm(p_project_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from proj_projects pr
+    where pr.id = p_project_id and proj_user_eligible(pr.company_id, auth.uid(), pr.id)
+      and (pr.pm_user_id = auth.uid()
+           or exists (select 1 from proj_project_members m
+                       where m.project_id = pr.id and m.user_id = auth.uid() and m.removed_at is null
+                         and m.role = 'acting_pm' and m.acting_until >= current_date)));
+$$;
+
+create or replace function proj_is_team_head(p_team_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from proj_teams t
+    join profiles p on p.id = t.head_user_id and p.is_active
+    where t.id = p_team_id and t.head_user_id = auth.uid() and t.removed_at is null
+      and proj_is_active_member(t.project_id));
+$$;
+
+create or replace function proj_is_any_team_head(p_project_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from proj_teams t
+    where t.project_id = p_project_id and t.head_user_id = auth.uid() and t.removed_at is null
+      and proj_is_active_member(t.project_id));
+$$;
+
+create or replace function proj_sales_linked(p_project_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from proj_sales_links l
+    join proj_projects pr on pr.id = l.project_id
+    where l.project_id = p_project_id and l.user_id = auth.uid() and l.removed_at is null
+      and crm_has_access(pr.company_id));
+$$;
+
+-- Founder of the project's company, or an active member (the PM is always a member).
+create or replace function proj_can_view_details(p_project_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from proj_projects pr
+    where pr.id = p_project_id and (proj_is_founder(pr.company_id) or proj_is_active_member(pr.id)));
+$$;
+
+-- PM / acting PM / founder: scope, members, teams, milestones, delivery.
+create or replace function proj_can_manage(p_project_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from proj_projects pr
+    where pr.id = p_project_id and (proj_is_founder(pr.company_id) or proj_is_pm(pr.id)));
+$$;
+
+-- Summary row: founders, members, Projects-access holders (ongoing projects only) and linked Sales users.
+create or replace function proj_can_view_summary(p_project_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from proj_projects pr
+    where pr.id = p_project_id
+      and (proj_is_founder(pr.company_id)
+           or proj_is_active_member(pr.id)
+           or (proj_has_access(pr.company_id) and pr.status in ('planning', 'in_progress', 'ready_for_installation', 'on_site', 'on_hold'))
+           or proj_sales_linked(pr.id)));
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Row-level security: SELECT only.
+-- -----------------------------------------------------------------------------
+alter table proj_projects enable row level security;
+drop policy if exists proj_projects_select on proj_projects;
+create policy proj_projects_select on proj_projects for select using (proj_can_view_summary(id));
+
+alter table proj_sales_links enable row level security;
+drop policy if exists proj_sales_links_select on proj_sales_links;
+create policy proj_sales_links_select on proj_sales_links for select
+  using (proj_can_view_details(project_id) or (user_id = auth.uid() and removed_at is null));
+
+alter table proj_handovers enable row level security;
+drop policy if exists proj_handovers_select on proj_handovers;
+create policy proj_handovers_select on proj_handovers for select
+  using (
+    proj_is_founder(company_id)
+    or proj_has_capability(company_id, 'assign_pm')
+    or ((prepared_by = auth.uid() or sales_owner_id = auth.uid()) and crm_has_access(company_id))
+    or (pm_user_id = auth.uid() and status in ('pm_assigned', 'clarification_requested', 'accepted'))
+    or (project_id is not null and proj_can_view_details(project_id))
+  );
+
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'proj_project_details', 'proj_teams', 'proj_project_members', 'proj_milestones', 'proj_deliverables', 'proj_tasks',
+    'proj_task_collaborators', 'proj_task_dependencies', 'proj_task_events', 'proj_task_comments', 'proj_change_log'
+  ] loop
+    execute format('alter table %I enable row level security', t);
+    execute format('drop policy if exists %I on %I', t || '_select', t);
+    execute format('create policy %I on %I for select using (proj_can_view_details(project_id))', t || '_select', t);
+  end loop;
+end $$;
+
+-- -----------------------------------------------------------------------------
+-- Audit triggers on every table whose rows carry decisions (membership, ownership, dates, status, scope, completion).
+-- -----------------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'proj_projects', 'proj_project_details', 'proj_teams', 'proj_project_members', 'proj_sales_links', 'proj_handovers',
+    'proj_milestones', 'proj_deliverables', 'proj_tasks'
+  ] loop
+    execute format('drop trigger if exists %I on %I', t || '_audit', t);
+    execute format('create trigger %I after insert or update or delete on %I for each row execute function proj_audit_trigger()', t || '_audit', t);
+  end loop;
+end $$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges: clients can only SELECT (through RLS); no DML, no TRUNCATE; sequences closed.
+-- -----------------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'proj_projects', 'proj_project_details', 'proj_teams', 'proj_project_members', 'proj_sales_links', 'proj_handovers',
+    'proj_milestones', 'proj_deliverables', 'proj_tasks', 'proj_task_collaborators', 'proj_task_dependencies',
+    'proj_task_events', 'proj_task_comments', 'proj_change_log'
+  ] loop
+    execute format('revoke all on table %I from anon, authenticated, public', t);
+    execute format('grant select on table %I to authenticated', t);
+  end loop;
+end $$;
+revoke all on sequence proj_task_events_id_seq, proj_change_log_id_seq from public, anon, authenticated;
+
+revoke all on function
+  proj_valid_timezone(text), proj_handover_frozen(), proj_user_eligible(uuid, uuid, uuid),
+  proj_project_company(uuid), proj_is_active_member(uuid), proj_is_pm(uuid), proj_is_team_head(uuid), proj_is_any_team_head(uuid),
+  proj_sales_linked(uuid), proj_can_view_details(uuid), proj_can_manage(uuid), proj_can_view_summary(uuid)
+  from public, anon, authenticated;
+grant execute on function
+  proj_valid_timezone(text), proj_user_eligible(uuid, uuid, uuid),
+  proj_project_company(uuid), proj_is_active_member(uuid), proj_is_pm(uuid), proj_is_team_head(uuid), proj_is_any_team_head(uuid),
+  proj_sales_linked(uuid), proj_can_view_details(uuid), proj_can_manage(uuid), proj_can_view_summary(uuid)
+  to authenticated;
+
+-- ---- 20261120000200_proj_projects_handover_functions.sql ----
+-- Projects & Tasks (Release 2), migration 3 of 6: handover from Sales, project creation, ownership, status, members and teams.
+--
+-- Hard rules encoded here:
+--   * Sales-to-PM handover is a Projects record (proj_handovers) built from a WON opportunity. It never writes to CRM
+--     tables (the existing crm_handovers / crm_update_handover keep working untouched) and it never carries value,
+--     budget, payment terms, PO or evidence reference.
+--   * Acceptance by the assigned PM creates exactly one project, linked to the opportunity. It is idempotent and safe
+--     against concurrent or repeated clicks (row lock + unique indexes). The accepted handover is then frozen.
+--   * Membership, department responsibility and temporary project leadership are Projects concepts only: no function
+--     here reads or writes an HR table, attendance, Recovery Leave, managers or payroll.
+--   * Every write is a SECURITY DEFINER function that checks the specific role it needs.
+
+-- -----------------------------------------------------------------------------
+-- Internal helpers (not granted to clients)
+-- -----------------------------------------------------------------------------
+create or replace function proj_display_name(p_user_id uuid)
+returns text
+language sql stable security definer
+set search_path = public
+as $$
+  select coalesce(nullif(btrim(p.full_name), ''), split_part(p.email, '@', 1)) from profiles p where p.id = p_user_id;
+$$;
+
+-- Lock and return a project the caller can at least see in summary. Not-visible and not-existing are indistinguishable.
+create or replace function proj_lock_project(p_project_id uuid)
+returns proj_projects
+language plpgsql security definer
+set search_path = public
+as $$
+declare v proj_projects;
+begin
+  perform proj_require_user();
+  select * into v from proj_projects where id = p_project_id for update;
+  if not found or not proj_can_view_summary(v.id) then
+    raise exception 'Project not found' using errcode = 'P0002';
+  end if;
+  return v;
+end;
+$$;
+
+create or replace function proj_require_manager(p_project proj_projects)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if not proj_can_manage(p_project.id) then
+    raise exception 'Only the Project Manager, someone holding temporary project leadership, or a founder can do that' using errcode = '42501';
+  end if;
+end;
+$$;
+
+create or replace function proj_check_version(p_current integer, p_expected integer)
+returns void
+language plpgsql immutable
+as $$
+begin
+  if p_expected is not null and p_expected <> p_current then
+    raise exception 'This was changed by someone else. Reload and try again' using errcode = '40001';
+  end if;
+end;
+$$;
+
+create or replace function proj_log_change(p_project_id uuid, p_entity text, p_entity_id uuid, p_field text, p_from text, p_to text, p_note text default null)
+returns void
+language sql security definer
+set search_path = public
+as $$
+  insert into proj_change_log (project_id, entity_type, entity_id, field, from_value, to_value, note, actor_id)
+  select p_project_id, p_entity, p_entity_id, p_field, p_from, p_to, nullif(btrim(p_note), ''), auth.uid()
+  where p_from is distinct from p_to;
+$$;
+
+-- In-app notification, reusing the shared notifications table (insert-only, new "project_*" types). The recipient must
+-- still be allowed to see the project (active member or founder) unless the notice is a handover one (no project yet).
+-- Deduplicated: an unread notice with the same key is not repeated. Never to the actor, never for minor edits.
+create or replace function proj_notify(p_project_id uuid, p_user_id uuid, p_type text, p_payload jsonb, p_dedupe text, p_require_member boolean default true)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v_company uuid;
+begin
+  if p_user_id is null or p_user_id = auth.uid() then return; end if;
+  if not exists (select 1 from profiles where id = p_user_id and is_active) then return; end if;
+  if p_require_member then
+    select company_id into v_company from proj_projects where id = p_project_id;
+    if not (
+      (exists (select 1 from proj_project_members m where m.project_id = p_project_id and m.user_id = p_user_id and m.removed_at is null)
+       and proj_user_eligible(v_company, p_user_id, p_project_id))
+      or exists (select 1 from proj_company_grants g where g.user_id = p_user_id and g.company_id = v_company
+                  and g.revoked_at is null and 'founder' = any (g.capabilities))
+    ) then return; end if;
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('proj_notify:' || p_user_id::text || ':' || p_dedupe, 0));
+  if exists (select 1 from notifications n where n.user_id = p_user_id and n.type = p_type and n.read_at is null
+              and n.payload->>'dedupe_key' = p_dedupe) then return; end if;
+  insert into notifications (user_id, type, payload)
+  values (p_user_id, p_type, coalesce(p_payload, '{}'::jsonb) || jsonb_build_object('dedupe_key', p_dedupe, 'project_id', p_project_id));
+end;
+$$;
+
+create or replace function proj_next_reference(p_company_id uuid)
+returns text
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_code text;
+  v_year integer := extract(year from (now() at time zone 'Asia/Dubai'))::integer;
+  v_n integer;
+begin
+  select reference_code into v_code from proj_company_settings where company_id = p_company_id;
+  if v_code is null then
+    raise exception 'Project reference code is not configured for this company. A founder sets it first' using errcode = '22023';
+  end if;
+  insert into proj_reference_counters (company_id, year, last_value) values (p_company_id, v_year, 1)
+  on conflict (company_id, year) do update set last_value = proj_reference_counters.last_value + 1
+  returning last_value into v_n;
+  return v_code || '-P-' || v_year || '-' || lpad(v_n::text, 4, '0');
+end;
+$$;
+
+create or replace function proj_add_member_row(p_project_id uuid, p_user_id uuid, p_role text, p_team_id uuid default null, p_acting_until date default null)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare v_id uuid;
+begin
+  select id into v_id from proj_project_members where project_id = p_project_id and user_id = p_user_id and removed_at is null;
+  if v_id is not null then
+    update proj_project_members set role = case when p_role = 'member' and role in ('pm', 'acting_pm') then role else p_role end,
+           acting_until = case when p_role = 'acting_pm' then p_acting_until when p_role in ('pm', 'member') and role = 'acting_pm' then null else acting_until end,
+           team_id = coalesce(p_team_id, team_id)
+     where id = v_id;
+    return v_id;
+  end if;
+  insert into proj_project_members (project_id, user_id, role, team_id, acting_until, added_by)
+  values (p_project_id, p_user_id, p_role, p_team_id, p_acting_until, auth.uid()) returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Handover: Sales prepares, a founder (or assign_pm) names the PM, the PM accepts or asks for clarification.
+-- -----------------------------------------------------------------------------
+create or replace function proj_text_or_null(p_fields jsonb, p_key text)
+returns text
+language sql immutable
+as $$ select nullif(btrim(p_fields->>p_key), ''); $$;
+
+-- Create or update the draft handover for a WON opportunity. The caller must be the opportunity's owner or a CRM
+-- founder for its company (the same people who may hand over in Sales). Brief fields are what Sales chooses to share
+-- with delivery; nothing is read from the commercial columns.
+create or replace function proj_save_handover(p_opportunity_id uuid, p_fields jsonb default '{}'::jsonb, p_expected_version integer default null)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  o crm_opportunities;
+  h proj_handovers;
+  v_client text;
+  v_title text;
+  v_tz text;
+  v_id uuid;
+begin
+  perform proj_require_user();
+  select * into o from crm_opportunities where id = p_opportunity_id;
+  if not found or not crm_has_access(o.company_id) then
+    raise exception 'Opportunity not found' using errcode = 'P0002';
+  end if;
+  if o.owner_id <> auth.uid() and not crm_is_founder(o.company_id) then
+    raise exception 'Only the opportunity owner or a Sales founder can prepare its project handover' using errcode = '42501';
+  end if;
+  if o.stage <> 'won' then
+    raise exception 'A handover can only be prepared for a Won opportunity' using errcode = '23514';
+  end if;
+  select * into h from proj_handovers where crm_opportunity_id = p_opportunity_id and status <> 'withdrawn' for update;
+
+  v_tz := coalesce(proj_text_or_null(p_fields, 'site_timezone'), case when found then h.site_timezone else 'Asia/Dubai' end);
+  if not proj_valid_timezone(v_tz) then raise exception 'Unknown time zone %', v_tz using errcode = '22023'; end if;
+
+  if h.id is null then
+    select coalesce((select name from crm_organisations where id = o.client_org_id), (select name from crm_organisations where id = o.agency_org_id)) into v_client;
+    v_title := coalesce(proj_text_or_null(p_fields, 'title'), o.title);
+    insert into proj_handovers (company_id, crm_opportunity_id, crm_reference, prepared_by, sales_owner_id, title, client_name, location,
+                                site_timezone, install_start, event_start, event_end, technologies, scope, exclusions, risks, notes)
+    values (o.company_id, o.id, o.reference, auth.uid(), o.owner_id, v_title,
+            coalesce(proj_text_or_null(p_fields, 'client_name'), v_client),
+            coalesce(proj_text_or_null(p_fields, 'location'), o.location), v_tz,
+            coalesce((p_fields->>'install_start')::date, o.install_start),
+            coalesce((p_fields->>'event_start')::date, o.event_start),
+            coalesce((p_fields->>'event_end')::date, o.event_end),
+            coalesce(p_fields->'technologies', o.technologies),
+            coalesce(proj_text_or_null(p_fields, 'scope'), o.scope),
+            coalesce(proj_text_or_null(p_fields, 'exclusions'), o.exclusions),
+            coalesce(p_fields->'risks', o.risks),
+            proj_text_or_null(p_fields, 'notes'))
+    returning id into v_id;
+    return v_id;
+  end if;
+
+  perform proj_check_version(h.version, p_expected_version);
+  if h.status not in ('draft', 'submitted', 'clarification_requested') then
+    raise exception 'This handover can no longer be edited (status: %)', h.status using errcode = '23514';
+  end if;
+  update proj_handovers set
+    title = coalesce(proj_text_or_null(p_fields, 'title'), title),
+    client_name = case when p_fields ? 'client_name' then proj_text_or_null(p_fields, 'client_name') else client_name end,
+    location = case when p_fields ? 'location' then proj_text_or_null(p_fields, 'location') else location end,
+    site_timezone = v_tz,
+    install_start = case when p_fields ? 'install_start' then nullif(p_fields->>'install_start', '')::date else install_start end,
+    event_start = case when p_fields ? 'event_start' then nullif(p_fields->>'event_start', '')::date else event_start end,
+    event_end = case when p_fields ? 'event_end' then nullif(p_fields->>'event_end', '')::date else event_end end,
+    technologies = coalesce(p_fields->'technologies', technologies),
+    scope = case when p_fields ? 'scope' then proj_text_or_null(p_fields, 'scope') else scope end,
+    exclusions = case when p_fields ? 'exclusions' then proj_text_or_null(p_fields, 'exclusions') else exclusions end,
+    risks = coalesce(p_fields->'risks', risks),
+    notes = case when p_fields ? 'notes' then proj_text_or_null(p_fields, 'notes') else notes end,
+    version = version + 1
+   where id = h.id;
+  return h.id;
+end;
+$$;
+
+create or replace function proj_lock_handover(p_handover_id uuid)
+returns proj_handovers
+language plpgsql security definer
+set search_path = public
+as $$
+declare h proj_handovers;
+begin
+  perform proj_require_user();
+  select * into h from proj_handovers where id = p_handover_id for update;
+  if not found or not (
+    proj_is_founder(h.company_id) or proj_has_capability(h.company_id, 'assign_pm')
+    or ((h.prepared_by = auth.uid() or h.sales_owner_id = auth.uid()) and crm_has_access(h.company_id))
+    or h.pm_user_id = auth.uid()
+  ) then
+    raise exception 'Handover not found' using errcode = 'P0002';
+  end if;
+  return h;
+end;
+$$;
+
+create or replace function proj_submit_handover(p_handover_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  h proj_handovers;
+  r record;
+begin
+  h := proj_lock_handover(p_handover_id);
+  if not ((h.prepared_by = auth.uid() or h.sales_owner_id = auth.uid()) and crm_has_access(h.company_id)) and not crm_is_founder(h.company_id) then
+    raise exception 'Only Sales can submit the handover' using errcode = '42501';
+  end if;
+  if h.status not in ('draft', 'clarification_requested') then
+    if h.status in ('submitted', 'pm_assigned', 'accepted') then return; end if;   -- repeated click: nothing more to do
+    raise exception 'This handover cannot be submitted (status: %)', h.status using errcode = '23514';
+  end if;
+  if length(btrim(coalesce(h.scope, ''))) = 0 then
+    raise exception 'Describe the scope of work before submitting the handover' using errcode = '22023';
+  end if;
+  update proj_handovers set
+    status = case when pm_user_id is not null then 'pm_assigned' else 'submitted' end,
+    submitted_at = now(), revision = revision + 1, version = version + 1,
+    clarification_note = case when status = 'clarification_requested' then clarification_note else null end
+   where id = h.id;
+  if h.pm_user_id is not null then
+    perform proj_notify(null, h.pm_user_id, 'project_handover_resubmitted',
+      jsonb_build_object('handover_id', h.id, 'title', h.title, 'reference', h.crm_reference), 'handover:' || h.id || ':rev:' || (h.revision + 1), false);
+  else
+    for r in select g.user_id from proj_company_grants g join profiles p on p.id = g.user_id and p.is_active
+              where g.company_id = h.company_id and g.revoked_at is null and ('founder' = any (g.capabilities) or 'assign_pm' = any (g.capabilities)) loop
+      perform proj_notify(null, r.user_id, 'project_handover_submitted',
+        jsonb_build_object('handover_id', h.id, 'title', h.title, 'reference', h.crm_reference), 'handover:' || h.id || ':rev:' || (h.revision + 1), false);
+    end loop;
+  end if;
+end;
+$$;
+
+create or replace function proj_assign_handover_pm(p_handover_id uuid, p_pm_user_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare h proj_handovers;
+begin
+  h := proj_lock_handover(p_handover_id);
+  if not proj_has_capability(h.company_id, 'assign_pm') then
+    raise exception 'Only a founder, or someone a founder gave PM assignment to, can assign the Project Manager' using errcode = '42501';
+  end if;
+  if h.status not in ('submitted', 'pm_assigned', 'clarification_requested') then
+    raise exception 'A Project Manager can only be assigned to a submitted handover (status: %)', h.status using errcode = '23514';
+  end if;
+  if not proj_user_eligible(h.company_id, p_pm_user_id) then
+    raise exception 'That person does not have Projects access in this company. Give them access first' using errcode = '22023';
+  end if;
+  update proj_handovers set pm_user_id = p_pm_user_id, pm_assigned_by = auth.uid(), pm_assigned_at = now(),
+         status = 'pm_assigned', version = version + 1 where id = h.id;
+  perform proj_notify(null, p_pm_user_id, 'project_handover_assigned',
+    jsonb_build_object('handover_id', h.id, 'title', h.title, 'reference', h.crm_reference), 'handover:' || h.id || ':pm:' || p_pm_user_id, false);
+end;
+$$;
+
+create or replace function proj_request_handover_clarification(p_handover_id uuid, p_note text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare h proj_handovers;
+begin
+  h := proj_lock_handover(p_handover_id);
+  if h.pm_user_id is distinct from auth.uid() then
+    raise exception 'Only the assigned Project Manager can ask for clarification' using errcode = '42501';
+  end if;
+  if h.status = 'clarification_requested' then return; end if;
+  if h.status <> 'pm_assigned' then
+    raise exception 'Clarification can only be requested on a handover waiting for acceptance (status: %)', h.status using errcode = '23514';
+  end if;
+  if length(btrim(coalesce(p_note, ''))) = 0 then
+    raise exception 'Say what needs clarifying' using errcode = '22023';
+  end if;
+  update proj_handovers set status = 'clarification_requested', clarification_note = btrim(p_note),
+         clarification_requested_at = now(), clarification_requested_by = auth.uid(), version = version + 1 where id = h.id;
+  perform proj_notify(null, h.sales_owner_id, 'project_handover_clarification',
+    jsonb_build_object('handover_id', h.id, 'title', h.title, 'reference', h.crm_reference), 'handover:' || h.id || ':clar:' || (h.version + 1), false);
+  if h.prepared_by <> h.sales_owner_id then
+    perform proj_notify(null, h.prepared_by, 'project_handover_clarification',
+      jsonb_build_object('handover_id', h.id, 'title', h.title, 'reference', h.crm_reference), 'handover:' || h.id || ':clar:' || (h.version + 1), false);
+  end if;
+end;
+$$;
+
+create or replace function proj_withdraw_handover(p_handover_id uuid, p_reason text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare h proj_handovers;
+begin
+  h := proj_lock_handover(p_handover_id);
+  if not ((h.prepared_by = auth.uid() or h.sales_owner_id = auth.uid()) and crm_has_access(h.company_id)) and not proj_is_founder(h.company_id) then
+    raise exception 'Only Sales or a founder can withdraw a handover' using errcode = '42501';
+  end if;
+  if h.status = 'withdrawn' then return; end if;
+  if h.status = 'accepted' then
+    raise exception 'An accepted handover cannot be withdrawn' using errcode = '23514';
+  end if;
+  if length(btrim(coalesce(p_reason, ''))) = 0 then raise exception 'Give a reason for withdrawing' using errcode = '22023'; end if;
+  update proj_handovers set status = 'withdrawn', notes = btrim(concat_ws(E'\n', notes, 'Withdrawn: ' || btrim(p_reason))), version = version + 1 where id = h.id;
+end;
+$$;
+
+-- PM acceptance: exactly one project per opportunity, whatever the number of clicks or concurrent callers.
+create or replace function proj_accept_handover(p_handover_id uuid)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  h proj_handovers;
+  o crm_opportunities;
+  v_project uuid;
+  v_ref text;
+  r record;
+begin
+  perform proj_require_user();
+  select * into h from proj_handovers where id = p_handover_id for update;      -- serialises concurrent acceptances
+  if not found or (h.pm_user_id is distinct from auth.uid() and not proj_is_founder(h.company_id)) then
+    raise exception 'Handover not found' using errcode = 'P0002';
+  end if;
+  if h.status = 'accepted' then
+    if h.pm_user_id is distinct from auth.uid() then
+      raise exception 'Only the assigned Project Manager can accept the handover' using errcode = '42501';
+    end if;
+    return h.project_id;                                                         -- repeated click: same project
+  end if;
+  if h.pm_user_id is distinct from auth.uid() then
+    raise exception 'Only the assigned Project Manager can accept the handover' using errcode = '42501';
+  end if;
+  if h.status <> 'pm_assigned' then
+    raise exception 'This handover is not waiting for acceptance (status: %)', h.status using errcode = '23514';
+  end if;
+  if not proj_user_eligible(h.company_id, auth.uid()) then
+    raise exception 'You no longer have Projects access in this company' using errcode = '42501';
+  end if;
+  -- The opportunity must still be Won (a reopened opportunity is not delivered). Nothing else is read from it.
+  select * into o from crm_opportunities where id = h.crm_opportunity_id;
+  if not found or o.stage <> 'won' then
+    raise exception 'The Sales opportunity is no longer Won, so the handover cannot be accepted. Ask Sales' using errcode = '23514';
+  end if;
+  if exists (select 1 from proj_projects where crm_opportunity_id = h.crm_opportunity_id) then
+    raise exception 'A project already exists for this opportunity' using errcode = '23505';
+  end if;
+
+  v_ref := proj_next_reference(h.company_id);
+  insert into proj_projects (company_id, reference, name, kind, status, pm_user_id, start_date, end_date, crm_opportunity_id, handover_id, created_by)
+  values (h.company_id, v_ref, h.title, 'client', 'planning', h.pm_user_id,
+          coalesce(h.install_start, h.event_start), h.event_end, h.crm_opportunity_id, h.id, auth.uid())
+  returning id into v_project;
+  insert into proj_project_details (project_id, client_name, location, site_timezone, install_start, event_start, event_end, scope, exclusions, technologies, risks)
+  values (v_project, h.client_name, h.location, h.site_timezone, h.install_start, h.event_start, h.event_end, h.scope, h.exclusions, h.technologies, h.risks);
+  insert into proj_project_members (project_id, user_id, role, added_by) values (v_project, h.pm_user_id, 'pm', auth.uid());
+  -- Sales relationship, recorded once: the opportunity owner at handover and whoever prepared it.
+  insert into proj_sales_links (project_id, user_id, source, added_by) values (v_project, h.sales_owner_id, 'handover_owner', auth.uid());
+  if h.prepared_by <> h.sales_owner_id then
+    insert into proj_sales_links (project_id, user_id, source, added_by) values (v_project, h.prepared_by, 'handover_preparer', auth.uid());
+  end if;
+  update proj_handovers set status = 'accepted', accepted_by = auth.uid(), accepted_at = now(), project_id = v_project, version = version + 1 where id = h.id;
+
+  for r in select distinct u from unnest(array[h.sales_owner_id, h.prepared_by]) as u loop
+    perform proj_notify(v_project, r.u, 'project_handover_accepted',
+      jsonb_build_object('handover_id', h.id, 'title', h.title, 'reference', v_ref), 'handover:' || h.id || ':accepted', false);
+  end loop;
+  return v_project;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Internal projects: no opportunity, no PO, no Sales value. A founder (or assign_pm) names the accountable owner.
+-- -----------------------------------------------------------------------------
+create or replace function proj_create_internal_project(
+  p_company_id uuid,
+  p_name text,
+  p_owner_user_id uuid,
+  p_is_ongoing boolean default false,
+  p_priority text default 'normal',
+  p_start_date date default null,
+  p_end_date date default null,
+  p_summary text default null,
+  p_site_timezone text default 'Asia/Dubai'
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_project uuid;
+  v_ref text;
+begin
+  perform proj_require_user();
+  if not proj_has_capability(p_company_id, 'assign_pm') then
+    raise exception 'Only a founder, or someone a founder gave PM assignment to, can create an internal project' using errcode = '42501';
+  end if;
+  if not exists (select 1 from companies where id = p_company_id and is_active and deleted_at is null) then
+    raise exception 'Unknown or inactive company' using errcode = '22023';
+  end if;
+  if not proj_user_eligible(p_company_id, p_owner_user_id) then
+    raise exception 'The owner needs Projects access in this company first' using errcode = '22023';
+  end if;
+  if not proj_valid_timezone(p_site_timezone) then raise exception 'Unknown time zone %', p_site_timezone using errcode = '22023'; end if;
+  v_ref := proj_next_reference(p_company_id);
+  insert into proj_projects (company_id, reference, name, kind, pm_user_id, priority, is_ongoing, start_date, end_date, created_by)
+  values (p_company_id, v_ref, btrim(p_name), 'internal', p_owner_user_id, coalesce(p_priority, 'normal'), coalesce(p_is_ongoing, false),
+          p_start_date, p_end_date, auth.uid())
+  returning id into v_project;
+  insert into proj_project_details (project_id, scope, site_timezone) values (v_project, nullif(btrim(p_summary), ''), p_site_timezone);
+  insert into proj_project_members (project_id, user_id, role, added_by) values (v_project, p_owner_user_id, 'pm', auth.uid());
+  perform proj_notify(v_project, p_owner_user_id, 'project_assigned',
+    jsonb_build_object('name', btrim(p_name), 'reference', v_ref), 'project:' || v_project || ':pm:' || p_owner_user_id);
+  return v_project;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- PM / owner reassignment (founder or assign_pm only)
+-- -----------------------------------------------------------------------------
+create or replace function proj_assign_pm(p_project_id uuid, p_pm_user_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v proj_projects;
+begin
+  v := proj_lock_project(p_project_id);
+  if not proj_has_capability(v.company_id, 'assign_pm') then
+    raise exception 'Only a founder, or someone a founder gave PM assignment to, can change the Project Manager' using errcode = '42501';
+  end if;
+  if v.status in ('completed', 'archived') then
+    raise exception 'A completed project has no active Project Manager to change. Reopen it first' using errcode = '23514';
+  end if;
+  if v.pm_user_id = p_pm_user_id then return; end if;
+  if not proj_user_eligible(v.company_id, p_pm_user_id, v.id) then
+    raise exception 'That person does not have Projects access in this company. Give them access first' using errcode = '22023';
+  end if;
+  update proj_project_members set role = 'member' where project_id = v.id and user_id = v.pm_user_id and removed_at is null and role = 'pm';
+  perform proj_add_member_row(v.id, p_pm_user_id, 'pm');
+  update proj_project_members set role = 'pm', acting_until = null where project_id = v.id and user_id = p_pm_user_id and removed_at is null;
+  update proj_projects set pm_user_id = p_pm_user_id, version = version + 1 where id = v.id;
+  perform proj_log_change(v.id, 'project', v.id, 'pm', proj_display_name(v.pm_user_id), proj_display_name(p_pm_user_id));
+  perform proj_notify(v.id, p_pm_user_id, 'project_assigned',
+    jsonb_build_object('name', v.name, 'reference', v.reference), 'project:' || v.id || ':pm:' || p_pm_user_id);
+end;
+$$;
+
+-- Temporary project leadership: the PM's project powers (not PM or acting-PM assignment, not HR anything) until a date.
+create or replace function proj_set_acting_pm(p_project_id uuid, p_user_id uuid, p_until date)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v proj_projects;
+begin
+  v := proj_lock_project(p_project_id);
+  if v.pm_user_id <> auth.uid() and not proj_is_founder(v.company_id) then
+    raise exception 'Only the Project Manager or a founder can appoint temporary project leadership' using errcode = '42501';
+  end if;
+  if p_until is null or p_until < current_date then
+    raise exception 'Give an end date that is today or later' using errcode = '22023';
+  end if;
+  if p_user_id = v.pm_user_id then raise exception 'The Project Manager already leads this project' using errcode = '22023'; end if;
+  if not proj_user_eligible(v.company_id, p_user_id, v.id) then
+    raise exception 'That person does not have Projects access in this company' using errcode = '22023';
+  end if;
+  perform proj_add_member_row(v.id, p_user_id, 'acting_pm', null, p_until);
+  perform proj_log_change(v.id, 'member', p_user_id, 'acting_pm_until', null, p_until::text);
+  perform proj_notify(v.id, p_user_id, 'project_assigned',
+    jsonb_build_object('name', v.name, 'reference', v.reference, 'acting_until', p_until), 'project:' || v.id || ':acting:' || p_user_id || ':' || p_until);
+end;
+$$;
+
+create or replace function proj_end_acting_pm(p_project_id uuid, p_user_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v proj_projects;
+begin
+  v := proj_lock_project(p_project_id);
+  if v.pm_user_id <> auth.uid() and not proj_is_founder(v.company_id) then
+    raise exception 'Only the Project Manager or a founder can end temporary project leadership' using errcode = '42501';
+  end if;
+  update proj_project_members set role = 'member', acting_until = null
+   where project_id = v.id and user_id = p_user_id and removed_at is null and role = 'acting_pm';
+  perform proj_log_change(v.id, 'member', p_user_id, 'acting_pm_until', 'set', null);
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Project edits and lifecycle
+-- -----------------------------------------------------------------------------
+create or replace function proj_update_project(p_project_id uuid, p_patch jsonb, p_expected_version integer default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  d proj_project_details;
+  k text;
+  v_proj_keys text[] := array['name', 'priority', 'start_date', 'end_date', 'is_ongoing'];
+  v_detail_keys text[] := array['client_name', 'location', 'site_timezone', 'install_start', 'event_start', 'event_end', 'scope', 'exclusions', 'technologies', 'risks'];
+  v_dates_changed boolean := false;
+  v_new proj_projects;
+  r record;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_manager(v);
+  perform proj_check_version(v.version, p_expected_version);
+  if v.status in ('completed', 'archived') then
+    raise exception 'A completed project is read-only. Reopen it first' using errcode = '23514';
+  end if;
+  if p_patch is null or jsonb_typeof(p_patch) <> 'object' then raise exception 'Nothing to change' using errcode = '22023'; end if;
+  for k in select jsonb_object_keys(p_patch) loop
+    if not (k = any (v_proj_keys) or k = any (v_detail_keys)) then
+      raise exception 'Field % cannot be changed here', k using errcode = '22023';
+    end if;
+  end loop;
+  if v.kind = 'client' and p_patch ? 'scope' then
+    raise exception 'The agreed scope of a client project changes only through a recorded scope change' using errcode = '23514';
+  end if;
+  if v.kind = 'client' and p_patch ? 'is_ongoing' then
+    raise exception 'Only internal projects can be marked ongoing' using errcode = '23514';
+  end if;
+  if p_patch ? 'site_timezone' and not proj_valid_timezone(p_patch->>'site_timezone') then
+    raise exception 'Unknown time zone %', p_patch->>'site_timezone' using errcode = '22023';
+  end if;
+  select * into d from proj_project_details where project_id = v.id;
+
+  update proj_projects set
+    name = coalesce(proj_text_or_null(p_patch, 'name'), name),
+    priority = coalesce(proj_text_or_null(p_patch, 'priority'), priority),
+    start_date = case when p_patch ? 'start_date' then nullif(p_patch->>'start_date', '')::date else start_date end,
+    end_date = case when p_patch ? 'end_date' then nullif(p_patch->>'end_date', '')::date else end_date end,
+    is_ongoing = case when p_patch ? 'is_ongoing' then (p_patch->>'is_ongoing')::boolean else is_ongoing end,
+    version = version + 1
+   where id = v.id returning * into v_new;
+  update proj_project_details set
+    client_name = case when p_patch ? 'client_name' then proj_text_or_null(p_patch, 'client_name') else client_name end,
+    location = case when p_patch ? 'location' then proj_text_or_null(p_patch, 'location') else location end,
+    site_timezone = coalesce(proj_text_or_null(p_patch, 'site_timezone'), site_timezone),
+    install_start = case when p_patch ? 'install_start' then nullif(p_patch->>'install_start', '')::date else install_start end,
+    event_start = case when p_patch ? 'event_start' then nullif(p_patch->>'event_start', '')::date else event_start end,
+    event_end = case when p_patch ? 'event_end' then nullif(p_patch->>'event_end', '')::date else event_end end,
+    scope = case when p_patch ? 'scope' then proj_text_or_null(p_patch, 'scope') else scope end,
+    exclusions = case when p_patch ? 'exclusions' then proj_text_or_null(p_patch, 'exclusions') else exclusions end,
+    technologies = coalesce(p_patch->'technologies', technologies),
+    risks = coalesce(p_patch->'risks', risks)
+   where project_id = v.id;
+
+  perform proj_log_change(v.id, 'project', v.id, 'start_date', v.start_date::text, v_new.start_date::text);
+  perform proj_log_change(v.id, 'project', v.id, 'end_date', v.end_date::text, v_new.end_date::text);
+  perform proj_log_change(v.id, 'project', v.id, 'priority', v.priority, v_new.priority);
+  perform proj_log_change(v.id, 'project', v.id, 'install_start', d.install_start::text, (select install_start::text from proj_project_details where project_id = v.id));
+  perform proj_log_change(v.id, 'project', v.id, 'event_start', d.event_start::text, (select event_start::text from proj_project_details where project_id = v.id));
+  perform proj_log_change(v.id, 'project', v.id, 'event_end', d.event_end::text, (select event_end::text from proj_project_details where project_id = v.id));
+  v_dates_changed := v.start_date is distinct from v_new.start_date or v.end_date is distinct from v_new.end_date
+    or d.install_start is distinct from (select install_start from proj_project_details where project_id = v.id)
+    or d.event_start is distinct from (select event_start from proj_project_details where project_id = v.id)
+    or d.event_end is distinct from (select event_end from proj_project_details where project_id = v.id);
+  if v_dates_changed then
+    for r in select user_id from proj_project_members where project_id = v.id and removed_at is null loop
+      perform proj_notify(v.id, r.user_id, 'project_dates_changed',
+        jsonb_build_object('name', v.name, 'reference', v.reference), 'project:' || v.id || ':dates:' || v_new.version);
+    end loop;
+  end if;
+end;
+$$;
+
+-- Lifecycle. Completion and reopening have their own functions (they need evidence and a reason). Forward steps are free;
+-- going back, or skipping, needs a reason that is kept in the change log.
+create or replace function proj_status_rank(p_status text)
+returns integer
+language sql immutable
+as $$ select case p_status when 'planning' then 1 when 'in_progress' then 2 when 'ready_for_installation' then 3 when 'on_site' then 4 end; $$;
+
+create or replace function proj_set_status(p_project_id uuid, p_to text, p_reason text default null, p_review_date date default null, p_expected_version integer default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  d proj_project_details;
+  v_from_rank integer;
+  v_to_rank integer;
+  v_target text := p_to;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_manager(v);
+  perform proj_check_version(v.version, p_expected_version);
+  select * into d from proj_project_details where project_id = v.id;
+  if v.status = p_to then return; end if;
+  if p_to in ('completed') then
+    raise exception 'Use Complete project: it records the completion evidence' using errcode = '23514';
+  end if;
+  if v.status = 'completed' and p_to = 'archived' then
+    update proj_projects set status = 'archived', archived_at = now(), version = version + 1 where id = v.id;
+    perform proj_log_change(v.id, 'project', v.id, 'status', v.status, 'archived');
+    return;
+  end if;
+  if v.status in ('completed', 'archived') then
+    raise exception 'A completed project can only be archived or reopened' using errcode = '23514';
+  end if;
+  if p_to = 'archived' then
+    raise exception 'Only a completed project can be archived' using errcode = '23514';
+  end if;
+  if p_to = 'on_hold' then
+    if length(btrim(coalesce(p_reason, ''))) = 0 or p_review_date is null then
+      raise exception 'Putting a project on hold needs a reason and a review date' using errcode = '22023';
+    end if;
+    update proj_project_details set hold_reason = btrim(p_reason), hold_review_date = p_review_date, status_before_hold = v.status where project_id = v.id;
+    update proj_projects set status = 'on_hold', version = version + 1 where id = v.id;
+    perform proj_log_change(v.id, 'project', v.id, 'status', v.status, 'on_hold', p_reason);
+    return;
+  end if;
+  if v.status = 'on_hold' then
+    -- Resume returns to where it was (or to an explicit earlier/later live state with a reason).
+    if p_to = 'resume' or p_to = d.status_before_hold then
+      v_target := d.status_before_hold;
+      update proj_project_details set hold_reason = null, hold_review_date = null, status_before_hold = null where project_id = v.id;
+      update proj_projects set status = v_target, version = version + 1 where id = v.id;
+      perform proj_log_change(v.id, 'project', v.id, 'status', 'on_hold', v_target, p_reason);
+      return;
+    end if;
+    raise exception 'Resume the project before moving it to another state' using errcode = '23514';
+  end if;
+  v_from_rank := proj_status_rank(v.status);
+  v_to_rank := proj_status_rank(p_to);
+  if v_to_rank is null then raise exception 'Unknown status %', p_to using errcode = '22023'; end if;
+  if v.kind = 'internal' and p_to in ('ready_for_installation', 'on_site') then
+    raise exception 'Internal projects do not use installation and show states' using errcode = '23514';
+  end if;
+  if v_to_rank <> v_from_rank + 1 and length(btrim(coalesce(p_reason, ''))) = 0 then
+    raise exception 'Moving a project backwards or skipping a state needs a reason' using errcode = '22023';
+  end if;
+  update proj_projects set status = p_to, version = version + 1 where id = v.id;
+  perform proj_log_change(v.id, 'project', v.id, 'status', v.status, p_to, p_reason);
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Members and teams
+-- -----------------------------------------------------------------------------
+create or replace function proj_add_member(p_project_id uuid, p_user_id uuid, p_team_id uuid default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  v_existed boolean;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_manager(v);
+  if v.status in ('completed', 'archived') then raise exception 'A completed project is read-only' using errcode = '23514'; end if;
+  if not proj_user_eligible(v.company_id, p_user_id, v.id) then
+    raise exception 'That person does not have Projects access in this company. A founder gives them access first' using errcode = '22023';
+  end if;
+  if p_team_id is not null and not exists (select 1 from proj_teams where id = p_team_id and project_id = v.id and removed_at is null) then
+    raise exception 'Unknown department team' using errcode = '22023';
+  end if;
+  select exists (select 1 from proj_project_members where project_id = v.id and user_id = p_user_id and removed_at is null) into v_existed;
+  perform proj_add_member_row(v.id, p_user_id, 'member', p_team_id);
+  if not v_existed then
+    perform proj_log_change(v.id, 'member', p_user_id, 'added', null, proj_display_name(p_user_id));
+    perform proj_notify(v.id, p_user_id, 'project_invitation',
+      jsonb_build_object('name', v.name, 'reference', v.reference), 'project:' || v.id || ':invite:' || p_user_id);
+  end if;
+end;
+$$;
+
+create or replace function proj_set_member_team(p_project_id uuid, p_user_id uuid, p_team_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v proj_projects;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_manager(v);
+  if p_team_id is not null and not exists (select 1 from proj_teams where id = p_team_id and project_id = v.id and removed_at is null) then
+    raise exception 'Unknown department team' using errcode = '22023';
+  end if;
+  update proj_project_members set team_id = p_team_id where project_id = v.id and user_id = p_user_id and removed_at is null;
+  if not found then raise exception 'That person is not a member of this project' using errcode = 'P0002'; end if;
+end;
+$$;
+
+-- What would be left behind if this person lost access. Replaced in migration 4 to add site bookings.
+create or replace function proj_member_blockers(p_project_id uuid, p_user_id uuid)
+returns jsonb
+language sql stable security definer
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'open_tasks', (select count(*) from proj_tasks t where t.project_id = p_project_id and t.assignee_id = p_user_id
+                    and t.status in ('todo', 'in_progress', 'ready_for_review')));
+$$;
+
+create or replace function proj_remove_member(p_project_id uuid, p_user_id uuid, p_reason text default null, p_reassign_to uuid default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  v_open integer;
+  v_blockers jsonb;
+  t record;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_manager(v);
+  if v.pm_user_id = p_user_id then
+    raise exception 'The Project Manager cannot be removed. Assign another Project Manager first' using errcode = '23514';
+  end if;
+  if exists (select 1 from proj_teams where project_id = v.id and head_user_id = p_user_id and removed_at is null) then
+    raise exception 'This person heads a department team. Choose another head first' using errcode = '23514';
+  end if;
+  if not exists (select 1 from proj_project_members where project_id = v.id and user_id = p_user_id and removed_at is null) then return; end if;
+
+  v_blockers := proj_member_blockers(v.id, p_user_id);
+  v_open := (v_blockers->>'open_tasks')::integer;
+  if v_open > 0 then
+    if p_reassign_to is null then
+      raise exception 'This person still has % open task(s). Reassign them (choose who takes over) before removing access', v_open using errcode = '23514';
+    end if;
+    if p_reassign_to = p_user_id or not exists (select 1 from proj_project_members where project_id = v.id and user_id = p_reassign_to and removed_at is null) then
+      raise exception 'Choose another active member to take over the open tasks' using errcode = '22023';
+    end if;
+    for t in select id from proj_tasks where project_id = v.id and assignee_id = p_user_id and status in ('todo', 'in_progress', 'ready_for_review') loop
+      update proj_tasks set assignee_id = p_reassign_to, version = version + 1 where id = t.id;
+      insert into proj_task_events (task_id, project_id, actor_id, kind, from_value, to_value, note)
+      values (t.id, v.id, auth.uid(), 'reassigned', proj_display_name(p_user_id), proj_display_name(p_reassign_to), 'Member removed from the project');
+    end loop;
+  end if;
+  if coalesce((v_blockers->>'upcoming_bookings')::integer, 0) > 0 then
+    raise exception 'This person has % upcoming site booking(s). Cancel or reassign them first', v_blockers->>'upcoming_bookings' using errcode = '23514';
+  end if;
+  delete from proj_task_collaborators where project_id = v.id and user_id = p_user_id;
+  update proj_project_members set removed_at = now(), removed_by = auth.uid(), removal_reason = nullif(btrim(p_reason), '') where project_id = v.id and user_id = p_user_id and removed_at is null;
+  perform proj_log_change(v.id, 'member', p_user_id, 'removed', proj_display_name(p_user_id), null, p_reason);
+  -- Their unread and read project notices for this project go too, so nothing about it remains readable to them.
+  delete from notifications where user_id = p_user_id and type like 'project\_%' and payload->>'project_id' = v.id::text;
+end;
+$$;
+
+create or replace function proj_save_team(p_project_id uuid, p_team_id uuid, p_name text, p_head_user_id uuid, p_department_id uuid default null)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  v_id uuid;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_manager(v);
+  if v.status in ('completed', 'archived') then raise exception 'A completed project is read-only' using errcode = '23514'; end if;
+  if length(btrim(coalesce(p_name, ''))) = 0 then raise exception 'Name the department team' using errcode = '22023'; end if;
+  if not proj_user_eligible(v.company_id, p_head_user_id, v.id) then
+    raise exception 'The department head needs Projects access in this company first' using errcode = '22023';
+  end if;
+  if p_department_id is not null and not exists (select 1 from departments where id = p_department_id and company_id = v.company_id and deleted_at is null) then
+    raise exception 'Unknown department' using errcode = '22023';
+  end if;
+  perform proj_add_member_row(v.id, p_head_user_id, 'member');
+  if p_team_id is null then
+    insert into proj_teams (project_id, name, department_id, head_user_id, created_by)
+    values (v.id, btrim(p_name), p_department_id, p_head_user_id, auth.uid()) returning id into v_id;
+    perform proj_notify(v.id, p_head_user_id, 'project_assigned',
+      jsonb_build_object('name', v.name, 'reference', v.reference, 'team', btrim(p_name)), 'project:' || v.id || ':head:' || v_id);
+  else
+    update proj_teams set name = btrim(p_name), department_id = p_department_id, head_user_id = p_head_user_id
+     where id = p_team_id and project_id = v.id and removed_at is null returning id into v_id;
+    if v_id is null then raise exception 'Unknown department team' using errcode = 'P0002'; end if;
+  end if;
+  update proj_project_members set team_id = v_id where project_id = v.id and user_id = p_head_user_id and removed_at is null and team_id is null;
+  return v_id;
+end;
+$$;
+
+create or replace function proj_remove_team(p_project_id uuid, p_team_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v proj_projects;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_manager(v);
+  if exists (select 1 from proj_deliverables where team_id = p_team_id and status in ('open', 'in_progress', 'ready_for_review'))
+     or exists (select 1 from proj_tasks where team_id = p_team_id and status in ('todo', 'in_progress', 'ready_for_review')) then
+    raise exception 'This team still has open deliverables or tasks. Move or close them first' using errcode = '23514';
+  end if;
+  update proj_teams set removed_at = now() where id = p_team_id and project_id = v.id and removed_at is null;
+  update proj_project_members set team_id = null where project_id = v.id and team_id = p_team_id;
+end;
+$$;
+
+-- Sales relationship maintenance: explicit only (a CRM owner reassignment changes nothing here).
+create or replace function proj_set_sales_link(p_project_id uuid, p_user_id uuid, p_linked boolean)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v proj_projects;
+begin
+  v := proj_lock_project(p_project_id);
+  if not (proj_is_founder(v.company_id) or proj_has_capability(v.company_id, 'assign_pm')) then
+    raise exception 'Only a founder, or someone a founder gave PM assignment to, can change which Sales people are linked to a project' using errcode = '42501';
+  end if;
+  if v.kind <> 'client' then raise exception 'Only client projects have Sales links' using errcode = '23514'; end if;
+  if p_linked then
+    if not exists (select 1 from crm_company_grants c where c.user_id = p_user_id and c.company_id = v.company_id and c.revoked_at is null) then
+      raise exception 'That person does not have Sales access in this company' using errcode = '22023';
+    end if;
+    insert into proj_sales_links (project_id, user_id, source, added_by) values (v.id, p_user_id, 'added', auth.uid())
+    on conflict (project_id, user_id) where removed_at is null do nothing;
+  else
+    update proj_sales_links set removed_at = now() where project_id = v.id and user_id = p_user_id and removed_at is null;
+    -- If they were also added as a member to take part, that membership is a separate PM decision and is left alone.
+  end if;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Directory (summary only) with the PM's name. Obeys the same visibility as the table; returns nothing else.
+-- -----------------------------------------------------------------------------
+create or replace function proj_directory()
+returns table (id uuid, company_id uuid, reference text, name text, kind text, status text, priority text, is_ongoing boolean,
+               pm_user_id uuid, pm_name text, start_date date, end_date date, is_member boolean, is_sales_linked boolean)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform proj_require_user();
+  return query
+    select pr.id, pr.company_id, pr.reference, pr.name, pr.kind, pr.status, pr.priority, pr.is_ongoing,
+           pr.pm_user_id, proj_display_name(pr.pm_user_id), pr.start_date, pr.end_date,
+           proj_is_active_member(pr.id), proj_sales_linked(pr.id)
+    from proj_projects pr
+    where proj_can_view_summary(pr.id)
+    order by (pr.status in ('completed', 'archived')), pr.end_date nulls last, pr.reference;
+end;
+$$;
+
+-- The handover status of a Won opportunity, for the Sales handover page. Read-only; exposes status and PM name only.
+create or replace function proj_handover_for_opportunity(p_opportunity_id uuid)
+returns table (handover_id uuid, status text, pm_name text, project_id uuid, project_reference text, clarification_note text)
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare o_company uuid;
+begin
+  perform proj_require_user();
+  select company_id into o_company from crm_opportunities where crm_opportunities.id = p_opportunity_id;
+  if o_company is null or not crm_has_access(o_company) then return; end if;
+  return query
+    select h.id, h.status, proj_display_name(h.pm_user_id), h.project_id,
+           (select pr.reference from proj_projects pr where pr.id = h.project_id and proj_can_view_summary(pr.id)),
+           h.clarification_note
+    from proj_handovers h where h.crm_opportunity_id = p_opportunity_id and h.status <> 'withdrawn';
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Revoking Projects access (replaces the migration-1 version, now that memberships exist). Access ends at once because
+-- membership only counts while the person is eligible; here the revoked person's project notices are removed as well, so no
+-- project name, task or reference stays readable to them, and every membership of theirs in this company is closed.
+-- A Project Manager or department head cannot silently lose access: reassign those roles first.
+-- -----------------------------------------------------------------------------
+create or replace function proj_revoke_access(p_user_id uuid, p_company_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_target_is_founder boolean;
+  v_founders integer;
+begin
+  perform proj_require_user();
+  if not proj_has_capability(p_company_id, 'manage_access') then
+    raise exception 'Only a Projects founder can revoke Projects access for this company' using errcode = '42501';
+  end if;
+  select 'founder' = any (capabilities) into v_target_is_founder
+    from proj_company_grants where user_id = p_user_id and company_id = p_company_id and revoked_at is null;
+  if v_target_is_founder is null then return; end if;
+  if v_target_is_founder and not proj_is_founder(p_company_id) then
+    raise exception 'Only a Projects founder can revoke a founder' using errcode = '42501';
+  end if;
+  if v_target_is_founder then
+    select count(*) into v_founders from proj_company_grants
+     where company_id = p_company_id and revoked_at is null and 'founder' = any (capabilities);
+    if v_founders <= 1 then
+      raise exception 'Cannot revoke the last founder of this company' using errcode = '23514';
+    end if;
+  end if;
+  if exists (select 1 from proj_projects pr where pr.company_id = p_company_id and pr.pm_user_id = p_user_id and pr.status not in ('completed', 'archived')) then
+    raise exception 'This person is the Project Manager of a live project. Assign another Project Manager first' using errcode = '23514';
+  end if;
+  if exists (select 1 from proj_teams t join proj_projects pr on pr.id = t.project_id
+              where pr.company_id = p_company_id and t.head_user_id = p_user_id and t.removed_at is null and pr.status not in ('completed', 'archived')) then
+    raise exception 'This person heads a department team on a live project. Choose another head first' using errcode = '23514';
+  end if;
+  update proj_company_grants set revoked_at = now(), revoked_by = auth.uid()
+   where user_id = p_user_id and company_id = p_company_id and revoked_at is null;
+  update proj_project_members m set removed_at = now(), removed_by = auth.uid(), removal_reason = 'Projects access revoked'
+   from proj_projects pr
+   where m.project_id = pr.id and pr.company_id = p_company_id and m.user_id = p_user_id and m.removed_at is null;
+  delete from notifications n using proj_projects pr
+   where n.user_id = p_user_id and n.type like 'project\_%' and n.payload->>'project_id' = pr.id::text and pr.company_id = p_company_id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges
+-- -----------------------------------------------------------------------------
+revoke all on function
+  proj_display_name(uuid), proj_lock_project(uuid), proj_require_manager(proj_projects),
+  proj_check_version(integer, integer), proj_log_change(uuid, text, uuid, text, text, text, text),
+  proj_notify(uuid, uuid, text, jsonb, text, boolean), proj_next_reference(uuid),
+  proj_add_member_row(uuid, uuid, text, uuid, date), proj_text_or_null(jsonb, text), proj_lock_handover(uuid),
+  proj_status_rank(text), proj_member_blockers(uuid, uuid),
+  proj_save_handover(uuid, jsonb, integer), proj_submit_handover(uuid), proj_assign_handover_pm(uuid, uuid),
+  proj_request_handover_clarification(uuid, text), proj_withdraw_handover(uuid, text), proj_accept_handover(uuid),
+  proj_create_internal_project(uuid, text, uuid, boolean, text, date, date, text, text),
+  proj_assign_pm(uuid, uuid), proj_set_acting_pm(uuid, uuid, date), proj_end_acting_pm(uuid, uuid),
+  proj_update_project(uuid, jsonb, integer), proj_set_status(uuid, text, text, date, integer),
+  proj_add_member(uuid, uuid, uuid), proj_set_member_team(uuid, uuid, uuid), proj_remove_member(uuid, uuid, text, uuid),
+  proj_save_team(uuid, uuid, text, uuid, uuid), proj_remove_team(uuid, uuid), proj_set_sales_link(uuid, uuid, boolean),
+  proj_directory(), proj_handover_for_opportunity(uuid)
+  from public, anon, authenticated;
+
+grant execute on function
+  proj_save_handover(uuid, jsonb, integer), proj_submit_handover(uuid), proj_assign_handover_pm(uuid, uuid),
+  proj_request_handover_clarification(uuid, text), proj_withdraw_handover(uuid, text), proj_accept_handover(uuid),
+  proj_create_internal_project(uuid, text, uuid, boolean, text, date, date, text, text),
+  proj_assign_pm(uuid, uuid), proj_set_acting_pm(uuid, uuid, date), proj_end_acting_pm(uuid, uuid),
+  proj_update_project(uuid, jsonb, integer), proj_set_status(uuid, text, text, date, integer),
+  proj_add_member(uuid, uuid, uuid), proj_set_member_team(uuid, uuid, uuid), proj_remove_member(uuid, uuid, text, uuid),
+  proj_save_team(uuid, uuid, text, uuid, uuid), proj_remove_team(uuid, uuid), proj_set_sales_link(uuid, uuid, boolean),
+  proj_directory(), proj_handover_for_opportunity(uuid)
+  to authenticated;
+
+-- ---- 20261120000300_proj_delivery_functions.sql ----
+-- Projects & Tasks (Release 2), migration 4 of 6: milestones, deliverables and tasks.
+--
+-- Roles (checked in every function, never inferred from HR roles or the reporting line):
+--   * PM / acting PM / founder  manage scope: milestones, deliverables, any task, reassignment, acceptance of milestones.
+--   * Department (team) head    manages the team's deliverables (status, dates) and the team's tasks, and accepts the
+--                               team's deliverables and reviews the team's tasks.
+--   * Assignee                  updates their own task (status, blocker, description, dates) and comments.
+--   * Any member                creates a task for themselves, in their own team or no team; comments.
+-- A reviewer is never the person whose work is being reviewed. Dates are plain dates and are never shifted
+-- automatically: changing one records history and reports which dependent work is affected, for a person to decide.
+
+-- -----------------------------------------------------------------------------
+-- Internal helpers
+-- -----------------------------------------------------------------------------
+create or replace function proj_require_member_or_founder(p_project proj_projects)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if not proj_can_view_details(p_project.id) then
+    raise exception 'Project not found' using errcode = 'P0002';
+  end if;
+end;
+$$;
+
+create or replace function proj_require_open_project(p_project proj_projects)
+returns void
+language plpgsql
+as $$
+begin
+  if p_project.status in ('completed', 'archived') then
+    raise exception 'A completed project is read-only. Reopen it first' using errcode = '23514';
+  end if;
+end;
+$$;
+
+create or replace function proj_task_event(p_task_id uuid, p_project_id uuid, p_kind text, p_from text, p_to text, p_note text default null)
+returns void
+language sql security definer
+set search_path = public
+as $$
+  insert into proj_task_events (task_id, project_id, actor_id, kind, from_value, to_value, note)
+  values (p_task_id, p_project_id, auth.uid(), p_kind, p_from, p_to, nullif(btrim(p_note), ''));
+$$;
+
+create or replace function proj_member_in_team(p_project_id uuid, p_user_id uuid, p_team_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (select 1 from proj_project_members m where m.project_id = p_project_id and m.user_id = p_user_id and m.removed_at is null
+                   and (p_team_id is null or m.team_id = p_team_id
+                        or exists (select 1 from proj_teams t where t.id = p_team_id and t.head_user_id = p_user_id)));
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Milestones (PM defines and accepts)
+-- -----------------------------------------------------------------------------
+create or replace function proj_save_milestone(p_project_id uuid, p_milestone_id uuid, p_fields jsonb)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  m proj_milestones;
+  v_id uuid;
+  v_due date;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_manager(v);
+  perform proj_require_open_project(v);
+  if p_milestone_id is null then
+    if length(btrim(coalesce(p_fields->>'title', ''))) = 0 then raise exception 'Give the milestone a title' using errcode = '22023'; end if;
+    insert into proj_milestones (project_id, title, description, due_date, is_required, client_facing, sort_order, created_by)
+    values (v.id, btrim(p_fields->>'title'), proj_text_or_null(p_fields, 'description'), nullif(p_fields->>'due_date', '')::date,
+            coalesce((p_fields->>'is_required')::boolean, true), coalesce((p_fields->>'client_facing')::boolean, false),
+            coalesce((p_fields->>'sort_order')::integer, (select coalesce(max(sort_order), 0) + 10 from proj_milestones where project_id = v.id)),
+            auth.uid())
+    returning id into v_id;
+    return v_id;
+  end if;
+  select * into m from proj_milestones where id = p_milestone_id and project_id = v.id for update;
+  if not found then raise exception 'Milestone not found' using errcode = 'P0002'; end if;
+  perform proj_check_version(m.version, nullif(p_fields->>'expected_version', '')::integer);
+  if m.status in ('accepted', 'cancelled') then raise exception 'An accepted or cancelled milestone can no longer be edited' using errcode = '23514'; end if;
+  v_due := case when p_fields ? 'due_date' then nullif(p_fields->>'due_date', '')::date else m.due_date end;
+  update proj_milestones set
+    title = coalesce(proj_text_or_null(p_fields, 'title'), title),
+    description = case when p_fields ? 'description' then proj_text_or_null(p_fields, 'description') else description end,
+    due_date = v_due,
+    is_required = coalesce((p_fields->>'is_required')::boolean, is_required),
+    client_facing = coalesce((p_fields->>'client_facing')::boolean, client_facing),
+    sort_order = coalesce((p_fields->>'sort_order')::integer, sort_order),
+    version = version + 1
+   where id = m.id;
+  perform proj_log_change(v.id, 'milestone', m.id, 'due_date', m.due_date::text, v_due::text, p_fields->>'reason');
+  if m.due_date is distinct from v_due then
+    -- Material date change: tell the people responsible for the work attached to it. Nothing is rescheduled.
+    perform proj_notify(v.id, x.user_id, 'project_deadline_changed',
+      jsonb_build_object('name', v.name, 'reference', v.reference, 'milestone', m.title, 'to', v_due), 'milestone:' || m.id || ':due:' || coalesce(v_due::text, 'none'))
+    from (select distinct t.head_user_id as user_id from proj_deliverables d join proj_teams t on t.id = d.team_id where d.milestone_id = m.id and d.status not in ('accepted', 'cancelled')) x;
+  end if;
+  return m.id;
+end;
+$$;
+
+create or replace function proj_set_milestone_status(p_milestone_id uuid, p_to text, p_note text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  m proj_milestones;
+  v proj_projects;
+begin
+  perform proj_require_user();
+  select * into m from proj_milestones where id = p_milestone_id for update;
+  if not found then raise exception 'Milestone not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(m.project_id);
+  perform proj_require_manager(v);
+  perform proj_require_open_project(v);
+  if m.status = p_to then return; end if;
+  if p_to not in ('planned', 'in_progress', 'ready_for_acceptance', 'accepted', 'cancelled', 'deferred') then
+    raise exception 'Unknown milestone status %', p_to using errcode = '22023';
+  end if;
+  if m.status in ('accepted', 'cancelled') and p_to <> 'in_progress' then
+    raise exception 'This milestone is %. Reopen it to in progress first', m.status using errcode = '23514';
+  end if;
+  if p_to in ('cancelled', 'deferred') and length(btrim(coalesce(p_note, ''))) = 0 then
+    raise exception 'Say why the milestone is %', p_to using errcode = '22023';
+  end if;
+  if p_to = 'accepted' then
+    if exists (select 1 from proj_deliverables d where d.milestone_id = m.id and d.status in ('open', 'in_progress', 'ready_for_review')) then
+      raise exception 'Every deliverable of this milestone must be accepted, cancelled or deferred first' using errcode = '23514';
+    end if;
+  end if;
+  if m.status in ('accepted', 'cancelled') and p_to = 'in_progress' and length(btrim(coalesce(p_note, ''))) = 0 then
+    raise exception 'Say why the milestone is being reopened' using errcode = '22023';
+  end if;
+  update proj_milestones set status = p_to, version = version + 1,
+         accepted_by = case when p_to = 'accepted' then auth.uid() else null end,
+         accepted_at = case when p_to = 'accepted' then now() else null end
+   where id = m.id;
+  perform proj_log_change(v.id, 'milestone', m.id, 'status', m.status, p_to, p_note);
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Deliverables (PM assigns to a department team; the head manages and accepts)
+-- -----------------------------------------------------------------------------
+create or replace function proj_save_deliverable(p_project_id uuid, p_deliverable_id uuid, p_fields jsonb)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  d proj_deliverables;
+  v_id uuid;
+  v_team uuid;
+  v_ms uuid;
+  v_due date;
+  v_is_manager boolean;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_open_project(v);
+  v_is_manager := proj_can_manage(v.id);
+  if p_deliverable_id is null then
+    if not v_is_manager then raise exception 'Only the Project Manager can assign a deliverable to a department' using errcode = '42501'; end if;
+    if length(btrim(coalesce(p_fields->>'title', ''))) = 0 then raise exception 'Give the deliverable a title' using errcode = '22023'; end if;
+    v_team := nullif(p_fields->>'team_id', '')::uuid;
+    v_ms := nullif(p_fields->>'milestone_id', '')::uuid;
+    if v_team is not null and not exists (select 1 from proj_teams where id = v_team and project_id = v.id and removed_at is null) then
+      raise exception 'Unknown department team' using errcode = '22023';
+    end if;
+    if v_ms is not null and not exists (select 1 from proj_milestones where id = v_ms and project_id = v.id) then
+      raise exception 'Unknown milestone' using errcode = '22023';
+    end if;
+    insert into proj_deliverables (project_id, milestone_id, team_id, title, description, due_date, created_by)
+    values (v.id, v_ms, v_team, btrim(p_fields->>'title'), proj_text_or_null(p_fields, 'description'), nullif(p_fields->>'due_date', '')::date, auth.uid())
+    returning id into v_id;
+    if v_team is not null then
+      perform proj_notify(v.id, (select head_user_id from proj_teams where id = v_team), 'project_assignment',
+        jsonb_build_object('name', v.name, 'reference', v.reference, 'deliverable', btrim(p_fields->>'title')), 'deliverable:' || v_id || ':assigned');
+    end if;
+    return v_id;
+  end if;
+
+  select * into d from proj_deliverables where id = p_deliverable_id and project_id = v.id for update;
+  if not found then raise exception 'Deliverable not found' using errcode = 'P0002'; end if;
+  perform proj_check_version(d.version, nullif(p_fields->>'expected_version', '')::integer);
+  if d.status in ('accepted', 'cancelled') then raise exception 'An accepted or cancelled deliverable can no longer be edited' using errcode = '23514'; end if;
+  if not v_is_manager and not (d.team_id is not null and proj_is_team_head(d.team_id)) then
+    raise exception 'Only the Project Manager or the head of the responsible department can change this deliverable' using errcode = '42501';
+  end if;
+  -- A department head may refine the description and the date; scope-level changes (title, team, milestone) are the PM's.
+  if not v_is_manager and (p_fields ? 'title' or p_fields ? 'team_id' or p_fields ? 'milestone_id') then
+    raise exception 'Only the Project Manager can change the title, department or milestone of a deliverable' using errcode = '42501';
+  end if;
+  v_team := case when p_fields ? 'team_id' then nullif(p_fields->>'team_id', '')::uuid else d.team_id end;
+  v_ms := case when p_fields ? 'milestone_id' then nullif(p_fields->>'milestone_id', '')::uuid else d.milestone_id end;
+  v_due := case when p_fields ? 'due_date' then nullif(p_fields->>'due_date', '')::date else d.due_date end;
+  if v_team is not null and not exists (select 1 from proj_teams where id = v_team and project_id = v.id and removed_at is null) then
+    raise exception 'Unknown department team' using errcode = '22023';
+  end if;
+  if v_ms is not null and not exists (select 1 from proj_milestones where id = v_ms and project_id = v.id) then
+    raise exception 'Unknown milestone' using errcode = '22023';
+  end if;
+  update proj_deliverables set
+    title = coalesce(proj_text_or_null(p_fields, 'title'), title),
+    description = case when p_fields ? 'description' then proj_text_or_null(p_fields, 'description') else description end,
+    due_date = v_due, team_id = v_team, milestone_id = v_ms, version = version + 1
+   where id = d.id;
+  perform proj_log_change(v.id, 'deliverable', d.id, 'due_date', d.due_date::text, v_due::text, p_fields->>'reason');
+  perform proj_log_change(v.id, 'deliverable', d.id, 'team', (select name from proj_teams where id = d.team_id), (select name from proj_teams where id = v_team));
+  if d.due_date is distinct from v_due then
+    perform proj_notify(v.id, x.user_id, 'project_deadline_changed',
+      jsonb_build_object('name', v.name, 'reference', v.reference, 'deliverable', d.title, 'to', v_due), 'deliverable:' || d.id || ':due:' || coalesce(v_due::text, 'none'))
+    from (select pm_user_id as user_id from proj_projects where id = v.id
+          union select head_user_id from proj_teams where id = v_team) x;
+  end if;
+  return d.id;
+end;
+$$;
+
+create or replace function proj_set_deliverable_status(p_deliverable_id uuid, p_to text, p_note text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  d proj_deliverables;
+  v proj_projects;
+  v_is_manager boolean;
+  v_is_head boolean;
+begin
+  perform proj_require_user();
+  select * into d from proj_deliverables where id = p_deliverable_id for update;
+  if not found then raise exception 'Deliverable not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(d.project_id);
+  perform proj_require_open_project(v);
+  v_is_manager := proj_can_manage(v.id);
+  v_is_head := d.team_id is not null and proj_is_team_head(d.team_id);
+  if not (v_is_manager or v_is_head) then
+    raise exception 'Only the Project Manager or the head of the responsible department can change this deliverable''s status' using errcode = '42501';
+  end if;
+  if d.status = p_to then return; end if;
+  if p_to not in ('open', 'in_progress', 'ready_for_review', 'accepted', 'cancelled', 'deferred') then
+    raise exception 'Unknown deliverable status %', p_to using errcode = '22023';
+  end if;
+  if d.status in ('accepted', 'cancelled') and p_to <> 'in_progress' then
+    raise exception 'This deliverable is %. Reopen it to in progress first', d.status using errcode = '23514';
+  end if;
+  if p_to in ('cancelled', 'deferred') and length(btrim(coalesce(p_note, ''))) = 0 then
+    raise exception 'Say why the deliverable is %', p_to using errcode = '22023';
+  end if;
+  if d.status in ('accepted', 'cancelled') and p_to = 'in_progress' and length(btrim(coalesce(p_note, ''))) = 0 then
+    raise exception 'Say why the deliverable is being reopened' using errcode = '22023';
+  end if;
+  if p_to = 'accepted' then
+    if exists (select 1 from proj_tasks t where t.deliverable_id = d.id and t.status in ('todo', 'in_progress', 'ready_for_review')) then
+      raise exception 'Every task of this deliverable must be done, cancelled or deferred first' using errcode = '23514';
+    end if;
+  end if;
+  update proj_deliverables set status = p_to, version = version + 1,
+         accepted_by = case when p_to = 'accepted' then auth.uid() else null end,
+         accepted_at = case when p_to = 'accepted' then now() else null end
+   where id = d.id;
+  perform proj_log_change(v.id, 'deliverable', d.id, 'status', d.status, p_to, p_note);
+  if p_to = 'ready_for_review' and d.team_id is not null then
+    perform proj_notify(v.id, v.pm_user_id, 'project_review_requested',
+      jsonb_build_object('name', v.name, 'reference', v.reference, 'deliverable', d.title), 'deliverable:' || d.id || ':review:' || (d.version + 1));
+  end if;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Tasks
+-- -----------------------------------------------------------------------------
+-- Dependencies: same project, no self-reference, no cycles. The cycle check walks the existing graph from each proposed
+-- prerequisite and refuses if it can reach the task itself.
+create or replace function proj_set_task_dependencies(p_task_id uuid, p_depends_on uuid[])
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  t proj_tasks;
+  x uuid;
+begin
+  select * into t from proj_tasks where id = p_task_id;
+  p_depends_on := coalesce((select array_agg(distinct u) from unnest(coalesce(p_depends_on, '{}'::uuid[])) u), '{}'::uuid[]);
+  foreach x in array p_depends_on loop
+    if x = t.id then raise exception 'A task cannot depend on itself' using errcode = '23514'; end if;
+    if not exists (select 1 from proj_tasks where id = x and project_id = t.project_id) then
+      raise exception 'A dependency must be a task of the same project' using errcode = '22023';
+    end if;
+    -- would x (transitively) already depend on t?
+    if exists (
+      with recursive chain(id) as (
+        select depends_on_task_id from proj_task_dependencies where task_id = x
+        union
+        select d.depends_on_task_id from proj_task_dependencies d join chain c on d.task_id = c.id
+      ) select 1 from chain where id = t.id
+    ) then
+      raise exception 'That dependency would create a loop between tasks' using errcode = '23514';
+    end if;
+  end loop;
+  delete from proj_task_dependencies where task_id = t.id and depends_on_task_id <> all (p_depends_on);
+  insert into proj_task_dependencies (task_id, depends_on_task_id, project_id)
+  select t.id, u, t.project_id from unnest(p_depends_on) u
+  on conflict do nothing;
+end;
+$$;
+
+create or replace function proj_set_task_collaborators(p_task_id uuid, p_user_ids uuid[])
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  t proj_tasks;
+  x uuid;
+begin
+  select * into t from proj_tasks where id = p_task_id;
+  p_user_ids := coalesce((select array_agg(distinct u) from unnest(coalesce(p_user_ids, '{}'::uuid[])) u where u <> t.assignee_id), '{}'::uuid[]);
+  foreach x in array p_user_ids loop
+    if not exists (select 1 from proj_project_members where project_id = t.project_id and user_id = x and removed_at is null) then
+      raise exception 'Collaborators must be active members of the project' using errcode = '22023';
+    end if;
+  end loop;
+  delete from proj_task_collaborators where task_id = t.id and user_id <> all (p_user_ids);
+  insert into proj_task_collaborators (task_id, user_id, project_id) select t.id, u, t.project_id from unnest(p_user_ids) u on conflict do nothing;
+end;
+$$;
+
+create or replace function proj_create_task(p_project_id uuid, p_fields jsonb)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  v_assignee uuid;
+  v_team uuid;
+  v_deliverable uuid;
+  v_milestone uuid;
+  v_id uuid;
+  v_manager boolean;
+  v_my_team uuid;
+  v_title text := btrim(coalesce(p_fields->>'title', ''));
+  dl proj_deliverables;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_member_or_founder(v);
+  perform proj_require_open_project(v);
+  if length(v_title) = 0 then raise exception 'Give the task a title' using errcode = '22023'; end if;
+  v_manager := proj_can_manage(v.id);
+  v_assignee := coalesce(nullif(p_fields->>'assignee_id', '')::uuid, auth.uid());
+  v_team := nullif(p_fields->>'team_id', '')::uuid;
+  v_deliverable := nullif(p_fields->>'deliverable_id', '')::uuid;
+  v_milestone := nullif(p_fields->>'milestone_id', '')::uuid;
+
+  if v_deliverable is not null then
+    select * into dl from proj_deliverables where id = v_deliverable and project_id = v.id;
+    if not found then raise exception 'Unknown deliverable' using errcode = '22023'; end if;
+    v_team := coalesce(v_team, dl.team_id);
+    v_milestone := coalesce(v_milestone, dl.milestone_id);
+  end if;
+  if v_team is not null and not exists (select 1 from proj_teams where id = v_team and project_id = v.id and removed_at is null) then
+    raise exception 'Unknown department team' using errcode = '22023';
+  end if;
+  if v_milestone is not null and not exists (select 1 from proj_milestones where id = v_milestone and project_id = v.id) then
+    raise exception 'Unknown milestone' using errcode = '22023';
+  end if;
+  if not exists (select 1 from proj_project_members where project_id = v.id and user_id = v_assignee and removed_at is null) then
+    raise exception 'The assignee must be an active member of the project' using errcode = '22023';
+  end if;
+
+  if not v_manager then
+    if v_team is not null and proj_is_team_head(v_team) then
+      -- A department head distributes the team's work to the team (or themself).
+      if not proj_member_in_team(v.id, v_assignee, v_team) then
+        raise exception 'A department head assigns tasks to people in their own team' using errcode = '42501';
+      end if;
+    else
+      -- Any member: a task for themself, in their own team or no team, never into someone else's deliverable.
+      select team_id into v_my_team from proj_project_members where project_id = v.id and user_id = auth.uid() and removed_at is null;
+      if v_assignee <> auth.uid() then
+        raise exception 'You can create tasks for yourself. Ask your department head or the Project Manager to assign work to others' using errcode = '42501';
+      end if;
+      if v_team is not null and v_team is distinct from v_my_team then
+        raise exception 'You can only add tasks to your own department' using errcode = '42501';
+      end if;
+    end if;
+  end if;
+
+  insert into proj_tasks (project_id, deliverable_id, milestone_id, team_id, title, description, assignee_id, priority, start_date, due_date, requires_review, created_by)
+  values (v.id, v_deliverable, v_milestone, v_team, v_title, proj_text_or_null(p_fields, 'description'), v_assignee,
+          coalesce(proj_text_or_null(p_fields, 'priority'), 'normal'), nullif(p_fields->>'start_date', '')::date, nullif(p_fields->>'due_date', '')::date,
+          case when v_manager or (v_team is not null and proj_is_team_head(v_team)) then coalesce((p_fields->>'requires_review')::boolean, false) else false end,
+          auth.uid())
+  returning id into v_id;
+  perform proj_task_event(v_id, v.id, 'created', null, proj_display_name(v_assignee), null);
+  if p_fields ? 'depends_on' then
+    perform proj_set_task_dependencies(v_id, array(select jsonb_array_elements_text(p_fields->'depends_on')::uuid));
+  end if;
+  if p_fields ? 'collaborator_ids' then
+    perform proj_set_task_collaborators(v_id, array(select jsonb_array_elements_text(p_fields->'collaborator_ids')::uuid));
+  end if;
+  if v_assignee <> auth.uid() then
+    perform proj_notify(v.id, v_assignee, 'project_task_assigned',
+      jsonb_build_object('name', v.name, 'reference', v.reference, 'task_id', v_id, 'task', v_title), 'task:' || v_id || ':assigned:' || v_assignee);
+  end if;
+  return v_id;
+end;
+$$;
+
+-- Who may change a task's content: PM/founder, the team head, the assignee.
+create or replace function proj_task_actor_role(p_task proj_tasks)
+returns text
+language sql stable security definer
+set search_path = public
+as $$
+  select case
+    when proj_can_manage(p_task.project_id) then 'manager'
+    when p_task.team_id is not null and proj_is_team_head(p_task.team_id) then 'head'
+    when p_task.assignee_id = auth.uid() and proj_is_active_member(p_task.project_id) then 'assignee'
+    else null end;
+$$;
+
+-- Dependent work touched by a date change: tasks that rely on this one and start (or finish) before it now finishes.
+create or replace function proj_task_affected(p_task_id uuid, p_new_due date default null)
+returns table (task_id uuid, title text, assignee_name text, start_date date, due_date date)
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare t proj_tasks;
+begin
+  perform proj_require_user();
+  select * into t from proj_tasks where id = p_task_id;
+  if not found or not proj_can_view_details(t.project_id) then return; end if;
+  return query
+    select d.id, d.title, proj_display_name(d.assignee_id), d.start_date, d.due_date
+    from proj_task_dependencies dep join proj_tasks d on d.id = dep.task_id
+    where dep.depends_on_task_id = t.id and d.status not in ('done', 'cancelled')
+      and coalesce(p_new_due, t.due_date) is not null
+      and (coalesce(d.start_date, d.due_date) <= coalesce(p_new_due, t.due_date));
+end;
+$$;
+
+create or replace function proj_update_task(p_task_id uuid, p_fields jsonb, p_expected_version integer default null)
+returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  t proj_tasks;
+  v proj_projects;
+  v_role text;
+  v_start date;
+  v_due date;
+  v_affected integer := 0;
+  k text;
+  v_allowed text[] := array['title', 'description', 'priority', 'start_date', 'due_date', 'requires_review', 'milestone_id', 'deliverable_id',
+                            'team_id', 'depends_on', 'collaborator_ids', 'reason'];
+begin
+  perform proj_require_user();
+  select * into t from proj_tasks where id = p_task_id for update;
+  if not found then raise exception 'Task not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(t.project_id);
+  perform proj_require_open_project(v);
+  v_role := proj_task_actor_role(t);
+  if v_role is null then raise exception 'Only the assignee, the department head or the Project Manager can change this task' using errcode = '42501'; end if;
+  perform proj_check_version(t.version, p_expected_version);
+  if t.status in ('done', 'cancelled') then raise exception 'A % task can no longer be edited. Reopen it first', t.status using errcode = '23514'; end if;
+  for k in select jsonb_object_keys(p_fields) loop
+    if not (k = any (v_allowed)) then raise exception 'Field % cannot be changed here', k using errcode = '22023'; end if;
+  end loop;
+  -- Placement in the plan (and the review rule) is a leadership decision; the assignee refines their own task.
+  if v_role = 'assignee' and (p_fields ? 'requires_review' or p_fields ? 'milestone_id' or p_fields ? 'deliverable_id' or p_fields ? 'team_id') then
+    raise exception 'Ask your department head or the Project Manager to change where this task sits or whether it needs review' using errcode = '42501';
+  end if;
+  if p_fields ? 'team_id' and nullif(p_fields->>'team_id', '')::uuid is not null
+     and not exists (select 1 from proj_teams where id = nullif(p_fields->>'team_id', '')::uuid and project_id = v.id and removed_at is null) then
+    raise exception 'Unknown department team' using errcode = '22023';
+  end if;
+  if p_fields ? 'deliverable_id' and nullif(p_fields->>'deliverable_id', '')::uuid is not null
+     and not exists (select 1 from proj_deliverables where id = nullif(p_fields->>'deliverable_id', '')::uuid and project_id = v.id) then
+    raise exception 'Unknown deliverable' using errcode = '22023';
+  end if;
+  if p_fields ? 'milestone_id' and nullif(p_fields->>'milestone_id', '')::uuid is not null
+     and not exists (select 1 from proj_milestones where id = nullif(p_fields->>'milestone_id', '')::uuid and project_id = v.id) then
+    raise exception 'Unknown milestone' using errcode = '22023';
+  end if;
+  v_start := case when p_fields ? 'start_date' then nullif(p_fields->>'start_date', '')::date else t.start_date end;
+  v_due := case when p_fields ? 'due_date' then nullif(p_fields->>'due_date', '')::date else t.due_date end;
+  if v_due is not null and v_start is not null and v_due < v_start then
+    raise exception 'The due date cannot be before the start date' using errcode = '23514';
+  end if;
+
+  update proj_tasks set
+    title = coalesce(proj_text_or_null(p_fields, 'title'), title),
+    description = case when p_fields ? 'description' then proj_text_or_null(p_fields, 'description') else description end,
+    priority = coalesce(proj_text_or_null(p_fields, 'priority'), priority),
+    start_date = v_start, due_date = v_due,
+    requires_review = coalesce((p_fields->>'requires_review')::boolean, requires_review),
+    milestone_id = case when p_fields ? 'milestone_id' then nullif(p_fields->>'milestone_id', '')::uuid else milestone_id end,
+    deliverable_id = case when p_fields ? 'deliverable_id' then nullif(p_fields->>'deliverable_id', '')::uuid else deliverable_id end,
+    team_id = case when p_fields ? 'team_id' then nullif(p_fields->>'team_id', '')::uuid else team_id end,
+    version = version + 1
+   where id = t.id;
+  if p_fields ? 'depends_on' then
+    perform proj_set_task_dependencies(t.id, array(select jsonb_array_elements_text(p_fields->'depends_on')::uuid));
+  end if;
+  if p_fields ? 'collaborator_ids' then
+    perform proj_set_task_collaborators(t.id, array(select jsonb_array_elements_text(p_fields->'collaborator_ids')::uuid));
+  end if;
+
+  if t.start_date is distinct from v_start then
+    perform proj_task_event(t.id, v.id, 'start_date_changed', t.start_date::text, v_start::text, p_fields->>'reason');
+  end if;
+  if t.due_date is distinct from v_due then
+    perform proj_task_event(t.id, v.id, 'due_date_changed', t.due_date::text, v_due::text, p_fields->>'reason');
+    select count(*) into v_affected from proj_task_affected(t.id, v_due);
+    -- Material deadline change: the assignee (if someone else moved it) or the people who plan the work (if the assignee did).
+    if v_role = 'assignee' then
+      perform proj_notify(v.id, x.user_id, 'project_deadline_changed',
+        jsonb_build_object('name', v.name, 'reference', v.reference, 'task_id', t.id, 'task', t.title, 'to', v_due), 'task:' || t.id || ':due:' || coalesce(v_due::text, 'none'))
+      from (select v.pm_user_id as user_id union select head_user_id from proj_teams where id = t.team_id) x;
+    else
+      perform proj_notify(v.id, t.assignee_id, 'project_deadline_changed',
+        jsonb_build_object('name', v.name, 'reference', v.reference, 'task_id', t.id, 'task', t.title, 'to', v_due), 'task:' || t.id || ':due:' || coalesce(v_due::text, 'none'));
+    end if;
+  end if;
+  if p_fields ? 'requires_review' and t.requires_review is distinct from (p_fields->>'requires_review')::boolean then
+    perform proj_task_event(t.id, v.id, 'review_rule_changed', t.requires_review::text, p_fields->>'requires_review', null);
+  end if;
+  return v_affected;
+end;
+$$;
+
+create or replace function proj_reassign_task(p_task_id uuid, p_assignee_id uuid, p_note text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  t proj_tasks;
+  v proj_projects;
+  v_role text;
+begin
+  perform proj_require_user();
+  select * into t from proj_tasks where id = p_task_id for update;
+  if not found then raise exception 'Task not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(t.project_id);
+  perform proj_require_open_project(v);
+  v_role := proj_task_actor_role(t);
+  if v_role not in ('manager', 'head') then
+    raise exception 'Only the department head or the Project Manager can reassign a task' using errcode = '42501';
+  end if;
+  if t.status in ('done', 'cancelled') then raise exception 'A % task cannot be reassigned', t.status using errcode = '23514'; end if;
+  if t.assignee_id = p_assignee_id then return; end if;
+  if not exists (select 1 from proj_project_members where project_id = v.id and user_id = p_assignee_id and removed_at is null) then
+    raise exception 'The assignee must be an active member of the project' using errcode = '22023';
+  end if;
+  if v_role = 'head' and not proj_member_in_team(v.id, p_assignee_id, t.team_id) then
+    raise exception 'A department head assigns tasks to people in their own team' using errcode = '42501';
+  end if;
+  update proj_tasks set assignee_id = p_assignee_id, version = version + 1 where id = t.id;
+  delete from proj_task_collaborators where task_id = t.id and user_id = p_assignee_id;
+  perform proj_task_event(t.id, v.id, 'reassigned', proj_display_name(t.assignee_id), proj_display_name(p_assignee_id), p_note);
+  perform proj_notify(v.id, p_assignee_id, 'project_task_assigned',
+    jsonb_build_object('name', v.name, 'reference', v.reference, 'task_id', t.id, 'task', t.title), 'task:' || t.id || ':assigned:' || p_assignee_id);
+end;
+$$;
+
+-- Status. Owners finish routine tasks themselves. A task that needs review is finished by someone ELSE with authority
+-- (department head or PM): never by the person who did the work.
+create or replace function proj_set_task_status(p_task_id uuid, p_to text, p_note text default null, p_expected_version integer default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  t proj_tasks;
+  v proj_projects;
+  v_role text;
+  v_is_reviewer boolean;
+  v_reviewer uuid;
+begin
+  perform proj_require_user();
+  select * into t from proj_tasks where id = p_task_id for update;
+  if not found then raise exception 'Task not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(t.project_id);
+  perform proj_require_open_project(v);
+  v_role := proj_task_actor_role(t);
+  if v_role is null then raise exception 'Only the assignee, the department head or the Project Manager can change this task' using errcode = '42501'; end if;
+  perform proj_check_version(t.version, p_expected_version);
+  if t.status = p_to then return; end if;
+  if p_to not in ('todo', 'in_progress', 'ready_for_review', 'done', 'cancelled', 'deferred') then
+    raise exception 'Unknown task status %', p_to using errcode = '22023';
+  end if;
+  v_is_reviewer := v_role in ('manager', 'head') and t.assignee_id <> auth.uid();
+
+  if t.status in ('done', 'cancelled', 'deferred') then
+    if p_to not in ('in_progress', 'todo') or v_role not in ('manager', 'head') then
+      raise exception 'Only the department head or the Project Manager can reopen a % task, back to To do or In progress', t.status using errcode = '42501';
+    end if;
+    if length(btrim(coalesce(p_note, ''))) = 0 then raise exception 'Say why the task is being reopened' using errcode = '22023'; end if;
+  elsif p_to = 'done' then
+    if t.requires_review then
+      if t.status <> 'ready_for_review' then raise exception 'This task needs review: send it for review first' using errcode = '23514'; end if;
+      if not v_is_reviewer then
+        raise exception 'This task needs review by the department head or the Project Manager, not by the person who did it' using errcode = '42501';
+      end if;
+    elsif v_role = 'assignee' or v_role in ('manager', 'head') then
+      null;
+    end if;
+    if t.blocked_at is not null then raise exception 'Clear the blocker before completing the task' using errcode = '23514'; end if;
+  elsif p_to = 'ready_for_review' then
+    if not t.requires_review then raise exception 'This task does not need review: mark it Done' using errcode = '23514'; end if;
+  elsif p_to = 'in_progress' and t.status = 'ready_for_review' then
+    if not v_is_reviewer and v_role <> 'assignee' then raise exception 'Not allowed' using errcode = '42501'; end if;
+    -- Reviewer requesting changes should say what; the assignee withdrawing from review needs no note.
+    if v_role <> 'assignee' and length(btrim(coalesce(p_note, ''))) = 0 then
+      raise exception 'Say what needs changing' using errcode = '22023';
+    end if;
+  elsif p_to in ('cancelled', 'deferred') then
+    if v_role not in ('manager', 'head') then raise exception 'Only the department head or the Project Manager can cancel or defer a task' using errcode = '42501'; end if;
+    if length(btrim(coalesce(p_note, ''))) = 0 then raise exception 'Say why the task is %', p_to using errcode = '22023'; end if;
+  end if;
+
+  update proj_tasks set status = p_to, version = version + 1,
+         completed_at = case when p_to = 'done' then now() else null end,
+         completed_by = case when p_to = 'done' then auth.uid() else null end
+   where id = t.id;
+  perform proj_task_event(t.id, v.id, 'status_changed', t.status, p_to, p_note);
+
+  if p_to = 'ready_for_review' then
+    v_reviewer := coalesce((select head_user_id from proj_teams where id = t.team_id and head_user_id <> t.assignee_id), v.pm_user_id);
+    perform proj_notify(v.id, v_reviewer, 'project_review_requested',
+      jsonb_build_object('name', v.name, 'reference', v.reference, 'task_id', t.id, 'task', t.title), 'task:' || t.id || ':review:' || (t.version + 1));
+  elsif t.status = 'ready_for_review' and p_to in ('in_progress', 'done') and v_is_reviewer then
+    perform proj_notify(v.id, t.assignee_id, 'project_review_result',
+      jsonb_build_object('name', v.name, 'reference', v.reference, 'task_id', t.id, 'task', t.title, 'result', p_to), 'task:' || t.id || ':result:' || (t.version + 1));
+  end if;
+end;
+$$;
+
+create or replace function proj_block_task(p_task_id uuid, p_reason text, p_unblock_owner uuid default null, p_unblock_action text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  t proj_tasks;
+  v proj_projects;
+begin
+  perform proj_require_user();
+  select * into t from proj_tasks where id = p_task_id for update;
+  if not found then raise exception 'Task not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(t.project_id);
+  perform proj_require_open_project(v);
+  if proj_task_actor_role(t) is null then raise exception 'Only the assignee, the department head or the Project Manager can block this task' using errcode = '42501'; end if;
+  if t.status in ('done', 'cancelled', 'deferred') then raise exception 'A % task cannot be blocked', t.status using errcode = '23514'; end if;
+  if length(btrim(coalesce(p_reason, ''))) = 0 then raise exception 'Say what is blocking the task' using errcode = '22023'; end if;
+  if p_unblock_owner is null and length(btrim(coalesce(p_unblock_action, ''))) = 0 then
+    raise exception 'Say who or what action will unblock it' using errcode = '22023';
+  end if;
+  if p_unblock_owner is not null and not exists (select 1 from proj_project_members where project_id = v.id and user_id = p_unblock_owner and removed_at is null) then
+    raise exception 'The person who can unblock it must be a member of the project' using errcode = '22023';
+  end if;
+  update proj_tasks set blocked_at = now(), blocked_reason = btrim(p_reason), unblock_owner_id = p_unblock_owner,
+         unblock_action = nullif(btrim(p_unblock_action), ''), version = version + 1 where id = t.id;
+  perform proj_task_event(t.id, v.id, 'blocked', null, btrim(p_reason), p_unblock_action);
+  perform proj_notify(v.id, coalesce(p_unblock_owner, v.pm_user_id), 'project_task_blocked',
+    jsonb_build_object('name', v.name, 'reference', v.reference, 'task_id', t.id, 'task', t.title, 'reason', btrim(p_reason)), 'task:' || t.id || ':blocked:' || (t.version + 1));
+end;
+$$;
+
+create or replace function proj_unblock_task(p_task_id uuid, p_note text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  t proj_tasks;
+  v proj_projects;
+begin
+  perform proj_require_user();
+  select * into t from proj_tasks where id = p_task_id for update;
+  if not found then raise exception 'Task not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(t.project_id);
+  perform proj_require_open_project(v);
+  if proj_task_actor_role(t) is null and t.unblock_owner_id is distinct from auth.uid() then
+    raise exception 'Only the assignee, the department head, the Project Manager or the named unblocker can clear this blocker' using errcode = '42501';
+  end if;
+  if t.blocked_at is null then return; end if;
+  update proj_tasks set blocked_at = null, blocked_reason = null, unblock_owner_id = null, unblock_action = null, version = version + 1 where id = t.id;
+  perform proj_task_event(t.id, v.id, 'unblocked', t.blocked_reason, null, p_note);
+end;
+$$;
+
+create or replace function proj_comment_task(p_task_id uuid, p_body text)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  t proj_tasks;
+  v_id uuid;
+begin
+  perform proj_require_user();
+  select * into t from proj_tasks where id = p_task_id;
+  if not found or not proj_can_view_details(t.project_id) then raise exception 'Task not found' using errcode = 'P0002'; end if;
+  if length(btrim(coalesce(p_body, ''))) = 0 then raise exception 'Write a comment' using errcode = '22023'; end if;
+  insert into proj_task_comments (task_id, project_id, author_id, body) values (t.id, t.project_id, auth.uid(), btrim(p_body)) returning id into v_id;
+  return v_id;
+end;
+$$;
+
+create or replace function proj_edit_task_comment(p_comment_id uuid, p_body text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  perform proj_require_user();
+  if length(btrim(coalesce(p_body, ''))) = 0 then raise exception 'Write a comment' using errcode = '22023'; end if;
+  update proj_task_comments set body = btrim(p_body), edited_at = now()
+   where id = p_comment_id and author_id = auth.uid() and proj_can_view_details(project_id);
+  if not found then raise exception 'Comment not found' using errcode = 'P0002'; end if;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Progress, stated with its basis: accepted required milestones / required milestones (cancelled and deferred excluded
+-- from the denominator). Nothing is derived from elapsed time.
+-- -----------------------------------------------------------------------------
+create or replace function proj_milestone_progress(p_project_id uuid)
+returns table (accepted_required integer, total_required integer)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform proj_require_user();
+  if not proj_can_view_details(p_project_id) then return; end if;
+  return query
+    select count(*) filter (where m.status = 'accepted')::integer, count(*) filter (where m.status not in ('cancelled', 'deferred'))::integer
+    from proj_milestones m where m.project_id = p_project_id and m.is_required;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Names for the people on a project (members only; no HR data, no e-mail).
+-- -----------------------------------------------------------------------------
+create or replace function proj_project_people(p_project_id uuid)
+returns table (user_id uuid, full_name text, role text, team_id uuid, is_team_head boolean, acting_until date)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform proj_require_user();
+  if not proj_can_view_details(p_project_id) then return; end if;
+  return query
+    select m.user_id, proj_display_name(m.user_id), m.role, m.team_id,
+           exists (select 1 from proj_teams t where t.project_id = m.project_id and t.head_user_id = m.user_id and t.removed_at is null),
+           m.acting_until
+    from proj_project_members m where m.project_id = p_project_id and m.removed_at is null
+    order by 2;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges
+-- -----------------------------------------------------------------------------
+revoke all on function
+  proj_require_member_or_founder(proj_projects), proj_require_open_project(proj_projects),
+  proj_task_event(uuid, uuid, text, text, text, text), proj_member_in_team(uuid, uuid, uuid),
+  proj_set_task_dependencies(uuid, uuid[]), proj_set_task_collaborators(uuid, uuid[]), proj_task_actor_role(proj_tasks),
+  proj_save_milestone(uuid, uuid, jsonb), proj_set_milestone_status(uuid, text, text),
+  proj_save_deliverable(uuid, uuid, jsonb), proj_set_deliverable_status(uuid, text, text),
+  proj_create_task(uuid, jsonb), proj_task_affected(uuid, date), proj_update_task(uuid, jsonb, integer),
+  proj_reassign_task(uuid, uuid, text), proj_set_task_status(uuid, text, text, integer),
+  proj_block_task(uuid, text, uuid, text), proj_unblock_task(uuid, text), proj_comment_task(uuid, text),
+  proj_edit_task_comment(uuid, text), proj_milestone_progress(uuid), proj_project_people(uuid)
+  from public, anon, authenticated;
+
+grant execute on function
+  proj_save_milestone(uuid, uuid, jsonb), proj_set_milestone_status(uuid, text, text),
+  proj_save_deliverable(uuid, uuid, jsonb), proj_set_deliverable_status(uuid, text, text),
+  proj_create_task(uuid, jsonb), proj_task_affected(uuid, date), proj_update_task(uuid, jsonb, integer),
+  proj_reassign_task(uuid, uuid, text), proj_set_task_status(uuid, text, text, integer),
+  proj_block_task(uuid, text, uuid, text), proj_unblock_task(uuid, text), proj_comment_task(uuid, text),
+  proj_edit_task_comment(uuid, text), proj_milestone_progress(uuid), proj_project_people(uuid)
+  to authenticated;
+
+-- ---- 20261120000400_proj_plans_site_calendar_discussion.sql ----
+-- Projects & Tasks (Release 2), migration 5 of 6: timelines, external dependencies, site bookings, calendars and discussion.
+--
+-- Rules encoded here:
+--   * Delivery timeline and site production timeline are ordinary editable rows (templates are applied by a function and
+--     can be changed freely), never mandatory.
+--   * Deadlines and plan dates are DATES (no time zone, never shifted). Timed events are timestamptz plus the IANA zone of
+--     the site; the local wall-clock time is converted by Postgres, so daylight-saving changes and overnight/multi-day
+--     events are handled by the database, not by arithmetic in the app.
+--   * Several assignments in one day is never a conflict. Only PHYSICAL site bookings are compared, by booking not job title,
+--     including preparation / travel allowances, across all projects. Confirming a booking that overlaps a confirmed one
+--     needs the override capability and a recorded reason; concurrent confirmations are serialised per person.
+--   * Conflict messages never reveal a project the caller cannot see.
+--   * The company calendar shows only summary-safe project spans; the project calendar is for members and founders.
+--   * Discussion is private to members and authorised founders; its notifications carry no message text.
+
+-- -----------------------------------------------------------------------------
+-- Tables
+-- -----------------------------------------------------------------------------
+create table if not exists proj_plan_items (
+  id             uuid primary key default gen_random_uuid(),
+  project_id     uuid not null references proj_projects(id) on delete cascade,
+  plan           text not null check (plan in ('delivery', 'site')),
+  template_key   text,
+  title          text not null check (length(btrim(title)) between 1 and 200),
+  -- Date-only items use start_date/end_date; timed items use starts_at/ends_at with tz; an item may be undated for now.
+  start_date     date,
+  end_date       date,
+  starts_at      timestamptz,
+  ends_at        timestamptz,
+  tz             text,
+  status         text not null default 'planned' check (status in ('planned', 'in_progress', 'done', 'cancelled')),
+  -- Only items the PM marks are ever offered to a client timeline.
+  client_facing  boolean not null default false,
+  milestone_id   uuid references proj_milestones(id),
+  notes          text,
+  sort_order     integer not null default 0,
+  created_by     uuid references auth.users(id),
+  version        integer not null default 1,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  constraint proj_plan_items_shape check (
+    (start_date is null and end_date is null and starts_at is null and ends_at is null)
+    or (start_date is not null and starts_at is null and ends_at is null and tz is null)
+    or (start_date is null and end_date is null and starts_at is not null and ends_at is not null and tz is not null)),
+  constraint proj_plan_items_dates check (end_date is null or end_date >= start_date),
+  constraint proj_plan_items_times check (ends_at is null or ends_at >= starts_at),
+  constraint proj_plan_items_tz check (tz is null or proj_valid_timezone(tz))
+);
+create index if not exists idx_proj_plan_items_project on proj_plan_items(project_id, plan, sort_order);
+
+create table if not exists proj_external_dependencies (
+  id             uuid primary key default gen_random_uuid(),
+  project_id     uuid not null references proj_projects(id) on delete cascade,
+  kind           text not null check (kind in ('structure_ready', 'power_network', 'access_permitted', 'standbuilder_complete', 'other')),
+  label          text not null check (length(btrim(label)) between 1 and 200),
+  -- Date, optionally with a wall-clock time in the project's site time zone. No accounts, no portal, no messages sent.
+  expected_date  date,
+  expected_time  time,
+  organisation   text,
+  contact        text,
+  confirmation   text not null default 'pending' check (confirmation in ('pending', 'confirmed', 'not_possible')),
+  confirmed_at   timestamptz,
+  confirmed_by   uuid references auth.users(id),
+  milestone_id   uuid references proj_milestones(id),
+  client_facing  boolean not null default false,
+  notes          text,
+  created_by     uuid references auth.users(id),
+  version        integer not null default 1,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  constraint proj_external_time_needs_date check (expected_time is null or expected_date is not null)
+);
+create index if not exists idx_proj_external_deps_project on proj_external_dependencies(project_id, expected_date);
+
+create table if not exists proj_site_bookings (
+  id             uuid primary key default gen_random_uuid(),
+  project_id     uuid not null references proj_projects(id) on delete cascade,
+  user_id        uuid not null references auth.users(id),
+  plan_item_id   uuid references proj_plan_items(id),
+  location       text not null check (length(btrim(location)) between 1 and 200),
+  starts_at      timestamptz not null,
+  ends_at        timestamptz not null,
+  tz             text not null,
+  -- Preparation / travel allowance before the booking and travel back after it; both count when looking for overlaps.
+  lead_minutes   integer not null default 0 check (lead_minutes between 0 and 1440),
+  trail_minutes  integer not null default 0 check (trail_minutes between 0 and 1440),
+  state          text not null default 'tentative' check (state in ('tentative', 'confirmed', 'cancelled')),
+  confirmed_by   uuid references auth.users(id),
+  confirmed_at   timestamptz,
+  override_reason text,
+  override_by    uuid references auth.users(id),
+  cancel_reason  text,
+  notes          text,
+  created_by     uuid references auth.users(id),
+  version        integer not null default 1,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  constraint proj_site_bookings_range check (ends_at > starts_at),
+  constraint proj_site_bookings_tz check (proj_valid_timezone(tz)),
+  constraint proj_site_bookings_confirmed check ((state = 'confirmed') = (confirmed_at is not null))
+);
+create index if not exists idx_proj_site_bookings_user on proj_site_bookings(user_id, starts_at) where state <> 'cancelled';
+create index if not exists idx_proj_site_bookings_project on proj_site_bookings(project_id, starts_at);
+
+create table if not exists proj_messages (
+  id           uuid primary key default gen_random_uuid(),
+  seq          bigint generated always as identity,
+  project_id   uuid not null references proj_projects(id) on delete cascade,
+  author_id    uuid not null references auth.users(id),
+  parent_id    uuid references proj_messages(id),
+  body         text not null check (length(body) <= 4000),
+  -- Client-generated key: a retried send (timeout, double click) returns the same message instead of posting twice.
+  client_nonce uuid,
+  created_at   timestamptz not null default now(),
+  edited_at    timestamptz,
+  deleted_at   timestamptz,
+  deleted_by   uuid references auth.users(id),
+  changed_at   timestamptz not null default now(),
+  constraint proj_messages_body check (deleted_at is not null or length(btrim(body)) > 0)
+);
+create unique index if not exists uq_proj_messages_seq on proj_messages(seq);
+create unique index if not exists uq_proj_messages_nonce on proj_messages(project_id, author_id, client_nonce) where client_nonce is not null;
+create index if not exists idx_proj_messages_project on proj_messages(project_id, seq);
+
+-- The original text of a deleted message, readable only by founders (who may read the discussion anyway).
+create table if not exists proj_message_tombstones (
+  message_id     uuid primary key references proj_messages(id) on delete cascade,
+  project_id     uuid not null references proj_projects(id) on delete cascade,
+  original_body  text not null,
+  deleted_by     uuid references auth.users(id),
+  reason         text,
+  deleted_at     timestamptz not null default now()
+);
+
+create table if not exists proj_message_mentions (
+  message_id  uuid not null references proj_messages(id) on delete cascade,
+  user_id     uuid not null references auth.users(id),
+  project_id  uuid not null references proj_projects(id) on delete cascade,
+  primary key (message_id, user_id)
+);
+
+create table if not exists proj_read_state (
+  project_id    uuid not null references proj_projects(id) on delete cascade,
+  user_id       uuid not null references auth.users(id),
+  last_read_seq bigint not null default 0,
+  last_read_at  timestamptz not null default now(),
+  primary key (project_id, user_id)
+);
+
+do $$
+declare t text;
+begin
+  foreach t in array array['proj_plan_items', 'proj_external_dependencies', 'proj_site_bookings'] loop
+    execute format('drop trigger if exists %I on %I', t || '_set_updated_at', t);
+    execute format('create trigger %I before update on %I for each row execute function set_updated_at()', t || '_set_updated_at', t);
+    execute format('drop trigger if exists %I on %I', t || '_audit', t);
+    execute format('create trigger %I after insert or update or delete on %I for each row execute function proj_audit_trigger()', t || '_audit', t);
+  end loop;
+end $$;
+
+-- -----------------------------------------------------------------------------
+-- Row-level security (SELECT only)
+-- -----------------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  foreach t in array array['proj_plan_items', 'proj_external_dependencies', 'proj_site_bookings', 'proj_messages', 'proj_message_mentions'] loop
+    execute format('alter table %I enable row level security', t);
+    execute format('drop policy if exists %I on %I', t || '_select', t);
+    execute format('create policy %I on %I for select using (proj_can_view_details(project_id))', t || '_select', t);
+  end loop;
+end $$;
+
+alter table proj_message_tombstones enable row level security;
+drop policy if exists proj_message_tombstones_select on proj_message_tombstones;
+create policy proj_message_tombstones_select on proj_message_tombstones for select
+  using (proj_is_founder(proj_project_company(project_id)));
+
+alter table proj_read_state enable row level security;
+drop policy if exists proj_read_state_select on proj_read_state;
+create policy proj_read_state_select on proj_read_state for select using (user_id = auth.uid());
+
+-- -----------------------------------------------------------------------------
+-- Member blockers now include upcoming site bookings (replaces the migration-3 version).
+-- -----------------------------------------------------------------------------
+create or replace function proj_member_blockers(p_project_id uuid, p_user_id uuid)
+returns jsonb
+language sql stable security definer
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'open_tasks', (select count(*) from proj_tasks t where t.project_id = p_project_id and t.assignee_id = p_user_id
+                    and t.status in ('todo', 'in_progress', 'ready_for_review')),
+    'upcoming_bookings', (select count(*) from proj_site_bookings b where b.project_id = p_project_id and b.user_id = p_user_id
+                           and b.state in ('tentative', 'confirmed') and b.ends_at > now()));
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Plan items (timelines) and templates. PM only.
+-- -----------------------------------------------------------------------------
+create or replace function proj_save_plan_item(p_project_id uuid, p_item_id uuid, p_fields jsonb)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  d proj_project_details;
+  i proj_plan_items;
+  v_id uuid;
+  v_plan text;
+  v_tz text;
+  v_start date;
+  v_end date;
+  v_sa timestamptz;
+  v_ea timestamptz;
+  v_timed boolean := (p_fields ? 'starts_local' or p_fields ? 'ends_local');
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_manager(v);
+  perform proj_require_open_project(v);
+  select * into d from proj_project_details where project_id = v.id;
+  if p_item_id is null then
+    v_plan := p_fields->>'plan';
+    if v_plan not in ('delivery', 'site') then raise exception 'Choose the delivery or the site timeline' using errcode = '22023'; end if;
+    if length(btrim(coalesce(p_fields->>'title', ''))) = 0 then raise exception 'Give the item a title' using errcode = '22023'; end if;
+  else
+    select * into i from proj_plan_items where id = p_item_id and project_id = v.id for update;
+    if not found then raise exception 'Timeline item not found' using errcode = 'P0002'; end if;
+    perform proj_check_version(i.version, nullif(p_fields->>'expected_version', '')::integer);
+    v_plan := i.plan;
+  end if;
+  v_tz := coalesce(proj_text_or_null(p_fields, 'tz'), i.tz, d.site_timezone);
+  if v_timed then
+    if not proj_valid_timezone(v_tz) then raise exception 'Unknown time zone %', v_tz using errcode = '22023'; end if;
+    v_sa := (p_fields->>'starts_local')::timestamp at time zone v_tz;
+    v_ea := coalesce((p_fields->>'ends_local')::timestamp at time zone v_tz, v_sa);
+    v_start := null; v_end := null;
+  elsif p_fields ? 'start_date' or p_fields ? 'end_date' then
+    v_start := nullif(p_fields->>'start_date', '')::date;
+    v_end := nullif(p_fields->>'end_date', '')::date;
+    if v_start is null and v_end is not null then v_start := v_end; end if;
+    v_sa := null; v_ea := null; v_tz := null;
+  elsif i.id is not null then
+    v_start := i.start_date; v_end := i.end_date; v_sa := i.starts_at; v_ea := i.ends_at; v_tz := i.tz;
+  end if;
+  if p_fields ? 'milestone_id' and nullif(p_fields->>'milestone_id', '')::uuid is not null
+     and not exists (select 1 from proj_milestones where id = nullif(p_fields->>'milestone_id', '')::uuid and project_id = v.id) then
+    raise exception 'Unknown milestone' using errcode = '22023';
+  end if;
+
+  if i.id is null then
+    insert into proj_plan_items (project_id, plan, template_key, title, start_date, end_date, starts_at, ends_at, tz, client_facing, milestone_id, notes, sort_order, created_by)
+    values (v.id, v_plan, proj_text_or_null(p_fields, 'template_key'), btrim(p_fields->>'title'), v_start, v_end, v_sa, v_ea, v_tz,
+            coalesce((p_fields->>'client_facing')::boolean, false), nullif(p_fields->>'milestone_id', '')::uuid, proj_text_or_null(p_fields, 'notes'),
+            coalesce((p_fields->>'sort_order')::integer, (select coalesce(max(sort_order), 0) + 10 from proj_plan_items where project_id = v.id and plan = v_plan)),
+            auth.uid())
+    returning id into v_id;
+    return v_id;
+  end if;
+  update proj_plan_items set
+    title = coalesce(proj_text_or_null(p_fields, 'title'), title),
+    start_date = v_start, end_date = v_end, starts_at = v_sa, ends_at = v_ea, tz = v_tz,
+    status = coalesce(proj_text_or_null(p_fields, 'status'), status),
+    client_facing = coalesce((p_fields->>'client_facing')::boolean, client_facing),
+    milestone_id = case when p_fields ? 'milestone_id' then nullif(p_fields->>'milestone_id', '')::uuid else milestone_id end,
+    notes = case when p_fields ? 'notes' then proj_text_or_null(p_fields, 'notes') else notes end,
+    sort_order = coalesce((p_fields->>'sort_order')::integer, sort_order),
+    version = version + 1
+   where id = i.id;
+  perform proj_log_change(v.id, 'plan_item', i.id, 'start', coalesce(i.start_date::text, i.starts_at::text), coalesce(v_start::text, v_sa::text), p_fields->>'reason');
+  perform proj_log_change(v.id, 'plan_item', i.id, 'end', coalesce(i.end_date::text, i.ends_at::text), coalesce(v_end::text, v_ea::text), p_fields->>'reason');
+  return i.id;
+end;
+$$;
+
+create or replace function proj_delete_plan_item(p_item_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  i proj_plan_items;
+  v proj_projects;
+begin
+  perform proj_require_user();
+  select * into i from proj_plan_items where id = p_item_id for update;
+  if not found then raise exception 'Timeline item not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(i.project_id);
+  perform proj_require_manager(v);
+  perform proj_require_open_project(v);
+  if exists (select 1 from proj_site_bookings where plan_item_id = i.id and state <> 'cancelled') then
+    raise exception 'Bookings still use this activity. Cancel them first' using errcode = '23514';
+  end if;
+  delete from proj_plan_items where id = i.id;
+  perform proj_log_change(v.id, 'plan_item', i.id, 'deleted', i.title, null);
+end;
+$$;
+
+-- Applies a template once to an empty plan. Each item: {title, template_key?, offset_days?, duration_days?, client_facing?}. With a base
+-- date, offsets become dates; without one the items are created undated for the PM to schedule. The templates themselves live in
+-- the application (packages/domain) and are suggestions only.
+create or replace function proj_apply_plan_template(p_project_id uuid, p_plan text, p_items jsonb, p_base_date date default null)
+returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  it jsonb;
+  n integer := 0;
+  v_off integer;
+  v_dur integer;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_manager(v);
+  perform proj_require_open_project(v);
+  if p_plan not in ('delivery', 'site') then raise exception 'Choose the delivery or the site timeline' using errcode = '22023'; end if;
+  if jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then raise exception 'The template has no items' using errcode = '22023'; end if;
+  if exists (select 1 from proj_plan_items where project_id = v.id and plan = p_plan) then
+    raise exception 'This timeline already has items. Edit them, or remove them first' using errcode = '23514';
+  end if;
+  for it in select * from jsonb_array_elements(p_items) loop
+    v_off := nullif(it->>'offset_days', '')::integer;
+    v_dur := coalesce(nullif(it->>'duration_days', '')::integer, 0);
+    insert into proj_plan_items (project_id, plan, template_key, title, start_date, end_date, client_facing, sort_order, created_by)
+    values (v.id, p_plan, nullif(it->>'template_key', ''), btrim(it->>'title'),
+            case when p_base_date is not null and v_off is not null then p_base_date + v_off end,
+            case when p_base_date is not null and v_off is not null then p_base_date + v_off + v_dur end,
+            coalesce((it->>'client_facing')::boolean, false), (n + 1) * 10, auth.uid());
+    n := n + 1;
+  end loop;
+  return n;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- External dependencies (standbuilder, power, network, access). Recorded by the PM; nothing is sent to anyone.
+-- -----------------------------------------------------------------------------
+create or replace function proj_save_external_dependency(p_project_id uuid, p_dependency_id uuid, p_fields jsonb)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  e proj_external_dependencies;
+  v_id uuid;
+  v_conf text;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_manager(v);
+  perform proj_require_open_project(v);
+  if p_fields ? 'milestone_id' and nullif(p_fields->>'milestone_id', '')::uuid is not null
+     and not exists (select 1 from proj_milestones where id = nullif(p_fields->>'milestone_id', '')::uuid and project_id = v.id) then
+    raise exception 'Unknown milestone' using errcode = '22023';
+  end if;
+  if p_dependency_id is null then
+    if length(btrim(coalesce(p_fields->>'label', ''))) = 0 then raise exception 'Describe what you are waiting for' using errcode = '22023'; end if;
+    insert into proj_external_dependencies (project_id, kind, label, expected_date, expected_time, organisation, contact, milestone_id, client_facing, notes, created_by)
+    values (v.id, coalesce(proj_text_or_null(p_fields, 'kind'), 'other'), btrim(p_fields->>'label'), nullif(p_fields->>'expected_date', '')::date,
+            nullif(p_fields->>'expected_time', '')::time, proj_text_or_null(p_fields, 'organisation'), proj_text_or_null(p_fields, 'contact'),
+            nullif(p_fields->>'milestone_id', '')::uuid, coalesce((p_fields->>'client_facing')::boolean, false), proj_text_or_null(p_fields, 'notes'), auth.uid())
+    returning id into v_id;
+    return v_id;
+  end if;
+  select * into e from proj_external_dependencies where id = p_dependency_id and project_id = v.id for update;
+  if not found then raise exception 'Dependency not found' using errcode = 'P0002'; end if;
+  perform proj_check_version(e.version, nullif(p_fields->>'expected_version', '')::integer);
+  v_conf := coalesce(proj_text_or_null(p_fields, 'confirmation'), e.confirmation);
+  if v_conf not in ('pending', 'confirmed', 'not_possible') then raise exception 'Unknown confirmation status' using errcode = '22023'; end if;
+  update proj_external_dependencies set
+    kind = coalesce(proj_text_or_null(p_fields, 'kind'), kind),
+    label = coalesce(proj_text_or_null(p_fields, 'label'), label),
+    expected_date = case when p_fields ? 'expected_date' then nullif(p_fields->>'expected_date', '')::date else expected_date end,
+    expected_time = case when p_fields ? 'expected_time' then nullif(p_fields->>'expected_time', '')::time else expected_time end,
+    organisation = case when p_fields ? 'organisation' then proj_text_or_null(p_fields, 'organisation') else organisation end,
+    contact = case when p_fields ? 'contact' then proj_text_or_null(p_fields, 'contact') else contact end,
+    confirmation = v_conf,
+    confirmed_at = case when v_conf = 'confirmed' and confirmation <> 'confirmed' then now() when v_conf <> 'confirmed' then null else confirmed_at end,
+    confirmed_by = case when v_conf = 'confirmed' and confirmation <> 'confirmed' then auth.uid() when v_conf <> 'confirmed' then null else confirmed_by end,
+    milestone_id = case when p_fields ? 'milestone_id' then nullif(p_fields->>'milestone_id', '')::uuid else milestone_id end,
+    client_facing = coalesce((p_fields->>'client_facing')::boolean, client_facing),
+    notes = case when p_fields ? 'notes' then proj_text_or_null(p_fields, 'notes') else notes end,
+    version = version + 1
+   where id = e.id;
+  perform proj_log_change(v.id, 'external_dependency', e.id, 'expected', coalesce(e.expected_date::text, '') || coalesce(' ' || e.expected_time::text, ''),
+    coalesce(nullif(p_fields->>'expected_date', ''), e.expected_date::text, '') || coalesce(' ' || nullif(p_fields->>'expected_time', ''), ''), p_fields->>'reason');
+  perform proj_log_change(v.id, 'external_dependency', e.id, 'confirmation', e.confirmation, v_conf);
+  return e.id;
+end;
+$$;
+
+create or replace function proj_delete_external_dependency(p_dependency_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  e proj_external_dependencies;
+  v proj_projects;
+begin
+  perform proj_require_user();
+  select * into e from proj_external_dependencies where id = p_dependency_id for update;
+  if not found then raise exception 'Dependency not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(e.project_id);
+  perform proj_require_manager(v);
+  perform proj_require_open_project(v);
+  delete from proj_external_dependencies where id = e.id;
+  perform proj_log_change(v.id, 'external_dependency', e.id, 'deleted', e.label, null);
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Site bookings
+-- -----------------------------------------------------------------------------
+-- PM / founder, or the head of the team the booked person belongs to, may book that person.
+create or replace function proj_can_book(p_project_id uuid, p_user_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select proj_can_manage(p_project_id)
+      or exists (select 1 from proj_project_members m join proj_teams t on t.id = m.team_id
+                  where m.project_id = p_project_id and m.user_id = p_user_id and m.removed_at is null
+                    and t.removed_at is null and proj_is_team_head(t.id));
+$$;
+
+create or replace function proj_save_booking(p_project_id uuid, p_booking_id uuid, p_fields jsonb)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  d proj_project_details;
+  b proj_site_bookings;
+  v_user uuid;
+  v_tz text;
+  v_sa timestamptz;
+  v_ea timestamptz;
+  v_lead integer;
+  v_trail integer;
+  v_loc text;
+  v_id uuid;
+  v_changed boolean;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_open_project(v);
+  select * into d from proj_project_details where project_id = v.id;
+  if p_booking_id is not null then
+    select * into b from proj_site_bookings where id = p_booking_id and project_id = v.id for update;
+    if not found then raise exception 'Booking not found' using errcode = 'P0002'; end if;
+    perform proj_check_version(b.version, nullif(p_fields->>'expected_version', '')::integer);
+    if b.state = 'cancelled' then raise exception 'A cancelled booking cannot be edited. Create a new one' using errcode = '23514'; end if;
+  end if;
+  v_user := coalesce(nullif(p_fields->>'user_id', '')::uuid, b.user_id);
+  if v_user is null then raise exception 'Choose who is booked' using errcode = '22023'; end if;
+  if not proj_can_book(v.id, v_user) then
+    raise exception 'Only the Project Manager, or the head of that person''s department team, can book them on site' using errcode = '42501';
+  end if;
+  if not exists (select 1 from proj_project_members where project_id = v.id and user_id = v_user and removed_at is null) then
+    raise exception 'The booked person must be a member of the project' using errcode = '22023';
+  end if;
+  v_tz := coalesce(proj_text_or_null(p_fields, 'tz'), b.tz, d.site_timezone);
+  if not proj_valid_timezone(v_tz) then raise exception 'Unknown time zone %', v_tz using errcode = '22023'; end if;
+  v_sa := case when p_fields ? 'starts_local' then (p_fields->>'starts_local')::timestamp at time zone v_tz else b.starts_at end;
+  v_ea := case when p_fields ? 'ends_local' then (p_fields->>'ends_local')::timestamp at time zone v_tz else b.ends_at end;
+  if v_sa is null or v_ea is null then raise exception 'Give the start and end time' using errcode = '22023'; end if;
+  if v_ea <= v_sa then raise exception 'The booking must end after it starts' using errcode = '22023'; end if;
+  v_lead := coalesce((p_fields->>'lead_minutes')::integer, b.lead_minutes, 0);
+  v_trail := coalesce((p_fields->>'trail_minutes')::integer, b.trail_minutes, 0);
+  v_loc := coalesce(proj_text_or_null(p_fields, 'location'), b.location);
+  if v_loc is null then raise exception 'Give the site location' using errcode = '22023'; end if;
+  if p_fields ? 'plan_item_id' and nullif(p_fields->>'plan_item_id', '')::uuid is not null
+     and not exists (select 1 from proj_plan_items where id = nullif(p_fields->>'plan_item_id', '')::uuid and project_id = v.id and plan = 'site') then
+    raise exception 'Unknown site activity' using errcode = '22023';
+  end if;
+
+  if b.id is null then
+    insert into proj_site_bookings (project_id, user_id, plan_item_id, location, starts_at, ends_at, tz, lead_minutes, trail_minutes, notes, created_by)
+    values (v.id, v_user, nullif(p_fields->>'plan_item_id', '')::uuid, v_loc, v_sa, v_ea, v_tz, v_lead, v_trail, proj_text_or_null(p_fields, 'notes'), auth.uid())
+    returning id into v_id;
+    perform proj_notify(v.id, v_user, 'project_assignment',
+      jsonb_build_object('name', v.name, 'reference', v.reference, 'booking_id', v_id, 'location', v_loc), 'booking:' || v_id || ':created');
+    return v_id;
+  end if;
+
+  -- Changing who, when, where or the allowances of a confirmed booking withdraws the confirmation: it must be confirmed again
+  -- (and re-checked for overlaps).
+  v_changed := b.user_id <> v_user or b.starts_at <> v_sa or b.ends_at <> v_ea or b.lead_minutes <> v_lead or b.trail_minutes <> v_trail;
+  update proj_site_bookings set
+    user_id = v_user, plan_item_id = case when p_fields ? 'plan_item_id' then nullif(p_fields->>'plan_item_id', '')::uuid else plan_item_id end,
+    location = v_loc, starts_at = v_sa, ends_at = v_ea, tz = v_tz, lead_minutes = v_lead, trail_minutes = v_trail,
+    notes = case when p_fields ? 'notes' then proj_text_or_null(p_fields, 'notes') else notes end,
+    state = case when v_changed and state = 'confirmed' then 'tentative' else state end,
+    confirmed_by = case when v_changed and state = 'confirmed' then null else confirmed_by end,
+    confirmed_at = case when v_changed and state = 'confirmed' then null else confirmed_at end,
+    override_reason = case when v_changed and state = 'confirmed' then null else override_reason end,
+    override_by = case when v_changed and state = 'confirmed' then null else override_by end,
+    version = version + 1
+   where id = b.id;
+  perform proj_log_change(v.id, 'booking', b.id, 'window', b.starts_at::text || ' - ' || b.ends_at::text, v_sa::text || ' - ' || v_ea::text, p_fields->>'reason');
+  if v_changed then
+    perform proj_notify(v.id, v_user, 'project_deadline_changed',
+      jsonb_build_object('name', v.name, 'reference', v.reference, 'booking_id', b.id, 'location', v_loc), 'booking:' || b.id || ':window:' || (b.version + 1));
+  end if;
+  return b.id;
+end;
+$$;
+
+-- Overlaps with this booking's effective window (preparation before, travel after). Visible projects are named; others are
+-- reported only as "not visible to you", with no project, no times, nothing else.
+create or replace function proj_booking_conflicts(p_booking_id uuid)
+returns table (booking_id uuid, is_visible boolean, project_id uuid, project_reference text, project_name text, starts_at timestamptz, ends_at timestamptz, tz text, state text)
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare b proj_site_bookings;
+begin
+  perform proj_require_user();
+  select * into b from proj_site_bookings where id = p_booking_id;
+  if not found or not proj_can_view_details(b.project_id) then return; end if;
+  return query
+    select o.id, proj_can_view_details(o.project_id),
+           case when proj_can_view_details(o.project_id) then o.project_id end,
+           case when proj_can_view_details(o.project_id) then (select pr.reference from proj_projects pr where pr.id = o.project_id) end,
+           case when proj_can_view_details(o.project_id) then (select pr.name from proj_projects pr where pr.id = o.project_id) end,
+           case when proj_can_view_details(o.project_id) then o.starts_at end,
+           case when proj_can_view_details(o.project_id) then o.ends_at end,
+           case when proj_can_view_details(o.project_id) then o.tz end,
+           case when proj_can_view_details(o.project_id) then o.state end
+    from proj_site_bookings o
+    where o.user_id = b.user_id and o.id <> b.id and o.state <> 'cancelled'
+      and tstzrange(o.starts_at - make_interval(mins => o.lead_minutes), o.ends_at + make_interval(mins => o.trail_minutes))
+          && tstzrange(b.starts_at - make_interval(mins => b.lead_minutes), b.ends_at + make_interval(mins => b.trail_minutes))
+    order by o.starts_at;
+end;
+$$;
+
+-- Confirmation: serialised per person, so two bookings confirmed at the same moment cannot both pass the overlap check.
+create or replace function proj_confirm_booking(p_booking_id uuid, p_override_reason text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  b proj_site_bookings;
+  v proj_projects;
+  v_conflicts integer;
+  v_visible text;
+  v_hidden integer;
+  v_overridden boolean := false;
+begin
+  perform proj_require_user();
+  select * into b from proj_site_bookings where id = p_booking_id;
+  if not found then raise exception 'Booking not found' using errcode = 'P0002'; end if;
+  perform pg_advisory_xact_lock(hashtextextended('proj_booking:' || b.user_id::text, 0));
+  select * into b from proj_site_bookings where id = p_booking_id for update;       -- re-read after the lock
+  v := proj_lock_project(b.project_id);
+  perform proj_require_open_project(v);
+  if not proj_can_book(v.id, b.user_id) then
+    raise exception 'Only the Project Manager, or the head of that person''s department team, can confirm this booking' using errcode = '42501';
+  end if;
+  if b.state = 'confirmed' then return jsonb_build_object('confirmed', true, 'conflicts', 0, 'overridden', b.override_reason is not null); end if;
+  if b.state = 'cancelled' then raise exception 'A cancelled booking cannot be confirmed' using errcode = '23514'; end if;
+  if not proj_user_eligible(v.company_id, b.user_id, v.id) then
+    raise exception 'The booked person no longer has access to this project' using errcode = '23514';
+  end if;
+
+  select count(*), count(*) filter (where not proj_can_view_details(o.project_id)),
+         string_agg((select pr.reference from proj_projects pr where pr.id = o.project_id), ', ') filter (where proj_can_view_details(o.project_id))
+    into v_conflicts, v_hidden, v_visible
+  from proj_site_bookings o
+  where o.user_id = b.user_id and o.id <> b.id and o.state = 'confirmed'
+    and tstzrange(o.starts_at - make_interval(mins => o.lead_minutes), o.ends_at + make_interval(mins => o.trail_minutes))
+        && tstzrange(b.starts_at - make_interval(mins => b.lead_minutes), b.ends_at + make_interval(mins => b.trail_minutes));
+
+  if v_conflicts > 0 then
+    if length(btrim(coalesce(p_override_reason, ''))) = 0 then
+      raise exception 'This person already has % confirmed site booking(s) that overlap this one, including preparation and travel time%. Change the time or the person; a founder with site-conflict authority can confirm it anyway with a recorded reason.',
+        v_conflicts,
+        case when v_visible is not null then ' (' || v_visible || case when v_hidden > 0 then ' and ' || v_hidden || ' you cannot see' else '' end || ')'
+             when v_hidden > 0 then ' (' || v_hidden || ' on projects you cannot see)' else '' end
+        using errcode = '23P01';
+    end if;
+    if not proj_has_capability(v.company_id, 'override_site_conflict') then
+      raise exception 'Only a founder, or someone a founder gave site-conflict authority to, can confirm an overlapping booking' using errcode = '42501';
+    end if;
+    v_overridden := true;
+  end if;
+
+  update proj_site_bookings set state = 'confirmed', confirmed_by = auth.uid(), confirmed_at = now(),
+         override_reason = case when v_overridden then btrim(p_override_reason) end,
+         override_by = case when v_overridden then auth.uid() end, version = version + 1
+   where id = b.id;
+  perform proj_log_change(v.id, 'booking', b.id, 'state', b.state, 'confirmed', case when v_overridden then 'Overlap overridden: ' || btrim(p_override_reason) end);
+  perform proj_notify(v.id, b.user_id, 'project_assignment',
+    jsonb_build_object('name', v.name, 'reference', v.reference, 'booking_id', b.id, 'location', b.location), 'booking:' || b.id || ':confirmed');
+  return jsonb_build_object('confirmed', true, 'conflicts', v_conflicts, 'overridden', v_overridden);
+end;
+$$;
+
+create or replace function proj_cancel_booking(p_booking_id uuid, p_reason text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  b proj_site_bookings;
+  v proj_projects;
+begin
+  perform proj_require_user();
+  select * into b from proj_site_bookings where id = p_booking_id for update;
+  if not found then raise exception 'Booking not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(b.project_id);
+  if not proj_can_book(v.id, b.user_id) then
+    raise exception 'Only the Project Manager, or the head of that person''s department team, can cancel this booking' using errcode = '42501';
+  end if;
+  if b.state = 'cancelled' then return; end if;
+  update proj_site_bookings set state = 'cancelled', cancel_reason = nullif(btrim(p_reason), ''), confirmed_by = null, confirmed_at = null, version = version + 1 where id = b.id;
+  perform proj_log_change(v.id, 'booking', b.id, 'state', b.state, 'cancelled', p_reason);
+  perform proj_notify(v.id, b.user_id, 'project_deadline_changed',
+    jsonb_build_object('name', v.name, 'reference', v.reference, 'booking_id', b.id, 'location', b.location, 'cancelled', true), 'booking:' || b.id || ':cancelled');
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Calendars. Date-only items come back as dates; timed items as instants plus the source zone (the app shows both).
+-- -----------------------------------------------------------------------------
+-- My Calendar: my tasks and review requests, milestones and bookings of projects I belong to. Nothing from other projects.
+create or replace function proj_my_calendar(p_from date, p_to date, p_view_tz text default 'Asia/Dubai')
+returns table (kind text, item_id uuid, project_id uuid, project_reference text, project_name text, title text,
+               on_date date, end_date date, starts_at timestamptz, ends_at timestamptz, tz text, status text, detail text)
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_from timestamptz;
+  v_to timestamptz;
+begin
+  perform proj_require_user();
+  if p_to < p_from then raise exception 'The end of the range is before its start' using errcode = '22023'; end if;
+  if p_to - p_from > 400 then raise exception 'Choose a range of at most about a year' using errcode = '22023'; end if;
+  if not proj_valid_timezone(p_view_tz) then p_view_tz := 'Asia/Dubai'; end if;
+  v_from := p_from::timestamp at time zone p_view_tz;
+  v_to := (p_to + 1)::timestamp at time zone p_view_tz;
+  return query
+    select 'task'::text, t.id, pr.id, pr.reference, pr.name, t.title, t.due_date, t.due_date, null::timestamptz, null::timestamptz, null::text, t.status,
+           case when t.blocked_at is not null then 'Blocked' end
+    from proj_tasks t join proj_projects pr on pr.id = t.project_id
+    where (t.assignee_id = auth.uid() or exists (select 1 from proj_task_collaborators c where c.task_id = t.id and c.user_id = auth.uid()))
+      and t.status in ('todo', 'in_progress', 'ready_for_review') and t.due_date between p_from and p_to and proj_can_view_details(pr.id)
+    union all
+    select 'review', t.id, pr.id, pr.reference, pr.name, t.title, coalesce(t.due_date, (t.updated_at at time zone p_view_tz)::date), coalesce(t.due_date, (t.updated_at at time zone p_view_tz)::date),
+           null, null, null, t.status, 'Review requested'
+    from proj_tasks t join proj_projects pr on pr.id = t.project_id
+    where t.status = 'ready_for_review' and t.assignee_id <> auth.uid() and proj_can_view_details(pr.id)
+      and (proj_can_manage(pr.id) or (t.team_id is not null and proj_is_team_head(t.team_id)))
+      and coalesce(t.due_date, (t.updated_at at time zone p_view_tz)::date) between p_from and p_to
+    union all
+    select 'milestone', m.id, pr.id, pr.reference, pr.name, m.title, m.due_date, m.due_date, null, null, null, m.status, null
+    from proj_milestones m join proj_projects pr on pr.id = m.project_id
+    where m.due_date between p_from and p_to and m.status not in ('cancelled') and proj_is_active_member(pr.id)
+    union all
+    select 'booking', b.id, pr.id, pr.reference, pr.name, 'Site: ' || b.location, null, null, b.starts_at, b.ends_at, b.tz, b.state, null
+    from proj_site_bookings b join proj_projects pr on pr.id = b.project_id
+    where b.user_id = auth.uid() and b.state <> 'cancelled' and b.starts_at < v_to and b.ends_at > v_from and proj_can_view_details(pr.id)
+    order by 7 nulls last, 9 nulls last;
+end;
+$$;
+
+-- Company Project Calendar: summary-safe project spans only (reference, name, status, dates). No milestones, tasks, bookings.
+-- A Sales-only user sees only their linked projects, because visibility is the summary rule.
+create or replace function proj_company_calendar(p_company_id uuid, p_from date, p_to date)
+returns table (project_id uuid, reference text, name text, kind text, status text, start_date date, end_date date)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform proj_require_user();
+  if p_to - p_from > 800 then raise exception 'Choose a shorter range' using errcode = '22023'; end if;
+  return query
+    select pr.id, pr.reference, pr.name, pr.kind, pr.status, pr.start_date, pr.end_date
+    from proj_projects pr
+    where pr.company_id = p_company_id and proj_can_view_summary(pr.id)
+      and pr.start_date is not null and pr.start_date <= p_to and coalesce(pr.end_date, pr.start_date) >= p_from
+    order by pr.start_date, pr.reference;
+end;
+$$;
+
+-- Project Calendar (members and founders): milestones, deliverables, task deadlines, timeline items, bookings, dependencies.
+create or replace function proj_project_calendar(p_project_id uuid, p_from date, p_to date, p_view_tz text default 'Asia/Dubai')
+returns table (kind text, item_id uuid, title text, on_date date, end_date date, starts_at timestamptz, ends_at timestamptz, tz text, status text, who text, detail text)
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_from timestamptz;
+  v_to timestamptz;
+begin
+  perform proj_require_user();
+  if not proj_can_view_details(p_project_id) then return; end if;
+  if p_to - p_from > 800 then raise exception 'Choose a shorter range' using errcode = '22023'; end if;
+  if not proj_valid_timezone(p_view_tz) then p_view_tz := 'Asia/Dubai'; end if;
+  v_from := p_from::timestamp at time zone p_view_tz;
+  v_to := (p_to + 1)::timestamp at time zone p_view_tz;
+  return query
+    select 'milestone'::text, m.id, m.title, m.due_date, m.due_date, null::timestamptz, null::timestamptz, null::text, m.status, null::text, null::text
+      from proj_milestones m where m.project_id = p_project_id and m.due_date between p_from and p_to and m.status <> 'cancelled'
+    union all
+    select 'deliverable', d.id, d.title, d.due_date, d.due_date, null, null, null, d.status, (select t.name from proj_teams t where t.id = d.team_id), null
+      from proj_deliverables d where d.project_id = p_project_id and d.due_date between p_from and p_to and d.status <> 'cancelled'
+    union all
+    select 'task', t.id, t.title, t.due_date, t.due_date, null, null, null, t.status, proj_display_name(t.assignee_id), case when t.blocked_at is not null then 'Blocked' end
+      from proj_tasks t where t.project_id = p_project_id and t.due_date between p_from and p_to and t.status not in ('cancelled')
+    union all
+    select 'plan_' || i.plan, i.id, i.title, i.start_date, coalesce(i.end_date, i.start_date), i.starts_at, i.ends_at, i.tz, i.status, null, null
+      from proj_plan_items i where i.project_id = p_project_id and i.status <> 'cancelled'
+       and ((i.start_date is not null and i.start_date <= p_to and coalesce(i.end_date, i.start_date) >= p_from)
+         or (i.starts_at is not null and i.starts_at < v_to and i.ends_at >= v_from))
+    union all
+    select 'booking', b.id, 'Site: ' || b.location, null, null, b.starts_at, b.ends_at, b.tz, b.state, proj_display_name(b.user_id), null
+      from proj_site_bookings b where b.project_id = p_project_id and b.state <> 'cancelled' and b.starts_at < v_to and b.ends_at > v_from
+    union all
+    select 'dependency', e.id, e.label, e.expected_date, e.expected_date, null, null, null, e.confirmation, e.organisation, e.expected_time::text
+      from proj_external_dependencies e where e.project_id = p_project_id and e.expected_date between p_from and p_to
+    order by 4 nulls last, 6 nulls last;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Private discussion
+-- -----------------------------------------------------------------------------
+-- A participant is an active member or a founder of the project's company: the only people a discussion is open to.
+create or replace function proj_user_is_participant(p_project_id uuid, p_user_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from proj_projects pr
+    where pr.id = p_project_id and exists (select 1 from profiles p where p.id = p_user_id and p.is_active)
+      and (
+        (exists (select 1 from proj_project_members m where m.project_id = pr.id and m.user_id = p_user_id and m.removed_at is null)
+         and proj_user_eligible(pr.company_id, p_user_id, pr.id))
+        or exists (select 1 from proj_company_grants g where g.user_id = p_user_id and g.company_id = pr.company_id and g.revoked_at is null and 'founder' = any (g.capabilities))
+      ));
+$$;
+
+create or replace function proj_post_message(p_project_id uuid, p_body text, p_parent_id uuid default null, p_nonce uuid default null, p_mentions uuid[] default '{}'::uuid[])
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  v_id uuid;
+  v_parent proj_messages;
+  u uuid;
+  v_body text := btrim(coalesce(p_body, ''));
+begin
+  v := proj_lock_project(p_project_id);
+  if not proj_can_view_details(v.id) then raise exception 'Project not found' using errcode = 'P0002'; end if;
+  -- A retry of the same send (same nonce) returns the message that was already stored.
+  if p_nonce is not null then
+    select id into v_id from proj_messages where project_id = v.id and author_id = auth.uid() and client_nonce = p_nonce;
+    if v_id is not null then return v_id; end if;
+  end if;
+  if v.status in ('completed', 'archived') then raise exception 'A completed project''s discussion is read-only' using errcode = '23514'; end if;
+  if length(v_body) = 0 then raise exception 'Write a message' using errcode = '22023'; end if;
+  if length(v_body) > 4000 then raise exception 'Messages are limited to 4000 characters' using errcode = '22023'; end if;
+  if p_parent_id is not null then
+    select * into v_parent from proj_messages where id = p_parent_id and project_id = v.id;
+    if not found then raise exception 'The message you are replying to was not found' using errcode = '22023'; end if;
+  end if;
+  p_mentions := coalesce((select array_agg(distinct m) from unnest(coalesce(p_mentions, '{}'::uuid[])) m where m <> auth.uid()), '{}'::uuid[]);
+  foreach u in array p_mentions loop
+    if not proj_user_is_participant(v.id, u) then
+      raise exception 'You can only mention people who are part of this project' using errcode = '22023';
+    end if;
+  end loop;
+
+  insert into proj_messages (project_id, author_id, parent_id, body, client_nonce) values (v.id, auth.uid(), p_parent_id, v_body, p_nonce) returning id into v_id;
+  insert into proj_message_mentions (message_id, user_id, project_id) select v_id, m, v.id from unnest(p_mentions) m;
+  foreach u in array p_mentions loop
+    perform proj_notify(v.id, u, 'project_mention', jsonb_build_object('name', v.name, 'reference', v.reference, 'message_id', v_id), 'msg:' || v_id || ':' || u);
+  end loop;
+  if v_parent.id is not null and v_parent.author_id <> auth.uid() and not (v_parent.author_id = any (p_mentions)) and v_parent.deleted_at is null then
+    perform proj_notify(v.id, v_parent.author_id, 'project_reply', jsonb_build_object('name', v.name, 'reference', v.reference, 'message_id', v_id), 'msg:' || v_id || ':' || v_parent.author_id);
+  end if;
+  -- Posting counts as having read everything up to your own message.
+  perform proj_mark_read(v.id);
+  return v_id;
+end;
+$$;
+
+create or replace function proj_edit_message(p_message_id uuid, p_body text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  m proj_messages;
+  v_body text := btrim(coalesce(p_body, ''));
+begin
+  perform proj_require_user();
+  select * into m from proj_messages where id = p_message_id for update;
+  if not found or m.author_id <> auth.uid() or not proj_can_view_details(m.project_id) then raise exception 'Message not found' using errcode = 'P0002'; end if;
+  if m.deleted_at is not null then raise exception 'A deleted message cannot be edited' using errcode = '23514'; end if;
+  if (select status from proj_projects where id = m.project_id) in ('completed', 'archived') then raise exception 'A completed project''s discussion is read-only' using errcode = '23514'; end if;
+  if length(v_body) = 0 or length(v_body) > 4000 then raise exception 'Messages are 1 to 4000 characters' using errcode = '22023'; end if;
+  if v_body = m.body then return; end if;
+  update proj_messages set body = v_body, edited_at = now(), changed_at = now() where id = m.id;
+end;
+$$;
+
+-- Deleting leaves a visible tombstone ("Message deleted"). The author, the PM or a founder may delete; the original text
+-- is kept in the founders-only tombstone table and the deletion is recorded in the member-visible change log.
+create or replace function proj_delete_message(p_message_id uuid, p_reason text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare m proj_messages;
+begin
+  perform proj_require_user();
+  select * into m from proj_messages where id = p_message_id for update;
+  if not found or not proj_can_view_details(m.project_id) then raise exception 'Message not found' using errcode = 'P0002'; end if;
+  if m.author_id <> auth.uid() and not proj_can_manage(m.project_id) then
+    raise exception 'Only the author, the Project Manager or a founder can delete a message' using errcode = '42501';
+  end if;
+  if m.deleted_at is not null then return; end if;
+  insert into proj_message_tombstones (message_id, project_id, original_body, deleted_by, reason) values (m.id, m.project_id, m.body, auth.uid(), nullif(btrim(p_reason), ''));
+  update proj_messages set body = '', deleted_at = now(), deleted_by = auth.uid(), changed_at = now() where id = m.id;
+  delete from proj_message_mentions where message_id = m.id;
+  perform proj_log_change(m.project_id, 'message', m.id, 'deleted', proj_display_name(m.author_id), proj_display_name(auth.uid()), p_reason);
+end;
+$$;
+
+-- Polling endpoint: new messages after a cursor, plus any message edited or deleted since a timestamp. Cheap, bounded.
+create or replace function proj_messages_since(p_project_id uuid, p_after_seq bigint default 0, p_changed_since timestamptz default null, p_limit integer default 200)
+returns table (id uuid, seq bigint, parent_id uuid, author_id uuid, author_name text, body text, created_at timestamptz, edited_at timestamptz,
+               deleted_at timestamptz, changed_at timestamptz, mention_ids uuid[])
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform proj_require_user();
+  if not proj_can_view_details(p_project_id) then return; end if;
+  return query
+    select m.id, m.seq, m.parent_id, m.author_id, proj_display_name(m.author_id), m.body, m.created_at, m.edited_at, m.deleted_at, m.changed_at,
+           coalesce((select array_agg(x.user_id) from proj_message_mentions x where x.message_id = m.id), '{}'::uuid[])
+    from proj_messages m
+    where m.project_id = p_project_id
+      and (m.seq > coalesce(p_after_seq, 0) or (p_changed_since is not null and m.changed_at > p_changed_since))
+    order by m.seq
+    limit greatest(1, least(coalesce(p_limit, 200), 500));
+end;
+$$;
+
+create or replace function proj_mark_read(p_project_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v_max bigint;
+begin
+  perform proj_require_user();
+  if not proj_can_view_details(p_project_id) then return; end if;
+  select coalesce(max(seq), 0) into v_max from proj_messages where project_id = p_project_id;
+  insert into proj_read_state (project_id, user_id, last_read_seq, last_read_at) values (p_project_id, auth.uid(), v_max, now())
+  on conflict (project_id, user_id) do update set last_read_seq = greatest(proj_read_state.last_read_seq, excluded.last_read_seq), last_read_at = now();
+end;
+$$;
+
+-- Unread messages per project for the caller: other people's messages after what they last read (or after they joined).
+create or replace function proj_unread_counts()
+returns table (project_id uuid, unread integer, mentioned boolean)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform proj_require_user();
+  return query
+    select pr.id,
+           (select count(*)::integer from proj_messages m
+             where m.project_id = pr.id and m.author_id <> auth.uid() and m.deleted_at is null
+               and m.seq > coalesce((select rs.last_read_seq from proj_read_state rs where rs.project_id = pr.id and rs.user_id = auth.uid()), 0)
+               and m.created_at > coalesce((select mm.added_at from proj_project_members mm where mm.project_id = pr.id and mm.user_id = auth.uid() and mm.removed_at is null), '-infinity'::timestamptz)),
+           exists (select 1 from proj_message_mentions mn join proj_messages m on m.id = mn.message_id
+                    where mn.project_id = pr.id and mn.user_id = auth.uid() and m.deleted_at is null
+                      and m.seq > coalesce((select rs.last_read_seq from proj_read_state rs where rs.project_id = pr.id and rs.user_id = auth.uid()), 0))
+    from proj_projects pr
+    where proj_can_view_details(pr.id) and pr.status not in ('archived');
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- My project notifications, limited to what I can still see. Handover notices (no project yet) are always mine.
+-- -----------------------------------------------------------------------------
+create or replace function proj_my_notifications(p_limit integer default 50, p_only_unread boolean default false)
+returns table (id uuid, type text, payload jsonb, read_at timestamptz, created_at timestamptz)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform proj_require_user();
+  return query
+    select n.id, n.type, n.payload, n.read_at, n.created_at
+    from notifications n
+    where n.user_id = auth.uid() and n.type like 'project\_%'
+      and (not p_only_unread or n.read_at is null)
+      and (n.payload->>'project_id' is null or proj_user_is_participant((n.payload->>'project_id')::uuid, auth.uid()))
+    order by n.created_at desc
+    limit greatest(1, least(coalesce(p_limit, 50), 200));
+end;
+$$;
+
+create or replace function proj_mark_notifications_read(p_ids uuid[] default null)
+returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare n integer;
+begin
+  perform proj_require_user();
+  update notifications set read_at = now()
+   where user_id = auth.uid() and type like 'project\_%' and read_at is null and (p_ids is null or id = any (p_ids));
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges
+-- -----------------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  foreach t in array array['proj_plan_items', 'proj_external_dependencies', 'proj_site_bookings', 'proj_messages', 'proj_message_tombstones', 'proj_message_mentions', 'proj_read_state'] loop
+    execute format('revoke all on table %I from anon, authenticated, public', t);
+    execute format('grant select on table %I to authenticated', t);
+  end loop;
+end $$;
+revoke all on sequence proj_messages_seq_seq from public, anon, authenticated;
+
+revoke all on function
+  proj_member_blockers(uuid, uuid), proj_can_book(uuid, uuid), proj_user_is_participant(uuid, uuid),
+  proj_save_plan_item(uuid, uuid, jsonb), proj_delete_plan_item(uuid), proj_apply_plan_template(uuid, text, jsonb, date),
+  proj_save_external_dependency(uuid, uuid, jsonb), proj_delete_external_dependency(uuid),
+  proj_save_booking(uuid, uuid, jsonb), proj_booking_conflicts(uuid), proj_confirm_booking(uuid, text), proj_cancel_booking(uuid, text),
+  proj_my_calendar(date, date, text), proj_company_calendar(uuid, date, date), proj_project_calendar(uuid, date, date, text),
+  proj_post_message(uuid, text, uuid, uuid, uuid[]), proj_edit_message(uuid, text), proj_delete_message(uuid, text),
+  proj_messages_since(uuid, bigint, timestamptz, integer), proj_mark_read(uuid), proj_unread_counts(),
+  proj_my_notifications(integer, boolean), proj_mark_notifications_read(uuid[])
+  from public, anon, authenticated;
+
+grant execute on function
+  proj_save_plan_item(uuid, uuid, jsonb), proj_delete_plan_item(uuid), proj_apply_plan_template(uuid, text, jsonb, date),
+  proj_save_external_dependency(uuid, uuid, jsonb), proj_delete_external_dependency(uuid),
+  proj_save_booking(uuid, uuid, jsonb), proj_booking_conflicts(uuid), proj_confirm_booking(uuid, text), proj_cancel_booking(uuid, text),
+  proj_my_calendar(date, date, text), proj_company_calendar(uuid, date, date), proj_project_calendar(uuid, date, date, text),
+  proj_post_message(uuid, text, uuid, uuid, uuid[]), proj_edit_message(uuid, text), proj_delete_message(uuid, text),
+  proj_messages_since(uuid, bigint, timestamptz, integer), proj_mark_read(uuid), proj_unread_counts(),
+  proj_my_notifications(integer, boolean), proj_mark_notifications_read(uuid[])
+  to authenticated;
+
+-- ---- 20261120000500_proj_feedback_plans_files_completion.sql ----
+-- Projects & Tasks (Release 2), migration 6 of 6: client feedback and scope changes, issued client timelines, private files,
+-- completion evidence and reopening.
+--
+-- Rules encoded here:
+--   * Scope changes never overwrite the agreed scope: the handover snapshot stays as it was, every change records the scope it
+--     replaced, and only a person with the 'approve_scope' capability decides. A chat message or an attachment never approves
+--     anything. Cost effects live in a separate, commercially restricted table that PMs and members cannot read.
+--   * Issued client timelines are immutable. The payload is built by the database from items the PM marked client-facing
+--     (no internal tasks, discussions, notes, people or money). Issued, sent and client-accepted are three recorded facts;
+--     recording one never implies another and the app sends nothing.
+--   * Files: private buckets with no client policies, upload through a quarantine bucket and a signed URL, server-side
+--     validation, then registration from the intent's own stored values. Restricted files are visible to PM/founders only.
+--   * A client project cannot be completed without client completion evidence; unfinished work must be explicitly cancelled,
+--     deferred or resolved (never silently done). Reopening needs a capability and a reason and keeps the earlier completion.
+
+-- -----------------------------------------------------------------------------
+-- Tables
+-- -----------------------------------------------------------------------------
+create or replace function proj_file_name_blocked(p_name text)
+returns boolean
+language sql immutable
+as $$ select crm_file_name_blocked(p_name); $$;
+
+create table if not exists proj_files (
+  id            uuid primary key default gen_random_uuid(),
+  project_id    uuid not null references proj_projects(id) on delete cascade,
+  kind          text not null check (kind in ('file', 'link')),
+  purpose       text not null default 'document' check (purpose in ('document', 'completion_evidence', 'feedback_evidence', 'other')),
+  label         text,
+  original_name text,
+  storage_path  text unique,
+  mime_type     text,
+  size_bytes    bigint,
+  url           text,
+  -- Restricted files are readable by the PM, temporary leaders and founders only.
+  restricted    boolean not null default false,
+  uploaded_by   uuid not null references auth.users(id),
+  created_at    timestamptz not null default now(),
+  deleted_at    timestamptz,
+  constraint proj_files_file_shape check (
+    kind <> 'file' or (
+      storage_path is not null and original_name is not null and mime_type is not null and size_bytes is not null and url is null
+      and mime_type = any (crm_allowed_mime_types())
+      and size_bytes between 1 and 20971520
+      and not proj_file_name_blocked(original_name)
+      and storage_path ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}/[0-9a-f-]{36}-[A-Za-z0-9._-]{1,150}$')),
+  constraint proj_files_link_shape check (
+    kind <> 'link' or (url is not null and url ~* '^https://[^\s]+$' and storage_path is null and mime_type is null and size_bytes is null))
+);
+create index if not exists idx_proj_files_project on proj_files(project_id) where deleted_at is null;
+
+create table if not exists proj_upload_intents (
+  id               uuid primary key default gen_random_uuid(),
+  project_id       uuid not null references proj_projects(id) on delete cascade,
+  company_id       uuid not null references companies(id),
+  user_id          uuid not null references auth.users(id),
+  original_name    text not null,
+  mime_type        text not null,
+  size_bytes       bigint not null check (size_bytes between 1 and 20971520),
+  purpose          text not null check (purpose in ('document', 'completion_evidence', 'feedback_evidence', 'other')),
+  label            text,
+  restricted       boolean not null default false,
+  quarantine_path  text not null unique,
+  final_path       text not null unique,
+  status           text not null default 'pending' check (status in ('pending', 'validated', 'rejected', 'registered', 'expired')),
+  reject_reason    text,
+  created_at       timestamptz not null default now(),
+  expires_at       timestamptz not null default now() + interval '2 hours',
+  finished_at      timestamptz,
+  swept_at         timestamptz
+);
+create index if not exists idx_proj_upload_intents_open on proj_upload_intents(expires_at) where swept_at is null;
+
+create table if not exists proj_feedback (
+  id                  uuid primary key default gen_random_uuid(),
+  project_id          uuid not null references proj_projects(id) on delete cascade,
+  target_type         text not null check (target_type in ('project', 'milestone', 'deliverable', 'task')),
+  target_id           uuid,
+  source              text not null check (length(btrim(source)) between 1 and 200),
+  received_on         date not null,
+  request_text        text not null check (length(btrim(request_text)) between 1 and 4000),
+  -- A correction to what was agreed is delivered; a proposed change is a scope question and needs a decision.
+  kind                text not null check (kind in ('in_scope_correction', 'proposed_change')),
+  responsible_user_id uuid references auth.users(id),
+  due_date            date,
+  status              text not null default 'open' check (status in ('open', 'in_progress', 'resolved', 'declined', 'deferred')),
+  resolution          text,
+  evidence_note       text,
+  resolved_at         timestamptz,
+  resolved_by         uuid references auth.users(id),
+  scope_change_id     uuid,
+  created_by          uuid references auth.users(id),
+  version             integer not null default 1,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+  constraint proj_feedback_target check ((target_type = 'project') = (target_id is null)),
+  constraint proj_feedback_resolved check (
+    status in ('open', 'in_progress') or length(btrim(coalesce(resolution, ''))) > 0)
+);
+create index if not exists idx_proj_feedback_project on proj_feedback(project_id, status);
+
+create table if not exists proj_scope_changes (
+  id               uuid primary key default gen_random_uuid(),
+  project_id       uuid not null references proj_projects(id) on delete cascade,
+  feedback_id      uuid references proj_feedback(id),
+  title            text not null check (length(btrim(title)) between 1 and 200),
+  -- What the scope said when this was proposed (the original is never edited), and what is proposed instead.
+  original_scope   text,
+  base_scope_hash  text not null,
+  proposed_scope   text not null check (length(btrim(proposed_scope)) > 0),
+  effect_on_dates  text,
+  status           text not null default 'proposed' check (status in ('proposed', 'approved', 'rejected', 'withdrawn')),
+  proposed_by      uuid not null references auth.users(id),
+  proposed_at      timestamptz not null default now(),
+  decided_by       uuid references auth.users(id),
+  decided_at       timestamptz,
+  decision_note    text,
+  created_at       timestamptz not null default now(),
+  constraint proj_scope_changes_decided check ((status in ('approved', 'rejected')) = (decided_at is not null))
+);
+create index if not exists idx_proj_scope_changes_project on proj_scope_changes(project_id, proposed_at);
+alter table proj_feedback drop constraint if exists proj_feedback_scope_change_fk;
+alter table proj_feedback add constraint proj_feedback_scope_change_fk foreign key (scope_change_id) references proj_scope_changes(id);
+
+-- Financial effect of a scope change: restricted to 'view_commercial' (founders hold it). Never in a member-readable table.
+create table if not exists proj_scope_change_commercial (
+  scope_change_id uuid primary key references proj_scope_changes(id) on delete cascade,
+  project_id      uuid not null references proj_projects(id) on delete cascade,
+  currency        text check (currency is null or currency ~ '^[A-Z]{3}$'),
+  amount          numeric(14, 2),
+  note            text,
+  updated_by      uuid references auth.users(id),
+  updated_at      timestamptz not null default now()
+);
+
+create table if not exists proj_issued_plans (
+  id                uuid primary key default gen_random_uuid(),
+  project_id        uuid not null references proj_projects(id) on delete cascade,
+  version           integer not null,
+  client_reference  text not null check (length(btrim(client_reference)) between 1 and 100),
+  title             text not null,
+  tz                text not null,
+  payload           jsonb not null,
+  payload_hash      text not null,
+  note              text,
+  issued_by         uuid not null references auth.users(id),
+  issued_at         timestamptz not null default now(),
+  superseded_at     timestamptz,
+  sent_at           timestamptz,
+  sent_by           uuid references auth.users(id),
+  sent_note         text,
+  accepted_on       date,
+  accepted_recorded_at timestamptz,
+  accepted_recorded_by uuid references auth.users(id),
+  accepted_contact  text,
+  accepted_note     text,
+  constraint proj_issued_plans_version unique (project_id, version)
+);
+
+create table if not exists proj_completions (
+  id                 uuid primary key default gen_random_uuid(),
+  project_id         uuid not null references proj_projects(id) on delete cascade,
+  evidence_type      text not null check (evidence_type in ('email_reference', 'signed_handover', 'uploaded_confirmation', 'internal_note')),
+  evidence_reference text,
+  file_id            uuid references proj_files(id),
+  confirmed_on       date,
+  client_contact     text,
+  completion_note    text not null check (length(btrim(completion_note)) > 0),
+  -- What was cancelled / deferred / resolved to allow completion (a record, not a way to hide anything).
+  resolutions        jsonb not null default '[]'::jsonb,
+  completed_by       uuid not null references auth.users(id),
+  completed_at       timestamptz not null default now(),
+  reopened_at        timestamptz,
+  reopened_by        uuid references auth.users(id),
+  reopen_reason      text
+);
+create unique index if not exists uq_proj_completions_open on proj_completions(project_id) where reopened_at is null;
+
+do $$
+declare t text;
+begin
+  foreach t in array array['proj_feedback'] loop
+    execute format('drop trigger if exists %I on %I', t || '_set_updated_at', t);
+    execute format('create trigger %I before update on %I for each row execute function set_updated_at()', t || '_set_updated_at', t);
+  end loop;
+  foreach t in array array['proj_feedback', 'proj_scope_changes', 'proj_issued_plans', 'proj_completions', 'proj_files'] loop
+    execute format('drop trigger if exists %I on %I', t || '_audit', t);
+    execute format('create trigger %I after insert or update or delete on %I for each row execute function proj_audit_trigger()', t || '_audit', t);
+  end loop;
+end $$;
+
+-- An issued plan never changes: only the facts recorded AFTER issuing (sent, accepted, superseded) may be set.
+create or replace function proj_issued_plan_guard()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'An issued plan cannot be deleted' using errcode = '23514'; end if;
+  if (new.id, new.project_id, new.version, new.client_reference, new.title, new.tz, new.payload, new.payload_hash, new.note, new.issued_by, new.issued_at)
+     is distinct from
+     (old.id, old.project_id, old.version, old.client_reference, old.title, old.tz, old.payload, old.payload_hash, old.note, old.issued_by, old.issued_at) then
+    raise exception 'An issued plan cannot be changed. Issue a new version instead' using errcode = '23514';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists proj_issued_plans_guard on proj_issued_plans;
+create trigger proj_issued_plans_guard before update or delete on proj_issued_plans
+  for each row execute function proj_issued_plan_guard();
+
+-- -----------------------------------------------------------------------------
+-- Row-level security (SELECT only)
+-- -----------------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  foreach t in array array['proj_feedback', 'proj_scope_changes', 'proj_issued_plans', 'proj_completions'] loop
+    execute format('alter table %I enable row level security', t);
+    execute format('drop policy if exists %I on %I', t || '_select', t);
+    execute format('create policy %I on %I for select using (proj_can_view_details(project_id))', t || '_select', t);
+  end loop;
+end $$;
+
+alter table proj_files enable row level security;
+drop policy if exists proj_files_select on proj_files;
+create policy proj_files_select on proj_files for select
+  using (deleted_at is null and ((not restricted and proj_can_view_details(project_id)) or (restricted and proj_can_manage(project_id))));
+
+alter table proj_upload_intents enable row level security;          -- no policy: server functions only
+
+alter table proj_scope_change_commercial enable row level security;
+drop policy if exists proj_scope_change_commercial_select on proj_scope_change_commercial;
+create policy proj_scope_change_commercial_select on proj_scope_change_commercial for select
+  using (proj_has_capability(proj_project_company(project_id), 'view_commercial'));
+
+-- -----------------------------------------------------------------------------
+-- Private buckets (no client policies: the service role is the only reader, mover and signer)
+-- -----------------------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('proj-files', 'proj-files', false, 20971520, crm_allowed_mime_types())
+on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('proj-quarantine', 'proj-quarantine', false, 20971520, crm_allowed_mime_types())
+on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+-- -----------------------------------------------------------------------------
+-- Files
+-- -----------------------------------------------------------------------------
+create or replace function proj_create_upload_intent(
+  p_project_id uuid, p_original_name text, p_mime_type text, p_size_bytes bigint, p_safe_name text,
+  p_purpose text default 'document', p_label text default null, p_restricted boolean default false
+) returns table (intent_id uuid, quarantine_path text)
+language plpgsql security definer
+set search_path = public
+as $$
+declare v proj_projects; v_id uuid := gen_random_uuid(); v_final uuid := gen_random_uuid(); v_open integer; v_qpath text;
+begin
+  v := proj_lock_project(p_project_id);
+  if not proj_can_view_details(v.id) then raise exception 'Project not found' using errcode = 'P0002'; end if;
+  perform proj_require_open_project(v);
+  if p_purpose not in ('document', 'completion_evidence', 'feedback_evidence', 'other') then raise exception 'Unknown file purpose' using errcode = '22023'; end if;
+  if (coalesce(p_restricted, false) or p_purpose in ('completion_evidence')) and not proj_can_manage(v.id) then
+    raise exception 'Only the Project Manager can add a restricted file or completion evidence' using errcode = '42501';
+  end if;
+  if length(coalesce(p_original_name, '')) not between 1 and 200 or proj_file_name_blocked(p_original_name) then
+    raise exception 'Executable, script and macro-enabled files cannot be uploaded' using errcode = '22023';
+  end if;
+  if p_mime_type is null or not (p_mime_type = any (crm_allowed_mime_types())) then raise exception 'That file type is not allowed' using errcode = '22023'; end if;
+  if p_size_bytes is null or p_size_bytes not between 1 and 20971520 then raise exception 'Files must be between 1 byte and 20 MB' using errcode = '22023'; end if;
+  if p_safe_name is null or p_safe_name !~ '^[A-Za-z0-9._-]{1,150}$' then raise exception 'Invalid file name' using errcode = '22023'; end if;
+  select count(*) into v_open from proj_upload_intents i where i.user_id = auth.uid() and i.status in ('pending', 'validated') and i.expires_at > now();
+  if v_open >= 20 then raise exception 'Too many uploads are waiting. Finish or wait for them to expire, then try again' using errcode = '53400'; end if;
+  v_qpath := v.company_id::text || '/' || v.id::text || '/' || v_id::text || '-' || p_safe_name;
+  insert into proj_upload_intents (id, project_id, company_id, user_id, original_name, mime_type, size_bytes, purpose, label, restricted, quarantine_path, final_path)
+  values (v_id, v.id, v.company_id, auth.uid(), p_original_name, p_mime_type, p_size_bytes, p_purpose, nullif(btrim(p_label), ''), coalesce(p_restricted, false),
+          v_qpath, v.company_id::text || '/' || v.id::text || '/' || v_final::text || '-' || p_safe_name);
+  return query select v_id, v_qpath;
+end;
+$$;
+
+create or replace function proj_get_upload_intent(p_intent_id uuid)
+returns table (id uuid, project_id uuid, company_id uuid, original_name text, mime_type text, size_bytes bigint, purpose text, label text,
+               restricted boolean, quarantine_path text, final_path text, status text, expires_at timestamptz)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform proj_require_user();
+  return query
+    select i.id, i.project_id, i.company_id, i.original_name, i.mime_type, i.size_bytes, i.purpose, i.label, i.restricted, i.quarantine_path, i.final_path, i.status, i.expires_at
+    from proj_upload_intents i where i.id = p_intent_id and i.user_id = auth.uid() and proj_can_view_details(i.project_id);
+end;
+$$;
+
+create or replace function proj_mark_upload_intent(p_intent_id uuid, p_status text, p_reason text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if p_status not in ('validated', 'rejected') then raise exception 'Unknown status' using errcode = '22023'; end if;
+  update proj_upload_intents i set status = p_status, reject_reason = left(p_reason, 300),
+         finished_at = case when p_status = 'rejected' then now() else i.finished_at end
+   where i.id = p_intent_id and i.status = 'pending' and i.expires_at > now();
+  if not found then raise exception 'Upload not found, already decided, or expired' using errcode = 'P0002'; end if;
+end;
+$$;
+
+create or replace function proj_register_uploaded_file(p_intent_id uuid)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare i proj_upload_intents; v proj_projects; v_id uuid;
+begin
+  perform proj_require_user();
+  select * into i from proj_upload_intents where id = p_intent_id and user_id = auth.uid() for update;
+  if not found then raise exception 'Upload not found' using errcode = 'P0002'; end if;
+  if i.status = 'registered' then raise exception 'This upload was already added' using errcode = '23514'; end if;
+  if i.status <> 'validated' then raise exception 'This upload has not passed the file checks' using errcode = '23514'; end if;
+  v := proj_lock_project(i.project_id);
+  perform proj_require_open_project(v);
+  if not proj_can_view_details(v.id) then raise exception 'Project not found' using errcode = 'P0002'; end if;
+  if not exists (select 1 from storage.objects where bucket_id = 'proj-files' and name = i.final_path) then
+    raise exception 'The validated file was not found' using errcode = 'P0002';
+  end if;
+  insert into proj_files (project_id, kind, purpose, label, original_name, storage_path, mime_type, size_bytes, restricted, uploaded_by)
+  values (i.project_id, 'file', i.purpose, i.label, i.original_name, i.final_path, i.mime_type, i.size_bytes, i.restricted, auth.uid())
+  returning id into v_id;
+  update proj_upload_intents set status = 'registered', finished_at = now() where id = i.id;
+  return v_id;
+end;
+$$;
+
+create or replace function proj_expire_upload_intents()
+returns table (quarantine_path text, final_path text, orphaned_validated boolean)
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  return query
+    with due as (select u.id, u.status from proj_upload_intents u where u.swept_at is null and u.expires_at < now() for update),
+         upd as (update proj_upload_intents i
+                    set swept_at = now(), status = case when i.status in ('pending', 'validated') then 'expired' else i.status end,
+                        finished_at = coalesce(i.finished_at, now())
+                   from due where i.id = due.id returning i.id, i.quarantine_path as qp, i.final_path as fp)
+    select upd.qp, upd.fp, (due.status = 'validated') from upd join due on due.id = upd.id;
+end;
+$$;
+
+create or replace function proj_add_link(p_project_id uuid, p_label text, p_url text, p_purpose text default 'document', p_restricted boolean default false)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare v proj_projects; v_id uuid;
+begin
+  v := proj_lock_project(p_project_id);
+  if not proj_can_view_details(v.id) then raise exception 'Project not found' using errcode = 'P0002'; end if;
+  perform proj_require_open_project(v);
+  if (coalesce(p_restricted, false) or p_purpose = 'completion_evidence') and not proj_can_manage(v.id) then
+    raise exception 'Only the Project Manager can add a restricted link or completion evidence' using errcode = '42501';
+  end if;
+  if p_purpose not in ('document', 'completion_evidence', 'feedback_evidence', 'other') then raise exception 'Unknown file purpose' using errcode = '22023'; end if;
+  if p_url is null or p_url !~* '^https://[^\s]+$' then raise exception 'Links must start with https://' using errcode = '22023'; end if;
+  insert into proj_files (project_id, kind, purpose, label, url, restricted, uploaded_by)
+  values (v.id, 'link', p_purpose, nullif(btrim(p_label), ''), btrim(p_url), coalesce(p_restricted, false), auth.uid()) returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- Soft-removes the record; the server deletes the stored object with the service role afterwards. Uploader or PM.
+create or replace function proj_remove_file(p_file_id uuid)
+returns text
+language plpgsql security definer
+set search_path = public
+as $$
+declare f proj_files; v proj_projects;
+begin
+  perform proj_require_user();
+  select * into f from proj_files where id = p_file_id and deleted_at is null for update;
+  if not found then raise exception 'File not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(f.project_id);
+  if f.uploaded_by <> auth.uid() and not proj_can_manage(v.id) then raise exception 'Only the person who added it or the Project Manager can remove this' using errcode = '42501'; end if;
+  if f.restricted and not proj_can_manage(v.id) then raise exception 'Not allowed' using errcode = '42501'; end if;
+  perform proj_require_open_project(v);
+  if exists (select 1 from proj_completions c where c.file_id = f.id and c.reopened_at is null) then
+    raise exception 'This file is the evidence the project was completed with' using errcode = '23514';
+  end if;
+  update proj_files set deleted_at = now() where id = f.id;
+  return f.storage_path;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Client feedback and scope changes (PM / founder record and decide; the responsible person resolves)
+-- -----------------------------------------------------------------------------
+create or replace function proj_record_feedback(p_project_id uuid, p_fields jsonb)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  v_type text := coalesce(proj_text_or_null(p_fields, 'target_type'), 'project');
+  v_target uuid := nullif(p_fields->>'target_id', '')::uuid;
+  v_resp uuid := nullif(p_fields->>'responsible_user_id', '')::uuid;
+  v_id uuid;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_manager(v);
+  perform proj_require_open_project(v);
+  if v_type = 'project' then v_target := null;
+  elsif v_target is null
+     or not exists (select 1 from (
+          select id from proj_milestones where project_id = v.id and v_type = 'milestone'
+          union all select id from proj_deliverables where project_id = v.id and v_type = 'deliverable'
+          union all select id from proj_tasks where project_id = v.id and v_type = 'task') x where x.id = v_target) then
+    raise exception 'Choose the milestone, deliverable or task this feedback is about' using errcode = '22023';
+  end if;
+  if v_resp is not null and not exists (select 1 from proj_project_members where project_id = v.id and user_id = v_resp and removed_at is null) then
+    raise exception 'The responsible person must be a member of the project' using errcode = '22023';
+  end if;
+  if coalesce(p_fields->>'kind', '') not in ('in_scope_correction', 'proposed_change') then
+    raise exception 'Say whether this is a correction to what was agreed or a proposed change' using errcode = '22023';
+  end if;
+  insert into proj_feedback (project_id, target_type, target_id, source, received_on, request_text, kind, responsible_user_id, due_date, created_by)
+  values (v.id, v_type, v_target, btrim(coalesce(p_fields->>'source', '')), (p_fields->>'received_on')::date, btrim(coalesce(p_fields->>'request_text', '')),
+          p_fields->>'kind', v_resp, nullif(p_fields->>'due_date', '')::date, auth.uid())
+  returning id into v_id;
+  perform proj_notify(v.id, v_resp, 'project_assignment',
+    jsonb_build_object('name', v.name, 'reference', v.reference, 'feedback_id', v_id), 'feedback:' || v_id || ':assigned');
+  return v_id;
+end;
+$$;
+
+create or replace function proj_update_feedback(p_feedback_id uuid, p_fields jsonb)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  f proj_feedback;
+  v proj_projects;
+  v_status text;
+begin
+  perform proj_require_user();
+  select * into f from proj_feedback where id = p_feedback_id for update;
+  if not found then raise exception 'Feedback not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(f.project_id);
+  perform proj_require_open_project(v);
+  if not (proj_can_manage(v.id) or (f.responsible_user_id = auth.uid() and proj_is_active_member(v.id))) then
+    raise exception 'Only the Project Manager or the person responsible can update this feedback' using errcode = '42501';
+  end if;
+  perform proj_check_version(f.version, nullif(p_fields->>'expected_version', '')::integer);
+  v_status := coalesce(proj_text_or_null(p_fields, 'status'), f.status);
+  if v_status not in ('open', 'in_progress', 'resolved', 'declined', 'deferred') then raise exception 'Unknown feedback status' using errcode = '22023'; end if;
+  if v_status not in ('open', 'in_progress') and length(btrim(coalesce(proj_text_or_null(p_fields, 'resolution'), f.resolution, ''))) = 0 then
+    raise exception 'Record how this was resolved, declined or deferred' using errcode = '22023';
+  end if;
+  if (p_fields ? 'responsible_user_id' or p_fields ? 'due_date') and not proj_can_manage(v.id) then
+    raise exception 'Only the Project Manager can reassign feedback or change its deadline' using errcode = '42501';
+  end if;
+  update proj_feedback set status = v_status,
+    resolution = case when p_fields ? 'resolution' then proj_text_or_null(p_fields, 'resolution') else resolution end,
+    evidence_note = case when p_fields ? 'evidence_note' then proj_text_or_null(p_fields, 'evidence_note') else evidence_note end,
+    responsible_user_id = case when p_fields ? 'responsible_user_id' then nullif(p_fields->>'responsible_user_id', '')::uuid else responsible_user_id end,
+    due_date = case when p_fields ? 'due_date' then nullif(p_fields->>'due_date', '')::date else due_date end,
+    resolved_at = case when v_status in ('resolved', 'declined', 'deferred') then coalesce(resolved_at, now()) else null end,
+    resolved_by = case when v_status in ('resolved', 'declined', 'deferred') then coalesce(resolved_by, auth.uid()) else null end,
+    version = version + 1
+   where id = f.id;
+end;
+$$;
+
+create or replace function proj_propose_scope_change(p_project_id uuid, p_fields jsonb)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  d proj_project_details;
+  v_id uuid;
+  v_feedback uuid := nullif(p_fields->>'feedback_id', '')::uuid;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_manager(v);
+  perform proj_require_open_project(v);
+  select * into d from proj_project_details where project_id = v.id;
+  if length(btrim(coalesce(p_fields->>'title', ''))) = 0 then raise exception 'Give the change a title' using errcode = '22023'; end if;
+  if length(btrim(coalesce(p_fields->>'proposed_scope', ''))) = 0 then raise exception 'Write the proposed scope' using errcode = '22023'; end if;
+  if v_feedback is not null and not exists (select 1 from proj_feedback where id = v_feedback and project_id = v.id) then
+    raise exception 'Unknown feedback' using errcode = '22023';
+  end if;
+  insert into proj_scope_changes (project_id, feedback_id, title, original_scope, base_scope_hash, proposed_scope, effect_on_dates, proposed_by)
+  values (v.id, v_feedback, btrim(p_fields->>'title'), d.scope, md5(coalesce(d.scope, '')), btrim(p_fields->>'proposed_scope'),
+          proj_text_or_null(p_fields, 'effect_on_dates'), auth.uid())
+  returning id into v_id;
+  if p_fields ? 'cost_note' or p_fields ? 'amount' then
+    insert into proj_scope_change_commercial (scope_change_id, project_id, currency, amount, note, updated_by)
+    values (v_id, v.id, nullif(upper(p_fields->>'currency'), ''), nullif(p_fields->>'amount', '')::numeric, proj_text_or_null(p_fields, 'cost_note'), auth.uid());
+  end if;
+  if v_feedback is not null then update proj_feedback set scope_change_id = v_id, version = version + 1 where id = v_feedback; end if;
+  return v_id;
+end;
+$$;
+
+create or replace function proj_set_scope_change_commercial(p_scope_change_id uuid, p_currency text, p_amount numeric, p_note text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare s proj_scope_changes; v_company uuid;
+begin
+  perform proj_require_user();
+  select * into s from proj_scope_changes where id = p_scope_change_id;
+  if not found then raise exception 'Scope change not found' using errcode = 'P0002'; end if;
+  v_company := proj_project_company(s.project_id);
+  if not proj_has_capability(v_company, 'view_commercial') then
+    raise exception 'Only a founder, or someone a founder gave commercial access to, can record the cost effect' using errcode = '42501';
+  end if;
+  insert into proj_scope_change_commercial (scope_change_id, project_id, currency, amount, note, updated_by)
+  values (s.id, s.project_id, nullif(upper(p_currency), ''), p_amount, nullif(btrim(p_note), ''), auth.uid())
+  on conflict (scope_change_id) do update set currency = excluded.currency, amount = excluded.amount, note = excluded.note, updated_by = excluded.updated_by, updated_at = now();
+end;
+$$;
+
+create or replace function proj_withdraw_scope_change(p_scope_change_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare s proj_scope_changes; v proj_projects;
+begin
+  perform proj_require_user();
+  select * into s from proj_scope_changes where id = p_scope_change_id for update;
+  if not found then raise exception 'Scope change not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(s.project_id);
+  perform proj_require_manager(v);
+  if s.status = 'withdrawn' then return; end if;
+  if s.status <> 'proposed' then raise exception 'A decided scope change cannot be withdrawn' using errcode = '23514'; end if;
+  update proj_scope_changes set status = 'withdrawn' where id = s.id;
+end;
+$$;
+
+-- Only 'approve_scope' (founders hold it) decides. Approval replaces the CURRENT scope; the original stays in the handover
+-- snapshot and in every earlier change record. Dates are never moved by an approval: the effect on dates is a note for the PM.
+create or replace function proj_decide_scope_change(p_scope_change_id uuid, p_decision text, p_note text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  s proj_scope_changes;
+  v proj_projects;
+  d proj_project_details;
+  v_target text;
+begin
+  perform proj_require_user();
+  select * into s from proj_scope_changes where id = p_scope_change_id for update;
+  if not found then raise exception 'Scope change not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(s.project_id);
+  if not proj_has_capability(v.company_id, 'approve_scope') then
+    raise exception 'Only a founder, or someone a founder gave scope approval to, can decide a scope change' using errcode = '42501';
+  end if;
+  perform proj_require_open_project(v);
+  if p_decision not in ('approve', 'reject') then raise exception 'Choose approve or reject' using errcode = '22023'; end if;
+  v_target := case when p_decision = 'approve' then 'approved' else 'rejected' end;
+  if s.status = v_target then return; end if;   -- repeated click
+  if s.status <> 'proposed' then raise exception 'This scope change is already % ', s.status using errcode = '23514'; end if;
+  if length(btrim(coalesce(p_note, ''))) = 0 then raise exception 'Record the reason for the decision' using errcode = '22023'; end if;
+  if p_decision = 'approve' then
+    select * into d from proj_project_details where project_id = v.id for update;
+    if md5(coalesce(d.scope, '')) <> s.base_scope_hash then
+      raise exception 'The scope has changed since this was proposed. Ask the Project Manager to propose it again' using errcode = '40001';
+    end if;
+    update proj_project_details set scope = s.proposed_scope where project_id = v.id;
+    perform proj_log_change(v.id, 'project', v.id, 'scope', 'previous scope kept in change ' || s.id::text, 'approved change ' || s.id::text, p_note);
+  end if;
+  update proj_scope_changes set status = v_target,
+         decided_by = auth.uid(), decided_at = now(), decision_note = btrim(p_note) where id = s.id;
+  perform proj_notify(v.id, v.pm_user_id, 'project_scope_decision',
+    jsonb_build_object('name', v.name, 'reference', v.reference, 'scope_change_id', s.id, 'decision', p_decision), 'scopechange:' || s.id || ':' || p_decision);
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Client timeline: the database builds the payload from what the PM marked client-facing.
+-- -----------------------------------------------------------------------------
+create or replace function proj_build_plan_payload(p_project_id uuid)
+returns jsonb
+language sql stable security definer
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'project', (select jsonb_build_object('reference', pr.reference, 'name', pr.name, 'client_name', d.client_name, 'location', d.location, 'site_timezone', d.site_timezone)
+                  from proj_projects pr join proj_project_details d on d.project_id = pr.id where pr.id = p_project_id),
+    'milestones', coalesce((select jsonb_agg(jsonb_build_object('title', m.title, 'due_date', m.due_date) order by m.due_date nulls last, m.sort_order, m.title)
+                              from proj_milestones m where m.project_id = p_project_id and m.client_facing and m.status <> 'cancelled'), '[]'::jsonb),
+    'delivery', coalesce((select jsonb_agg(jsonb_build_object('title', i.title, 'start_date', i.start_date, 'end_date', i.end_date) order by i.start_date nulls last, i.sort_order, i.title)
+                            from proj_plan_items i where i.project_id = p_project_id and i.plan = 'delivery' and i.client_facing and i.status <> 'cancelled'), '[]'::jsonb),
+    'site', coalesce((select jsonb_agg(jsonb_build_object('title', i.title, 'start_date', i.start_date, 'end_date', i.end_date,
+                                                           'starts_local', case when i.starts_at is not null then to_char(i.starts_at at time zone i.tz, 'YYYY-MM-DD"T"HH24:MI') end,
+                                                           'ends_local', case when i.ends_at is not null then to_char(i.ends_at at time zone i.tz, 'YYYY-MM-DD"T"HH24:MI') end,
+                                                           'tz', i.tz)
+                                         order by coalesce(i.start_date::timestamp, i.starts_at at time zone i.tz) nulls last, i.sort_order, i.title)
+                        from proj_plan_items i where i.project_id = p_project_id and i.plan = 'site' and i.client_facing and i.status <> 'cancelled'), '[]'::jsonb),
+    'dependencies', coalesce((select jsonb_agg(jsonb_build_object('label', e.label, 'kind', e.kind, 'expected_date', e.expected_date, 'expected_time', e.expected_time,
+                                                                   'organisation', e.organisation, 'confirmation', e.confirmation)
+                                                order by e.expected_date nulls last, e.label)
+                                from proj_external_dependencies e where e.project_id = p_project_id and e.client_facing), '[]'::jsonb));
+$$;
+
+create or replace function proj_current_plan_payload(p_project_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform proj_require_user();
+  if not proj_can_manage(p_project_id) then return null; end if;
+  return proj_build_plan_payload(p_project_id);
+end;
+$$;
+
+create or replace function proj_issue_plan(p_project_id uuid, p_client_reference text default null, p_note text default null)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  d proj_project_details;
+  v_payload jsonb;
+  v_version integer;
+  v_id uuid;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_manager(v);
+  if v.kind <> 'client' then raise exception 'Client timelines are for client projects' using errcode = '23514'; end if;
+  if v.status = 'archived' then raise exception 'An archived project cannot issue a new timeline' using errcode = '23514'; end if;
+  select * into d from proj_project_details where project_id = v.id;
+  v_payload := proj_build_plan_payload(v.id);
+  if jsonb_array_length(v_payload->'milestones') + jsonb_array_length(v_payload->'delivery') + jsonb_array_length(v_payload->'site') = 0 then
+    raise exception 'Mark at least one milestone or timeline activity as client-facing before issuing' using errcode = '22023';
+  end if;
+  -- Issuing the same content twice in a row (double click) returns the version already issued.
+  select id into v_id from proj_issued_plans where project_id = v.id and superseded_at is null and payload_hash = md5(v_payload::text);
+  if v_id is not null then return v_id; end if;
+  select coalesce(max(version), 0) + 1 into v_version from proj_issued_plans where project_id = v.id;
+  update proj_issued_plans set superseded_at = now() where project_id = v.id and superseded_at is null;
+  insert into proj_issued_plans (project_id, version, client_reference, title, tz, payload, payload_hash, note, issued_by)
+  values (v.id, v_version, coalesce(proj_text_or_null(jsonb_build_object('r', p_client_reference), 'r'), v.reference), v.name, d.site_timezone, v_payload, md5(v_payload::text), nullif(btrim(p_note), ''), auth.uid())
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- True when the live client-facing plan no longer matches the latest issued version (so the issued one is outdated).
+create or replace function proj_plan_outdated(p_project_id uuid)
+returns boolean
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare p proj_issued_plans;
+begin
+  perform proj_require_user();
+  if not proj_can_view_details(p_project_id) then return null; end if;
+  select * into p from proj_issued_plans where project_id = p_project_id and superseded_at is null;
+  if not found then return null; end if;
+  return md5(proj_build_plan_payload(p_project_id)::text) <> p.payload_hash;
+end;
+$$;
+
+create or replace function proj_record_plan_sent(p_plan_id uuid, p_note text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare p proj_issued_plans; v proj_projects;
+begin
+  perform proj_require_user();
+  select * into p from proj_issued_plans where id = p_plan_id for update;
+  if not found then raise exception 'Issued plan not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(p.project_id);
+  perform proj_require_manager(v);
+  if p.sent_at is not null then return; end if;
+  if length(btrim(coalesce(p_note, ''))) = 0 then raise exception 'Record how and to whom it was sent' using errcode = '22023'; end if;
+  update proj_issued_plans set sent_at = now(), sent_by = auth.uid(), sent_note = btrim(p_note) where id = p.id;
+end;
+$$;
+
+create or replace function proj_record_plan_accepted(p_plan_id uuid, p_accepted_on date, p_contact text, p_note text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare p proj_issued_plans; v proj_projects;
+begin
+  perform proj_require_user();
+  select * into p from proj_issued_plans where id = p_plan_id for update;
+  if not found then raise exception 'Issued plan not found' using errcode = 'P0002'; end if;
+  v := proj_lock_project(p.project_id);
+  perform proj_require_manager(v);
+  if p.accepted_on is not null then return; end if;
+  if p.superseded_at is not null then raise exception 'This version has been replaced by a newer one. Record acceptance against the latest version' using errcode = '23514'; end if;
+  if p_accepted_on is null or p_accepted_on > (now() at time zone 'Asia/Dubai')::date then raise exception 'Give the date the client accepted (not in the future)' using errcode = '22023'; end if;
+  if length(btrim(coalesce(p_contact, ''))) = 0 then raise exception 'Record who at the client accepted it' using errcode = '22023'; end if;
+  update proj_issued_plans set accepted_on = p_accepted_on, accepted_recorded_at = now(), accepted_recorded_by = auth.uid(),
+         accepted_contact = btrim(p_contact), accepted_note = nullif(btrim(p_note), '') where id = p.id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Completion and reopening
+-- -----------------------------------------------------------------------------
+create or replace function proj_completion_review(p_project_id uuid)
+returns table (kind text, item_id uuid, title text, status text, detail text)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform proj_require_user();
+  if not proj_can_manage(p_project_id) then return; end if;
+  return query
+    select 'task'::text, t.id, t.title, t.status, concat_ws(' · ', proj_display_name(t.assignee_id), case when t.blocked_at is not null then 'Blocked: ' || t.blocked_reason end)
+      from proj_tasks t where t.project_id = p_project_id and t.status in ('todo', 'in_progress', 'ready_for_review')
+    union all
+    select 'deliverable', d.id, d.title, d.status, (select tm.name from proj_teams tm where tm.id = d.team_id)
+      from proj_deliverables d where d.project_id = p_project_id and d.status in ('open', 'in_progress', 'ready_for_review')
+    union all
+    select 'milestone', m.id, m.title, m.status, case when m.is_required then 'Required' else 'Optional' end
+      from proj_milestones m where m.project_id = p_project_id and m.status in ('planned', 'in_progress', 'ready_for_acceptance')
+    union all
+    select 'feedback', f.id, left(f.request_text, 120), f.status, f.source
+      from proj_feedback f where f.project_id = p_project_id and f.status in ('open', 'in_progress')
+    union all
+    select 'booking', b.id, 'Site: ' || b.location, b.state, proj_display_name(b.user_id)
+      from proj_site_bookings b where b.project_id = p_project_id and b.state in ('tentative', 'confirmed') and b.ends_at > now()
+    order by 1, 3;
+end;
+$$;
+
+create or replace function proj_complete_project(p_project_id uuid, p_fields jsonb, p_resolutions jsonb default '[]'::jsonb)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  c proj_completions;
+  r record;
+  e jsonb;
+  v_action text;
+  v_note text;
+  v_type text := coalesce(proj_text_or_null(p_fields, 'evidence_type'), '');
+  v_ref text := proj_text_or_null(p_fields, 'evidence_reference');
+  v_file uuid := nullif(p_fields->>'file_id', '')::uuid;
+  v_on date := nullif(p_fields->>'confirmed_on', '')::date;
+  v_contact text := proj_text_or_null(p_fields, 'client_contact');
+  v_note_c text := proj_text_or_null(p_fields, 'completion_note');
+  v_missing integer;
+  v_id uuid;
+begin
+  v := proj_lock_project(p_project_id);
+  perform proj_require_manager(v);
+  if v.status in ('completed', 'archived') then
+    select * into c from proj_completions where project_id = v.id and reopened_at is null;
+    if found then return c.id; end if;                                   -- repeated click: the same completion
+    raise exception 'This project is already completed' using errcode = '23514';
+  end if;
+  if v_note_c is null then raise exception 'Write the completion note' using errcode = '22023'; end if;
+  if v.kind = 'client' then
+    if v_type not in ('email_reference', 'signed_handover', 'uploaded_confirmation') then
+      raise exception 'A client project needs the client''s completion confirmation: an e-mail reference, a signed handover or an uploaded confirmation' using errcode = '22023';
+    end if;
+    if v_on is null or v_on > (now() at time zone 'Asia/Dubai')::date then raise exception 'Give the date the client confirmed (not in the future)' using errcode = '22023'; end if;
+    if v_contact is null then raise exception 'Record who at the client confirmed' using errcode = '22023'; end if;
+    if v_type = 'uploaded_confirmation' then
+      if v_file is null or not exists (select 1 from proj_files where id = v_file and project_id = v.id and deleted_at is null and purpose = 'completion_evidence') then
+        raise exception 'Upload the confirmation as completion evidence first, then select it' using errcode = '22023';
+      end if;
+    elsif v_ref is null then
+      raise exception 'Give the e-mail reference or the signed handover reference' using errcode = '22023';
+    end if;
+  else
+    v_type := 'internal_note'; v_ref := null; v_file := null; v_on := null; v_contact := null;
+  end if;
+
+  -- Everything unfinished must be explicitly cancelled, deferred or resolved, with a reason. Nothing becomes Done by completion.
+  select count(*) into v_missing from proj_completion_review(v.id) x
+   where not exists (select 1 from jsonb_array_elements(coalesce(p_resolutions, '[]'::jsonb)) j
+                      where j->>'kind' = x.kind and (j->>'id')::uuid = x.item_id and length(btrim(coalesce(j->>'note', ''))) > 0
+                        and j->>'action' = any (case x.kind when 'feedback' then array['resolve', 'decline', 'defer'] when 'booking' then array['cancel'] else array['cancel', 'defer'] end));
+  if v_missing > 0 then
+    raise exception '% unfinished item(s) still need an explicit decision (cancel, defer or resolve, with a reason) before the project can be completed', v_missing using errcode = '23514';
+  end if;
+  for e in select * from jsonb_array_elements(coalesce(p_resolutions, '[]'::jsonb)) loop
+    v_action := e->>'action'; v_note := btrim(e->>'note');
+    case e->>'kind'
+      when 'task' then
+        update proj_tasks set status = case v_action when 'cancel' then 'cancelled' else 'deferred' end, blocked_at = null, blocked_reason = null,
+               unblock_owner_id = null, unblock_action = null, version = version + 1
+         where id = (e->>'id')::uuid and project_id = v.id and status in ('todo', 'in_progress', 'ready_for_review');
+        perform proj_task_event((e->>'id')::uuid, v.id, 'status_changed', null, case v_action when 'cancel' then 'cancelled' else 'deferred' end, 'At completion: ' || v_note);
+      when 'deliverable' then
+        update proj_deliverables set status = case v_action when 'cancel' then 'cancelled' else 'deferred' end, version = version + 1
+         where id = (e->>'id')::uuid and project_id = v.id and status in ('open', 'in_progress', 'ready_for_review');
+        perform proj_log_change(v.id, 'deliverable', (e->>'id')::uuid, 'status', null, v_action, 'At completion: ' || v_note);
+      when 'milestone' then
+        update proj_milestones set status = case v_action when 'cancel' then 'cancelled' else 'deferred' end, version = version + 1
+         where id = (e->>'id')::uuid and project_id = v.id and status in ('planned', 'in_progress', 'ready_for_acceptance');
+        perform proj_log_change(v.id, 'milestone', (e->>'id')::uuid, 'status', null, v_action, 'At completion: ' || v_note);
+      when 'feedback' then
+        update proj_feedback set status = case v_action when 'resolve' then 'resolved' when 'decline' then 'declined' else 'deferred' end,
+               resolution = 'At completion: ' || v_note, resolved_at = now(), resolved_by = auth.uid(), version = version + 1
+         where id = (e->>'id')::uuid and project_id = v.id and status in ('open', 'in_progress');
+      when 'booking' then
+        update proj_site_bookings set state = 'cancelled', cancel_reason = 'At completion: ' || v_note, confirmed_by = null, confirmed_at = null, version = version + 1
+         where id = (e->>'id')::uuid and project_id = v.id and state in ('tentative', 'confirmed');
+      else null;
+    end case;
+  end loop;
+
+  insert into proj_completions (project_id, evidence_type, evidence_reference, file_id, confirmed_on, client_contact, completion_note, resolutions, completed_by)
+  values (v.id, v_type, v_ref, v_file, v_on, v_contact, v_note_c, coalesce(p_resolutions, '[]'::jsonb), auth.uid())
+  returning id into v_id;
+  update proj_projects set status = 'completed', completed_at = now(), version = version + 1 where id = v.id;
+  perform proj_log_change(v.id, 'project', v.id, 'status', v.status, 'completed', v_note_c);
+  for r in select user_id from proj_project_members where project_id = v.id and removed_at is null loop
+    perform proj_notify(v.id, r.user_id, 'project_completed', jsonb_build_object('name', v.name, 'reference', v.reference), 'project:' || v.id || ':completed:' || v_id);
+  end loop;
+  return v_id;
+end;
+$$;
+
+-- Reopening: needs the capability and a reason. The completion record stays (marked reopened). Items cancelled or deferred at
+-- completion stay as they are: the PM reinstates the ones that matter; nothing is deleted or silently revived.
+create or replace function proj_reopen_project(p_project_id uuid, p_reason text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v proj_projects;
+  r record;
+begin
+  v := proj_lock_project(p_project_id);
+  if not proj_has_capability(v.company_id, 'reopen_project') then
+    raise exception 'Only a founder, or someone a founder gave reopening to, can reopen a completed project' using errcode = '42501';
+  end if;
+  if v.status not in ('completed', 'archived') then
+    if v.status = 'in_progress' and exists (select 1 from proj_completions where project_id = v.id and reopened_at is not null) then return; end if;   -- repeated click
+    raise exception 'Only a completed project can be reopened' using errcode = '23514';
+  end if;
+  if length(btrim(coalesce(p_reason, ''))) = 0 then raise exception 'Give the reason for reopening' using errcode = '22023'; end if;
+  update proj_completions set reopened_at = now(), reopened_by = auth.uid(), reopen_reason = btrim(p_reason) where project_id = v.id and reopened_at is null;
+  update proj_projects set status = 'in_progress', completed_at = null, archived_at = null, version = version + 1 where id = v.id;
+  perform proj_log_change(v.id, 'project', v.id, 'status', v.status, 'in_progress', 'Reopened: ' || btrim(p_reason));
+  for r in select user_id from proj_project_members where project_id = v.id and removed_at is null loop
+    perform proj_notify(v.id, r.user_id, 'project_reopened', jsonb_build_object('name', v.name, 'reference', v.reference), 'project:' || v.id || ':reopened:' || (v.version + 1));
+  end loop;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges
+-- -----------------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  foreach t in array array['proj_files', 'proj_upload_intents', 'proj_feedback', 'proj_scope_changes', 'proj_scope_change_commercial', 'proj_issued_plans', 'proj_completions'] loop
+    execute format('revoke all on table %I from anon, authenticated, public', t);
+  end loop;
+  foreach t in array array['proj_files', 'proj_feedback', 'proj_scope_changes', 'proj_scope_change_commercial', 'proj_issued_plans', 'proj_completions'] loop
+    execute format('grant select on table %I to authenticated', t);
+  end loop;
+end $$;
+
+revoke all on function
+  proj_file_name_blocked(text), proj_issued_plan_guard(), proj_build_plan_payload(uuid),
+  proj_create_upload_intent(uuid, text, text, bigint, text, text, text, boolean), proj_get_upload_intent(uuid),
+  proj_mark_upload_intent(uuid, text, text), proj_register_uploaded_file(uuid), proj_expire_upload_intents(),
+  proj_add_link(uuid, text, text, text, boolean), proj_remove_file(uuid),
+  proj_record_feedback(uuid, jsonb), proj_update_feedback(uuid, jsonb),
+  proj_propose_scope_change(uuid, jsonb), proj_set_scope_change_commercial(uuid, text, numeric, text),
+  proj_withdraw_scope_change(uuid), proj_decide_scope_change(uuid, text, text),
+  proj_current_plan_payload(uuid), proj_issue_plan(uuid, text, text), proj_plan_outdated(uuid),
+  proj_record_plan_sent(uuid, text), proj_record_plan_accepted(uuid, date, text, text),
+  proj_completion_review(uuid), proj_complete_project(uuid, jsonb, jsonb), proj_reopen_project(uuid, text)
+  from public, anon, authenticated;
+
+grant execute on function
+  proj_create_upload_intent(uuid, text, text, bigint, text, text, text, boolean), proj_get_upload_intent(uuid),
+  proj_register_uploaded_file(uuid), proj_add_link(uuid, text, text, text, boolean), proj_remove_file(uuid),
+  proj_record_feedback(uuid, jsonb), proj_update_feedback(uuid, jsonb),
+  proj_propose_scope_change(uuid, jsonb), proj_set_scope_change_commercial(uuid, text, numeric, text),
+  proj_withdraw_scope_change(uuid), proj_decide_scope_change(uuid, text, text),
+  proj_current_plan_payload(uuid), proj_issue_plan(uuid, text, text), proj_plan_outdated(uuid),
+  proj_record_plan_sent(uuid, text), proj_record_plan_accepted(uuid, date, text, text),
+  proj_completion_review(uuid), proj_complete_project(uuid, jsonb, jsonb), proj_reopen_project(uuid, text)
+  to authenticated;
+
+-- Scheduled / server-only: the service role (never reachable from a browser session). Nothing here is scheduled by this release.
+grant execute on function proj_mark_upload_intent(uuid, text, text), proj_expire_upload_intents() to service_role;

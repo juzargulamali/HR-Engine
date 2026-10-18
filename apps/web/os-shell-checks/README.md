@@ -14,6 +14,8 @@ cd apps/web && VERCEL_ENV=production npx next build && VERCEL_ENV=production npx
 # 2. checks (each prints PASS/FAIL lines and a verdict)
 node os-shell-checks/sales-actions.mjs                       # the real Sales operations end to end (create, stages, hold, availability, links,
                                                              # proposal, Zoho reference, contacts, Won + handover, founder reopen, reports)
+node os-shell-checks/projects-flow.mjs                      # Projects & Tasks end to end (needs the Projects seed: see below): Sales handover, PM acceptance, team, milestones, tasks and review,
+                                                             # timelines, site bookings and overlaps, calendars, discussion, scope change, client timeline PDF, completion and reopening, internal project
 node os-shell-checks/shell-checks.mjs                        # navigation per persona, Coming soon, titles, mobile bar/drawer, keyboard, theme persistence,
                                                              # clock status, /os-preview blocked
 node os-shell-checks/phone-fit.mjs                           # 360 and 390 px, dark + light, 26 pages: no horizontal scroll, no clipped bottom-bar label, nothing under the bar
@@ -24,3 +26,10 @@ node os-shell-checks/screenshots.mjs out-dir                 # dashboard, Sales 
 `contrast-audit.mjs` walks every visible text node, resolves its real foreground and the real background behind it (compositing
 translucent layers), and fails anything under 4.5:1 (3:1 for large text). It also records how strongly input borders stand out.
 The token-level guard that runs in CI is `src/app/theme-contrast.test.ts`.
+
+## Projects & Tasks seed (local stack only)
+
+`projects-flow.mjs` expects, in the throwaway local database: the Sales grants of the CRM seed (ceo@ founder; mgr@ and emp@ plain), a Sales
+reference code, Projects access (`proj_company_grants`: ceo@ founder; mgr@ = the Project Manager, lead@ = a department head, hr@ = a project
+member who is also an HR admin, hr1@ = directory only; admin@ none), `proj_company_settings` (UAE), and one **Won** opportunity owned by emp@. It then
+does everything else through the real screens. `phone-fit.mjs` and `contrast-audit.mjs` include the Projects pages when a project exists.

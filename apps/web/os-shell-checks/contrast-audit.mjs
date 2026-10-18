@@ -4,7 +4,9 @@ import fs from "node:fs";
 const outFile = process.argv[2]; const persona = process.argv[3] ?? "ceo@e2e.local"; const vpName = process.argv[4] ?? "desktop";
 const vp = vpName === "mobile" ? { width: 390, height: 844 } : { width: 1440, height: 900 };
 const oppId = psql("select id from crm_opportunities order by created_at desc limit 1");
-const PAGES = ["/", "/sales", "/sales/opportunities", `/sales/opportunities/${oppId}`, "/sales/pipeline", "/sales/follow-ups", "/sales/proposals", "/sales/clients", "/sales/reports", "/sales/settings", "/sales/access", "/sales/new",
+const projId = psql("select id from proj_projects where kind='client' limit 1");
+const taskId = psql("select id from proj_tasks limit 1");
+const PAGES = [...(projId ? ["/projects", "/projects/work", "/projects/calendar", "/projects/handovers", "/projects/new", "/projects/access", `/projects/${projId}`, `/projects/${projId}/work`, `/projects/${projId}/work/tasks/${taskId}`, `/projects/${projId}/timeline`, `/projects/${projId}/calendar`, `/projects/${projId}/people`, `/projects/${projId}/discussion`, `/projects/${projId}/changes`, `/projects/${projId}/documents`, `/projects/${projId}/history`, `/projects/${projId}/complete`] : []), "/", "/sales", "/sales/opportunities", `/sales/opportunities/${oppId}`, "/sales/pipeline", "/sales/follow-ups", "/sales/proposals", "/sales/clients", "/sales/reports", "/sales/settings", "/sales/access", "/sales/new",
   "/attendance", "/employees", "/leave", "/leave/new", "/approvals", "/alerts", "/payroll", "/reimbursements", "/performance", "/policies", "/holidays", "/profile", "/attendance-clock", "/letters", "/admin/users", "/admin/companies", "/audit-log", "/ai-suggestions", "/account/security"];
 
 const evalFn = () => {

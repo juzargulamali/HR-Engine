@@ -21,8 +21,9 @@ for (const [name, email] of Object.entries(PERSONAS)) {
   if (name === "nosales") { ok(/You do not have Sales access/i.test(await page.locator("main").innerText()), "direct /sales shows the no-access message, no data"); }
   if (name === "sales") ok(!links.includes("Settings") && !links.includes("Access"), "Sales user without capabilities sees neither Settings nor Access");
   if (name === "founder") ok(links.includes("Settings") && links.includes("Access"), "founder sees Settings and Access");
-  for (const m of ["Projects & Tasks", "Inventory", "Vendors & Purchasing"]) ok(t.includes(m) && new RegExp(`${m.replace(/&/g, "&")}\\s*\\n?\\s*Coming soon`).test(t), `${m} is shown as Coming soon`);
-  ok(!(await page.locator("aside a", { hasText: /^Projects & Tasks$/ }).count()), "Projects & Tasks is not a link");
+  for (const m of ["Inventory", "Vendors & Purchasing"]) ok(t.includes(m) && new RegExp(`${m.replace(/&/g, "&")}\\s*\\n?\\s*Coming soon`).test(t), `${m} is shown as Coming soon`);
+  // Projects & Tasks is a real module now: only people with Projects access (or a Sales link) see it; nobody sees it as "coming soon".
+  ok(!/Projects & Tasks\s*\n?\s*Coming soon/.test(t), "Projects & Tasks is no longer shown as Coming soon");
   await page.goto(`${BASE}/performance`, { waitUntil: "networkidle" });
   const t2 = await sideText(page); ok(/Performance reviews \(HR\)/.test(t2) && /KPIs\s*\n?\s*Coming soon/.test(t2), "KPIs & Performance: HR reviews live, KPIs Coming soon");
   // no fictional/preview artefacts anywhere on the dashboard
