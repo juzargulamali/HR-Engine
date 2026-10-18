@@ -23,7 +23,7 @@ export function CommandPalette({ groups }: { groups: NavGroupData[] }) {
   const router = useRouter();
   useFocusTrap(dialogRef, open);
 
-  const flatLinks = useMemo(() => groups.flatMap((g) => g.links.map((l) => ({ ...l, group: g.label }))), [groups]);
+  const flatLinks = useMemo(() => groups.flatMap((g) => g.links.filter((l) => !l.comingSoon).map((l) => ({ ...l, group: g.label }))), [groups]);
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();

@@ -29,12 +29,16 @@ export type NavIconKey =
   | "companies"
   | "ai"
   | "audit"
-  | "users";
+  | "users"
+  | "sales"
+  | "soon";
 
 export interface NavLinkData {
   href: string;
   label: string;
   iconKey: NavIconKey;
+  /** A module that is planned but not built yet: shown muted, never a working link. */
+  comingSoon?: boolean;
 }
 
 export interface NavGroupData {
@@ -48,7 +52,10 @@ export interface NavGroupData {
  * hasRoleAnyScope, canViewHrAlerts). Kept separate from AppShell so it can
  * be unit tested directly without rendering anything.
  */
-export function buildNavGroups(grants: readonly RoleGrant[], options: { hasPendingApprovals?: boolean } = {}): NavGroupData[] {
+export function buildNavGroups(
+  grants: readonly RoleGrant[],
+  options: { hasPendingApprovals?: boolean; hasCrmAccess?: boolean } = {},
+): NavGroupData[] {
   const showAdminLink = isSysAdmin(grants);
   const showInsightsLinks = hasRoleAnyScope(grants, "hr_admin") || hasRoleAnyScope(grants, "sys_admin");
   const showAlertsLink = canViewHrAlerts(grants);
@@ -117,6 +124,24 @@ export function buildNavGroups(grants: readonly RoleGrant[], options: { hasPendi
       links: [
         { href: "/ai-suggestions", label: "AI Suggestions", iconKey: "ai" },
         { href: "/audit-log", label: "Audit Log", iconKey: "audit" },
+      ],
+    });
+  }
+
+  // Sales & CRM has its own company-scoped access (crm_company_grants), independent of HR roles: shown only to people
+  // granted it. The planned modules appear as "Coming soon" next to it and are not links.
+  if (options.hasCrmAccess === true) {
+    groups.splice(1, 0, {
+      label: "Sales",
+      links: [{ href: "/sales", label: "Sales & CRM", iconKey: "sales" }],
+    });
+    groups.push({
+      label: "Coming soon",
+      links: [
+        { href: "#projects", label: "Projects & Tasks", iconKey: "soon", comingSoon: true },
+        { href: "#inventory", label: "Inventory", iconKey: "soon", comingSoon: true },
+        { href: "#vendors", label: "Vendors & Purchasing", iconKey: "soon", comingSoon: true },
+        { href: "#kpis", label: "Performance & KPIs", iconKey: "soon", comingSoon: true },
       ],
     });
   }

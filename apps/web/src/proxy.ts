@@ -8,7 +8,11 @@ import { NextResponse, type NextRequest } from "next/server";
 // components/auth/password-reset-form.tsx). /forgot-password is the request
 // form that sends that email in the first place, so it's public for the
 // same reason /login is.
-const PUBLIC_PATHS = ["/login", "/set-password", "/forgot-password", "/reset-password"];
+//
+// /api/cron/crm-reminders is called by the scheduler with no session cookie, so the sign-in redirect would swallow it.
+// It authenticates itself with CRON_SECRET (lib/cron/auth.ts) and returns 401 without it. Only this one route is
+// listed; the older /api/cron/* routes are deliberately left exactly as they were.
+const PUBLIC_PATHS = ["/login", "/set-password", "/forgot-password", "/reset-password", "/api/cron/crm-reminders"];
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });

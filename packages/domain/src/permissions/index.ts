@@ -19,3 +19,4 @@ export * from "./assets";
 export * from "./attendance";
 export * from "./performance";
 export * from "./dashboard";
+export * from "./crm";

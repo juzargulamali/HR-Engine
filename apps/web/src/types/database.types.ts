@@ -18,6 +18,13 @@
  * is a full peer of ceo everywhere in this system.
  */
 
+import type {
+  CrmActivityRow, CrmApprovalRow, CrmAuditLogRow, CrmCompanyGrantRow, CrmCompanySettingsRow, CrmContactRow,
+  CrmDuplicateCandidateRow, CrmFileRow, CrmFollowUpRow, CrmHandoverRow, CrmOpportunityContactRow, CrmOpportunityEventRow,
+  CrmOpportunityRow, CrmOrganisationRow, CrmProposalRow, CrmReadOnlyTable, CrmReminderEmailClaim, CrmReminderRow,
+  CrmZohoReferenceRow, CrmClosureRow, CrmUploadIntent,
+} from "./crm";
+
 export type AppRole = "employee" | "line_manager" | "hr_admin" | "finance" | "ceo" | "cto" | "sys_admin";
 export type AccountStatus = "invited" | "active" | "deactivated";
 export type EmploymentStatus = "active" | "on_leave" | "suspended" | "terminated";
@@ -1620,6 +1627,24 @@ export interface Database {
         Update: { status?: AiDraftStatus; authorized_by?: string | null; authorized_at?: string | null; reference_id?: string | null };
         Relationships: [];
       };
+      // Sales & CRM (20261115000000-300): read-only to clients; every write is a crm_* function below.
+      crm_company_grants: CrmReadOnlyTable<CrmCompanyGrantRow>;
+      crm_audit_log: CrmReadOnlyTable<CrmAuditLogRow>;
+      crm_company_settings: CrmReadOnlyTable<CrmCompanySettingsRow>;
+      crm_organisations: CrmReadOnlyTable<CrmOrganisationRow>;
+      crm_contacts: CrmReadOnlyTable<CrmContactRow>;
+      crm_opportunities: CrmReadOnlyTable<CrmOpportunityRow>;
+      crm_opportunity_contacts: CrmReadOnlyTable<CrmOpportunityContactRow>;
+      crm_opportunity_events: CrmReadOnlyTable<CrmOpportunityEventRow>;
+      crm_activities: CrmReadOnlyTable<CrmActivityRow>;
+      crm_follow_ups: CrmReadOnlyTable<CrmFollowUpRow>;
+      crm_files: CrmReadOnlyTable<CrmFileRow>;
+      crm_proposals: CrmReadOnlyTable<CrmProposalRow>;
+      crm_zoho_references: CrmReadOnlyTable<CrmZohoReferenceRow>;
+      crm_approvals: CrmReadOnlyTable<CrmApprovalRow>;
+      crm_handovers: CrmReadOnlyTable<CrmHandoverRow>;
+      crm_reminders: CrmReadOnlyTable<CrmReminderRow>;
+      crm_closures: CrmReadOnlyTable<CrmClosureRow>;
     };
     Views: {
       leave_balances: {
@@ -1632,6 +1657,108 @@ export interface Database {
       };
     };
     Functions: {
+      crm_has_access: { Args: { p_company_id: string }; Returns: boolean };
+      crm_has_capability: { Args: { p_company_id: string; p_capability: string }; Returns: boolean };
+      crm_grant_access: { Args: { p_user_id: string; p_company_id: string; p_capabilities?: string[]; p_note?: string | null }; Returns: string };
+      crm_revoke_access: { Args: { p_user_id: string; p_company_id: string }; Returns: undefined };
+      crm_upsert_settings: {
+        Args: {
+          p_company_id: string; p_reference_code: string; p_default_quote_currency: string;
+          p_response_target_hours?: number | null; p_working_calendar?: Record<string, unknown> | null;
+          p_duplicate_window_days?: number; p_owner_email_enabled?: boolean;
+          p_approval_policy?: string | null; p_approval_note?: string | null;
+        };
+        Returns: undefined;
+      };
+      crm_create_organisation: { Args: { p_name: string; p_kind: string; p_place?: string | null; p_note?: string | null }; Returns: string };
+      crm_create_contact: {
+        Args: { p_organisation_id: string | null; p_name: string; p_role_title?: string | null; p_email?: string | null; p_phone?: string | null };
+        Returns: string;
+      };
+      crm_find_similar_organisations: { Args: { p_name: string }; Returns: { id: string; name: string; kind: string; place: string | null }[] };
+      crm_find_duplicate_candidates: {
+        Args: { p_agency_org_id?: string | null; p_client_org_id?: string | null; p_event_start?: string | null; p_install_start?: string | null; p_location?: string | null };
+        Returns: CrmDuplicateCandidateRow[];
+      };
+      crm_create_opportunity: {
+        Args: {
+          p_company_id: string; p_title: string; p_source: string; p_next_title: string; p_next_due: string;
+          p_agency_org_id?: string | null; p_client_org_id?: string | null; p_owner_id?: string | null;
+          p_currency?: string | null; p_value?: number | null; p_budget_note?: string | null; p_brief?: string | null;
+          p_event_start?: string | null; p_event_end?: string | null; p_install_start?: string | null;
+          p_location?: string | null; p_technologies?: Record<string, unknown>[]; p_scope?: string | null;
+          p_waiting_on?: string | null; p_contacts?: Record<string, unknown>[]; p_next_kind?: string;
+        };
+        Returns: string;
+      };
+      crm_update_opportunity: { Args: { p_id: string; p_expected_version: number | null; p_patch: Record<string, unknown> }; Returns: number };
+      crm_move_stage: { Args: { p_id: string; p_to: string; p_expected_version?: number | null }; Returns: number };
+      crm_hold_opportunity: { Args: { p_id: string; p_reason: string; p_review_date: string; p_expected_version?: number | null }; Returns: number };
+      crm_resume_opportunity: { Args: { p_id: string; p_next_title: string; p_next_due: string; p_next_kind?: string; p_expected_version?: number | null }; Returns: number };
+      crm_mark_won: {
+        Args: { p_id: string; p_evidence_type: string; p_evidence_reference: string; p_evidence_date: string; p_note?: string | null; p_expected_version?: number | null };
+        Returns: number;
+      };
+      crm_mark_lost: { Args: { p_id: string; p_reason: string; p_expected_version?: number | null }; Returns: number };
+      crm_assign_owner: { Args: { p_id: string; p_new_owner: string; p_reason?: string | null }; Returns: undefined };
+      crm_add_activity: { Args: { p_id: string; p_kind: string; p_body: string; p_occurred_at?: string; p_internal?: boolean }; Returns: string };
+      crm_create_follow_up: { Args: { p_id: string; p_title: string; p_due_at: string; p_kind?: string; p_assigned_to?: string | null }; Returns: string };
+      crm_complete_follow_up: {
+        Args: {
+          p_follow_up_id: string; p_outcome: string; p_next_title?: string | null; p_next_due?: string | null;
+          p_next_kind?: string; p_hold_reason?: string | null; p_hold_review_date?: string | null;
+        };
+        Returns: undefined;
+      };
+      crm_reschedule_follow_up: { Args: { p_follow_up_id: string; p_due_at: string }; Returns: undefined };
+      crm_cancel_follow_up: { Args: { p_follow_up_id: string; p_reason: string }; Returns: undefined };
+      crm_register_file: {
+        Args: {
+          p_opportunity_id: string; p_kind: string; p_purpose?: string; p_label?: string | null; p_storage_path?: string | null;
+          p_original_name?: string | null; p_mime_type?: string | null; p_size_bytes?: number | null; p_url?: string | null;
+        };
+        Returns: string;
+      };
+      crm_remove_file: { Args: { p_file_id: string }; Returns: string | null };
+      crm_add_proposal: { Args: { p_opportunity_id: string; p_note?: string | null; p_file_id?: string | null }; Returns: string };
+      crm_set_proposal_status: { Args: { p_proposal_id: string; p_status: string; p_sent_on?: string | null }; Returns: undefined };
+      crm_upsert_zoho_reference: {
+        Args: {
+          p_opportunity_id: string; p_quote_ref?: string | null; p_quote_sent_on?: string | null; p_invoice_ref?: string | null;
+          p_invoice_issued_on?: string | null; p_payment_received_on?: string | null; p_paid_amount?: number | null;
+        };
+        Returns: undefined;
+      };
+      crm_request_availability: { Args: { p_opportunity_id: string }; Returns: undefined };
+      crm_confirm_availability: { Args: { p_opportunity_id: string; p_state: string; p_notes: string }; Returns: undefined };
+      crm_request_approval: { Args: { p_opportunity_id: string; p_proposal_id?: string | null }; Returns: string };
+      crm_decide_approval: { Args: { p_approval_id: string; p_state: string; p_instruction?: string | null }; Returns: undefined };
+      crm_update_handover: { Args: { p_opportunity_id: string; p_status: string; p_pm_user_id?: string | null; p_notes?: string | null }; Returns: undefined };
+      crm_mark_reminder_read: { Args: { p_reminder_id?: string | null }; Returns: number };
+      // Scheduled-job functions: service role only (never callable from a browser session).
+      crm_generate_reminders: { Args: { p_now?: string }; Returns: number };
+      crm_claim_reminder_emails: { Args: { p_limit?: number; p_now?: string }; Returns: CrmReminderEmailClaim[] };
+      crm_finish_reminder_email: { Args: { p_reminder_id: string; p_ok: boolean; p_error?: string | null }; Returns: undefined };
+      crm_people: { Args: Record<string, never>; Returns: { user_id: string; full_name: string | null; email: string | null; company_ids: string[] }[] };
+      crm_staff_directory: { Args: Record<string, never>; Returns: { user_id: string; full_name: string | null; email: string | null }[] };
+      crm_reopen_opportunity: {
+        Args: { p_id: string; p_reason: string; p_next_title: string; p_next_due: string; p_next_kind?: string; p_to_stage?: string | null; p_expected_version?: number | null };
+        Returns: number;
+      };
+      crm_link_contact: { Args: { p_opportunity_id: string; p_contact_id: string; p_role?: string | null }; Returns: undefined };
+      crm_unlink_contact: { Args: { p_opportunity_id: string; p_contact_id: string }; Returns: undefined };
+      crm_update_contact: { Args: { p_contact_id: string; p_patch: Record<string, unknown> }; Returns: undefined };
+      crm_can_edit_contact: { Args: { p_contact_id: string }; Returns: boolean };
+      crm_create_upload_intent: {
+        Args: { p_opportunity_id: string; p_original_name: string; p_mime_type: string; p_size_bytes: number; p_safe_name: string; p_purpose?: string; p_label?: string | null };
+        Returns: { intent_id: string; quarantine_path: string }[];
+      };
+      crm_get_upload_intent: { Args: { p_intent_id: string }; Returns: CrmUploadIntent[] };
+      crm_register_uploaded_file: { Args: { p_intent_id: string }; Returns: string };
+      // Service role only (never callable from a browser session):
+      crm_mark_upload_intent: { Args: { p_intent_id: string; p_status: string; p_reason?: string | null }; Returns: undefined };
+      crm_expire_upload_intents: { Args: Record<string, never>; Returns: { quarantine_path: string; final_path: string; orphaned_validated: boolean }[] };
+      crm_availability_needs_recheck: { Args: { p_opportunity_id: string }; Returns: boolean };
       get_contract_as_of: {
         Args: { p_employee_id: string; p_as_of: string };
         Returns: Database["public"]["Tables"]["employment_contracts"]["Row"][];

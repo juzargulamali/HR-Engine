@@ -116,4 +116,32 @@ time-boxed, logged elevation procedure, not a standing role grant.
   habit; the matrix deliberately keeps it near-zero on HR content to satisfy "separate access
   controls for salary, bank, ID and appraisal data."
 
+## 3.8 Sales & CRM (Stage B) — separate, company-scoped access
+
+Sales & CRM does **not** use `user_roles`. Access is the table `crm_company_grants` (user, company, capabilities), granted per
+company by a founder. HR Admin, Finance, CEO/CTO and Sys Admin hold **no** Sales rights by virtue of those roles, and a Sales
+grant gives **no** HR access; neither side's policies consult the other. Enforced by RLS plus `SECURITY DEFINER` functions (the
+CRM tables have SELECT policies only); mirrored for the UI in `packages/domain/src/permissions/crm.ts`. Verified by
+`packages/rls-tests/test/crm.rls.test.ts`.
+
+| Capability / action | Plain Sales user (granted company) | Opportunity owner | Delegated capability | Founder (per company) | HR Admin / Finance / CEO / Sys Admin (no grant) |
+|---|---|---|---|---|---|
+| See the company's opportunities, clients, follow-ups, values and budgets | R | R | R | R | – |
+| Create an enquiry (becomes the owner) | F | F | F | F | – |
+| Add notes, links and files; add follow-ups for themselves | F | F | F | F | – |
+| Edit details, move stage, hold/resume, mark Won/Lost, proposals, Zoho references | – | F (own) | – | F (any) | – |
+| Change the value of a **Won** opportunity | – | – | – | F | – |
+| Assign / reassign owner | – | – | `assign_owner` | F | – |
+| Record equipment availability | – | – | `confirm_availability` | F | – |
+| Set the commercial approval policy / decide an approval | – | – | `manage_approval_rules` (policy only) | F | – |
+| Edit Sales settings (reference code, currency, targets, calendar, emails) | – | – | `manage_settings` | F | – |
+| Grant / revoke Sales access (cannot grant founder or `manage_access`) | – | – | `manage_access` | F (incl. founder rights) | – |
+| Read the Sales audit trail (`crm_audit_log`, not the HR audit log) | – | – | `view_audit` | F | – |
+| Reopen a Won or Lost opportunity (reason + new next action; closure kept) | – | – | `reopen_closed` | F | – |
+| Link / unlink a shared contact on an opportunity; change its role | – | F (own, not lost) | – | F (any, not lost) | – |
+| Edit a shared contact's details | creator only | F (if on one of their live opportunities) | – | F | – |
+| Complete / reschedule / cancel a follow-up | assignee only | F | – | F | – |
+
+The last founder of a company cannot be revoked. The shared `audit_log` (readable by HR) never receives CRM rows.
+
 Proceed to [04-user-journeys.md](./04-user-journeys.md).

@@ -72,8 +72,32 @@ function NavLinks({ groups, collapsed, onNavigate }: { groups: NavGroupData[]; c
             {groupCollapsed ? null : (
               <div className="flex flex-col gap-0.5">
                 {group.links.map((link) => {
-                  const active = isActive(pathname, link.href);
                   const Icon = NAV_ICONS[link.iconKey];
+                  if (link.comingSoon) {
+                    const soonEl = (
+                      <div
+                        key={link.href}
+                        aria-disabled="true"
+                        className={cn("flex cursor-default items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-muted-foreground/60", collapsed && "justify-center px-0 py-2.5")}
+                      >
+                        <Icon className="h-4 w-4 flex-none" aria-hidden />
+                        {collapsed ? null : (
+                          <>
+                            <span className="truncate">{link.label}</span>
+                            <span className="ml-auto rounded-full border border-border px-1.5 py-px text-[10px] font-medium uppercase tracking-wide">Soon</span>
+                          </>
+                        )}
+                      </div>
+                    );
+                    return collapsed ? (
+                      <Tooltip key={link.href} label={`${link.label} (coming soon)`} side="right">
+                        {soonEl}
+                      </Tooltip>
+                    ) : (
+                      soonEl
+                    );
+                  }
+                  const active = isActive(pathname, link.href);
                   const linkEl = (
                     <Link
                       key={link.href}

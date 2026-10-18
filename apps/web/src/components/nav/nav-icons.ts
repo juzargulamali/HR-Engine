@@ -2,8 +2,10 @@ import {
   BellRing,
   Building,
   BookOpen,
+  Briefcase,
   CalendarCheck,
   CalendarDays,
+  CircleDashed,
   ClipboardCheck,
   Clock,
   FileText,
@@ -49,4 +51,6 @@ export const NAV_ICONS: Record<NavIconKey, LucideIcon> = {
   ai: Sparkles,
   audit: ScrollText,
   users: UserCog,
+  sales: Briefcase,
+  soon: CircleDashed,
 };

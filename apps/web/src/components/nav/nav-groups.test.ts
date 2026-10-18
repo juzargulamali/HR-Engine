@@ -153,3 +153,29 @@ describe("buildNavGroups", () => {
     expect(allHrefs).toContain("/payroll");
   });
 });
+
+
+describe("Sales & CRM navigation", () => {
+  it("shows Sales and the Coming soon modules only to people with CRM access, whatever their HR roles", () => {
+    const withAccess = buildNavGroups([], { hasCrmAccess: true });
+    expect(withAccess.map((g) => g.label)).toEqual(expect.arrayContaining(["Sales", "Coming soon"]));
+    expect(withAccess.find((g) => g.label === "Sales")?.links).toEqual([{ href: "/sales", label: "Sales & CRM", iconKey: "sales" }]);
+    for (const hr of [grant("hr_admin"), grant("ceo"), grant("sys_admin"), grant("finance")]) {
+      const labels = buildNavGroups([hr]).flatMap((g) => g.links.map((l) => l.href));
+      expect(labels).not.toContain("/sales");
+      expect(buildNavGroups([hr], { hasCrmAccess: false }).map((g) => g.label)).not.toContain("Coming soon");
+    }
+  });
+  it("lists future modules as non-links marked coming soon, and keeps every existing HR link", () => {
+    const base = buildNavGroups([grant("employee")]);
+    const withCrm = buildNavGroups([grant("employee")], { hasCrmAccess: true });
+    const soon = withCrm.find((g) => g.label === "Coming soon")!;
+    expect(soon.links.map((l) => l.label)).toEqual(["Projects & Tasks", "Inventory", "Vendors & Purchasing", "Performance & KPIs"]);
+    expect(soon.links.every((l) => l.comingSoon === true)).toBe(true);
+    const hrHrefs = (gs: ReturnType<typeof buildNavGroups>) => gs.filter((g) => g.label !== "Sales" && g.label !== "Coming soon").flatMap((g) => g.links.map((l) => l.href));
+    expect(hrHrefs(withCrm)).toEqual(hrHrefs(base));
+  });
+  it("never carries a function across the server/client boundary", () => {
+    assertNoFunctions(buildNavGroups([grant("hr_admin")], { hasCrmAccess: true }));
+  });
+});

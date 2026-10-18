@@ -164,3 +164,27 @@ Example: an AI assistant reviews attendance anomalies and drafts a leave-ledger 
    any soft-delete flag directly.
 
 Proceed to [05-automation-rules.md](./05-automation-rules.md).
+
+## 4.12 Sales — enquiry to handover (Sales & CRM, Stage B)
+
+1. **Enquiry arrives** (call, LinkedIn, WhatsApp, website…): any Sales user chooses **New enquiry**, picks the company, an agency
+   and/or end client (adding them inline if new), enters dates, location, technologies and a budget if known, and a **next
+   action with a date**. They become the owner. A "may be the same enquiry" warning appears only when title, dates, location or
+   technologies also resemble an existing one — a shared agency alone never triggers it.
+2. **Assignment:** Juzar or Rafi can reassign the owner at any time; the previous owner's open follow-ups move with it.
+3. **Working it:** the owner moves it forward (qualified → proposal preparation → proposal sent → quote sent → negotiation). Moving
+   to *Proposal sent* needs a proposal recorded as sent; *Quote sent* needs the Zoho Books quote reference. "Sent" is never
+   "approved". Equipment availability is requested by the owner and confirmed by a founder (or delegate), and is flagged
+   **needs recheck** if dates, technologies or quantities change afterwards.
+4. **Follow-ups:** completing one asks what came of it; if it was the last, the owner must add the next action or put the
+   opportunity **on hold** (reason + review date). Reminders appear in the Sales overview; owner emails only when enabled.
+5. **Won / Lost:** *Won* needs a purchase order or authorised email (reference + date) and a value; *Lost* needs a reason. Open
+   follow-ups are cancelled; Won creates a handover draft.
+6. **Handover:** the owner prepares the package (scope, exclusions, accepted proposal, confirmation evidence, technologies,
+   dates, contacts, payment terms, risks) and records the Project Manager. The Projects module is **Coming soon**, so this is a
+   recorded package, not an automatic project.
+7. **Contacts** can be added, linked, re-roled and unlinked after the fact (the person's record is shared and always kept); editing a person changes the shared record and is logged on every opportunity they are on.
+8. **Reopen:** if a Won or Lost job comes back, a founder (or someone they delegated) reopens it with a reason and a new next action; the earlier outcome stays in the closure history and a prepared handover is left as it was.
+9. **Commercial approval** is *not configured* until the founders decide a policy; nothing can be requested or approved before
+   that, and the screens never imply approval.
+
