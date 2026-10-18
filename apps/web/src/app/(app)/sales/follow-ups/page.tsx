@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { listTable } from "@/components/workspace/list-table";
 import { Bell } from "lucide-react";
 import { canActOnFollowUp, isCrmActive } from "@enginious-hr/domain";
 import { Card, CardContent } from "@/components/ui/card";
@@ -138,7 +139,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
           <EmptyState title="No completed follow-ups yet" description={who === "mine" ? "This shows follow-ups assigned to you. Choose Everyone to see the whole team's." : undefined} />
         ) : (
           <>
-            <Table className="min-w-[44rem]">
+            <Table className={cn("min-w-[44rem]", listTable)}>
               <caption className="sr-only">Recently completed follow-ups</caption>
               <TableHeader>
                 <TableRow>
@@ -152,12 +153,12 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                 {doneRows.map((f) => (
                   <TableRow key={f.followUp.id} className="align-top">
                     <TableCell className="min-w-[10rem] font-medium">{f.followUp.title}</TableCell>
-                    <TableCell className="min-w-[12rem]">
+                    <TableCell data-label="Enquiry" className="min-w-[12rem]">
                       <PanelLink href={open(f.opportunity.id)} className="underline-offset-2 hover:underline">{f.opportunity.title}</PanelLink>
                       <div className="text-sm text-muted-foreground">{f.party}</div>
                     </TableCell>
-                    <TableCell className="whitespace-nowrap">{formatDateTime(f.followUp.completed_at)}<div className="text-sm text-muted-foreground">{f.assigneeName}</div></TableCell>
-                    <TableCell className="text-sm">{f.followUp.outcome || <span className="text-muted-foreground">No outcome recorded</span>}</TableCell>
+                    <TableCell data-label="Completed" className="whitespace-nowrap">{formatDateTime(f.followUp.completed_at)}<div className="text-sm text-muted-foreground">{f.assigneeName}</div></TableCell>
+                    <TableCell data-label="What happened" className="text-sm">{f.followUp.outcome || <span className="text-muted-foreground">No outcome recorded</span>}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -176,7 +177,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
             rows.length === 0 ? null : (
               <section key={title} aria-labelledby={`g-${title}`}>
                 <h2 id={`g-${title}`} className={cn("mb-2 text-sm font-semibold", danger && "text-destructive")}>{title} <span className="font-normal text-muted-foreground">({rows.length})</span></h2>
-                <Table className="min-w-[52rem]">
+                <Table className={cn("min-w-[52rem]", listTable)}>
                   <caption className="sr-only">{title} follow-ups</caption>
                   <TableHeader>
                     <TableRow>
@@ -195,15 +196,15 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                       const canAct = canActOnFollowUp(ctx.grants, { assignedTo: fu.assigned_to }, { companyId: f.opportunity.company_id, ownerId: f.opportunity.owner_id }, ctx.userId);
                       return (
                         <TableRow key={fu.id} className={cn("align-top", openId === f.opportunity.id && "bg-secondary/50")}>
-                          <TableCell className="min-w-[11rem]"><div className="break-words font-medium">{fu.title}</div><div className="text-sm text-muted-foreground">{KIND_LABEL[fu.kind] ?? fu.kind}</div></TableCell>
-                          <TableCell className="min-w-[12rem]">
+                          <TableCell className="min-w-[9rem]"><div className="break-words font-medium">{fu.title}</div><div className="text-sm text-muted-foreground">{KIND_LABEL[fu.kind] ?? fu.kind}</div></TableCell>
+                          <TableCell data-label="Enquiry" className="min-w-[10rem]">
                             <PanelLink href={open(f.opportunity.id)} className="break-words underline-offset-2 hover:underline">{f.opportunity.title}</PanelLink>
                             <div className="font-mono text-sm text-muted-foreground">{f.opportunity.reference}</div>
                           </TableCell>
-                          <TableCell className="min-w-[9rem] break-words">{f.party}</TableCell>
-                          <TableCell><DueText dueAt={fu.due_at} /></TableCell>
-                          <TableCell className="whitespace-nowrap">{f.assigneeName}</TableCell>
-                          <TableCell className="min-w-[10rem]">
+                          <TableCell data-label="Client" className="min-w-[7rem] break-words">{f.party}</TableCell>
+                          <TableCell data-label="Due"><DueText dueAt={fu.due_at} className="whitespace-normal" /></TableCell>
+                          <TableCell data-label="Owner" className="whitespace-nowrap">{f.assigneeName}</TableCell>
+                          <TableCell className="min-w-[9rem]">
                             {canAct ? (
                               <FollowUpRowActions followUp={{ id: fu.id, title: fu.title, opportunityId: fu.opportunity_id, isOnlyOpen }} />
                             ) : (

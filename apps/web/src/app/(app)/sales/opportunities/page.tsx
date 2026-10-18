@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { cn } from "@/lib/utils";
+import { listTable } from "@/components/workspace/list-table";
 import { CRM_STAGES, crmSourceLabel, crmStageLabel } from "@enginious-hr/domain";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -191,7 +193,7 @@ function TableView({ rows, total, cols, sort, here, openId, filterActive }: {
       <p className="text-sm text-muted-foreground" role="status">
         {rows.length} of {total} enquiries{filterActive ? " match" : ""}{rows.length > MAX_ROWS ? `, showing the first ${MAX_ROWS}. Narrow the filters to see the rest` : ""}
       </p>
-      <Table className="min-w-[48rem]">
+      <Table className={cn("min-w-[48rem]", listTable)}>
         <caption className="sr-only">Enquiries, sorted by {sort.key} {sort.dir === "asc" ? "ascending" : "descending"}</caption>
         <TableHeader>
           <TableRow>
@@ -209,7 +211,7 @@ function TableView({ rows, total, cols, sort, here, openId, filterActive }: {
           {shown.map((i) => (
             <TableRow key={i.opp.id} className={`align-top ${openId === i.opp.id ? "bg-secondary/50" : ""}`} aria-selected={openId === i.opp.id || undefined}>
               {cols.map((c) => (
-                <TableCell key={c} className={cellClass(c)}>
+                <TableCell key={c} data-label={c === cols[0] ? undefined : label(c)} className={cellClass(c)}>
                   <Cell column={c} item={i} href={here({ open: i.opp.id })} />
                 </TableCell>
               ))}
@@ -223,9 +225,9 @@ function TableView({ rows, total, cols, sort, here, openId, filterActive }: {
 
 function cellClass(c: EnquiryColumn): string {
   switch (c) {
-    case "enquiry": return "min-w-[14rem] max-w-[22rem]";
-    case "party": return "min-w-[10rem]";
-    case "next": return "min-w-[10rem]";
+    case "enquiry": return "min-w-[11rem] max-w-[20rem]";
+    case "party": return "min-w-[8rem]";
+    case "next": return "min-w-[9rem]";
     case "value": return "whitespace-nowrap text-right tabular-nums";
     case "owner": case "created": case "company": return "whitespace-nowrap";
     default: return "";
@@ -246,7 +248,7 @@ function Cell({ column, item: i, href }: { column: EnquiryColumn; item: Opportun
     case "owner": return <>{i.ownerName}</>;
     case "stage": return <StageBadge stage={i.opp.stage} />;
     case "next": return i.nextFollowUp ? <span className="break-words">{i.nextFollowUp.title}</span> : <span className="text-muted-foreground">{closed ? `Closed: ${crmStageLabel(i.opp.stage).toLowerCase()}` : i.opp.stage === "on_hold" ? "On hold" : "None planned"}</span>;
-    case "due": return i.nextFollowUp ? <DueText dueAt={i.nextFollowUp.due_at} /> : <span className="text-muted-foreground">—</span>;
+    case "due": return i.nextFollowUp ? <DueText dueAt={i.nextFollowUp.due_at} className="whitespace-normal" /> : <span className="text-muted-foreground">—</span>;
     case "dates": {
       const d = installOrShowDate(i.opp);
       return d ? <span className="whitespace-nowrap">{formatDate(d)}<span className="block text-sm text-muted-foreground">{i.opp.install_start ? "Installation" : "Show"}</span></span> : <span className="text-muted-foreground">—</span>;

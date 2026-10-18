@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { cn } from "@/lib/utils";
+import { listTable } from "@/components/workspace/list-table";
 import { FolderKanban } from "lucide-react";
 import { hasProjCapability, isProjFounder, projectStatusLabel, PROJECT_STATUSES } from "@enginious-hr/domain";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -148,7 +150,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
         <ProjectBoard projects={boardProjects} />
       ) : (
         <>
-          <Table className="min-w-[44rem]">
+          <Table className={cn("min-w-[44rem]", listTable)}>
             <caption className="sr-only">Projects</caption>
             <TableHeader>
               <TableRow>
@@ -172,12 +174,12 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
                       {unreadBy.get(p.id) ? <span className="ml-2 rounded-full bg-accent px-1.5 text-[13px] font-semibold text-accent-foreground">{unreadBy.get(p.id)} unread</span> : null}
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground"><span>{p.reference}</span><KindBadge kind={p.kind} ongoing={p.is_ongoing} /></div>
                     </TableCell>
-                    {companies.length > 1 ? <TableCell className="text-sm">{ctx.companyName(p.company_id)}</TableCell> : null}
-                    <TableCell className="text-sm">{p.pm_name ?? "—"}</TableCell>
-                    <TableCell><ProjectStatusBadge status={p.status} /></TableCell>
-                    <TableCell className="whitespace-nowrap text-sm">{dateRangeText(p.start_date, p.end_date)}</TableCell>
+                    {companies.length > 1 ? <TableCell data-label="Company" className="text-sm">{ctx.companyName(p.company_id)}</TableCell> : null}
+                    <TableCell data-label="Project Manager" className="text-sm">{p.pm_name ?? "—"}</TableCell>
+                    <TableCell data-label="Status"><ProjectStatusBadge status={p.status} /></TableCell>
+                    <TableCell data-label="Key dates" className="whitespace-nowrap text-sm">{dateRangeText(p.start_date, p.end_date)}</TableCell>
                     {showMilestone ? (
-                      <TableCell className="min-w-[10rem] text-sm">
+                      <TableCell data-label="Next milestone" className="min-w-[10rem] text-sm">
                         {!details ? <span className="text-muted-foreground">Members only</span> : milestoneError ? <span className="text-muted-foreground">Not available</span> : next ? <>{next.title}<span className="block text-muted-foreground">{formatDate(next.due)}</span></> : <span className="text-muted-foreground">None dated</span>}
                       </TableCell>
                     ) : null}

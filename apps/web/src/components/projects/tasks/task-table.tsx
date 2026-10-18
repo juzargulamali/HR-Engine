@@ -1,3 +1,5 @@
+import { cn } from "@/lib/utils";
+import { listTable } from "@/components/workspace/list-table";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { BlockedBadge, PriorityBadge } from "@/components/projects/badges";
@@ -45,7 +47,7 @@ export function TaskTable({ rows, columns, sort, basePath, current, showProject,
   const head = (key: TaskSortKey, label: string, className?: string) => <SortHead label={label} href={sortHref(key)} active={sort.key === key} dir={sort.dir} className={className} />;
   const has = (c: TaskColumnId) => columns.includes(c);
   return (
-    <Table className="min-w-[46rem]">
+    <Table className={cn("min-w-[46rem]", listTable)}>
       <caption className="sr-only">{caption}</caption>
       <TableHeader>
         <TableRow>
@@ -68,18 +70,18 @@ export function TaskTable({ rows, columns, sort, basePath, current, showProject,
               <TaskFlags r={r} />
             </TableCell>
             {showProject ? (
-              <TableCell className="px-3 py-2.5 text-sm">
+              <TableCell data-label="Project" className="px-3 py-2.5 text-sm">
                 <span className="block break-words">{r.projectName}</span>
                 <span className="font-mono text-[13px] text-muted-foreground">{r.projectReference}</span>
               </TableCell>
             ) : null}
-            <TableCell className="px-3 py-2.5 text-sm"><TaskAssigneeControl row={toControlRow(r)} /></TableCell>
-            <TableCell className="min-w-[10rem] px-3 py-2.5 text-sm"><TaskDueControl row={toControlRow(r)} /></TableCell>
-            <TableCell className="px-3 py-2.5 text-sm"><TaskStatusControl row={toControlRow(r)} /></TableCell>
-            {has("priority") ? <TableCell className="px-3 py-2.5 text-sm capitalize">{r.priority}</TableCell> : null}
-            {has("team") ? <TableCell className="px-3 py-2.5 text-sm">{r.teamName ?? <span className="text-muted-foreground">None</span>}</TableCell> : null}
-            {has("milestone") ? <TableCell className="px-3 py-2.5 text-sm">{r.milestoneTitle ?? <span className="text-muted-foreground">Unlinked</span>}</TableCell> : null}
-            {has("deliverable") ? <TableCell className="px-3 py-2.5 text-sm">{r.deliverableTitle ?? <span className="text-muted-foreground">None</span>}</TableCell> : null}
+            <TableCell data-label="Assignee" className="px-3 py-2.5 text-sm"><TaskAssigneeControl row={toControlRow(r)} /></TableCell>
+            <TableCell data-label="Due" className="min-w-[10rem] px-3 py-2.5 text-sm"><TaskDueControl row={toControlRow(r)} /></TableCell>
+            <TableCell data-label="Status" className="px-3 py-2.5 text-sm"><TaskStatusControl row={toControlRow(r)} /></TableCell>
+            {has("priority") ? <TableCell data-label="Priority" className="px-3 py-2.5 text-sm capitalize">{r.priority}</TableCell> : null}
+            {has("team") ? <TableCell data-label="Department" className="px-3 py-2.5 text-sm">{r.teamName ?? <span className="text-muted-foreground">None</span>}</TableCell> : null}
+            {has("milestone") ? <TableCell data-label="Milestone" className="px-3 py-2.5 text-sm">{r.milestoneTitle ?? <span className="text-muted-foreground">Unlinked</span>}</TableCell> : null}
+            {has("deliverable") ? <TableCell data-label="Deliverable" className="px-3 py-2.5 text-sm">{r.deliverableTitle ?? <span className="text-muted-foreground">None</span>}</TableCell> : null}
           </TableRow>
         ))}
       </TableBody>

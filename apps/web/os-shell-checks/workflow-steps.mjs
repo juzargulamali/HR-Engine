@@ -51,7 +51,7 @@ await job("1 Add an enquiry", "emp@e2e.local", async (t) => {
     await t.click(modulesNav(page).getByRole("link", { name: "Sales & CRM", exact: true }), "Sales & CRM");
     await t.click(page.getByRole("button", { name: /add enquiry/i }), "Add enquiry");
     const dlg = page.getByRole("dialog");
-    await t.fill(dlg.getByLabel(/requirement/i), title, "requirement");
+    await t.fill(dlg.getByLabel(/what is the enquiry/i), title, "requirement");
     await t.choose(dlg.locator("select[name=source]"), "agency_call", "source");
     await t.choose(dlg.locator("select[name=agencyOrgId]"), await optionValue(page, "dialog select[name=agencyOrgId]", "Zeta"), "agency");
     await t.fill(dlg.locator("input[name=nextTitle]"), "Call to qualify the brief", "next action");
@@ -95,7 +95,7 @@ await job("3 Update an assigned task", "hr@e2e.local", async (t) => {
     if (await dlg.count()) await t.click(dlg.getByRole("button", { name: /^(start|save|move|confirm)/i }).last(), "confirm");
   } else {
     await t.click(modulesNav(page).getByRole("link", { name: "Projects & Tasks", exact: true }), "Projects & Tasks");
-    await t.choose(page.getByRole("row", { name: /Sensor calibration/ }).getByLabel(/status/i), "in_progress", "status");
+    await t.choose(page.getByRole("row", { name: /Sensor calibration/ }).getByLabel(/status of/i), { label: "Start" }, "status");
   }
   await page.waitForTimeout(2500);
   return sql("select status from proj_tasks where title = 'Sensor calibration'") === "in_progress";
@@ -110,7 +110,7 @@ await job("4 Open the project discussion", "hr@e2e.local", async (t) => {
     await t.click(page.getByRole("navigation", { name: "Project sections" }).getByRole("link", { name: /discussion/i }), "Discussion");
   } else {
     await t.click(modulesNav(page).getByRole("link", { name: "Projects & Tasks", exact: true }), "Projects & Tasks");
-    await t.click(page.getByRole("link", { name: /discussion/i }).first(), "Discussion");
+    await t.click(page.getByRole("region", { name: "My projects" }).getByRole("link", { name: /discussion/i }), "Discussion");
   }
   await page.waitForTimeout(1000);
   return /Truss arrives/.test(await page.locator("main").innerText());
@@ -121,7 +121,6 @@ await job("5 Find the next milestone", "hr@e2e.local", async (t) => {
   const { page } = t;
   await t.click(modulesNav(page).getByRole("link", { name: "Projects & Tasks", exact: true }), "Projects & Tasks");
   if (VARIANT === "before") await t.click(page.getByRole("link", { name: /Floor projection/ }).first(), "the project");
-  else await t.click(page.getByRole("link", { name: /Floor projection/ }).first(), "the project");
   await page.waitForTimeout(800);
   return /Content approved by the client/.test(await page.locator("main").innerText());
 });

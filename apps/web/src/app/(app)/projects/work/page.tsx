@@ -3,6 +3,7 @@ import { ClipboardCheck } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { MyProjects, type MyProjectItem } from "@/components/projects/my-projects";
 import { Muted, PageHeader, Panel } from "@/components/projects/parts";
 import { TaskBoard } from "@/components/projects/tasks/task-board";
 import { TaskPanel } from "@/components/projects/tasks/task-panel";
@@ -14,6 +15,8 @@ import { LoadError } from "@/components/workspace/states";
 import { firstParam, paramsToRecord, parseColumns, parseRecordId, parseView, withParams } from "@/components/workspace/url-state";
 import { ViewSwitch } from "@/components/workspace/view-switch";
 import { getProjectsContext } from "@/lib/projects/context";
+import { loadDirectoryResult } from "@/lib/projects/data";
+import { canSeeProjectDetails, milestoneProjectIds, nextMilestones } from "@/lib/projects/directory";
 import { describeNotification } from "@/lib/projects/notification-text";
 import { loadProjectsAttention, loadWorkRows, type WorkRows } from "@/lib/projects/my-work";
 import { MY_WORK_LABELS, MY_WORK_SHOWS, narrowMyWork, parseMyWorkShow, selectMyWorkRows, type MyWorkShow } from "@/lib/projects/work-logic";
@@ -75,7 +78,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
   const projects = [...new Map(base.map((r) => [r.projectId, `${r.projectName}`])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
   const projectId = projects.some(([id]) => id === firstParam(sp, "project")) ? firstParam(sp, "project") : "";
   const rows = sortTaskRows(narrowMyWork(base, q, projectId), sort);
-  const showProject = projects.length > 1;
+  const showProject = true; // My Work is the one place that spans projects: the project is always shown
   const filtered = q !== "" || projectId !== "";
   const taskParam = parseRecordId(firstParam(sp, "task"));
 
@@ -83,6 +86,21 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
   const { data: notices, error: noticeError } = await supabase.rpc("proj_my_notifications", { p_limit: 40 });
   const notifications = notices ?? [];
   const unread = notifications.filter((n) => !n.read_at).length;
+
+  // The projects this person is a member of, with the next milestone (members only) and unread discussion, for one-click access.
+  const myProjects: MyProjectItem[] = await (async () => {
+    const { rows: directory } = await loadDirectoryResult();
+    const mine = directory.filter((d) => d.is_member && d.status !== "completed" && d.status !== "archived");
+    if (mine.length === 0) return [];
+    const ids = milestoneProjectIds(mine, ctx.grants);
+    const [{ data: ms }, { data: unreadRows }] = await Promise.all([
+      ids.length > 0 ? supabase.from("proj_milestones").select("project_id, title, due_date, status").in("project_id", ids).in("status", ["planned", "in_progress", "ready_for_acceptance"]).not("due_date", "is", null) : Promise.resolve({ data: [] as { project_id: string; title: string; due_date: string | null; status: string }[] }),
+      supabase.rpc("proj_unread_counts"),
+    ]);
+    const next = nextMilestones(ms ?? []);
+    const unreadBy = new Map((unreadRows ?? []).map((r) => [r.project_id, r.unread]));
+    return mine.map((p) => ({ id: p.id, name: p.name, reference: p.reference, nextMilestone: canSeeProjectDetails(p, ctx.grants) ? (next.get(p.id) ?? null) : null, unread: unreadBy.get(p.id) ?? 0 }));
+  })();
 
   const counts: Record<MyWorkShow, number> = {
     mine: work.mine.length,
@@ -102,6 +120,8 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
           <Link href="/projects/handovers" className={buttonVariants({ variant: "outline", size: "sm" })}>Open handovers</Link>
         </Alert>
       ) : null}
+
+      <MyProjects items={myProjects} />
 
       <div className="space-y-3">
         <ListToolbar
