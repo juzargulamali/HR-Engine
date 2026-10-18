@@ -144,4 +144,46 @@ CRM tables have SELECT policies only); mirrored for the UI in `packages/domain/s
 
 The last founder of a company cannot be revoked. The shared `audit_log` (readable by HR) never receives CRM rows.
 
+## 3.9 Projects & Tasks (Release 2) — separate, company-scoped access, three data tiers
+
+Projects & Tasks does **not** use `user_roles` or `crm_company_grants`. Access is the table `proj_company_grants` (user, company,
+capabilities), granted per company by a founder. An empty capability list means *Projects access*: the directory only. HR Admin,
+Finance, CEO/CTO and Sys Admin roles, a Sales grant, an employee record or an e-mail domain confer **no** Projects access, and a
+Projects grant gives **no** HR or Sales access. Project roles (PM, temporary leader, department head, member) are Projects
+concepts: **none of them creates attendance, awards Recovery Leave, changes `employees.manager_id`, or gives access to confidential
+HR data** (a test scans every `proj_` function for HR tables and `manager_id`). Enforced by RLS plus `SECURITY DEFINER` functions (every
+`proj_` table has SELECT policies only); mirrored for the UI in `packages/domain/src/permissions/proj.ts`. Verified by
+`packages/rls-tests/test/projects.rls.test.ts`. Design: [projects-design.md](./projects-design.md).
+
+**Three tiers, in different tables, because row-level security cannot hide columns:**
+
+| Tier | Tables | Who reads it |
+|---|---|---|
+| Summary-safe | `proj_projects` (reference, name, company, kind, status, PM, start/end) | Founders; active members; any Projects-access holder for *ongoing* projects of their company; a Sales user only for projects linked to them |
+| Member-only | details (client name, location, scope, time zone, install/event dates), members, teams, milestones, deliverables, tasks, plans, bookings, discussion, feedback, scope changes, issued plans, files, completions, change log, handover (after acceptance) | Founders of the company and **active** members only |
+| Commercially restricted | `proj_scope_change_commercial` (cost effect of a scope change) | People with `view_commercial` (founders hold it) — nobody else, including the PM |
+
+No Sales value, budget, payment terms, purchase order or evidence reference is copied into any Projects table; commercial reading stays in Sales & CRM.
+
+| Capability / action | Directory user (Projects access) | Member | Department head | PM / temporary leader | Delegated capability | Founder (per company) | HR / Sales roles with no grant |
+|---|---|---|---|---|---|---|---|
+| See the summary of ongoing projects of the company | R | R | R | R | R | R (all, incl. finished) | – |
+| See details, tasks, plans, discussion, files | – | R | R | R | – | R | – |
+| Update own assigned task; comment; post in discussion | – | F | F | F | – | F | – |
+| Create a task for themself (own team or none) | – | F | F | F | – | F | – |
+| Distribute tasks / reassign inside the team; review the team's tasks; accept the team's deliverables | – | – | F (own team) | F | – | F | – |
+| Define milestones/deliverables, change scope fields (internal), edit dates, add/remove members and teams, book people on site, issue client timelines, record feedback, propose scope changes | – | – | – | F | – | F | – |
+| Accept a milestone; complete a project (with client evidence); archive | – | – | – | F | – | F | – |
+| Appoint temporary project leadership | – | – | – | F (the PM only) | – | F | – |
+| Assign / reassign the PM; create an internal project; link/unlink Sales people | – | – | – | – | `assign_pm` | F | – |
+| Grant / revoke Projects access (founder and `manage_access` rights themselves need a founder) | – | – | – | – | `manage_access` | F | – |
+| Decide a scope change | – | – | – | – | `approve_scope` | F | – |
+| See cost effects of scope changes | – | – | – | – | `view_commercial` | F | – |
+| Read the Projects audit trail (includes member-only fields) | – | – | – | – | `view_audit` | F | – |
+| Reopen a completed project (reason required; completion record kept) | – | – | – | – | `reopen_project` | F | – |
+| Confirm a site booking that overlaps another (reason recorded) | – | – | – | – | `override_site_conflict` | F | – |
+| Sales user linked to the project (no membership) | summary + handover status only | | | | | | |
+
+A **reviewer is never the person whose work is reviewed.** Removing a member (or revoking their Projects access) ends their access at once everywhere (details, discussion, files, downloads, notifications, calendars): membership only counts while the person is still eligible. The last founder of a company cannot be revoked.
+
 Proceed to [04-user-journeys.md](./04-user-journeys.md).

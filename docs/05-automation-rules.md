@@ -35,6 +35,15 @@ sent only when `CRM_REMINDER_EMAILS=on` and `CRM_REMINDER_FROM_EMAIL` are set; a
 failure retries with backoff (15 min, 1 h, 4 h, 12 h) and stops after five attempts; a sent row is never reopened; reminders for a
 follow-up that was completed, cancelled or rescheduled are skipped. **No message is ever sent to a client.**
 
+### 5.1b Projects & Tasks (Release 2): no scheduled jobs, no e-mail
+
+**This release adds no scheduled job, no cron route, no e-mail and no external call.** Everything happens when a person acts:
+
+- **Notifications** are in-app rows in the shared `notifications` table (types `project_*`), inserted by `proj_notify()` inside the action that caused them: deduplicated by an unread key, never to the person who acted, only to someone still allowed to see the project, and carrying no message text. Removing a member or revoking access deletes their project notices for it.
+- **Discussion** refreshes by *polling* from the open page (about every 8 seconds while the tab is visible, slower or paused when hidden, backing off on errors). It is not a push service and does nothing when nobody has the page open.
+- **Not built, by decision:** reminders for approaching or missed deadlines, overdue digests, and e-mail of any kind. If you want them later they need a scheduled route (Vercel Hobby allows one daily run) and your separate authorisation; they would follow the same pattern as the Sales reminders (idempotent, dedupe key, off until enabled).
+- **The only server-side housekeeping function** is `proj_expire_upload_intents()` (service role): it only marks finished upload records as expired, and **nothing calls it**. Abandoned quarantine files are harmless (private, never readable by users). `proj_abandoned_upload_objects()` (service role, read-only) lists what can be removed, and the owner removes those files by hand in the Storage page, following `docs/projects-deployment.md` §12 and `supabase/manual-sql/proj_85_abandoned_uploads_readonly.sql`. Nothing deletes a file automatically.
+
 ## 5.2 Deterministic calculation rules (the "must be app code, not AI, not ad hoc SQL" list)
 
 - **Leave day counting**: working days between `start_date` and `end_date` inclusive, minus

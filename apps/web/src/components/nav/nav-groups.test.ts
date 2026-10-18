@@ -154,14 +154,14 @@ describe("buildNavModules", () => {
 });
 
 describe("ENGINIOUS OS modules", () => {
-  it("lists the approved modules in order, for everyone", () => {
+  it("lists the approved modules in order, for everyone; Projects & Tasks appears only with Projects access", () => {
     const labels = buildNavModules([grant("employee")]).map((m) => m.label);
-    expect(labels).toEqual(["My Day", "People & HR", "Projects & Tasks", "Inventory", "Vendors & Purchasing", "KPIs & Performance"]);
+    expect(labels).toEqual(["My Day", "People & HR", "Inventory", "Vendors & Purchasing", "KPIs & Performance"]);
   });
 
   it("marks every unbuilt module as coming soon: no link, no sub-links, no data", () => {
     const soon = buildNavModules([grant("employee")]).filter((m) => m.comingSoon);
-    expect(soon.map((m) => m.label)).toEqual(["Projects & Tasks", "Inventory", "Vendors & Purchasing"]);
+    expect(soon.map((m) => m.label)).toEqual(["Inventory", "Vendors & Purchasing"]);
     for (const m of soon) {
       expect(m.href).toBe("");
       expect(m.sections).toEqual([]);
@@ -242,5 +242,56 @@ describe("active module and breadcrumb", () => {
     expect(breadcrumbFor("/attendance", modules)).toEqual({ module: "People & HR", page: "Attendance" });
     expect(breadcrumbFor("/", modules)).toEqual({ module: "My Day", page: null });
     expect(breadcrumbFor("/sales", modules)).toEqual({ module: "Sales & CRM", page: null });
+  });
+});
+
+describe("Projects & Tasks navigation", () => {
+  const proj = (capabilities: string[] = [], extra: { salesLinked?: boolean; pendingHandovers?: boolean } = {}) =>
+    ({ projects: { grants: [{ companyId: "c1", capabilities: capabilities as never[] }], ...extra } });
+
+  it("is absent for everyone without a Projects grant or a Sales link, whatever their HR roles or Sales grants", () => {
+    for (const hr of [grant("hr_admin"), grant("ceo"), grant("sys_admin"), grant("finance"), grant("employee")]) {
+      expect(buildNavModules([hr]).map((m) => m.id)).not.toContain("projects");
+      expect(hrefsOf(buildNavModules([hr], { crmGrants: [{ companyId: "c1", capabilities: ["founder"] }] }))).not.toContain("/projects");
+    }
+    expect(buildNavModules([], { projects: { grants: [] } }).map((m) => m.id)).not.toContain("projects");
+  });
+
+  it("gives a plain grant holder the directory, My Work and the calendar, and nothing administrative", () => {
+    const hrefs = hrefsOf(buildNavModules([], proj()));
+    expect(hrefs).toEqual(expect.arrayContaining(["/projects", "/projects/work", "/projects/calendar"]));
+    for (const h of ["/projects/handovers", "/projects/new", "/projects/access"]) expect(hrefs).not.toContain(h);
+  });
+
+  it("shows Handovers and New internal project to people who can assign a PM, and Access to those who manage access", () => {
+    expect(hrefsOf(buildNavModules([], proj(["assign_pm"])))).toEqual(expect.arrayContaining(["/projects/handovers", "/projects/new"]));
+    expect(hrefsOf(buildNavModules([], proj(["assign_pm"])))).not.toContain("/projects/access");
+    expect(hrefsOf(buildNavModules([], proj(["manage_access"])))).toContain("/projects/access");
+    expect(hrefsOf(buildNavModules([], proj(["founder"])))).toEqual(expect.arrayContaining(["/projects/handovers", "/projects/new", "/projects/access"]));
+  });
+
+  it("shows Handovers to a PM who has one waiting for acceptance", () => {
+    expect(hrefsOf(buildNavModules([], proj([], { pendingHandovers: true })))).toContain("/projects/handovers");
+    expect(hrefsOf(buildNavModules([], proj()))).not.toContain("/projects/handovers");
+  });
+
+  it("gives a Sales-linked person with no Projects grant only the directory of their own projects", () => {
+    const hrefs = hrefsOf(buildNavModules([], { projects: { grants: [], salesLinked: true } }));
+    expect(hrefs).toContain("/projects");
+    for (const h of ["/projects/work", "/projects/calendar", "/projects/handovers", "/projects/new", "/projects/access"]) expect(hrefs).not.toContain(h);
+  });
+
+  it("adds no HR link for a Projects grant, and its icons resolve", () => {
+    const base = hrefsOf(buildNavModules([grant("employee")]));
+    const withProj = hrefsOf(buildNavModules([grant("employee")], proj(["founder"])));
+    expect(base.every((h) => withProj.includes(h))).toBe(true);
+    for (const key of iconKeysOf(buildNavModules([], proj(["founder"])))) expect(NAV_ICONS[key as keyof typeof NAV_ICONS]).toBeDefined();
+  });
+
+  it("marks Projects as the active module for its pages", () => {
+    const modules = buildNavModules([grant("employee")], proj(["founder"]));
+    expect(activeModuleId("/projects/abc/tasks", modules)).toBe("projects");
+    expect(activeModuleId("/projects/work", modules)).toBe("projects");
+    expect(breadcrumbFor("/projects/work", modules)).toEqual({ module: "Projects & Tasks", page: "My Work" });
   });
 });

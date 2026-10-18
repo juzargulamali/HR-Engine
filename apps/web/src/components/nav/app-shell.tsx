@@ -1,5 +1,5 @@
 import { canViewHrAlerts, roleLabelsFor } from "@enginious-hr/domain";
-import type { CrmGrant } from "@enginious-hr/domain";
+import type { CrmGrant, ProjGrant } from "@enginious-hr/domain";
 import type { CurrentSession } from "@/lib/auth/session";
 import { signOut } from "@/lib/actions/auth";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ export function AppShell({
   clockOpenSince = null,
   hasPendingApprovals = false,
   crmGrants = [],
+  projects,
   children,
 }: {
   session: CurrentSession;
@@ -23,11 +24,13 @@ export function AppShell({
   clockOpenSince?: string | null;
   hasPendingApprovals?: boolean;
   crmGrants?: readonly CrmGrant[];
+  /** Projects access (own grants, Sales link, waiting handover). Absent means none: the module is then not shown. */
+  projects?: { grants: readonly ProjGrant[]; salesLinked?: boolean; pendingHandovers?: boolean };
   children: React.ReactNode;
 }) {
   const roleLabels = roleLabelsFor(session.grants);
   const showAlertsLink = canViewHrAlerts(session.grants);
-  const modules = buildNavModules(session.grants, { hasPendingApprovals, crmGrants });
+  const modules = buildNavModules(session.grants, { hasPendingApprovals, crmGrants, projects });
   const fullName = session.fullName ?? session.email ?? "Signed in";
 
   const signOutSlot = (

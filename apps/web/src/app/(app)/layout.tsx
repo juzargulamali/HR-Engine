@@ -3,6 +3,7 @@ import type { CrmCapability, CrmGrant } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "@/components/nav/app-shell";
+import { loadProjectsNavAccess } from "@/lib/projects/context";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await getCurrentSession();
@@ -59,8 +60,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     crmGrants = [];
   }
 
+  // Projects & Tasks: its own company grants, a Sales link, or a handover waiting on this person. Degrades to "no access" on any failure.
+  const projects = await loadProjectsNavAccess(session.userId);
+
   return (
-    <AppShell session={session} clockOpenSince={clockOpenSince} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants}>
+    <AppShell session={session} clockOpenSince={clockOpenSince} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants} projects={projects}>
       {children}
     </AppShell>
   );

@@ -122,7 +122,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       {items.length === 0 ? (
         <EmptyState title="Not enough data yet" description="Reports appear once opportunities have been recorded." action={<Link href="/sales/new" className={buttonVariants({ size: "sm" })}>New enquiry</Link>} />
       ) : (
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <ReportCard title="Open pipeline by stage" description="Open opportunities now. Each currency on its own line; never added together." note={`n = ${stages.reduce((n, s) => n + s.count, 0)} open opportunities`}>
             <Table>
               <caption className="sr-only">Open pipeline by stage</caption>

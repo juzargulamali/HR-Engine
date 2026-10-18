@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlarmClock, CalendarClock, CalendarDays, ClipboardCheck, Inbox, ReceiptText, UserPlus, Users } from "lucide-react";
+import { AlarmClock, CalendarClock, CalendarDays, ClipboardCheck, FolderKanban, Inbox, ReceiptText, UserPlus, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
   canCreateEmployee,
@@ -32,6 +32,10 @@ import { UpcomingSection } from "./upcoming-section";
 import { DashboardHeader } from "./dashboard-header";
 import { SalesToday } from "./sales-today";
 import { loadSalesToday } from "@/lib/crm/my-day";
+import { getProjectsContext } from "@/lib/projects/context";
+import { projectDayRows } from "@/lib/projects/my-day";
+import { loadProjectsAttention } from "@/lib/projects/my-work";
+import { ProjectsToday } from "./projects-today";
 
 export const metadata = { title: "My Day" };
 
@@ -261,12 +265,25 @@ export default async function DashboardPage() {
         ]
       : [];
 
+  // Projects & Tasks for people with Projects access (null for everyone else, and when it is not installed). Real counts only.
+  let projectRows: ReturnType<typeof projectDayRows> | "error" | null = null;
+  try {
+    const projectsCtx = await getProjectsContext();
+    if (projectsCtx?.installed && projectsCtx.grants.length > 0) projectRows = projectDayRows(await loadProjectsAttention(projectsCtx));
+  } catch (e) {
+    console.error("[projects] my day load failed", e);
+    projectRows = "error";
+  }
+  const projectActionItems: ActionItem[] = Array.isArray(projectRows)
+    ? projectRows.filter((r) => r.needsYou).map((r) => ({ key: r.key, icon: FolderKanban, label: r.label, count: r.count, href: r.href }))
+    : [];
+
   // ONE list of what needs attention, from the same authorised data the card shows; the sentence under the greeting is derived
   // from it, so the two can never disagree (Sales follow-ups are in the list, so they count in the sentence too).
   const actionItems = buildActionItems({
     myPendingApprovals,
     ...(showHrView ? { contractsEndingCount, probationDueCount, docsExpiringCount, identityExpiringCount } : {}),
-    extraItems: salesActionItems,
+    extraItems: [...salesActionItems, ...projectActionItems],
   });
 
   const summarySentence = hrSectionError
@@ -348,6 +365,7 @@ export default async function DashboardPage() {
         <div className="order-2 space-y-6 lg:col-span-2 lg:col-start-1 lg:row-span-3 lg:row-start-1">
           <ActionCentre title="Needs you today" items={actionItems} />
           <SalesToday result={salesToday} />
+          <ProjectsToday rows={projectRows} />
           {showHrView ? <UpcomingSection holidays={upcomingHolidays} onLeaveToday={onLeaveToday} /> : null}
         </div>
         {showHrView ? (
@@ -390,7 +408,7 @@ export default async function DashboardPage() {
       ) : null}
 
       {/* The sidebar already lists these; this is only a quiet reminder, with no figures. */}
-      <p className="text-sm text-muted-foreground">Coming soon to ENGINIOUS OS: Projects &amp; Tasks, Inventory, Vendors &amp; Purchasing and KPIs.</p>
+      <p className="text-sm text-muted-foreground">Coming soon to ENGINIOUS OS: Inventory, Vendors &amp; Purchasing and KPIs.</p>
     </div>
   );
 }
