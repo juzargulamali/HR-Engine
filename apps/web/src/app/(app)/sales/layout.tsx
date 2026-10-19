@@ -1,6 +1,7 @@
 import { hasCrmCapability, isAnyCrmFounder } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
 import { SalesTabs, type SalesTab } from "@/components/sales/sales-tabs";
+import { LoadError } from "@/components/workspace/states";
 import { getCrmContext } from "@/lib/crm/context";
 
 /**
@@ -10,6 +11,14 @@ import { getCrmContext } from "@/lib/crm/context";
 export default async function SalesLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getCrmContext();
   if (!ctx) return null;
+  if (ctx.loadFailed) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-semibold">Sales &amp; CRM</h1>
+        <LoadError what="Sales & CRM" />
+      </div>
+    );
+  }
   if (ctx.grants.length === 0) {
     return (
       <div className="space-y-4">

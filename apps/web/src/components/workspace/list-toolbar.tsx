@@ -13,6 +13,8 @@ export interface ToolbarFilter {
   label: string;
   value: string;
   options: readonly { value: string; label: string }[];
+  /** Less common filter: kept under a "More filters" disclosure, which opens by itself while one of them is set. */
+  secondary?: boolean;
 }
 
 /**
@@ -42,6 +44,17 @@ export function ListToolbar({ search, filters, clearHref, children }: { search?:
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => go({ q: v.trim() === "" ? null : v.trim().slice(0, 100) }), 300);
   };
+  const primary = filters.filter((f) => !f.secondary);
+  const secondary = filters.filter((f) => f.secondary);
+  const secondaryActive = secondary.some((f) => f.value !== "");
+  const field = (f: ToolbarFilter) => (
+    <div key={f.name} className="min-w-[8.5rem]">
+      <label htmlFor={`lt-${f.name}`} className="mb-1 block text-[13px] font-medium text-muted-foreground">{f.label}</label>
+      <Select id={`lt-${f.name}`} value={f.value} onChange={(e) => go({ [f.name]: e.target.value || null })}>
+        {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </Select>
+    </div>
+  );
   const active = filters.some((f) => f.value !== "") || (search?.value ?? "") !== "";
 
   return (
@@ -55,14 +68,15 @@ export function ListToolbar({ search, filters, clearHref, children }: { search?:
           </div>
         </div>
       ) : null}
-      {filters.map((f) => (
-        <div key={f.name} className="min-w-[8.5rem]">
-          <label htmlFor={`lt-${f.name}`} className="mb-1 block text-[13px] font-medium text-muted-foreground">{f.label}</label>
-          <Select id={`lt-${f.name}`} value={f.value} onChange={(e) => go({ [f.name]: e.target.value || null })}>
-            {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </Select>
-        </div>
-      ))}
+      {primary.map(field)}
+      {secondary.length > 0 ? (
+        <details key={secondaryActive ? "on" : "off"} open={secondaryActive} className="basis-full">
+          <summary className="inline-flex h-8 cursor-pointer items-center rounded-md px-2 text-sm font-medium text-muted-foreground hover:text-foreground">
+            More filters{secondaryActive ? " (in use)" : ""}
+          </summary>
+          <div className="mt-2 flex flex-wrap items-end gap-3">{secondary.map(field)}</div>
+        </details>
+      ) : null}
       {active && clearHref ? <Link href={clearHref} scroll={false} className="pb-2 text-sm font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Clear</Link> : null}
       {children ? <div className="ml-auto flex flex-wrap items-center gap-2">{children}</div> : null}
     </div>

@@ -25,6 +25,9 @@ node os-shell-checks/projects-workspace.mjs                  # the simplified Pr
                                                              # form, summary panel, Next milestone only for members and founders (also absent from the page HTML), My Work (filters, Board, columns, My projects),
                                                              # quick changes by role, task panel (Back, direct address, unsaved text, stale edit), Work grouping, review queue, Jump to task, Manage menu,
                                                              # cross-company isolation, revoked grant and membership, HR tables unchanged
+node os-shell-checks/a11y-states.mjs                         # keyboard and focus (Tab reach, focus ring, dialog focus and Escape, panel focus and return, Board Move to, My Work status),
+                                                             # axe (WCAG 2.1 A/AA + best practice, serious/critical) on 13 pages x desktop/phone x dark/light, and "an error is not an empty list":
+                                                             # with OUTAGE_STOP_CMD / OUTAGE_START_CMD set it stops the data service while pages load (needs the sample scenario)
 node os-shell-checks/shell-checks.mjs                        # navigation per persona, Coming soon, titles, mobile bar/drawer, keyboard, theme persistence,
                                                              # clock status, /os-preview blocked
 node os-shell-checks/phone-fit.mjs                           # 360 and 390 px, dark + light, 26 pages: no horizontal scroll, no clipped bottom-bar label, nothing under the bar

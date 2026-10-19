@@ -91,26 +91,37 @@ Method and script: `apps/web/os-shell-checks/workflow-steps.mjs`. Every click an
 | 4. Open a project discussion | 3 | 2 | 3 | 2 |
 | 5. Find the next milestone | 2 | 1 | 2 | 1 |
 
-Honest reading: adding an enquiry takes the same number of entries (the information required is the same), it just needs one fewer screen. These are the shortest scripted paths on one machine, not a usability study with staff, and they were taken before the final regression build; they were **not re-measured** afterwards, and the after-screenshots were not regenerated for this PR (only the before set is in `docs/os-workflow-screenshots/`).
+Honest reading: adding an enquiry takes the same number of entries (the information required is the same), it just needs one fewer screen. The "before" column was measured on current `main`; the "after" column was **re-measured on the final build** (all five jobs completed and were confirmed in the database): 7, 6, 2, 2 and 1 steps over 2, 1, 1, 2 and 1 screens. These are the shortest scripted paths on one machine, not a usability study with staff.
 
-## Verification (local throwaway database and a production build)
+## Screenshots
+
+`docs/os-workflow-screenshots/` holds 24 `before-*` and 34 `after-*` images of the same sample scenario: Follow-ups, Enquiries Table and Board, Quick Add, the enquiry panel, My Work (Table and Board), the project directory (Table and Board), project Overview, Work, the task panel, Plan and Discussion, in dark and soft light at laptop width, and the Table, panel and task panel at 390 px. Each was inspected after the final build. Two problems found that way were fixed: the side-panel heading drew a stray focus box when it took focus, and the project Work toolbar showed six controls at once (the less used Department, Deliverable and Narrow to filters now sit under **More filters**, which opens by itself while one of them is set). Full-page captures at phone width show the fixed bottom bar in the middle of the page; that is a capture artefact of a fixed bar, the phone-fit check confirms nothing sits under it in use.
+
+## Accessibility, keyboard and failure states
+
+`os-shell-checks/a11y-states.mjs` checks, in a real browser: every Tab stop to Add enquiry has a visible focus ring; Add enquiry opens with focus inside, Tab stays in the dialog, Escape closes it and focus returns to the button; a row opens its panel from the keyboard, focus moves into the panel, Escape closes it and focus returns to the row; Board **Move to** and My Work status controls are reachable by Tab, named for their record and show a ring; axe (WCAG 2.1 A and AA plus best practice) reports no serious or critical finding on 13 pages in desktop and phone, dark and light; a search with no match says so; and with the data service stopped, Enquiries, Follow-ups, Projects, My Work and a project's Work say they could not load and that it is not an empty list. That last check found a real fault, now fixed: when the access lookup itself failed, Sales and Projects told people "You do not have access". They now say the information could not be loaded, and nothing is granted when the lookup fails. It also found a link on Follow-ups that was not underlined (links inside text must not rely on colour alone).
+
+## Verification (local throwaway database and a production build of the final commit)
 
 | Check | Result |
 |---|---|
 | `tsc --noEmit`, `eslint .` (apps/web) | clean |
 | Unit tests (apps/web) | 656 passed |
 | `sales-actions.mjs` (on the Sales-only seed it expects) | 22 of 22 |
-| `sales-workspace.mjs` | all passed |
+| `sales-workspace.mjs` | 30 of 30 |
 | `projects-flow.mjs` | 48 of 48 |
 | `projects-workspace.mjs` | 37 of 37 |
-| `shell-checks.mjs` | all passed |
+| `shell-checks.mjs` | 141 of 141 |
+| `a11y-states.mjs` (keyboard, focus, axe on 13 pages x 4 variants, outage) | 16 of 16 |
 | `phone-fit.mjs` | 256 page views, 0 with problems |
-| `contrast-audit.mjs` | 178 pages, 0 failing combinations |
+| `contrast-audit.mjs` | 178 pages, 12,778 text nodes, 0 failing combinations |
 
-No database migration changed, so the database and security suites were not re-run.
+No database migration changed, so the database and security suites were not re-run (the repository CI runs them, `rls-policies`).
 
 ## Known limitations
 
 * Drag and drop uses the browser's native drag events; touch and keyboard use each card's **Move to** control.
 * Quick Add of an enquiry needs an agency or an end client (the database rule), not just a contact.
 * The step counts are the shortest path a competent user would take in scripted runs, not a usability study with staff.
+* Board column headings say "No value yet" when no card in the column has a value; this is true but repeated when nothing has a value.
+* Nothing here was tried on the hosted preview by a person; all browser runs used a local throwaway database.

@@ -1,5 +1,6 @@
 import { Alert } from "@/components/ui/alert";
 import { PageHeader } from "@/components/projects/parts";
+import { LoadError } from "@/components/workspace/states";
 import { getProjectsContext } from "@/lib/projects/context";
 
 /**
@@ -15,6 +16,14 @@ export default async function ProjectsLayout({ children }: { children: React.Rea
       <div className="space-y-4">
         <PageHeader title="Projects & Tasks" />
         <Alert role="status">Projects &amp; Tasks is not installed in this environment yet. The database changes it needs have not been applied here, so nothing is shown.</Alert>
+      </div>
+    );
+  }
+  if (ctx.loadFailed) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Projects & Tasks" />
+        <LoadError what="Projects & Tasks" />
       </div>
     );
   }

@@ -54,7 +54,7 @@ export function SidePanel({ title, subtitle, closeHref, fullPageHref, children }
       <header className="flex items-start justify-between gap-3 border-b border-border bg-chrome px-4 py-3">
         <div className="min-w-0">
           {subtitle ? <p className="truncate text-[13px] text-muted-foreground">{subtitle}</p> : null}
-          <h2 ref={headingRef} tabIndex={-1} className="break-words font-heading text-base font-semibold leading-snug focus:outline-none">{title}</h2>
+          <h2 ref={headingRef} tabIndex={-1} style={{ outline: "none" }} className="break-words font-heading text-base font-semibold leading-snug">{title}</h2>
         </div>
         <div className="flex flex-none items-center gap-1">
           {fullPageHref ? (

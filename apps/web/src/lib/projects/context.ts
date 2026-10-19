@@ -34,6 +34,8 @@ export interface ProjectsContext {
   /** Everyone with Projects access in those companies (names only). */
   people: ProjPerson[];
   hasAnyAccess: boolean;
+  /** True when the grants could not be read (the data service did not answer): nothing is granted, and the page says it could not load rather than "no access". */
+  loadFailed?: boolean;
   personName: (id: string | null | undefined) => string;
   companyName: (id: string) => string;
 }
@@ -58,6 +60,7 @@ export const getProjectsContext = cache(async (): Promise<ProjectsContext | null
     supabase.from("proj_sales_links").select("project_id").eq("user_id", session.userId).is("removed_at", null),
   ]);
   if (isNotInstalled(grantError) || isNotInstalled(linkError)) return empty(false);
+  if (grantError || linkError) return { ...empty(true), loadFailed: true };
   const grants: ProjGrant[] = (grantRows ?? []).map((g) => ({ companyId: g.company_id, capabilities: g.capabilities as ProjCapability[] }));
   const salesLinkedProjectIds = (linkRows ?? []).map((l) => l.project_id);
   if (grants.length === 0) {

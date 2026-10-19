@@ -117,7 +117,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                   <li key={r.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-1.5 text-sm">
                     <div className="min-w-0">
                       <span className="font-medium">{REMINDER_LABEL[r.kind]}</span>: {r.title}{" "}
-                      <PanelLink href={open(r.opportunity_id)} className="text-muted-foreground underline-offset-2 hover:underline">{o ? `${o.opp.reference} · ${o.opp.title}` : "Open enquiry"}</PanelLink>
+                      <PanelLink href={open(r.opportunity_id)} className="text-muted-foreground underline underline-offset-2 hover:text-foreground">{o ? `${o.opp.reference} · ${o.opp.title}` : "Open enquiry"}</PanelLink>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm text-muted-foreground">{formatDateTime(r.due_at ?? r.created_at)}</span>
