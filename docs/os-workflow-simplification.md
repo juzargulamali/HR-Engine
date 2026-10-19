@@ -81,7 +81,33 @@ The module opens on **My Work** for people who only take part in projects, and o
 
 ## Measured effort (same sample scenario, real browser)
 
-See the pull request for the table; method and script: `apps/web/os-shell-checks/workflow-steps.mjs` (every click and every field filled or chosen, starting on My Day; a job counts only when its result is in the database).
+Method and script: `apps/web/os-shell-checks/workflow-steps.mjs`. Every click and every field filled or chosen counts as one step, starting on My Day; a job counts only when its result is in the database. The same seeded scenario was used on the old build (current `main`) and the new one.
+
+| Job | Steps before | Steps after | Screens before | Screens after |
+|---|---|---|---|---|
+| 1. Add an enquiry | 7 | 7 | 3 | 2 |
+| 2. Complete a follow-up | 7 | 6 | 2 | 1 |
+| 3. Find and update an assigned task | 4 | 2 | 3 | 1 |
+| 4. Open a project discussion | 3 | 2 | 3 | 2 |
+| 5. Find the next milestone | 2 | 1 | 2 | 1 |
+
+Honest reading: adding an enquiry takes the same number of entries (the information required is the same), it just needs one fewer screen. These are the shortest scripted paths on one machine, not a usability study with staff, and they were taken before the final regression build; they were **not re-measured** afterwards, and the after-screenshots were not regenerated for this PR (only the before set is in `docs/os-workflow-screenshots/`).
+
+## Verification (local throwaway database and a production build)
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit`, `eslint .` (apps/web) | clean |
+| Unit tests (apps/web) | 656 passed |
+| `sales-actions.mjs` (on the Sales-only seed it expects) | 22 of 22 |
+| `sales-workspace.mjs` | all passed |
+| `projects-flow.mjs` | 48 of 48 |
+| `projects-workspace.mjs` | 37 of 37 |
+| `shell-checks.mjs` | all passed |
+| `phone-fit.mjs` | 256 page views, 0 with problems |
+| `contrast-audit.mjs` | 178 pages, 0 failing combinations |
+
+No database migration changed, so the database and security suites were not re-run.
 
 ## Known limitations
 
