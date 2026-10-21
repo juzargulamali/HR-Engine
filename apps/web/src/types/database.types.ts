@@ -25,6 +25,12 @@ import type {
   CrmZohoReferenceRow, CrmClosureRow, CrmUploadIntent,
 } from "./crm";
 import type {
+  InvAuditLogRow, InvAvailabilityCheckRow, InvBalanceRow, InvBinRow, InvCategoryRow, InvCompanyGrantRow, InvCompanySettingsRow, InvCostRow,
+  InvCountLineRow, InvCountRow, InvImportLogRow, InvItemRow, InvKitContentRow, InvLabelPrintRow, InvLocationRow, InvMovementLineRow, InvMovementRow,
+  InvOperatorLocationRow, InvReadOnlyTable, InvRentalRow, InvRequestLineRow, InvRequestRow, InvReservationRow, InvTechnologyComponentRow,
+  InvTechnologyRow, InvTransferRow, InvUnitRow, InvJson, InvMyEquipmentRow, InvOutstandingRow, InvLegacyAssetRow,
+} from "./inventory";
+import type {
   ProjAuditLogRow, ProjBookingConflictRow, ProjChangeLogRow, ProjCompanyCalendarRow, ProjCompanyGrantRow, ProjCompanySettingsRow, ProjCompletionReviewRow,
   ProjCompletionRow, ProjDeliverableRow, ProjDirectoryRow, ProjExternalDependencyRow, ProjFeedbackRow, ProjFileRow, ProjHandoverRow, ProjHandoverStatusRow,
   ProjIssuedPlanRow, ProjMemberRow, ProjMessageFeedRow, ProjMessageMentionRow, ProjMessageRow, ProjMessageTombstoneRow, ProjMilestoneProgressRow,
@@ -1635,6 +1641,33 @@ export interface Database {
         Update: { status?: AiDraftStatus; authorized_by?: string | null; authorized_at?: string | null; reference_id?: string | null };
         Relationships: [];
       };
+      // Inventory (20261201000000-200): read-only to clients; every write is an inv_* function below.
+      inv_company_grants: InvReadOnlyTable<InvCompanyGrantRow>;
+      inv_audit_log: InvReadOnlyTable<InvAuditLogRow>;
+      inv_company_settings: InvReadOnlyTable<InvCompanySettingsRow>;
+      inv_locations: InvReadOnlyTable<InvLocationRow>;
+      inv_bins: InvReadOnlyTable<InvBinRow>;
+      inv_operator_locations: InvReadOnlyTable<InvOperatorLocationRow>;
+      inv_categories: InvReadOnlyTable<InvCategoryRow>;
+      inv_items: InvReadOnlyTable<InvItemRow>;
+      inv_rentals: InvReadOnlyTable<InvRentalRow>;
+      inv_transfers: InvReadOnlyTable<InvTransferRow>;
+      inv_units: InvReadOnlyTable<InvUnitRow>;
+      inv_balances: InvReadOnlyTable<InvBalanceRow>;
+      inv_kit_contents: InvReadOnlyTable<InvKitContentRow>;
+      inv_movements: InvReadOnlyTable<InvMovementRow>;
+      inv_movement_lines: InvReadOnlyTable<InvMovementLineRow>;
+      inv_costs: InvReadOnlyTable<InvCostRow>;
+      inv_label_prints: InvReadOnlyTable<InvLabelPrintRow>;
+      inv_technologies: InvReadOnlyTable<InvTechnologyRow>;
+      inv_technology_components: InvReadOnlyTable<InvTechnologyComponentRow>;
+      inv_requests: InvReadOnlyTable<InvRequestRow>;
+      inv_request_lines: InvReadOnlyTable<InvRequestLineRow>;
+      inv_reservations: InvReadOnlyTable<InvReservationRow>;
+      inv_availability_checks: InvReadOnlyTable<InvAvailabilityCheckRow>;
+      inv_counts: InvReadOnlyTable<InvCountRow>;
+      inv_count_lines: InvReadOnlyTable<InvCountLineRow>;
+      inv_import_log: InvReadOnlyTable<InvImportLogRow>;
       // Projects & Tasks (20261120000000-500): read-only to clients; every write is a proj_* function below.
       proj_company_grants: ProjReadOnlyTable<ProjCompanyGrantRow>;
       proj_audit_log: ProjReadOnlyTable<ProjAuditLogRow>;
@@ -1798,6 +1831,44 @@ export interface Database {
       crm_mark_upload_intent: { Args: { p_intent_id: string; p_status: string; p_reason?: string | null }; Returns: undefined };
       crm_expire_upload_intents: { Args: Record<string, never>; Returns: { quarantine_path: string; final_path: string; orphaned_validated: boolean }[] };
       crm_availability_needs_recheck: { Args: { p_opportunity_id: string }; Returns: boolean };
+      // Inventory functions (20261201000000-500). Writes are only these; the database enforces who may call what.
+      inv_has_access: { Args: { p_company_id: string }; Returns: boolean };
+      inv_has_capability: { Args: { p_company_id: string; p_capability: string }; Returns: boolean };
+      inv_grant_access: { Args: { p_user_id: string; p_company_id: string; p_capabilities?: string[]; p_note?: string | null }; Returns: string };
+      inv_revoke_access: { Args: { p_user_id: string; p_company_id: string }; Returns: undefined };
+      inv_set_company_code: { Args: { p_company_id: string; p_reference_code: string }; Returns: undefined };
+      inv_set_enabled: { Args: { p_company_id: string; p_enabled: boolean }; Returns: undefined };
+      inv_staff_directory: { Args: Record<string, never>; Returns: { user_id: string; full_name: string | null; email: string | null }[] };
+      inv_save_technology: { Args: { p_company_id: string; p_technology_id: string | null; p_name: string; p_description?: string | null; p_expected_version?: number | null }; Returns: string };
+      inv_save_technology_components: { Args: { p_technology_id: string; p_components: InvJson; p_expected_version?: number | null }; Returns: number };
+      inv_set_technology_status: { Args: { p_technology_id: string; p_status: string; p_expected_version?: number | null }; Returns: undefined };
+      inv_create_request: { Args: { p_kind: string; p_project_id?: string | null; p_employee_id?: string | null; p_title?: string | null; p_plan?: InvJson | null; p_timezone?: string | null; p_destination?: string | null; p_pickup_location_id?: string | null; p_note?: string | null }; Returns: string };
+      inv_save_request_plan: { Args: { p_request_id: string; p_plan: InvJson; p_timezone?: string | null; p_expected_version?: number | null }; Returns: InvJson };
+      inv_add_request_line: { Args: { p_request_id: string; p_item_id: string; p_qty: number; p_note?: string | null; p_expected_version?: number | null }; Returns: string };
+      inv_expand_technology: { Args: { p_request_id: string; p_technology_id: string; p_multiplier?: number; p_choices?: InvJson }; Returns: InvJson };
+      inv_update_request_line: { Args: { p_line_id: string; p_qty?: number | null; p_note?: string | null; p_expected_version?: number | null }; Returns: undefined };
+      inv_cancel_request_line: { Args: { p_line_id: string; p_reason?: string | null }; Returns: InvJson };
+      inv_submit_request: { Args: { p_request_id: string; p_expected_version?: number | null }; Returns: undefined };
+      inv_cancel_request: { Args: { p_request_id: string; p_reason?: string | null }; Returns: InvJson };
+      inv_propose_substitution: { Args: { p_line_id: string; p_item_id: string; p_note?: string | null; p_expected_version?: number | null }; Returns: undefined };
+      inv_decide_substitution: { Args: { p_line_id: string; p_accept: boolean; p_note?: string | null }; Returns: InvJson };
+      inv_set_shortage_action: { Args: { p_line_id: string; p_action: string; p_note?: string | null; p_rental_reference?: string | null }; Returns: undefined };
+      inv_reserve: { Args: { p_line_id: string; p_location_id: string; p_unit_ids?: string[] | null; p_qty?: number | null; p_shortage_action?: string | null; p_rental_reference?: string | null }; Returns: InvJson };
+      inv_release_reservation: { Args: { p_reservation_id: string; p_reason?: string | null }; Returns: InvJson };
+      inv_change_request_window: { Args: { p_request_id: string; p_plan: InvJson; p_timezone?: string | null; p_expected_version?: number | null }; Returns: InvJson };
+      inv_availability: { Args: { p_item_id: string; p_location_id: string; p_from: string; p_until: string }; Returns: InvJson };
+      inv_technology_availability: { Args: { p_technology_id: string; p_qty: number; p_location_id: string; p_from: string; p_until: string }; Returns: InvJson };
+      inv_request_opportunity_check: { Args: { p_opportunity_id: string; p_location_id?: string | null }; Returns: string };
+      inv_record_opportunity_check: { Args: { p_opportunity_id: string; p_location_id?: string | null; p_note?: string | null }; Returns: string };
+      inv_opportunity_availability: { Args: { p_opportunity_id: string }; Returns: InvJson };
+      inv_project_equipment: { Args: { p_project_id: string }; Returns: InvJson };
+      inv_import_handover_requirements: { Args: { p_project_id: string }; Returns: string };
+      inv_employee_lookup: { Args: { p_company_id: string; p_query: string }; Returns: { employee_id: string; display_name: string; employee_number: string; department_name: string | null }[] };
+      inv_my_equipment: { Args: Record<string, never>; Returns: InvMyEquipmentRow[] };
+      inv_employee_outstanding: { Args: { p_company_id: string; p_employee_id?: string | null; p_include_inactive?: boolean }; Returns: InvOutstandingRow[] };
+      inv_reassign_unit: { Args: { p_unit_id: string; p_to: string; p_employee_id: string | null; p_reason: string; p_key: string }; Returns: InvJson };
+      inv_preview_legacy_assets: { Args: { p_company_id: string }; Returns: InvLegacyAssetRow[] };
+      inv_import_legacy_assets: { Args: { p_company_id: string; p_rows: InvJson }; Returns: InvJson };
       // Projects & Tasks functions (20261120000000-500). Writes are only these; the database enforces who may call what.
       proj_has_access: { Args: { p_company_id: string }; Returns: boolean };
       proj_has_capability: { Args: { p_company_id: string; p_capability: string }; Returns: boolean };

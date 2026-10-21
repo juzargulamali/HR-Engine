@@ -21,3 +21,4 @@ export * from "./performance";
 export * from "./dashboard";
 export * from "./crm";
 export * from "./proj";
+export * from "./inv";

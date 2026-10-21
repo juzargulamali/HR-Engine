@@ -35,7 +35,15 @@ create or replace function inv_local_to_utc(p_local timestamp, p_tz text)
 returns timestamptz
 language sql stable
 as $$
-  select p_local at time zone p_tz;
+  select case
+    -- A time that does not exist (the hour skipped when clocks go forward): the first real instant after the gap.
+    when (p_local at time zone p_tz) at time zone p_tz is distinct from p_local
+      then (date_trunc('hour', p_local) + interval '1 hour') at time zone p_tz
+    -- A time that happens twice (clocks go back): the FIRST occurrence (summer time).
+    when ((p_local at time zone p_tz) - interval '1 hour') at time zone p_tz = p_local
+      then (p_local at time zone p_tz) - interval '1 hour'
+    else p_local at time zone p_tz
+  end;
 $$;
 
 -- Is the unit usable right now, as a thing a person could pick up from a shelf? Reservations do not matter here (separate dimension).

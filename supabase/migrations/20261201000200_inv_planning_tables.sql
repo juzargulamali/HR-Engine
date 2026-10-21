@@ -230,7 +230,7 @@ as $$
     select 1 from inv_requests r
     where r.id = p_request_id
       and (inv_can_view_stock(r.company_id)
-           or r.requested_by = auth.uid()
+           or (r.employee_id is not null and r.requested_by = auth.uid() and inv_has_access(r.company_id))
            or (r.project_id is not null and proj_can_view_details(r.project_id))
            or (r.employee_id is not null and exists (select 1 from employees e where e.id = r.employee_id and e.user_id = auth.uid()))
            or (r.employee_id is not null and inv_has_capability(r.company_id, 'view_employee_custody'))));
