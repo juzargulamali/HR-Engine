@@ -69,7 +69,7 @@ function Section({ title, description, children }: { title: string; description?
 }
 
 /** A plain select with a small search box above it (the list of organisations gets long). */
-function OrganisationPicker({
+export function OrganisationPicker({
   id, name, label, hint, value, onChange, organisations, preferredKinds, onAdd,
 }: {
   id: string;
@@ -105,7 +105,7 @@ function OrganisationPicker({
   );
 }
 
-function DuplicateWarning({ matches, onDismiss }: { matches: DuplicateMatch[]; onDismiss: (id: string) => void }) {
+export function DuplicateWarning({ matches, onDismiss }: { matches: DuplicateMatch[]; onDismiss: (id: string) => void }) {
   if (matches.length === 0) return null;
   return (
     <section aria-label="Possible duplicate enquiry" role="status" className="space-y-3 rounded-lg border border-warning/50 bg-warning/10 p-4">

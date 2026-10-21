@@ -24,6 +24,16 @@ const optionalInt = z.preprocess((v) => (v === "" || v == null ? undefined : v),
 const fail = (message: string): ActionState => ({ error: friendlyCrmError(message) });
 const firstIssue = (e: z.ZodError) => e.issues[0]?.message ?? "Invalid input.";
 
+/**
+ * Says at once when the enquiry has moved on since the person loaded it. The database still makes the real check (and refuses), but
+ * a refusal there is slow (see RPC_TIMEOUT_MS), so the ordinary case is answered here, in words, before anything is sent.
+ */
+async function staleMessage(supabase: Awaited<ReturnType<typeof createClient>>, id: string, expected: number | null | undefined): Promise<string | null> {
+  if (expected == null || !Number.isFinite(expected)) return null;
+  const { data } = await supabase.from("crm_opportunities").select("version").eq("id", id).maybeSingle();
+  return data && data.version !== expected ? "This enquiry was changed by someone else. Reload the page to see the latest version, then make your change again." : null;
+}
+
 function refresh(id?: string) {
   revalidatePath("/sales", "layout");
   if (id) revalidatePath(`/sales/opportunities/${id}`);
@@ -106,7 +116,8 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
   });
   if (error) return fail(error.message);
   refresh();
-  redirect(`/sales/opportunities/${data}`);
+  // The quick-add dialog asks to land on the list with the new enquiry open in the side panel; anything else keeps the full page.
+  redirect(formData.get("after") === "panel" ? `/sales/opportunities?open=${data}` : `/sales/opportunities/${data}`);
 }
 
 const patchFields = {
@@ -141,6 +152,7 @@ export async function updateOpportunity(_prev: ActionState, formData: FormData):
   }
   if (Object.keys(patch).length === 0) return { error: "Nothing to save." };
   const supabase = await createClient();
+  { const stale = await staleMessage(supabase, id.data, Number.isFinite(version) ? version : null); if (stale) return { error: stale }; }
   const { error } = await supabase.rpc("crm_update_opportunity", { p_id: id.data, p_expected_version: Number.isFinite(version) ? version : null, p_patch: patch });
   if (error) return fail(error.message);
   refresh(id.data);
@@ -150,6 +162,7 @@ export async function updateOpportunity(_prev: ActionState, formData: FormData):
 export async function moveStage(id: string, to: string, expectedVersion: number): Promise<ActionState> {
   if (!uuid.safeParse(id).success) return { error: "Missing opportunity." };
   const supabase = await createClient();
+  { const stale = await staleMessage(supabase, id, expectedVersion); if (stale) return { error: stale }; }
   const { error } = await supabase.rpc("crm_move_stage", { p_id: id, p_to: to, p_expected_version: expectedVersion });
   if (error) return fail(error.message);
   refresh(id);
@@ -164,6 +177,7 @@ export async function holdOpportunity(_prev: ActionState, formData: FormData): P
   const p = holdSchema.safeParse(Object.fromEntries(formData));
   if (!p.success) return { error: firstIssue(p.error) };
   const supabase = await createClient();
+  { const stale = await staleMessage(supabase, p.data.id, p.data.expectedVersion); if (stale) return { error: stale }; }
   const { error } = await supabase.rpc("crm_hold_opportunity", { p_id: p.data.id, p_reason: p.data.reason, p_review_date: p.data.reviewDate, p_expected_version: p.data.expectedVersion ?? null });
   if (error) return fail(error.message);
   refresh(p.data.id);
@@ -180,6 +194,7 @@ export async function resumeOpportunity(_prev: ActionState, formData: FormData):
   const due = dueIso(p.data.nextDate, p.data.nextTime);
   if (!due) return { error: "The next action needs a valid date and time." };
   const supabase = await createClient();
+  { const stale = await staleMessage(supabase, p.data.id, p.data.expectedVersion); if (stale) return { error: stale }; }
   const { error } = await supabase.rpc("crm_resume_opportunity", { p_id: p.data.id, p_next_title: p.data.nextTitle, p_next_due: due, p_next_kind: p.data.nextKind, p_expected_version: p.data.expectedVersion ?? null });
   if (error) return fail(error.message);
   refresh(p.data.id);
@@ -195,9 +210,12 @@ export async function markWon(_prev: ActionState, formData: FormData): Promise<A
   const p = wonSchema.safeParse(Object.fromEntries(formData));
   if (!p.success) return { error: firstIssue(p.error) };
   const supabase = await createClient();
+  { const stale = await staleMessage(supabase, p.data.id, p.data.expectedVersion); if (stale) return { error: stale }; }
   const { error } = await supabase.rpc("crm_mark_won", { p_id: p.data.id, p_evidence_type: p.data.evidenceType, p_evidence_reference: p.data.evidenceReference, p_evidence_date: p.data.evidenceDate, p_note: p.data.note ?? null, p_expected_version: p.data.expectedVersion ?? null });
   if (error) return fail(error.message);
   refresh(p.data.id);
+  // From a dialog (side panel, board) the person stays where they are; the page behind refreshes with the new stage.
+  if (formData.get("after") === "stay") return { error: null };
   redirect(`/sales/opportunities/${p.data.id}`);
 }
 
@@ -206,9 +224,11 @@ export async function markLost(_prev: ActionState, formData: FormData): Promise<
   const p = lostSchema.safeParse(Object.fromEntries(formData));
   if (!p.success) return { error: firstIssue(p.error) };
   const supabase = await createClient();
+  { const stale = await staleMessage(supabase, p.data.id, p.data.expectedVersion); if (stale) return { error: stale }; }
   const { error } = await supabase.rpc("crm_mark_lost", { p_id: p.data.id, p_reason: p.data.reason, p_expected_version: p.data.expectedVersion ?? null });
   if (error) return fail(error.message);
   refresh(p.data.id);
+  if (formData.get("after") === "stay") return { error: null };
   redirect(`/sales/opportunities/${p.data.id}`);
 }
 
@@ -352,6 +372,7 @@ export async function reopenOpportunity(_prev: ActionState, formData: FormData):
   const due = dueIso(p.data.nextDate, p.data.nextTime);
   if (!due) return { error: "The new next action needs a valid date and time." };
   const supabase = await createClient();
+  { const stale = await staleMessage(supabase, p.data.id, p.data.expectedVersion); if (stale) return { error: stale }; }
   const { error } = await supabase.rpc("crm_reopen_opportunity", {
     p_id: p.data.id, p_reason: p.data.reason, p_next_title: p.data.nextTitle, p_next_due: due, p_next_kind: p.data.nextKind,
     p_to_stage: p.data.toStage ?? null, p_expected_version: p.data.expectedVersion ?? null,

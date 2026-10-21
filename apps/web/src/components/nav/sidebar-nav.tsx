@@ -83,7 +83,7 @@ export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: 
           isActive ? "bg-accent/15 font-semibold text-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground",
         );
         const link = (
-          <Link href={m.href} onClick={onNavigate} aria-current={isActive && (!hasSub || sub === m.href) ? "page" : undefined} className={rowClass}>
+          <Link href={m.href} onClick={onNavigate} aria-current={isActive && (!hasSub || (!open && sub === m.href)) ? "page" : undefined} className={rowClass}>
             {isActive ? <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-accent" aria-hidden /> : null}
             <Icon className="h-4 w-4 flex-none" aria-hidden />
             {collapsed ? <span className="sr-only">{m.label}</span> : <span className="truncate">{m.label}</span>}
@@ -115,8 +115,8 @@ export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: 
               <div className="mb-1.5 ml-[1.4rem] mt-0.5 flex flex-col gap-0.5 border-l border-border pl-2.5">
                 {m.sections.map((s) => (
                   <div key={s.label} className="flex flex-col gap-px">
-                    {m.sections.length > 1 ? <p className="px-2.5 pb-0.5 pt-2 text-[13px] font-semibold uppercase tracking-[0.08em] text-subtle">{s.label}</p> : null}
-                    {s.links.map((l) => {
+                    {m.sections.length > 1 && s.label !== m.label ? <p className="px-2.5 pb-0.5 pt-2 text-[13px] font-semibold uppercase tracking-[0.08em] text-subtle">{s.label}</p> : null}
+                    {s.links.filter((l) => !l.secondary).map((l) => {
                       if (l.comingSoon) {
                         return (
                           <div key={l.label} aria-disabled="true" className="rounded-md px-2.5 py-1.5 text-subtle">

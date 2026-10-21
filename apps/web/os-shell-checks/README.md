@@ -14,8 +14,20 @@ cd apps/web && VERCEL_ENV=production npx next build && VERCEL_ENV=production npx
 # 2. checks (each prints PASS/FAIL lines and a verdict)
 node os-shell-checks/sales-actions.mjs                       # the real Sales operations end to end (create, stages, hold, availability, links,
                                                              # proposal, Zoho reference, contacts, Won + handover, founder reopen, reports)
-node os-shell-checks/projects-flow.mjs                      # Projects & Tasks end to end (needs the Projects seed: see below): Sales handover, PM acceptance, team, milestones, tasks and review,
-                                                             # timelines, site bookings and overlaps, calendars, discussion, scope change, client timeline PDF, completion and reopening, internal project
+node os-shell-checks/sales-workspace.mjs                     # the simplified Sales workspace (needs the sample scenario below, reseed before each run): Follow-ups groups, completing a
+                                                             # follow-up never marks Won, Enquiries table (search, filters, sort, Columns), Table/Board, side panel (?open=, Back, unsaved
+                                                             # prompt, stale edit), Board moves and refusals, Quick Add, owner picker, authorisation boundaries
+node os-shell-checks/projects-flow.mjs                      # Projects & Tasks end to end through the simplified screens (needs the Projects seed: see below; reseed before each run): Sales handover,
+                                                             # PM acceptance, team, milestones (Plan menu), Add task, in-place status and review rules, due-date change with dependents, Plan (Delivery / Site,
+                                                             # List / Calendar / Timeline, legacy addresses), site bookings and overlaps, Quick Add internal project, calendars, summary-only access,
+                                                             # discussion, scope change, client timeline PDF, completion, reopening (Manage menu)
+node os-shell-checks/projects-workspace.mjs                  # the simplified Projects workspace (needs the sample scenario below, reseed before each run): directory table (search, filters, sort), Board and its status
+                                                             # form, summary panel, Next milestone only for members and founders (also absent from the page HTML), My Work (filters, Board, columns, My projects),
+                                                             # quick changes by role, task panel (Back, direct address, unsaved text, stale edit), Work grouping, review queue, Jump to task, Manage menu,
+                                                             # cross-company isolation, revoked grant and membership, HR tables unchanged
+node os-shell-checks/a11y-states.mjs                         # keyboard and focus (Tab reach, focus ring, dialog focus and Escape, panel focus and return, Board Move to, My Work status),
+                                                             # axe (WCAG 2.1 A/AA + best practice, serious/critical) on 13 pages x desktop/phone x dark/light, and "an error is not an empty list":
+                                                             # with OUTAGE_STOP_CMD / OUTAGE_START_CMD set it stops the data service while pages load (needs the sample scenario)
 node os-shell-checks/shell-checks.mjs                        # navigation per persona, Coming soon, titles, mobile bar/drawer, keyboard, theme persistence,
                                                              # clock status, /os-preview blocked
 node os-shell-checks/phone-fit.mjs                           # 360 and 390 px, dark + light, 26 pages: no horizontal scroll, no clipped bottom-bar label, nothing under the bar
@@ -33,3 +45,13 @@ The token-level guard that runs in CI is `src/app/theme-contrast.test.ts`.
 reference code, Projects access (`proj_company_grants`: ceo@ founder; mgr@ = the Project Manager, lead@ = a department head, hr@ = a project
 member who is also an HR admin, hr1@ = directory only; admin@ none), `proj_company_settings` (UAE), and one **Won** opportunity owned by emp@. It then
 does everything else through the real screens. `phone-fit.mjs` and `contrast-audit.mjs` include the Projects pages when a project exists.
+
+## Sample scenario (local stack only)
+
+`sales-workspace.mjs`, `workflow-steps.mjs` and the Projects checks expect the shared sample scenario: the Projects seed above plus four open
+enquiries owned by emp@ (one overdue, one due today, two upcoming), a Won enquiry with an accepted handover, one client project with a
+Programming team, tasks (one overdue, one waiting for review) and a short discussion. `sales-actions.mjs` instead starts from the Sales grants
+only (an empty Sales database). Both write to the database they drive: reseed before every run.
+
+`phone-fit.mjs` and `contrast-audit.mjs` cover the list, board, side panel, Quick Add and menu states of the new Sales and Projects workspaces
+(and skip a panel only where the signed-in person legitimately has no access, for example Sales for a Projects-only user).

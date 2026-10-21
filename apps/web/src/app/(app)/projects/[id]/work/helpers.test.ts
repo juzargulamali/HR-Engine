@@ -3,7 +3,7 @@ import type { ProjectStanding } from "@enginious-hr/domain";
 import type { ProjDeliverableRow, ProjProjectPersonRow, ProjTaskRow, ProjTeamRow } from "@/types/projects";
 import {
   deliverableMoves, describeTaskEvent, dueWords, filterTasks, groupDeliverables, hasActiveFilters, isTaskOverdue, milestoneMoves, newTaskOptions, parseTaskFilters,
-  reviewQueue, sortTasks, taskCountsByDeliverable, taskRowFields, DEFAULT_TASK_FILTERS,
+  quickAssigneeChoices, reviewQueue, showChoiceOf, sortTasks, taskCountsByDeliverable, taskRowFields, DEFAULT_TASK_FILTERS,
 } from "./helpers";
 
 const U = "11111111-1111-4111-8111-111111111111";
@@ -29,13 +29,27 @@ describe("parseTaskFilters", () => {
   });
   it("accepts valid filters, takes the first of repeated parameters, and clamps ids", () => {
     const f = parseTaskFilters({ status: ["done", "all"], assignee: U, team: TEAM, mine: "1", overdue: "1", blocked: "1", deliverable: T2 });
-    expect(f).toEqual({ assignee: U, status: "done", team: TEAM, deliverable: T2, mine: true, overdue: true, blocked: true });
+    expect(f).toEqual({ assignee: U, status: "done", team: TEAM, deliverable: T2, mine: true, overdue: true, blocked: true, q: "" });
     expect(parseTaskFilters({ status: "all" }).status).toBe("all");
+  });
+  it("reads the toolbar's single Show choice, a search text, and old multi-flag bookmarks the same way", () => {
+    expect(parseTaskFilters({ show: "overdue" })).toMatchObject({ overdue: true, mine: false, blocked: false });
+    expect(parseTaskFilters({ show: "mine" }).mine).toBe(true);
+    expect(parseTaskFilters({ show: "everything" })).toEqual(DEFAULT_TASK_FILTERS);
+    expect(parseTaskFilters({ q: "  truss  " }).q).toBe("truss");
+    expect(parseTaskFilters({ q: "x".repeat(300) }).q).toHaveLength(100);
+    expect(showChoiceOf({ mine: false, overdue: true, blocked: true })).toBe("overdue");
+    expect(showChoiceOf({ mine: false, overdue: false, blocked: false })).toBe("");
+  });
+  it("searches titles and descriptions, ignoring case", () => {
+    const tasks = [task({ id: "1", title: "Truss delivery" }), task({ id: "2", title: "Other", description: "about the TRUSS" }), task({ id: "3", title: "Nothing" })];
+    expect(filterTasks(tasks, { ...DEFAULT_TASK_FILTERS, q: "truss" }, U, "2026-10-20").map((t) => t.id)).toEqual(["1", "2"]);
   });
   it("reports when a filter is active", () => {
     expect(hasActiveFilters(DEFAULT_TASK_FILTERS)).toBe(false);
     expect(hasActiveFilters({ ...DEFAULT_TASK_FILTERS, status: "all" })).toBe(true);
     expect(hasActiveFilters({ ...DEFAULT_TASK_FILTERS, mine: true })).toBe(true);
+    expect(hasActiveFilters({ ...DEFAULT_TASK_FILTERS, q: "x" })).toBe(true);
   });
 });
 
@@ -169,5 +183,26 @@ describe("status options and history", () => {
     expect(describeTaskEvent({ kind: "status_changed", from_value: "todo", to_value: "ready_for_review", note: null }, date)).toBe("Status changed from To do to Ready for review.");
     expect(describeTaskEvent({ kind: "blocked", from_value: null, to_value: "Waiting for truss", note: "Standbuilder delivers" }, date)).toBe("Blocked: Waiting for truss. To unblock: Standbuilder delivers");
     expect(describeTaskEvent({ kind: "created", from_value: null, to_value: "Sam", note: null }, date)).toBe("Created and assigned to Sam.");
+  });
+});
+
+describe("quickAssigneeChoices", () => {
+  const people = [person(U, null, "Ann"), person("b", TEAM, "Bea"), person("c", TEAM, "Cy"), person("d", T2, "Dee")];
+  const teams = [team(TEAM, "Programming", "b"), team(T2, "Hardware", "d")];
+  const base = { userId: "b", myTeamId: TEAM, people, teams, deliverables: [] as never[] };
+  it("offers a Project Manager everyone, filed under no team", () => {
+    const o = newTaskOptions({ ...base, standing: standing({ isPm: true }), manager: true });
+    const c = quickAssigneeChoices(o, true);
+    expect(c.map((x) => x.name)).toEqual(["Ann", "Bea", "Cy", "Dee"]);
+    expect(c.every((x) => x.teamId === "")).toBe(true);
+  });
+  it("offers a plain member only themself, with no team", () => {
+    const o = newTaskOptions({ ...base, userId: "c", standing: standing(), manager: false });
+    expect(quickAssigneeChoices(o, false)).toEqual([{ id: "c", name: "Cy", teamId: "" }]);
+  });
+  it("offers a department head themself (no team) and their team members (filed under the team), and nobody from other teams", () => {
+    const o = newTaskOptions({ ...base, standing: standing({ headOfTeamIds: [TEAM] }), manager: false });
+    const c = quickAssigneeChoices(o, false);
+    expect(c.map((x) => [x.name, x.teamId])).toEqual([["Bea", ""], ["Cy", TEAM]]);
   });
 });

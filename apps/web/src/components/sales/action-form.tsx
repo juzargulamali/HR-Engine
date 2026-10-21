@@ -1,9 +1,10 @@
 "use client";
 
-import { startTransition, useActionState, useEffect, useRef } from "react";
+import { startTransition, useActionState, useEffect, useId, useRef, useState } from "react";
 import type { ActionState } from "@/lib/actions/companies";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { useUnsavedChanges } from "@/components/workspace/unsaved";
 
 type Action = (prev: ActionState & { id?: string }, formData: FormData) => Promise<ActionState & { id?: string }>;
 type S = ActionState & { id?: string };
@@ -26,6 +27,9 @@ export function ActionForm({
   variant?: "default" | "destructive" | "outline" | "secondary";
 }) {
   const formRef = useRef<HTMLFormElement>(null);
+  // Edits that are not saved yet are registered, so closing the side panel or opening another record asks first.
+  const [edited, setEdited] = useState(false);
+  useUnsavedChanges(useId(), edited);
   // onDone / reset run inside the action wrapper, not in an effect: a successful save often changes what the page
   // shows (revalidation can unmount this very form, e.g. the last item leaves a picker), and an effect would then never
   // run, leaving a dialog open after the work was done.
@@ -38,6 +42,7 @@ export function ActionForm({
   const wrapped = async (prev: S, formData: FormData): Promise<S> => {
     const result = await action(prev, formData);
     if (result.error === null) {
+      setEdited(false);
       if (resetRef.current) formRef.current?.reset();
       onDoneRef.current?.(result);
     }
@@ -47,6 +52,8 @@ export function ActionForm({
   return (
     <form
       ref={formRef}
+      onInput={() => setEdited(true)}
+      onChange={() => setEdited(true)}
       // Submitting through onSubmit (not <form action>) stops React 19 resetting the fields after a REFUSED save, so a
       // person never loses what they typed; a successful save resets or closes it explicitly (resetOnSuccess / onDone).
       onSubmit={(e) => {

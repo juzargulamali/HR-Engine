@@ -25,7 +25,7 @@ export function AppShell({
   hasPendingApprovals?: boolean;
   crmGrants?: readonly CrmGrant[];
   /** Projects access (own grants, Sales link, waiting handover). Absent means none: the module is then not shown. */
-  projects?: { grants: readonly ProjGrant[]; salesLinked?: boolean; pendingHandovers?: boolean };
+  projects?: { grants: readonly ProjGrant[]; salesLinked?: boolean; pendingHandovers?: boolean; managesProjects?: boolean };
   children: React.ReactNode;
 }) {
   const roleLabels = roleLabelsFor(session.grants);

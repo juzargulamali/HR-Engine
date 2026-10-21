@@ -20,7 +20,7 @@ export interface MilestoneFormValues {
 }
 
 /** Add or edit a milestone. Changing the due date asks for a reason, because the history of date changes is kept. */
-function MilestoneForm({ projectId, milestone, onDone }: { projectId: string; milestone?: MilestoneFormValues; onDone: () => void }) {
+export function MilestoneForm({ projectId, milestone, onDone }: { projectId: string; milestone?: MilestoneFormValues; onDone: () => void }) {
   const [due, setDue] = useState(milestone?.due_date ?? "");
   const dateChanged = Boolean(milestone) && due !== (milestone?.due_date ?? "");
   return (

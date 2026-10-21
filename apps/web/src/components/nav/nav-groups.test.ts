@@ -179,7 +179,7 @@ describe("ENGINIOUS OS modules", () => {
     const grants = [{ companyId: "company-1", capabilities: [] as never[] }];
     const withAccess = buildNavModules([], { crmGrants: grants });
     expect(withAccess.map((m) => m.id)).toContain("sales");
-    expect(withAccess.find((m) => m.id === "sales")?.href).toBe("/sales");
+    expect(withAccess.find((m) => m.id === "sales")?.href).toBe("/sales/follow-ups");
     for (const hr of [grant("hr_admin"), grant("ceo"), grant("sys_admin"), grant("finance")]) {
       expect(hrefsOf(buildNavModules([hr]))).not.toContain("/sales");
       expect(buildNavModules([hr], { crmGrants: [] }).map((m) => m.id)).not.toContain("sales");
@@ -188,7 +188,7 @@ describe("ENGINIOUS OS modules", () => {
 
   it("shows Sales Settings only to people who can manage them, and Access only to those who can manage access", () => {
     const plain = hrefsOf(buildNavModules([], { crmGrants: [{ companyId: "c1", capabilities: [] }] }));
-    expect(plain).toEqual(expect.arrayContaining(["/sales", "/sales/opportunities", "/sales/pipeline", "/sales/follow-ups", "/sales/proposals", "/sales/clients", "/sales/reports"]));
+    expect(plain).toEqual(expect.arrayContaining(["/sales/follow-ups", "/sales/opportunities", "/sales/reports", "/sales/clients", "/sales/proposals"]));
     expect(plain).not.toContain("/sales/settings");
     expect(plain).not.toContain("/sales/access");
     const settingsOnly = hrefsOf(buildNavModules([], { crmGrants: [{ companyId: "c1", capabilities: ["manage_settings"] }] }));
@@ -223,7 +223,8 @@ describe("active module and breadcrumb", () => {
   it.each([
     ["/", "my-day"],
     ["/approvals", "approvals"],
-    ["/sales", "sales"],
+    ["/sales/follow-ups", "sales"],
+    ["/sales/clients", "sales"],
     ["/sales/opportunities/abc", "sales"],
     ["/employees/123", "people"],
     ["/attendance", "people"],
@@ -237,11 +238,60 @@ describe("active module and breadcrumb", () => {
     expect(activeModuleId("/account/security", modules)).toBeNull();
   });
   it("names the module and the most specific page", () => {
-    expect(breadcrumbFor("/sales/opportunities/abc", modules)).toEqual({ module: "Sales & CRM", page: "Opportunities" });
+    expect(breadcrumbFor("/sales/opportunities/abc", modules)).toEqual({ module: "Sales & CRM", page: "Enquiries" });
     expect(breadcrumbFor("/attendance-clock", modules)).toEqual({ module: "People & HR", page: "My Attendance Clock" });
     expect(breadcrumbFor("/attendance", modules)).toEqual({ module: "People & HR", page: "Attendance" });
     expect(breadcrumbFor("/", modules)).toEqual({ module: "My Day", page: null });
-    expect(breadcrumbFor("/sales", modules)).toEqual({ module: "Sales & CRM", page: null });
+    expect(breadcrumbFor("/sales/follow-ups", modules)).toEqual({ module: "Sales & CRM", page: null });
+  });
+});
+
+/** What the sidebar actually lists: secondary destinations are left out (they stay reachable by search and from the pages that own them). */
+function menuLabels(modules: NavModuleData[], id: string): string[] {
+  return (modules.find((m) => m.id === id)?.sections ?? []).flatMap((s) => s.links.filter((l) => !l.secondary && !l.comingSoon).map((l) => l.label));
+}
+
+describe("simplified Sales & CRM menu", () => {
+  const founder = buildNavModules([], { crmGrants: [{ companyId: "c1", capabilities: ["founder"] }] });
+  const plain = buildNavModules([], { crmGrants: [{ companyId: "c1", capabilities: [] }] });
+
+  it("lists three destinations for an ordinary salesperson, and nothing for settings or access", () => {
+    expect(menuLabels(plain, "sales")).toEqual(["Follow-ups", "Enquiries", "Reports"]);
+  });
+  it("puts Settings and Access under their own Manage heading, only for those who may use them", () => {
+    expect(menuLabels(founder, "sales")).toEqual(["Follow-ups", "Enquiries", "Reports", "Settings", "Access"]);
+    const manage = founder.find((m) => m.id === "sales")?.sections.find((s) => s.label === "Manage");
+    expect(manage?.links.map((l) => l.href)).toEqual(["/sales/settings", "/sales/access"]);
+    expect(plain.find((m) => m.id === "sales")?.sections.some((s) => s.label === "Manage")).toBe(false);
+  });
+  it("keeps contacts, proposals, the pipeline board and the full new-enquiry form out of the menu but findable", () => {
+    const secondary = founder.find((m) => m.id === "sales")!.sections.flatMap((s) => s.links.filter((l) => l.secondary).map((l) => l.href));
+    expect(secondary).toEqual(expect.arrayContaining(["/sales/clients", "/sales/proposals", "/sales/pipeline", "/sales/opportunities?add=1"]));
+    const palette = navGroupsFromModules(founder).find((g) => g.label === "Sales & CRM")!.links.map((l) => l.label);
+    expect(palette).toEqual(expect.arrayContaining(["Follow-ups", "Enquiries", "Reports", "Clients & contacts", "Proposals & quotes", "Pipeline board", "New enquiry", "Settings", "Access"]));
+  });
+});
+
+describe("simplified Projects & Tasks menu", () => {
+  const mk = (capabilities: string[] = [], extra: { salesLinked?: boolean; pendingHandovers?: boolean; managesProjects?: boolean } = {}) =>
+    buildNavModules([], { projects: { grants: [{ companyId: "c1", capabilities: capabilities as never[] }], ...extra } });
+
+  it("lists My Work, Projects and Calendar for everyone with access", () => {
+    expect(menuLabels(mk(), "projects")).toEqual(["My Work", "Projects", "Calendar"]);
+  });
+  it("opens on My Work for people who only take part, and on the directory for founders, PM assigners and Project Managers", () => {
+    expect(mk().find((m) => m.id === "projects")?.href).toBe("/projects/work");
+    expect(mk(["founder"]).find((m) => m.id === "projects")?.href).toBe("/projects");
+    expect(mk(["assign_pm"]).find((m) => m.id === "projects")?.href).toBe("/projects");
+    expect(mk([], { managesProjects: true }).find((m) => m.id === "projects")?.href).toBe("/projects");
+    expect(buildNavModules([], { projects: { grants: [], salesLinked: true } }).find((m) => m.id === "projects")?.href).toBe("/projects");
+  });
+  it("puts Handovers and Access under Manage for those who may use them, and New internal project out of the menu", () => {
+    expect(menuLabels(mk(["founder"]), "projects")).toEqual(["My Work", "Projects", "Calendar", "Handovers", "Access"]);
+    expect(menuLabels(mk([], { pendingHandovers: true }), "projects")).toEqual(["My Work", "Projects", "Calendar", "Handovers"]);
+    const secondary = mk(["assign_pm"]).find((m) => m.id === "projects")!.sections.flatMap((s) => s.links.filter((l) => l.secondary).map((l) => l.href));
+    expect(secondary).toEqual(["/projects/new"]);
+    expect(menuLabels(mk(), "projects")).not.toContain("Handovers");
   });
 });
 

@@ -1,6 +1,7 @@
 import { hasCrmCapability, isAnyCrmFounder } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
 import { SalesTabs, type SalesTab } from "@/components/sales/sales-tabs";
+import { LoadError } from "@/components/workspace/states";
 import { getCrmContext } from "@/lib/crm/context";
 
 /**
@@ -10,6 +11,14 @@ import { getCrmContext } from "@/lib/crm/context";
 export default async function SalesLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getCrmContext();
   if (!ctx) return null;
+  if (ctx.loadFailed) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-semibold">Sales &amp; CRM</h1>
+        <LoadError what="Sales & CRM" />
+      </div>
+    );
+  }
   if (ctx.grants.length === 0) {
     return (
       <div className="space-y-4">
@@ -20,13 +29,10 @@ export default async function SalesLayout({ children }: { children: React.ReactN
   }
   const manageSettings = ctx.grants.some((g) => hasCrmCapability([g], g.companyId, "manage_settings"));
   const manageAccess = ctx.grants.some((g) => hasCrmCapability([g], g.companyId, "manage_access"));
+  // The same short list as the sidebar: contacts and proposals are reached from Enquiries, settings and access from Manage.
   const tabs: SalesTab[] = [
-    { href: "/sales", label: "Overview" },
-    { href: "/sales/opportunities", label: "Opportunities" },
-    { href: "/sales/pipeline", label: "Pipeline" },
     { href: "/sales/follow-ups", label: "Follow-ups" },
-    { href: "/sales/proposals", label: "Proposals" },
-    { href: "/sales/clients", label: "Clients" },
+    { href: "/sales/opportunities", label: "Enquiries" },
     { href: "/sales/reports", label: "Reports" },
     ...(manageSettings || isAnyCrmFounder(ctx.grants) ? [{ href: "/sales/settings", label: "Settings" }] : []),
     ...(manageAccess ? [{ href: "/sales/access", label: "Access" }] : []),

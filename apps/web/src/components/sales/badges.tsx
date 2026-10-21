@@ -49,7 +49,7 @@ export function DueText({ dueAt, className }: { dueAt: string; className?: strin
   const timing = followUpTiming(dueAt);
   const days = daysOverdue(dueAt);
   return (
-    <span className={cn("whitespace-nowrap", timing === "overdue" && "font-medium text-destructive", timing === "due_today" && "font-medium text-amber-800 dark:text-amber-300", className)}>
+    <span className={cn("whitespace-nowrap max-sm:whitespace-normal", timing === "overdue" && "font-medium text-destructive", timing === "due_today" && "font-medium text-amber-800 dark:text-amber-300", className)}>
       {formatDateTime(dueAt)}
       {timing === "overdue" ? ` · overdue${days > 0 ? ` ${days}d` : ""}` : timing === "due_today" ? " · due today" : ""}
     </span>

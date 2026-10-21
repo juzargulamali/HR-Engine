@@ -28,6 +28,8 @@ export interface CrmContext {
   people: CrmPerson[];
   personName: (id: string | null | undefined) => string;
   companyName: (id: string) => string;
+  /** True when the grants could not be read (the data service did not answer): nothing is granted, and the page says it could not load rather than "no access". */
+  loadFailed?: boolean;
 }
 
 export const displayNameFor = (p: { full_name: string | null; email: string | null }) =>
@@ -44,11 +46,12 @@ export const getCrmContext = cache(async (): Promise<CrmContext | null> => {
   if (!session) return null;
   const supabase = await createClient();
 
-  const { data: grantRows } = await supabase
+  const { data: grantRows, error: grantError } = await supabase
     .from("crm_company_grants")
     .select("company_id, capabilities")
     .eq("user_id", session.userId)
     .is("revoked_at", null);
+  if (grantError) return { userId: session.userId, fullName: session.fullName, grants: [], companies: [], people: [], personName: () => "Unknown", companyName: () => "Unknown", loadFailed: true };
   const grants: CrmGrant[] = (grantRows ?? []).map((g) => ({ companyId: g.company_id, capabilities: g.capabilities as CrmCapability[] }));
 
   if (grants.length === 0) {

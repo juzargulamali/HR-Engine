@@ -18,7 +18,7 @@ order, and each step has a check before the next one. Design and decisions: [pro
 
 | | |
 |---|---|
-| **Added** | A **Projects & Tasks** area in the existing app (`/projects`): directory, My Work, calendars, handovers, per-project Overview, Milestones & tasks, Timelines & site, Calendar, People, Discussion, Feedback & changes, Documents (incl. client timeline PDF), History, completion. Thirty-two new `proj_*` tables, controlled database functions, two private storage buckets. |
+| **Added** | A **Projects & Tasks** area in the existing app (`/projects`): My Work, the project directory, calendars, handovers, and per project Overview, Work, Plan (timelines and site), Discussion, with a Manage project menu for people, status, feedback and changes, documents (incl. client timeline PDF), history and completion (current navigation: [os-workflow-simplification.md](./os-workflow-simplification.md)). Thirty-two new `proj_*` tables, controlled database functions, two private storage buckets. |
 | **Not touched** | Every HR table, policy, function, calculation, approval route and page; every Sales table and function; the legacy `projects` and `project_allocations` tables (and their reimbursement/timesheet references). Attendance, Recovery Leave, leave, expenses, payroll and appraisals behave exactly as before. |
 | **Separate access** | Projects access is its own table (`proj_company_grants`), **per company**, independent of HR roles and of Sales grants. People without it do not see the module. Founders grant access inside the app (Projects → Access). |
 | **Shell change** | The "Projects & Tasks — Coming soon" menu entry becomes a real module shown only to people with Projects access (or a Sales relationship to a project). One light query in the app layout reads the person's own grants; it degrades to "no access" if the tables do not exist yet. |
@@ -87,11 +87,11 @@ capabilities: *Assign Project Managers*, *Manage access*, *Decide scope changes*
 *Reopen completed projects*, *Confirm overlapping site bookings*. Only a founder can give founder or manage-access rights. Everyone who
 should be a PM, department head or team member needs at least plain access first.
 
-**Founders / PM assigners.** *Projects → Handovers*: when Sales submits a handover, pick the Project Manager. *New internal project*: name, owner, priority, ongoing or finite.
+**Founders / PM assigners.** *Projects → Manage → Handovers*: when Sales submits a handover, pick the Project Manager. the *New internal project* button on Projects: name, owner, priority, ongoing or finite.
 
 **Project Managers.** Accept the handover (or ask Sales to clarify). Then, in the project: **People** (add members, create department teams with a head, appoint temporary leadership), **Milestones & tasks** (milestones, deliverables per department), **Timelines & site** (use the suggested timelines or your own; book people on site; record external dependencies), **Documents** (issue the client timeline once client-facing items are marked), **Feedback & changes**, and finally **Complete project** with the client's confirmation.
 
-**Department heads.** In *Milestones & tasks*, distribute tasks to your team, review tasks that need review, accept your team's deliverables.
+**Department heads.** In **Work**, distribute tasks to your team, review tasks that need review, accept your team's deliverables.
 
 **Everyone else.** *My Work* shows your tasks, reviews waiting for you and notifications; update your tasks, comment, and use the project's **Discussion**.
 

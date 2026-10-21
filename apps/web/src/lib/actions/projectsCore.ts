@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { PROJ_CAPABILITIES } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
-import { checkbox, fail, firstIssue, ok, optionalDate, optionalText, optionalUuid, patchOf, refreshProjects, textPatch, uuid, type ProjectActionState } from "@/lib/projects/action-utils";
+import { checkbox, fail, firstIssue, ok, optionalDate, optionalText, optionalUuid, patchOf, refreshProjects, staleMessage, textPatch, uuid, type ProjectActionState } from "@/lib/projects/action-utils";
 
 /**
  * Projects & Tasks server actions: access, Sales handover, project creation and lifecycle, people and departments. Each is a
@@ -191,6 +191,7 @@ export async function updateProject(_prev: S, fd: FormData): Promise<S> {
     is_ongoing: fd.has("isOngoingPresent") ? fd.get("isOngoing") === "on" : undefined,
   });
   const supabase = await createClient();
+  { const stale = await staleMessage(supabase, "project", id.data, version); if (stale) return { error: stale }; }
   const { error } = await supabase.rpc("proj_update_project", { p_project_id: id.data, p_patch: patch, p_expected_version: version });
   if (error) return fail(error.message);
   refreshProjects(id.data);

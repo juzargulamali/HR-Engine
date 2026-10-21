@@ -30,12 +30,25 @@ await step("create enquiry (forced next action, reference issued)", async () => 
   await page.locator("select").filter({ has: page.locator("option", { hasText: "Zeta Media LLC" }) }).first().selectOption({ label: "Zeta Media LLC" });
   await page.getByLabel("Next action").fill("Call Hana to qualify the brief"); await page.getByLabel("Budget or value").fill("170000");
   await page.getByRole("button", { name: /record enquiry/i }).click(); await page.waitForURL(/\/sales\/opportunities\/[0-9a-f-]{36}$/, { timeout: 15000 });
-  url = page.url(); if (!/OPP-UAE-\d{4}-0001/.test(await text())) throw new Error("no reference");
+  url = page.url(); await seen(/OPP-UAE-\d{4}-0001/); // the page renders after the redirect: wait for the issued reference
+});
+await step("create enquiry through Quick Add (agency only, short form) lands on it in the side panel", async () => {
+  await page.goto(`${BASE}/sales/follow-ups`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: /^add enquiry$/i }).first().click();
+  const d = page.getByRole("dialog", { name: /add an enquiry/i }); await d.waitFor();
+  await d.getByLabel("What is the enquiry?").fill("Quick-added lobby screen");
+  await d.getByLabel("Agency", { exact: true }).selectOption({ label: "Zeta Media LLC" });
+  await d.getByLabel("Where did it come from?").selectOption("website");
+  await d.getByLabel("Next action").fill("Call to qualify"); await d.getByRole("button", { name: /^add enquiry$/i }).click();
+  await page.waitForURL(/open=[0-9a-f-]{36}/, { timeout: 15000 }); await page.getByRole("dialog", { name: /quick-added lobby screen/i }).waitFor({ timeout: 15000 });
+  if (sql("select count(*) from crm_opportunities where title='Quick-added lobby screen'") !== "1") throw new Error("expected exactly one new enquiry");
+  if (!/^OPP-UAE-\d{4}-0002$/.test(sql("select reference from crm_opportunities where title='Quick-added lobby screen'"))) throw new Error("reference not issued in sequence");
+  await page.goto(url, { waitUntil: "networkidle" });
 });
 const oppId = () => url.split("/").pop();
 await step("completing the only follow-up demands the next action", async () => {
-  await page.getByRole("button", { name: /^done$|complete/i }).first().click();
-  await dialog().getByLabel(/what came of it/i).fill("Spoke to Hana; wants options."); await dialog().getByLabel(/^next action/i).fill("Send two concept options"); await dialog().getByLabel(/^date/i).fill("2026-10-30");
+  await page.getByRole("button", { name: /complete/i }).first().click();
+  await dialog().getByLabel(/what happened/i).fill("Spoke to Hana; wants options."); await dialog().getByLabel(/^next action/i).fill("Send two concept options"); await dialog().getByLabel(/^date/i).fill("2026-10-30");
   await dialog().getByRole("button", { name: /^complete$/i }).click(); await page.getByText("Send two concept options").first().waitFor({ timeout: 10000 });
 });
 await step("move stage to Qualified", async () => {

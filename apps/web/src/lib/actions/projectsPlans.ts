@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { planTemplate } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
-import { checkbox, fail, firstIssue, ok, optionalDate, optionalInt, optionalLocal, optionalText, optionalUuid, patchOf, refreshProjects, textPatch, uuid, type ProjectActionState } from "@/lib/projects/action-utils";
+import { checkbox, fail, firstIssue, ok, optionalDate, optionalInt, optionalLocal, optionalText, optionalUuid, patchOf, refreshProjects, staleMessage, textPatch, uuid, type ProjectActionState } from "@/lib/projects/action-utils";
 
 /** Timelines, external dependencies, site bookings, client timeline issuing. */
 type S = ProjectActionState;
@@ -40,6 +40,7 @@ export async function savePlanItem(_prev: S, fd: FormData): Promise<S> {
     if (d.tz) fields.tz = d.tz;
   }
   const supabase = await createClient();
+  { const stale = await staleMessage(supabase, "plan_item", d.itemId, d.expectedVersion); if (stale) return { error: stale }; }
   const { data, error } = await supabase.rpc("proj_save_plan_item", { p_project_id: d.projectId, p_item_id: d.itemId ?? null, p_fields: fields });
   if (error) return fail(error.message);
   refreshProjects(d.projectId);
@@ -71,6 +72,7 @@ export async function saveExternalDependency(_prev: S, fd: FormData): Promise<S>
     client_facing: fd.has("clientFacingPresent") ? d.clientFacing : undefined, notes: textPatch(fd, "notes"), reason: textPatch(fd, "reason") ?? undefined, expected_version: d.expectedVersion,
   });
   const supabase = await createClient();
+  { const stale = await staleMessage(supabase, "dependency", d.dependencyId, d.expectedVersion); if (stale) return { error: stale }; }
   const { data, error } = await supabase.rpc("proj_save_external_dependency", { p_project_id: d.projectId, p_dependency_id: d.dependencyId ?? null, p_fields: fields });
   if (error) return fail(error.message);
   refreshProjects(d.projectId);
@@ -101,6 +103,7 @@ export async function saveSiteBooking(_prev: S, fd: FormData): Promise<S> {
     lead_minutes: d.leadMinutes, trail_minutes: d.trailMinutes, plan_item_id: d.planItemId, notes: textPatch(fd, "notes"), reason: textPatch(fd, "reason") ?? undefined, expected_version: d.expectedVersion,
   });
   const supabase = await createClient();
+  { const stale = await staleMessage(supabase, "booking", d.bookingId, d.expectedVersion); if (stale) return { error: stale }; }
   const { data, error } = await supabase.rpc("proj_save_booking", { p_project_id: d.projectId, p_booking_id: d.bookingId ?? null, p_fields: fields });
   if (error) return fail(error.message);
   refreshProjects(d.projectId);

@@ -8,9 +8,9 @@ import { ActionForm, Field } from "@/components/sales/action-form";
 const KINDS = [["note", "Note"], ["call", "Call"], ["email", "Email"], ["meeting", "Meeting"], ["client_response", "Client response"]] as const;
 
 /** Records what happened. Nothing is sent to anyone: this is a log, not a message. */
-export function AddActivityForm({ opportunityId }: { opportunityId: string }) {
+export function AddActivityForm({ opportunityId, onDone }: { opportunityId: string; onDone?: () => void }) {
   return (
-    <ActionForm action={addActivity} submitLabel="Add to timeline" resetOnSuccess className="space-y-3">
+    <ActionForm action={addActivity} submitLabel="Add to timeline" resetOnSuccess onDone={onDone ? () => onDone() : undefined} className="space-y-3">
       <input type="hidden" name="id" value={opportunityId} />
       <div className="grid gap-3 sm:grid-cols-[12rem_1fr]">
         <Field label="What kind" htmlFor="act-kind">

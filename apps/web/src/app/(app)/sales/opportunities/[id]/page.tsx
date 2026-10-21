@@ -71,7 +71,7 @@ export default async function OpportunityPage({ params, searchParams }: { params
     <div className="space-y-5">
       <header className="space-y-3">
         <Link href="/sales/opportunities" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Opportunities
+          <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Enquiries
         </Link>
         <div>
           <p className="text-sm text-muted-foreground">{opp.reference} · {item.companyName}</p>

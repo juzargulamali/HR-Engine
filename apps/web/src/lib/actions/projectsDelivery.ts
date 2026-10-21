@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { checkbox, fail, firstIssue, ok, optionalDate, optionalText, optionalUuid, patchOf, refreshProjects, textPatch, uuid, type ProjectActionState } from "@/lib/projects/action-utils";
+import { checkbox, fail, firstIssue, ok, optionalDate, optionalText, optionalUuid, patchOf, refreshProjects, staleMessage, textPatch, uuid, type ProjectActionState } from "@/lib/projects/action-utils";
 
 /** Milestones, deliverables and tasks. Role rules (PM, department head, assignee, reviewer) live in the database functions. */
 type S = ProjectActionState;
@@ -18,6 +18,7 @@ export async function saveMilestone(_prev: S, fd: FormData): Promise<S> {
     reason: textPatch(fd, "reason") ?? undefined, expected_version: p.data.expectedVersion,
   });
   const supabase = await createClient();
+  { const stale = await staleMessage(supabase, "milestone", p.data.milestoneId, p.data.expectedVersion); if (stale) return { error: stale }; }
   const { data, error } = await supabase.rpc("proj_save_milestone", { p_project_id: p.data.projectId, p_milestone_id: p.data.milestoneId ?? null, p_fields: fields });
   if (error) return fail(error.message);
   refreshProjects(p.data.projectId);
@@ -44,6 +45,7 @@ export async function saveDeliverable(_prev: S, fd: FormData): Promise<S> {
     team_id: textPatch(fd, "teamId"), milestone_id: textPatch(fd, "milestoneId"), reason: textPatch(fd, "reason") ?? undefined, expected_version: p.data.expectedVersion,
   });
   const supabase = await createClient();
+  { const stale = await staleMessage(supabase, "deliverable", p.data.deliverableId, p.data.expectedVersion); if (stale) return { error: stale }; }
   const { data, error } = await supabase.rpc("proj_save_deliverable", { p_project_id: p.data.projectId, p_deliverable_id: p.data.deliverableId ?? null, p_fields: fields });
   if (error) return fail(error.message);
   refreshProjects(p.data.projectId);
@@ -91,6 +93,7 @@ export async function updateProjectTask(_prev: S, fd: FormData): Promise<S> {
     depends_on: fd.has("dependsOnPresent") ? ids(fd, "dependsOn") : undefined, collaborator_ids: fd.has("collaboratorIdsPresent") ? ids(fd, "collaboratorIds") : undefined,
   });
   const supabase = await createClient();
+  { const stale = await staleMessage(supabase, "task", p.data.taskId, p.data.expectedVersion); if (stale) return { error: stale }; }
   const { data, error } = await supabase.rpc("proj_update_task", { p_task_id: p.data.taskId, p_fields: fields, p_expected_version: p.data.expectedVersion ?? null });
   if (error) return fail(error.message);
   refreshProjects(p.data.projectId);
@@ -113,6 +116,7 @@ export async function setProjectTaskStatus(_prev: S, fd: FormData): Promise<S> {
   const p = z.object({ projectId: uuid, taskId: uuid, to: z.string().min(1), note: optionalText, expectedVersion: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.coerce.number().int().optional()) }).safeParse(Object.fromEntries(fd));
   if (!p.success) return { error: firstIssue(p.error) };
   const supabase = await createClient();
+  { const stale = await staleMessage(supabase, "task", p.data.taskId, p.data.expectedVersion); if (stale) return { error: stale }; }
   const { error } = await supabase.rpc("proj_set_task_status", { p_task_id: p.data.taskId, p_to: p.data.to, p_note: p.data.note ?? null, p_expected_version: p.data.expectedVersion ?? null });
   if (error) return fail(error.message);
   refreshProjects(p.data.projectId);
