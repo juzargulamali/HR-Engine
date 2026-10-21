@@ -740,6 +740,7 @@ begin
   if l.status <> 'open' then raise exception 'This line is %, so it cannot be cancelled', l.status using errcode = '23514'; end if;
   v_rel := inv_release_unused(l.id, coalesce(nullif(btrim(p_reason), ''), 'Line cancelled'));
   update inv_request_lines set status = 'cancelled', version = version + 1 where id = l.id;
+  perform inv_refresh_request_status(l.request_id);
   return v_rel || jsonb_build_object('line_id', l.id, 'status', 'cancelled');
 end;
 $$;

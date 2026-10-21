@@ -199,9 +199,9 @@ describe("Inventory: employees and the legacy asset register", () => {
         'inv_mirror_legacy', 'inv_is_warehouse_operator', 'inv_employee_active', 'inv_legacy_guard', 'inv_asset_is_linked', 'inv_employee_lookup', 'inv_my_equipment',
         'inv_employee_outstanding', 'inv_reassign_unit', 'inv_preview_legacy_assets', 'inv_import_legacy_assets')`);
       const by = Object.fromEntries(rows.map((r) => [r.proname, r]));
-      for (const n of ["inv_mirror_legacy", "inv_is_warehouse_operator", "inv_employee_active", "inv_legacy_guard"]) expect([n, by[n].anon, by[n].auth]).toEqual([n, false, false]);
+      for (const n of ["inv_mirror_legacy", "inv_is_warehouse_operator", "inv_employee_active", "inv_legacy_guard"]) expect([n, by[n]!.anon, by[n]!.auth]).toEqual([n, false, false]);
       for (const n of ["inv_employee_lookup", "inv_my_equipment", "inv_employee_outstanding", "inv_reassign_unit", "inv_preview_legacy_assets", "inv_import_legacy_assets", "inv_asset_is_linked"]) {
-        expect([n, by[n].anon, by[n].auth]).toEqual([n, false, true]);
+        expect([n, by[n]!.anon, by[n]!.auth]).toEqual([n, false, true]);
       }
     });
     it("denies anonymous callers every client function and refuses a browser session the mirror", async () => {
@@ -326,7 +326,7 @@ describe("Inventory: employees and the legacy asset register", () => {
       const carl = byEmp("AE-003");
       expect(carl.map((r) => r.holding_kind).sort()).toEqual(["quantity", "unit"]);
       for (const r of carl) expect(r).toMatchObject({ employment_status: "terminated", is_active: false, display_name: "Carl Clark" });
-      expect(ymd(carl[0].termination_date)).toBe("2026-09-30");
+      expect(ymd(carl[0]!.termination_date)).toBe("2026-09-30");
       expect(byEmp("AE-001")[0]).toMatchObject({ is_active: true, employment_status: "active", termination_date: null, unit_id: unitAlice });
       expect(Number(carl.find((r) => r.holding_kind === "quantity")!.qty)).toBe(5);
     });
@@ -592,15 +592,15 @@ describe("Inventory: employees and the legacy asset register", () => {
     it("imports the chosen assets as draft units, never guessing, and reports every skipped row with a reason", async () => {
       assetsFp = await fingerprint(["assets", "asset_assignments"]);
       rows = [
-        { asset_id: A.a1, item_id: itemLaptop, location_id: locA },
-        { asset_id: A.a2, item_id: itemLaptop, location_id: locB },
-        { asset_id: A.a3, item_id: itemLaptop, location_id: locA },       // retired
-        { asset_id: A.a4, item_id: itemKsa, location_id: locA },          // other company's item
-        { asset_id: A.a5, item_id: itemCable, location_id: locA },        // quantity item
-        { asset_id: A.a6, item_id: itemLaptop, location_id: locOff },     // inactive location
-        { asset_id: A.a2, item_id: itemLaptop, location_id: locA },       // same asset twice
-        { asset_id: A.k1, item_id: itemLaptop, location_id: locA },       // other company's asset
-        { asset_id: A.a7, item_id: itemLaptop, location_id: locA },       // deleted asset
+        { asset_id!: A.a1, item_id: itemLaptop, location_id: locA },
+        { asset_id!: A.a2, item_id: itemLaptop, location_id: locB },
+        { asset_id!: A.a3, item_id: itemLaptop, location_id: locA },       // retired
+        { asset_id!: A.a4, item_id: itemKsa, location_id: locA },          // other company's item
+        { asset_id!: A.a5, item_id: itemCable, location_id: locA },        // quantity item
+        { asset_id!: A.a6, item_id: itemLaptop, location_id: locOff },     // inactive location
+        { asset_id!: A.a2, item_id: itemLaptop, location_id: locA },       // same asset twice
+        { asset_id!: A.k1, item_id: itemLaptop, location_id: locA },       // other company's asset
+        { asset_id!: A.a7, item_id: itemLaptop, location_id: locA },       // deleted asset
         { asset_id: id(), item_id: itemLaptop, location_id: locA },       // unknown asset
       ];
       importResult = (await commit<{ r: Row }>(U.founder, `select inv_import_legacy_assets('${CO.uae}', '${JSON.stringify(rows)}'::jsonb) as r`))[0].r;
@@ -653,11 +653,11 @@ describe("Inventory: employees and the legacy asset register", () => {
     it("the imported employee custody shows in HR's outstanding view and in the employee's own list, issued date from the HR assignment", async () => {
       const mine = (await q<Row>(U.alice, "select * from inv_my_equipment()")).filter((r) => r.lifecycle === "draft");
       expect(mine).toHaveLength(1);
-      expect(ymd(new Date(mine[0].issued_at))).toBe("2026-02-01");
-      expect(mine[0].code).toMatch(/^UAE-E-/);
+      expect(ymd(new Date(mine[0]!.issued_at))).toBe("2026-02-01");
+      expect(mine[0]!.code).toMatch(/^UAE-E-/);
       const hr = (await q<Row>(U.hrCust, `select * from inv_employee_outstanding('${CO.uae}', '${E.alice}')`)).filter((r) => r.lifecycle === "draft");
       expect(hr).toHaveLength(1);
-      expect(hr[0]).toMatchObject({ unit_id: mine[0].unit_id, is_active: true });
+      expect(hr[0]).toMatchObject({ unit_id: mine[0]!.unit_id, is_active: true });
     });
     it("imports the next batch alongside: assets with problems can be fixed and imported later without touching the first ones", async () => {
       const r = (await commit<{ r: Row }>(U.founder, `select inv_import_legacy_assets('${CO.uae}', '${JSON.stringify([

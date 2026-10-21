@@ -16,16 +16,15 @@ import { RlsTestDatabase } from "../src/harness";
 //   * the handover import (idempotent, never blocks the handover) and the project completion hook (never blocks completion);
 //   * that Sales and PM views carry no cost, employee or unrelated project data, and that no CRM / Projects / HR row changes.
 //
-// These tests build the database from the migrations up to and including the planning migration and do NOT depend on the stock
-// functions (migration 4): units, balances, locations and dispatched states are created with admin SQL. Set INV_PLANNING_ALL=1 to
-// include every migration that sorts before the planning one (including the stock functions).
+// These tests build the database from every migration up to and including the planning migration (the stock functions included,
+// because planning calls inv_refresh_request_status); units, balances, locations and dispatched states are still created with admin SQL.
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.resolve(__dirname, "../../../supabase/migrations");
 const FIRST_CRM_MIGRATION = "20261115000000_crm_access_audit_settings.sql";
 const PLANNING_MIGRATION = "20261201000400_inv_planning_functions.sql";
 const STOCK_PREFIX = "20261201000300";
-const WITH_STOCK = process.env.INV_PLANNING_ALL === "1";
+const WITH_STOCK = process.env.INV_PLANNING_WITHOUT_STOCK !== "1";
 const LATE_MIGRATIONS = readdirSync(MIGRATIONS_DIR)
   .filter((f) => f >= FIRST_CRM_MIGRATION && f <= PLANNING_MIGRATION && f.endsWith(".sql") && (WITH_STOCK || !f.startsWith(STOCK_PREFIX)))
   .sort();

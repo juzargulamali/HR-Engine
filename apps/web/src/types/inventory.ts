@@ -64,7 +64,7 @@ export type InvKitContentRow = {
 }
 export type InvMovementKind =
   | "opening" | "receipt" | "rental_receipt" | "issue_employee" | "return_employee" | "reassign_employee" | "dispatch_project" | "return_project"
-  | "transfer_project" | "transfer_dispatch" | "transfer_receive" | "consume" | "return_unused" | "repair_out" | "repair_in" | "pack_kit"
+  | "rental_return" | "transfer_project" | "transfer_dispatch" | "transfer_receive" | "consume" | "return_unused" | "repair_out" | "repair_in" | "pack_kit"
   | "unpack_kit" | "pool_change" | "condition_check" | "adjust_missing" | "adjust_found" | "adjust_retire" | "count_adjust" | "correction";
 export type InvMovementRow = {
   id: string; company_id: string; code: string; kind: InvMovementKind; occurred_at: string; recorded_at: string; performed_by: string;
@@ -77,6 +77,7 @@ export type InvMovementLineRow = {
   from_kind: string; to_kind: string; from_location_id: string | null; to_location_id: string | null; from_bin_id: string | null; to_bin_id: string | null;
   from_employee_id: string | null; to_employee_id: string | null; from_project_id: string | null; to_project_id: string | null;
   from_balance_id: string | null; to_balance_id: string | null; condition_from: string | null; condition_to: string | null; exception_note: string | null;
+  corrects_line_id: string | null;
 }
 export type InvCostRow = {
   id: string; company_id: string; item_id: string; unit_id: string | null; movement_id: string | null; purchase_date: string | null;
@@ -144,4 +145,8 @@ export type InvLegacyAssetRow = {
   asset_id: string; asset_tag: string; category: string; description: string | null; status: string; purchase_date: string | null; value: number | string | null;
   open_assignment_count: number; employee_id: string | null; employee_name: string | null; employee_number: string | null; employee_active: boolean | null;
   issued_date: string | null; already_linked: boolean; unit_id: string | null; unit_code: string | null;
+}
+
+export type InvCompanySharingRow = {
+  id: string; company_id: string; use_company_id: string; note: string | null; authorised_by: string; authorised_at: string; revoked_by: string | null; revoked_at: string | null;
 }

@@ -30,7 +30,7 @@
 --   inv_confirm_opening_custody(p_company_id, p_key, p_lines jsonb, p_note=null)                                           [confirm_stock]
 --  movements (all need operate(location) as described in the design; p_key is the idempotency key)
 --   inv_receive_stock(p_company_id, p_location_id, p_key, p_lines, p_rental jsonb=null, p_note=null)
---   inv_issue_to_employee(p_company_id, p_location_id, p_employee_id, p_key, p_lines, p_expected_return_at=null, p_note=null)
+--   inv_issue_to_employee(p_company_id, p_location_id, p_employee_id, p_key, p_lines, p_expected_return_at=null, p_note=null, p_request_id=null)
 --   inv_return_from_employee(p_company_id, p_location_id, p_employee_id, p_key, p_lines, p_note=null)
 --   inv_dispatch_to_project(p_company_id, p_location_id, p_project_id, p_key, p_lines, p_request_id=null, p_expected_return_at=null, p_note=null)
 --   inv_return_from_project(p_company_id, p_location_id, p_project_id, p_key, p_lines, p_note=null)
@@ -50,9 +50,13 @@
 --   inv_return_rental(p_company_id, p_location_id, p_key, p_rental_id, p_lines=null, p_note=null)
 --   inv_transaction_status(p_company_id, p_key) -> jsonb
 --   inv_ledger_problems() -> table (problem, company_id, subject_id, detail)                                              [read-only; view_audit]
+-- Internal (not client-callable): inv_refresh_request_status(request_id) -> text keeps a request's status true (fulfilled / closed); the
+-- planning functions call it after cancelling a request line.
 -- Additions: table inv_company_sharing (owner company -> using company), table inv_idempotency (internal), column
 -- inv_movement_lines.corrects_line_id, movement kind 'rental_return'.
 -- Prerequisites: migrations 1-3 and 3b (20261201000000 .. 20261201000250) and the Projects migrations (proj_projects, proj_can_manage).
+-- At run time (not at install) the dispatch functions call inv_effective_item(), defined by the planning migration 20261201000400, which
+-- therefore has to be applied before any stock is moved against a request.
 -- Does not write HR, CRM or Projects tables (inv_mirror_legacy, replaced in migration 6, keeps the HR asset register in step).
 
 -- =============================================================================
@@ -628,7 +632,8 @@ declare r record; v_left numeric := p_qty; v_take numeric;
 begin
   for r in
     select res.* from inv_reservations res join inv_request_lines l on l.id = res.request_line_id
-     where l.request_id = p_request_id and res.item_id = p_item_id and res.status = 'active' and res.dispatched_qty < res.qty
+     where l.request_id = p_request_id and res.item_id = p_item_id and inv_effective_item(l) = p_item_id
+       and res.status = 'active' and res.dispatched_qty < res.qty
        and ((p_unit_id is not null and res.unit_id = p_unit_id) or (p_unit_id is null and res.unit_id is null and (p_location_id is null or res.location_id = p_location_id)))
      order by res.made_at, res.id for update of res
   loop
@@ -644,7 +649,8 @@ begin
 end;
 $$;
 
--- Return progress on the reservations of one project's requests: returned_qty goes up; everything dispatched back = completed.
+-- Return progress on the reservations of one project's requests: returned_qty goes up. A reservation is 'completed' only when everything
+-- reserved was dispatched AND is back; while some of it was never dispatched it stays active and keeps blocking that rest.
 create or replace function inv_reservation_return(p_project_id uuid, p_item_id uuid, p_unit_id uuid, p_qty numeric)
 returns numeric
 language plpgsql
@@ -660,11 +666,71 @@ begin
     exit when v_left <= 0;
     v_take := least(r.dispatched_qty - r.returned_qty, v_left);
     update inv_reservations set returned_qty = returned_qty + v_take,
-           status = case when returned_qty + v_take = dispatched_qty then 'completed' else status end
+           status = case when returned_qty + v_take = qty then 'completed' else status end
      where id = r.id;
     v_left := v_left - v_take;
   end loop;
   return p_qty - v_left;
+end;
+$$;
+
+-- Keeps the status of a request true to what has physically happened (never touches a cancelled or closed request):
+--   project request  -> 'in_progress' once something went out, 'fulfilled' when every non-cancelled line is fully dispatched,
+--                       'closed' when all of that has also come back;
+--   employee request -> 'fulfilled' when every non-cancelled line has been issued.
+-- Called by the stock functions after every dispatch, return, issue and transfer; the planning functions call it after cancelling a line.
+create or replace function inv_refresh_request_status(p_request_id uuid)
+returns text
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  r inv_requests;
+  v_lines integer; v_unfilled integer; v_done numeric; v_back numeric; v_new text;
+begin
+  select * into r from inv_requests where id = p_request_id for update;
+  if r.id is null then return null; end if;
+  if r.status not in ('submitted', 'in_progress', 'fulfilled') then return r.status; end if;
+  select count(*) into v_lines from inv_request_lines where request_id = r.id and status <> 'cancelled';
+  if v_lines = 0 then return r.status; end if;
+  if r.kind = 'project' then
+    select count(*) filter (where coalesce(x.disp, 0) < l.qty), coalesce(sum(x.disp), 0), coalesce(sum(x.ret), 0)
+      into v_unfilled, v_done, v_back
+      from inv_request_lines l
+      left join lateral (select sum(res.dispatched_qty) disp, sum(res.returned_qty) ret from inv_reservations res
+                          where res.request_line_id = l.id and res.status in ('active', 'completed')) x on true
+     where l.request_id = r.id and l.status <> 'cancelled';
+    v_new := case when v_done > 0 and v_unfilled = 0 and v_back = v_done then 'closed'
+                  when v_unfilled = 0 then 'fulfilled'
+                  when v_done > 0 then 'in_progress'
+                  else r.status end;
+  else
+    select count(*) filter (where coalesce(x.issued, 0) < l.qty), coalesce(sum(x.issued), 0)
+      into v_unfilled, v_done
+      from inv_request_lines l
+      left join lateral (select sum(ml.qty) issued from inv_movement_lines ml join inv_movements m on m.id = ml.movement_id
+                          where m.request_id = r.id and m.kind = 'issue_employee' and ml.item_id = inv_effective_item(l)) x on true
+     where l.request_id = r.id and l.status <> 'cancelled';
+    v_new := case when v_unfilled = 0 then 'fulfilled' when v_done > 0 then 'in_progress' else r.status end;
+  end if;
+  if v_new is distinct from r.status then
+    update inv_requests set status = v_new, updated_at = now() where id = r.id;
+  end if;
+  return v_new;
+end;
+$$;
+
+-- Every open request of a project (after a return or transfer touched its reservations).
+create or replace function inv_refresh_project_requests(p_project_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare x uuid;
+begin
+  for x in select id from inv_requests where project_id = p_project_id and status in ('submitted', 'in_progress', 'fulfilled') order by id loop
+    perform inv_refresh_request_status(x);
+  end loop;
 end;
 $$;
 
@@ -1625,23 +1691,31 @@ $$;
 -- Issue equipment or quantities to an employee. Lines: {"unit_id"} or {"item_id","qty","bin_id","rental_id"}.
 -- Consumables are not issued: they are consumed (inv_consume).
 create or replace function inv_issue_to_employee(p_company_id uuid, p_location_id uuid, p_employee_id uuid, p_key text, p_lines jsonb,
-                                                 p_expected_return_at timestamptz default null, p_note text default null)
+                                                 p_expected_return_at timestamptz default null, p_note text default null, p_request_id uuid default null)
 returns jsonb
 language plpgsql security definer
 set search_path = public
 as $$
 declare
-  l inv_locations; emp employees; h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; t record;
+  l inv_locations; emp employees; h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; t record; q inv_requests;
   v_seen uuid[] := '{}'; v_why text; v_res text; v_qty numeric; v_rental uuid; v_free numeric; v_dest uuid; v_out jsonb := '[]'::jsonb;
+  v_asked numeric; v_issued numeric;
 begin
   perform inv_ctx(p_company_id);
   l := inv_loc(p_company_id, p_location_id);
   perform inv_lines_array(p_lines);
   emp := inv_get_employee(p_employee_id, true);
+  if p_request_id is not null then
+    select * into q from inv_requests where id = p_request_id;
+    if q.id is null or q.company_id <> p_company_id then raise exception 'Unknown request' using errcode = '22023'; end if;
+    if q.kind <> 'employee' or q.employee_id is distinct from emp.id then raise exception 'That request is not for this employee' using errcode = '23514'; end if;
+    if q.status not in ('submitted', 'in_progress') then raise exception 'Request % is % and cannot be issued against', q.code, q.status using errcode = '23514'; end if;
+  end if;
   if p_expected_return_at is not null and p_expected_return_at <= now() then raise exception 'The expected return date must be in the future' using errcode = '22023'; end if;
   h := inv_begin_movement(p_company_id, 'issue_employee', p_key,
-         jsonb_build_object('location', p_location_id, 'employee', p_employee_id, 'lines', p_lines, 'expected', p_expected_return_at, 'note', p_note),
-         jsonb_build_object('employee_id', emp.id, 'recipient_employee_id', emp.id, 'from_location_id', l.id, 'expected_return_at', p_expected_return_at, 'note', p_note));
+         jsonb_build_object('location', p_location_id, 'employee', p_employee_id, 'lines', p_lines, 'expected', p_expected_return_at, 'note', p_note, 'request', p_request_id),
+         jsonb_build_object('employee_id', emp.id, 'recipient_employee_id', emp.id, 'from_location_id', l.id, 'expected_return_at', p_expected_return_at, 'note', p_note,
+                            'request_id', p_request_id));
   if (h->>'replay')::boolean then return h->'result'; end if;
   v_mid := (h->>'movement_id')::uuid;
   perform inv_lock_lines(p_lines);
@@ -1653,6 +1727,13 @@ begin
       i := inv_get_item(u.item_id);
       perform inv_check_sharing(i.company_id, l.company_id);
       perform inv_check_sharing(i.company_id, emp.company_id);
+      if q.id is not null then
+        select coalesce(sum(rl.qty), 0) into v_asked from inv_request_lines rl where rl.request_id = q.id and rl.status <> 'cancelled' and inv_effective_item(rl) = u.item_id;
+        select coalesce(sum(ml.qty), 0) into v_issued from inv_movement_lines ml join inv_movements m on m.id = ml.movement_id
+         where m.request_id = q.id and m.kind = 'issue_employee' and ml.item_id = u.item_id;
+        if v_asked = 0 then raise exception '% is not on request %', i.name, q.code using errcode = '23514'; end if;
+        if v_issued + 1 > v_asked then raise exception 'Request % asks for % of % and they have all been issued', q.code, trim_scale(v_asked), i.name using errcode = '23514'; end if;
+      end if;
       v_why := inv_unit_block_reason(u, l.id);
       if v_why is not null then raise exception '%', v_why using errcode = '23514'; end if;
       v_res := inv_unit_reserved_by(u.id, now(), p_expected_return_at);
@@ -1670,6 +1751,13 @@ begin
       perform inv_check_sharing(i.company_id, emp.company_id);
       v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
       v_rental := nullif(e->>'rental_id', '')::uuid;
+      if q.id is not null then
+        select coalesce(sum(rl.qty), 0) into v_asked from inv_request_lines rl where rl.request_id = q.id and rl.status <> 'cancelled' and inv_effective_item(rl) = i.id;
+        select coalesce(sum(ml.qty), 0) into v_issued from inv_movement_lines ml join inv_movements m on m.id = ml.movement_id
+         where m.request_id = q.id and m.kind = 'issue_employee' and ml.item_id = i.id;
+        if v_asked = 0 then raise exception '% is not on request %', i.name, q.code using errcode = '23514'; end if;
+        if v_issued + v_qty > v_asked then raise exception 'Request % asks for % of %; % have already been issued', q.code, trim_scale(v_asked), i.name, trim_scale(v_issued) using errcode = '23514'; end if;
+      end if;
       v_free := inv_qty_free(i.id, l.id, now(), p_expected_return_at, null, v_rental is not null);
       if v_qty > v_free then
         raise exception 'Only % of % can be issued now: the rest is not on the shelf or is reserved for upcoming requests', trim_scale(v_free), i.name using errcode = '23514';
@@ -1685,7 +1773,9 @@ begin
       v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty);
     end if;
   end loop;
-  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('employee_id', emp.id, 'lines', v_out));
+  if q.id is not null then perform inv_refresh_request_status(q.id); end if;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('employee_id', emp.id, 'request_id', p_request_id,
+           'request_status', (select status from inv_requests where id = q.id), 'lines', v_out));
 end;
 $$;
 
@@ -1840,10 +1930,9 @@ begin
       v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty);
     end if;
   end loop;
-  if q.id is not null and q.status = 'submitted' then
-    update inv_requests set status = 'in_progress', updated_at = now() where id = q.id;
-  end if;
-  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('project_id', pr.id, 'request_id', p_request_id, 'expected_return_at', v_exp, 'lines', v_out));
+  if q.id is not null then perform inv_refresh_request_status(q.id); end if;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('project_id', pr.id, 'request_id', p_request_id, 'expected_return_at', v_exp,
+           'request_status', (select status from inv_requests where id = q.id), 'lines', v_out));
 end;
 $$;
 
@@ -1907,6 +1996,7 @@ begin
       v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty, 'condition', v_cond, 'available', v_cond = 'good');
     end if;
   end loop;
+  perform inv_refresh_project_requests(pr.id);
   return inv_finish_movement(p_company_id, p_key, jsonb_build_object('project_id', pr.id, 'lines', v_out));
 end;
 $$;
@@ -1951,7 +2041,7 @@ begin
   perform inv_lock_lines(p_lines);
   -- The destination is checked AFTER the locks are held, so a project that completed meanwhile is caught.
   tp := inv_get_project(p_to_project_id, true);
-  select * into q from inv_requests where id = p_request_id for share;
+  select * into q from inv_requests where id = p_request_id for update;
   if q.status not in ('submitted', 'in_progress') then raise exception 'Request % is % and cannot receive equipment', q.code, q.status using errcode = '23514'; end if;
   for e in select x from jsonb_array_elements(p_lines) x loop
     if nullif(e->>'unit_id', '') is not null then
@@ -1979,8 +2069,10 @@ begin
         if v_res is not null then
           raise exception '% is reserved for % in that period. A reservation held by another request is never displaced', u.code, v_res using errcode = '23514';
         end if;
-        select rl.id into v_line from inv_request_lines rl where rl.request_id = q.id and rl.item_id = u.item_id and rl.status = 'open' order by rl.sort_order, rl.created_at limit 1;
-        if v_line is null then raise exception 'Request % has no open line for %', q.code, i.name using errcode = '23514'; end if;
+        select rl.id into v_line from inv_request_lines rl where rl.request_id = q.id and inv_effective_item(rl) = u.item_id and rl.status = 'open'
+           and rl.qty - coalesce((select sum(r.qty) from inv_reservations r where r.request_line_id = rl.id and r.status in ('active', 'completed')), 0) >= 1
+         order by rl.sort_order, rl.created_at limit 1;
+        if v_line is null then raise exception 'Request % has no open line for % with room for another one', q.code, i.name using errcode = '23514'; end if;
         insert into inv_reservations (company_id, request_line_id, item_id, unit_id, qty, dispatched_qty, reserved_during, made_by)
         values (q.company_id, v_line, u.item_id, u.id, 1, 1, tstzrange(now(), v_exp), auth.uid());
         v_new_res := v_new_res + 1;
@@ -2026,8 +2118,10 @@ begin
           raise exception 'Moving % to project % until % would leave a reservation of another project short. Reservations of other projects are never displaced',
             i.name, tp.reference, to_char(v_exp at time zone 'UTC', 'YYYY-MM-DD') using errcode = '23514';
         end if;
-        select rl.id into v_line from inv_request_lines rl where rl.request_id = q.id and rl.item_id = i.id and rl.status = 'open' order by rl.sort_order, rl.created_at limit 1;
-        if v_line is null then raise exception 'Request % has no open line for %', q.code, i.name using errcode = '23514'; end if;
+        select rl.id into v_line from inv_request_lines rl where rl.request_id = q.id and inv_effective_item(rl) = i.id and rl.status = 'open'
+           and rl.qty - coalesce((select sum(r.qty) from inv_reservations r where r.request_line_id = rl.id and r.status in ('active', 'completed')), 0) >= v_taken - v_covered
+         order by rl.sort_order, rl.created_at limit 1;
+        if v_line is null then raise exception 'Request % has no open line for % with room for % more', q.code, i.name, trim_scale(v_taken - v_covered) using errcode = '23514'; end if;
         insert into inv_reservations (company_id, request_line_id, item_id, location_id, qty, dispatched_qty, reserved_during, made_by)
         values (q.company_id, v_line, i.id, v_origin, v_taken - v_covered, v_taken - v_covered, tstzrange(now(), v_exp), auth.uid());
         v_new_res := v_new_res + 1;
@@ -2035,7 +2129,8 @@ begin
       v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty);
     end if;
   end loop;
-  if q.status = 'submitted' then update inv_requests set status = 'in_progress', updated_at = now() where id = q.id; end if;
+  perform inv_refresh_request_status(q.id);
+  perform inv_refresh_project_requests(fp.id);
   return inv_finish_movement(p_company_id, p_key, jsonb_build_object('from_project_id', fp.id, 'to_project_id', tp.id, 'request_id', q.id,
            'expected_return_at', v_exp, 'new_reservations', v_new_res, 'lines', v_out));
 end;
@@ -2246,6 +2341,7 @@ begin
     end loop;
     v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty);
   end loop;
+  if q.id is not null then perform inv_refresh_request_status(q.id); end if;
   return inv_finish_movement(p_company_id, p_key, jsonb_build_object('lines', v_out));
 end;
 $$;
@@ -3004,7 +3100,7 @@ revoke all on function
   inv_unit_move(uuid, text, uuid, uuid, uuid, uuid, uuid, text, uuid, timestamptz, text),
   inv_idem_begin(uuid, text, text, jsonb), inv_begin_movement(uuid, text, text, jsonb, jsonb, boolean), inv_finish_movement(uuid, text, jsonb),
   inv_reservation_take(uuid, uuid, uuid, numeric, uuid, boolean), inv_reservation_return(uuid, uuid, uuid, numeric),
-  inv_nonblank(text, text), inv_cost_fields_present(jsonb)
+  inv_nonblank(text, text), inv_cost_fields_present(jsonb), inv_refresh_request_status(uuid), inv_refresh_project_requests(uuid)
   from public, anon, authenticated;
 
 revoke all on function
@@ -3015,7 +3111,7 @@ revoke all on function
   inv_record_label_print(uuid, uuid, uuid),
   inv_start_count(uuid, uuid, text, text), inv_save_count_line(uuid, numeric, uuid, uuid, uuid, text, text, text, uuid),
   inv_confirm_count(uuid, uuid, text, text), inv_cancel_count(uuid, uuid, text), inv_confirm_opening_custody(uuid, text, jsonb, text),
-  inv_receive_stock(uuid, uuid, text, jsonb, jsonb, text), inv_issue_to_employee(uuid, uuid, uuid, text, jsonb, timestamptz, text),
+  inv_receive_stock(uuid, uuid, text, jsonb, jsonb, text), inv_issue_to_employee(uuid, uuid, uuid, text, jsonb, timestamptz, text, uuid),
   inv_return_from_employee(uuid, uuid, uuid, text, jsonb, text), inv_dispatch_to_project(uuid, uuid, uuid, text, jsonb, uuid, timestamptz, text),
   inv_return_from_project(uuid, uuid, uuid, text, jsonb, text), inv_transfer_between_projects(uuid, uuid, uuid, text, jsonb, uuid, timestamptz, text),
   inv_transfer_dispatch(uuid, uuid, uuid, text, jsonb, timestamptz, text, text, text), inv_transfer_receive(uuid, uuid, text, jsonb, text),
@@ -3035,7 +3131,7 @@ grant execute on function
   inv_record_label_print(uuid, uuid, uuid),
   inv_start_count(uuid, uuid, text, text), inv_save_count_line(uuid, numeric, uuid, uuid, uuid, text, text, text, uuid),
   inv_confirm_count(uuid, uuid, text, text), inv_cancel_count(uuid, uuid, text), inv_confirm_opening_custody(uuid, text, jsonb, text),
-  inv_receive_stock(uuid, uuid, text, jsonb, jsonb, text), inv_issue_to_employee(uuid, uuid, uuid, text, jsonb, timestamptz, text),
+  inv_receive_stock(uuid, uuid, text, jsonb, jsonb, text), inv_issue_to_employee(uuid, uuid, uuid, text, jsonb, timestamptz, text, uuid),
   inv_return_from_employee(uuid, uuid, uuid, text, jsonb, text), inv_dispatch_to_project(uuid, uuid, uuid, text, jsonb, uuid, timestamptz, text),
   inv_return_from_project(uuid, uuid, uuid, text, jsonb, text), inv_transfer_between_projects(uuid, uuid, uuid, text, jsonb, uuid, timestamptz, text),
   inv_transfer_dispatch(uuid, uuid, uuid, text, jsonb, timestamptz, text, text, text), inv_transfer_receive(uuid, uuid, text, jsonb, text),

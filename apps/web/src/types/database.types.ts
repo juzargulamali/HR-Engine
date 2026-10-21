@@ -28,7 +28,7 @@ import type {
   InvAuditLogRow, InvAvailabilityCheckRow, InvBalanceRow, InvBinRow, InvCategoryRow, InvCompanyGrantRow, InvCompanySettingsRow, InvCostRow,
   InvCountLineRow, InvCountRow, InvImportLogRow, InvItemRow, InvKitContentRow, InvLabelPrintRow, InvLocationRow, InvMovementLineRow, InvMovementRow,
   InvOperatorLocationRow, InvReadOnlyTable, InvRentalRow, InvRequestLineRow, InvRequestRow, InvReservationRow, InvTechnologyComponentRow,
-  InvTechnologyRow, InvTransferRow, InvUnitRow, InvJson, InvMyEquipmentRow, InvOutstandingRow, InvLegacyAssetRow,
+  InvTechnologyRow, InvTransferRow, InvUnitRow, InvCompanySharingRow, InvJson, InvMyEquipmentRow, InvOutstandingRow, InvLegacyAssetRow,
 } from "./inventory";
 import type {
   ProjAuditLogRow, ProjBookingConflictRow, ProjChangeLogRow, ProjCompanyCalendarRow, ProjCompanyGrantRow, ProjCompanySettingsRow, ProjCompletionReviewRow,
@@ -1668,6 +1668,7 @@ export interface Database {
       inv_counts: InvReadOnlyTable<InvCountRow>;
       inv_count_lines: InvReadOnlyTable<InvCountLineRow>;
       inv_import_log: InvReadOnlyTable<InvImportLogRow>;
+      inv_company_sharing: InvReadOnlyTable<InvCompanySharingRow>;
       // Projects & Tasks (20261120000000-500): read-only to clients; every write is a proj_* function below.
       proj_company_grants: ProjReadOnlyTable<ProjCompanyGrantRow>;
       proj_audit_log: ProjReadOnlyTable<ProjAuditLogRow>;
@@ -1869,6 +1870,43 @@ export interface Database {
       inv_reassign_unit: { Args: { p_unit_id: string; p_to: string; p_employee_id: string | null; p_reason: string; p_key: string }; Returns: InvJson };
       inv_preview_legacy_assets: { Args: { p_company_id: string }; Returns: InvLegacyAssetRow[] };
       inv_import_legacy_assets: { Args: { p_company_id: string; p_rows: InvJson }; Returns: InvJson };
+      // Inventory stock functions (20261201000300). Every movement takes an idempotency key (p_key, 8-120 characters).
+      inv_save_location: { Args: { p_company_id: string; p_location_id: string | null; p_code: string; p_name: string; p_timezone: string; p_kind?: string; p_address?: string | null; p_is_active?: boolean }; Returns: string };
+      inv_save_bin: { Args: { p_location_id: string; p_bin_id: string | null; p_code: string; p_label?: string | null; p_is_active?: boolean }; Returns: string };
+      inv_set_operator_locations: { Args: { p_company_id: string; p_user_id: string; p_location_ids: string[] }; Returns: number };
+      inv_save_category: { Args: { p_company_id: string; p_category_id: string | null; p_name: string; p_parent_id?: string | null; p_sort_order?: number; p_is_active?: boolean }; Returns: string };
+      inv_save_item: { Args: { p_company_id: string; p_item_id: string | null; p_fields: InvJson }; Returns: string };
+      inv_replace_item: { Args: { p_item_id: string; p_fields: InvJson; p_reason: string }; Returns: string };
+      inv_set_company_sharing: { Args: { p_owner_company_id: string; p_use_company_id: string; p_enabled: boolean; p_note?: string | null }; Returns: string };
+      inv_register_unit: { Args: { p_company_id: string; p_item_id: string; p_serial_number?: string | null; p_location_id?: string | null; p_bin_id?: string | null; p_condition?: string; p_holder?: InvJson | null; p_cost?: InvJson | null; p_notes?: string | null; p_key?: string | null }; Returns: InvJson };
+      inv_ensure_bin_label: { Args: { p_company_id: string; p_item_id: string; p_location_id: string; p_bin_id?: string | null }; Returns: InvJson };
+      inv_record_label_print: { Args: { p_company_id: string; p_unit_id?: string | null; p_balance_id?: string | null }; Returns: string };
+      inv_start_count: { Args: { p_company_id: string; p_location_id: string; p_kind: string; p_note?: string | null }; Returns: InvJson };
+      inv_save_count_line: { Args: { p_count_id: string; p_counted_qty: number; p_unit_id?: string | null; p_item_id?: string | null; p_bin_id?: string | null; p_condition?: string | null; p_reason?: string | null; p_note?: string | null; p_balance_id?: string | null }; Returns: string };
+      inv_confirm_count: { Args: { p_company_id: string; p_count_id: string; p_key: string; p_note?: string | null }; Returns: InvJson };
+      inv_cancel_count: { Args: { p_company_id: string; p_count_id: string; p_reason: string }; Returns: undefined };
+      inv_confirm_opening_custody: { Args: { p_company_id: string; p_key: string; p_lines: InvJson; p_note?: string | null }; Returns: InvJson };
+      inv_receive_stock: { Args: { p_company_id: string; p_location_id: string; p_key: string; p_lines: InvJson; p_rental?: InvJson | null; p_note?: string | null }; Returns: InvJson };
+      inv_issue_to_employee: { Args: { p_company_id: string; p_location_id: string; p_employee_id: string; p_key: string; p_lines: InvJson; p_expected_return_at?: string | null; p_note?: string | null; p_request_id?: string | null }; Returns: InvJson };
+      inv_return_from_employee: { Args: { p_company_id: string; p_location_id: string; p_employee_id: string; p_key: string; p_lines: InvJson; p_note?: string | null }; Returns: InvJson };
+      inv_dispatch_to_project: { Args: { p_company_id: string; p_location_id: string; p_project_id: string; p_key: string; p_lines: InvJson; p_request_id?: string | null; p_expected_return_at?: string | null; p_note?: string | null }; Returns: InvJson };
+      inv_return_from_project: { Args: { p_company_id: string; p_location_id: string; p_project_id: string; p_key: string; p_lines: InvJson; p_note?: string | null }; Returns: InvJson };
+      inv_transfer_between_projects: { Args: { p_company_id: string; p_from_project_id: string; p_to_project_id: string; p_key: string; p_lines: InvJson; p_request_id: string; p_expected_return_at?: string | null; p_note?: string | null }; Returns: InvJson };
+      inv_transfer_dispatch: { Args: { p_company_id: string; p_from_location_id: string; p_to_location_id: string; p_key: string; p_lines: InvJson; p_expected_at?: string | null; p_carrier?: string | null; p_reference?: string | null; p_note?: string | null }; Returns: InvJson };
+      inv_transfer_receive: { Args: { p_company_id: string; p_transfer_id: string; p_key: string; p_lines?: InvJson | null; p_note?: string | null }; Returns: InvJson };
+      inv_consume: { Args: { p_company_id: string; p_location_id: string; p_key: string; p_lines: InvJson; p_employee_id?: string | null; p_project_id?: string | null; p_request_id?: string | null; p_note?: string | null }; Returns: InvJson };
+      inv_return_unused: { Args: { p_company_id: string; p_location_id: string; p_key: string; p_lines: InvJson; p_employee_id?: string | null; p_project_id?: string | null; p_note?: string | null }; Returns: InvJson };
+      inv_repair_out: { Args: { p_company_id: string; p_location_id: string; p_key: string; p_lines: InvJson; p_repair_reference: string; p_expected_return_at?: string | null; p_note?: string | null }; Returns: InvJson };
+      inv_repair_in: { Args: { p_company_id: string; p_location_id: string; p_key: string; p_lines: InvJson; p_note?: string | null }; Returns: InvJson };
+      inv_pack_kit: { Args: { p_company_id: string; p_location_id: string; p_key: string; p_kit_unit_id: string; p_lines: InvJson; p_note?: string | null }; Returns: InvJson };
+      inv_unpack_kit: { Args: { p_company_id: string; p_location_id: string; p_key: string; p_kit_unit_id: string; p_lines?: InvJson | null; p_note?: string | null }; Returns: InvJson };
+      inv_set_kit_line: { Args: { p_company_id: string; p_kit_unit_id: string; p_item_id: string; p_expected_qty?: number | null; p_is_required?: boolean | null; p_note?: string | null; p_remove?: boolean }; Returns: string };
+      inv_check_condition: { Args: { p_company_id: string; p_location_id: string; p_key: string; p_lines: InvJson; p_note?: string | null }; Returns: InvJson };
+      inv_adjust_stock: { Args: { p_company_id: string; p_location_id: string; p_key: string; p_action: string; p_lines: InvJson; p_reason: string }; Returns: InvJson };
+      inv_correct_movement: { Args: { p_company_id: string; p_movement_id: string; p_key: string; p_reason: string; p_lines: InvJson }; Returns: InvJson };
+      inv_return_rental: { Args: { p_company_id: string; p_location_id: string; p_key: string; p_rental_id: string; p_lines?: InvJson | null; p_note?: string | null }; Returns: InvJson };
+      inv_transaction_status: { Args: { p_company_id: string; p_key: string }; Returns: InvJson };
+      inv_ledger_problems: { Args: Record<string, never>; Returns: { problem: string; company_id: string | null; subject_id: string | null; detail: string }[] };
       // Projects & Tasks functions (20261120000000-500). Writes are only these; the database enforces who may call what.
       proj_has_access: { Args: { p_company_id: string }; Returns: boolean };
       proj_has_capability: { Args: { p_company_id: string; p_capability: string }; Returns: boolean };
