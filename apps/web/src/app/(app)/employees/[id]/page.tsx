@@ -37,6 +37,7 @@ import { LeaveSection } from "./leave-section";
 import { DocumentsTab } from "./documents-tab";
 import { InsuranceLoansTab } from "./insurance-loans-tab";
 import { AssetsSection } from "./assets-section";
+import { EmployeeEquipmentLink } from "@/components/inventory/planning/employee-equipment-link";
 import { AttendanceSection } from "./attendance-section";
 import { PerformanceSection } from "./performance-section";
 
@@ -214,6 +215,8 @@ export default async function EmployeeDetailPage({
       {activeTab === "assets" ? (
         <AssetsSection employeeId={employee.id} companyId={employee.company_id} canManage={canEditAssets} />
       ) : null}
+
+      {activeTab === "assets" ? <EmployeeEquipmentLink employeeId={employee.id} companyId={employee.company_id} /> : null}
 
       {activeTab === "performance" ? (
         <PerformanceSection employeeId={employee.id} companyId={employee.company_id} canManage={canRateGoals} />

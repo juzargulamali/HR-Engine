@@ -367,7 +367,25 @@ describe("Inventory navigation", () => {
 
   it("shows Inventory, Requests and Movements to a warehouse operator, with My equipment and Scan kept out of the menu", () => {
     const links = sectionLinks(buildNavModules([grant("employee")], { inventory: inv("warehouse") }));
-    expect(links).toEqual(["Inventory:Inventory", "Inventory:Requests", "Inventory:Movements", "Inventory:My equipment*", "Inventory:Scan a label*"]);
+    expect(links).toEqual(["Inventory:Inventory", "Inventory:Requests", "Inventory:Movements", "Inventory:My equipment*", "Inventory:Scan a label*", "Inventory:Equipment held by employees*"]);
+  });
+
+  it("offers 'Equipment held by employees' (kept out of the menu) only to HR custody access, founders and warehouse operators", () => {
+    const held = (mods: ReturnType<typeof buildNavModules>) => sectionLinks(mods).filter((l) => l.includes("Equipment held by employees"));
+    expect(held(buildNavModules([], { inventory: inv("view_employee_custody") }))).toEqual(["Inventory:Equipment held by employees*"]);
+    expect(held(buildNavModules([], { inventory: inv("founder") }))).toEqual(["Inventory:Equipment held by employees*"]);
+    expect(held(buildNavModules([], { inventory: inv("warehouse") }))).toEqual(["Inventory:Equipment held by employees*"]);
+    // Nothing for stock readers, catalogue managers, department heads, project managers or plain employees: whatever their HR roles.
+    for (const caps of [["view_stock"], ["manage_catalogue"], ["request_for_employees"], ["view_costs"], []]) {
+      expect(held(buildNavModules([grant("hr_admin")], { inventory: inv(...caps) }))).toEqual([]);
+    }
+    expect(held(buildNavModules([grant("hr_admin")], { inventory: { grants: [], managesProjects: true, isEmployee: true } }))).toEqual([]);
+    expect(held(buildNavModules([grant("ceo")], { inventory: { grants: [], isEmployee: true } }))).toEqual([]);
+    // It is a real destination: found by search and it lights up Inventory, but it is not a menu row.
+    const mods = buildNavModules([], { inventory: inv("view_employee_custody") });
+    const link = mods.find((m) => m.id === "inventory")!.sections.flatMap((s) => s.links).find((l) => l.href === "/inventory/employees");
+    expect(link?.secondary).toBe(true);
+    expect(activeModuleId("/inventory/employees", mods)).toBe("inventory");
   });
 
   it("gives a Project Manager the catalogue and requests but not Movements, and a plain Inventory grant the same", () => {

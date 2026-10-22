@@ -258,6 +258,10 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
           ...(invStock || invAnyCap("founder") ? [{ href: "/inventory/movements", label: "Movements", iconKey: "inventory" as const }] : []),
           { href: "/inventory/mine", label: "My equipment", iconKey: "inventory", secondary: true },
           { href: "/inventory/scan", label: "Scan a label", iconKey: "inventory", secondary: true },
+          // Which company equipment each employee holds: for HR custody access, founders and warehouse operators (the page and the database check again).
+          ...(invAnyCap("view_employee_custody") || invAnyCap("founder") || invAnyCap("warehouse")
+            ? [{ href: "/inventory/employees", label: "Equipment held by employees", iconKey: "inventory" as const, secondary: true }]
+            : []),
         ]
       : [{ href: "/inventory/mine", label: "My equipment", iconKey: "inventory" }];
     const manage: NavLinkData[] = [];
