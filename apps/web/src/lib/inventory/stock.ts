@@ -208,7 +208,7 @@ export interface MovementBrief {
 const MOVEMENT_COLUMNS = "id, code, kind, occurred_at, performed_by, note, reason, project_id, employee_id, request_id, from_location_id, to_location_id, corrects_movement_id";
 const LINE_COLUMNS = "id, item_id, unit_id, qty, from_kind, to_kind, from_location_id, to_location_id, from_bin_id, to_bin_id, from_employee_id, to_employee_id, from_project_id, to_project_id, from_balance_id, to_balance_id, condition_from, condition_to, exception_note, corrects_line_id";
 
-export interface KitView extends InvKitContentRow { itemName: string; substituteName: string | null; contentCode: string | null }
+export interface KitView extends InvKitContentRow { itemName: string; itemTracking: InvTracking; itemUom: string; itemScale: number; substituteName: string | null; contentCode: string | null }
 
 export interface ItemDetail {
   item: InvItemRow;
@@ -219,6 +219,7 @@ export interface ItemDetail {
   canSeeCosts: boolean;
   canConfirm: boolean;
   counts: StockRow;
+  categories: InvCategoryRow[];
   units: UnitView[];
   unitsTruncated: boolean;
   balances: BalanceView[];
@@ -329,7 +330,7 @@ export async function loadItemDetail(ctx: InventoryContext, itemId: string): Pro
   return {
     item, categoryName: categoryPath(categories, item.category_id), companyName, detail,
     canEdit: canManageCatalogue(ctx.grants, item.company_id), canSeeCosts: costs, canConfirm: canConfirmStock(ctx.grants, item.company_id),
-    counts, units: unitViews, unitsTruncated, balances: balanceViews, kits, movements, locations, bins: (bins.data ?? []) as InvBinRow[], summaryAvailability, names,
+    counts, categories, units: unitViews, unitsTruncated, balances: balanceViews, kits, movements, locations, bins: (bins.data ?? []) as InvBinRow[], summaryAvailability, names,
     replacedBy: replaced.data ?? null,
   };
 }
@@ -395,10 +396,11 @@ export async function loadUnitDetail(ctx: InventoryContext, idOrCode: string): P
   const itemIds = [...new Set([...kitData.map((k) => k.item_id), ...kitData.map((k) => k.substitute_item_id).filter((x): x is string => !!x)])];
   const contentIds = kitData.map((k) => k.content_unit_id).filter((x): x is string => !!x);
   const [itemNames, contentUnits] = await Promise.all([
-    itemIds.length > 0 ? db.from("inv_items").select("id, name").in("id", itemIds) : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    itemIds.length > 0 ? db.from("inv_items").select("id, name, tracking, unit_of_measure, quantity_scale").in("id", itemIds) : Promise.resolve({ data: [] as { id: string; name: string; tracking: InvTracking; unit_of_measure: string; quantity_scale: number }[] }),
     contentIds.length > 0 ? db.from("inv_units").select("id, code").in("id", contentIds) : Promise.resolve({ data: [] as { id: string; code: string }[] }),
   ]);
   const nameOf = new Map((itemNames.data ?? []).map((i) => [i.id, i.name]));
+  const infoOf = new Map((itemNames.data ?? []).map((i) => [i.id, i]));
   const codeOf = new Map((contentUnits.data ?? []).map((c) => [c.id, c.code]));
   const names = await loadNames(db, ctx, {
     employeeIds: [u.employee_id, ...history.flatMap((m) => [m.employee_id, ...m.lines.flatMap((l) => [l.from_employee_id, l.to_employee_id])])].filter((x): x is string => !!x),
@@ -428,7 +430,7 @@ export async function loadUnitDetail(ctx: InventoryContext, idOrCode: string): P
     unit, item, companyName,
     canOperate: u.location_id ? canOperateLocation(ctx.grants, u.company_id, u.location_id, ctx.assignedLocationIds) : false,
     canEdit: canManageCatalogue(ctx.grants, u.company_id), canSeeCosts: costs,
-    kit: kitData.map((k) => ({ ...k, itemName: nameOf.get(k.item_id) ?? "Item", substituteName: k.substitute_item_id ? (nameOf.get(k.substitute_item_id) ?? "Item") : null, contentCode: k.content_unit_id ? (codeOf.get(k.content_unit_id) ?? null) : null })),
+    kit: kitData.map((k) => ({ ...k, itemName: nameOf.get(k.item_id) ?? "Item", itemTracking: infoOf.get(k.item_id)?.tracking ?? "individual", itemUom: infoOf.get(k.item_id)?.unit_of_measure ?? "each", itemScale: infoOf.get(k.item_id)?.quantity_scale ?? 0, substituteName: k.substitute_item_id ? (nameOf.get(k.substitute_item_id) ?? "Item") : null, contentCode: k.content_unit_id ? (codeOf.get(k.content_unit_id) ?? null) : null })),
     packable, rental: (rental.data ?? null) as InvRentalRow | null, history, historyTruncated: history.length >= 200, names, locations, bins: (bins.data ?? []) as InvBinRow[],
     inKitCode: inKit.data?.code ?? null,
   };

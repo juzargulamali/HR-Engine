@@ -211,6 +211,7 @@ export default async function InventoryManagePage({ searchParams }: { searchPara
           key={c.id} closeHref={closeCount} count={data} companyId={companyId} canEdit={canOperateLocation(ctx.grants, companyId, c.location_id, ctx.assignedLocationIds)} canConfirm={confirmer}
           lines={lineViews} items={countable} bins={binRows.filter((b) => b.location_id === c.location_id && b.is_active).map((b) => ({ id: b.id, code: b.code }))}
           balances={(balanceRows.data ?? []).map((b) => ({ itemId: b.item_id, binId: b.bin_id, condition: b.condition, qty: Number(b.qty) }))} notCounted={notCounted}
+          draftItemCount={itemRows.filter((i) => (i.tracking === "quantity" || i.tracking === "consumable") && i.status === "draft").length}
         />
       );
     }

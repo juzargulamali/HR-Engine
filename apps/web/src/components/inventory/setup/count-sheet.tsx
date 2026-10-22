@@ -52,6 +52,8 @@ export interface CountSheetProps {
   balances: readonly ShelfBalance[];
   /** Draft units at this location that are not on the count yet (opening counts). */
   notCounted: readonly NotCountedUnit[];
+  /** Counted-stock items still in draft: an opening count cannot include them until they are activated in the catalogue. */
+  draftItemCount?: number;
   onCancelled?: () => void;
 }
 
@@ -70,7 +72,8 @@ function saveLine(fields: Record<string, string | null | undefined>): Promise<In
 interface StockDraft { itemId: string; binId: string; condition: string; qty: string; reason: string }
 const EMPTY_STOCK: StockDraft = { itemId: "", binId: "", condition: "good", qty: "", reason: "" };
 
-function StockLineForm({ count, items, bins, balances, draft, onDraft, onSaved }: {
+function StockLineForm({ count, items, bins, balances, draft, onDraft, onSaved, draftItemCount = 0 }: {
+  draftItemCount?: number;
   count: CountSheetData; items: readonly CountableItem[]; bins: readonly BinOption[]; balances: readonly ShelfBalance[];
   draft: StockDraft; onDraft: (d: StockDraft) => void; onSaved: () => void;
 }) {
@@ -114,7 +117,7 @@ function StockLineForm({ count, items, bins, balances, draft, onDraft, onSaved }
   return (
     <form onSubmit={onSubmit} className="space-y-3" aria-label="Add counted stock">
       <Field label="Find an item" htmlFor="cs-find"><Input id="cs-find" type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Start typing the item name" autoComplete="off" /></Field>
-      <Field label="Item" htmlFor="cs-item" hint={items.length === 0 ? "No counted-stock items are active yet. Add and activate them in the catalogue." : undefined}>
+      <Field label="Item" htmlFor="cs-item" hint={items.length === 0 ? "No counted-stock items are active yet. Add and activate them in the catalogue." : count.kind === "opening" && draftItemCount > 0 ? `${draftItemCount} ${draftItemCount === 1 ? "item is" : "items are"} still in draft and cannot be counted yet. Activate ${draftItemCount === 1 ? "it" : "them"} in the catalogue first.` : undefined}>
         <Select id="cs-item" value={draft.itemId} onChange={(e) => set({ itemId: e.target.value })}>
           <option value="">Choose an item…</option>
           {shown.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
@@ -320,7 +323,7 @@ function ConfirmPanel({ count, companyId, lines, onConfirmed }: { count: CountSh
 // ---------------------------------------------------------------------------------------------------------------
 // The sheet
 // ---------------------------------------------------------------------------------------------------------------
-export function CountSheetBody({ count, companyId, canEdit, canConfirm, lines, items, bins, balances, notCounted, onCancelled }: CountSheetProps) {
+export function CountSheetBody({ count, companyId, canEdit, canConfirm, lines, items, bins, balances, notCounted, draftItemCount, onCancelled }: CountSheetProps) {
   const [mode, setMode] = useState<"stock" | "unit">("stock");
   const [stock, setStock] = useState<StockDraft>(EMPTY_STOCK);
   const [found, setFound] = useState<CountUnitInfo | null>(null);
@@ -361,7 +364,7 @@ export function CountSheetBody({ count, companyId, canEdit, canConfirm, lines, i
             <button type="button" role="tab" aria-selected={mode === "unit"} onClick={() => setMode("unit")} className={`rounded px-3 py-1 text-sm ${mode === "unit" ? "bg-secondary font-medium" : "text-muted-foreground"}`}>One unit by code</button>
           </div>
           {mode === "stock"
-            ? <StockLineForm count={count} items={items} bins={bins} balances={balances} draft={stock} onDraft={setStock} onSaved={() => setStock({ ...EMPTY_STOCK, binId: stock.binId })} />
+            ? <StockLineForm count={count} items={items} bins={bins} balances={balances} draftItemCount={draftItemCount} draft={stock} onDraft={setStock} onSaved={() => setStock({ ...EMPTY_STOCK, binId: stock.binId })} />
             : <UnitLineForm count={count} found={found} onFound={setFound} onSaved={() => setFound(null)} />}
         </section>
       ) : null}
