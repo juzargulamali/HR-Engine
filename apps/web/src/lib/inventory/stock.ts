@@ -75,7 +75,8 @@ export async function loadNames(db: Db, ctx: InventoryContext, want: { employeeI
       // The employee lookup the database offers to warehouse operators lists who holds what; a person who may not use it simply sees no names.
       const companyIds = [...new Set(want.companyIds ?? ctx.companies.map((c) => c.id))];
       await Promise.all(companyIds.map(async (companyId) => {
-        const { data } = await db.rpc("inv_employee_outstanding", { p_company_id: companyId, p_employee_id: null, p_include_inactive: true });
+        const only = emp.size === 1 ? [...emp][0]! : null;
+        const { data } = await db.rpc("inv_employee_outstanding", { p_company_id: companyId, p_employee_id: only, p_include_inactive: true });
         for (const r of data ?? []) if (emp.has(r.employee_id)) employees.set(r.employee_id, r.display_name);
       }));
       const missing = [...emp].filter((id) => !employees.has(id)).slice(0, 100);
@@ -192,6 +193,8 @@ export interface UnitView extends InvUnitRow {
   binLabel: string | null;
   locationName: string | null;
   cost: { amount: number; currency: string } | null;
+  /** Out (with an employee, on a project, in transit, at the repairer) and past its expected return. */
+  overdue: boolean;
 }
 export interface BalanceView extends InvBalanceRow {
   locationName: string | null;
@@ -231,6 +234,9 @@ export interface ItemDetail {
   names: Names;
   replacedBy: { id: string; name: string } | null;
 }
+
+const isOverdue = (u: Pick<InvUnitRow, "expected_return_at" | "custody_kind" | "lifecycle">): boolean =>
+  !!u.expected_return_at && u.lifecycle === "active" && ["employee", "project", "transit", "repair"].includes(u.custody_kind) && new Date(u.expected_return_at).getTime() < Date.now();
 
 async function companyNameOf(db: Db, ctx: InventoryContext, companyId: string): Promise<string> {
   const known = ctx.companyName(companyId);
@@ -308,7 +314,7 @@ export async function loadItemDetail(ctx: InventoryContext, itemId: string): Pro
     const projectName = u.project_id ? names.project(u.project_id) : null;
     const bin = u.bin_id ? (binLabel.get(u.bin_id) ?? null) : null;
     return {
-      ...u, employeeName, projectName, binLabel: bin, locationName: u.location_id ? (locName.get(u.location_id) ?? null) : null, cost: costByUnit.get(u.id) ?? null,
+      ...u, employeeName, projectName, binLabel: bin, locationName: u.location_id ? (locName.get(u.location_id) ?? null) : null, cost: costByUnit.get(u.id) ?? null, overdue: isOverdue(u),
       where: whereText({ custody: u.custody_kind, lifecycle: u.lifecycle, binLabel: bin, employeeName, projectName, repairReference: u.repair_reference, inKit: !!u.in_kit_id }, u.location_id ? locName.get(u.location_id) : null),
     };
   });
@@ -411,7 +417,7 @@ export async function loadUnitDetail(ctx: InventoryContext, idOrCode: string): P
   const projectName = u.project_id ? names.project(u.project_id) : null;
   const bin = u.bin_id ? (binMap.get(u.bin_id) ?? null) : null;
   const unit: UnitView = {
-    ...u, employeeName, projectName, binLabel: bin, locationName: u.location_id ? (locName.get(u.location_id) ?? null) : null,
+    ...u, employeeName, projectName, binLabel: bin, locationName: u.location_id ? (locName.get(u.location_id) ?? null) : null, overdue: isOverdue(u),
     cost: costRow.data?.[0]?.unit_cost != null && costRow.data[0].currency ? { amount: num(costRow.data[0].unit_cost), currency: costRow.data[0].currency } : null,
     where: whereText({ custody: u.custody_kind, lifecycle: u.lifecycle, binLabel: bin, employeeName, projectName, repairReference: u.repair_reference, inKit: !!u.in_kit_id }, u.location_id ? locName.get(u.location_id) : null),
   };
@@ -552,8 +558,9 @@ export async function searchCandidates(p: SearchParams): Promise<Candidate[]> {
     let bq = db.from("inv_balances").select("*").eq("company_id", p.companyId).eq("holder_kind", "warehouse").gt("qty", 0).limit(80).order("id");
     if (p.locationId) bq = bq.eq("location_id", p.locationId);
     if (source === "shelf") bq = bq.eq("condition", "good");
+    // Rented stock can be issued, dispatched and sent on like owned stock; everything else works on what the company owns.
     if (source === "rental") bq = bq.not("rental_id", "is", null);
-    else if (source !== "shelf_any" && source !== "missing") bq = bq.is("rental_id", null);
+    else if (source !== "shelf_any" && source !== "missing" && !(p.kind === "issue" || p.kind === "dispatch" || p.kind === "transfer")) bq = bq.is("rental_id", null);
     if (p.rentalId) bq = bq.eq("rental_id", p.rentalId);
     const or = [q ? `label_code.ilike.%${q.replace(/ /g, "%")}%` : null, items.length > 0 ? `item_id.in.(${items.map((i) => i.id).join(",")})` : null].filter(Boolean);
     if (or.length > 0) bq = bq.or(or.join(","));
@@ -753,7 +760,7 @@ export async function loadMovements(ctx: InventoryContext, f: MovementFilters, v
 }
 
 export interface MovementDetail {
-  movement: MovementBrief & { company_id: string; recipient_name: string | null; expected_return_at: string | null; transfer_id: string | null; to_project_id: string | null; recorded_at: string };
+  movement: MovementBrief & { company_id: string; recipient_name: string | null; expected_return_at: string | null; transfer_id: string | null; to_project_id: string | null; recorded_at: string; idempotency_key: string | null };
   items: Map<string, string>;
   unitCodes: Map<string, string>;
   names: Names;
@@ -792,7 +799,7 @@ export async function loadMovementDetail(ctx: InventoryContext, id: string): Pro
     if (l.unit_id === null && m.kind !== "correction" && (consume || (l.from_balance_id === null && l.to_balance_id !== null))) correctable.add(l.id);
   }
   return {
-    movement: { ...(m as InvMovementRow), company_id: m.company_id, lines: (lines ?? []) as MovementBrief["lines"], recipient_name: m.recipient_name, expected_return_at: m.expected_return_at, transfer_id: m.transfer_id, to_project_id: m.to_project_id, recorded_at: m.recorded_at },
+    movement: { ...(m as InvMovementRow), company_id: m.company_id, lines: (lines ?? []) as MovementBrief["lines"], recipient_name: m.recipient_name, expected_return_at: m.expected_return_at, transfer_id: m.transfer_id, to_project_id: m.to_project_id, recorded_at: m.recorded_at, idempotency_key: m.idempotency_key },
     items: new Map((items.data ?? []).map((i) => [i.id, i.name])),
     unitCodes: new Map((units.data ?? []).map((u) => [u.id, u.code])),
     names,
