@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,18 +101,18 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
   const [currency, setCurrency] = useState("AED");
 
   // ---- the list --------------------------------------------------------------------------------------------------
-  const skipped = useRef<string[]>([]);
-  const counter = useRef(0);
-  const [drafts, setDrafts] = useState<LineDraft[]>(() => {
-    const out: LineDraft[] = [];
+  const [start] = useState(() => {
+    const drafts: LineDraft[] = [];
+    const skipped: string[] = [];
     for (const c of initial?.candidates ?? []) {
-      const problem = unitProblemFor(kind, c, initial?.adjustAction);
-      if (problem) { skipped.current.push(problem); continue; }
-      if (out.some((d) => (c.unitId && d.unitId === c.unitId) || (!c.unitId && d.itemId === c.itemId && d.binId === (c.binId ?? "")))) continue;
-      out.push(draftFromCandidate(c, kind, `i${++counter.current}`));
+      const why = unitProblemFor(kind, c, initial?.adjustAction);
+      if (why) { skipped.push(why); continue; }
+      if (drafts.some((d) => (c.unitId && d.unitId === c.unitId) || (!c.unitId && d.itemId === c.itemId && d.binId === (c.binId ?? "")))) continue;
+      drafts.push(draftFromCandidate(c, kind, `i${drafts.length + 1}`));
     }
-    return out;
+    return { drafts, skipped };
   });
+  const [drafts, setDrafts] = useState<LineDraft[]>(start.drafts);
   const [problem, setProblem] = useState<string | null>(null);
   const [lineError, setLineError] = useState<{ id: string; message: string } | null>(null);
 
@@ -135,8 +135,8 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
   const dirty = drafts.length > 0 || note.trim() !== "" || reason.trim() !== "";
   useUnsavedChanges(uid, dirty && flow.phase !== "done");
 
-  const eligibleProjects = useMemo(() => context.projects.filter((p) => p.companyId === companyId && (kind === "dispatch" ? DISPATCHABLE(p.status) : true)), [context.projects, companyId, kind]);
-  const destProjects = useMemo(() => eligibleProjects.filter((p) => DISPATCHABLE(p.status)), [eligibleProjects]);
+  const eligibleProjects = context.projects.filter((p) => p.companyId === companyId && (kind === "dispatch" ? DISPATCHABLE(p.status) : true));
+  const destProjects = eligibleProjects.filter((p) => DISPATCHABLE(p.status));
   const requestsFor = (pid: string, empId: string | undefined, kindOfRequest: "project" | "employee") =>
     context.requests.filter((r) => r.companyId === companyId && r.kind === kindOfRequest && (kindOfRequest === "project" ? r.projectId === pid : empId ? r.employeeId === empId : false));
   const chosenRequest = context.requests.find((r) => r.id === requestId);
@@ -280,7 +280,7 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
     <form onSubmit={onReview} className="space-y-5" aria-label={heading} data-step="edit" noValidate>
       <p className="text-sm text-muted-foreground">{cfg.lead}</p>
       {noLocations ? <Alert role="status">You are not set up to work at any location. Ask an Inventory founder to add a location to your access.</Alert> : null}
-      {skipped.current.length > 0 ? <Alert variant="warning" role="status">Not added: {skipped.current.join(" ")}</Alert> : null}
+      {start.skipped.length > 0 ? <Alert variant="warning" role="status">Not added: {start.skipped.join(" ")}</Alert> : null}
 
       {kind === "receive_transfer" ? (
         <div className="space-y-1.5">
@@ -450,7 +450,7 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
           {isRental ? (
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5"><label htmlFor={`${uid}-rs`} className="text-sm font-medium leading-none">Supplier</label><Input id={`${uid}-rs`} value={rentalSupplier} onChange={(e) => setRentalSupplier(e.target.value)} maxLength={160} /></div>
-              <div className="space-y-1.5"><label htmlFor={`${uid}-rr`} className="text-sm font-medium leading-none">Supplier's reference</label><Input id={`${uid}-rr`} value={rentalRef} onChange={(e) => setRentalRef(e.target.value)} maxLength={160} /></div>
+              <div className="space-y-1.5"><label htmlFor={`${uid}-rr`} className="text-sm font-medium leading-none">Supplier&rsquo;s reference</label><Input id={`${uid}-rr`} value={rentalRef} onChange={(e) => setRentalRef(e.target.value)} maxLength={160} /></div>
               <div className="space-y-1.5"><label htmlFor={`${uid}-rd`} className="text-sm font-medium leading-none">Has to go back by</label><Input id={`${uid}-rd`} type="datetime-local" value={rentalDeadline} min={nowLocalInput(tz)} onChange={(e) => setRentalDeadline(e.target.value)} /></div>
               <ProjectSelect label="For project (optional)" projects={context.projects.filter((p) => p.companyId === companyId)} value={rentalProjectId} onChange={setRentalProjectId} />
             </div>

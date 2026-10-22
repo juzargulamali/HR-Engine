@@ -70,13 +70,14 @@ export function LinesEditor(props: Props) {
   // Codes being looked up right now (a camera reads the same label many times a second): they count as "on the list" at once.
   const inFlight = useRef<PendingScanLine[]>([]);
   const draftsRef = useRef(drafts);
-  draftsRef.current = drafts;
+  useEffect(() => { draftsRef.current = drafts; });
   const nextId = () => `l${++counter.current}`;
   const searchable = source !== "held" && source !== "transit" && source !== "kit";
 
   // Searching as the person types (the database answers; people who may not see stock get nothing).
+  const searching_ = searchable && q.trim().length >= 2 && !!companyId;
   useEffect(() => {
-    if (!searchable || q.trim().length < 2 || !companyId) { setResults([]); setSearchError(null); return; }
+    if (!searching_) return;
     const mine = ++seq.current;
     const t = setTimeout(() => {
       setSearching(true);
@@ -86,7 +87,7 @@ export function LinesEditor(props: Props) {
         .finally(() => { if (mine === seq.current) setSearching(false); });
     }, 250);
     return () => clearTimeout(t);
-  }, [q, searchable, companyId, locationId, kind, rentalId, adjustAction, services]);
+  }, [q, searching_, companyId, locationId, kind, rentalId, adjustAction, services]);
 
   const onList = (c: Candidate, list: readonly LineDraft[]): boolean =>
     c.type === "unit" ? list.some((d) => d.unitId === c.unitId)
@@ -166,7 +167,7 @@ export function LinesEditor(props: Props) {
 
       <div role="status" aria-live="polite" className="min-h-[1.25rem] text-sm text-muted-foreground">{message}</div>
 
-      {searchable && q.trim().length >= 2 ? (
+      {searching_ ? (
         <div>
           {searching ? <p className="text-sm text-muted-foreground" role="status">Searching…</p> : null}
           {searchError ? <p role="alert" className="text-sm text-destructive">{searchError}</p> : null}
