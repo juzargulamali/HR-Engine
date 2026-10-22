@@ -592,15 +592,15 @@ describe("Inventory: employees and the legacy asset register", () => {
     it("imports the chosen assets as draft units, never guessing, and reports every skipped row with a reason", async () => {
       assetsFp = await fingerprint(["assets", "asset_assignments"]);
       rows = [
-        { asset_id!: A.a1, item_id: itemLaptop, location_id: locA },
-        { asset_id!: A.a2, item_id: itemLaptop, location_id: locB },
-        { asset_id!: A.a3, item_id: itemLaptop, location_id: locA },       // retired
-        { asset_id!: A.a4, item_id: itemKsa, location_id: locA },          // other company's item
-        { asset_id!: A.a5, item_id: itemCable, location_id: locA },        // quantity item
-        { asset_id!: A.a6, item_id: itemLaptop, location_id: locOff },     // inactive location
-        { asset_id!: A.a2, item_id: itemLaptop, location_id: locA },       // same asset twice
-        { asset_id!: A.k1, item_id: itemLaptop, location_id: locA },       // other company's asset
-        { asset_id!: A.a7, item_id: itemLaptop, location_id: locA },       // deleted asset
+        { asset_id: A.a1!, item_id: itemLaptop, location_id: locA },
+        { asset_id: A.a2!, item_id: itemLaptop, location_id: locB },
+        { asset_id: A.a3!, item_id: itemLaptop, location_id: locA },       // retired
+        { asset_id: A.a4!, item_id: itemKsa, location_id: locA },          // other company's item
+        { asset_id: A.a5!, item_id: itemCable, location_id: locA },        // quantity item
+        { asset_id: A.a6!, item_id: itemLaptop, location_id: locOff },     // inactive location
+        { asset_id: A.a2!, item_id: itemLaptop, location_id: locA },       // same asset twice
+        { asset_id: A.k1!, item_id: itemLaptop, location_id: locA },       // other company's asset
+        { asset_id: A.a7!, item_id: itemLaptop, location_id: locA },       // deleted asset
         { asset_id: id(), item_id: itemLaptop, location_id: locA },       // unknown asset
       ];
       importResult = (await commit<{ r: Row }>(U.founder, `select inv_import_legacy_assets('${CO.uae}', '${JSON.stringify(rows)}'::jsonb) as r`))[0].r;
@@ -640,7 +640,7 @@ describe("Inventory: employees and the legacy asset register", () => {
       const again = (await commit<{ r: Row }>(U.founder, `select inv_import_legacy_assets('${CO.uae}', '${JSON.stringify(rows.slice(0, 2))}'::jsonb) as r`))[0].r;
       expect(again).toMatchObject({ created: 0, skipped: 2 });
       expect((again.results as Row[]).map((x) => x.reason)).toEqual(["already_linked", "already_linked"]);
-      expect((again.results as Row[])[0].unit_code).toMatch(/^UAE-E-/);
+      expect((again.results as Row[])[0]!.unit_code).toMatch(/^UAE-E-/);
       expect(await fingerprint(["inv_units", "inv_costs"])).toBe(unitsBefore);
       expect(await fingerprint(["assets", "asset_assignments"])).toBe(assetsFp);
     });

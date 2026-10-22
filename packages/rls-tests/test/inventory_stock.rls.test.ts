@@ -273,7 +273,7 @@ describe("Inventory stock core", () => {
 
     it("registers units as DRAFTS: catalogued, with unique codes, claiming no verified stock and not usable", async () => {
       for (const k of ["led1", "led2", "led3", "led4", "led5"]) {
-        const r = await reg(U.opDubai, IT.led!, `SN-${k}`, L.dubai, `, p_bin_id => '${L.binA1}'`);
+        const r = await reg(U.opDubai, IT.led!, `SN-${k}`, L.dubai!, `, p_bin_id => '${L.binA1}'`);
         UN[k] = r.unit_id;
         expect(r).toMatchObject({ lifecycle: "draft", custody_kind: "warehouse" });
       }
@@ -286,23 +286,23 @@ describe("Inventory stock core", () => {
       }
     });
     it("refuses a repeated serial number for the same item (same code is never issued twice)", async () => {
-      await expect(reg(U.opDubai, IT.led!, "sn-LED1", L.dubai)).rejects.toThrow(/Serial number sn-LED1 is already registered as UAE-E-\d{5}/);
-      await expect(reg(U.opDubai, IT.led!, " SN-led2 ", L.dubai)).rejects.toThrow(/already registered/);
-      await expect(reg(U.opDubai, IT.cable!, null, L.dubai)).rejects.toThrow(/tracked by quantity/);
+      await expect(reg(U.opDubai, IT.led!, "sn-LED1", L.dubai!)).rejects.toThrow(/Serial number sn-LED1 is already registered as UAE-E-\d{5}/);
+      await expect(reg(U.opDubai, IT.led!, " SN-led2 ", L.dubai!)).rejects.toThrow(/already registered/);
+      await expect(reg(U.opDubai, IT.cable!, null, L.dubai!)).rejects.toThrow(/tracked by quantity/);
       expect(await n(`select 1 from inv_units`)).toBe(5);
     });
     it("takes a cost only from someone allowed to see costs, and keeps costs out of everyone else's sight", async () => {
-      await expect(reg(U.opDubai, IT.led!, "SN-led6", L.dubai, `, p_cost => ${j({ unit_cost: 1200, currency: "AED", purchase_date: "2026-01-05" })}`)).rejects.toThrow(/may see costs/);
-      const r = await reg(U.costCatalog, IT.led!, "SN-led6", L.dubai, `, p_cost => ${j({ unit_cost: 1200, currency: "AED", purchase_date: "2026-01-05" })}`);
+      await expect(reg(U.opDubai, IT.led!, "SN-led6", L.dubai!, `, p_cost => ${j({ unit_cost: 1200, currency: "AED", purchase_date: "2026-01-05" })}`)).rejects.toThrow(/may see costs/);
+      const r = await reg(U.costCatalog, IT.led!, "SN-led6", L.dubai!, `, p_cost => ${j({ unit_cost: 1200, currency: "AED", purchase_date: "2026-01-05" })}`);
       UN.led6 = r.unit_id;
       expect(await q(U.costCatalog, `select unit_cost from inv_costs where unit_id = '${UN.led6}'`)).toEqual([{ unit_cost: "1200.00" }]);
       expect(await q(U.founder, `select 1 from inv_costs`)).toHaveLength(1);
       for (const who of [U.opDubai, U.counter, U.viewer, U.catalog, U.accessMgr, U.outsider]) expect(await q(who, `select 1 from inv_costs`)).toHaveLength(0);
     });
     it("refuses registration by people who may not work there, and by outsiders", async () => {
-      await expect(reg(U.opPoznan, IT.led!, "SN-x1", L.dubai)).rejects.toThrow(/not allowed to register/);
-      await expect(reg(U.viewer, IT.led!, "SN-x2", L.dubai)).rejects.toThrow(/not allowed to register/);
-      await expect(reg(U.outsider, IT.led!, "SN-x3", L.dubai)).rejects.toThrow(/not set up|not allowed/);
+      await expect(reg(U.opPoznan, IT.led!, "SN-x1", L.dubai!)).rejects.toThrow(/not allowed to register/);
+      await expect(reg(U.viewer, IT.led!, "SN-x2", L.dubai!)).rejects.toThrow(/not allowed to register/);
+      await expect(reg(U.outsider, IT.led!, "SN-x3", L.dubai!)).rejects.toThrow(/not set up|not allowed/);
     });
     it("does not let a draft unit be issued, dispatched or counted as available, and a draft catalogue item cannot be received", async () => {
       await expect(call(U.opDubai, `inv_issue_to_employee('${CO.uae}', '${L.dubai}', '${EMP.aisha}', '${key()}', ${j([{ unit_id: UN.led6 }])})`)).rejects.toThrow(/has not been counted and confirmed yet/);
@@ -345,9 +345,9 @@ describe("Inventory stock core", () => {
       const units = await admin<Row>(`select lifecycle, verified_by, verified_at from inv_units where id in ('${UN.led1}', '${UN.led5}')`);
       expect(units.every((u) => u.lifecycle === "active" && u.verified_by === U.counter && u.verified_at)).toBe(true);
       expect((await admin<Row>(`select lifecycle from inv_units where id = '${UN.led6}'`))[0].lifecycle).toBe("draft");
-      expect(await qtyOf(IT.cable!, L.dubai)).toBe(100);
-      expect(await qtyOf(IT.rope!, L.dubai)).toBe(50.5);
-      expect(await qtyOf(IT.tape!, L.dubai)).toBe(20);
+      expect(await qtyOf(IT.cable!, L.dubai!)).toBe(100);
+      expect(await qtyOf(IT.rope!, L.dubai!)).toBe(50.5);
+      expect(await qtyOf(IT.tape!, L.dubai!)).toBe(20);
       const lines = await admin<Row>(`select l.from_kind, l.to_kind, m.kind from inv_movement_lines l join inv_movements m on m.id = l.movement_id`);
       expect(lines).toHaveLength(8);
       expect(lines.every((l) => l.from_kind === "external" && l.to_kind === "warehouse" && l.kind === "opening")).toBe(true);
@@ -358,7 +358,7 @@ describe("Inventory stock core", () => {
       const again = await call<Row>(U.counter, `inv_confirm_count('${CO.uae}', '${count1}', '${k}')`);
       expect(again).toMatchObject({ movement_id: r.movement_id, replayed: true });
       await fails(U.counter, `select inv_confirm_count('${CO.uae}', '${count1}', '${key()}')`, /already confirmed/);
-      expect(await qtyOf(IT.cable!, L.dubai)).toBe(100);
+      expect(await qtyOf(IT.cable!, L.dubai!)).toBe(100);
     });
     it("never re-opens a verified unit or re-counts verified stock as opening stock, and the draft unit stays a draft", async () => {
       const c3 = (await call<Row>(U.opDubai, `inv_start_count('${CO.uae}', '${L.dubai}', 'opening')`)).count_id;
@@ -386,7 +386,7 @@ describe("Inventory stock core", () => {
       expect(r).toMatchObject({ units: 2, quantity_lines: 1 });
       expect(await unit(UN.ledE!)).toMatchObject({ lifecycle: "active", custody_kind: "employee", employee_id: EMP.aisha, verified_by: U.counter });
       expect(await unit(UN.ledP!)).toMatchObject({ lifecycle: "active", custody_kind: "project", project_id: PRJ.p1 });
-      expect(await qtyOf(IT.cable!, L.dubai)).toBe(100);                 // the shelf is untouched: nothing counted twice
+      expect(await qtyOf(IT.cable!, L.dubai!)).toBe(100);                 // the shelf is untouched: nothing counted twice
       expect(Number((await admin<Row>(`select sum(qty) s from inv_balances where item_id = '${IT.cable}' and holder_kind = 'employee'`))[0].s)).toBe(2);
       expect(await n(`select 1 from inv_movement_lines where unit_id = '${UN.ledE}'`)).toBe(1);
       // once verified, the custody cannot be opened again, and the unit cannot be counted on the shelf either
@@ -402,19 +402,19 @@ describe("Inventory stock core", () => {
     it("receives quantity stock into a bin and returns the resulting quantity", async () => {
       const r = await receive(U.opDubai, CO.uae, L.dubai!, [{ item_id: IT.cable, qty: 20, bin_id: L.binB2 }]);
       expect(r).toMatchObject({ kind: "receipt", lines: [{ qty: 20, qty_after: 20 }] });
-      expect(await qtyOf(IT.cable!, L.dubai)).toBe(120);
+      expect(await qtyOf(IT.cable!, L.dubai!)).toBe(120);
       expect(await n(`select 1 from inv_movement_lines where movement_id = '${r.movement_id}' and from_kind = 'external' and to_kind = 'warehouse'`)).toBe(1);
     });
     it("respects each item's precision: metres to 3 decimals, individual units and pieces whole, never zero or negative", async () => {
       await receive(U.opDubai, CO.uae, L.dubai!, [{ item_id: IT.rope, qty: 10.125 }]);
-      expect(await qtyOf(IT.rope!, L.dubai)).toBe(60.625);
+      expect(await qtyOf(IT.rope!, L.dubai!)).toBe(60.625);
       await expect(receive(U.opDubai, CO.uae, L.dubai!, [{ item_id: IT.rope, qty: 10.1234 }])).rejects.toThrow(/at most 3 decimal/);
       await expect(receive(U.opDubai, CO.uae, L.dubai!, [{ item_id: IT.cable, qty: 1.5 }])).rejects.toThrow(/at most 0 decimal/);
       await expect(receive(U.opDubai, CO.uae, L.dubai!, [{ item_id: IT.led, qty: 1.5, serials: ["a"] }])).rejects.toThrow(/Give a serial number for every unit|whole units/);
       await expect(receive(U.opDubai, CO.uae, L.dubai!, [{ item_id: IT.led, qty: 1.5 }])).rejects.toThrow(/whole units/);
       await expect(receive(U.opDubai, CO.uae, L.dubai!, [{ item_id: IT.cable, qty: 0 }])).rejects.toThrow(/more than zero/);
       await expect(receive(U.opDubai, CO.uae, L.dubai!, [{ item_id: IT.cable, qty: -4 }])).rejects.toThrow(/more than zero/);
-      expect(await qtyOf(IT.rope!, L.dubai)).toBe(60.625);
+      expect(await qtyOf(IT.rope!, L.dubai!)).toBe(60.625);
     });
     it("receives individual units as active, verified by the receiver, with unique codes; repeated serials are refused", async () => {
       const r = await receive(U.opDubai, CO.uae, L.dubai!, [{ item_id: IT.extra, qty: 2, serials: ["LENS-1", "LENS-2"], bin_id: L.binA1 }]);
@@ -443,12 +443,12 @@ describe("Inventory stock core", () => {
       await expect(receive(U.catalog, CO.uae, L.dubai!, [{ item_id: IT.cable, qty: 1 }])).rejects.toThrow(/not set up to work/);
       await expect(receive(U.ksaFounder, CO.uae, L.dubai!, [{ item_id: IT.cable, qty: 1 }])).rejects.toThrow();
       await receive(U.crossOp, CO.uae, L.poznan!, [{ item_id: IT.cable, qty: 7, bin_id: L.binP1 }]);
-      expect(await qtyOf(IT.cable!, L.poznan)).toBe(7);
+      expect(await qtyOf(IT.cable!, L.poznan!)).toBe(7);
       await receive(U.opPoznan, CO.uae, L.poznan!, [{ item_id: IT.cable, qty: 3 }]);
-      expect(await qtyOf(IT.cable!, L.poznan)).toBe(10);
+      expect(await qtyOf(IT.cable!, L.poznan!)).toBe(10);
     });
     it("records a rental receipt as rental-owned stock tied to a rental (supplier, reference, deadline) and never adds to owned quantities", async () => {
-      const ownedBefore = await qtyOf(IT.shackle!, L.dubai);
+      const ownedBefore = await qtyOf(IT.shackle!, L.dubai!);
       const unitsBefore = await n(`select 1 from inv_units where ownership = 'owned'`);
       const rental = { supplier_name: "Acme Rentals", external_reference: "RENT-77", return_deadline: fut(10) };
       await expect(receive(U.opDubai, CO.uae, L.dubai!, [{ item_id: IT.shackle, qty: 8 }], { ...rental, return_deadline: fut(-1) })).rejects.toThrow(/deadline in the future/);
@@ -456,7 +456,7 @@ describe("Inventory stock core", () => {
       expect(r.kind).toBe("rental_receipt");
       const rentalRow = (await admin<Row>(`select * from inv_rentals where id = '${r.rental_id}'`))[0];
       expect(rentalRow).toMatchObject({ supplier_name: "Acme Rentals", external_reference: "RENT-77", status: "open" });
-      expect(await qtyOf(IT.shackle!, L.dubai)).toBe(ownedBefore);                       // owned quantity untouched
+      expect(await qtyOf(IT.shackle!, L.dubai!)).toBe(ownedBefore);                       // owned quantity untouched
       expect(Number((await admin<Row>(`select sum(qty) s from inv_balances where item_id = '${IT.shackle}' and rental_id = '${r.rental_id}'`))[0].s)).toBe(8);
       expect(await n(`select 1 from inv_units where ownership = 'owned'`)).toBe(unitsBefore);
       const rentalUnits = await admin<Row>(`select id, ownership, rental_id from inv_units where item_id = '${IT.adapterB}'`);
@@ -483,13 +483,13 @@ describe("Inventory stock core", () => {
 
     it("treats the same key from the same caller with the same content as one transaction: the original result, nothing changed", async () => {
       const k = key();
-      const before = await qtyOf(IT.cable!, L.dubai);
+      const before = await qtyOf(IT.cable!, L.dubai!);
       const movementsBefore = await n(`select 1 from inv_movements`);
       const first = await receive(U.opDubai, CO.uae, L.dubai!, [{ item_id: IT.cable, qty: 5 }], null, k);
       const second = await receive(U.opDubai, CO.uae, L.dubai!, [{ item_id: IT.cable, qty: 5 }], null, k);
       expect(second).toMatchObject({ movement_id: first.movement_id, code: first.code, replayed: true });
       expect(first.replayed).toBeUndefined();
-      expect(await qtyOf(IT.cable!, L.dubai)).toBe(before + 5);
+      expect(await qtyOf(IT.cable!, L.dubai!)).toBe(before + 5);
       expect(await n(`select 1 from inv_movements`)).toBe(movementsBefore + 1);
     });
     it("refuses the same key with different content, from another caller, or too short; a failed call leaves its key unused", async () => {
@@ -500,7 +500,7 @@ describe("Inventory stock core", () => {
       await expect(receive(U.opDubai, CO.uae, L.dubai!, [{ item_id: IT.cable, qty: 1 }], null, "short")).rejects.toThrow(/8 to 120/);
       await expect(receive(U.opDubai, CO.uae, L.dubai!, [{ item_id: IT.cable, qty: 1 }], null, "x".repeat(121))).rejects.toThrow(/8 to 120/);
       const bad = key();
-      await expect(issue(U.opDubai, L.dubai!, EMP.aisha, [{ item_id: IT.cable, qty: 100000 }], bad)).rejects.toThrow(/Only .* can be issued now/);
+      await expect(issue(U.opDubai, L.dubai!, EMP.aisha!, [{ item_id: IT.cable, qty: 100000 }], bad)).rejects.toThrow(/Only .* can be issued now/);
       expect(await n(`select 1 from inv_idempotency where idem_key = '${bad}'`)).toBe(0);
       // the same key is a different request for a different kind of movement
       const k2 = key();
@@ -527,7 +527,7 @@ describe("Inventory stock core", () => {
       ]);
       expect(a.movement_id).toBe(b.movement_id);
       expect(await n(`select 1 from inv_movements`)).toBe(before + 1);
-      expect(await qtyOf(IT.screws!, L.dubai)).toBe(9);
+      expect(await qtyOf(IT.screws!, L.dubai!)).toBe(9);
     });
     it("lets a retried registration with a key create one unit", async () => {
       const k = key();
@@ -542,20 +542,20 @@ describe("Inventory stock core", () => {
     it("serialises two simultaneous issues of the last quantity: exactly one succeeds, nothing goes negative", async () => {
       await receive(U.opDubai, CO.uae, L.dubai!, [{ item_id: IT.shackle, qty: 5 }]);
       const results = await Promise.allSettled([
-        issue(U.opDubai, L.dubai!, EMP.aisha, [{ item_id: IT.shackle, qty: 3 }]),
-        issue(U.founder, L.dubai!, EMP.omar, [{ item_id: IT.shackle, qty: 3 }]),
-        issue(U.crossOp, L.dubai!, EMP.omar, [{ item_id: IT.shackle, qty: 3 }]),
+        issue(U.opDubai, L.dubai!, EMP.aisha!, [{ item_id: IT.shackle, qty: 3 }]),
+        issue(U.founder, L.dubai!, EMP.omar!, [{ item_id: IT.shackle, qty: 3 }]),
+        issue(U.crossOp, L.dubai!, EMP.omar!, [{ item_id: IT.shackle, qty: 3 }]),
       ]);
       expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
       for (const r of results.filter((x) => x.status === "rejected")) expect((r as PromiseRejectedResult).reason.message).toMatch(/Only 2 of Shackle 5t can be issued now/);
-      expect(await qtyOf(IT.shackle!, L.dubai)).toBe(2);
+      expect(await qtyOf(IT.shackle!, L.dubai!)).toBe(2);
       expect(Number((await admin<Row>(`select sum(qty) s from inv_balances where item_id = '${IT.shackle}' and holder_kind = 'employee'`))[0].s)).toBe(3);
       expect(await n(`select 1 from inv_balances where qty < 0`)).toBe(0);
     });
     it("serialises two simultaneous issues of the last unit: one wins, the other is told where it is", async () => {
       const results = await Promise.allSettled([
-        issue(U.opDubai, L.dubai!, EMP.aisha, [{ unit_id: UN.lens2 }]),
-        issue(U.founder, L.dubai!, EMP.omar, [{ unit_id: UN.lens2 }]),
+        issue(U.opDubai, L.dubai!, EMP.aisha!, [{ unit_id: UN.lens2 }]),
+        issue(U.founder, L.dubai!, EMP.omar!, [{ unit_id: UN.lens2 }]),
       ]);
       expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
       expect(((results.find((x) => x.status === "rejected")) as PromiseRejectedResult).reason.message).toMatch(/not on the shelf: it is with an employee/);
@@ -564,7 +564,7 @@ describe("Inventory stock core", () => {
     });
     it("stops a parallel dispatch and issue of the same unit from both taking it, whichever function is used", async () => {
       const results = await Promise.allSettled([
-        issue(U.opDubai, L.dubai!, EMP.aisha, [{ unit_id: UN.lens1 }]),
+        issue(U.opDubai, L.dubai!, EMP.aisha!, [{ unit_id: UN.lens1 }]),
         call(U.founder, `inv_dispatch_to_project('${CO.uae}', '${L.dubai}', '${PRJ.p1}', '${key()}', ${j([{ unit_id: UN.lens1 }])}, null, '${fut(2)}')`),
       ]);
       expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
@@ -612,7 +612,7 @@ describe("Inventory stock core", () => {
     it("keeps a unit reserved for a project from going to a person for that period", async () => {
       const r = await mkRequest(PRJ.p2!, "UAE-R-9001");
       UN.reqP2 = r;
-      UN.resLed2 = await reserveUnit(r, IT.led!, UN.led2, 5, 10);
+      UN.resLed2 = await reserveUnit(r, IT.led!, UN.led2!, 5, 10);
       await expect(issue(U.opDubai, EMP.omar!, [{ unit_id: UN.led2 }], null)).rejects.toThrow(/reserved for UAE-R-9001/);
       await expect(issue(U.opDubai, EMP.omar!, [{ unit_id: UN.led2 }], fut(8))).rejects.toThrow(/reserved for UAE-R-9001/);
     });
@@ -647,11 +647,11 @@ describe("Inventory stock core", () => {
       expect((await admin<Row>(`select inv_unit_usable(u) ok from inv_units u where id = '${UN.led1}'`))[0].ok).toBe(true);
       expect(await unit(UN.led1!)).toMatchObject({ custody_kind: "warehouse", bin_id: L.binA1, condition: "good" });
       await back(U.opDubai, EMP.aisha!, [{ item_id: IT.cable, qty: 2, condition: "needs_inspection" }]);
-      expect(await qtyOf(IT.cable!, L.dubai, "needs_inspection")).toBe(2);        // quantity held, not mixed into good stock
+      expect(await qtyOf(IT.cable!, L.dubai!, "needs_inspection")).toBe(2);        // quantity held, not mixed into good stock
     });
     it("lets a unit that was returned for inspection be released for quantity stock only by a condition check", async () => {
       await call(U.opDubai, `inv_check_condition('${CO.uae}', '${L.dubai}', '${key()}', ${j([{ item_id: IT.cable, qty: 2, from_condition: "needs_inspection", condition: "good" }])})`);
-      expect(await qtyOf(IT.cable!, L.dubai, "needs_inspection")).toBe(0);
+      expect(await qtyOf(IT.cable!, L.dubai!, "needs_inspection")).toBe(0);
       await expect(call(U.opDubai, `inv_check_condition('${CO.uae}', '${L.dubai}', '${key()}', ${j([{ item_id: IT.cable, qty: 2, from_condition: "needs_inspection", condition: "good" }])})`)).rejects.toThrow(/Not enough HDMI cable/);
     });
   });
@@ -665,14 +665,14 @@ describe("Inventory stock core", () => {
     let resCable = "";
 
     it("dispatches without a request only what is unreserved and free until the expected return; another reservation in that period stops it", async () => {
-      resCable = await reserveQty(UN.reqP2!, IT.cable, L.dubai, 20, 5, 10);
+      resCable = await reserveQty(UN.reqP2!, IT.cable!, L.dubai!, 20, 5, 10);
       await expect(dispatch(U.opDubai, PRJ.p1!, [{ unit_id: UN.led2 }], null, fut(7))).rejects.toThrow(/reserved for UAE-R-9001 \(project UAE-P-2\)/);
-      const shelf = await qtyOf(IT.cable!, L.dubai);
+      const shelf = await qtyOf(IT.cable!, L.dubai!);
       await expect(dispatch(U.opDubai, PRJ.p1!, [{ item_id: IT.cable, qty: shelf - 19 }], null, fut(7))).rejects.toThrow(/Only \d+ of HDMI cable is free until/);
       await expect(dispatch(U.opDubai, PRJ.p1!, [{ item_id: IT.cable, qty: shelf - 20 }], null, fut(7)).then(async (r) => { expect(r.lines).toHaveLength(1); })).resolves.toBeUndefined();
       // bring that back so the reservation tests below have stock
       await back(U.opDubai, PRJ.p1!, [{ item_id: IT.cable, qty: shelf - 20, condition: "good", bin_id: L.binA1 }]);
-      expect(await qtyOf(IT.cable!, L.dubai)).toBe(shelf);
+      expect(await qtyOf(IT.cable!, L.dubai!)).toBe(shelf);
       // before the reservation starts, the same unit is free: a short dispatch that returns before day 5 is fine
       const r = await dispatch(U.opDubai, PRJ.p1!, [{ unit_id: UN.led3 }], null, fut(3));
       expect(r.project_id).toBe(PRJ.p1);
@@ -710,7 +710,7 @@ describe("Inventory stock core", () => {
     it("handles partial returns: the rest stays outstanding, damaged is held, the reservation completes only when everything dispatched is back", async () => {
       const r1 = await back(U.opDubai, PRJ.p2!, [{ item_id: IT.cable, qty: 10, condition: "good", bin_id: L.binB2 }, { item_id: IT.cable, qty: 3, condition: "damaged" }]);
       expect(r1.lines.map((l: Row) => [l.qty, l.available])).toEqual([[10, true], [3, false]]);
-      expect(await qtyOf(IT.cable!, L.dubai, "damaged")).toBe(3);
+      expect(await qtyOf(IT.cable!, L.dubai!, "damaged")).toBe(3);
       let res = (await admin<Row>(`select returned_qty, dispatched_qty, status from inv_reservations where id = '${resCable}'`))[0];
       expect(res).toMatchObject({ returned_qty: "13.000", dispatched_qty: "15.000", status: "active" });
       expect(Number((await admin<Row>(`select qty from inv_balances where item_id = '${IT.cable}' and project_id = '${PRJ.p2}'`))[0].qty)).toBe(2);
@@ -720,7 +720,7 @@ describe("Inventory stock core", () => {
       res = (await admin<Row>(`select returned_qty, dispatched_qty, status from inv_reservations where id = '${resCable}'`))[0];
       expect(res).toMatchObject({ returned_qty: "15.000", dispatched_qty: "15.000", status: "active" });
       expect((await admin<Row>(`select status from inv_requests where id = '${UN.reqP2}'`))[0].status).toBe("in_progress");
-      expect(await qtyOf(IT.cable!, L.dubai, "needs_inspection")).toBe(2);
+      expect(await qtyOf(IT.cable!, L.dubai!, "needs_inspection")).toBe(2);
       // the rest is dispatched later and, when ALL 20 are dispatched and back, the reservation completes
       await dispatch(U.opDubai, PRJ.p2!, [{ item_id: IT.cable, qty: 5 }], UN.reqP2);
       expect((await admin<Row>(`select status from inv_requests where id = '${UN.reqP2}'`))[0].status).toBe("fulfilled");      // every line fully dispatched (the unit is still out)
@@ -770,7 +770,7 @@ describe("Inventory stock core", () => {
       lineCable = await mkLine(reqP3, IT.cable!, 4);
       await dispatch(PRJ.p1!, [{ unit_id: UN.led4 }]);
       const movementsBefore = await n(`select 1 from inv_movements`);
-      const r = await move(U.pm, PRJ.p1!, PRJ.p3, [{ unit_id: UN.led4 }], reqP3);
+      const r = await move(U.pm, PRJ.p1!, PRJ.p3!, [{ unit_id: UN.led4 }], reqP3);
       expect(r).toMatchObject({ kind: "transfer_project", new_reservations: 1, from_project_id: PRJ.p1, to_project_id: PRJ.p3 });
       expect(await n(`select 1 from inv_movements`)).toBe(movementsBefore + 1);
       expect(await unit(UN.led4!)).toMatchObject({ custody_kind: "project", project_id: PRJ.p3 });
@@ -786,8 +786,8 @@ describe("Inventory stock core", () => {
     });
     it("moves a unit that is already reserved for the destination request, and counts it on that reservation", async () => {
       await dispatch(PRJ.p1!, [{ unit_id: UN.led5 }]);
-      const res = await reserveUnit(reqP3, IT.led!, UN.led5, 2, 12);
-      const r = await move(U.opDubai, PRJ.p1!, PRJ.p3, [{ unit_id: UN.led5 }], reqP3);
+      const res = await reserveUnit(reqP3, IT.led!, UN.led5!, 2, 12);
+      const r = await move(U.opDubai, PRJ.p1!, PRJ.p3!, [{ unit_id: UN.led5 }], reqP3);
       expect(r.new_reservations).toBe(0);
       expect((await admin<Row>(`select dispatched_qty, status from inv_reservations where id = '${res}'`))[0]).toMatchObject({ dispatched_qty: "1.000", status: "active" });
       expect(await unit(UN.led5!)).toMatchObject({ custody_kind: "project", project_id: PRJ.p3 });
@@ -795,47 +795,47 @@ describe("Inventory stock core", () => {
     it("refuses when the destination window is reserved by someone else, and never displaces that reservation", async () => {
       await dispatch(PRJ.p1!, [{ unit_id: UN.led3 }], fut(4));
       const other = await mkRequest(PRJ.p2!, "UAE-R-9004", "submitted", 3, 20);
-      const res = await reserveUnit(other, IT.led!, UN.led3, 3, 20);
-      await expect(move(U.pm, PRJ.p1!, PRJ.p3, [{ unit_id: UN.led3 }], reqP3)).rejects.toThrow(/reserved for UAE-R-9004 \(project UAE-P-2\).*never displaced/);
+      const res = await reserveUnit(other, IT.led!, UN.led3!, 3, 20);
+      await expect(move(U.pm, PRJ.p1!, PRJ.p3!, [{ unit_id: UN.led3 }], reqP3)).rejects.toThrow(/reserved for UAE-R-9004 \(project UAE-P-2\).*never displaced/);
       expect(await unit(UN.led3!)).toMatchObject({ custody_kind: "project", project_id: PRJ.p1 });
       expect((await admin<Row>(`select status from inv_reservations where id = '${res}'`))[0].status).toBe("active");
       expect(await n(`select 1 from inv_movements where kind = 'transfer_project'`)).toBe(2);
       // the reserving project itself can have it
-      const r = await move(U.pm, PRJ.p1!, PRJ.p2, [{ unit_id: UN.led3 }], other);
+      const r = await move(U.pm, PRJ.p1!, PRJ.p2!, [{ unit_id: UN.led3 }], other);
       expect(r.new_reservations).toBe(0);
       expect(await unit(UN.led3!)).toMatchObject({ project_id: PRJ.p2 });
       await call(U.opDubai, `inv_return_from_project('${CO.uae}', '${L.dubai}', '${PRJ.p2}', '${key()}', ${j([{ unit_id: UN.led3, condition: "good" }])})`);
     });
     it("checks who may move it, that the destination is ongoing and has its request, and that the unit is where it is said to be", async () => {
       await dispatch(PRJ.p1!, [{ unit_id: UN.lens1 }]);
-      await expect(move(U.pm2, PRJ.p1!, PRJ.p3, [{ unit_id: UN.lens1 }], reqP3)).rejects.toThrow(/Only the manager of the project/);
-      await expect(move(U.outsider, PRJ.p1!, PRJ.p3, [{ unit_id: UN.lens1 }], reqP3)).rejects.toThrow(/Only the manager|not set up/);
-      await expect(move(U.opPoznan, PRJ.p1!, PRJ.p3, [{ unit_id: UN.lens1 }], reqP3)).rejects.toThrow(/not allowed to move/);
+      await expect(move(U.pm2, PRJ.p1!, PRJ.p3!, [{ unit_id: UN.lens1 }], reqP3)).rejects.toThrow(/Only the manager of the project/);
+      await expect(move(U.outsider, PRJ.p1!, PRJ.p3!, [{ unit_id: UN.lens1 }], reqP3)).rejects.toThrow(/Only the manager|not set up/);
+      await expect(move(U.opPoznan, PRJ.p1!, PRJ.p3!, [{ unit_id: UN.lens1 }], reqP3)).rejects.toThrow(/not allowed to move/);
       const holdReq = await mkRequest(PRJ.hold!, "UAE-R-9005");
       await mkLine(holdReq, IT.extra!, 1);
-      await expect(move(U.pm, PRJ.p1!, PRJ.hold, [{ unit_id: UN.lens1 }], holdReq)).rejects.toThrow(/on hold and cannot receive equipment/);
-      await expect(move(U.pm, PRJ.p1!, PRJ.p3, [{ unit_id: UN.lens1 }], null)).rejects.toThrow(/destination project's equipment request/);
-      await expect(move(U.pm, PRJ.p1!, PRJ.p2, [{ unit_id: UN.lens1 }], reqP3)).rejects.toThrow(/not for the destination project/);
-      await expect(move(U.pm, PRJ.p1!, PRJ.p1, [{ unit_id: UN.lens1 }], reqP3)).rejects.toThrow(/two different projects/);
-      await expect(move(U.pm, PRJ.p2!, PRJ.p3, [{ unit_id: UN.lens1 }], reqP3)).rejects.toThrow(/is not on project UAE-P-2/);
-      await expect(move(U.pm, PRJ.p1!, PRJ.p3, [{ unit_id: UN.lens1 }], reqP3, null)).resolves.toBeTruthy();   // request supplies the return date
-      await expect(move(U.pm, PRJ.p1!, PRJ.p3, [{ unit_id: UN.lens1 }, { unit_id: UN.lens1 }], reqP3)).rejects.toThrow();
+      await expect(move(U.pm, PRJ.p1!, PRJ.hold!, [{ unit_id: UN.lens1 }], holdReq)).rejects.toThrow(/on hold and cannot receive equipment/);
+      await expect(move(U.pm, PRJ.p1!, PRJ.p3!, [{ unit_id: UN.lens1 }], null)).rejects.toThrow(/destination project's equipment request/);
+      await expect(move(U.pm, PRJ.p1!, PRJ.p2!, [{ unit_id: UN.lens1 }], reqP3)).rejects.toThrow(/not for the destination project/);
+      await expect(move(U.pm, PRJ.p1!, PRJ.p1!, [{ unit_id: UN.lens1 }], reqP3)).rejects.toThrow(/two different projects/);
+      await expect(move(U.pm, PRJ.p2!, PRJ.p3!, [{ unit_id: UN.lens1 }], reqP3)).rejects.toThrow(/is not on project UAE-P-2/);
+      await expect(move(U.pm, PRJ.p1!, PRJ.p3!, [{ unit_id: UN.lens1 }], reqP3, null)).resolves.toBeTruthy();   // request supplies the return date
+      await expect(move(U.pm, PRJ.p1!, PRJ.p3!, [{ unit_id: UN.lens1 }, { unit_id: UN.lens1 }], reqP3)).rejects.toThrow();
       // the destination project completes: the next transfer is refused
       const doneReq = await mkRequest(PRJ.done!, "UAE-R-9006", "submitted");
-      await expect(move(U.pm, PRJ.p3!, PRJ.done, [{ unit_id: UN.lens1 }], doneReq)).rejects.toThrow(/completed and cannot receive/);
+      await expect(move(U.pm, PRJ.p3!, PRJ.done!, [{ unit_id: UN.lens1 }], doneReq)).rejects.toThrow(/completed and cannot receive/);
     });
     it("moves quantities too, reserving the moved stock for the destination, and refuses when it would leave another project's reservation short", async () => {
       await dispatch(PRJ.p1!, [{ item_id: IT.cable, qty: 10 }]);
-      const shelf = await qtyOf(IT.cable!, L.dubai);
+      const shelf = await qtyOf(IT.cable!, L.dubai!);
       const reqLine = lineCable;
       const blocker = await mkRequest(PRJ.p2!, "UAE-R-9007", "submitted", 1, 30);
-      const blockRes = await reserveQty(blocker, IT.cable!, L.dubai, shelf + 1, 1, 30);
-      await expect(move(U.pm, PRJ.p1!, PRJ.p3, [{ item_id: IT.cable, qty: 4 }], reqP3)).rejects.toThrow(/would leave a reservation of another project short/);
+      const blockRes = await reserveQty(blocker, IT.cable!, L.dubai!, shelf + 1, 1, 30);
+      await expect(move(U.pm, PRJ.p1!, PRJ.p3!, [{ item_id: IT.cable, qty: 4 }], reqP3)).rejects.toThrow(/would leave a reservation of another project short/);
       await admin(`update inv_reservations set status = 'released', released_at = now() where id = '${blockRes}'`);
-      const r = await move(U.pm, PRJ.p1!, PRJ.p3, [{ item_id: IT.cable, qty: 4 }], reqP3);
+      const r = await move(U.pm, PRJ.p1!, PRJ.p3!, [{ item_id: IT.cable, qty: 4 }], reqP3);
       expect(r.new_reservations).toBe(1);
       const held = await admin<Row>(`select project_id, qty from inv_balances where item_id = '${IT.cable}' and holder_kind = 'project' and qty > 0 order by project_id`);
-      expect(Object.fromEntries(held.map((h) => [h.project_id, Number(h.qty)]))).toMatchObject({ [PRJ.p1]: 6, [PRJ.p3]: 4 });
+      expect(Object.fromEntries(held.map((h) => [h.project_id, Number(h.qty)]))).toMatchObject({ [PRJ.p1!]: 6, [PRJ.p3!]: 4 });
       expect(reqLine).toBeTruthy();
       expect((await admin<Row>(`select qty, dispatched_qty, location_id from inv_reservations where request_line_id = '${reqLine}'`))[0]).toMatchObject({ qty: "4.000", dispatched_qty: "4.000", location_id: L.dubai });
       await call(U.opDubai, `inv_return_from_project('${CO.uae}', '${L.dubai}', '${PRJ.p1}', '${key()}', ${j([{ item_id: IT.cable, qty: 6, condition: "good" }])})`);
@@ -867,27 +867,27 @@ describe("Inventory stock core", () => {
       expect(UN.kit2).toBeTruthy();
     });
     it("dispatches to another location: a transfer record, stock in transit, nothing available at the destination yet", async () => {
-      await expect(dispatchT(U.opPoznan, L.dubai!, L.poznan, [{ unit_id: UN.ad1 }])).rejects.toThrow(/not set up to work at this location/);
-      await expect(dispatchT(U.opDubai, L.dubai!, L.dubai, [{ unit_id: UN.ad1 }])).rejects.toThrow(/different location/);
+      await expect(dispatchT(U.opPoznan, L.dubai!, L.poznan!, [{ unit_id: UN.ad1 }])).rejects.toThrow(/not set up to work at this location/);
+      await expect(dispatchT(U.opDubai, L.dubai!, L.dubai!, [{ unit_id: UN.ad1 }])).rejects.toThrow(/different location/);
       await expect(dispatchT(U.opDubai, L.dubai!, id(), [{ unit_id: UN.ad1 }])).rejects.toThrow(/Unknown destination/);
-      await expect(dispatchT(U.opDubai, L.dubai!, L.poznan, [{ unit_id: UN.led6 }])).rejects.toThrow(/has not been counted/);
-      await expect(dispatchT(U.opDubai, L.dubai!, L.poznan, [{ item_id: IT.cable, qty: 100000 }])).rejects.toThrow(/Only \d+ of HDMI cable can be moved now/);
-      const poznanBefore = await qtyOf(IT.cable!, L.poznan);
-      const dubaiBefore = await qtyOf(IT.cable!, L.dubai);
-      const nowFree = await free(IT.cable!, L.poznan, "now()", "now() + interval '1 hour'");
-      const r = await dispatchT(U.opDubai, L.dubai!, L.poznan, [{ unit_id: UN.ad1 }, { unit_id: UN.ad2 }, { item_id: IT.cable, qty: 20 }]);
+      await expect(dispatchT(U.opDubai, L.dubai!, L.poznan!, [{ unit_id: UN.led6 }])).rejects.toThrow(/has not been counted/);
+      await expect(dispatchT(U.opDubai, L.dubai!, L.poznan!, [{ item_id: IT.cable, qty: 100000 }])).rejects.toThrow(/Only \d+ of HDMI cable can be moved now/);
+      const poznanBefore = await qtyOf(IT.cable!, L.poznan!);
+      const dubaiBefore = await qtyOf(IT.cable!, L.dubai!);
+      const nowFree = await free(IT.cable!, L.poznan!, "now()", "now() + interval '1 hour'");
+      const r = await dispatchT(U.opDubai, L.dubai!, L.poznan!, [{ unit_id: UN.ad1 }, { unit_id: UN.ad2 }, { item_id: IT.cable, qty: 20 }]);
       transferId = r.transfer_id;
       expect(r).toMatchObject({ kind: "transfer_dispatch", status: "in_transit" });
       expect(r.transfer_code).toMatch(/^UAE-T-\d{5}$/);
       expect(await unit(UN.ad1!)).toMatchObject({ custody_kind: "transit", transfer_id: transferId });
       expect((await admin<Row>(`select inv_unit_usable(u) ok from inv_units u where id = '${UN.ad1}'`))[0].ok).toBe(false);
-      expect(await qtyOf(IT.cable!, L.dubai)).toBe(dubaiBefore - 20);
-      expect(await qtyOf(IT.cable!, L.poznan)).toBe(poznanBefore);
+      expect(await qtyOf(IT.cable!, L.dubai!)).toBe(dubaiBefore - 20);
+      expect(await qtyOf(IT.cable!, L.poznan!)).toBe(poznanBefore);
       expect((await admin<Row>(`select qty from inv_balances where holder_kind = 'transit' and transfer_id = '${transferId}'`))[0].qty).toBe("20.000");
       expect((await admin<Row>(`select transfer_id from inv_movements where id = '${r.movement_id}'`))[0].transfer_id).toBe(transferId);
       // in transit it does not count as stock at the destination now; on time for a LATER window it does, still never as 'usable now'
-      expect(await free(IT.cable!, L.poznan, "now()", "now() + interval '1 hour'")).toBe(nowFree);
-      expect(await free(IT.cable!, L.poznan, "now() + interval '3 days'", "now() + interval '4 days'")).toBe(nowFree + 20);
+      expect(await free(IT.cable!, L.poznan!, "now()", "now() + interval '1 hour'")).toBe(nowFree);
+      expect(await free(IT.cable!, L.poznan!, "now() + interval '3 days'", "now() + interval '4 days'")).toBe(nowFree + 20);
       expect((await admin<Row>(`select inv_unit_free('${UN.ad1}', now(), now() + interval '1 hour', '${L.poznan}') f`))[0].f).toBe(false);
       expect((await admin<Row>(`select inv_unit_free('${UN.ad1}', now() + interval '3 days', now() + interval '4 days', '${L.poznan}') f`))[0].f).toBe(true);
       // it cannot be used from either end while in transit
@@ -900,12 +900,12 @@ describe("Inventory stock core", () => {
       await expect(receiveT(U.outsider, transferId)).rejects.toThrow(/not set up/);
       await expect(receiveT(U.opPoznan, transferId, [{ unit_id: UN.ad3, condition: "good" }])).rejects.toThrow(/not part of transfer/);
       await expect(receiveT(U.opPoznan, transferId, [{ item_id: IT.cable, qty: 21 }])).rejects.toThrow(/Not enough HDMI cable in transit/);
-      const poznanBefore = await qtyOf(IT.cable!, L.poznan);
+      const poznanBefore = await qtyOf(IT.cable!, L.poznan!);
       const r = await receiveT(U.opPoznan, transferId, [{ unit_id: UN.ad1, condition: "good", bin_id: L.binP1 }, { item_id: IT.cable, qty: 12, bin_id: L.binP1 }]);
       expect(r).toMatchObject({ status: "in_transit", still_on_the_way: 2 });
       expect(await unit(UN.ad1!)).toMatchObject({ custody_kind: "warehouse", location_id: L.poznan, bin_id: L.binP1, transfer_id: null });
       expect((await admin<Row>(`select inv_unit_usable(u) ok from inv_units u where id = '${UN.ad1}'`))[0].ok).toBe(true);
-      expect(await qtyOf(IT.cable!, L.poznan)).toBe(poznanBefore + 12);
+      expect(await qtyOf(IT.cable!, L.poznan!)).toBe(poznanBefore + 12);
       expect((await admin<Row>(`select status, received_at from inv_transfers where id = '${transferId}'`))[0]).toMatchObject({ status: "in_transit", received_at: null });
       expect(await unit(UN.ad2!)).toMatchObject({ custody_kind: "transit" });
     });
@@ -919,7 +919,7 @@ describe("Inventory stock core", () => {
       expect(await n(`select 1 from inv_balances where holder_kind = 'transit' and qty > 0`)).toBe(0);
     });
     it("lets cross_location staff handle any location, and plain operators only their own", async () => {
-      const r = await dispatchT(U.crossOp, L.poznan!, L.dubai, [{ item_id: IT.cable, qty: 1 }]);
+      const r = await dispatchT(U.crossOp, L.poznan!, L.dubai!, [{ item_id: IT.cable, qty: 1 }]);
       await expect(receiveT(U.opPoznan, r.transfer_id)).rejects.toThrow(/not set up to work at this location/);
       await receiveT(U.opDubai, r.transfer_id);
       await call(U.crossOp, `inv_check_condition('${CO.uae}', '${L.poznan}', '${key()}', ${j([{ unit_id: UN.ad2, condition: "good" }])})`);
@@ -1063,7 +1063,7 @@ describe("Inventory stock core", () => {
     });
     it("moves a project request to in progress, fulfilled and closed as lines are dispatched and everything comes back; a cancelled line no longer counts", async () => {
       const r = await mkRequest(PRJ.p3!, "UAE-R-9021", "submitted", 1, 15);
-      await reserveUnit(r, IT.led!, UN.led1, 1, 15);
+      await reserveUnit(r, IT.led!, UN.led1!, 1, 15);
       const lineB = await mkLine(r, IT.cable!, 2);
       const [resBRow] = await admin<{ id: string }>(`insert into inv_reservations (company_id, request_line_id, item_id, location_id, qty, reserved_during, made_by)
         values ('${CO.uae}', '${lineB}', '${IT.cable}', '${L.dubai}', 2, tstzrange(now() + interval '1 day', now() + interval '15 days'), '${U.pm}') returning id`);
@@ -1110,11 +1110,11 @@ describe("Inventory stock core", () => {
     const usable = async (u: string) => (await admin<Row>(`select inv_unit_usable(u) ok from inv_units u where id = '${u}'`))[0].ok as boolean;
 
     it("packs a kit against its checklist: present contents go into the kit, a missing line is recorded, nothing is hidden", async () => {
-      const shelfBefore = await qtyOf(IT.screws!, L.dubai);
+      const shelfBefore = await qtyOf(IT.screws!, L.dubai!);
       const r = await pack(U.opDubai, UN.kit1!, [{ item_id: IT.adapter, unit_id: UN.ad3 }, { item_id: IT.screws, qty: 4, expected_qty: 4 }, { item_id: IT.extra, status: "missing" }]);
       expect(r.missing_required).toEqual([expect.objectContaining({ name: "Spare lens" })]);
       expect(await unit(UN.ad3!)).toMatchObject({ custody_kind: "kit", in_kit_id: UN.kit1 });
-      expect(await qtyOf(IT.screws!, L.dubai)).toBe(shelfBefore - 4);
+      expect(await qtyOf(IT.screws!, L.dubai!)).toBe(shelfBefore - 4);
       expect(Number((await admin<Row>(`select qty from inv_balances where holder_kind = 'kit' and kit_unit_id = '${UN.kit1}' and item_id = '${IT.screws}'`))[0].qty)).toBe(4);
       const rows = await admin<Row>(`select item_id, status, content_unit_id, present_qty from inv_kit_contents where kit_unit_id = '${UN.kit1}'`);
       const by = (item: string) => rows.find((x) => x.item_id === item);
@@ -1162,12 +1162,12 @@ describe("Inventory stock core", () => {
       expect(await usable(UN.kit1!)).toBe(true);
     });
     it("unpacks a kit back onto the shelf: contents available again on their own, the checklist lines show missing, the ledger keeps the history", async () => {
-      const shelfBefore = await qtyOf(IT.screws!, L.dubai);
+      const shelfBefore = await qtyOf(IT.screws!, L.dubai!);
       const r = await unpack(U.opDubai, UN.kit1!);
       expect(r.lines).toHaveLength(2);
       expect(await unit(UN.ad3!)).toMatchObject({ custody_kind: "warehouse", in_kit_id: null, location_id: L.dubai });
       expect(await usable(UN.ad3!)).toBe(true);
-      expect(await qtyOf(IT.screws!, L.dubai)).toBe(shelfBefore + 4);
+      expect(await qtyOf(IT.screws!, L.dubai!)).toBe(shelfBefore + 4);
       expect(await n(`select 1 from inv_kit_contents where kit_unit_id = '${UN.kit1}' and status = 'missing' and content_unit_id is null and present_qty = 0`)).toBe(3);
       expect(await n(`select 1 from inv_movements where kind in ('pack_kit', 'unpack_kit')`)).toBeGreaterThanOrEqual(3);
       await expect(unpack(U.opDubai, UN.kit1!)).rejects.toThrow(/nothing in this kit/);
@@ -1204,10 +1204,10 @@ describe("Inventory stock core", () => {
       expect(await n(`select 1 from inv_units`)).toBe(unitsBefore);
     });
     it("consumes consumables with no expected return, never beyond stock or reservations, and takes back only what was consumed", async () => {
-      const shelf = await qtyOf(IT.tape!, L.dubai);
+      const shelf = await qtyOf(IT.tape!, L.dubai!);
       const c = await call<Row>(U.opDubai, `inv_consume('${CO.uae}', '${L.dubai}', '${key()}', ${j([{ item_id: IT.tape, qty: 5 }])}, '${EMP.aisha}')`);
       UN.consumeMovement = c.movement_id;
-      expect(await qtyOf(IT.tape!, L.dubai)).toBe(shelf - 5);
+      expect(await qtyOf(IT.tape!, L.dubai!)).toBe(shelf - 5);
       expect((await admin<Row>(`select employee_id, expected_return_at from inv_movements where id = '${c.movement_id}'`))[0]).toMatchObject({ employee_id: EMP.aisha, expected_return_at: null });
       expect(await n(`select 1 from inv_movement_lines where movement_id = '${c.movement_id}' and to_kind = 'consumed' and from_balance_id is not null`)).toBe(1);
       await expect(call(U.opDubai, `inv_consume('${CO.uae}', '${L.dubai}', '${key()}', ${j([{ item_id: IT.led, qty: 1 }])})`)).rejects.toThrow(/not a consumable/);
@@ -1220,17 +1220,17 @@ describe("Inventory stock core", () => {
       await expect(call(U.opDubai, `inv_return_unused('${CO.uae}', '${L.dubai}', '${key()}', ${j([{ item_id: IT.tape, qty: 1 }])}, '${EMP.omar}')`)).rejects.toThrow(/Only 0 of Gaffer tape was consumed/);
       await expect(call(U.opDubai, `inv_return_unused('${CO.uae}', '${L.dubai}', '${key()}', ${j([{ item_id: IT.tape, qty: 1 }])})`)).rejects.toThrow(/employee or the project/);
       await call(U.opDubai, `inv_return_unused('${CO.uae}', '${L.dubai}', '${key()}', ${j([{ item_id: IT.tape, qty: 2 }])}, '${EMP.aisha}')`);
-      expect(await qtyOf(IT.tape!, L.dubai)).toBe(shelf - 3);
+      expect(await qtyOf(IT.tape!, L.dubai!)).toBe(shelf - 3);
       await expect(call(U.opDubai, `inv_return_unused('${CO.uae}', '${L.dubai}', '${key()}', ${j([{ item_id: IT.tape, qty: 4 }])}, '${EMP.aisha}')`)).rejects.toThrow(/Only 3 of Gaffer tape was consumed/);
     });
     it("counts a consumable against the request that reserved it, and does not let others use what is reserved", async () => {
       const r = await mkRequest(PRJ.p3!, "UAE-R-9030", "submitted", 1, 5);
-      const res = await reserveQty(r, IT.tape!, L.dubai, 10, 1, 5);
-      const shelf = await qtyOf(IT.tape!, L.dubai);                                                                  // 17
+      const res = await reserveQty(r, IT.tape!, L.dubai!, 10, 1, 5);
+      const shelf = await qtyOf(IT.tape!, L.dubai!);                                                                  // 17
       await expect(call(U.opDubai, `inv_consume('${CO.uae}', '${L.dubai}', '${key()}', ${j([{ item_id: IT.tape, qty: shelf - 9 }])})`)).rejects.toThrow(/Only 7 of Gaffer tape can be used now/);
       await call(U.opDubai, `inv_consume('${CO.uae}', '${L.dubai}', '${key()}', ${j([{ item_id: IT.tape, qty: 10 }])}, null, '${PRJ.p3}', '${r}')`);
       expect((await admin<Row>(`select dispatched_qty, returned_qty, status from inv_reservations where id = '${res}'`))[0]).toMatchObject({ dispatched_qty: "10.000", returned_qty: "10.000", status: "completed" });
-      expect(await qtyOf(IT.tape!, L.dubai)).toBe(shelf - 10);
+      expect(await qtyOf(IT.tape!, L.dubai!)).toBe(shelf - 10);
     });
     it("sends equipment and held quantities to repair and takes them back with the condition found; repair is not availability", async () => {
       await expect(call(U.opDubai, `inv_repair_out('${CO.uae}', '${L.dubai}', '${key()}', ${j([{ unit_id: UN.led1 }])}, '  ')`)).rejects.toThrow(/repair reference/);
@@ -1270,15 +1270,15 @@ describe("Inventory stock core", () => {
       await adj(U.opDubai, "found", [{ unit_id: UN.lens2, condition: "good" }], "returned by the employee");
       expect(await unit(UN.lens2!)).toMatchObject({ lifecycle: "active", custody_kind: "warehouse", employee_id: null });
       // quantities
-      const before = await qtyOf(IT.cable!, L.dubai);
+      const before = await qtyOf(IT.cable!, L.dubai!);
       await adj(U.opDubai, "missing", [{ item_id: IT.cable, qty: 3 }], "three cables lost");
-      expect(await qtyOf(IT.cable!, L.dubai)).toBe(before - 3);
+      expect(await qtyOf(IT.cable!, L.dubai!)).toBe(before - 3);
       await expect(adj(U.opDubai, "found", [{ item_id: IT.cable, qty: 4 }], "found")).rejects.toThrow(/Only 3 of HDMI cable has been recorded as missing/);
       await adj(U.opDubai, "found", [{ item_id: IT.cable, qty: 3, condition: "good" }], "found in the van");
-      expect(await qtyOf(IT.cable!, L.dubai)).toBe(before);
+      expect(await qtyOf(IT.cable!, L.dubai!)).toBe(before);
       // retire
       await expect(adj(U.opDubai, "retire", [{ unit_id: UN.led6 }])).rejects.toThrow(/not been confirmed yet/);
-      const resv = await reserveUnit(await mkRequest(PRJ.p2!, "UAE-R-9031"), IT.led!, UN.led5, 30, 35);
+      const resv = await reserveUnit(await mkRequest(PRJ.p2!, "UAE-R-9031"), IT.led!, UN.led5!, 30, 35);
       await expect(adj(U.opDubai, "retire", [{ unit_id: UN.led5 }])).rejects.toThrow(/reserved for UAE-R-9031/);
       await admin(`update inv_reservations set status = 'released', released_at = now() where id = '${resv}'`);
       await adj(U.opDubai, "retire", [{ unit_id: UN.led5 }], "beyond repair, scrapped");
@@ -1297,7 +1297,7 @@ describe("Inventory stock core", () => {
 
     it("turns a cycle count into count_adjust movements for the differences, each needing a reason", async () => {
       const c = (await call<Row>(U.opDubai, `inv_start_count('${CO.uae}', '${L.dubai}', 'cycle')`)).count_id;
-      const bal = await savedBalance(IT.cable!, L.binA1);
+      const bal = await savedBalance(IT.cable!, L.binA1!);
       const want = Number(bal.qty) - 2;
       await commit(U.opDubai, `select inv_save_count_line('${c}', ${want}, p_item_id => '${IT.cable}', p_bin_id => '${L.binA1}')`);
       await commit(U.opDubai, `select inv_save_count_line('${c}', 0, p_unit_id => '${UN.led3}')`);
@@ -1309,7 +1309,7 @@ describe("Inventory stock core", () => {
       await commit(U.opDubai, `select inv_save_count_line('${c}', 0, p_unit_id => '${UN.led3}', p_reason => 'not on the shelf')`);
       const r = await call<Row>(U.counter, `inv_confirm_count('${CO.uae}', '${c}', '${key()}')`);
       expect(r).toMatchObject({ kind: "count_adjust", adjustments: 2 });
-      expect(Number((await savedBalance(IT.cable!, L.binA1)).qty)).toBe(want);
+      expect(Number((await savedBalance(IT.cable!, L.binA1!)).qty)).toBe(want);
       expect((await unit(UN.led3!)).lifecycle).toBe("missing");
       const lines = await admin<Row>(`select from_kind, to_kind, exception_note from inv_movement_lines where movement_id = '${r.movement_id}' order by qty desc, unit_id nulls first`);
       expect(lines.every((l) => l.from_kind === "warehouse" && l.to_kind === "adjustment" && l.exception_note)).toBe(true);
@@ -1322,7 +1322,7 @@ describe("Inventory stock core", () => {
     it("keeps the original on a correction: a new movement naming it, with a reason, never an edit", async () => {
       const [orig] = await admin<Row>(`select m.id movement_id, m.code, l.id line_id, l.qty from inv_movements m join inv_movement_lines l on l.movement_id = m.id
          where m.kind = 'receipt' and l.item_id = '${IT.cable}' and l.qty = 20 and l.to_bin_id = '${L.binB2}' order by m.recorded_at limit 1`);
-      const bal = await savedBalance(IT.cable!, L.binB2);
+      const bal = await savedBalance(IT.cable!, L.binB2!);
       const fix = (user: string, qty: number, reason = "counted at the dock: 18 arrived") =>
         call<Row>(user, `inv_correct_movement('${CO.uae}', '${orig.movement_id}', '${key()}', '${reason}', ${j([{ line_id: orig.line_id, qty }])})`);
       await expect(fix(U.opDubai, 18)).rejects.toThrow(/allowed to confirm stock/);
@@ -1331,7 +1331,7 @@ describe("Inventory stock core", () => {
       await expect(fix(U.counter, 1.5)).rejects.toThrow(/at most 0 decimal/);
       const r = await fix(U.counter, 18);
       expect(r).toMatchObject({ kind: "correction", corrects_movement: orig.code });
-      expect(Number((await savedBalance(IT.cable!, L.binB2)).qty)).toBe(Number(bal.qty) - 2);
+      expect(Number((await savedBalance(IT.cable!, L.binB2!)).qty)).toBe(Number(bal.qty) - 2);
       const original = (await admin<Row>(`select qty from inv_movement_lines where id = '${orig.line_id}'`))[0];
       expect(original.qty).toBe("20.000");                                                                         // the original line is untouched
       const header = (await admin<Row>(`select corrects_movement_id, reason, kind from inv_movements where id = '${r.movement_id}'`))[0];
@@ -1339,7 +1339,7 @@ describe("Inventory stock core", () => {
       expect(await n(`select 1 from inv_movement_lines where movement_id = '${r.movement_id}' and corrects_line_id = '${orig.line_id}' and to_kind = 'adjustment'`)).toBe(1);
       const again = await fix(U.counter, 25, "recount after the second pallet");
       expect(again.lines[0]).toMatchObject({ was: 18, now: 25 });
-      expect(Number((await savedBalance(IT.cable!, L.binB2)).qty)).toBe(Number(bal.qty) + 5);
+      expect(Number((await savedBalance(IT.cable!, L.binB2!)).qty)).toBe(Number(bal.qty) + 5);
       expect(await n(`select 1 from inv_movements where kind = 'correction' and corrects_movement_id = '${orig.movement_id}'`)).toBe(2);
       // a correction of a movement that moved equipment between holders, or of a unit line, is refused with the right way pointed out
       const [issueLine] = await admin<Row>(`select l.id from inv_movement_lines l join inv_movements m on m.id = l.movement_id where m.kind = 'issue_employee' and l.item_id = '${IT.cable}' limit 1`);
@@ -1349,9 +1349,9 @@ describe("Inventory stock core", () => {
       await expect(call(U.counter, `inv_correct_movement('${CO.uae}', '${unitLine.movement_id}', '${key()}', 'wrong', ${j([{ line_id: unitLine.id, qty: 1 }])})`)).rejects.toThrow(/Equipment units are corrected/);
       // a consumption can be corrected too
       const [cl] = await admin<Row>(`select l.id from inv_movement_lines l where l.movement_id = '${UN.consumeMovement}'`);
-      const tapeBefore = await qtyOf(IT.tape!, L.dubai);
+      const tapeBefore = await qtyOf(IT.tape!, L.dubai!);
       await call(U.counter, `inv_correct_movement('${CO.uae}', '${UN.consumeMovement}', '${key()}', 'six rolls were used, not five', ${j([{ line_id: cl.id, qty: 6 }])})`);
-      expect(await qtyOf(IT.tape!, L.dubai)).toBe(tapeBefore - 1);
+      expect(await qtyOf(IT.tape!, L.dubai!)).toBe(tapeBefore - 1);
     });
     it("makes the ledger immutable: no edit and no delete of a movement or a line, by anyone", async () => {
       await expect(admin(`update inv_movements set note = 'edited'`)).rejects.toThrow(/never edited or deleted/);
