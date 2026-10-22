@@ -14,6 +14,7 @@ import { ActionForm, Field } from "@/components/sales/action-form";
 export function CompanySettings({ companyId, companyName, referenceCode, isEnabled, isFounder }: { companyId: string; companyName: string; referenceCode: string | null; isEnabled: boolean; isFounder: boolean }) {
   const [code, setCode] = useState(referenceCode ?? "");
   const [confirmOff, setConfirmOff] = useState(false);
+  const [codeSaved, setCodeSaved] = useState(false);
   const configured = referenceCode !== null;
   return (
     <div className="space-y-6">
@@ -24,13 +25,14 @@ export function CompanySettings({ companyId, companyName, referenceCode, isEnabl
         </div>
         {!configured ? <Alert variant="warning" role="status">No equipment can be registered for {companyName} until a founder sets the reference code. Nothing is guessed.</Alert> : null}
         {isFounder ? (
-          <ActionForm action={setInventoryCompanyCode} submitLabel={configured ? "Change code" : "Set code"} className="max-w-md space-y-3">
+          <ActionForm action={setInventoryCompanyCode} submitLabel={configured ? "Change code" : "Set code"} className="max-w-md space-y-3" onDone={() => setCodeSaved(true)}>
             <input type="hidden" name="companyId" value={companyId} />
             <Field label="Equipment reference code" htmlFor={`inv-code-${companyId}`} hint={`2 to 5 capital letters, different for every company. Equipment IDs are made from it, for example ${code || "UAE"}-E-00042 for a unit and ${code || "UAE"}-S-00007 for an item in a bin. It cannot be changed once the first equipment code has been issued, because labels already carry it.`}>
               <Input id={`inv-code-${companyId}`} name="code" value={code} onChange={(e) => setCode(normaliseCompanyCode(e.target.value))} required minLength={2} maxLength={5} pattern="[A-Za-z]{2,5}" autoCapitalize="characters" autoComplete="off" className="uppercase" />
             </Field>
           </ActionForm>
         ) : <p className="text-sm text-muted-foreground">Only a founder can set or change it.</p>}
+        {codeSaved ? <Alert variant="success" role="status" className="max-w-md">Reference code saved.</Alert> : null}
       </div>
 
       <div className="space-y-2">

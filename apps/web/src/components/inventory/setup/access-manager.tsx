@@ -104,13 +104,19 @@ function PersonPicker({ staff }: { staff: readonly StaffOption[] }) {
 }
 
 export function GiveAccessForm({ companyId, viewerIsFounder, staff, locations }: { companyId: string; viewerIsFounder: boolean; staff: readonly StaffOption[]; locations: readonly AccessLocation[] }) {
+  // After a successful save the form starts again empty (a new key), and says so; the new person appears in the list above.
+  const [round, setRound] = useState(0);
+  const [saved, setSaved] = useState(false);
   return (
-    <ActionForm action={grantInventoryAccess} submitLabel="Give access" pendingLabel="Saving…" resetOnSuccess>
-      <input type="hidden" name="companyId" value={companyId} />
-      <PersonPicker staff={staff} />
-      <RightsFields idPrefix="inv-grant" viewerIsFounder={viewerIsFounder} defaults={[]} locations={locations} defaultLocationIds={[]} />
-      <Field label="Note (optional)" htmlFor="inv-grant-note" hint="Why they need access. Kept in the history."><Input id="inv-grant-note" name="note" maxLength={200} /></Field>
-    </ActionForm>
+    <div onChange={() => setSaved(false)} className="space-y-3">
+      {saved ? <Alert variant="success" role="status">Access saved. The person now appears in the list above.</Alert> : null}
+      <ActionForm key={round} action={grantInventoryAccess} submitLabel="Give access" pendingLabel="Saving…" onDone={() => { setRound((n) => n + 1); setSaved(true); }}>
+        <input type="hidden" name="companyId" value={companyId} />
+        <PersonPicker staff={staff} />
+        <RightsFields idPrefix="inv-grant" viewerIsFounder={viewerIsFounder} defaults={[]} locations={locations} defaultLocationIds={[]} />
+        <Field label="Note (optional)" htmlFor="inv-grant-note" hint="Why they need access. Kept in the history."><Input id="inv-grant-note" name="note" maxLength={200} /></Field>
+      </ActionForm>
+    </div>
   );
 }
 

@@ -171,7 +171,7 @@ export default async function InventoryManagePage({ searchParams }: { searchPara
   if (viewStock && UUID_RE.test(countId)) {
     const { data: c } = await supabase.from("inv_counts").select("*").eq("id", countId).eq("company_id", companyId).maybeSingle();
     if (!c) {
-      sheet = null;
+      sheet = <Alert role="status">That count was not found, or it is not available to you.</Alert>;
     } else {
       const [lineRows, balanceRows] = await Promise.all([
         supabase.from("inv_count_lines").select("*").eq("count_id", c.id).order("id"),
