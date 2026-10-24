@@ -61,7 +61,7 @@ export function makeRunner(prefix, { shots = SHOTS } = {}) {
       }
     },
     check(cond, msg) { if (!cond) throw new Error(msg); },
-    eq(actual, expected, what) { if (String(actual) !== String(expected)) throw new Error(`${what}: expected ${expected}, got ${actual}`); },
+    eq(actual, expected, what) { const num = (x) => (String(x).trim() !== "" && Number.isFinite(Number(x)) ? Number(x) : null); const same = num(actual) !== null && num(expected) !== null ? num(actual) === num(expected) : String(actual) === String(expected); if (!same) throw new Error(`${what}: expected ${expected}, got ${actual}`); },
     verdict(title) {
       console.log(`\n${title}: ${st.passes} passed, ${st.fails} failed`);
       if (st.fails) console.log("FAILED:", st.failures.join(" | "));

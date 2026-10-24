@@ -87,6 +87,8 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
   const canEditList = (manage || warehouse) && !off;
   const technologies = canEditList ? await loadTechnologies(project.company_id).catch(() => []) : [];
   const outstanding = asArray(equipment.outstanding).map(asRecord);
+  // Metres and other measured units are written with their unit, as on the request lines.
+  const unitOfLine = new Map(models.flatMap((m) => m.lines.map((l) => [l.id, l.unit] as const)));
   const shortages = asArray(equipment.shortages).map(asRecord);
   const handover = models.find((m) => m.request.source === "sales_handover");
   const openRequest = parseRecordId(firstParam(sp, "request")) ?? models.find((m) => m.request.status !== "cancelled" && m.request.status !== "closed")?.request.id ?? null;
@@ -131,7 +133,7 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
               {outstanding.map((o, i) => (
                 <li key={`${o.line_id}-${i}`} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2">
                   <span className="min-w-0 break-words font-medium">{str(o.item_name) ?? "Item"}{str(o.unit_code) ? <span className="font-mono font-normal text-muted-foreground"> · {str(o.unit_code)}</span> : null}{str(o.serial_number) ? <span className="font-normal text-muted-foreground"> · serial {str(o.serial_number)}</span> : null}</span>
-                  <span className="text-muted-foreground">{formatQty(num(o.qty_outstanding))} out · request {str(o.request_code)}</span>
+                  <span className="text-muted-foreground">{str(o.unit_lifecycle) === "missing" ? <Badge variant="warning" className="mr-2">Recorded as missing</Badge> : null}{formatQty(num(o.qty_outstanding), unitOfLine.get(String(o.line_id)))} {str(o.unit_lifecycle) === "missing" ? "not returned" : "out"} · request {str(o.request_code)}</span>
                 </li>
               ))}
             </ul>
@@ -145,7 +147,7 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
             {shortages.map((s, i) => (
               <li key={`${s.line_id}-${i}`} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2">
                 <span className="min-w-0 break-words"><span className="font-medium">{str(s.item_name) ?? "Item"}</span> <span className="text-muted-foreground">· request {str(s.request_code)}</span></span>
-                <span>Short by {formatQty(num(s.short_qty))} <span className="text-muted-foreground">· {str(s.shortage_action) && s.shortage_action !== "none" ? `${shortageLabel(str(s.shortage_action))}${str(s.rental_reference) ? ` (ref ${str(s.rental_reference)})` : ""}` : "no plan yet"}</span></span>
+                <span>Short by {formatQty(num(s.short_qty), unitOfLine.get(String(s.line_id)))} <span className="text-muted-foreground">· {str(s.shortage_action) && s.shortage_action !== "none" ? `${shortageLabel(str(s.shortage_action))}${str(s.rental_reference) ? ` (ref ${str(s.rental_reference)})` : ""}` : "no plan yet"}</span></span>
               </li>
             ))}
           </ul>
@@ -184,7 +186,7 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
                   {r.source === "sales_handover" ? <Badge variant="outline">Imported from the Sales handover</Badge> : null}
                   <span className="min-w-0 break-words font-medium">{r.title ?? ""}</span>
                   <span className="text-muted-foreground">{windowLabel(r)}</span>
-                  <span className="text-muted-foreground">{total === 0 ? "No lines" : `${total} ${total === 1 ? "line" : "lines"}`}{m.outstanding > 0 ? ` · ${formatQty(m.outstanding)} still out` : ""}</span>
+                  <span className="text-muted-foreground">{total === 0 ? "No lines" : `${total} ${total === 1 ? "line" : "lines"}`}{m.outstandingLines > 0 ? ` · equipment still out on ${m.outstandingLines === 1 ? "1 line" : `${m.outstandingLines} lines`}` : ""}</span>
                 </summary>
                 <div className="border-t border-border p-4">
                   <RequestEditor model={m} can={can} locations={locations} technologies={technologies} hideHeading />

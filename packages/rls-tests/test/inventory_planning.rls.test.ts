@@ -936,6 +936,14 @@ describe("Inventory planning", () => {
       const out = (pe.outstanding as Row[]).filter((o) => o.request_code === (rq && (pe.requests as Row[]).find((x) => x.id === req)?.code));
       expect(out.map((o) => Number(o.qty_outstanding)).sort()).toEqual([1, 3]);
       expect(out.find((o) => o.unit_code && o.serial_number === "SN-OUT-1")).toBeTruthy();
+      // each outstanding row says whether its unit is recorded as missing (the screen shows "Recorded as missing, not returned"); counted stock has none
+      expect(out.find((o) => o.serial_number === "SN-OUT-1")).toMatchObject({ unit_lifecycle: "active" });
+      expect(out.filter((o) => !o.unit_code).every((o) => o.unit_lifecycle === null)).toBe(true);
+      // a unit that is out and never comes back can be recorded as missing from where it was sent; it stays listed as outstanding, marked missing
+      await commit(U.whA, `select inv_adjust_stock('${CO.uae}', '${LOC.a}', 'missing-out-${u1.slice(0, 8)}', 'missing', ${j([{ unit_id: u1 }])}, 'Not returned after the install')`);
+      expect(await num(`select count(*) n from inv_units where id = '${u1}' and lifecycle = 'missing' and custody_kind = 'project'`)).toBe(1);
+      const pe2 = (await q<{ r: Row }>(U.pm, `select inv_project_equipment('${PRJ.p1}') as r`))[0].r;
+      expect((pe2.outstanding as Row[]).find((o) => o.serial_number === "SN-OUT-1")).toMatchObject({ unit_lifecycle: "missing" });
       // idempotent
       const again = await one<Row>(U.pm, `inv_cancel_request('${req}', 'again')`);
       expect(again).toMatchObject({ status: "cancelled", outstanding_qty: 4 });

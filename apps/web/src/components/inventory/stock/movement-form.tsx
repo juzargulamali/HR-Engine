@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useUnsavedChanges } from "@/components/workspace/unsaved";
-import { draftFromCandidate, unitProblemFor, type Candidate, type FormContext, type FormLocation, type FormTransfer } from "@/lib/inventory/stock-candidates";
+import { countStillOutstanding, draftFromCandidate, unitProblemFor, type Candidate, type FormContext, type FormLocation, type FormTransfer } from "@/lib/inventory/stock-candidates";
 import {
   ADJUST_WORDS, KIND_CONFIG, formatInZone, localToUtcIso, nowLocalInput, parseLines, sourceFor, summaryRows, validateInput,
   type AdjustAction, type LineDraft, type MovementInput, type MovementKind, type ReturnFrom, type SummaryInput,
@@ -228,7 +228,7 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
     adjustAction: kind === "adjust" ? adjustAction : undefined, rentalSupplier: kind === "receive" && isRental ? rentalSupplier.trim() : kind === "return_rental" ? context.rentals.find((r) => r.id === rentalId)?.supplier : undefined,
     kit: initial?.kitLabel, note: note.trim() || undefined, reason: kind === "adjust" ? reason.trim() || undefined : undefined,
     everything: (kind === "receive_transfer" && receiveAll) || kind === "unpack_kit" || (cfg.linesOptional && drafts.length === 0),
-    stillOutstanding: kind === "return" && heldLoaded ? heldLoaded.candidates.filter((c) => !drafts.some((d) => (c.unitId ? d.unitId === c.unitId : d.itemId === c.itemId && d.binId === (c.binId ?? "")))).length : undefined,
+    stillOutstanding: kind === "return" && heldLoaded ? countStillOutstanding(heldLoaded.candidates, drafts) : undefined,
   };
 
   const onReview = (e: React.FormEvent) => {

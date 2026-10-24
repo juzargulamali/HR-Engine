@@ -391,7 +391,7 @@ describe("equipment held by employees", () => {
   });
   it("words why a person is flagged, truthfully for a removed record and a past termination date", () => {
     expect(leftLabel({ removed: true, status: "active", terminationDate: null })).toBe("Record removed");
-    expect(leftLabel({ removed: false, status: "terminated", terminationDate: "2030-01-31" })).toBe("Left on 2030-01-31");
+    expect(leftLabel({ removed: false, status: "terminated", terminationDate: "2030-01-31" })).toBe("Left on 31 Jan 2030");
     expect(leftLabel({ removed: false, status: "terminated", terminationDate: null })).toBe("Has left");
   });
 });

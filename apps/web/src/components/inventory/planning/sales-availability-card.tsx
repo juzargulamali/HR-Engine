@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { AvailabilityCardView } from "./sales-card-view";
 
 /**
- * The "Equipment availability" card of the enquiry panel. It can never break the Sales panel: it loads behind a Suspense boundary and
+ * The "Warehouse stock check" card of the enquiry panel. It can never break the Sales panel: it loads behind a Suspense boundary and
  * every failure (Inventory not installed, the person has no use for it, the data service down) makes it disappear instead of showing an
  * error or a made-up answer.
  */

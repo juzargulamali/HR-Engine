@@ -27,9 +27,10 @@ export function AvailabilityCardView({ view, opportunityId, locations, canAsk, c
   const [dialog, setDialog] = useState<null | "ask" | "record">(null);
   const close = () => setDialog(null);
   return (
-    <section aria-label="Equipment availability" className="rounded-lg border border-border bg-card p-4">
+    <section aria-label="Warehouse stock check" className="rounded-lg border border-border bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">Equipment availability</h3>
+        {/* Not "Equipment availability": that is the name of Sales' own manual confirmation lower on the same panel, and two things with one name contradict each other. */}
+        <h3 className="text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">Warehouse stock check</h3>
         <Badge variant="outline" className={cn("whitespace-nowrap", TONE_BADGE[view.tone])} data-tone={view.tone}>{view.headline}</Badge>
       </div>
 

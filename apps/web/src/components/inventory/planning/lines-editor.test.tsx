@@ -83,7 +83,7 @@ describe("the lines table", () => {
   it("says short by how much, and what is planned for it", () => {
     render(<LinesEditor request={request} lines={[line({ shortageAction: "need_to_rent", rentalReference: "Q-77" })]} can={can()} locations={locations} />);
     expect(screen.getByText("short by 4")).toBeTruthy();
-    expect(screen.getByText("Need to rent")).toBeTruthy();
+    expect(screen.getByText(/If short: Need to rent/)).toBeTruthy();
     expect(screen.getByText("Ref Q-77")).toBeTruthy();
   });
 

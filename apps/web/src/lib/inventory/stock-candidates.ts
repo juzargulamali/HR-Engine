@@ -109,7 +109,9 @@ export function unitProblemFor(kind: MovementKind, c: Candidate, adjustAction?: 
   if (c.lifecycle === "missing") return `${label} is recorded as missing`;
   if (c.lifecycle === "retired") return `${label} is retired`;
   if (c.inKit && kind !== "unpack_kit") return `${label} is packed in a kit and cannot be handled on its own`;
-  if (c.custody !== "warehouse") return `${label} is not on the shelf: ${c.where.toLowerCase() || "it is elsewhere"}`;
+  // Equipment that went out and never came back can be recorded as missing from wherever it was last sent (a project or a person).
+  const missingFromHolder = kind === "adjust" && adjustAction === "missing" && (c.custody === "project" || c.custody === "employee");
+  if (c.custody !== "warehouse" && !missingFromHolder) return `${label} is not on the shelf: ${c.where.toLowerCase() || "it is elsewhere"}`;
   const needsUsable = kind === "issue" || kind === "dispatch" || kind === "pack_kit";
   if (needsUsable && c.condition !== "good" && c.condition !== "fair") return `${label} is ${(CONDITION_WORDS[c.condition as InvCondition] ?? c.condition).toLowerCase()} and is held back until it has been checked`;
   return null;
@@ -155,3 +157,17 @@ export type ScanResolution =
   | { ok: true; kind: "stock"; itemId: string; code: string; candidate: Candidate }
   | { ok: false; message: string };
 
+
+/**
+ * How many of the things a holder has are NOT fully on a return list: whole units that are not listed, and counted quantities that are
+ * not listed or are only partly returned (typed less than they hold). Those stay outstanding.
+ */
+export function countStillOutstanding(held: readonly Candidate[], drafts: readonly Pick<LineDraft, "unitId" | "itemId" | "binId" | "qty">[]): number {
+  return held.filter((c) => {
+    const d = drafts.find((x) => (c.unitId ? x.unitId === c.unitId : x.itemId === c.itemId && x.binId === (c.binId ?? "")));
+    if (!d) return true;
+    if (c.unitId || c.qty === null) return false;
+    const typed = Number(String(d.qty).replace(",", "."));
+    return Number.isFinite(typed) && typed < c.qty;
+  }).length;
+}

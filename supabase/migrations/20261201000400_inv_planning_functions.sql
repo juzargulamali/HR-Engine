@@ -1919,7 +1919,7 @@ begin
   v_out := jsonb_build_object('project_id', pr.id, 'requests', v_requests, 'shortages', v_short,
     'outstanding', coalesce((
       select jsonb_agg(jsonb_build_object('request_code', q.code, 'line_id', l.id, 'item_name', i.name, 'unit_code', u.code, 'serial_number', u.serial_number,
-               'qty_outstanding', x.dispatched_qty - x.returned_qty) order by q.created_at, x.made_at)
+               'qty_outstanding', x.dispatched_qty - x.returned_qty, 'unit_lifecycle', u.lifecycle) order by q.created_at, x.made_at)
         from inv_reservations x join inv_request_lines l on l.id = x.request_line_id join inv_requests q on q.id = l.request_id
              join inv_items i on i.id = x.item_id left join inv_units u on u.id = x.unit_id
        where q.project_id = pr.id and x.status = 'active' and x.dispatched_qty > x.returned_qty), '[]'::jsonb));

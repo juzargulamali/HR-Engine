@@ -5,7 +5,7 @@ import { cancelRequestLine, decideSubstitution, proposeSubstitution, releaseRese
 import { formatInZone, formatQtyPlain, shortageLabel, type ReservationLite } from "@/lib/inventory/planning";
 import type { LineModel } from "@/lib/inventory/planning-data";
 import { formatQty } from "@/lib/inventory/words";
-import { listTable } from "@/components/workspace/list-table";
+import { compactTable, stackedInNarrowContainer } from "@/components/workspace/list-table";
 import { MoreMenu, type MoreItem } from "@/components/workspace/more-menu";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -42,7 +42,8 @@ export function LinesEditor({ request, lines, can, locations }: { request: Edito
   if (lines.length === 0) return <p className="text-sm text-muted-foreground">No lines yet. Add an item, or add everything a technology needs from its template.</p>;
   const operable = locations.filter((l) => can.operableLocationIds.includes(l.id));
   return (
-    <Table className={`min-w-[46rem] ${listTable}`}>
+    <div className="@container">
+    <Table className={`min-w-[40rem] ${compactTable} ${stackedInNarrowContainer}`}>
       <caption className="sr-only">Equipment lines of this request</caption>
       <TableHeader>
         <TableRow>
@@ -52,7 +53,6 @@ export function LinesEditor({ request, lines, can, locations }: { request: Edito
           <TableHead scope="col" className="text-right">Dispatched</TableHead>
           <TableHead scope="col" className="text-right">Returned</TableHead>
           <TableHead scope="col" className="text-right">Outstanding</TableHead>
-          <TableHead scope="col">If short</TableHead>
           <TableHead scope="col"><span className="sr-only">Actions</span></TableHead>
         </TableRow>
       </TableHeader>
@@ -60,6 +60,7 @@ export function LinesEditor({ request, lines, can, locations }: { request: Edito
         {lines.map((l) => <LineRow key={l.id} line={l} request={request} can={can} locations={operable} />)}
       </TableBody>
     </Table>
+    </div>
   );
 }
 
@@ -93,23 +94,26 @@ function LineRow({ line: l, request, can, locations }: { line: LineModel; reques
             {l.isOptional ? <span>Optional</span> : null}
           </div>
           {l.note ? <div className="text-sm text-muted-foreground">Note: {l.note}</div> : null}
+          {l.shortageAction !== "none" || l.progress.shortage > 0 ? (
+            <div className="text-sm text-muted-foreground">
+              If short: {l.shortageAction === "none" ? "not decided yet" : shortageLabel(l.shortageAction)}
+              {l.rentalReference ? <span className="block">Ref {l.rentalReference}</span> : null}{l.shortageNote ? <span className="block">{l.shortageNote}</span> : null}
+            </div>
+          ) : null}
           <div className="mt-1"><SubstitutionBadge status={l.substitution.state} originalItemName={l.originalItemName} itemName={l.itemName} note={l.substitutionNote} /></div>
         </TableCell>
         <TableCell data-label="Needed" className={num}>{q(l.qty)}</TableCell>
         <TableCell data-label="Reserved" className={num}>
-          {q(l.progress.reserved)}
-          {l.progress.shortage > 0 ? <span className="block text-sm font-medium text-amber-800 dark:text-amber-300">short by {q(l.progress.shortage)}</span> : null}
+          <span>
+            {q(l.progress.reserved)}
+            {l.progress.shortage > 0 ? <span className="block text-sm font-medium text-amber-800 dark:text-amber-300">short by {q(l.progress.shortage)}</span> : null}
+          </span>
         </TableCell>
         <TableCell data-label="Dispatched" className={num}>{q(l.progress.dispatched)}</TableCell>
         <TableCell data-label="Returned" className={num}>{q(l.progress.returned)}</TableCell>
         <TableCell data-label="Outstanding" className={`${num} ${l.progress.outstanding > 0 ? "font-semibold" : ""}`}>{q(l.progress.outstanding)}</TableCell>
-        <TableCell data-label="If short" className="min-w-[8rem]">
-          {l.shortageAction === "none" ? <span className="text-muted-foreground">{l.progress.shortage > 0 ? "Not decided yet" : "—"}</span> : (
-            <span className="break-words">{shortageLabel(l.shortageAction)}{l.rentalReference ? <span className="block text-sm text-muted-foreground">Ref {l.rentalReference}</span> : null}{l.shortageNote ? <span className="block text-sm text-muted-foreground">{l.shortageNote}</span> : null}</span>
-          )}
-        </TableCell>
-        <TableCell className="whitespace-nowrap max-md:text-left">
-          <div className="flex flex-wrap items-center justify-end gap-2 max-md:justify-start">
+        <TableCell className="whitespace-nowrap @max-3xl:text-left">
+          <div className="flex flex-wrap items-center justify-end gap-2 @max-3xl:justify-start">
             {showReserve ? <Button type="button" size="sm" onClick={() => setDialog("reserve")}>Reserve</Button> : null}
             {showDecide ? <Button type="button" size="sm" variant="outline" onClick={() => setDialog("decide")}>Accept or decline</Button> : null}
             <MoreMenu items={items} />
@@ -123,8 +127,8 @@ function LineRow({ line: l, request, can, locations }: { line: LineModel; reques
         </TableCell>
       </TableRow>
       {l.reservations.length > 0 ? (
-        <TableRow className="border-b-0 max-md:block">
-          <TableCell colSpan={8} className="pt-0 max-md:block max-md:text-left">
+        <TableRow className="border-b-0 @max-3xl:block">
+          <TableCell colSpan={7} className="pt-0 @max-3xl:block @max-3xl:text-left">
             <ReservationList line={l} request={request} canRelease={can.edit || can.warehouse} />
           </TableCell>
         </TableRow>

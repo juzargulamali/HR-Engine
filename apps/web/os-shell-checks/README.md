@@ -55,3 +55,20 @@ only (an empty Sales database). Both write to the database they drive: reseed be
 
 `phone-fit.mjs` and `contrast-audit.mjs` cover the list, board, side panel, Quick Add and menu states of the new Sales and Projects workspaces
 (and skip a panel only where the signed-in person legitimately has no access, for example Sales for a Projects-only user).
+
+## Inventory workflow checks (local stack only)
+
+Real-browser workflows of the Inventory module, each driven as the real people and confirmed in the database. They need the Inventory seed
+(`seed/inventory.sh`, which also builds the Won opportunity of `seed/base.sh`) and **write** to the database they drive, so each one reseeds
+itself first when run with `RESEED=1` (the app keeps running: it holds no database state). Screenshots go to `docs/inventory-screenshots/`
+(`SHOTS_DIR` overrides). Shared plumbing is in `inventory-flow-lib.mjs`.
+
+```bash
+node os-shell-checks/inventory-smoke.mjs                                 # every Inventory screen opens without errors
+RESEED=1 node os-shell-checks/inventory-flow-1-stock-to-reconcile.mjs    # opening count, labels (QR decoded), project request, reserve, partial dispatch,
+                                                                         # partial return (good + damaged), outstanding, final reconciliation, ledger check
+RESEED=1 node os-shell-checks/inventory-flow-2-employee.mjs              # employee request, issue, My equipment, HR view, reserve refusal, return, reassign, leaver, no private data
+RESEED=1 node os-shell-checks/inventory-flow-3-sales.mjs                 # Sales check card, template, out of date, no cost/custody in Sales, winning, handover import once
+```
+
+Each prints PASS/FAIL per step and a verdict, and exits non-zero on a failure. `stack.sh reset|build|start|stop|all` rebuilds the stack after code changes.

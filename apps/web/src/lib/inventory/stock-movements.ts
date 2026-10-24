@@ -517,7 +517,11 @@ export function fromTo(s: SummaryInput): { from: string; to: string } {
     case "repair_out": return { from: loc, to: `Out for repair${s.repairReference ? ` (${s.repairReference})` : ""}` };
     case "repair_in": return { from: "At the repairer", to: loc };
     case "check": return { from: loc, to: `${loc} (stays here; condition changes)` };
-    case "adjust": return { from: loc, to: s.adjustAction ? ADJUST_WORDS[s.adjustAction].to : "—" };
+    case "adjust": {
+      // Equipment that is out with a project or a person is missing from THERE, not from the shelf of the place the operator works at.
+      const elsewhere = [...new Set(s.drafts.filter((d) => d.unitId && d.where && !/^(In the warehouse|Not counted yet)/i.test(d.where)).map((d) => d.where))];
+      return { from: s.adjustAction === "missing" && elsewhere.length > 0 ? elsewhere.join("; ") : loc, to: s.adjustAction ? ADJUST_WORDS[s.adjustAction].to : "—" };
+    }
     case "consume": return { from: loc, to: "Used up" };
     case "return_unused": return { from: s.employee ? `Employee: ${s.employee}` : s.project ? `Project: ${s.project}` : "—", to: loc };
     case "return_rental": return { from: loc, to: `Back to the supplier${s.rentalSupplier ? `: ${s.rentalSupplier}` : ""}` };

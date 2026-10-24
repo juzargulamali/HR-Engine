@@ -617,9 +617,16 @@ export function filterHoldings(groups: readonly EmployeeHolding[], f: { q: strin
   });
 }
 
+/** A plain YYYY-MM-DD date as "23 Oct 2026" (as written: no time zone shifts it). Anything else is returned as it is. */
+function plainDateWords(value: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return value;
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))));
+}
+
 /** "Left the company" wording that is true for both a removed record and a past termination date. */
 export function leftLabel(g: Pick<EmployeeHolding, "removed" | "status" | "terminationDate">): string {
   if (g.removed) return "Record removed";
-  if (g.terminationDate) return `Left on ${g.terminationDate}`;
+  if (g.terminationDate) return `Left on ${plainDateWords(g.terminationDate)}`;
   return g.status === "terminated" || g.status === "resigned" ? "Has left" : "Not active";
 }

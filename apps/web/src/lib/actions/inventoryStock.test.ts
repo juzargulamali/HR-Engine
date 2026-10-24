@@ -15,7 +15,7 @@ const rpc = vi.fn((fn: string, args: Record<string, unknown>) => {
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc }) }));
 vi.mock("@/lib/inventory/context", () => ({ getInventoryContext: async () => null }));
 
-import { checkTransaction, correctMovement, recordMovement, registerUnit, saveItem } from "./inventoryStock";
+import { checkTransaction, correctMovement, reassignUnit, recordMovement, registerUnit, saveItem } from "./inventoryStock";
 import type { MovementInput } from "@/lib/inventory/stock-movements";
 
 const C = "11111111-1111-4111-8111-111111111111";
@@ -136,6 +136,39 @@ describe("registerUnit", () => {
     expect(rpc).not.toHaveBeenCalled();
     await registerUnit({ error: null }, fd({ ...base, cost: "100", currency: "aed", purchaseDate: "2026-10-01" }));
     expect(calls[0]!.args.p_cost).toEqual({ unit_cost: 100, currency: "AED", purchase_date: "2026-10-01" });
+  });
+});
+
+describe("registerUnit with the pre-filled currency", () => {
+  it("ignores a currency that comes with no amount (the form pre-fills AED, so leaving cost empty must still work)", async () => {
+    outcome = { data: { unit_id: U, code: "UAE-E-00043", lifecycle: "draft" }, error: null };
+    const r = await registerUnit({ error: null }, fd({ companyId: C, itemId: U, locationId: L, condition: "good", key: "unit-12345678-abcd", cost: "", currency: "AED", purchaseDate: "" }));
+    expect(r.error).toBeNull();
+    expect(calls[0]!.args.p_cost).toBeNull();
+  });
+});
+
+describe("reassignUnit (who holds a unit, with a reason)", () => {
+  const base = { unitId: U, to: "pool", reason: "The employee left; the laptop was handed back to the team", key: "reassign-12345678-abcd" };
+  it("sends the unit, the destination, the reason and the key, and says what was recorded", async () => {
+    outcome = { data: { movement_code: "ENG-M-00012", replayed: false }, error: null };
+    const r = await reassignUnit({ error: null }, fd(base));
+    expect(r.error).toBeNull();
+    expect(r.warning).toMatch(/Recorded as ENG-M-00012.*project pool/);
+    expect(calls[0]).toMatchObject({ fn: "inv_reassign_unit", args: { p_unit_id: U, p_to: "pool", p_employee_id: null, p_key: "reassign-12345678-abcd" } });
+  });
+  it("needs a reason, and an employee when the unit goes to one; asks the database nothing otherwise", async () => {
+    expect((await reassignUnit({ error: null }, fd({ ...base, reason: "  " }))).error).toMatch(/reason/);
+    expect((await reassignUnit({ error: null }, fd({ ...base, to: "employee" }))).error).toMatch(/Choose the employee/);
+    expect(rpc).not.toHaveBeenCalled();
+    await reassignUnit({ error: null }, fd({ ...base, to: "employee", employeeId: E }));
+    expect(calls[0]!.args).toMatchObject({ p_to: "employee", p_employee_id: E });
+  });
+  it("never sends an employee along with a move to the pool, and says so when it is a repeat", async () => {
+    outcome = { data: { movement_code: "ENG-M-00012", replayed: true }, error: null };
+    const r = await reassignUnit({ error: null }, fd({ ...base, employeeId: E }));
+    expect(calls[0]!.args.p_employee_id).toBeNull();
+    expect(r.warning).toMatch(/nothing was recorded twice/);
   });
 });
 

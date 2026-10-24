@@ -26,7 +26,7 @@ const request = (over: Partial<InvRequestRow> = {}): InvRequestRow => ({
 });
 const base = { id: "l1", itemId: "i1", itemName: "LED panel", itemModel: "P2.6", tracking: "quantity", unit: "each", scale: 0, qty: 10, note: null, status: "open" as const, version: 1, technologyName: null, altGroup: null, isOptional: false, originalItemId: null, originalItemName: null, substitution: substitutionInfo({ substitution_status: "none" }), substitutionNote: null, substituteOptions: [], shortageAction: "none", shortageNote: null, rentalReference: null };
 const model = (req: InvRequestRow, lines = [base], outstanding = 0): RequestModel => ({
-  request: req, forLabel: "Mall activation", requestedByName: "You", outstanding,
+  request: req, forLabel: "Mall activation", requestedByName: "You", outstandingLines: outstanding,
   lines: lines.map((l) => ({ ...l, progress: lineProgress(l, req, []), reservations: [] })),
 });
 const locations = [{ id: "loc1", company_id: "c1", name: "Dubai warehouse", timezone: "Asia/Dubai" }] as InvLocationRow[];

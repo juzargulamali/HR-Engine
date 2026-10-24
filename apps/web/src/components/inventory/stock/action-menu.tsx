@@ -20,13 +20,15 @@ export type ActionSpec = { key: string; label: string; hint?: string; separatorB
  * passed in by key. Nothing here changes data until a form's own button is pressed.
  */
 export function ActionMenu({ specs, context, dialogs, label = "More actions" }: { specs: readonly ActionSpec[]; context: FormContext; dialogs?: Record<string, React.ReactNode>; label?: string }) {
-  const [active, setActive] = useState<string | null>(null);
+  // The chosen action is kept as it was when it was chosen: recording it changes the page behind (the unit is now somewhere else, so the
+  // menu offers other things), and the form that shows "Recorded" must not vanish with the old menu entry.
+  const [chosen, setChosen] = useState<ActionSpec | null>(null);
   const items: MoreItem[] = specs.map((s) => ({
     key: s.key, label: s.label, hint: s.hint, separatorBefore: s.separatorBefore, danger: s.danger, disabled: s.disabled,
-    ...("href" in s ? { href: s.href } : { onSelect: (k: string) => setActive(k) }),
+    ...("href" in s ? { href: s.href } : { onSelect: (k: string) => setChosen(specs.find((x) => x.key === k) ?? null) }),
   }));
-  const spec = specs.find((s) => s.key === active);
-  const close = () => setActive(null);
+  const spec = chosen;
+  const close = () => setChosen(null);
   return (
     <>
       <MoreMenu items={items} label={label} />

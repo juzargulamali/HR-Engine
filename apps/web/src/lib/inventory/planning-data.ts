@@ -36,8 +36,9 @@ async function namesOf(db: Db, table: "profiles", ids: string[]): Promise<Map<st
   const map = new Map<string, string>();
   if (ids.length === 0) return map;
   for (const part of chunk(ids, 100)) {
-    const { data } = await db.from(table).select("id, full_name").in("id", part);
-    for (const p of data ?? []) map.set(p.id, p.full_name?.trim() || "Unnamed");
+    const { data } = await db.from(table).select("id, full_name, email").in("id", part);
+    // A person without a profile name is still called something a colleague recognises (the part of the email before the @), as on the Projects screens.
+    for (const p of data ?? []) map.set(p.id, p.full_name?.trim() || p.email?.split("@")[0] || "Unnamed");
   }
   return map;
 }
@@ -122,7 +123,8 @@ export interface RequestModel {
   requestedByName: string;
   lines: LineModel[];
   /** Equipment already dispatched and not yet back, over every non-cancelled line. */
-  outstanding: number;
+  /** How many lines still have equipment out (a count of lines: the quantities are in different units and are never added together). */
+  outstandingLines: number;
 }
 export interface TechnologyOption { id: string; name: string; version: number; components: Pick<InvTechnologyComponentRow, "id" | "item_id" | "qty" | "alt_group" | "is_optional" | "sort_order">[]; itemNames: Record<string, string> }
 
@@ -240,7 +242,7 @@ export async function loadRequestModels(
       request, lines,
       forLabel: request.kind === "project" ? (projects.get(request.project_id ?? "") ?? "A project") : (employees.get(request.employee_id ?? "") ?? request.title ?? "An employee"),
       requestedByName: request.requested_by === userId ? "You" : (people.get(request.requested_by) ?? "—"),
-      outstanding: lines.reduce((s, l) => s + l.progress.outstanding, 0),
+      outstandingLines: lines.filter((l) => l.progress.outstanding > 0).length,
     };
   });
 }

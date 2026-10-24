@@ -528,8 +528,11 @@ export async function searchCandidates(p: SearchParams): Promise<Candidate[]> {
 
   if (unitMode) {
     let uq = db.from("inv_units").select("*").eq("company_id", p.companyId).limit(60).order("code");
-    if (p.locationId) uq = uq.eq("location_id", p.locationId);
+    // "Mark missing" also finds equipment that is out with a project or a person and never came back (it has no shelf location of its own).
+    const missingFromHolder = p.kind === "adjust" && p.adjustAction === "missing";
+    if (p.locationId) uq = missingFromHolder ? uq.or(`location_id.eq.${p.locationId},custody_kind.in.(employee,project)`) : uq.eq("location_id", p.locationId);
     if (source === "shelf") uq = uq.eq("custody_kind", "warehouse").eq("lifecycle", "active");
+    else if (source === "shelf_any" && missingFromHolder) uq = uq.in("custody_kind", ["warehouse", "employee", "project"]).in("lifecycle", ["active", "missing"]);
     else if (source === "shelf_any") uq = uq.eq("custody_kind", "warehouse").in("lifecycle", p.kind === "adjust" ? ["active", "missing"] : ["active"]);
     else if (source === "repair") uq = uq.eq("custody_kind", "repair");
     else if (source === "missing") uq = uq.eq("lifecycle", "missing");

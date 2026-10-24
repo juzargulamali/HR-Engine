@@ -234,7 +234,8 @@ export async function registerUnit(_prev: InvActionState, formData: FormData): P
   const parsed = unitSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const d = parsed.data;
-  if ((d.cost !== undefined) !== (d.currency !== undefined)) return { error: "A cost needs both an amount and a currency" };
+  // The currency box is pre-filled (AED), so a currency on its own, with no amount, is just the default left alone and is ignored.
+  if (d.cost !== undefined && d.currency === undefined) return { error: "A cost needs both an amount and a currency" };
   const cost = d.cost !== undefined ? { unit_cost: d.cost, currency: d.currency, ...(d.purchaseDate ? { purchase_date: d.purchaseDate } : {}) } : d.purchaseDate ? { purchase_date: d.purchaseDate } : null;
   const db = await createClient();
   const { data, error } = await db.rpc("inv_register_unit", {
@@ -246,6 +247,32 @@ export async function registerUnit(_prev: InvActionState, formData: FormData): P
   const r = data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
   const code = typeof r.code === "string" ? r.code : undefined;
   return ok({ id: typeof r.unit_id === "string" ? r.unit_id : undefined, code, replayed: r.replayed === true, warning: `${code ? `Registered as ${code}.` : "Registered."} It shows as "Not counted yet" until the opening stock is confirmed.` });
+}
+
+const reassignSchema = z.object({
+  unitId: uuid,
+  to: z.enum(["pool", "employee"], { message: "Choose where the equipment goes" }),
+  employeeId: optionalUuid,
+  reason: z.string().trim().min(1, "Give a reason for the change").max(2000, "The reason is too long"),
+  key: movementKey,
+});
+
+/**
+ * Changes who holds a unit that is with an employee: back to the project pool (the warehouse stock it was issued from) or to another
+ * employee, with a reason. The history keeps who held it before. The same key twice records nothing twice.
+ */
+export async function reassignUnit(_prev: InvActionState, formData: FormData): Promise<InvActionState> {
+  const parsed = reassignSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: firstIssue(parsed.error) };
+  const d = parsed.data;
+  if (d.to === "employee" && !d.employeeId) return { error: "Choose the employee" };
+  const db = await createClient();
+  const { data, error } = await db.rpc("inv_reassign_unit", { p_unit_id: d.unitId, p_to: d.to, p_employee_id: d.to === "employee" ? (d.employeeId ?? null) : null, p_reason: d.reason, p_key: d.key });
+  if (error) return fail(error.message);
+  refreshInventory(["/hr/assets"]);
+  const r = data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
+  const code = typeof r.movement_code === "string" ? r.movement_code : undefined;
+  return ok({ code, replayed: r.replayed === true, warning: `${code ? `Recorded as ${code}.` : "Recorded."} ${d.to === "pool" ? "The unit is back in the project pool and no longer assigned to anyone." : "The unit is now assigned to the other employee."}${r.replayed === true ? " This had already been recorded; nothing was recorded twice." : ""}` });
 }
 
 const replaceSchema = z.object({

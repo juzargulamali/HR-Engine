@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { candidateBase, candidateMatches, cleanSearch, draftFromCandidate, unitProblemFor, whereText, type Candidate } from "./stock-candidates";
+import { candidateBase, candidateMatches, cleanSearch, countStillOutstanding, draftFromCandidate, unitProblemFor, whereText, type Candidate } from "./stock-candidates";
 
 const unit = (over: Partial<Candidate> = {}): Candidate =>
   candidateBase({ key: "u1", type: "unit", unitId: "unit-1", code: "UAE-E-00042", itemId: "i1", itemName: "Laptop X1", lifecycle: "active", custody: "warehouse", where: "In the warehouse: Dubai", ...over });
@@ -51,6 +51,12 @@ describe("unitProblemFor", () => {
     expect(unitProblemFor("repair_in", unit())).toMatch(/not out for repair/);
     expect(unitProblemFor("adjust", unit({ lifecycle: "missing" }))).toMatch(/missing/);
   });
+  it("lets equipment that went out and never came back be marked missing, but not retired or moved, from where it was sent", () => {
+    expect(unitProblemFor("adjust", unit({ custody: "project", where: "On a project: P-1" }), "missing")).toBeNull();
+    expect(unitProblemFor("adjust", unit({ custody: "employee", where: "With an employee: Sara" }), "missing")).toBeNull();
+    expect(unitProblemFor("adjust", unit({ custody: "project", where: "On a project: P-1" }), "retire")).toMatch(/not on the shelf/);
+    expect(unitProblemFor("dispatch", unit({ custody: "project", where: "On a project: P-1" }))).toMatch(/not on the shelf/);
+  });
   it("never blocks counted rows here", () => {
     expect(unitProblemFor("issue", counted())).toBeNull();
   });
@@ -77,5 +83,20 @@ describe("search", () => {
     expect(candidateMatches(c, "laptop zzz")).toBe(false);
     expect(candidateMatches(c, "   ")).toBe(true);
     expect(candidateMatches(counted(), "a1 xlr")).toBe(true);
+  });
+});
+
+describe("countStillOutstanding (what a partial return leaves with the holder)", () => {
+  const held = [unit(), unit({ key: "u2", unitId: "unit-2", code: "UAE-E-00043" }), counted({ qty: 4 })];
+  const line = (over: Record<string, string | null>) => ({ unitId: null as string | null, itemId: "i2", binId: "bin-a", qty: "", ...over });
+  it("counts units and quantities that are not listed at all", () => {
+    expect(countStillOutstanding(held, [])).toBe(3);
+    expect(countStillOutstanding(held, [line({ unitId: "unit-1", itemId: "i1", binId: "" })])).toBe(2);
+  });
+  it("a quantity returned in part (3 of 4) still has the rest outstanding, a full one does not", () => {
+    const units = [line({ unitId: "unit-1", itemId: "i1", binId: "" }), line({ unitId: "unit-2", itemId: "i1", binId: "" })];
+    expect(countStillOutstanding(held, [...units, line({ qty: "3" })])).toBe(1);
+    expect(countStillOutstanding(held, [...units, line({ qty: "4" })])).toBe(0);
+    expect(countStillOutstanding(held, [...units, line({ qty: "" })])).toBe(1); // nothing typed yet: nothing is coming back
   });
 });

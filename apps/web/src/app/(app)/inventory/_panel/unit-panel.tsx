@@ -8,6 +8,7 @@ import { formatDate, formatDateTime, formatMoney } from "@/components/sales/form
 import { ActionMenu, type ActionSpec } from "@/components/inventory/stock/action-menu";
 import { KitLineForm } from "@/components/inventory/stock/item-forms";
 import { LiveKitPackForm } from "@/components/inventory/stock/live-forms";
+import { ReassignUnitForm } from "@/components/inventory/stock/reassign-form";
 import type { KitRow } from "@/components/inventory/stock/kit-forms";
 import { listTable } from "@/components/workspace/list-table";
 import { PanelLink } from "@/components/workspace/panel-link";
@@ -82,6 +83,8 @@ export async function UnitSidePanel({ unitRef, closeHref, here }: { unitRef: str
       specs.push({ key: "missing", label: "Mark missing", separatorBefore: true, movement: { kind: "adjust", initial: { ...base, adjustAction: "missing" }, title: `Mark ${u.code} as missing` } });
       specs.push({ key: "retire", label: "Retire (write off)", danger: true, movement: { kind: "adjust", initial: { ...base, adjustAction: "retire" }, title: `Retire ${u.code}` } });
     }
+    if (u.custody_kind === "employee" && (u.lifecycle === "active" || u.lifecycle === "draft")) specs.push({ key: "reassign", label: "Change who holds it", hint: "Back to the project pool, or to another employee", separatorBefore: true, dialog: { title: `Change who holds ${u.code}`, description: "A reason is needed. The history keeps who held it before." } });
+    if (u.lifecycle === "active" && (u.custody_kind === "project" || u.custody_kind === "employee")) specs.push({ key: "missing-out", label: "Mark missing", hint: "It went out and never came back", separatorBefore: true, movement: { kind: "adjust", initial: { ...base, adjustAction: "missing" }, title: `Mark ${u.code} as missing` } });
     if (u.custody_kind === "repair") specs.push({ key: "repair-in", label: "Back from repair", movement: { kind: "repair_in", initial: base, title: `${u.code} back from repair` } });
     if (u.custody_kind === "project" && u.project_id) specs.push({ key: "project-move", label: "Move to another project", hint: "Directly, without coming back to the warehouse", movement: { kind: "project_transfer", initial: { ...base, projectId: u.project_id }, title: `Move ${u.code} to another project` } });
     if (isKit && onShelf) {
@@ -107,6 +110,7 @@ export async function UnitSidePanel({ unitRef, closeHref, here }: { unitRef: str
   }));
   const locationBins = d.bins.filter((b) => b.location_id === u.location_id).map((b) => ({ id: b.id, code: b.code, label: b.label }));
   const dialogs: Record<string, React.ReactNode> = {
+    reassign: <ReassignUnitForm unit={{ id: u.id, code: u.code }} companyId={u.company_id} holder={u.employeeName ?? "an employee"} poolPlace={u.locationName ?? null} />,
     pack: u.location_id ? <LiveKitPackForm kit={{ unitId: u.id, code: u.code, companyId: u.company_id, locationId: u.location_id, locationName: u.locationName ?? "this location", itemName: item.name }} rows={kitRows} bins={locationBins} /> : null,
     checklist: (
       <div className="space-y-5">

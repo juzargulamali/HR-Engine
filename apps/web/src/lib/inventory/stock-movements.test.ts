@@ -249,6 +249,16 @@ describe("summaryRows (the review step)", () => {
     expect(get(r, "What")).toContain("damaged, held back");
     expect(get(summaryRows({ kind: "return", returnFrom: "project", project: "P-1", location: "L", stillOutstanding: 0, drafts: [unit("1")] }), "Still outstanding")).toBe("Nothing else is outstanding");
   });
+  it("says a unit that never came back is missing from the project it was sent to, not from the shelf", () => {
+    const out = summaryRows({ kind: "adjust", adjustAction: "missing", location: "Dubai warehouse", reason: "Not returned", drafts: [unit("1", { where: "On a project: P-7 Mall" })] });
+    expect(get(out, "From")).toBe("On a project: P-7 Mall");
+    const shelf = summaryRows({ kind: "adjust", adjustAction: "missing", location: "Dubai warehouse", reason: "Not found", drafts: [unit("1", { where: "In the warehouse: Dubai" })] });
+    expect(get(shelf, "From")).toBe("Dubai warehouse");
+  });
+  it("a partial quantity return (3 of 4) is not described as the end of what is outstanding", () => {
+    // the form counts held rows with something left; this documents the sentence it feeds
+    expect(get(summaryRows({ kind: "return", returnFrom: "project", project: "P-1", location: "L", stillOutstanding: 1, drafts: [counted("1", { qty: "3" })] }), "Still outstanding")).toMatch(/1 other item stays with the project/);
+  });
   it("dispatch names the project and the request", () => {
     const r = rows("dispatch", { project: "P-7 Mall", request: "REQ-0004" });
     expect(get(r, "To")).toBe("Project: P-7 Mall");

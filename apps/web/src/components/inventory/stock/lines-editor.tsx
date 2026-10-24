@@ -46,6 +46,12 @@ interface Props {
   initialQuery?: string;
 }
 
+/** The heading over the list, in the words of what is being done (the plain "What is it about" read as a riddle on a dispatch). */
+const LEGEND: Partial<Record<MovementKind, string>> = {
+  issue: "What is being given out", dispatch: "What is going out", transfer: "What is being sent", repair_out: "What is going for repair", check: "What is being checked",
+  adjust: "What is affected", consume: "What is being used up", pack_kit: "What goes in the kit", return_rental: "What goes back to the supplier",
+  return: "What is coming back", repair_in: "What came back from repair", return_unused: "What is being returned unused", unpack_kit: "What comes out of the kit", receive_transfer: "What arrived",
+};
 const UNIT_BIN_KINDS: readonly MovementKind[] = ["return", "repair_in", "receive_transfer", "unpack_kit"];
 const TAKING_KINDS: readonly MovementKind[] = ["issue", "dispatch", "transfer", "consume", "repair_out", "check", "adjust", "return_rental", "pack_kit"];
 
@@ -139,7 +145,7 @@ export function LinesEditor(props: Props) {
 
   return (
     <fieldset className="space-y-3" disabled={disabled}>
-      <legend className="text-sm font-medium">{source === "catalogue" ? "What arrived" : held ? held.title : "What is it about"}</legend>
+      <legend className="text-sm font-medium">{source === "catalogue" ? "What arrived" : held ? held.title : (LEGEND[kind] ?? "What is it about")}</legend>
 
       {searchable || held ? (
         <div className="flex flex-wrap items-end gap-2">
