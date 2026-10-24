@@ -17471,3 +17471,7576 @@ revoke all on function proj_messages_before(uuid, bigint, integer), proj_company
 grant execute on function proj_messages_before(uuid, bigint, integer), proj_company_labels() to authenticated;
 -- Server / owner only: the service role and the SQL Editor (never reachable from a browser session).
 grant execute on function proj_abandoned_upload_objects(interval) to service_role;
+
+-- ==============================================================================
+-- 20. Inventory — migrations 20261201000000 .. 20261201000800, mirrored verbatim.
+-- Company-scoped Inventory access (inv_company_grants, NOT user_roles, crm_ or proj_ grants), summary / operational / cost tiers, read-only tables,
+-- an immutable stock ledger and controlled functions. Prerequisites: Sales & CRM (section 18) and Projects & Tasks (section 19).
+-- See docs/inventory-design.md and docs/inventory-deployment.md.
+-- ==============================================================================
+
+-- ---- 20261201000000_inv_access_audit_settings.sql ----
+-- Inventory, migration 1 of 6: access, audit, company settings and reference codes.
+--
+-- Inventory access is its own company-scoped grant table (inv_company_grants), deliberately NOT user_roles, NOT crm_company_grants and
+-- NOT proj_company_grants: an HR role, a Sales grant, a Projects grant, an employee record or an e-mail domain confers no Inventory
+-- access, and an Inventory grant confers no HR, Sales or Projects access. A grant with an empty capability list means "Inventory
+-- access": the catalogue summary only. Founders are grants (capability 'founder'), never hard-coded people. Purchase-cost visibility
+-- is its own capability ('view_costs'), never implied by warehouse, Sales, HR or PM access.
+--
+-- Prerequisites: the Sales & CRM (20261115*) and Projects & Tasks (20261120*) migrations are applied.
+-- Nothing here reads or writes any HR, CRM or Projects table. Additive: no existing object is altered.
+
+-- -----------------------------------------------------------------------------
+-- Capability vocabulary
+-- -----------------------------------------------------------------------------
+--   founder               everything in the company, including costs and access
+--   manage_access         grant / revoke Inventory access (founders hold it implicitly)
+--   manage_catalogue      categories, items, technology templates, locations, bins
+--   warehouse             operate stock (receive, issue, return, transfer, count) at the locations the person is assigned to
+--   cross_location        handle transfers and receipts at every location of the company, not only assigned ones
+--   view_stock            read unit-level stock and movements (custody included), read only
+--   view_costs            read purchase dates, costs and currencies
+--   view_audit            read the Inventory audit log
+--   confirm_stock         confirm opening stock and counts as verified
+--   request_for_employees request equipment for employees (department heads)
+--   view_employee_custody see which company equipment each employee holds (HR onboarding and exit)
+create or replace function inv_capability_list()
+returns text[]
+language sql immutable
+as $$
+  select array['founder', 'manage_access', 'manage_catalogue', 'warehouse', 'cross_location', 'view_stock', 'view_costs',
+               'view_audit', 'confirm_stock', 'request_for_employees', 'view_employee_custody']::text[];
+$$;
+
+create table if not exists inv_company_grants (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references auth.users(id),
+  company_id    uuid not null references companies(id),
+  capabilities  text[] not null default '{}'::text[],
+  note          text,
+  granted_by    uuid references auth.users(id),
+  granted_at    timestamptz not null default now(),
+  revoked_at    timestamptz,
+  revoked_by    uuid references auth.users(id),
+  constraint inv_company_grants_caps check (capabilities <@ inv_capability_list())
+);
+create unique index if not exists uq_inv_grants_active on inv_company_grants(user_id, company_id) where revoked_at is null;
+create index if not exists idx_inv_grants_company on inv_company_grants(company_id) where revoked_at is null;
+
+-- -----------------------------------------------------------------------------
+-- Helpers. SECURITY DEFINER + stable so policies can call them without recursion; every one joins to an ACTIVE profile, so a
+-- deactivated account loses access at once, and a revoked grant stops working on the very next call (a page that is already open
+-- gets "no access" from the database on its next action).
+-- -----------------------------------------------------------------------------
+create or replace function inv_require_user()
+returns uuid
+language plpgsql stable
+as $$
+begin
+  if auth.uid() is null then raise exception 'Not signed in' using errcode = '28000'; end if;
+  return auth.uid();
+end;
+$$;
+
+create or replace function inv_has_access(p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from inv_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid() and g.company_id = p_company_id and g.revoked_at is null);
+$$;
+
+create or replace function inv_has_capability(p_company_id uuid, p_capability text)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from inv_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid() and g.company_id = p_company_id and g.revoked_at is null
+      and ('founder' = any (g.capabilities) or p_capability = any (g.capabilities)));
+$$;
+
+create or replace function inv_is_founder(p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from inv_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid() and g.company_id = p_company_id and g.revoked_at is null
+      and 'founder' = any (g.capabilities));
+$$;
+
+create or replace function inv_has_any_access()
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from inv_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid() and g.revoked_at is null);
+$$;
+
+create or replace function inv_is_any_founder()
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from inv_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid() and g.revoked_at is null and 'founder' = any (g.capabilities));
+$$;
+
+create or replace function inv_accessible_company_ids()
+returns setof uuid
+language sql stable security definer
+set search_path = public
+as $$
+  select g.company_id
+  from inv_company_grants g
+  join profiles p on p.id = g.user_id and p.is_active
+  where g.user_id = auth.uid() and g.revoked_at is null;
+$$;
+
+alter table inv_company_grants enable row level security;
+drop policy if exists inv_company_grants_select on inv_company_grants;
+create policy inv_company_grants_select on inv_company_grants for select
+  using (user_id = auth.uid() or inv_has_capability(company_id, 'manage_access'));
+
+-- -----------------------------------------------------------------------------
+-- Inventory audit log. The HR audit_log is readable by HR roles, so Inventory keeps its own, readable only with 'view_audit'
+-- (founders hold it implicitly). Rows store the old and new row images. Stock movements are ALSO kept in their own ledger
+-- (migration 2); this log records who changed catalogue, access and settings rows and every state change of a unit or stock row.
+-- -----------------------------------------------------------------------------
+create table if not exists inv_audit_log (
+  id          bigint generated always as identity primary key,
+  table_name  text not null,
+  row_id      text,
+  company_id  uuid,
+  action      text not null check (action in ('insert', 'update', 'delete')),
+  actor_id    uuid,
+  old_row     jsonb,
+  new_row     jsonb,
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_inv_audit_company_time on inv_audit_log(company_id, created_at desc);
+create index if not exists idx_inv_audit_row on inv_audit_log(table_name, row_id);
+
+alter table inv_audit_log enable row level security;
+drop policy if exists inv_audit_log_select on inv_audit_log;
+create policy inv_audit_log_select on inv_audit_log for select
+  using (company_id is not null and inv_has_capability(company_id, 'view_audit'));
+
+-- Every audited table has a uuid "id". company_id is read from the row when present; a row without one is logged with a null
+-- company and is therefore readable by nobody through RLS.
+create or replace function inv_audit_trigger()
+returns trigger
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_new jsonb := case when tg_op = 'DELETE' then null else to_jsonb(new) end;
+  v_old jsonb := case when tg_op = 'INSERT' then null else to_jsonb(old) end;
+  v_row jsonb := coalesce(v_new, v_old);
+begin
+  insert into inv_audit_log (table_name, row_id, company_id, action, actor_id, old_row, new_row)
+  values (tg_table_name, v_row->>'id', nullif(v_row->>'company_id', '')::uuid, lower(tg_op), auth.uid(), v_old, v_new);
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists inv_company_grants_audit on inv_company_grants;
+create trigger inv_company_grants_audit after insert or update or delete on inv_company_grants
+  for each row execute function inv_audit_trigger();
+
+-- -----------------------------------------------------------------------------
+-- Per-company settings: the equipment reference code ("UAE" -> UAE-E-00001) and the on/off switch. A blank code means "not
+-- configured": nothing can be registered until a founder sets it (never a silent default). Switching off blocks every Inventory
+-- WRITE function and keeps every record, so it is a safe pause (see supabase/manual-sql/inv_80_safe_disable_and_restore.sql).
+-- -----------------------------------------------------------------------------
+create table if not exists inv_company_settings (
+  company_id      uuid primary key references companies(id),
+  reference_code  text not null,
+  is_enabled      boolean not null default true,
+  updated_by      uuid references auth.users(id),
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  constraint inv_company_settings_code check (reference_code ~ '^[A-Z]{2,5}$')
+);
+create unique index if not exists uq_inv_company_settings_code on inv_company_settings(reference_code);
+
+-- Codes are issued from here only: unit and bin labels, requests, transfers. Never reused, never edited.
+create table if not exists inv_reference_counters (
+  company_id  uuid not null references companies(id),
+  kind        text not null check (kind in ('unit', 'stock', 'request', 'transfer', 'movement', 'count')),
+  last_value  bigint not null default 0,
+  primary key (company_id, kind)
+);
+
+drop trigger if exists inv_company_settings_set_updated_at on inv_company_settings;
+create trigger inv_company_settings_set_updated_at before update on inv_company_settings
+  for each row execute function set_updated_at();
+drop trigger if exists inv_company_settings_audit on inv_company_settings;
+create trigger inv_company_settings_audit after insert or update or delete on inv_company_settings
+  for each row execute function inv_audit_trigger();
+
+alter table inv_company_settings enable row level security;
+drop policy if exists inv_company_settings_select on inv_company_settings;
+create policy inv_company_settings_select on inv_company_settings for select using (inv_has_access(company_id));
+alter table inv_reference_counters enable row level security;   -- no policy: only the SECURITY DEFINER code reads it
+
+-- The next code of a kind for a company: UAE-E-00001 (units), UAE-S-00001 (bin / stock labels), UAE-R-00001 (requests),
+-- UAE-T-00001 (transfers), UAE-M-00001 (movements), UAE-C-00001 (counts). Serialised by the counter row lock.
+create or replace function inv_next_code(p_company_id uuid, p_kind text)
+returns text
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_code text;
+  v_n bigint;
+  v_letter text := case p_kind when 'unit' then 'E' when 'stock' then 'S' when 'request' then 'R' when 'transfer' then 'T'
+                              when 'movement' then 'M' when 'count' then 'C' end;
+begin
+  if v_letter is null then raise exception 'Unknown code kind %', p_kind using errcode = '22023'; end if;
+  select reference_code into v_code from inv_company_settings where company_id = p_company_id;
+  if v_code is null then
+    raise exception 'An Inventory reference code has not been set for this company yet. A founder sets it under Manage.' using errcode = '23514';
+  end if;
+  insert into inv_reference_counters (company_id, kind, last_value) values (p_company_id, p_kind, 1)
+  on conflict (company_id, kind) do update set last_value = inv_reference_counters.last_value + 1
+  returning last_value into v_n;
+  return v_code || '-' || v_letter || '-' || lpad(v_n::text, 5, '0');
+end;
+$$;
+
+-- Every Inventory write checks this first: unknown company, not configured, or switched off all say so in words.
+create or replace function inv_require_enabled(p_company_id uuid)
+returns void
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare v_enabled boolean;
+begin
+  select is_enabled into v_enabled from inv_company_settings where company_id = p_company_id;
+  if v_enabled is null then
+    raise exception 'Inventory is not set up for this company yet. A founder sets the reference code under Manage.' using errcode = '23514';
+  end if;
+  if not v_enabled then
+    raise exception 'Inventory is switched off for this company. Nothing can be changed until a founder switches it on.' using errcode = '23514';
+  end if;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Access management functions
+-- -----------------------------------------------------------------------------
+create or replace function inv_grant_access(
+  p_user_id uuid,
+  p_company_id uuid,
+  p_capabilities text[] default '{}'::text[],
+  p_note text default null
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_id uuid;
+  v_caps text[] := coalesce(p_capabilities, '{}'::text[]);
+  v_existing text[];
+begin
+  perform inv_require_user();
+  if not inv_has_capability(p_company_id, 'manage_access') then
+    raise exception 'Only a founder, or someone a founder gave access management to, can grant Inventory access for this company' using errcode = '42501';
+  end if;
+  if not (v_caps <@ inv_capability_list()) then
+    raise exception 'Unknown Inventory capability in %', v_caps using errcode = '22023';
+  end if;
+  if ('founder' = any (v_caps) or 'manage_access' = any (v_caps) or 'view_costs' = any (v_caps)) and not inv_is_founder(p_company_id) then
+    raise exception 'Only an Inventory founder can grant founder, access-management or cost-visibility rights' using errcode = '42501';
+  end if;
+  if not exists (select 1 from profiles where id = p_user_id and is_active) then
+    raise exception 'That user does not exist or is not active' using errcode = '22023';
+  end if;
+  if not exists (select 1 from companies where id = p_company_id and is_active and deleted_at is null) then
+    raise exception 'Unknown or inactive company' using errcode = '22023';
+  end if;
+  select capabilities into v_existing from inv_company_grants
+   where user_id = p_user_id and company_id = p_company_id and revoked_at is null;
+  if v_existing is not null and ('founder' = any (v_existing) or 'manage_access' = any (v_existing) or 'view_costs' = any (v_existing)) then
+    if not inv_is_founder(p_company_id) then
+      raise exception 'Only an Inventory founder can change a founder''s, access manager''s or cost reader''s rights' using errcode = '42501';
+    end if;
+    if 'founder' = any (v_existing) and not ('founder' = any (v_caps)) and (
+         select count(*) from inv_company_grants
+          where company_id = p_company_id and revoked_at is null and 'founder' = any (capabilities)) <= 1 then
+      raise exception 'Cannot remove founder rights from the last founder of this company' using errcode = '23514';
+    end if;
+  end if;
+
+  update inv_company_grants set capabilities = v_caps, note = coalesce(p_note, note)
+   where user_id = p_user_id and company_id = p_company_id and revoked_at is null
+  returning id into v_id;
+  if v_id is null then
+    insert into inv_company_grants (user_id, company_id, capabilities, granted_by, note)
+    values (p_user_id, p_company_id, v_caps, auth.uid(), p_note)
+    returning id into v_id;
+  end if;
+  return v_id;
+end;
+$$;
+
+-- Revoking Inventory access removes the person's warehouse locations as well (migration 2 replaces this function once
+-- inv_operator_locations exists). Records they created stay: history is never deleted.
+create or replace function inv_revoke_access(p_user_id uuid, p_company_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_target_is_founder boolean;
+  v_founders integer;
+begin
+  perform inv_require_user();
+  if not inv_has_capability(p_company_id, 'manage_access') then
+    raise exception 'Only an Inventory founder can revoke Inventory access for this company' using errcode = '42501';
+  end if;
+  select 'founder' = any (capabilities) into v_target_is_founder
+    from inv_company_grants where user_id = p_user_id and company_id = p_company_id and revoked_at is null;
+  if v_target_is_founder is null then return; end if;
+  if v_target_is_founder and not inv_is_founder(p_company_id) then
+    raise exception 'Only an Inventory founder can revoke a founder' using errcode = '42501';
+  end if;
+  if v_target_is_founder then
+    select count(*) into v_founders from inv_company_grants
+     where company_id = p_company_id and revoked_at is null and 'founder' = any (capabilities);
+    if v_founders <= 1 then
+      raise exception 'Cannot revoke the last founder of this company' using errcode = '23514';
+    end if;
+  end if;
+  update inv_company_grants set revoked_at = now(), revoked_by = auth.uid()
+   where user_id = p_user_id and company_id = p_company_id and revoked_at is null;
+end;
+$$;
+
+create or replace function inv_set_company_code(p_company_id uuid, p_reference_code text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v_code text := upper(btrim(coalesce(p_reference_code, '')));
+begin
+  perform inv_require_user();
+  if not inv_is_founder(p_company_id) then
+    raise exception 'Only an Inventory founder can set the equipment reference code' using errcode = '42501';
+  end if;
+  if v_code !~ '^[A-Z]{2,5}$' then
+    raise exception 'The reference code is 2 to 5 capital letters' using errcode = '22023';
+  end if;
+  if not exists (select 1 from companies where id = p_company_id and is_active and deleted_at is null) then
+    raise exception 'Unknown or inactive company' using errcode = '22023';
+  end if;
+  if exists (select 1 from inv_company_settings where reference_code = v_code and company_id <> p_company_id) then
+    raise exception 'That reference code is used by another company' using errcode = '23505';
+  end if;
+  if exists (select 1 from inv_company_settings where company_id = p_company_id and reference_code <> v_code)
+     and exists (select 1 from inv_reference_counters where company_id = p_company_id and last_value > 0) then
+    raise exception 'The reference code cannot change once equipment codes have been issued: labels already carry it' using errcode = '23514';
+  end if;
+  insert into inv_company_settings (company_id, reference_code, updated_by) values (p_company_id, v_code, auth.uid())
+  on conflict (company_id) do update set reference_code = excluded.reference_code, updated_by = excluded.updated_by;
+end;
+$$;
+
+-- The owner's pause switch, also reachable by a founder. Records are never touched.
+create or replace function inv_set_enabled(p_company_id uuid, p_enabled boolean)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  perform inv_require_user();
+  if not inv_is_founder(p_company_id) then
+    raise exception 'Only an Inventory founder can switch Inventory on or off' using errcode = '42501';
+  end if;
+  update inv_company_settings set is_enabled = coalesce(p_enabled, true), updated_by = auth.uid() where company_id = p_company_id;
+  if not found then raise exception 'Set the reference code first' using errcode = '23514'; end if;
+end;
+$$;
+
+-- People picker for access managers: all active staff (names; e-mail only for founders, who need it to tell two people apart).
+create or replace function inv_staff_directory()
+returns table (user_id uuid, full_name text, email text)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform inv_require_user();
+  if not exists (
+    select 1 from inv_company_grants g join profiles p on p.id = g.user_id and p.is_active
+     where g.user_id = auth.uid() and g.revoked_at is null
+       and ('founder' = any (g.capabilities) or 'manage_access' = any (g.capabilities) or 'warehouse' = any (g.capabilities))
+  ) then return; end if;
+  return query
+    select p.id, coalesce(nullif(btrim(p.full_name), ''), split_part(p.email, '@', 1)), case when inv_is_any_founder() then p.email end
+    from profiles p where p.is_active
+    order by 2, p.email;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges: clients read through RLS only; everything else is via the functions.
+-- -----------------------------------------------------------------------------
+revoke all on table inv_company_grants, inv_audit_log, inv_company_settings, inv_reference_counters from anon, authenticated, public;
+revoke all on sequence inv_audit_log_id_seq from public, anon, authenticated;
+grant select on table inv_company_grants, inv_audit_log, inv_company_settings to authenticated;
+
+revoke all on function
+  inv_capability_list(), inv_require_user(), inv_has_access(uuid), inv_has_capability(uuid, text), inv_is_founder(uuid),
+  inv_has_any_access(), inv_is_any_founder(), inv_accessible_company_ids(), inv_audit_trigger(), inv_next_code(uuid, text),
+  inv_require_enabled(uuid), inv_grant_access(uuid, uuid, text[], text), inv_revoke_access(uuid, uuid),
+  inv_set_company_code(uuid, text), inv_set_enabled(uuid, boolean), inv_staff_directory()
+  from public, anon, authenticated;
+grant execute on function
+  inv_capability_list(), inv_has_access(uuid), inv_has_capability(uuid, text), inv_is_founder(uuid),
+  inv_has_any_access(), inv_is_any_founder(), inv_accessible_company_ids(),
+  inv_grant_access(uuid, uuid, text[], text), inv_revoke_access(uuid, uuid), inv_set_company_code(uuid, text),
+  inv_set_enabled(uuid, boolean), inv_staff_directory()
+  to authenticated;
+
+-- ROLLBACK (only before any Inventory data exists; afterwards use the safe-disable script, never drop):
+--   drop table if exists inv_reference_counters, inv_company_settings, inv_audit_log, inv_company_grants cascade;
+--   drop function if exists inv_staff_directory(), inv_set_enabled(uuid, boolean), inv_set_company_code(uuid, text),
+--     inv_revoke_access(uuid, uuid), inv_grant_access(uuid, uuid, text[], text), inv_require_enabled(uuid), inv_next_code(uuid, text),
+--     inv_audit_trigger(), inv_accessible_company_ids(), inv_is_any_founder(), inv_has_any_access(), inv_is_founder(uuid),
+--     inv_has_capability(uuid, text), inv_has_access(uuid), inv_require_user(), inv_capability_list();
+
+-- ---- 20261201000100_inv_catalogue_stock_ledger.sql ----
+-- Inventory, migration 2 of 6: locations, categories, items, physical units, quantity balances, kits, transfers, rentals, the
+-- movement ledger, costs, label history and row-level security.
+--
+-- Everything here is READ-ONLY to clients (SELECT policies only, no INSERT/UPDATE/DELETE policies, no DML grants). Changes go
+-- through the SECURITY DEFINER functions in migrations 4-6, which enforce the role rules and keep stock consistent.
+--
+-- Tiers are kept in DIFFERENT tables because row-level security cannot hide columns:
+--   summary-safe     inv_locations, inv_bins, inv_categories, inv_items      (any Inventory access holder in the company)
+--   operational      inv_units, inv_balances, inv_kit_contents, inv_transfers, inv_rentals, inv_movements, inv_movement_lines
+--                    (founders, warehouse operators, and holders of 'view_stock'): custody, employee and project pointers live here
+--   cost             inv_costs                                                 ('view_costs' only; never implied by anything else)
+-- Employee custody, project names and purchase costs therefore never reach someone who only holds basic Inventory access.
+--
+-- Separate dimensions of a physical unit (never one overloaded status):
+--   lifecycle    draft (catalogued, stock not yet claimed as verified) / active / retired / missing
+--   condition    good / fair / needs_inspection / damaged / unserviceable
+--   custody      where it physically is: warehouse (location + bin), employee, project, transit, repair, or packed in a kit
+--   reservation  future commitments live in inv_reservations (migration 3) and are NOT a location or a status
+-- Quantity stock (identical items, consumables) is held in inv_balances, one row per holder/condition, changed only by the ledger.
+
+-- -----------------------------------------------------------------------------
+-- Locations and bins
+-- -----------------------------------------------------------------------------
+create table if not exists inv_locations (
+  id          uuid primary key default gen_random_uuid(),
+  company_id  uuid not null references companies(id),      -- the company that runs this storage location
+  code        text not null check (code ~ '^[A-Z0-9]{2,8}$'),
+  name        text not null check (length(btrim(name)) between 1 and 80),
+  kind        text not null default 'warehouse' check (kind in ('warehouse', 'office', 'other')),
+  -- IANA zone of the place: dates shown and typed at this location are in it; instants are stored in UTC.
+  timezone    text not null check (proj_valid_timezone(timezone)),
+  address     text,
+  is_active   boolean not null default true,
+  created_by  uuid references auth.users(id),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  constraint inv_locations_code_unique unique (company_id, code)
+);
+create unique index if not exists uq_inv_locations_name on inv_locations(company_id, lower(btrim(name)));
+
+create table if not exists inv_bins (
+  id           uuid primary key default gen_random_uuid(),
+  company_id   uuid not null references companies(id),
+  location_id  uuid not null references inv_locations(id),
+  code         text not null check (length(btrim(code)) between 1 and 30),
+  label        text,
+  is_active    boolean not null default true,
+  created_at   timestamptz not null default now()
+);
+create unique index if not exists uq_inv_bins_code on inv_bins(location_id, lower(btrim(code)));
+
+-- Which locations a warehouse operator works at. 'cross_location' (a capability) widens this to every location of the company.
+create table if not exists inv_operator_locations (
+  id           uuid primary key default gen_random_uuid(),
+  company_id   uuid not null references companies(id),
+  user_id      uuid not null references auth.users(id),
+  location_id  uuid not null references inv_locations(id),
+  assigned_by  uuid references auth.users(id),
+  assigned_at  timestamptz not null default now(),
+  removed_at   timestamptz
+);
+create unique index if not exists uq_inv_operator_locations_active on inv_operator_locations(user_id, location_id) where removed_at is null;
+
+-- -----------------------------------------------------------------------------
+-- Categories and items (the catalogue). Categories are data, never a fixed list.
+-- -----------------------------------------------------------------------------
+create table if not exists inv_categories (
+  id          uuid primary key default gen_random_uuid(),
+  company_id  uuid not null references companies(id),
+  name        text not null check (length(btrim(name)) between 1 and 80),
+  parent_id   uuid references inv_categories(id),
+  sort_order  integer not null default 0,
+  is_active   boolean not null default true,
+  created_at  timestamptz not null default now()
+);
+create unique index if not exists uq_inv_categories_name
+  on inv_categories(company_id, coalesce(parent_id, '00000000-0000-0000-0000-000000000000'::uuid), lower(btrim(name)));
+
+create table if not exists inv_items (
+  id                  uuid primary key default gen_random_uuid(),
+  company_id          uuid not null references companies(id),
+  name                text not null check (length(btrim(name)) between 1 and 160),
+  category_id         uuid references inv_categories(id),
+  -- individual: each physical unit has its own identity. quantity: identical stock counted per bin. kit: a physical kit with a
+  -- contents checklist. consumable: used up on issue. Fixed once movement history exists (see inv_items_guard).
+  tracking            text not null check (tracking in ('individual', 'quantity', 'kit', 'consumable')),
+  unit_of_measure     text not null default 'each' check (length(btrim(unit_of_measure)) between 1 and 20),
+  -- Decimal places allowed for a quantity (0 = whole numbers; up to 3, e.g. metres). Individual units and kits are always whole.
+  quantity_scale      smallint not null default 0 check (quantity_scale between 0 and 3),
+  manufacturer        text,
+  model               text,
+  -- The exact specification that keeps look-alikes apart (cable length, connector type, motor rating).
+  specification       text,
+  status              text not null default 'draft' check (status in ('draft', 'active', 'retired')),
+  replaced_by_item_id uuid references inv_items(id),
+  notes               text,
+  version             integer not null default 1,
+  created_by          uuid references auth.users(id),
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+  constraint inv_items_whole_units check (tracking in ('quantity', 'consumable') or quantity_scale = 0)
+);
+-- Distinct specifications stay separate; the same name + model + specification is one item.
+create unique index if not exists uq_inv_items_identity
+  on inv_items(company_id, lower(btrim(name)), lower(btrim(coalesce(model, ''))), lower(btrim(coalesce(specification, ''))))
+  where status <> 'retired';
+create index if not exists idx_inv_items_company_category on inv_items(company_id, category_id);
+
+-- -----------------------------------------------------------------------------
+-- Rentals: equipment that is NOT ours. Receipts into a rental never increase owned quantities.
+-- -----------------------------------------------------------------------------
+create table if not exists inv_rentals (
+  id                  uuid primary key default gen_random_uuid(),
+  company_id          uuid not null references companies(id),
+  supplier_name       text not null check (length(btrim(supplier_name)) between 1 and 160),
+  external_reference  text not null check (length(btrim(external_reference)) between 1 and 160),
+  return_deadline     timestamptz not null,
+  project_id          uuid references proj_projects(id),
+  note                text,
+  status              text not null default 'open' check (status in ('open', 'returned')),
+  created_by          uuid references auth.users(id),
+  created_at          timestamptz not null default now(),
+  returned_at         timestamptz
+);
+create unique index if not exists uq_inv_rentals_reference on inv_rentals(company_id, lower(btrim(external_reference)));
+
+-- -----------------------------------------------------------------------------
+-- Transfers between locations: dispatch, transit and destination receipt are three separate records in time.
+-- -----------------------------------------------------------------------------
+create table if not exists inv_transfers (
+  id                uuid primary key default gen_random_uuid(),
+  company_id        uuid not null references companies(id),
+  code              text not null unique,
+  from_location_id  uuid not null references inv_locations(id),
+  to_location_id    uuid not null references inv_locations(id),
+  status            text not null default 'in_transit' check (status in ('in_transit', 'received', 'cancelled')),
+  carrier           text,
+  reference         text,
+  dispatched_by     uuid not null references auth.users(id),
+  dispatched_at     timestamptz not null default now(),
+  expected_at       timestamptz,
+  received_by       uuid references auth.users(id),
+  received_at       timestamptz,
+  note              text,
+  constraint inv_transfers_different check (from_location_id <> to_location_id),
+  constraint inv_transfers_received check ((status = 'received') = (received_at is not null))
+);
+create index if not exists idx_inv_transfers_open on inv_transfers(company_id, status) where status = 'in_transit';
+
+-- -----------------------------------------------------------------------------
+-- Physical units (individually tracked equipment AND physical kits)
+-- -----------------------------------------------------------------------------
+create table if not exists inv_units (
+  id                  uuid primary key default gen_random_uuid(),
+  company_id          uuid not null references companies(id),     -- the OWNING company; moving a unit never changes it
+  item_id             uuid not null references inv_items(id),
+  code                text not null unique,                       -- permanent Enginious equipment ID, e.g. UAE-E-00042 (the QR label identifies it)
+  serial_number       text check (serial_number is null or length(btrim(serial_number)) between 1 and 120),
+  ownership           text not null default 'owned' check (ownership in ('owned', 'rental')),
+  rental_id           uuid references inv_rentals(id),
+  lifecycle           text not null default 'draft' check (lifecycle in ('draft', 'active', 'retired', 'missing')),
+  condition           text not null default 'good' check (condition in ('good', 'fair', 'needs_inspection', 'damaged', 'unserviceable')),
+  custody_kind        text not null default 'warehouse' check (custody_kind in ('warehouse', 'employee', 'project', 'transit', 'repair', 'kit')),
+  -- Last known / current storage place. For a unit that is out (employee, project, transit, repair) it remains the place it left from.
+  location_id         uuid references inv_locations(id),
+  bin_id              uuid references inv_bins(id),
+  employee_id         uuid references employees(id),
+  project_id          uuid references proj_projects(id),
+  transfer_id         uuid references inv_transfers(id),
+  repair_reference    text,
+  in_kit_id           uuid references inv_units(id),
+  -- When a unit that is out is expected back. Overdue units are flagged and never presented as ready.
+  expected_return_at  timestamptz,
+  verified_at         timestamptz,
+  verified_by         uuid references auth.users(id),
+  -- A link to the earlier HR asset register row this unit was reconciled from (never two registers for one item).
+  legacy_asset_id     uuid unique references assets(id),
+  notes               text,
+  version             integer not null default 1,
+  created_by          uuid references auth.users(id),
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+  retired_at          timestamptz,
+  constraint inv_units_rental check ((ownership = 'rental') = (rental_id is not null)),
+  constraint inv_units_custody check (
+    case custody_kind
+      when 'warehouse' then location_id is not null and employee_id is null and project_id is null and transfer_id is null and in_kit_id is null
+      when 'employee'  then employee_id is not null and project_id is null and transfer_id is null and in_kit_id is null
+      when 'project'   then project_id is not null and employee_id is null and transfer_id is null and in_kit_id is null
+      when 'transit'   then transfer_id is not null and employee_id is null and project_id is null and in_kit_id is null
+      when 'repair'    then repair_reference is not null and employee_id is null and project_id is null and in_kit_id is null
+      when 'kit'       then in_kit_id is not null and employee_id is null and project_id is null and transfer_id is null
+    end),
+  constraint inv_units_not_own_kit check (in_kit_id is null or in_kit_id <> id),
+  constraint inv_units_retired check ((lifecycle = 'retired') = (retired_at is not null)),
+  constraint inv_units_verified check ((verified_at is null) = (verified_by is null))
+);
+-- Manufacturer serial numbers identify one unit of a model; two identical units never share one.
+create unique index if not exists uq_inv_units_serial on inv_units(item_id, lower(btrim(serial_number))) where serial_number is not null;
+create index if not exists idx_inv_units_item on inv_units(item_id);
+create index if not exists idx_inv_units_company_location on inv_units(company_id, location_id) where custody_kind = 'warehouse';
+create index if not exists idx_inv_units_employee on inv_units(employee_id) where custody_kind = 'employee';
+create index if not exists idx_inv_units_project on inv_units(project_id) where custody_kind = 'project';
+create index if not exists idx_inv_units_kit on inv_units(in_kit_id) where in_kit_id is not null;
+
+-- -----------------------------------------------------------------------------
+-- Quantity balances (identical items and consumables). One row per item + holder + condition (+ bin, rental). Never edited by hand:
+-- the ledger functions change qty and write the matching movement line in one transaction. qty can never go below zero.
+-- -----------------------------------------------------------------------------
+create table if not exists inv_balances (
+  id                  uuid primary key default gen_random_uuid(),
+  company_id          uuid not null references companies(id),     -- owning company
+  item_id             uuid not null references inv_items(id),
+  holder_kind         text not null check (holder_kind in ('warehouse', 'employee', 'project', 'transit', 'repair', 'kit')),
+  location_id         uuid references inv_locations(id),
+  bin_id              uuid references inv_bins(id),
+  employee_id         uuid references employees(id),
+  project_id          uuid references proj_projects(id),
+  transfer_id         uuid references inv_transfers(id),
+  kit_unit_id         uuid references inv_units(id),
+  repair_reference    text,
+  rental_id           uuid references inv_rentals(id),
+  condition           text not null default 'good' check (condition in ('good', 'needs_inspection', 'damaged')),
+  qty                 numeric(14, 3) not null default 0 check (qty >= 0),
+  -- Stable label code for a warehouse bin of this item ("the item in this bin"): the QR identifies the combination, never a quantity.
+  label_code          text unique,
+  expected_return_at  timestamptz,
+  verified_at         timestamptz,
+  verified_by         uuid references auth.users(id),
+  version             integer not null default 1,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+  constraint inv_balances_holder check (
+    case holder_kind
+      when 'warehouse' then location_id is not null and employee_id is null and project_id is null and transfer_id is null and kit_unit_id is null
+      when 'employee'  then employee_id is not null and project_id is null and transfer_id is null and kit_unit_id is null
+      when 'project'   then project_id is not null and employee_id is null and transfer_id is null and kit_unit_id is null
+      when 'transit'   then transfer_id is not null and employee_id is null and project_id is null and kit_unit_id is null
+      when 'repair'    then repair_reference is not null and employee_id is null and project_id is null and kit_unit_id is null
+      when 'kit'       then kit_unit_id is not null and employee_id is null and project_id is null and transfer_id is null
+    end),
+  constraint inv_balances_verified check ((verified_at is null) = (verified_by is null))
+);
+create unique index if not exists uq_inv_balances_key on inv_balances(
+  company_id, item_id, holder_kind, condition,
+  coalesce(location_id, '00000000-0000-0000-0000-000000000000'::uuid), coalesce(bin_id, '00000000-0000-0000-0000-000000000000'::uuid),
+  coalesce(employee_id, '00000000-0000-0000-0000-000000000000'::uuid), coalesce(project_id, '00000000-0000-0000-0000-000000000000'::uuid),
+  coalesce(transfer_id, '00000000-0000-0000-0000-000000000000'::uuid), coalesce(kit_unit_id, '00000000-0000-0000-0000-000000000000'::uuid),
+  coalesce(repair_reference, ''), coalesce(rental_id, '00000000-0000-0000-0000-000000000000'::uuid));
+create index if not exists idx_inv_balances_item_location on inv_balances(item_id, location_id) where holder_kind = 'warehouse';
+create index if not exists idx_inv_balances_employee on inv_balances(employee_id) where holder_kind = 'employee';
+create index if not exists idx_inv_balances_project on inv_balances(project_id) where holder_kind = 'project';
+
+-- -----------------------------------------------------------------------------
+-- Kits: a physical kit is an individually tracked unit of an item with tracking = 'kit'. Its contents checklist lives here.
+-- A content unit packed into a kit is custody 'kit' (never independently available); a quantity content is a balance held by the kit.
+-- A kit cannot contain a kit (no nesting, so no cycles) and a unit is packed in at most one kit.
+-- -----------------------------------------------------------------------------
+create table if not exists inv_kit_contents (
+  id                 uuid primary key default gen_random_uuid(),
+  company_id         uuid not null references companies(id),
+  kit_unit_id        uuid not null references inv_units(id),
+  item_id            uuid not null references inv_items(id),     -- what the checklist expects
+  expected_qty       numeric(14, 3) not null default 1 check (expected_qty > 0),
+  is_required        boolean not null default true,
+  -- present: the expected item is in the kit; missing: it is not (recorded, never hidden); substituted: another item stands in.
+  status             text not null default 'missing' check (status in ('present', 'missing', 'substituted')),
+  content_unit_id    uuid references inv_units(id),              -- the physical unit packed against this line (individual contents)
+  present_qty        numeric(14, 3) not null default 0 check (present_qty >= 0),   -- quantity contents currently in the kit
+  substitute_item_id uuid references inv_items(id),
+  note               text,
+  updated_at         timestamptz not null default now(),
+  constraint inv_kit_contents_substitute check ((status = 'substituted') = (substitute_item_id is not null)),
+  constraint inv_kit_contents_not_self check (content_unit_id is null or content_unit_id <> kit_unit_id)
+);
+create unique index if not exists uq_inv_kit_contents_unit on inv_kit_contents(content_unit_id) where content_unit_id is not null;
+create unique index if not exists uq_inv_kit_contents_line on inv_kit_contents(kit_unit_id, item_id) where status <> 'substituted';
+create index if not exists idx_inv_kit_contents_kit on inv_kit_contents(kit_unit_id);
+
+-- -----------------------------------------------------------------------------
+-- The movement ledger. Immutable: a mistake is fixed by a correction that names the movement it corrects and says why, never by
+-- editing or deleting. Retried requests carry an idempotency key, so a repeated click cannot record a second receipt or movement.
+-- -----------------------------------------------------------------------------
+create table if not exists inv_movements (
+  id                    uuid primary key default gen_random_uuid(),
+  company_id            uuid not null references companies(id),
+  code                  text not null unique,
+  kind                  text not null check (kind in (
+                          'opening', 'receipt', 'rental_receipt', 'issue_employee', 'return_employee', 'reassign_employee',
+                          'dispatch_project', 'return_project', 'transfer_project', 'transfer_dispatch', 'transfer_receive',
+                          'consume', 'return_unused', 'repair_out', 'repair_in', 'pack_kit', 'unpack_kit', 'pool_change',
+                          'condition_check', 'adjust_missing', 'adjust_found', 'adjust_retire', 'count_adjust', 'correction')),
+  occurred_at           timestamptz not null default now(),
+  recorded_at           timestamptz not null default now(),
+  performed_by          uuid not null references auth.users(id),
+  recipient_user_id     uuid references auth.users(id),
+  recipient_employee_id uuid references employees(id),
+  recipient_name        text,
+  project_id            uuid references proj_projects(id),
+  to_project_id         uuid references proj_projects(id),         -- direct project-to-project transfer: the destination
+  employee_id           uuid references employees(id),
+  request_id            uuid,                                      -- inv_requests(id), added with that table (migration 3)
+  transfer_id           uuid references inv_transfers(id),
+  from_location_id      uuid references inv_locations(id),
+  to_location_id        uuid references inv_locations(id),
+  expected_return_at    timestamptz,
+  note                  text,
+  reason                text,
+  corrects_movement_id  uuid references inv_movements(id),
+  idempotency_key       text check (idempotency_key is null or length(idempotency_key) between 8 and 120),
+  constraint inv_movements_correction check (kind <> 'correction' or (corrects_movement_id is not null and length(btrim(coalesce(reason, ''))) > 0))
+);
+create unique index if not exists uq_inv_movements_idem on inv_movements(company_id, idempotency_key) where idempotency_key is not null;
+create index if not exists idx_inv_movements_company_time on inv_movements(company_id, occurred_at desc);
+create index if not exists idx_inv_movements_project on inv_movements(project_id) where project_id is not null;
+create index if not exists idx_inv_movements_employee on inv_movements(employee_id) where employee_id is not null;
+
+create table if not exists inv_movement_lines (
+  id                 uuid primary key default gen_random_uuid(),
+  movement_id        uuid not null references inv_movements(id),
+  company_id         uuid not null references companies(id),
+  item_id            uuid not null references inv_items(id),
+  unit_id            uuid references inv_units(id),             -- individually tracked unit, when the line is about one
+  qty                numeric(14, 3) not null check (qty > 0),
+  -- Where it came from / went to. 'external' = outside the books (receipt, opening stock), 'consumed' = used up, 'adjustment' =
+  -- a recorded correction of the count. Balance ids tie a quantity line to the exact rows it changed.
+  from_kind          text not null check (from_kind in ('external', 'warehouse', 'employee', 'project', 'transit', 'repair', 'kit', 'adjustment')),
+  to_kind            text not null check (to_kind in ('consumed', 'warehouse', 'employee', 'project', 'transit', 'repair', 'kit', 'adjustment')),
+  from_location_id   uuid references inv_locations(id),
+  to_location_id     uuid references inv_locations(id),
+  from_bin_id        uuid references inv_bins(id),
+  to_bin_id          uuid references inv_bins(id),
+  from_employee_id   uuid references employees(id),
+  to_employee_id     uuid references employees(id),
+  from_project_id    uuid references proj_projects(id),
+  to_project_id      uuid references proj_projects(id),
+  from_balance_id    uuid references inv_balances(id),
+  to_balance_id      uuid references inv_balances(id),
+  condition_from     text,
+  condition_to       text,
+  exception_note     text
+);
+create index if not exists idx_inv_movement_lines_movement on inv_movement_lines(movement_id);
+create index if not exists idx_inv_movement_lines_unit on inv_movement_lines(unit_id) where unit_id is not null;
+create index if not exists idx_inv_movement_lines_item on inv_movement_lines(item_id);
+create index if not exists idx_inv_movement_lines_from_balance on inv_movement_lines(from_balance_id) where from_balance_id is not null;
+create index if not exists idx_inv_movement_lines_to_balance on inv_movement_lines(to_balance_id) where to_balance_id is not null;
+
+create or replace function inv_ledger_immutable()
+returns trigger
+language plpgsql
+as $$
+begin
+  raise exception 'Stock movements are never edited or deleted. Record a correction that names this movement and says why.' using errcode = '55000';
+end;
+$$;
+drop trigger if exists inv_movements_immutable on inv_movements;
+create trigger inv_movements_immutable before update or delete on inv_movements for each row execute function inv_ledger_immutable();
+drop trigger if exists inv_movement_lines_immutable on inv_movement_lines;
+create trigger inv_movement_lines_immutable before update or delete on inv_movement_lines for each row execute function inv_ledger_immutable();
+
+-- -----------------------------------------------------------------------------
+-- Costs (own table so row-level security can hide them from everyone without 'view_costs'), and label history.
+-- -----------------------------------------------------------------------------
+create table if not exists inv_costs (
+  id             uuid primary key default gen_random_uuid(),
+  company_id     uuid not null references companies(id),
+  item_id        uuid not null references inv_items(id),
+  unit_id        uuid references inv_units(id),
+  movement_id    uuid references inv_movements(id),
+  purchase_date  date,
+  unit_cost      numeric(14, 2) check (unit_cost is null or unit_cost >= 0),
+  currency       text check (currency is null or currency ~ '^[A-Z]{3}$'),
+  note           text,
+  entered_by     uuid references auth.users(id),
+  entered_at     timestamptz not null default now(),
+  constraint inv_costs_subject check (unit_id is not null or movement_id is not null),
+  constraint inv_costs_money check ((unit_cost is null) = (currency is null))
+);
+create index if not exists idx_inv_costs_unit on inv_costs(unit_id) where unit_id is not null;
+
+-- Printing a label never creates equipment: a reprint of a damaged label is a row here and the same code.
+create table if not exists inv_label_prints (
+  id          uuid primary key default gen_random_uuid(),
+  company_id  uuid not null references companies(id),
+  unit_id     uuid references inv_units(id),
+  balance_id  uuid references inv_balances(id),
+  reason      text not null default 'first' check (reason in ('first', 'reprint')),
+  printed_by  uuid references auth.users(id),
+  printed_at  timestamptz not null default now(),
+  constraint inv_label_prints_subject check ((unit_id is not null) <> (balance_id is not null))
+);
+
+-- -----------------------------------------------------------------------------
+-- Guards
+-- -----------------------------------------------------------------------------
+-- The tracking method (and the unit of measure and decimals) cannot change once any unit, balance or movement exists for the item:
+-- history must never be reinterpreted. inv_replace_item (migration 4) is the controlled way: retire and replace.
+create or replace function inv_items_guard()
+returns trigger
+language plpgsql
+as $$
+begin
+  if (new.tracking, new.unit_of_measure, new.quantity_scale) is distinct from (old.tracking, old.unit_of_measure, old.quantity_scale) then
+    if exists (select 1 from inv_units where item_id = old.id) or exists (select 1 from inv_balances where item_id = old.id)
+       or exists (select 1 from inv_movement_lines where item_id = old.id) then
+      raise exception 'The tracking method, unit and decimals of an item cannot change once it has stock or history. Replace the item instead.' using errcode = '23514';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists inv_items_guard_trg on inv_items;
+create trigger inv_items_guard_trg before update on inv_items for each row execute function inv_items_guard();
+
+-- Unit rows: the item must be an individual or kit item of the same company, and a kit-content unit may not be a kit itself.
+create or replace function inv_units_guard()
+returns trigger
+language plpgsql
+as $$
+declare v_item inv_items; v_kit_item inv_items;
+begin
+  select * into v_item from inv_items where id = new.item_id;
+  if v_item.id is null then raise exception 'Unknown item' using errcode = '22023'; end if;
+  if v_item.tracking not in ('individual', 'kit') then
+    raise exception 'Only individually tracked equipment and kits have unit records; % is tracked by quantity', v_item.name using errcode = '23514';
+  end if;
+  if v_item.company_id <> new.company_id then
+    raise exception 'A unit belongs to the same company as its catalogue item' using errcode = '23514';
+  end if;
+  if new.in_kit_id is not null then
+    if v_item.tracking = 'kit' then raise exception 'A kit cannot be packed inside another kit' using errcode = '23514'; end if;
+    select i.* into v_kit_item from inv_units k join inv_items i on i.id = k.item_id where k.id = new.in_kit_id;
+    if v_kit_item.id is null or v_kit_item.tracking <> 'kit' then raise exception 'That is not a kit' using errcode = '23514'; end if;
+  end if;
+  new.updated_at := now();
+  return new;
+end;
+$$;
+drop trigger if exists inv_units_guard_trg on inv_units;
+create trigger inv_units_guard_trg before insert or update on inv_units for each row execute function inv_units_guard();
+
+-- -----------------------------------------------------------------------------
+-- Visibility helpers
+-- -----------------------------------------------------------------------------
+create or replace function inv_can_view_stock(p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select inv_has_capability(p_company_id, 'warehouse') or inv_has_capability(p_company_id, 'view_stock');
+$$;
+
+-- May the caller operate stock at this location? Founders: every location of their company. A warehouse operator: the locations
+-- they are assigned to, or every location when they hold 'cross_location'.
+create or replace function inv_can_operate(p_location_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from inv_locations l
+    where l.id = p_location_id and l.is_active
+      and (inv_is_founder(l.company_id)
+           or (inv_has_capability(l.company_id, 'warehouse')
+               and (inv_has_capability(l.company_id, 'cross_location')
+                    or exists (select 1 from inv_operator_locations o
+                                where o.user_id = auth.uid() and o.location_id = l.id and o.removed_at is null)))));
+$$;
+
+-- Catalogue summary (names, categories, counts of what is usable) is for Inventory grant holders and for Project Managers and
+-- department heads of ongoing projects in the company, who prepare equipment requirements without needing a stock grant.
+create or replace function inv_can_browse(p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select inv_has_access(p_company_id)
+      or exists (
+        select 1 from proj_projects p
+        where p.company_id = p_company_id and p.status not in ('completed', 'archived')
+          and (p.pm_user_id = auth.uid()
+               or exists (select 1 from proj_project_members m
+                           where m.project_id = p.id and m.user_id = auth.uid() and m.removed_at is null and m.role in ('pm', 'acting_pm'))
+               or exists (select 1 from proj_teams t where t.project_id = p.id and t.head_user_id = auth.uid() and t.removed_at is null)))
+         and exists (select 1 from profiles pr where pr.id = auth.uid() and pr.is_active);
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Row-level security: SELECT only.
+-- -----------------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  foreach t in array array['inv_locations', 'inv_categories', 'inv_items'] loop
+    execute format('alter table %I enable row level security', t);
+    execute format('drop policy if exists %I on %I', t || '_select', t);
+    execute format('create policy %I on %I for select using (inv_can_browse(company_id))', t || '_select', t);
+  end loop;
+  foreach t in array array['inv_bins'] loop
+    execute format('alter table %I enable row level security', t);
+    execute format('drop policy if exists %I on %I', t || '_select', t);
+    execute format('create policy %I on %I for select using (inv_can_browse(company_id))', t || '_select', t);
+  end loop;
+  foreach t in array array['inv_units', 'inv_balances', 'inv_kit_contents', 'inv_transfers', 'inv_rentals', 'inv_movements', 'inv_movement_lines'] loop
+    execute format('alter table %I enable row level security', t);
+    execute format('drop policy if exists %I on %I', t || '_select', t);
+    execute format('create policy %I on %I for select using (inv_can_view_stock(company_id))', t || '_select', t);
+  end loop;
+end $$;
+
+alter table inv_operator_locations enable row level security;
+drop policy if exists inv_operator_locations_select on inv_operator_locations;
+create policy inv_operator_locations_select on inv_operator_locations for select
+  using (user_id = auth.uid() or inv_has_capability(company_id, 'manage_access'));
+
+alter table inv_costs enable row level security;
+drop policy if exists inv_costs_select on inv_costs;
+create policy inv_costs_select on inv_costs for select using (inv_has_capability(company_id, 'view_costs'));
+
+alter table inv_label_prints enable row level security;
+drop policy if exists inv_label_prints_select on inv_label_prints;
+create policy inv_label_prints_select on inv_label_prints for select using (inv_can_view_stock(company_id));
+
+-- -----------------------------------------------------------------------------
+-- Audit triggers on every table whose rows carry decisions (the ledger is its own immutable record).
+-- -----------------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'inv_locations', 'inv_bins', 'inv_operator_locations', 'inv_categories', 'inv_items', 'inv_rentals', 'inv_transfers',
+    'inv_units', 'inv_balances', 'inv_kit_contents', 'inv_costs'
+  ] loop
+    execute format('drop trigger if exists %I on %I', t || '_audit', t);
+    execute format('create trigger %I after insert or update or delete on %I for each row execute function inv_audit_trigger()', t || '_audit', t);
+  end loop;
+end $$;
+
+-- Revoking Inventory access also ends the person's warehouse locations (history stays).
+create or replace function inv_revoke_access(p_user_id uuid, p_company_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_target_is_founder boolean;
+  v_founders integer;
+begin
+  perform inv_require_user();
+  if not inv_has_capability(p_company_id, 'manage_access') then
+    raise exception 'Only an Inventory founder can revoke Inventory access for this company' using errcode = '42501';
+  end if;
+  select 'founder' = any (capabilities) into v_target_is_founder
+    from inv_company_grants where user_id = p_user_id and company_id = p_company_id and revoked_at is null;
+  if v_target_is_founder is null then return; end if;
+  if v_target_is_founder and not inv_is_founder(p_company_id) then
+    raise exception 'Only an Inventory founder can revoke a founder' using errcode = '42501';
+  end if;
+  if v_target_is_founder then
+    select count(*) into v_founders from inv_company_grants
+     where company_id = p_company_id and revoked_at is null and 'founder' = any (capabilities);
+    if v_founders <= 1 then
+      raise exception 'Cannot revoke the last founder of this company' using errcode = '23514';
+    end if;
+  end if;
+  update inv_company_grants set revoked_at = now(), revoked_by = auth.uid()
+   where user_id = p_user_id and company_id = p_company_id and revoked_at is null;
+  update inv_operator_locations set removed_at = now() where user_id = p_user_id and company_id = p_company_id and removed_at is null;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges: clients can only SELECT (through RLS); no DML, no TRUNCATE; sequences closed.
+-- -----------------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'inv_locations', 'inv_bins', 'inv_operator_locations', 'inv_categories', 'inv_items', 'inv_rentals', 'inv_transfers',
+    'inv_units', 'inv_balances', 'inv_kit_contents', 'inv_movements', 'inv_movement_lines', 'inv_costs', 'inv_label_prints'
+  ] loop
+    execute format('revoke all on table %I from anon, authenticated, public', t);
+    execute format('grant select on table %I to authenticated', t);
+  end loop;
+end $$;
+
+revoke all on function inv_ledger_immutable(), inv_items_guard(), inv_units_guard(), inv_can_view_stock(uuid), inv_can_operate(uuid),
+  inv_can_browse(uuid), inv_revoke_access(uuid, uuid) from public, anon, authenticated;
+grant execute on function inv_can_view_stock(uuid), inv_can_operate(uuid), inv_can_browse(uuid), inv_revoke_access(uuid, uuid) to authenticated;
+
+-- ROLLBACK (only before any Inventory data exists; afterwards use the safe-disable script, never drop):
+--   drop table if exists inv_label_prints, inv_costs, inv_movement_lines, inv_movements, inv_kit_contents, inv_balances, inv_units,
+--     inv_transfers, inv_rentals, inv_items, inv_categories, inv_operator_locations, inv_bins, inv_locations cascade;
+--   drop function if exists inv_can_browse(uuid), inv_can_operate(uuid), inv_can_view_stock(uuid), inv_units_guard(), inv_items_guard(),
+--     inv_ledger_immutable();
+
+-- ---- 20261201000200_inv_planning_tables.sql ----
+-- Inventory, migration 3 of 6: technology templates, equipment requests, reservations, Sales availability checks, stock counts.
+--
+-- A technology template is a RECIPE (a checklist of items and quantities), never extra physical stock. Expanding it into a request
+-- copies the lines (a snapshot), so later template edits never silently change a project. A physical assembled kit is a different
+-- thing (migration 2); an available kit and its components are never counted twice.
+-- Reservations are future commitments on dates. They are separate from where equipment physically is, and they are enforced by the
+-- database itself: an exclusion constraint for individual units and a per-item lock for quantities (see migration 5).
+-- All tables here are READ-ONLY to clients; changes go through the SECURITY DEFINER functions of migrations 4-6.
+
+-- -----------------------------------------------------------------------------
+-- Technology templates
+-- -----------------------------------------------------------------------------
+create table if not exists inv_technologies (
+  id           uuid primary key default gen_random_uuid(),
+  company_id   uuid not null references companies(id),
+  name         text not null check (length(btrim(name)) between 1 and 160),
+  description  text,
+  -- draft: still being written. complete: the checklist is trusted for availability checks. retired: kept for history.
+  status       text not null default 'draft' check (status in ('draft', 'complete', 'retired')),
+  version      integer not null default 1,
+  created_by   uuid references auth.users(id),
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+create unique index if not exists uq_inv_technologies_name on inv_technologies(company_id, lower(btrim(name))) where status <> 'retired';
+
+create table if not exists inv_technology_components (
+  id             uuid primary key default gen_random_uuid(),
+  technology_id  uuid not null references inv_technologies(id),
+  company_id     uuid not null references companies(id),
+  item_id        uuid not null references inv_items(id),
+  qty            numeric(14, 3) not null check (qty > 0),
+  -- Components sharing an alternative group are alternatives to each other (one is needed). The first by sort order is the
+  -- standard choice; any other must be chosen on purpose and is marked as a substitute on the request. Technically different
+  -- models are never assumed interchangeable: only alternatives written into the template are offered.
+  alt_group      text,
+  is_optional    boolean not null default false,
+  note           text,
+  sort_order     integer not null default 0
+);
+create index if not exists idx_inv_tech_components_tech on inv_technology_components(technology_id);
+create unique index if not exists uq_inv_tech_components_item on inv_technology_components(technology_id, item_id);
+
+-- -----------------------------------------------------------------------------
+-- Requests to the warehouse: for a project, or for an employee's permanent equipment.
+-- -----------------------------------------------------------------------------
+create table if not exists inv_requests (
+  id               uuid primary key default gen_random_uuid(),
+  company_id       uuid not null references companies(id),      -- the company whose warehouse is asked
+  code             text not null unique,
+  kind             text not null check (kind in ('project', 'employee')),
+  project_id       uuid references proj_projects(id),
+  employee_id      uuid references employees(id),
+  requested_by     uuid not null references auth.users(id),
+  status           text not null default 'draft' check (status in ('draft', 'submitted', 'in_progress', 'fulfilled', 'cancelled', 'closed')),
+  title            text,
+  destination      text,                                          -- where it is needed (site or place), free text
+  pickup_location_id uuid references inv_locations(id),           -- preferred source location
+  timezone         text not null check (proj_valid_timezone(timezone)),   -- local dates below are in this zone
+  -- The named phases, in local time: prep_start, dispatch, install_start, show_start, show_end, dismantle_end, return_due,
+  -- inspect_until. Any may be missing. needed_from / needed_until are the UTC window derived from them (what is blocked).
+  plan             jsonb not null default '{}'::jsonb check (jsonb_typeof(plan) = 'object'),
+  needed_from      timestamptz,
+  needed_until     timestamptz,
+  expected_return_at timestamptz,
+  source           text not null default 'manual' check (source in ('manual', 'sales_handover')),
+  source_ref       uuid,                                          -- the CRM opportunity a handover import came from
+  note             text,
+  version          integer not null default 1,
+  submitted_at     timestamptz,
+  cancelled_at     timestamptz,
+  cancel_reason    text,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  constraint inv_requests_target check ((kind = 'project') = (project_id is not null) and (kind = 'employee') = (employee_id is not null)),
+  constraint inv_requests_window check (needed_until is null or needed_from is null or needed_until > needed_from),
+  constraint inv_requests_cancel check ((status = 'cancelled') = (cancelled_at is not null))
+);
+-- A handover import happens once per project and opportunity, however often it is retried.
+create unique index if not exists uq_inv_requests_handover on inv_requests(project_id, source_ref) where source = 'sales_handover';
+create index if not exists idx_inv_requests_project on inv_requests(project_id) where project_id is not null;
+create index if not exists idx_inv_requests_employee on inv_requests(employee_id) where employee_id is not null;
+create index if not exists idx_inv_requests_company_status on inv_requests(company_id, status);
+
+alter table inv_movements drop constraint if exists inv_movements_request_fk;
+alter table inv_movements add constraint inv_movements_request_fk foreign key (request_id) references inv_requests(id);
+
+create table if not exists inv_request_lines (
+  id                  uuid primary key default gen_random_uuid(),
+  request_id          uuid not null references inv_requests(id),
+  company_id          uuid not null references companies(id),
+  item_id             uuid not null references inv_items(id),
+  qty                 numeric(14, 3) not null check (qty > 0),
+  -- Where the line came from: a template expansion keeps a snapshot of what the template said at that moment.
+  technology_id       uuid references inv_technologies(id),
+  technology_snapshot jsonb,
+  alt_group           text,
+  is_optional         boolean not null default false,
+  -- Substitution: the template's standard item is original_item_id; choosing another is a substitute that the project's PM (or
+  -- an authorised project person) accepts on the record before the warehouse treats it as the requirement.
+  original_item_id    uuid references inv_items(id),
+  substitution_status text not null default 'none' check (substitution_status in ('none', 'proposed', 'accepted', 'declined')),
+  substitution_by     uuid references auth.users(id),
+  substitution_at     timestamptz,
+  substitution_note   text,
+  -- A shortage can become a purchase or rental need; the external reference is recorded, there is no purchasing system here.
+  shortage_action     text not null default 'none' check (shortage_action in ('none', 'need_to_buy', 'need_to_rent')),
+  shortage_note       text,
+  rental_reference    text,
+  status              text not null default 'open' check (status in ('open', 'cancelled', 'closed')),
+  note                text,
+  sort_order          integer not null default 0,
+  version             integer not null default 1,
+  created_at          timestamptz not null default now()
+);
+create index if not exists idx_inv_request_lines_request on inv_request_lines(request_id);
+create index if not exists idx_inv_request_lines_item on inv_request_lines(item_id);
+
+-- -----------------------------------------------------------------------------
+-- Reservations. unit_id for an individually tracked unit or kit (qty is then 1); location_id + qty for quantity stock.
+-- Stays 'active' while the equipment is out on the project (dispatched) and becomes 'completed' when it is back, so a dispatched
+-- unit keeps blocking overlapping bookings.
+-- -----------------------------------------------------------------------------
+create table if not exists inv_reservations (
+  id               uuid primary key default gen_random_uuid(),
+  company_id       uuid not null references companies(id),
+  request_line_id  uuid not null references inv_request_lines(id),
+  item_id          uuid not null references inv_items(id),
+  unit_id          uuid references inv_units(id),
+  location_id      uuid references inv_locations(id),
+  qty              numeric(14, 3) not null check (qty > 0),
+  dispatched_qty   numeric(14, 3) not null default 0 check (dispatched_qty >= 0),
+  returned_qty     numeric(14, 3) not null default 0 check (returned_qty >= 0),
+  reserved_during  tstzrange not null check (not isempty(reserved_during) and lower_inf(reserved_during) = false and upper_inf(reserved_during) = false),
+  status           text not null default 'active' check (status in ('active', 'released', 'completed')),
+  released_reason  text,
+  made_by          uuid not null references auth.users(id),
+  made_at          timestamptz not null default now(),
+  released_at      timestamptz,
+  constraint inv_reservations_target check ((unit_id is not null and qty = 1) or (unit_id is null and location_id is not null)),
+  constraint inv_reservations_progress check (dispatched_qty <= qty and returned_qty <= dispatched_qty),
+  constraint inv_reservations_release check ((status = 'released') = (released_at is not null)),
+  -- THE guarantee for individual equipment: two active reservations of the same unit can never overlap in time, even when two
+  -- people press the button at the same instant.
+  constraint inv_reservations_no_overlap exclude using gist (unit_id with =, reserved_during with &&) where (unit_id is not null and status = 'active')
+);
+create index if not exists idx_inv_reservations_line on inv_reservations(request_line_id);
+create index if not exists idx_inv_reservations_item_active on inv_reservations(item_id) where status = 'active';
+
+-- -----------------------------------------------------------------------------
+-- Sales availability checks. A check is a dated record, never a reservation, and never overwritten: a new check supersedes the old one
+-- and the old one stays in history. It is out of date as soon as the opportunity's dates, location, technologies or quantities
+-- move away from what it covered (compared in migration 5, never stored as a state).
+-- -----------------------------------------------------------------------------
+create table if not exists inv_availability_checks (
+  id               uuid primary key default gen_random_uuid(),
+  company_id       uuid not null references companies(id),
+  opportunity_id   uuid not null references crm_opportunities(id),
+  location_id      uuid references inv_locations(id),
+  requested_by     uuid not null references auth.users(id),
+  requested_at     timestamptz not null default now(),
+  checked_by       uuid references auth.users(id),
+  checked_at       timestamptz,
+  -- pending: asked for, not yet done. available: everything needed is free. partial / short: something is missing.
+  -- check_required: a technology has no complete template, so no result was invented.
+  result           text not null default 'pending' check (result in ('pending', 'available', 'partial', 'short', 'check_required')),
+  summary          jsonb not null default '[]'::jsonb check (jsonb_typeof(summary) = 'array'),
+  covers           jsonb,
+  note             text,
+  superseded_by    uuid references inv_availability_checks(id),
+  constraint inv_availability_checked check ((result = 'pending') = (checked_at is null))
+);
+create index if not exists idx_inv_availability_checks_opp on inv_availability_checks(opportunity_id, requested_at desc);
+
+-- -----------------------------------------------------------------------------
+-- Stock counts: opening stock and cycle counts share one flow. Counted quantities are written first and only become stock
+-- changes (adjustments with a reason) when an authorised person confirms; nothing is verified until then.
+-- -----------------------------------------------------------------------------
+create table if not exists inv_counts (
+  id            uuid primary key default gen_random_uuid(),
+  company_id    uuid not null references companies(id),
+  code          text not null unique,
+  kind          text not null check (kind in ('opening', 'cycle')),
+  location_id   uuid not null references inv_locations(id),
+  status        text not null default 'open' check (status in ('open', 'confirmed', 'cancelled')),
+  note          text,
+  started_by    uuid not null references auth.users(id),
+  started_at    timestamptz not null default now(),
+  confirmed_by  uuid references auth.users(id),
+  confirmed_at  timestamptz,
+  constraint inv_counts_confirmed check ((status = 'confirmed') = (confirmed_at is not null))
+);
+create table if not exists inv_count_lines (
+  id            uuid primary key default gen_random_uuid(),
+  count_id      uuid not null references inv_counts(id),
+  company_id    uuid not null references companies(id),
+  item_id       uuid not null references inv_items(id),
+  unit_id       uuid references inv_units(id),
+  balance_id    uuid references inv_balances(id),
+  bin_id        uuid references inv_bins(id),
+  condition     text,
+  expected_qty  numeric(14, 3),
+  counted_qty   numeric(14, 3) not null check (counted_qty >= 0),
+  reason        text,
+  note          text
+);
+create index if not exists idx_inv_count_lines_count on inv_count_lines(count_id);
+
+-- Outcome of the automatic requirement import at Sales handover (never blocks the handover; the PM can re-run it).
+create table if not exists inv_import_log (
+  id          uuid primary key default gen_random_uuid(),
+  company_id  uuid not null references companies(id),
+  project_id  uuid references proj_projects(id),
+  source_ref  uuid,
+  outcome     text not null check (outcome in ('imported', 'nothing_to_import', 'failed')),
+  detail      text,
+  created_at  timestamptz not null default now()
+);
+
+-- -----------------------------------------------------------------------------
+-- Row-level security: SELECT only. Project requests are visible to the project's members; employee requests to the requester and the
+-- employee; everything else to founders, warehouse operators and stock readers.
+-- -----------------------------------------------------------------------------
+create or replace function inv_can_see_request(p_request_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from inv_requests r
+    where r.id = p_request_id
+      and (inv_can_view_stock(r.company_id)
+           or (r.employee_id is not null and r.requested_by = auth.uid() and inv_has_access(r.company_id))
+           or (r.project_id is not null and proj_can_view_details(r.project_id))
+           or (r.employee_id is not null and exists (select 1 from employees e where e.id = r.employee_id and e.user_id = auth.uid()))
+           or (r.employee_id is not null and inv_has_capability(r.company_id, 'view_employee_custody'))));
+$$;
+
+alter table inv_technologies enable row level security;
+drop policy if exists inv_technologies_select on inv_technologies;
+create policy inv_technologies_select on inv_technologies for select using (inv_can_browse(company_id));
+alter table inv_technology_components enable row level security;
+drop policy if exists inv_technology_components_select on inv_technology_components;
+create policy inv_technology_components_select on inv_technology_components for select using (inv_can_browse(company_id));
+
+alter table inv_requests enable row level security;
+drop policy if exists inv_requests_select on inv_requests;
+create policy inv_requests_select on inv_requests for select using (inv_can_see_request(id));
+alter table inv_request_lines enable row level security;
+drop policy if exists inv_request_lines_select on inv_request_lines;
+create policy inv_request_lines_select on inv_request_lines for select using (inv_can_see_request(request_id));
+alter table inv_reservations enable row level security;
+drop policy if exists inv_reservations_select on inv_reservations;
+create policy inv_reservations_select on inv_reservations for select
+  using (inv_can_view_stock(company_id) or exists (select 1 from inv_request_lines l where l.id = request_line_id and inv_can_see_request(l.request_id)));
+
+alter table inv_availability_checks enable row level security;
+drop policy if exists inv_availability_checks_select on inv_availability_checks;
+create policy inv_availability_checks_select on inv_availability_checks for select
+  using (inv_can_view_stock(company_id) or inv_has_capability(company_id, 'founder')
+         or exists (select 1 from crm_opportunities o where o.id = opportunity_id and crm_has_access(o.company_id) and (o.owner_id = auth.uid() or crm_is_founder(o.company_id))));
+
+alter table inv_counts enable row level security;
+drop policy if exists inv_counts_select on inv_counts;
+create policy inv_counts_select on inv_counts for select using (inv_can_view_stock(company_id));
+alter table inv_count_lines enable row level security;
+drop policy if exists inv_count_lines_select on inv_count_lines;
+create policy inv_count_lines_select on inv_count_lines for select using (inv_can_view_stock(company_id));
+alter table inv_import_log enable row level security;
+drop policy if exists inv_import_log_select on inv_import_log;
+create policy inv_import_log_select on inv_import_log for select using (inv_can_view_stock(company_id) or (project_id is not null and proj_can_manage(project_id)));
+
+do $$
+declare t text;
+begin
+  foreach t in array array['inv_technologies', 'inv_technology_components', 'inv_requests', 'inv_request_lines', 'inv_reservations',
+                           'inv_availability_checks', 'inv_counts', 'inv_count_lines'] loop
+    execute format('drop trigger if exists %I on %I', t || '_audit', t);
+    execute format('create trigger %I after insert or update or delete on %I for each row execute function inv_audit_trigger()', t || '_audit', t);
+  end loop;
+  foreach t in array array['inv_technologies', 'inv_technology_components', 'inv_requests', 'inv_request_lines', 'inv_reservations',
+                           'inv_availability_checks', 'inv_counts', 'inv_count_lines', 'inv_import_log'] loop
+    execute format('revoke all on table %I from anon, authenticated, public', t);
+    execute format('grant select on table %I to authenticated', t);
+  end loop;
+end $$;
+
+revoke all on function inv_can_see_request(uuid) from public, anon, authenticated;
+grant execute on function inv_can_see_request(uuid) to authenticated;
+
+-- ROLLBACK (only before any Inventory data exists):
+--   drop table if exists inv_import_log, inv_count_lines, inv_counts, inv_availability_checks, inv_reservations, inv_request_lines,
+--     inv_requests, inv_technology_components, inv_technologies cascade;
+--   alter table inv_movements drop constraint if exists inv_movements_request_fk;
+--   drop function if exists inv_can_see_request(uuid);
+
+-- ---- 20261201000250_inv_shared_helpers.sql ----
+-- Inventory, migration 3b: shared helpers used by BOTH the stock functions (migration 4) and the planning / availability functions
+-- (migration 5). They are the single definition of "usable", "free for a date range" and "precision", so a dispatch and a reservation
+-- can never disagree about whether something is available. Internal: no client can execute them directly.
+
+-- All writes that touch the stock or the reservations of one item take this lock first (held until the transaction ends), so two
+-- people reserving, issuing or returning the same item at the same instant are serialised and can never oversell it.
+create or replace function inv_lock_item(p_item_id uuid)
+returns void
+language sql
+as $$
+  select pg_advisory_xact_lock(hashtextextended('inv_item:' || p_item_id::text, 0));
+$$;
+
+-- Validates a quantity for an item: positive, and within the decimals the item allows (whole numbers for individual units and
+-- kits; up to 3 decimals for things counted in metres). Returns the quantity unchanged, or raises in plain words.
+create or replace function inv_check_qty(p_item_id uuid, p_qty numeric)
+returns numeric
+language plpgsql stable
+as $$
+declare v_item inv_items;
+begin
+  select * into v_item from inv_items where id = p_item_id;
+  if v_item.id is null then raise exception 'Unknown item' using errcode = '22023'; end if;
+  if p_qty is null or p_qty <= 0 then raise exception 'The quantity must be more than zero' using errcode = '22023'; end if;
+  if p_qty <> round(p_qty, v_item.quantity_scale) then
+    raise exception 'The quantity of % can have at most % decimal place(s)', v_item.name, v_item.quantity_scale using errcode = '22023';
+  end if;
+  return p_qty;
+end;
+$$;
+
+-- A local wall-clock time in an IANA zone as a UTC instant. A time that does not exist (the hour skipped when clocks go forward in
+-- Poznan) moves forward to the first real instant after the gap; a time that happens twice (clocks go back) is the FIRST occurrence.
+create or replace function inv_local_to_utc(p_local timestamp, p_tz text)
+returns timestamptz
+language sql stable
+as $$
+  select case
+    -- A time that does not exist (the hour skipped when clocks go forward): the first real instant after the gap.
+    when (p_local at time zone p_tz) at time zone p_tz is distinct from p_local
+      then (date_trunc('hour', p_local) + interval '1 hour') at time zone p_tz
+    -- A time that happens twice (clocks go back): the FIRST occurrence (summer time).
+    when ((p_local at time zone p_tz) - interval '1 hour') at time zone p_tz = p_local
+      then (p_local at time zone p_tz) - interval '1 hour'
+    else p_local at time zone p_tz
+  end;
+$$;
+
+-- Is the unit usable right now, as a thing a person could pick up from a shelf? Reservations do not matter here (separate dimension).
+create or replace function inv_unit_usable(p_unit inv_units)
+returns boolean
+language sql immutable
+as $$
+  select p_unit.lifecycle = 'active' and p_unit.condition in ('good', 'fair') and p_unit.custody_kind = 'warehouse' and p_unit.in_kit_id is null;
+$$;
+
+-- Is the individual unit (or kit) free for [p_from, p_until) at a location? True when ALL hold:
+--   * it is active, in good or fair condition, not packed inside a kit, not an employee's equipment, not missing / retired;
+--   * it is on the shelf at that location now, OR it is out on a project / in transit and its recorded return (or arrival) is on
+--     time, falls before p_from, and is not already overdue: an overdue unit is never presented as physically ready;
+--   * no ACTIVE reservation of the unit overlaps the range (ignoring p_exclude_line's own reservations, for re-checks).
+create or replace function inv_unit_free(p_unit_id uuid, p_from timestamptz, p_until timestamptz, p_location_id uuid, p_exclude_line uuid default null)
+returns boolean
+language sql stable
+as $$
+  select u.lifecycle = 'active' and u.condition in ('good', 'fair') and u.in_kit_id is null
+     and (   (u.custody_kind = 'warehouse' and u.location_id = p_location_id)
+          or (u.custody_kind = 'project' and u.expected_return_at is not null and u.expected_return_at >= now()
+              and u.expected_return_at <= p_from and u.location_id = p_location_id)
+          or (u.custody_kind = 'transit' and exists (select 1 from inv_transfers t where t.id = u.transfer_id and t.to_location_id = p_location_id
+                                                       and t.expected_at is not null and t.expected_at >= now() and t.expected_at <= p_from)))
+     and not exists (select 1 from inv_reservations r
+                      where r.unit_id = u.id and r.status = 'active'
+                        and r.reserved_during && tstzrange(p_from, p_until)
+                        and (p_exclude_line is null or r.request_line_id <> p_exclude_line))
+  from inv_units u where u.id = p_unit_id;
+$$;
+
+-- How many of an item (owned stock, or rental stock when p_rental is true) can be promised from a location for [p_from, p_until):
+--   good stock on the shelf there
+--   + good stock out on projects whose recorded return is on time and before p_from (never overdue stock)
+--   - reservations that overlap the range and are not yet physically out (dispatched quantities have already left the shelf).
+-- Quantity stock in transit counts once its transfer's expected arrival (not overdue) is before p_from. The caller holds inv_lock_item.
+create or replace function inv_qty_free(p_item_id uuid, p_location_id uuid, p_from timestamptz, p_until timestamptz, p_exclude_line uuid default null, p_rental boolean default false)
+returns numeric
+language sql stable
+as $$
+  select greatest(0,
+      coalesce((select sum(b.qty) from inv_balances b
+                 where b.item_id = p_item_id and b.holder_kind = 'warehouse' and b.location_id = p_location_id and b.condition = 'good'
+                   and (b.rental_id is not null) = p_rental), 0)
+    + coalesce((select sum(b.qty) from inv_balances b
+                 where b.item_id = p_item_id and b.holder_kind = 'project' and b.condition = 'good' and (b.rental_id is not null) = p_rental
+                   and b.expected_return_at is not null and b.expected_return_at >= now() and b.expected_return_at <= p_from
+                   and exists (select 1 from inv_movement_lines l where l.to_balance_id = b.id and l.from_location_id = p_location_id)), 0)
+    + coalesce((select sum(b.qty) from inv_balances b join inv_transfers t on t.id = b.transfer_id
+                 where b.item_id = p_item_id and b.holder_kind = 'transit' and b.condition = 'good' and (b.rental_id is not null) = p_rental
+                   and t.to_location_id = p_location_id and t.expected_at is not null and t.expected_at >= now() and t.expected_at <= p_from), 0)
+    - coalesce((select sum(r.qty - r.dispatched_qty) from inv_reservations r
+                 where r.item_id = p_item_id and r.unit_id is null and r.location_id = p_location_id and r.status = 'active'
+                   and r.reserved_during && tstzrange(p_from, p_until)
+                   and (p_exclude_line is null or r.request_line_id <> p_exclude_line)), 0));
+$$;
+
+-- Called by every function that moves a unit to or from an employee, in the same transaction. Here it does nothing; migration 6
+-- replaces it with the version that keeps the earlier HR asset register (assets / asset_assignments) in step for units that were
+-- reconciled from it, so HR's employee page never disagrees with Inventory.
+create or replace function inv_mirror_legacy(p_unit_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  return;
+end;
+$$;
+
+revoke all on function inv_lock_item(uuid), inv_check_qty(uuid, numeric), inv_local_to_utc(timestamp, text), inv_unit_usable(inv_units),
+  inv_unit_free(uuid, timestamptz, timestamptz, uuid, uuid), inv_qty_free(uuid, uuid, timestamptz, timestamptz, uuid, boolean), inv_mirror_legacy(uuid)
+  from public, anon, authenticated;
+
+-- ROLLBACK (only before any Inventory data exists):
+--   drop function if exists inv_mirror_legacy(uuid), inv_qty_free(uuid, uuid, timestamptz, timestamptz, uuid, boolean),
+--     inv_unit_free(uuid, timestamptz, timestamptz, uuid, uuid), inv_unit_usable(inv_units), inv_local_to_utc(timestamp, text),
+--     inv_check_qty(uuid, numeric), inv_lock_item(uuid);
+
+-- ---- 20261201000300_inv_stock_functions.sql ----
+-- Inventory, migration 4 of 6: the stock core. Every function that creates or changes stock, units, kits, counts or custody.
+--
+-- Stock changes ONLY through these functions, which write the ledger (inv_movements + inv_movement_lines, immutable) and change the stock
+-- rows in the same transaction. Nothing edits a total directly; a mistake is fixed by a correction that names the original and says why.
+-- All functions are SECURITY DEFINER with search_path = public. Errors: 42501 permission, 23514 state, 22023 input, 23505 duplicate;
+-- the wording is for a warehouse operator. Movement functions take p_key (8-120 chars, idempotency key): same key + same caller + same
+-- content = the original result comes back (replayed = true) and nothing changes; same key from someone else or with other content is refused.
+-- Quantities are validated per item scale (metres 3 decimals, individual units whole) and stock can never go below zero.
+--
+-- SIGNATURES (client-facing). Every function returns jsonb unless shown.
+--  configuration
+--   inv_save_location(p_company_id, p_location_id, p_code, p_name, p_timezone, p_kind='warehouse', p_address=null, p_is_active=true) -> uuid   [founder only]
+--   inv_save_bin(p_location_id, p_bin_id, p_code, p_label=null, p_is_active=true) -> uuid                                  [manage_catalogue]
+--   inv_set_operator_locations(p_company_id, p_user_id, p_location_ids uuid[]) -> integer                                  [manage_access]
+--   inv_save_category(p_company_id, p_category_id, p_name, p_parent_id=null, p_sort_order=0, p_is_active=true) -> uuid     [manage_catalogue]
+--   inv_save_item(p_company_id, p_item_id, p_fields jsonb) -> uuid                                                         [manage_catalogue]
+--   inv_replace_item(p_item_id, p_fields jsonb, p_reason) -> uuid                                                          [manage_catalogue]
+--   inv_set_company_sharing(p_owner_company_id, p_use_company_id, p_enabled, p_note=null) -> uuid                          [founder of the owning company]
+--  units and labels
+--   inv_register_unit(p_company_id, p_item_id, p_serial_number=null, p_location_id=null, p_bin_id=null, p_condition='good', p_holder jsonb=null,
+--                     p_cost jsonb=null, p_notes=null, p_key=null)                                          [operate(location) or manage_catalogue; cost needs view_costs]
+--   inv_ensure_bin_label(p_company_id, p_item_id, p_location_id, p_bin_id=null)
+--   inv_record_label_print(p_company_id, p_unit_id=null, p_balance_id=null) -> uuid
+--  opening and counts
+--   inv_start_count(p_company_id, p_location_id, p_kind 'opening'|'cycle', p_note=null)                                    [operate(location)]
+--   inv_save_count_line(p_count_id, p_counted_qty, p_unit_id=null, p_item_id=null, p_bin_id=null, p_condition=null, p_reason=null, p_note=null,
+--                       p_balance_id=null) -> uuid
+--   inv_confirm_count(p_company_id, p_count_id, p_key, p_note=null)                                                        [confirm_stock]
+--   inv_cancel_count(p_company_id, p_count_id, p_reason) -> void
+--   inv_confirm_opening_custody(p_company_id, p_key, p_lines jsonb, p_note=null)                                           [confirm_stock]
+--  movements (all need operate(location) as described in the design; p_key is the idempotency key)
+--   inv_receive_stock(p_company_id, p_location_id, p_key, p_lines, p_rental jsonb=null, p_note=null)
+--   inv_issue_to_employee(p_company_id, p_location_id, p_employee_id, p_key, p_lines, p_expected_return_at=null, p_note=null, p_request_id=null)
+--   inv_return_from_employee(p_company_id, p_location_id, p_employee_id, p_key, p_lines, p_note=null)
+--   inv_dispatch_to_project(p_company_id, p_location_id, p_project_id, p_key, p_lines, p_request_id=null, p_expected_return_at=null, p_note=null)
+--   inv_return_from_project(p_company_id, p_location_id, p_project_id, p_key, p_lines, p_note=null)
+--   inv_transfer_between_projects(p_company_id, p_from_project_id, p_to_project_id, p_key, p_lines, p_request_id, p_expected_return_at=null, p_note=null)
+--   inv_transfer_dispatch(p_company_id, p_from_location_id, p_to_location_id, p_key, p_lines, p_expected_at=null, p_carrier=null, p_reference=null, p_note=null)
+--   inv_transfer_receive(p_company_id, p_transfer_id, p_key, p_lines=null, p_note=null)                         [operate(destination)]
+--   inv_consume(p_company_id, p_location_id, p_key, p_lines, p_employee_id=null, p_project_id=null, p_request_id=null, p_note=null)
+--   inv_return_unused(p_company_id, p_location_id, p_key, p_lines, p_employee_id=null, p_project_id=null, p_note=null)
+--   inv_repair_out(p_company_id, p_location_id, p_key, p_lines, p_repair_reference, p_expected_return_at=null, p_note=null)
+--   inv_repair_in(p_company_id, p_location_id, p_key, p_lines, p_note=null)
+--   inv_pack_kit(p_company_id, p_location_id, p_key, p_kit_unit_id, p_lines, p_note=null)
+--   inv_unpack_kit(p_company_id, p_location_id, p_key, p_kit_unit_id, p_lines=null, p_note=null)
+--   inv_set_kit_line(p_company_id, p_kit_unit_id, p_item_id, p_expected_qty=null, p_is_required=null, p_note=null, p_remove=false) -> uuid
+--   inv_check_condition(p_company_id, p_location_id, p_key, p_lines, p_note=null)
+--   inv_adjust_stock(p_company_id, p_location_id, p_key, p_action 'missing'|'found'|'retire', p_lines, p_reason)
+--   inv_correct_movement(p_company_id, p_movement_id, p_key, p_reason, p_lines)                                            [confirm_stock]
+--   inv_return_rental(p_company_id, p_location_id, p_key, p_rental_id, p_lines=null, p_note=null)
+--   inv_transaction_status(p_company_id, p_key) -> jsonb
+--   inv_ledger_problems() -> table (problem, company_id, subject_id, detail)                                              [read-only; view_audit]
+-- Internal (not client-callable): inv_refresh_request_status(request_id) -> text keeps a request's status true (fulfilled / closed); the
+-- planning functions call it after cancelling a request line.
+-- Additions: table inv_company_sharing (owner company -> using company), table inv_idempotency (internal), column
+-- inv_movement_lines.corrects_line_id, movement kind 'rental_return'.
+-- Prerequisites: migrations 1-3 and 3b (20261201000000 .. 20261201000250) and the Projects migrations (proj_projects, proj_can_manage).
+-- At run time (not at install) the dispatch functions call inv_effective_item(), defined by the planning migration 20261201000400, which
+-- therefore has to be applied before any stock is moved against a request.
+-- Does not write HR, CRM or Projects tables (inv_mirror_legacy, replaced in migration 6, keeps the HR asset register in step).
+
+-- =============================================================================
+-- Additions to the ledger tables (additive; nothing is dropped)
+-- =============================================================================
+-- A rental going back to its supplier is a movement too.
+do $$
+declare v_name text;
+begin
+  select conname into v_name from pg_constraint
+   where conrelid = 'inv_movements'::regclass and contype = 'c' and pg_get_constraintdef(oid) like '%rental_receipt%';
+  if v_name is not null then execute format('alter table inv_movements drop constraint %I', v_name); end if;
+end $$;
+alter table inv_movements add constraint inv_movements_kind_check check (kind in (
+  'opening', 'receipt', 'rental_receipt', 'rental_return', 'issue_employee', 'return_employee', 'reassign_employee',
+  'dispatch_project', 'return_project', 'transfer_project', 'transfer_dispatch', 'transfer_receive',
+  'consume', 'return_unused', 'repair_out', 'repair_in', 'pack_kit', 'unpack_kit', 'pool_change',
+  'condition_check', 'adjust_missing', 'adjust_found', 'adjust_retire', 'count_adjust', 'correction'));
+
+-- A correction line names the original line it corrects, so the original is preserved and the effect can be followed.
+alter table inv_movement_lines add column if not exists corrects_line_id uuid references inv_movement_lines(id);
+create index if not exists idx_inv_movement_lines_corrects on inv_movement_lines(corrects_line_id) where corrects_line_id is not null;
+
+-- -----------------------------------------------------------------------------
+-- Cross-company use. Equipment belongs to the company of its catalogue item. Using it at another company's location, on another
+-- company's project or with another company's employee needs a row here, made by a founder of the OWNING company.
+-- -----------------------------------------------------------------------------
+create table if not exists inv_company_sharing (
+  id              uuid primary key default gen_random_uuid(),
+  company_id      uuid not null references companies(id),          -- the OWNING company (also what the audit log files it under)
+  use_company_id  uuid not null references companies(id),          -- the company allowed to use the owner's equipment
+  note            text,
+  authorised_by   uuid not null references auth.users(id),
+  authorised_at   timestamptz not null default now(),
+  revoked_by      uuid references auth.users(id),
+  revoked_at      timestamptz,
+  constraint inv_company_sharing_different check (company_id <> use_company_id),
+  constraint inv_company_sharing_revoked check ((revoked_by is null) = (revoked_at is null))
+);
+create unique index if not exists uq_inv_company_sharing_active on inv_company_sharing(company_id, use_company_id) where revoked_at is null;
+
+alter table inv_company_sharing enable row level security;
+drop policy if exists inv_company_sharing_select on inv_company_sharing;
+create policy inv_company_sharing_select on inv_company_sharing for select
+  using (inv_has_capability(company_id, 'manage_access') or inv_has_capability(use_company_id, 'manage_access'));
+drop trigger if exists inv_company_sharing_audit on inv_company_sharing;
+create trigger inv_company_sharing_audit after insert or update or delete on inv_company_sharing
+  for each row execute function inv_audit_trigger();
+
+-- -----------------------------------------------------------------------------
+-- Idempotency keys. One row per (company, key): who used it, a fingerprint of what was asked, and the result that was returned.
+-- Nobody reads this table directly; inv_transaction_status() is the lookup.
+-- -----------------------------------------------------------------------------
+create table if not exists inv_idempotency (
+  company_id   uuid not null references companies(id),
+  idem_key     text not null check (length(idem_key) between 8 and 120),
+  kind         text not null,
+  fingerprint  text not null,
+  performed_by uuid not null references auth.users(id),
+  movement_id  uuid references inv_movements(id),
+  result       jsonb,
+  created_at   timestamptz not null default now(),
+  primary key (company_id, idem_key)
+);
+alter table inv_idempotency enable row level security;   -- no policy: only the SECURITY DEFINER code reads it
+
+-- =============================================================================
+-- Internal helpers (never executable by clients)
+-- =============================================================================
+
+-- Signed in, company named, Inventory switched on for it.
+create or replace function inv_ctx(p_company_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  perform inv_require_user();
+  if p_company_id is null then raise exception 'Choose a company' using errcode = '22023'; end if;
+  perform inv_require_enabled(p_company_id);
+end;
+$$;
+
+create or replace function inv_require_cap(p_company_id uuid, p_capability text, p_message text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if not inv_has_capability(p_company_id, p_capability) then
+    raise exception '%', p_message using errcode = '42501';
+  end if;
+end;
+$$;
+
+-- The location, which must belong to the company; the caller must be able to work there (unless p_must_operate is false).
+create or replace function inv_loc(p_company_id uuid, p_location_id uuid, p_must_operate boolean default true)
+returns inv_locations
+language plpgsql security definer
+set search_path = public
+as $$
+declare l inv_locations;
+begin
+  if p_location_id is null then raise exception 'Choose a location' using errcode = '22023'; end if;
+  select * into l from inv_locations where id = p_location_id;
+  if l.id is null or l.company_id <> p_company_id then raise exception 'Unknown location' using errcode = '22023'; end if;
+  if p_must_operate then
+    if not inv_can_operate(l.id) then
+      if not l.is_active and (inv_is_founder(l.company_id) or inv_has_capability(l.company_id, 'warehouse')) then
+        raise exception 'That location is switched off' using errcode = '23514';
+      end if;
+      raise exception 'You are not set up to work at this location. Ask a founder to add it to your access.' using errcode = '42501';
+    end if;
+  end if;
+  return l;
+end;
+$$;
+
+create or replace function inv_check_bin(p_bin_id uuid, p_location_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if p_bin_id is null then return; end if;
+  if not exists (select 1 from inv_bins where id = p_bin_id and location_id = p_location_id and is_active) then
+    raise exception 'That bin does not exist at this location' using errcode = '22023';
+  end if;
+end;
+$$;
+
+-- Owner company -> using company. Same company is always fine.
+create or replace function inv_check_sharing(p_owner uuid, p_use uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if p_owner is null or p_use is null or p_owner = p_use then return; end if;
+  if exists (select 1 from inv_company_sharing s where s.company_id = p_owner and s.use_company_id = p_use and s.revoked_at is null) then return; end if;
+  raise exception 'This equipment belongs to another company. A founder of the owning company has to authorise sharing before it can be used here.'
+    using errcode = '42501';
+end;
+$$;
+
+create or replace function inv_get_item(p_item_id uuid)
+returns inv_items
+language plpgsql security definer
+set search_path = public
+as $$
+declare i inv_items;
+begin
+  select * into i from inv_items where id = p_item_id;
+  if i.id is null then raise exception 'Unknown item' using errcode = '22023'; end if;
+  return i;
+end;
+$$;
+
+create or replace function inv_get_employee(p_employee_id uuid, p_must_be_active boolean)
+returns employees
+language plpgsql security definer
+set search_path = public
+as $$
+declare e employees;
+begin
+  if p_employee_id is null then raise exception 'Choose the employee' using errcode = '22023'; end if;
+  select * into e from employees where id = p_employee_id and deleted_at is null;
+  if e.id is null then raise exception 'Unknown employee' using errcode = '22023'; end if;
+  if p_must_be_active and (e.employment_status = 'terminated' or (e.termination_date is not null and e.termination_date < current_date)) then
+    raise exception 'That employee has left the company. Equipment cannot be issued to them' using errcode = '23514';
+  end if;
+  return e;
+end;
+$$;
+
+-- Equipment may only leave for, or be handled on, a project that is still running.
+create or replace function inv_get_project(p_project_id uuid, p_must_be_ongoing boolean)
+returns proj_projects
+language plpgsql security definer
+set search_path = public
+as $$
+declare p proj_projects;
+begin
+  if p_project_id is null then raise exception 'Choose the project' using errcode = '22023'; end if;
+  select * into p from proj_projects where id = p_project_id for share;
+  if p.id is null then raise exception 'Unknown project' using errcode = '22023'; end if;
+  if p_must_be_ongoing and p.status in ('completed', 'archived', 'on_hold') then
+    raise exception 'Project % is % and cannot receive equipment', p.reference, replace(p.status, '_', ' ') using errcode = '23514';
+  end if;
+  return p;
+end;
+$$;
+
+create or replace function inv_lines_array(p_lines jsonb)
+returns void
+language plpgsql immutable
+as $$
+begin
+  if p_lines is null or jsonb_typeof(p_lines) <> 'array' or jsonb_array_length(p_lines) = 0 then
+    raise exception 'Add at least one line' using errcode = '22023';
+  end if;
+  if jsonb_array_length(p_lines) > 500 then raise exception 'Too many lines in one request (500 at most)' using errcode = '22023'; end if;
+end;
+$$;
+
+-- Lock every item named by the lines (directly, or through a unit), in one deterministic order, before anything is read for update.
+create or replace function inv_lock_lines(p_lines jsonb, p_extra_items uuid[] default '{}'::uuid[])
+returns void
+language plpgsql
+as $$
+declare r record;
+begin
+  for r in
+    select x.item_id from (
+      select coalesce(nullif(e->>'item_id', '')::uuid, (select u.item_id from inv_units u where u.id = nullif(e->>'unit_id', '')::uuid)) as item_id
+        from jsonb_array_elements(coalesce(p_lines, '[]'::jsonb)) e
+      union
+      select unnest(p_extra_items)) x
+    where x.item_id is not null
+    order by x.item_id
+  loop
+    perform inv_lock_item(r.item_id);
+  end loop;
+end;
+$$;
+
+create or replace function inv_unit_lock(p_unit_id uuid)
+returns inv_units
+language plpgsql
+as $$
+declare u inv_units;
+begin
+  if p_unit_id is null then raise exception 'Name the equipment (unit) for this line' using errcode = '22023'; end if;
+  select * into u from inv_units where id = p_unit_id for update;
+  if u.id is null then raise exception 'Unknown equipment' using errcode = '22023'; end if;
+  return u;
+end;
+$$;
+
+create or replace function inv_custody_words(p_kind text)
+returns text
+language sql immutable
+as $$
+  select case p_kind when 'warehouse' then 'on the shelf' when 'employee' then 'with an employee' when 'project' then 'out on a project'
+                     when 'transit' then 'in transit' when 'repair' then 'out for repair' when 'kit' then 'packed in a kit' else p_kind end;
+$$;
+
+-- Why can this unit not be handled as a thing on the shelf at the location? NULL when it can.
+create or replace function inv_unit_block_reason(u inv_units, p_location_id uuid, p_require_usable boolean default true)
+returns text
+language plpgsql stable
+as $$
+begin
+  if u.lifecycle = 'draft' then return u.code || ' has not been counted and confirmed yet, so it cannot be used'; end if;
+  if u.lifecycle = 'missing' then return u.code || ' is recorded as missing'; end if;
+  if u.lifecycle = 'retired' then return u.code || ' is retired'; end if;
+  if u.custody_kind = 'kit' then return u.code || ' is packed in a kit and cannot be handled on its own'; end if;
+  if u.custody_kind <> 'warehouse' then return u.code || ' is not on the shelf: it is ' || inv_custody_words(u.custody_kind); end if;
+  if p_location_id is not null and u.location_id <> p_location_id then return u.code || ' is at a different location'; end if;
+  if p_require_usable and u.condition not in ('good', 'fair') then
+    return u.code || ' is ' || replace(u.condition, '_', ' ') || ' and is held back until it has been inspected';
+  end if;
+  return null;
+end;
+$$;
+
+-- The first active reservation of the unit that overlaps [p_from, p_until) (NULL until = open ended), as text, or NULL.
+create or replace function inv_unit_reserved_by(p_unit_id uuid, p_from timestamptz, p_until timestamptz, p_ignore_request uuid default null, p_ignore_project uuid default null)
+returns text
+language sql stable
+as $$
+  select q.code || coalesce(' (project ' || pr.reference || ')', '')
+    from inv_reservations r
+    join inv_request_lines l on l.id = r.request_line_id
+    join inv_requests q on q.id = l.request_id
+    left join proj_projects pr on pr.id = q.project_id
+   where r.unit_id = p_unit_id and r.status = 'active' and r.reserved_during && tstzrange(p_from, p_until)
+     and (p_ignore_request is null or q.id <> p_ignore_request)
+     and (p_ignore_project is null or q.project_id is distinct from p_ignore_project)
+   order by r.made_at limit 1;
+$$;
+
+create or replace function inv_valid_condition(p_condition text, p_for_balance boolean default false)
+returns text
+language plpgsql immutable
+as $$
+begin
+  if p_condition is null then raise exception 'Say the condition (good, needs inspection or damaged)' using errcode = '22023'; end if;
+  if p_for_balance then
+    if p_condition not in ('good', 'needs_inspection', 'damaged') then
+      raise exception 'Quantity stock is either good, needs_inspection or damaged' using errcode = '22023';
+    end if;
+  elsif p_condition not in ('good', 'fair', 'needs_inspection', 'damaged', 'unserviceable') then
+    raise exception 'Unknown condition %', p_condition using errcode = '22023';
+  end if;
+  return p_condition;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Balances. Quantity changes only through inv_bal_change, always paired with an inv_ml() ledger line in the same transaction.
+-- -----------------------------------------------------------------------------
+create or replace function inv_bal_ensure(
+  p_company_id uuid, p_item_id uuid, p_holder text, p_condition text,
+  p_location uuid default null, p_bin uuid default null, p_employee uuid default null, p_project uuid default null,
+  p_transfer uuid default null, p_kit uuid default null, p_repair text default null, p_rental uuid default null,
+  p_expected timestamptz default null)
+returns uuid
+language plpgsql
+as $$
+declare
+  v_loc uuid := case when p_holder = 'warehouse' then p_location end;
+  v_bin uuid := case when p_holder = 'warehouse' then p_bin end;
+  v_emp uuid := case when p_holder = 'employee' then p_employee end;
+  v_prj uuid := case when p_holder = 'project' then p_project end;
+  v_trf uuid := case when p_holder = 'transit' then p_transfer end;
+  v_kit uuid := case when p_holder = 'kit' then p_kit end;
+  v_rep text := case when p_holder = 'repair' then p_repair end;
+  v_id uuid;
+begin
+  select b.id into v_id from inv_balances b
+   where b.company_id = p_company_id and b.item_id = p_item_id and b.holder_kind = p_holder and b.condition = p_condition
+     and b.location_id is not distinct from v_loc and b.bin_id is not distinct from v_bin and b.employee_id is not distinct from v_emp
+     and b.project_id is not distinct from v_prj and b.transfer_id is not distinct from v_trf and b.kit_unit_id is not distinct from v_kit
+     and coalesce(b.repair_reference, '') = coalesce(v_rep, '') and b.rental_id is not distinct from p_rental
+   for update;
+  if v_id is null then
+    begin
+      insert into inv_balances (company_id, item_id, holder_kind, location_id, bin_id, employee_id, project_id, transfer_id, kit_unit_id,
+                                repair_reference, rental_id, condition, qty, expected_return_at)
+      values (p_company_id, p_item_id, p_holder, v_loc, v_bin, v_emp, v_prj, v_trf, v_kit, v_rep, p_rental, p_condition, 0, p_expected)
+      returning id into v_id;
+    exception when unique_violation then
+      select b.id into v_id from inv_balances b
+       where b.company_id = p_company_id and b.item_id = p_item_id and b.holder_kind = p_holder and b.condition = p_condition
+         and b.location_id is not distinct from v_loc and b.bin_id is not distinct from v_bin and b.employee_id is not distinct from v_emp
+         and b.project_id is not distinct from v_prj and b.transfer_id is not distinct from v_trf and b.kit_unit_id is not distinct from v_kit
+         and coalesce(b.repair_reference, '') = coalesce(v_rep, '') and b.rental_id is not distinct from p_rental
+       for update;
+    end;
+  end if;
+  return v_id;
+end;
+$$;
+
+-- Add (or take away) quantity on a balance. Never below zero. A first positive change marks the balance verified (who / when).
+create or replace function inv_bal_change(p_balance_id uuid, p_delta numeric, p_expected timestamptz default null)
+returns numeric
+language plpgsql
+as $$
+declare b inv_balances; v_name text; v_new numeric;
+begin
+  select * into b from inv_balances where id = p_balance_id for update;
+  if b.id is null then raise exception 'Unknown stock row' using errcode = '22023'; end if;
+  v_new := b.qty + p_delta;
+  if v_new < 0 then
+    select name into v_name from inv_items where id = b.item_id;
+    raise exception 'Not enough % in stock: % available, % needed', v_name, trim_scale(b.qty), trim_scale(-p_delta) using errcode = '23514';
+  end if;
+  update inv_balances set qty = v_new, version = version + 1, updated_at = now(),
+         verified_at = case when p_delta > 0 and verified_at is null then now() else verified_at end,
+         verified_by = case when p_delta > 0 and verified_at is null then auth.uid() else verified_by end,
+         expected_return_at = case when p_expected is not null then greatest(coalesce(expected_return_at, p_expected), p_expected) else expected_return_at end
+   where id = b.id;
+  return v_new;
+end;
+$$;
+
+-- Take p_qty of an item from balances of one holder, locking them. Rows come back so the caller can write one ledger line per
+-- balance. Own stock is used before rental stock unless a rental is named. Raises in plain words when there is not enough.
+create or replace function inv_take_qty(
+  p_item_id uuid, p_qty numeric, p_holder text,
+  p_location uuid default null, p_bin uuid default null, p_employee uuid default null, p_project uuid default null,
+  p_transfer uuid default null, p_condition text default null, p_rental uuid default null, p_rentals text default 'owned',
+  p_repair text default null, p_kit uuid default null, p_where text default null)
+returns table (balance_id uuid, taken numeric, rental_id uuid, bin_id uuid, condition text, expected_return_at timestamptz)
+language plpgsql
+as $$
+declare
+  r record;
+  v_left numeric := p_qty;
+  v_have numeric := 0;
+  v_take numeric;
+  v_name text;
+begin
+  for r in
+    select b.* from inv_balances b
+     where b.item_id = p_item_id and b.holder_kind = p_holder and b.qty > 0
+       and (p_holder <> 'warehouse' or b.location_id = p_location)
+       and (p_bin is null or b.bin_id = p_bin)
+       and (p_holder <> 'employee' or b.employee_id = p_employee)
+       and (p_holder <> 'project' or b.project_id = p_project)
+       and (p_holder <> 'transit' or b.transfer_id = p_transfer)
+       and (p_holder <> 'repair' or b.repair_reference = p_repair)
+       and (p_holder <> 'kit' or b.kit_unit_id = p_kit)
+       and (p_condition is null or b.condition = p_condition)
+       and (case p_rentals when 'owned' then b.rental_id is null when 'only' then b.rental_id is not distinct from p_rental else true end)
+     order by (b.rental_id is not null), b.qty desc, b.id
+       for update
+  loop
+    v_have := v_have + r.qty;
+    exit when v_left <= 0;
+    v_take := least(r.qty, v_left);
+    balance_id := r.id; taken := v_take; rental_id := r.rental_id; bin_id := r.bin_id; condition := r.condition; expected_return_at := r.expected_return_at;
+    v_left := v_left - v_take;
+    return next;
+  end loop;
+  if v_left > 0 then
+    select name into v_name from inv_items where id = p_item_id;
+    -- v_have only counts rows visited; recount for an honest message
+    select coalesce(sum(b.qty), 0) into v_have from inv_balances b
+     where b.item_id = p_item_id and b.holder_kind = p_holder and b.qty > 0
+       and (p_holder <> 'warehouse' or b.location_id = p_location) and (p_bin is null or b.bin_id = p_bin)
+       and (p_holder <> 'employee' or b.employee_id = p_employee) and (p_holder <> 'project' or b.project_id = p_project)
+       and (p_holder <> 'transit' or b.transfer_id = p_transfer) and (p_holder <> 'repair' or b.repair_reference = p_repair)
+       and (p_holder <> 'kit' or b.kit_unit_id = p_kit) and (p_condition is null or b.condition = p_condition)
+       and (case p_rentals when 'owned' then b.rental_id is null when 'only' then b.rental_id is not distinct from p_rental else true end);
+    raise exception 'Not enough % %: % available, % needed', v_name, coalesce(p_where, 'in stock'), trim_scale(v_have), trim_scale(p_qty) using errcode = '23514';
+  end if;
+  return;
+end;
+$$;
+
+-- One ledger line.
+create or replace function inv_ml(
+  p_movement_id uuid, p_company_id uuid, p_item_id uuid, p_unit_id uuid, p_qty numeric, p_from_kind text, p_to_kind text,
+  p_from_loc uuid default null, p_to_loc uuid default null, p_from_bin uuid default null, p_to_bin uuid default null,
+  p_from_emp uuid default null, p_to_emp uuid default null, p_from_proj uuid default null, p_to_proj uuid default null,
+  p_from_bal uuid default null, p_to_bal uuid default null, p_cond_from text default null, p_cond_to text default null,
+  p_note text default null, p_corrects uuid default null)
+returns uuid
+language plpgsql
+as $$
+declare v_id uuid;
+begin
+  insert into inv_movement_lines (movement_id, company_id, item_id, unit_id, qty, from_kind, to_kind, from_location_id, to_location_id,
+      from_bin_id, to_bin_id, from_employee_id, to_employee_id, from_project_id, to_project_id, from_balance_id, to_balance_id,
+      condition_from, condition_to, exception_note, corrects_line_id)
+  values (p_movement_id, p_company_id, p_item_id, p_unit_id, p_qty, p_from_kind, p_to_kind, p_from_loc, p_to_loc,
+      p_from_bin, p_to_bin, p_from_emp, p_to_emp, p_from_proj, p_to_proj, p_from_bal, p_to_bal,
+      p_cond_from, p_cond_to, nullif(btrim(p_note), ''), p_corrects)
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- Where a unit is, in one statement (so the custody constraint is checked on the finished row). Out-of-warehouse custodies keep the
+-- last storage location; the bin is cleared unless the unit is back on a shelf.
+create or replace function inv_unit_move(
+  p_unit_id uuid, p_custody text, p_location uuid default null, p_bin uuid default null, p_employee uuid default null,
+  p_project uuid default null, p_transfer uuid default null, p_repair text default null, p_kit uuid default null,
+  p_expected timestamptz default null, p_condition text default null)
+returns void
+language plpgsql
+as $$
+begin
+  update inv_units set
+    custody_kind = p_custody,
+    location_id = coalesce(p_location, location_id),
+    bin_id = case when p_custody = 'warehouse' then p_bin else null end,
+    employee_id = case when p_custody = 'employee' then p_employee end,
+    project_id = case when p_custody = 'project' then p_project end,
+    transfer_id = case when p_custody = 'transit' then p_transfer end,
+    repair_reference = case when p_custody = 'repair' then p_repair end,
+    in_kit_id = case when p_custody = 'kit' then p_kit end,
+    expected_return_at = case when p_custody in ('employee', 'project', 'transit', 'repair') then p_expected end,
+    condition = coalesce(p_condition, condition),
+    version = version + 1
+   where id = p_unit_id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Idempotency and the movement header. Every movement function does exactly this, so they all behave identically:
+--   same key + same caller + same content  -> the original result comes back, nothing changes (replay = true)
+--   same key from another caller, or other content -> refused
+-- Takes the movement code first (a fixed lock order: code counter, then item locks), writes the header, returns its id.
+-- -----------------------------------------------------------------------------
+create or replace function inv_idem_begin(p_company_id uuid, p_key text, p_kind text, p_content jsonb)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_key text := btrim(coalesce(p_key, ''));
+  v_fp text := md5(p_kind || ':' || coalesce(p_content::text, ''));
+  v_row inv_idempotency;
+  v_n integer;
+begin
+  if length(v_key) < 8 or length(v_key) > 120 then
+    raise exception 'The transaction key must be 8 to 120 characters' using errcode = '22023';
+  end if;
+  insert into inv_idempotency (company_id, idem_key, kind, fingerprint, performed_by)
+  values (p_company_id, v_key, p_kind, v_fp, auth.uid())
+  on conflict (company_id, idem_key) do nothing;
+  get diagnostics v_n = row_count;
+  if v_n = 1 then return null; end if;
+  select * into v_row from inv_idempotency where company_id = p_company_id and idem_key = v_key;
+  if v_row.performed_by <> auth.uid() then
+    raise exception 'That transaction key was already used by someone else. Start a new request.' using errcode = '23505';
+  end if;
+  if v_row.fingerprint <> v_fp then
+    raise exception 'That transaction key was already used for a different request. Start a new request.' using errcode = '23505';
+  end if;
+  if v_row.result is null then
+    raise exception 'That request is still being recorded. Try again in a moment.' using errcode = '55P03';
+  end if;
+  return v_row.result || jsonb_build_object('replayed', true);
+end;
+$$;
+
+-- p_header keys: project_id, to_project_id, employee_id, recipient_employee_id, request_id, transfer_id, from_location_id,
+-- to_location_id, expected_return_at, note, reason, corrects_movement_id.
+create or replace function inv_begin_movement(p_company_id uuid, p_kind text, p_key text, p_content jsonb, p_header jsonb default '{}'::jsonb, p_skip_idem boolean default false)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_prev jsonb;
+  v_code text;
+  v_id uuid;
+begin
+  if not p_skip_idem then
+    v_prev := inv_idem_begin(p_company_id, p_key, p_kind, p_content);
+    if v_prev is not null then
+      return jsonb_build_object('replay', true, 'result', v_prev);
+    end if;
+  end if;
+  v_code := inv_next_code(p_company_id, 'movement');
+  insert into inv_movements (company_id, code, kind, occurred_at, recorded_at, performed_by, recipient_employee_id, project_id, to_project_id,
+      employee_id, request_id, transfer_id, from_location_id, to_location_id, expected_return_at, note, reason, corrects_movement_id, idempotency_key)
+  values (p_company_id, v_code, p_kind, clock_timestamp(), clock_timestamp(), auth.uid(),
+      nullif(p_header->>'recipient_employee_id', '')::uuid, nullif(p_header->>'project_id', '')::uuid, nullif(p_header->>'to_project_id', '')::uuid,
+      nullif(p_header->>'employee_id', '')::uuid, nullif(p_header->>'request_id', '')::uuid, nullif(p_header->>'transfer_id', '')::uuid,
+      nullif(p_header->>'from_location_id', '')::uuid, nullif(p_header->>'to_location_id', '')::uuid,
+      nullif(p_header->>'expected_return_at', '')::timestamptz, nullif(btrim(p_header->>'note'), ''), nullif(btrim(p_header->>'reason'), ''),
+      nullif(p_header->>'corrects_movement_id', '')::uuid, btrim(p_key))
+  returning id into v_id;
+  update inv_idempotency set movement_id = v_id where company_id = p_company_id and idem_key = btrim(p_key);
+  return jsonb_build_object('replay', false, 'movement_id', v_id, 'code', v_code);
+end;
+$$;
+
+-- Stores the result against the key (so a retry gets exactly this back) and returns it.
+create or replace function inv_finish_movement(p_company_id uuid, p_key text, p_extra jsonb default '{}'::jsonb)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_row inv_idempotency;
+  v_m inv_movements;
+  v_result jsonb;
+begin
+  select * into v_row from inv_idempotency where company_id = p_company_id and idem_key = btrim(p_key);
+  select * into v_m from inv_movements where id = v_row.movement_id;
+  v_result := jsonb_build_object('movement_id', v_m.id, 'code', v_m.code, 'kind', v_m.kind, 'recorded_at', v_m.recorded_at) || coalesce(p_extra, '{}'::jsonb);
+  update inv_idempotency set result = v_result where company_id = p_company_id and idem_key = btrim(p_key);
+  return v_result;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Reservation progress (the planning functions of migration 5 create reservations; the stock functions only move their counters).
+-- -----------------------------------------------------------------------------
+-- Dispatch against a request: the unit (or quantity) must be reserved by that request. Returns the quantity covered.
+create or replace function inv_reservation_take(p_request_id uuid, p_item_id uuid, p_unit_id uuid, p_qty numeric, p_location_id uuid, p_also_return boolean default false)
+returns numeric
+language plpgsql
+as $$
+declare r record; v_left numeric := p_qty; v_take numeric;
+begin
+  for r in
+    select res.* from inv_reservations res join inv_request_lines l on l.id = res.request_line_id
+     where l.request_id = p_request_id and res.item_id = p_item_id and inv_effective_item(l) = p_item_id
+       and res.status = 'active' and res.dispatched_qty < res.qty
+       and ((p_unit_id is not null and res.unit_id = p_unit_id) or (p_unit_id is null and res.unit_id is null and (p_location_id is null or res.location_id = p_location_id)))
+     order by res.made_at, res.id for update of res
+  loop
+    exit when v_left <= 0;
+    v_take := least(r.qty - r.dispatched_qty, v_left);
+    update inv_reservations set dispatched_qty = dispatched_qty + v_take,
+           returned_qty = returned_qty + case when p_also_return then v_take else 0 end,
+           status = case when p_also_return and dispatched_qty + v_take = qty then 'completed' else status end
+     where id = r.id;
+    v_left := v_left - v_take;
+  end loop;
+  return p_qty - v_left;
+end;
+$$;
+
+-- Return progress on the reservations of one project's requests: returned_qty goes up. A reservation is 'completed' only when everything
+-- reserved was dispatched AND is back; while some of it was never dispatched it stays active and keeps blocking that rest.
+create or replace function inv_reservation_return(p_project_id uuid, p_item_id uuid, p_unit_id uuid, p_qty numeric)
+returns numeric
+language plpgsql
+as $$
+declare r record; v_left numeric := p_qty; v_take numeric;
+begin
+  for r in
+    select res.* from inv_reservations res join inv_request_lines l on l.id = res.request_line_id join inv_requests q on q.id = l.request_id
+     where q.project_id = p_project_id and res.item_id = p_item_id and res.status = 'active' and res.dispatched_qty > res.returned_qty
+       and ((p_unit_id is not null and res.unit_id = p_unit_id) or (p_unit_id is null and res.unit_id is null))
+     order by res.made_at, res.id for update of res
+  loop
+    exit when v_left <= 0;
+    v_take := least(r.dispatched_qty - r.returned_qty, v_left);
+    update inv_reservations set returned_qty = returned_qty + v_take,
+           status = case when returned_qty + v_take = qty then 'completed' else status end
+     where id = r.id;
+    v_left := v_left - v_take;
+  end loop;
+  return p_qty - v_left;
+end;
+$$;
+
+-- Keeps the status of a request true to what has physically happened (never touches a cancelled or closed request):
+--   project request  -> 'in_progress' once something went out, 'fulfilled' when every non-cancelled line is fully dispatched,
+--                       'closed' when all of that has also come back;
+--   employee request -> 'fulfilled' when every non-cancelled line has been issued.
+-- Called by the stock functions after every dispatch, return, issue and transfer; the planning functions call it after cancelling a line.
+create or replace function inv_refresh_request_status(p_request_id uuid)
+returns text
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  r inv_requests;
+  v_lines integer; v_unfilled integer; v_done numeric; v_back numeric; v_new text;
+begin
+  select * into r from inv_requests where id = p_request_id for update;
+  if r.id is null then return null; end if;
+  if r.status not in ('submitted', 'in_progress', 'fulfilled') then return r.status; end if;
+  select count(*) into v_lines from inv_request_lines where request_id = r.id and status <> 'cancelled';
+  if v_lines = 0 then return r.status; end if;
+  if r.kind = 'project' then
+    select count(*) filter (where coalesce(x.disp, 0) < l.qty), coalesce(sum(x.disp), 0), coalesce(sum(x.ret), 0)
+      into v_unfilled, v_done, v_back
+      from inv_request_lines l
+      left join lateral (select sum(res.dispatched_qty) disp, sum(res.returned_qty) ret from inv_reservations res
+                          where res.request_line_id = l.id and res.status in ('active', 'completed')) x on true
+     where l.request_id = r.id and l.status <> 'cancelled';
+    v_new := case when v_done > 0 and v_unfilled = 0 and v_back = v_done then 'closed'
+                  when v_unfilled = 0 then 'fulfilled'
+                  when v_done > 0 then 'in_progress'
+                  else r.status end;
+  else
+    select count(*) filter (where coalesce(x.issued, 0) < l.qty), coalesce(sum(x.issued), 0)
+      into v_unfilled, v_done
+      from inv_request_lines l
+      left join lateral (select sum(ml.qty) issued from inv_movement_lines ml join inv_movements m on m.id = ml.movement_id
+                          where m.request_id = r.id and m.kind = 'issue_employee' and ml.item_id = inv_effective_item(l)) x on true
+     where l.request_id = r.id and l.status <> 'cancelled';
+    v_new := case when v_unfilled = 0 then 'fulfilled' when v_done > 0 then 'in_progress' else r.status end;
+  end if;
+  if v_new is distinct from r.status then
+    update inv_requests set status = v_new, updated_at = now() where id = r.id;
+  end if;
+  return v_new;
+end;
+$$;
+
+-- Every open request of a project (after a return or transfer touched its reservations).
+create or replace function inv_refresh_project_requests(p_project_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare x uuid;
+begin
+  for x in select id from inv_requests where project_id = p_project_id and status in ('submitted', 'in_progress', 'fulfilled') order by id loop
+    perform inv_refresh_request_status(x);
+  end loop;
+end;
+$$;
+
+create or replace function inv_nonblank(p_text text, p_message text)
+returns text
+language plpgsql immutable
+as $$
+begin
+  if length(btrim(coalesce(p_text, ''))) = 0 then raise exception '%', p_message using errcode = '22023'; end if;
+  return btrim(p_text);
+end;
+$$;
+
+create or replace function inv_cost_fields_present(p_obj jsonb)
+returns boolean
+language sql immutable
+as $$
+  select p_obj is not null and jsonb_typeof(p_obj) = 'object'
+     and (nullif(p_obj->>'unit_cost', '') is not null or nullif(p_obj->>'currency', '') is not null or nullif(p_obj->>'purchase_date', '') is not null);
+$$;
+
+-- =============================================================================
+-- Configuration
+-- =============================================================================
+
+-- Locations are configured by a founder only (nothing is seeded: Dubai, Riyadh, Poznan exist only once a founder has saved them).
+create or replace function inv_save_location(
+  p_company_id uuid, p_location_id uuid, p_code text, p_name text, p_timezone text,
+  p_kind text default 'warehouse', p_address text default null, p_is_active boolean default true
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_code text := upper(btrim(coalesce(p_code, '')));
+  v_name text := btrim(coalesce(p_name, ''));
+  v_id uuid := p_location_id;
+  l inv_locations;
+begin
+  perform inv_ctx(p_company_id);
+  if not inv_is_founder(p_company_id) then
+    raise exception 'Only an Inventory founder can set up or change locations' using errcode = '42501';
+  end if;
+  if v_code !~ '^[A-Z0-9]{2,8}$' then raise exception 'The location code is 2 to 8 capital letters or digits' using errcode = '22023'; end if;
+  if length(v_name) < 1 or length(v_name) > 80 then raise exception 'Give the location a name (up to 80 characters)' using errcode = '22023'; end if;
+  if p_timezone is null or not proj_valid_timezone(p_timezone) then
+    raise exception '"%" is not a time zone name such as Asia/Dubai, Asia/Riyadh or Europe/Warsaw', coalesce(p_timezone, '') using errcode = '22023';
+  end if;
+  if coalesce(p_kind, 'warehouse') not in ('warehouse', 'office', 'other') then raise exception 'The location kind is warehouse, office or other' using errcode = '22023'; end if;
+  begin
+    if v_id is null then
+      insert into inv_locations (company_id, code, name, kind, timezone, address, is_active, created_by)
+      values (p_company_id, v_code, v_name, coalesce(p_kind, 'warehouse'), p_timezone, nullif(btrim(p_address), ''), coalesce(p_is_active, true), auth.uid())
+      returning id into v_id;
+    else
+      select * into l from inv_locations where id = v_id and company_id = p_company_id for update;
+      if l.id is null then raise exception 'Unknown location' using errcode = '22023'; end if;
+      if l.is_active and not coalesce(p_is_active, true) then
+        if exists (select 1 from inv_units u where u.location_id = l.id and u.custody_kind = 'warehouse' and u.lifecycle in ('draft', 'active', 'missing'))
+           or exists (select 1 from inv_balances b where b.location_id = l.id and b.holder_kind = 'warehouse' and b.qty > 0)
+           or exists (select 1 from inv_transfers t where t.status = 'in_transit' and l.id in (t.from_location_id, t.to_location_id)) then
+          raise exception 'This location still holds stock or has transfers on the way. Move it first, then switch the location off' using errcode = '23514';
+        end if;
+      end if;
+      update inv_locations set code = v_code, name = v_name, kind = coalesce(p_kind, kind), timezone = p_timezone,
+             address = nullif(btrim(p_address), ''), is_active = coalesce(p_is_active, true), updated_at = now()
+       where id = l.id;
+    end if;
+  exception when unique_violation then
+    raise exception 'A location with that code or name already exists' using errcode = '23505';
+  end;
+  return v_id;
+end;
+$$;
+
+create or replace function inv_save_bin(p_location_id uuid, p_bin_id uuid, p_code text, p_label text default null, p_is_active boolean default true)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l inv_locations;
+  v_code text := btrim(coalesce(p_code, ''));
+  v_id uuid := p_bin_id;
+  b inv_bins;
+begin
+  perform inv_require_user();
+  select * into l from inv_locations where id = p_location_id;
+  if l.id is null then raise exception 'Unknown location' using errcode = '22023'; end if;
+  perform inv_require_enabled(l.company_id);
+  perform inv_require_cap(l.company_id, 'manage_catalogue', 'You need catalogue rights to change bins');
+  if length(v_code) < 1 or length(v_code) > 30 then raise exception 'Give the bin a code (up to 30 characters)' using errcode = '22023'; end if;
+  begin
+    if v_id is null then
+      insert into inv_bins (company_id, location_id, code, label, is_active)
+      values (l.company_id, l.id, v_code, nullif(btrim(p_label), ''), coalesce(p_is_active, true)) returning id into v_id;
+    else
+      select * into b from inv_bins where id = v_id and location_id = l.id for update;
+      if b.id is null then raise exception 'Unknown bin' using errcode = '22023'; end if;
+      if b.is_active and not coalesce(p_is_active, true) then
+        if exists (select 1 from inv_units u where u.bin_id = b.id and u.custody_kind = 'warehouse' and u.lifecycle <> 'retired')
+           or exists (select 1 from inv_balances x where x.bin_id = b.id and x.holder_kind = 'warehouse' and x.qty > 0) then
+          raise exception 'This bin still holds stock. Move it first, then switch the bin off' using errcode = '23514';
+        end if;
+      end if;
+      update inv_bins set code = v_code, label = nullif(btrim(p_label), ''), is_active = coalesce(p_is_active, true) where id = b.id;
+    end if;
+  exception when unique_violation then
+    raise exception 'That location already has a bin with this code' using errcode = '23505';
+  end;
+  return v_id;
+end;
+$$;
+
+-- Which locations a warehouse operator works at (replaces the whole list; removed locations keep their history).
+create or replace function inv_set_operator_locations(p_company_id uuid, p_user_id uuid, p_location_ids uuid[])
+returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_ids uuid[] := coalesce(p_location_ids, '{}'::uuid[]);
+  v_loc uuid;
+begin
+  perform inv_ctx(p_company_id);
+  perform inv_require_cap(p_company_id, 'manage_access', 'Only a founder, or someone a founder gave access management to, can assign warehouse locations');
+  if not exists (select 1 from inv_company_grants g where g.user_id = p_user_id and g.company_id = p_company_id and g.revoked_at is null) then
+    raise exception 'That person has no Inventory access yet. Give them access first' using errcode = '22023';
+  end if;
+  foreach v_loc in array v_ids loop
+    if not exists (select 1 from inv_locations where id = v_loc and company_id = p_company_id) then
+      raise exception 'Unknown location in the list' using errcode = '22023';
+    end if;
+  end loop;
+  update inv_operator_locations set removed_at = now()
+   where user_id = p_user_id and company_id = p_company_id and removed_at is null and not (location_id = any (v_ids));
+  insert into inv_operator_locations (company_id, user_id, location_id, assigned_by)
+  select p_company_id, p_user_id, x, auth.uid() from (select distinct unnest(v_ids) as x) s
+   where not exists (select 1 from inv_operator_locations o where o.user_id = p_user_id and o.location_id = s.x and o.removed_at is null);
+  return coalesce(array_length(v_ids, 1), 0);
+end;
+$$;
+
+create or replace function inv_save_category(p_company_id uuid, p_category_id uuid, p_name text, p_parent_id uuid default null,
+                                             p_sort_order integer default 0, p_is_active boolean default true)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_name text := btrim(coalesce(p_name, ''));
+  v_id uuid := p_category_id;
+  v_walk uuid;
+  v_depth integer := 0;
+begin
+  perform inv_ctx(p_company_id);
+  perform inv_require_cap(p_company_id, 'manage_catalogue', 'You need catalogue rights to change categories');
+  if length(v_name) < 1 or length(v_name) > 80 then raise exception 'Give the category a name (up to 80 characters)' using errcode = '22023'; end if;
+  if p_parent_id is not null then
+    if not exists (select 1 from inv_categories where id = p_parent_id and company_id = p_company_id) then raise exception 'Unknown parent category' using errcode = '22023'; end if;
+    v_walk := p_parent_id;
+    while v_walk is not null and v_depth < 20 loop
+      if v_walk = v_id then raise exception 'A category cannot sit under itself' using errcode = '22023'; end if;
+      select parent_id into v_walk from inv_categories where id = v_walk;
+      v_depth := v_depth + 1;
+    end loop;
+  end if;
+  begin
+    if v_id is null then
+      insert into inv_categories (company_id, name, parent_id, sort_order, is_active)
+      values (p_company_id, v_name, p_parent_id, coalesce(p_sort_order, 0), coalesce(p_is_active, true)) returning id into v_id;
+    else
+      update inv_categories set name = v_name, parent_id = p_parent_id, sort_order = coalesce(p_sort_order, 0), is_active = coalesce(p_is_active, true)
+       where id = v_id and company_id = p_company_id;
+      if not found then raise exception 'Unknown category' using errcode = '22023'; end if;
+    end if;
+  exception when unique_violation then
+    raise exception 'A category with that name already exists here' using errcode = '23505';
+  end;
+  return v_id;
+end;
+$$;
+
+-- p_fields keys: name, category_id, tracking, unit_of_measure, quantity_scale, manufacturer, model, specification, status
+-- (draft / active / retired), notes, expected_version.
+create or replace function inv_save_item(p_company_id uuid, p_item_id uuid, p_fields jsonb)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  f jsonb := coalesce(p_fields, '{}'::jsonb);
+  i inv_items;
+  v_id uuid := p_item_id;
+  v_tracking text;
+  v_scale smallint;
+  v_status text;
+  v_cat uuid;
+begin
+  perform inv_ctx(p_company_id);
+  perform inv_require_cap(p_company_id, 'manage_catalogue', 'You need catalogue rights to change catalogue items');
+  if jsonb_typeof(f) <> 'object' then raise exception 'The item details must be an object' using errcode = '22023'; end if;
+  if f ? 'category_id' and nullif(f->>'category_id', '') is not null then
+    v_cat := (f->>'category_id')::uuid;
+    if not exists (select 1 from inv_categories where id = v_cat and company_id = p_company_id) then raise exception 'Unknown category' using errcode = '22023'; end if;
+  end if;
+  begin
+    if v_id is null then
+      v_tracking := f->>'tracking';
+      if v_tracking is null or v_tracking not in ('individual', 'quantity', 'kit', 'consumable') then
+        raise exception 'Choose how this item is tracked: individual, quantity, kit or consumable' using errcode = '22023';
+      end if;
+      perform inv_nonblank(f->>'name', 'Give the item a name');
+      v_scale := coalesce(nullif(f->>'quantity_scale', '')::smallint, 0);
+      if v_scale < 0 or v_scale > 3 then raise exception 'Decimal places can be 0 to 3' using errcode = '22023'; end if;
+      if v_tracking in ('individual', 'kit') and v_scale <> 0 then raise exception 'Individual units and kits are counted in whole numbers' using errcode = '22023'; end if;
+      v_status := coalesce(nullif(f->>'status', ''), 'draft');
+      if v_status not in ('draft', 'active') then raise exception 'A new item starts as a draft or active' using errcode = '22023'; end if;
+      insert into inv_items (company_id, name, category_id, tracking, unit_of_measure, quantity_scale, manufacturer, model, specification, status, notes, created_by)
+      values (p_company_id, btrim(f->>'name'), v_cat, v_tracking, coalesce(nullif(btrim(f->>'unit_of_measure'), ''), 'each'), v_scale,
+              nullif(btrim(f->>'manufacturer'), ''), nullif(btrim(f->>'model'), ''), nullif(btrim(f->>'specification'), ''), v_status,
+              nullif(btrim(f->>'notes'), ''), auth.uid())
+      returning id into v_id;
+    else
+      select * into i from inv_items where id = v_id and company_id = p_company_id for update;
+      if i.id is null then raise exception 'Unknown item' using errcode = '22023'; end if;
+      if f ? 'expected_version' and nullif(f->>'expected_version', '') is not null and (f->>'expected_version')::integer <> i.version then
+        raise exception 'Someone else changed this item. Reload and try again' using errcode = '40001';
+      end if;
+      if i.status = 'retired' then raise exception 'A retired item cannot be edited' using errcode = '23514'; end if;
+      v_status := coalesce(nullif(f->>'status', ''), i.status);
+      if v_status not in ('draft', 'active', 'retired') then raise exception 'Unknown item status' using errcode = '22023'; end if;
+      if v_status = 'draft' and i.status = 'active' and (exists (select 1 from inv_units where item_id = i.id) or exists (select 1 from inv_balances where item_id = i.id)) then
+        raise exception 'An item that already has stock cannot go back to draft' using errcode = '23514';
+      end if;
+      if v_status = 'retired' and (exists (select 1 from inv_units u where u.item_id = i.id and u.lifecycle in ('draft', 'active', 'missing'))
+                                   or exists (select 1 from inv_balances b where b.item_id = i.id and b.qty > 0)) then
+        raise exception 'This item still has stock. Move it out or write it off first, or use Replace item' using errcode = '23514';
+      end if;
+      v_tracking := coalesce(nullif(f->>'tracking', ''), i.tracking);
+      if v_tracking not in ('individual', 'quantity', 'kit', 'consumable') then raise exception 'Unknown tracking method' using errcode = '22023'; end if;
+      v_scale := coalesce(nullif(f->>'quantity_scale', '')::smallint, i.quantity_scale);
+      if v_scale < 0 or v_scale > 3 then raise exception 'Decimal places can be 0 to 3' using errcode = '22023'; end if;
+      if v_tracking in ('individual', 'kit') and v_scale <> 0 then raise exception 'Individual units and kits are counted in whole numbers' using errcode = '22023'; end if;
+      update inv_items set
+        name = coalesce(nullif(btrim(f->>'name'), ''), name),
+        category_id = case when f ? 'category_id' then v_cat else category_id end,
+        tracking = v_tracking,
+        unit_of_measure = coalesce(nullif(btrim(f->>'unit_of_measure'), ''), unit_of_measure),
+        quantity_scale = v_scale,
+        manufacturer = case when f ? 'manufacturer' then nullif(btrim(f->>'manufacturer'), '') else manufacturer end,
+        model = case when f ? 'model' then nullif(btrim(f->>'model'), '') else model end,
+        specification = case when f ? 'specification' then nullif(btrim(f->>'specification'), '') else specification end,
+        notes = case when f ? 'notes' then nullif(btrim(f->>'notes'), '') else notes end,
+        status = v_status, version = version + 1, updated_at = now()
+       where id = i.id;
+    end if;
+  exception when unique_violation then
+    raise exception 'An item with the same name, model and specification already exists' using errcode = '23505';
+  end;
+  return v_id;
+end;
+$$;
+
+-- The controlled way to change what an item is once it has history: retire it, create the replacement, link them.
+create or replace function inv_replace_item(p_item_id uuid, p_fields jsonb, p_reason text)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  i inv_items;
+  f jsonb := coalesce(p_fields, '{}'::jsonb);
+  v_new uuid;
+  v_cat uuid;
+begin
+  perform inv_require_user();
+  select * into i from inv_items where id = p_item_id for update;
+  if i.id is null then raise exception 'Unknown item' using errcode = '22023'; end if;
+  perform inv_require_enabled(i.company_id);
+  perform inv_require_cap(i.company_id, 'manage_catalogue', 'You need catalogue rights to replace a catalogue item');
+  perform inv_nonblank(p_reason, 'Say why the item is being replaced');
+  if i.status = 'retired' then raise exception 'That item is already retired' using errcode = '23514'; end if;
+  v_cat := coalesce(nullif(f->>'category_id', '')::uuid, i.category_id);
+  if v_cat is not null and not exists (select 1 from inv_categories where id = v_cat and company_id = i.company_id) then raise exception 'Unknown category' using errcode = '22023'; end if;
+  update inv_items set status = 'retired', notes = coalesce(notes || E'\n', '') || 'Replaced: ' || btrim(p_reason), version = version + 1, updated_at = now() where id = i.id;
+  begin
+    insert into inv_items (company_id, name, category_id, tracking, unit_of_measure, quantity_scale, manufacturer, model, specification, status, notes, created_by)
+    values (i.company_id, coalesce(nullif(btrim(f->>'name'), ''), i.name), v_cat, coalesce(nullif(f->>'tracking', ''), i.tracking),
+            coalesce(nullif(btrim(f->>'unit_of_measure'), ''), i.unit_of_measure), coalesce(nullif(f->>'quantity_scale', '')::smallint, i.quantity_scale),
+            case when f ? 'manufacturer' then nullif(btrim(f->>'manufacturer'), '') else i.manufacturer end,
+            case when f ? 'model' then nullif(btrim(f->>'model'), '') else i.model end,
+            case when f ? 'specification' then nullif(btrim(f->>'specification'), '') else i.specification end,
+            coalesce(nullif(f->>'status', ''), 'draft'), 'Replaces ' || i.name || ': ' || btrim(p_reason), auth.uid())
+    returning id into v_new;
+  exception when unique_violation then
+    raise exception 'An item with the same name, model and specification already exists' using errcode = '23505';
+  end;
+  update inv_items set replaced_by_item_id = v_new where id = i.id;
+  return v_new;
+end;
+$$;
+
+-- Cross-company use: only a founder of the OWNING company can say that another company may use its equipment.
+create or replace function inv_set_company_sharing(p_owner_company_id uuid, p_use_company_id uuid, p_enabled boolean, p_note text default null)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare v_id uuid;
+begin
+  perform inv_require_user();
+  if p_owner_company_id is null or p_use_company_id is null then raise exception 'Choose both companies' using errcode = '22023'; end if;
+  if p_owner_company_id = p_use_company_id then raise exception 'A company does not need to authorise itself' using errcode = '22023'; end if;
+  if not inv_is_founder(p_owner_company_id) then
+    raise exception 'Only a founder of the company that owns the equipment can allow another company to use it' using errcode = '42501';
+  end if;
+  perform inv_require_enabled(p_owner_company_id);
+  if not exists (select 1 from companies where id = p_use_company_id and is_active and deleted_at is null) then
+    raise exception 'Unknown or inactive company' using errcode = '22023';
+  end if;
+  if coalesce(p_enabled, true) then
+    select id into v_id from inv_company_sharing where company_id = p_owner_company_id and use_company_id = p_use_company_id and revoked_at is null;
+    if v_id is null then
+      insert into inv_company_sharing (company_id, use_company_id, note, authorised_by) values (p_owner_company_id, p_use_company_id, nullif(btrim(p_note), ''), auth.uid())
+      returning id into v_id;
+    else
+      update inv_company_sharing set note = coalesce(nullif(btrim(p_note), ''), note) where id = v_id;
+    end if;
+  else
+    update inv_company_sharing set revoked_at = now(), revoked_by = auth.uid()
+     where company_id = p_owner_company_id and use_company_id = p_use_company_id and revoked_at is null
+    returning id into v_id;
+  end if;
+  return v_id;
+end;
+$$;
+
+-- =============================================================================
+-- Units, labels
+-- =============================================================================
+
+-- Registers a physical unit (or kit) as a DRAFT: it is catalogued but claims no verified stock, is not available, and becomes real
+-- only when a count or opening custody is confirmed. p_holder, for equipment that already sits with someone:
+--   {"kind":"employee","employee_id":"...","expected_return_at":"..."} or {"kind":"project","project_id":"...","expected_return_at":"..."}
+-- p_cost {"unit_cost":..,"currency":"AED","purchase_date":"2026-01-01"} is accepted only from someone allowed to see costs.
+create or replace function inv_register_unit(
+  p_company_id uuid, p_item_id uuid, p_serial_number text default null, p_location_id uuid default null, p_bin_id uuid default null,
+  p_condition text default 'good', p_holder jsonb default null, p_cost jsonb default null, p_notes text default null, p_key text default null
+) returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  i inv_items;
+  l inv_locations;
+  v_serial text := nullif(btrim(coalesce(p_serial_number, '')), '');
+  v_prev jsonb;
+  v_unit inv_units;
+  v_custody text := 'warehouse';
+  v_emp uuid; v_prj uuid; v_exp timestamptz;
+  e employees; pr proj_projects;
+  v_existing text;
+  v_result jsonb;
+  v_code text;
+begin
+  perform inv_ctx(p_company_id);
+  select * into i from inv_items where id = p_item_id;
+  if i.id is null or i.company_id <> p_company_id then raise exception 'Unknown item' using errcode = '22023'; end if;
+  if p_location_id is not null then
+    select * into l from inv_locations where id = p_location_id;
+    if l.id is null or l.company_id <> p_company_id then raise exception 'Unknown location' using errcode = '22023'; end if;
+  end if;
+  if not ((p_location_id is not null and inv_can_operate(p_location_id)) or inv_has_capability(p_company_id, 'manage_catalogue')) then
+    raise exception 'You are not allowed to register equipment here. You need to work at this location or have catalogue rights' using errcode = '42501';
+  end if;
+  if i.tracking not in ('individual', 'kit') then
+    raise exception '% is tracked by quantity, so it has no individual units. Receive it as stock instead', i.name using errcode = '23514';
+  end if;
+  if i.status = 'retired' then raise exception '% is retired and cannot get new units', i.name using errcode = '23514'; end if;
+  perform inv_valid_condition(coalesce(p_condition, 'good'));
+  perform inv_check_bin(p_bin_id, p_location_id);
+  if p_bin_id is not null and p_location_id is null then raise exception 'A bin needs a location' using errcode = '22023'; end if;
+  if p_holder is not null then
+    if jsonb_typeof(p_holder) <> 'object' or coalesce(p_holder->>'kind', '') not in ('employee', 'project') then
+      raise exception 'The current holder is an employee or a project' using errcode = '22023';
+    end if;
+    v_custody := p_holder->>'kind';
+    v_exp := nullif(p_holder->>'expected_return_at', '')::timestamptz;
+    if v_custody = 'employee' then
+      e := inv_get_employee(nullif(p_holder->>'employee_id', '')::uuid, false);
+      v_emp := e.id;
+      perform inv_check_sharing(i.company_id, e.company_id);
+    else
+      pr := inv_get_project(nullif(p_holder->>'project_id', '')::uuid, false);
+      v_prj := pr.id;
+      perform inv_check_sharing(i.company_id, pr.company_id);
+    end if;
+    p_bin_id := null;
+  elsif p_location_id is null then
+    raise exception 'Choose where the equipment is kept' using errcode = '22023';
+  end if;
+  if p_cost is not null and jsonb_typeof(p_cost) = 'object' and p_cost <> '{}'::jsonb then
+    perform inv_require_cap(p_company_id, 'view_costs', 'Only people who may see costs can enter them');
+    if (nullif(p_cost->>'unit_cost', '') is null) <> (nullif(p_cost->>'currency', '') is null) then
+      raise exception 'A cost needs both an amount and a currency' using errcode = '22023';
+    end if;
+  end if;
+  if p_key is not null then
+    v_prev := inv_idem_begin(p_company_id, p_key, 'register_unit', jsonb_build_object('item', p_item_id, 'serial', v_serial, 'location', p_location_id,
+                'bin', p_bin_id, 'condition', coalesce(p_condition, 'good'), 'holder', p_holder, 'cost', p_cost, 'notes', p_notes));
+    if v_prev is not null then return v_prev; end if;
+  end if;
+  if v_serial is not null then
+    select code into v_existing from inv_units where item_id = i.id and lower(btrim(serial_number)) = lower(v_serial);
+    if v_existing is not null then raise exception 'Serial number % is already registered as %', v_serial, v_existing using errcode = '23505'; end if;
+  end if;
+  v_code := inv_next_code(p_company_id, 'unit');
+  insert into inv_units (company_id, item_id, code, serial_number, lifecycle, condition, custody_kind, location_id, bin_id, employee_id, project_id,
+                         expected_return_at, notes, created_by)
+  values (p_company_id, i.id, v_code, v_serial, 'draft', coalesce(p_condition, 'good'), v_custody, p_location_id, p_bin_id, v_emp, v_prj, v_exp,
+          nullif(btrim(p_notes), ''), auth.uid())
+  returning * into v_unit;
+  if p_cost is not null and jsonb_typeof(p_cost) = 'object' and p_cost <> '{}'::jsonb then
+    insert into inv_costs (company_id, item_id, unit_id, purchase_date, unit_cost, currency, entered_by)
+    values (p_company_id, i.id, v_unit.id, nullif(p_cost->>'purchase_date', '')::date, nullif(p_cost->>'unit_cost', '')::numeric, nullif(p_cost->>'currency', ''), auth.uid());
+  end if;
+  v_result := jsonb_build_object('unit_id', v_unit.id, 'code', v_unit.code, 'lifecycle', v_unit.lifecycle, 'custody_kind', v_unit.custody_kind);
+  if p_key is not null then
+    update inv_idempotency set result = v_result where company_id = p_company_id and idem_key = btrim(p_key);
+  end if;
+  return v_result;
+end;
+$$;
+
+-- The stable label of "this item in this bin" (quantity stock). Creates the shelf row (with zero) if needed and gives it a
+-- permanent code. Asking again returns the same code.
+create or replace function inv_ensure_bin_label(p_company_id uuid, p_item_id uuid, p_location_id uuid, p_bin_id uuid default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  i inv_items;
+  l inv_locations;
+  v_bal uuid;
+  v_label text;
+  v_new boolean := false;
+begin
+  perform inv_ctx(p_company_id);
+  select * into i from inv_items where id = p_item_id;
+  if i.id is null or i.company_id <> p_company_id then raise exception 'Unknown item' using errcode = '22023'; end if;
+  select * into l from inv_locations where id = p_location_id;
+  if l.id is null or l.company_id <> p_company_id then raise exception 'Unknown location' using errcode = '22023'; end if;
+  if not (inv_can_operate(l.id) or inv_has_capability(p_company_id, 'manage_catalogue')) then
+    raise exception 'You are not allowed to create labels here' using errcode = '42501';
+  end if;
+  if i.tracking not in ('quantity', 'consumable') then raise exception 'Labels for bins are for quantity stock. Individual equipment has its own code' using errcode = '23514'; end if;
+  if i.status = 'retired' then raise exception '% is retired', i.name using errcode = '23514'; end if;
+  perform inv_check_bin(p_bin_id, l.id);
+  perform inv_lock_item(i.id);
+  v_bal := inv_bal_ensure(p_company_id, i.id, 'warehouse', 'good', l.id, p_bin_id);
+  select label_code into v_label from inv_balances where id = v_bal;
+  if v_label is null then
+    v_label := inv_next_code(p_company_id, 'stock');
+    update inv_balances set label_code = v_label where id = v_bal;
+    insert into inv_label_prints (company_id, balance_id, reason, printed_by) values (p_company_id, v_bal, 'first', auth.uid());
+    v_new := true;
+  end if;
+  return jsonb_build_object('balance_id', v_bal, 'label_code', v_label, 'created', v_new);
+end;
+$$;
+
+-- Printing (or reprinting) a label never creates equipment; it only writes history. The first print of a code is 'first', later ones 'reprint'.
+create or replace function inv_record_label_print(p_company_id uuid, p_unit_id uuid default null, p_balance_id uuid default null)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  u inv_units; b inv_balances; v_loc uuid; v_id uuid; v_reason text;
+begin
+  perform inv_ctx(p_company_id);
+  if (p_unit_id is null) = (p_balance_id is null) then raise exception 'Name either a unit or a stock label' using errcode = '22023'; end if;
+  if p_unit_id is not null then
+    select * into u from inv_units where id = p_unit_id;
+    if u.id is null or u.company_id <> p_company_id then raise exception 'Unknown equipment' using errcode = '22023'; end if;
+    v_loc := u.location_id;
+  else
+    select * into b from inv_balances where id = p_balance_id;
+    if b.id is null or b.company_id <> p_company_id or b.label_code is null then raise exception 'Unknown stock label' using errcode = '22023'; end if;
+    v_loc := b.location_id;
+  end if;
+  if not ((v_loc is not null and inv_can_operate(v_loc)) or inv_has_capability(p_company_id, 'manage_catalogue')) then
+    raise exception 'You are not allowed to print labels for this' using errcode = '42501';
+  end if;
+  v_reason := case when exists (select 1 from inv_label_prints x where (p_unit_id is not null and x.unit_id = p_unit_id) or (p_balance_id is not null and x.balance_id = p_balance_id))
+                   then 'reprint' else 'first' end;
+  insert into inv_label_prints (company_id, unit_id, balance_id, reason, printed_by) values (p_company_id, p_unit_id, p_balance_id, v_reason, auth.uid()) returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- =============================================================================
+-- Counts: opening stock and cycle counts
+-- =============================================================================
+create or replace function inv_start_count(p_company_id uuid, p_location_id uuid, p_kind text, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare v_id uuid; v_code text; l inv_locations;
+begin
+  perform inv_ctx(p_company_id);
+  l := inv_loc(p_company_id, p_location_id);
+  if p_kind is null or p_kind not in ('opening', 'cycle') then raise exception 'A count is either an opening count or a cycle count' using errcode = '22023'; end if;
+  v_code := inv_next_code(p_company_id, 'count');
+  insert into inv_counts (company_id, code, kind, location_id, note, started_by) values (p_company_id, v_code, p_kind, l.id, nullif(btrim(p_note), ''), auth.uid())
+  returning id into v_id;
+  return jsonb_build_object('count_id', v_id, 'code', v_code, 'kind', p_kind, 'location_id', l.id);
+end;
+$$;
+
+-- One counted line. Individual units: p_unit_id and a count of 1 (opening) or 1 / 0 (cycle: present / not found).
+-- Quantities: p_item_id, p_bin_id, p_condition and the counted quantity. Saving the same subject again replaces the line.
+create or replace function inv_save_count_line(
+  p_count_id uuid, p_counted_qty numeric, p_unit_id uuid default null, p_item_id uuid default null, p_bin_id uuid default null,
+  p_condition text default null, p_reason text default null, p_note text default null, p_balance_id uuid default null
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  c inv_counts;
+  u inv_units;
+  i inv_items;
+  b inv_balances;
+  v_item uuid := p_item_id;
+  v_cond text;
+  v_bin uuid := p_bin_id;
+  v_expected numeric;
+  v_other text;
+  v_line uuid;
+begin
+  perform inv_require_user();
+  select * into c from inv_counts where id = p_count_id;
+  if c.id is null then raise exception 'Count not found' using errcode = 'P0002'; end if;
+  perform inv_ctx(c.company_id);
+  perform inv_loc(c.company_id, c.location_id);
+  if p_counted_qty is null or p_counted_qty < 0 then raise exception 'The counted quantity cannot be negative' using errcode = '22023'; end if;
+  if p_unit_id is not null then
+    select u2.item_id into v_item from inv_units u2 where u2.id = p_unit_id;
+    if v_item is null then raise exception 'Unknown equipment' using errcode = '22023'; end if;
+  end if;
+  if v_item is null then raise exception 'Say which item or unit was counted' using errcode = '22023'; end if;
+  perform inv_lock_item(v_item);
+  select * into c from inv_counts where id = p_count_id for update;
+  if c.status <> 'open' then raise exception 'This count is already % and can no longer be changed', c.status using errcode = '23514'; end if;
+  select * into i from inv_items where id = v_item;
+  if i.company_id <> c.company_id then raise exception 'That item belongs to another company' using errcode = '23514'; end if;
+  if i.status = 'draft' and c.kind = 'opening' then raise exception '% is still a draft catalogue item. Activate it before counting stock', i.name using errcode = '23514'; end if;
+  if i.status = 'retired' then raise exception '% is retired', i.name using errcode = '23514'; end if;
+
+  if p_unit_id is not null then
+    u := inv_unit_lock(p_unit_id);
+    if u.company_id <> c.company_id then raise exception 'That equipment belongs to another company' using errcode = '23514'; end if;
+    if u.lifecycle = 'retired' then raise exception '% is retired', u.code using errcode = '23514'; end if;
+    if c.kind = 'opening' then
+      if u.verified_at is not null then
+        raise exception '% has already been counted and verified. It cannot be opened again; use a cycle count to re-check it', u.code using errcode = '23514';
+      end if;
+      if u.lifecycle <> 'draft' then raise exception '% is not waiting for an opening count', u.code using errcode = '23514'; end if;
+      if u.custody_kind <> 'warehouse' then
+        raise exception '% is recorded as % already. Confirm it as opening custody instead of counting it at the warehouse, so it is never counted twice',
+          u.code, inv_custody_words(u.custody_kind) using errcode = '23514';
+      end if;
+      if p_counted_qty <> 1 then raise exception 'A single unit is counted as 1' using errcode = '22023'; end if;
+    else
+      if u.lifecycle = 'draft' then raise exception '% has not been opened yet. Count it in an opening count first', u.code using errcode = '23514'; end if;
+      if p_counted_qty not in (0, 1) then raise exception 'A single unit is counted as 1 (found) or 0 (not found)' using errcode = '22023'; end if;
+      if u.lifecycle = 'active' and (u.custody_kind <> 'warehouse' or u.location_id <> c.location_id) then
+        raise exception '% is not on the shelf at this location (it is %), so it cannot be counted here', u.code, inv_custody_words(u.custody_kind) using errcode = '23514';
+      end if;
+    end if;
+    if u.location_id is distinct from c.location_id and u.lifecycle = 'draft' then
+      raise exception '% is registered at a different location', u.code using errcode = '23514';
+    end if;
+    select c2.code into v_other from inv_count_lines cl join inv_counts c2 on c2.id = cl.count_id
+     where cl.unit_id = u.id and c2.status = 'open' and c2.id <> c.id limit 1;
+    if v_other is not null then raise exception '% is already on the open count % . Finish or cancel that count first', u.code, v_other using errcode = '23514'; end if;
+    v_cond := inv_valid_condition(coalesce(p_condition, u.condition));
+    v_bin := coalesce(p_bin_id, u.bin_id);
+    perform inv_check_bin(v_bin, c.location_id);
+    v_expected := case when u.lifecycle = 'active' and u.custody_kind = 'warehouse' then 1 else 0 end;
+    select id into v_line from inv_count_lines where count_id = c.id and unit_id = u.id;
+    if v_line is null then
+      insert into inv_count_lines (count_id, company_id, item_id, unit_id, bin_id, condition, expected_qty, counted_qty, reason, note)
+      values (c.id, c.company_id, i.id, u.id, v_bin, v_cond, v_expected, p_counted_qty, nullif(btrim(p_reason), ''), nullif(btrim(p_note), '')) returning id into v_line;
+    else
+      update inv_count_lines set bin_id = v_bin, condition = v_cond, expected_qty = v_expected, counted_qty = p_counted_qty,
+             reason = nullif(btrim(p_reason), ''), note = nullif(btrim(p_note), '') where id = v_line;
+    end if;
+    return v_line;
+  end if;
+
+  -- quantity line
+  if i.tracking not in ('quantity', 'consumable') then
+    raise exception '% is counted unit by unit. Count each unit instead', i.name using errcode = '23514';
+  end if;
+  if p_counted_qty <> round(p_counted_qty, i.quantity_scale) then
+    raise exception 'The quantity of % can have at most % decimal place(s)', i.name, i.quantity_scale using errcode = '22023';
+  end if;
+  if c.kind = 'opening' and p_counted_qty = 0 then raise exception 'An opening count needs a quantity above zero' using errcode = '22023'; end if;
+  if p_balance_id is not null then
+    select * into b from inv_balances where id = p_balance_id for update;
+    if b.id is null or b.item_id <> i.id or b.holder_kind <> 'warehouse' or b.location_id <> c.location_id then
+      raise exception 'That stock row is not this item on the shelf at this location' using errcode = '22023';
+    end if;
+    v_bin := b.bin_id; v_cond := b.condition;
+  else
+    v_cond := inv_valid_condition(coalesce(p_condition, 'good'), true);
+    perform inv_check_bin(v_bin, c.location_id);
+    select * into b from inv_balances x where x.company_id = c.company_id and x.item_id = i.id and x.holder_kind = 'warehouse' and x.location_id = c.location_id
+       and x.bin_id is not distinct from v_bin and x.condition = v_cond and x.rental_id is null;
+  end if;
+  if c.kind = 'opening' then
+    if b.id is not null and b.verified_at is not null then
+      raise exception '% already has verified stock in this place. An opening count cannot be repeated; use a cycle count to change it', i.name using errcode = '23514';
+    end if;
+  end if;
+  select c2.code into v_other from inv_count_lines cl join inv_counts c2 on c2.id = cl.count_id
+   where cl.unit_id is null and cl.item_id = i.id and c2.location_id = c.location_id and c2.status = 'open' and c2.id <> c.id
+     and cl.bin_id is not distinct from v_bin and cl.condition is not distinct from v_cond and cl.balance_id is not distinct from b.id limit 1;
+  if v_other is not null then raise exception '% in this place is already on the open count %. Finish or cancel that count first', i.name, v_other using errcode = '23514'; end if;
+  v_expected := coalesce(b.qty, 0);
+  select id into v_line from inv_count_lines where count_id = c.id and unit_id is null and item_id = i.id
+     and bin_id is not distinct from v_bin and condition is not distinct from v_cond and balance_id is not distinct from b.id;
+  if v_line is null then
+    insert into inv_count_lines (count_id, company_id, item_id, balance_id, bin_id, condition, expected_qty, counted_qty, reason, note)
+    values (c.id, c.company_id, i.id, b.id, v_bin, v_cond, v_expected, p_counted_qty, nullif(btrim(p_reason), ''), nullif(btrim(p_note), '')) returning id into v_line;
+  else
+    update inv_count_lines set expected_qty = v_expected, counted_qty = p_counted_qty, reason = nullif(btrim(p_reason), ''), note = nullif(btrim(p_note), '') where id = v_line;
+  end if;
+  return v_line;
+end;
+$$;
+
+-- Confirming turns the count into ledger movements: opening -> 'opening' movements (stock becomes real, verified who/when);
+-- cycle -> 'count_adjust' movements for the differences, each needing a reason.
+create or replace function inv_confirm_count(p_company_id uuid, p_count_id uuid, p_key text, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  c inv_counts;
+  h jsonb;
+  v_mid uuid;
+  r record;
+  u inv_units;
+  i inv_items;
+  v_bal uuid;
+  v_have numeric;
+  v_diff numeric;
+  v_units integer := 0; v_qty integer := 0; v_adj integer := 0;
+  v_cond text;
+begin
+  perform inv_ctx(p_company_id);
+  perform inv_require_cap(p_company_id, 'confirm_stock', 'Only a founder, or someone allowed to confirm stock, can confirm a count');
+  select * into c from inv_counts where id = p_count_id and company_id = p_company_id;
+  if c.id is null then raise exception 'Count not found' using errcode = 'P0002'; end if;
+  h := inv_begin_movement(p_company_id, case c.kind when 'opening' then 'opening' else 'count_adjust' end, p_key,
+         jsonb_build_object('count', p_count_id, 'note', p_note), jsonb_build_object('to_location_id', c.location_id, 'note', coalesce(p_note, 'Count ' || c.code)));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  select * into c from inv_counts where id = p_count_id for update;
+  if c.status <> 'open' then raise exception 'This count is already %', c.status using errcode = '23514'; end if;
+  perform inv_lock_lines(coalesce((select jsonb_agg(jsonb_build_object('item_id', cl.item_id)) from inv_count_lines cl where cl.count_id = c.id), '[]'::jsonb));
+
+  for r in select cl.* from inv_count_lines cl where cl.count_id = c.id order by cl.id loop
+    select * into i from inv_items where id = r.item_id;
+    if r.unit_id is not null then
+      u := inv_unit_lock(r.unit_id);
+      if c.kind = 'opening' then
+        if u.lifecycle <> 'draft' or u.verified_at is not null or u.custody_kind <> 'warehouse' or u.location_id is distinct from c.location_id then
+          raise exception '% changed since it was counted. Remove it from the count and check it again', u.code using errcode = '23514';
+        end if;
+        if i.status <> 'active' then raise exception '% is still a draft catalogue item. Activate it first', i.name using errcode = '23514'; end if;
+        update inv_units set lifecycle = 'active', condition = coalesce(r.condition, condition), bin_id = coalesce(r.bin_id, bin_id), verified_at = now(),
+               verified_by = auth.uid(), version = version + 1 where id = u.id;
+        perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'external', 'warehouse', null, c.location_id, null, coalesce(r.bin_id, u.bin_id), null, null, null, null,
+                       null, null, null, coalesce(r.condition, u.condition), r.note);
+        v_units := v_units + 1;
+      else
+        if r.counted_qty = 1 and u.lifecycle = 'missing' then
+          perform inv_nonblank(r.reason, 'Say why ' || u.code || ' is found again (give a reason on that count line)');
+          perform inv_unit_move(u.id, 'warehouse', c.location_id, r.bin_id, null, null, null, null, null, null, null);
+          update inv_units set lifecycle = 'active' where id = u.id;
+          perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'adjustment', 'warehouse', null, c.location_id, null, r.bin_id, null, null, null, null, null, null, null, u.condition, r.reason);
+          v_adj := v_adj + 1;
+        elsif r.counted_qty = 0 and u.lifecycle = 'active' then
+          if u.custody_kind <> 'warehouse' or u.location_id <> c.location_id then
+            raise exception '% moved since it was counted. Check it again', u.code using errcode = '23514';
+          end if;
+          perform inv_nonblank(r.reason, 'Say why ' || u.code || ' was not found (give a reason on that count line)');
+          update inv_units set lifecycle = 'missing', version = version + 1 where id = u.id;
+          perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'warehouse', 'adjustment', c.location_id, null, u.bin_id, null, null, null, null, null, null, null, u.condition, null, r.reason);
+          v_adj := v_adj + 1;
+        end if;
+        v_units := v_units + 1;
+      end if;
+    else
+      if c.kind = 'opening' then
+        if i.status <> 'active' then raise exception '% is still a draft catalogue item. Activate it first', i.name using errcode = '23514'; end if;
+        v_bal := inv_bal_ensure(p_company_id, i.id, 'warehouse', coalesce(r.condition, 'good'), c.location_id, r.bin_id);
+        if exists (select 1 from inv_balances where id = v_bal and verified_at is not null) then
+          raise exception '% already has verified stock in this place. Check the count again', i.name using errcode = '23514';
+        end if;
+        perform inv_bal_change(v_bal, r.counted_qty);
+        perform inv_ml(v_mid, p_company_id, i.id, null, r.counted_qty, 'external', 'warehouse', null, c.location_id, null, r.bin_id, null, null, null, null, null, v_bal, null, coalesce(r.condition, 'good'), r.note);
+        v_qty := v_qty + 1;
+      else
+        v_bal := coalesce(r.balance_id, inv_bal_ensure(p_company_id, i.id, 'warehouse', coalesce(r.condition, 'good'), c.location_id, r.bin_id));
+        select qty, condition into v_have, v_cond from inv_balances where id = v_bal for update;
+        v_diff := r.counted_qty - v_have;
+        update inv_count_lines set expected_qty = v_have where id = r.id;
+        if v_diff <> 0 then
+          perform inv_nonblank(r.reason, 'Say why the count of ' || i.name || ' differs from the system (give a reason on that count line)');
+          if v_diff > 0 then
+            perform inv_bal_change(v_bal, v_diff);
+            perform inv_ml(v_mid, p_company_id, i.id, null, v_diff, 'adjustment', 'warehouse', null, c.location_id, null, r.bin_id, null, null, null, null, null, v_bal, null, v_cond, r.reason);
+          else
+            perform inv_bal_change(v_bal, v_diff);
+            perform inv_ml(v_mid, p_company_id, i.id, null, -v_diff, 'warehouse', 'adjustment', c.location_id, null, r.bin_id, null, null, null, null, null, v_bal, null, v_cond, null, r.reason);
+          end if;
+          v_adj := v_adj + 1;
+        end if;
+        v_qty := v_qty + 1;
+      end if;
+    end if;
+  end loop;
+  update inv_counts set status = 'confirmed', confirmed_by = auth.uid(), confirmed_at = now(), note = coalesce(nullif(btrim(p_note), ''), note) where id = c.id;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('count_id', c.id, 'count_code', c.code, 'count_kind', c.kind,
+           'units', v_units, 'quantity_lines', v_qty, 'adjustments', v_adj));
+end;
+$$;
+
+create or replace function inv_cancel_count(p_company_id uuid, p_count_id uuid, p_reason text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare c inv_counts;
+begin
+  perform inv_ctx(p_company_id);
+  select * into c from inv_counts where id = p_count_id and company_id = p_company_id for update;
+  if c.id is null then raise exception 'Count not found' using errcode = 'P0002'; end if;
+  if not (inv_can_operate(c.location_id) or inv_has_capability(p_company_id, 'confirm_stock')) then
+    raise exception 'You are not allowed to cancel this count' using errcode = '42501';
+  end if;
+  perform inv_nonblank(p_reason, 'Say why the count is cancelled');
+  if c.status <> 'open' then raise exception 'This count is already %', c.status using errcode = '23514'; end if;
+  update inv_counts set status = 'cancelled', note = coalesce(note || E'\n', '') || 'Cancelled: ' || btrim(p_reason) where id = c.id;
+end;
+$$;
+
+-- Equipment and quantities that are ALREADY with an employee or on a project when Inventory starts. They are confirmed once, as
+-- opening custody, and are never part of a warehouse count, so nothing is counted twice.
+--   {"unit_id": "..."}                         a unit registered with that holder (draft)
+--   {"item_id","qty","employee_id"|"project_id","condition"?,"expected_return_at"?,"location_id"?}   a quantity
+create or replace function inv_confirm_opening_custody(p_company_id uuid, p_key text, p_lines jsonb, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; emp employees; pr proj_projects;
+  v_bal uuid; v_exp timestamptz; v_qty numeric; v_cond text; v_units integer := 0; v_lines integer := 0;
+  v_seen uuid[] := '{}';
+  v_unit_id uuid;
+begin
+  perform inv_ctx(p_company_id);
+  perform inv_require_cap(p_company_id, 'confirm_stock', 'Only a founder, or someone allowed to confirm stock, can confirm opening custody');
+  perform inv_lines_array(p_lines);
+  h := inv_begin_movement(p_company_id, 'opening', p_key, jsonb_build_object('lines', p_lines, 'note', p_note, 'custody', true), jsonb_build_object('note', coalesce(p_note, 'Opening custody')));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines(p_lines);
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    if nullif(e->>'unit_id', '') is not null then
+      v_unit_id := (e->>'unit_id')::uuid;
+      if v_unit_id = any (v_seen) then raise exception 'The same unit is listed twice' using errcode = '22023'; end if;
+      v_seen := v_seen || v_unit_id;
+      u := inv_unit_lock(v_unit_id);
+      if u.company_id <> p_company_id then raise exception 'That equipment belongs to another company' using errcode = '23514'; end if;
+      select * into i from inv_items where id = u.item_id;
+      if u.verified_at is not null or u.lifecycle <> 'draft' then
+        raise exception '% has already been counted and verified. Opening custody can only be confirmed once', u.code using errcode = '23514';
+      end if;
+      if u.custody_kind not in ('employee', 'project') then
+        raise exception '% is recorded on the shelf, so it is counted in an opening count, not as opening custody', u.code using errcode = '23514';
+      end if;
+      if i.status <> 'active' then raise exception '% is still a draft catalogue item. Activate it first', i.name using errcode = '23514'; end if;
+      if u.custody_kind = 'employee' then
+        emp := inv_get_employee(u.employee_id, false);
+        perform inv_check_sharing(i.company_id, emp.company_id);
+      else
+        pr := inv_get_project(u.project_id, true);
+        perform inv_check_sharing(i.company_id, pr.company_id);
+      end if;
+      v_exp := coalesce(nullif(e->>'expected_return_at', '')::timestamptz, u.expected_return_at);
+      update inv_units set lifecycle = 'active', verified_at = now(), verified_by = auth.uid(), expected_return_at = v_exp, version = version + 1 where id = u.id;
+      perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'external', u.custody_kind, u.location_id, null, null, null, null, u.employee_id, null, u.project_id,
+                     null, null, null, u.condition, e->>'note');
+      if u.custody_kind = 'employee' then perform inv_mirror_legacy(u.id); end if;
+      v_units := v_units + 1;
+    else
+      select * into i from inv_items where id = nullif(e->>'item_id', '')::uuid;
+      if i.id is null then raise exception 'Unknown item' using errcode = '22023'; end if;
+      if i.company_id <> p_company_id then raise exception 'That item belongs to another company' using errcode = '23514'; end if;
+      if i.tracking <> 'quantity' then raise exception '% is not held by quantity with people. Register the individual units instead', i.name using errcode = '23514'; end if;
+      if i.status <> 'active' then raise exception '% is still a draft catalogue item. Activate it first', i.name using errcode = '23514'; end if;
+      v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+      v_cond := inv_valid_condition(coalesce(e->>'condition', 'good'), true);
+      v_exp := nullif(e->>'expected_return_at', '')::timestamptz;
+      if (nullif(e->>'employee_id', '') is null) = (nullif(e->>'project_id', '') is null) then
+        raise exception 'Name either the employee or the project that holds % ', i.name using errcode = '22023';
+      end if;
+      if nullif(e->>'employee_id', '') is not null then
+        emp := inv_get_employee((e->>'employee_id')::uuid, false);
+        perform inv_check_sharing(i.company_id, emp.company_id);
+        v_bal := inv_bal_ensure(p_company_id, i.id, 'employee', v_cond, p_employee => emp.id, p_expected => v_exp);
+        perform inv_bal_change(v_bal, v_qty, v_exp);
+        perform inv_ml(v_mid, p_company_id, i.id, null, v_qty, 'external', 'employee', nullif(e->>'location_id', '')::uuid, null, null, null, null, emp.id, null, null, null, v_bal, null, v_cond, e->>'note');
+      else
+        pr := inv_get_project((e->>'project_id')::uuid, true);
+        perform inv_check_sharing(i.company_id, pr.company_id);
+        v_bal := inv_bal_ensure(p_company_id, i.id, 'project', v_cond, p_project => pr.id, p_expected => v_exp);
+        perform inv_bal_change(v_bal, v_qty, v_exp);
+        perform inv_ml(v_mid, p_company_id, i.id, null, v_qty, 'external', 'project', nullif(e->>'location_id', '')::uuid, null, null, null, null, null, null, pr.id, null, v_bal, null, v_cond, e->>'note');
+      end if;
+      v_lines := v_lines + 1;
+    end if;
+  end loop;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('units', v_units, 'quantity_lines', v_lines));
+end;
+$$;
+
+-- =============================================================================
+-- Movements. Every one: signed in -> company enabled -> may work at the location -> idempotency + header -> item locks (in order) ->
+-- lines -> result stored against the key. All in one transaction, so stock and ledger can never disagree.
+-- =============================================================================
+
+-- Receipt of purchased stock (kind 'receipt') or of rented stock (kind 'rental_receipt', when p_rental is given).
+--   p_lines: [{"item_id","qty","serials":["..."],"bin_id","condition","unit_cost","currency","purchase_date"}]
+--   p_rental: {"supplier_name","external_reference","return_deadline","project_id","note"}
+-- Rented stock becomes rental-owned units or balances and never adds to owned quantities. Costs only from someone who may see costs.
+create or replace function inv_receive_stock(p_company_id uuid, p_location_id uuid, p_key text, p_lines jsonb, p_rental jsonb default null, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l inv_locations; h jsonb; v_mid uuid; e jsonb; i inv_items; v_rental inv_rentals; v_is_rental boolean := p_rental is not null;
+  v_has_cost boolean := false; v_n integer; v_k integer; v_qty numeric; v_cond text; v_bin uuid; v_serials jsonb; v_serial text;
+  v_unit inv_units; v_bal uuid; v_after numeric; v_out jsonb := '[]'::jsonb; v_existing text; v_proj uuid; v_deadline timestamptz;
+  v_supplier text; v_ref text;
+begin
+  perform inv_ctx(p_company_id);
+  l := inv_loc(p_company_id, p_location_id);
+  perform inv_lines_array(p_lines);
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    if inv_cost_fields_present(e) then
+      v_has_cost := true;
+      if (nullif(e->>'unit_cost', '') is null) <> (nullif(e->>'currency', '') is null) then raise exception 'A cost needs both an amount and a currency' using errcode = '22023'; end if;
+    end if;
+  end loop;
+  if v_has_cost then perform inv_require_cap(p_company_id, 'view_costs', 'Only people who may see costs can enter them'); end if;
+  if v_is_rental then
+    if jsonb_typeof(p_rental) <> 'object' then raise exception 'The rental details must be an object' using errcode = '22023'; end if;
+    v_supplier := inv_nonblank(p_rental->>'supplier_name', 'Name the rental supplier');
+    v_ref := inv_nonblank(p_rental->>'external_reference', 'Give the supplier''s reference for this rental');
+    v_deadline := nullif(p_rental->>'return_deadline', '')::timestamptz;
+    v_proj := nullif(p_rental->>'project_id', '')::uuid;
+    if v_proj is not null and not exists (select 1 from proj_projects where id = v_proj) then raise exception 'Unknown project' using errcode = '22023'; end if;
+  end if;
+  h := inv_begin_movement(p_company_id, case when v_is_rental then 'rental_receipt' else 'receipt' end, p_key,
+         jsonb_build_object('location', p_location_id, 'lines', p_lines, 'rental', p_rental, 'note', p_note),
+         jsonb_build_object('to_location_id', l.id, 'note', p_note));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines(p_lines);
+
+  if v_is_rental then
+    select * into v_rental from inv_rentals where company_id = p_company_id and lower(btrim(external_reference)) = lower(v_ref) for update;
+    if v_rental.id is not null then
+      if v_rental.status <> 'open' or lower(btrim(v_rental.supplier_name)) <> lower(v_supplier) then
+        raise exception 'The reference % is already used by another or an already returned rental', v_ref using errcode = '23505';
+      end if;
+    else
+      if v_deadline is null or v_deadline <= now() then raise exception 'Give a return deadline in the future for the rental' using errcode = '22023'; end if;
+      insert into inv_rentals (company_id, supplier_name, external_reference, return_deadline, project_id, note, created_by)
+      values (p_company_id, v_supplier, v_ref, v_deadline, v_proj, nullif(btrim(p_rental->>'note'), ''), auth.uid()) returning * into v_rental;
+    end if;
+  end if;
+
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+    if i.company_id <> p_company_id then raise exception '% belongs to another company and cannot be received here', i.name using errcode = '23514'; end if;
+    if i.status = 'draft' then raise exception '% is still a draft catalogue item. Activate it before receiving stock', i.name using errcode = '23514'; end if;
+    if i.status = 'retired' then raise exception '% is retired and cannot be received', i.name using errcode = '23514'; end if;
+    v_bin := nullif(e->>'bin_id', '')::uuid;
+    perform inv_check_bin(v_bin, l.id);
+    if i.tracking in ('individual', 'kit') then
+      v_serials := e->'serials';
+      if v_serials is not null and jsonb_typeof(v_serials) <> 'array' then raise exception 'Serial numbers are a list' using errcode = '22023'; end if;
+      v_qty := coalesce(nullif(e->>'qty', '')::numeric, jsonb_array_length(v_serials)::numeric, 1);
+      if v_qty < 1 or v_qty <> trunc(v_qty) then raise exception 'Individually tracked equipment is received in whole units' using errcode = '22023'; end if;
+      if v_qty > 200 then raise exception 'Receive at most 200 units of one item at a time' using errcode = '22023'; end if;
+      v_n := v_qty::integer;
+      if v_serials is not null and jsonb_array_length(v_serials) <> v_n then raise exception 'Give a serial number for every unit, or none' using errcode = '22023'; end if;
+      v_cond := inv_valid_condition(coalesce(e->>'condition', 'good'));
+      for v_k in 1..v_n loop
+        v_serial := case when v_serials is null then null else nullif(btrim(v_serials->>(v_k - 1)), '') end;
+        if v_serial is not null then
+          select code into v_existing from inv_units where item_id = i.id and lower(btrim(serial_number)) = lower(v_serial);
+          if v_existing is not null then raise exception 'Serial number % is already registered as %', v_serial, v_existing using errcode = '23505'; end if;
+        end if;
+        insert into inv_units (company_id, item_id, code, serial_number, ownership, rental_id, lifecycle, condition, custody_kind, location_id, bin_id,
+                               verified_at, verified_by, created_by)
+        values (p_company_id, i.id, inv_next_code(p_company_id, 'unit'), v_serial, case when v_is_rental then 'rental' else 'owned' end, v_rental.id,
+                'active', v_cond, 'warehouse', l.id, v_bin, now(), auth.uid(), auth.uid())
+        returning * into v_unit;
+        perform inv_ml(v_mid, p_company_id, i.id, v_unit.id, 1, 'external', 'warehouse', p_to_loc => l.id, p_to_bin => v_bin, p_cond_to => v_cond);
+        if inv_cost_fields_present(e) then
+          insert into inv_costs (company_id, item_id, unit_id, movement_id, purchase_date, unit_cost, currency, entered_by)
+          values (p_company_id, i.id, v_unit.id, v_mid, nullif(e->>'purchase_date', '')::date, nullif(e->>'unit_cost', '')::numeric, nullif(e->>'currency', ''), auth.uid());
+        end if;
+        v_out := v_out || jsonb_build_object('item_id', i.id, 'unit_id', v_unit.id, 'code', v_unit.code, 'condition', v_cond);
+      end loop;
+    else
+      v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+      v_cond := inv_valid_condition(coalesce(e->>'condition', 'good'), true);
+      v_bal := inv_bal_ensure(p_company_id, i.id, 'warehouse', v_cond, l.id, v_bin, p_rental => v_rental.id);
+      v_after := inv_bal_change(v_bal, v_qty);
+      perform inv_ml(v_mid, p_company_id, i.id, null, v_qty, 'external', 'warehouse', p_to_loc => l.id, p_to_bin => v_bin, p_to_bal => v_bal, p_cond_to => v_cond);
+      if inv_cost_fields_present(e) then
+        insert into inv_costs (company_id, item_id, movement_id, purchase_date, unit_cost, currency, entered_by)
+        values (p_company_id, i.id, v_mid, nullif(e->>'purchase_date', '')::date, nullif(e->>'unit_cost', '')::numeric, nullif(e->>'currency', ''), auth.uid());
+      end if;
+      v_out := v_out || jsonb_build_object('item_id', i.id, 'balance_id', v_bal, 'qty', v_qty, 'qty_after', v_after, 'condition', v_cond);
+    end if;
+  end loop;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('location_id', l.id, 'rental_id', v_rental.id, 'lines', v_out));
+end;
+$$;
+
+-- Issue equipment or quantities to an employee. Lines: {"unit_id"} or {"item_id","qty","bin_id","rental_id"}.
+-- Consumables are not issued: they are consumed (inv_consume).
+-- True when this caller already used this key: a repeated call then gets the original result back, so the time-dependent checks that
+-- ran the first time (a return date that was still in the future, a request that was still open) must not run again.
+create or replace function inv_replaying(p_company_id uuid, p_key text)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (select 1 from inv_idempotency where company_id = p_company_id and idem_key = p_key and performed_by = auth.uid());
+$$;
+revoke all on function inv_replaying(uuid, text) from public, anon, authenticated;
+
+create or replace function inv_issue_to_employee(p_company_id uuid, p_location_id uuid, p_employee_id uuid, p_key text, p_lines jsonb,
+                                                 p_expected_return_at timestamptz default null, p_note text default null, p_request_id uuid default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l inv_locations; emp employees; h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; t record; q inv_requests;
+  v_seen uuid[] := '{}'; v_why text; v_res text; v_qty numeric; v_rental uuid; v_free numeric; v_dest uuid; v_out jsonb := '[]'::jsonb;
+  v_asked numeric; v_issued numeric;
+begin
+  perform inv_ctx(p_company_id);
+  l := inv_loc(p_company_id, p_location_id);
+  perform inv_lines_array(p_lines);
+  emp := inv_get_employee(p_employee_id, not inv_replaying(p_company_id, p_key));
+  if p_request_id is not null then
+    select * into q from inv_requests where id = p_request_id;
+    if q.id is null or q.company_id <> p_company_id then raise exception 'Unknown request' using errcode = '22023'; end if;
+    if q.kind <> 'employee' or q.employee_id is distinct from emp.id then raise exception 'That request is not for this employee' using errcode = '23514'; end if;
+    if q.status not in ('submitted', 'in_progress') and not inv_replaying(p_company_id, p_key) then raise exception 'Request % is % and cannot be issued against', q.code, q.status using errcode = '23514'; end if;
+  end if;
+  if p_expected_return_at is not null and p_expected_return_at <= now() and not inv_replaying(p_company_id, p_key) then raise exception 'The expected return date must be in the future' using errcode = '22023'; end if;
+  h := inv_begin_movement(p_company_id, 'issue_employee', p_key,
+         jsonb_build_object('location', p_location_id, 'employee', p_employee_id, 'lines', p_lines, 'expected', p_expected_return_at, 'note', p_note, 'request', p_request_id),
+         jsonb_build_object('employee_id', emp.id, 'recipient_employee_id', emp.id, 'from_location_id', l.id, 'expected_return_at', p_expected_return_at, 'note', p_note,
+                            'request_id', p_request_id));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines(p_lines);
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    if nullif(e->>'unit_id', '') is not null then
+      u := inv_unit_lock((e->>'unit_id')::uuid);
+      if u.id = any (v_seen) then raise exception '% is listed twice', u.code using errcode = '22023'; end if;
+      v_seen := v_seen || u.id;
+      i := inv_get_item(u.item_id);
+      perform inv_check_sharing(i.company_id, l.company_id);
+      perform inv_check_sharing(i.company_id, emp.company_id);
+      if q.id is not null then
+        select coalesce(sum(rl.qty), 0) into v_asked from inv_request_lines rl where rl.request_id = q.id and rl.status <> 'cancelled' and inv_effective_item(rl) = u.item_id;
+        select coalesce(sum(ml.qty), 0) into v_issued from inv_movement_lines ml join inv_movements m on m.id = ml.movement_id
+         where m.request_id = q.id and m.kind = 'issue_employee' and ml.item_id = u.item_id;
+        if v_asked = 0 then raise exception '% is not on request %', i.name, q.code using errcode = '23514'; end if;
+        if v_issued + 1 > v_asked then raise exception 'Request % asks for % of % and they have all been issued', q.code, trim_scale(v_asked), i.name using errcode = '23514'; end if;
+      end if;
+      v_why := inv_unit_block_reason(u, l.id);
+      if v_why is not null then raise exception '%', v_why using errcode = '23514'; end if;
+      v_res := inv_unit_reserved_by(u.id, now(), p_expected_return_at);
+      if v_res is not null then raise exception '% is reserved for % and cannot be issued to a person for that period', u.code, v_res using errcode = '23514'; end if;
+      perform inv_unit_move(u.id, 'employee', p_employee => emp.id, p_expected => p_expected_return_at);
+      perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'warehouse', 'employee', p_from_loc => l.id, p_from_bin => u.bin_id, p_to_emp => emp.id,
+                     p_cond_from => u.condition, p_cond_to => u.condition);
+      perform inv_mirror_legacy(u.id);
+      v_out := v_out || jsonb_build_object('item_id', u.item_id, 'unit_id', u.id, 'code', u.code);
+    else
+      i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+      if i.tracking = 'consumable' then raise exception '% is a consumable. Record its use with Consume, not Issue', i.name using errcode = '23514'; end if;
+      if i.tracking <> 'quantity' then raise exception '% is tracked unit by unit. Name the unit to issue', i.name using errcode = '23514'; end if;
+      perform inv_check_sharing(i.company_id, l.company_id);
+      perform inv_check_sharing(i.company_id, emp.company_id);
+      v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+      v_rental := nullif(e->>'rental_id', '')::uuid;
+      if q.id is not null then
+        select coalesce(sum(rl.qty), 0) into v_asked from inv_request_lines rl where rl.request_id = q.id and rl.status <> 'cancelled' and inv_effective_item(rl) = i.id;
+        select coalesce(sum(ml.qty), 0) into v_issued from inv_movement_lines ml join inv_movements m on m.id = ml.movement_id
+         where m.request_id = q.id and m.kind = 'issue_employee' and ml.item_id = i.id;
+        if v_asked = 0 then raise exception '% is not on request %', i.name, q.code using errcode = '23514'; end if;
+        if v_issued + v_qty > v_asked then raise exception 'Request % asks for % of %; % have already been issued', q.code, trim_scale(v_asked), i.name, trim_scale(v_issued) using errcode = '23514'; end if;
+      end if;
+      v_free := inv_qty_free(i.id, l.id, now(), p_expected_return_at, null, v_rental is not null);
+      if v_qty > v_free then
+        raise exception 'Only % of % can be issued now: the rest is not on the shelf or is reserved for upcoming requests', trim_scale(v_free), i.name using errcode = '23514';
+      end if;
+      for t in select * from inv_take_qty(i.id, v_qty, 'warehouse', l.id, nullif(e->>'bin_id', '')::uuid, p_condition => 'good', p_rental => v_rental,
+                                           p_rentals => case when v_rental is null then 'owned' else 'only' end, p_where => 'on the shelf here') loop
+        v_dest := inv_bal_ensure(i.company_id, i.id, 'employee', 'good', p_employee => emp.id, p_rental => t.rental_id, p_expected => p_expected_return_at);
+        perform inv_bal_change(t.balance_id, -t.taken);
+        perform inv_bal_change(v_dest, t.taken, p_expected_return_at);
+        perform inv_ml(v_mid, p_company_id, i.id, null, t.taken, 'warehouse', 'employee', p_from_loc => l.id, p_from_bin => t.bin_id, p_to_emp => emp.id,
+                       p_from_bal => t.balance_id, p_to_bal => v_dest, p_cond_from => 'good', p_cond_to => 'good');
+      end loop;
+      v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty);
+    end if;
+  end loop;
+  if q.id is not null then perform inv_refresh_request_status(q.id); end if;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('employee_id', emp.id, 'request_id', p_request_id,
+           'request_status', (select status from inv_requests where id = q.id), 'lines', v_out));
+end;
+$$;
+
+-- Return from an employee. Each line says the condition; good (or fair) completes the check in this call and the item is available at the chosen
+-- bin; needs_inspection / damaged / unserviceable are held at the warehouse and never released automatically. Items not listed stay with the employee.
+--   Lines: {"unit_id","condition","bin_id","note"} or {"item_id","qty","condition","bin_id","rental_id","note"}
+create or replace function inv_return_from_employee(p_company_id uuid, p_location_id uuid, p_employee_id uuid, p_key text, p_lines jsonb, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l inv_locations; emp employees; h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; t record;
+  v_seen uuid[] := '{}'; v_cond text; v_bin uuid; v_qty numeric; v_rental uuid; v_dest uuid; v_out jsonb := '[]'::jsonb; v_have numeric;
+begin
+  perform inv_ctx(p_company_id);
+  l := inv_loc(p_company_id, p_location_id);
+  perform inv_lines_array(p_lines);
+  emp := inv_get_employee(p_employee_id, false);
+  h := inv_begin_movement(p_company_id, 'return_employee', p_key,
+         jsonb_build_object('location', p_location_id, 'employee', p_employee_id, 'lines', p_lines, 'note', p_note),
+         jsonb_build_object('employee_id', emp.id, 'recipient_employee_id', emp.id, 'to_location_id', l.id, 'note', p_note));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines(p_lines);
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    v_bin := nullif(e->>'bin_id', '')::uuid;
+    perform inv_check_bin(v_bin, l.id);
+    if nullif(e->>'unit_id', '') is not null then
+      u := inv_unit_lock((e->>'unit_id')::uuid);
+      if u.id = any (v_seen) then raise exception '% is listed twice', u.code using errcode = '22023'; end if;
+      v_seen := v_seen || u.id;
+      i := inv_get_item(u.item_id);
+      perform inv_check_sharing(i.company_id, l.company_id);
+      if u.custody_kind <> 'employee' or u.employee_id is distinct from emp.id then
+        raise exception '% is not recorded with this employee (it is %)', u.code, inv_custody_words(u.custody_kind) using errcode = '23514';
+      end if;
+      v_cond := inv_valid_condition(e->>'condition');
+      perform inv_unit_move(u.id, 'warehouse', l.id, v_bin, p_condition => v_cond);
+      perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'employee', 'warehouse', p_to_loc => l.id, p_to_bin => v_bin, p_from_emp => emp.id,
+                     p_cond_from => u.condition, p_cond_to => v_cond, p_note => e->>'note');
+      perform inv_mirror_legacy(u.id);
+      v_out := v_out || jsonb_build_object('item_id', u.item_id, 'unit_id', u.id, 'code', u.code, 'condition', v_cond, 'available', v_cond in ('good', 'fair'));
+    else
+      i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+      perform inv_check_sharing(i.company_id, l.company_id);
+      v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+      v_cond := inv_valid_condition(e->>'condition', true);
+      v_rental := nullif(e->>'rental_id', '')::uuid;
+      select coalesce(sum(b.qty), 0) into v_have from inv_balances b where b.item_id = i.id and b.holder_kind = 'employee' and b.employee_id = emp.id;
+      if v_have = 0 then raise exception 'This employee does not hold any %', i.name using errcode = '23514'; end if;
+      for t in select * from inv_take_qty(i.id, v_qty, 'employee', p_employee => emp.id, p_rental => v_rental,
+                                           p_rentals => case when v_rental is null then 'any' else 'only' end, p_where => 'with this employee') loop
+        v_dest := inv_bal_ensure(i.company_id, i.id, 'warehouse', v_cond, l.id, v_bin, p_rental => t.rental_id);
+        perform inv_bal_change(t.balance_id, -t.taken);
+        perform inv_bal_change(v_dest, t.taken);
+        perform inv_ml(v_mid, p_company_id, i.id, null, t.taken, 'employee', 'warehouse', p_to_loc => l.id, p_to_bin => v_bin, p_from_emp => emp.id,
+                       p_from_bal => t.balance_id, p_to_bal => v_dest, p_cond_from => t.condition, p_cond_to => v_cond, p_note => e->>'note');
+      end loop;
+      v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty, 'condition', v_cond, 'available', v_cond = 'good');
+    end if;
+  end loop;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('employee_id', emp.id, 'lines', v_out));
+end;
+$$;
+
+-- Dispatch to a project. With a request, each line must match an active reservation of that request (the reservation's dispatched
+-- quantity goes up and it stays active). Without one, the unit or quantity must be unreserved and free from now until the expected return,
+-- and another reservation in that period stops the dispatch (nothing is ever displaced).
+--   Lines: {"unit_id"} or {"item_id","qty","bin_id","rental_id"}
+create or replace function inv_dispatch_to_project(p_company_id uuid, p_location_id uuid, p_project_id uuid, p_key text, p_lines jsonb,
+                                                   p_request_id uuid default null, p_expected_return_at timestamptz default null, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l inv_locations; pr proj_projects; q inv_requests; h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; t record;
+  v_exp timestamptz; v_seen uuid[] := '{}'; v_why text; v_res text; v_qty numeric; v_rental uuid; v_free numeric; v_dest uuid; v_covered numeric;
+  v_out jsonb := '[]'::jsonb;
+begin
+  perform inv_ctx(p_company_id);
+  l := inv_loc(p_company_id, p_location_id);
+  perform inv_lines_array(p_lines);
+  if p_request_id is not null then
+    select * into q from inv_requests where id = p_request_id;
+    if q.id is null or q.company_id <> p_company_id then raise exception 'Unknown request' using errcode = '22023'; end if;
+    if q.kind <> 'project' or q.project_id is distinct from p_project_id then raise exception 'That request is not for this project' using errcode = '23514'; end if;
+    if q.status not in ('submitted', 'in_progress') and not inv_replaying(p_company_id, p_key) then raise exception 'Request % is % and cannot be dispatched against', q.code, q.status using errcode = '23514'; end if;
+  end if;
+  v_exp := coalesce(p_expected_return_at, q.expected_return_at, q.needed_until);
+  if v_exp is null then raise exception 'Say when the equipment is expected back' using errcode = '22023'; end if;
+  if v_exp <= now() and not inv_replaying(p_company_id, p_key) then raise exception 'The expected return date must be in the future' using errcode = '22023'; end if;
+  h := inv_begin_movement(p_company_id, 'dispatch_project', p_key,
+         jsonb_build_object('location', p_location_id, 'project', p_project_id, 'lines', p_lines, 'request', p_request_id, 'expected', p_expected_return_at, 'note', p_note),
+         jsonb_build_object('project_id', p_project_id, 'request_id', p_request_id, 'from_location_id', l.id, 'expected_return_at', v_exp, 'note', p_note));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines(p_lines);
+  pr := inv_get_project(p_project_id, true);
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    if nullif(e->>'unit_id', '') is not null then
+      u := inv_unit_lock((e->>'unit_id')::uuid);
+      if u.id = any (v_seen) then raise exception '% is listed twice', u.code using errcode = '22023'; end if;
+      v_seen := v_seen || u.id;
+      i := inv_get_item(u.item_id);
+      perform inv_check_sharing(i.company_id, l.company_id);
+      perform inv_check_sharing(i.company_id, pr.company_id);
+      v_why := inv_unit_block_reason(u, l.id);
+      if v_why is not null then raise exception '%', v_why using errcode = '23514'; end if;
+      if q.id is not null then
+        if inv_reservation_take(q.id, u.item_id, u.id, 1, null) < 1 then
+          raise exception '% is not reserved for request %. Reserve it for the request first', u.code, q.code using errcode = '23514';
+        end if;
+      else
+        v_res := inv_unit_reserved_by(u.id, now(), v_exp);
+        if v_res is not null then
+          raise exception '% is reserved for % in that period. Dispatch it against that request, or choose another unit', u.code, v_res using errcode = '23514';
+        end if;
+      end if;
+      perform inv_unit_move(u.id, 'project', p_project => pr.id, p_expected => v_exp);
+      perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'warehouse', 'project', p_from_loc => l.id, p_from_bin => u.bin_id, p_to_proj => pr.id,
+                     p_cond_from => u.condition, p_cond_to => u.condition);
+      v_out := v_out || jsonb_build_object('item_id', u.item_id, 'unit_id', u.id, 'code', u.code);
+    else
+      i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+      if i.tracking = 'consumable' then raise exception '% is a consumable. Record its use with Consume, not Dispatch', i.name using errcode = '23514'; end if;
+      if i.tracking <> 'quantity' then raise exception '% is tracked unit by unit. Name the units to dispatch', i.name using errcode = '23514'; end if;
+      perform inv_check_sharing(i.company_id, l.company_id);
+      perform inv_check_sharing(i.company_id, pr.company_id);
+      v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+      v_rental := nullif(e->>'rental_id', '')::uuid;
+      if q.id is not null then
+        v_covered := inv_reservation_take(q.id, i.id, null, v_qty, l.id);
+        if v_covered < v_qty then
+          raise exception 'Only % of % is reserved for request % at this location. Reserve the rest first', trim_scale(v_covered), i.name, q.code using errcode = '23514';
+        end if;
+      else
+        v_free := inv_qty_free(i.id, l.id, now(), v_exp, null, v_rental is not null);
+        if v_qty > v_free then
+          raise exception 'Only % of % is free until %: the rest is not on the shelf or is reserved by another request', trim_scale(v_free), i.name, to_char(v_exp at time zone 'UTC', 'YYYY-MM-DD HH24:MI "UTC"') using errcode = '23514';
+        end if;
+      end if;
+      for t in select * from inv_take_qty(i.id, v_qty, 'warehouse', l.id, nullif(e->>'bin_id', '')::uuid, p_condition => 'good', p_rental => v_rental,
+                                           p_rentals => case when v_rental is null then 'owned' else 'only' end, p_where => 'on the shelf here') loop
+        v_dest := inv_bal_ensure(i.company_id, i.id, 'project', 'good', p_project => pr.id, p_rental => t.rental_id, p_expected => v_exp);
+        perform inv_bal_change(t.balance_id, -t.taken);
+        perform inv_bal_change(v_dest, t.taken, v_exp);
+        perform inv_ml(v_mid, p_company_id, i.id, null, t.taken, 'warehouse', 'project', p_from_loc => l.id, p_from_bin => t.bin_id, p_to_proj => pr.id,
+                       p_from_bal => t.balance_id, p_to_bal => v_dest, p_cond_from => 'good', p_cond_to => 'good');
+      end loop;
+      v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty);
+    end if;
+  end loop;
+  if q.id is not null then perform inv_refresh_request_status(q.id); end if;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('project_id', pr.id, 'request_id', p_request_id, 'expected_return_at', v_exp,
+           'request_status', (select status from inv_requests where id = q.id), 'lines', v_out));
+end;
+$$;
+
+-- Return from a project; partial returns are normal: whatever is not listed stays on the project. Equipment that was never dispatched to
+-- the project is refused. Each line gives a condition (good / fair is available at once; the rest is held).
+--   Lines: {"unit_id","condition","bin_id","note"} or {"item_id","qty","condition","bin_id","rental_id","note"}
+create or replace function inv_return_from_project(p_company_id uuid, p_location_id uuid, p_project_id uuid, p_key text, p_lines jsonb, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l inv_locations; pr proj_projects; h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; t record;
+  v_seen uuid[] := '{}'; v_cond text; v_bin uuid; v_qty numeric; v_rental uuid; v_dest uuid; v_out jsonb := '[]'::jsonb; v_have numeric;
+begin
+  perform inv_ctx(p_company_id);
+  l := inv_loc(p_company_id, p_location_id);
+  perform inv_lines_array(p_lines);
+  pr := inv_get_project(p_project_id, false);
+  h := inv_begin_movement(p_company_id, 'return_project', p_key,
+         jsonb_build_object('location', p_location_id, 'project', p_project_id, 'lines', p_lines, 'note', p_note),
+         jsonb_build_object('project_id', pr.id, 'to_location_id', l.id, 'note', p_note));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines(p_lines);
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    v_bin := nullif(e->>'bin_id', '')::uuid;
+    perform inv_check_bin(v_bin, l.id);
+    if nullif(e->>'unit_id', '') is not null then
+      u := inv_unit_lock((e->>'unit_id')::uuid);
+      if u.id = any (v_seen) then raise exception '% is listed twice', u.code using errcode = '22023'; end if;
+      v_seen := v_seen || u.id;
+      i := inv_get_item(u.item_id);
+      perform inv_check_sharing(i.company_id, l.company_id);
+      if u.custody_kind <> 'project' or u.project_id is distinct from pr.id then
+        raise exception '% was not dispatched to project % (it is %), so it cannot be returned from there', u.code, pr.reference, inv_custody_words(u.custody_kind) using errcode = '23514';
+      end if;
+      v_cond := inv_valid_condition(e->>'condition');
+      perform inv_unit_move(u.id, 'warehouse', l.id, v_bin, p_condition => v_cond);
+      perform inv_reservation_return(pr.id, u.item_id, u.id, 1);
+      perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'project', 'warehouse', p_to_loc => l.id, p_to_bin => v_bin, p_from_proj => pr.id,
+                     p_cond_from => u.condition, p_cond_to => v_cond, p_note => e->>'note');
+      v_out := v_out || jsonb_build_object('item_id', u.item_id, 'unit_id', u.id, 'code', u.code, 'condition', v_cond, 'available', v_cond in ('good', 'fair'));
+    else
+      i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+      perform inv_check_sharing(i.company_id, l.company_id);
+      v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+      v_cond := inv_valid_condition(e->>'condition', true);
+      v_rental := nullif(e->>'rental_id', '')::uuid;
+      select coalesce(sum(b.qty), 0) into v_have from inv_balances b where b.item_id = i.id and b.holder_kind = 'project' and b.project_id = pr.id;
+      if v_have = 0 then raise exception '% was never dispatched to project %, so it cannot be returned from there', i.name, pr.reference using errcode = '23514'; end if;
+      for t in select * from inv_take_qty(i.id, v_qty, 'project', p_project => pr.id, p_rental => v_rental,
+                                           p_rentals => case when v_rental is null then 'any' else 'only' end, p_where => 'on project ' || pr.reference) loop
+        v_dest := inv_bal_ensure(i.company_id, i.id, 'warehouse', v_cond, l.id, v_bin, p_rental => t.rental_id);
+        perform inv_bal_change(t.balance_id, -t.taken);
+        perform inv_bal_change(v_dest, t.taken);
+        perform inv_ml(v_mid, p_company_id, i.id, null, t.taken, 'project', 'warehouse', p_to_loc => l.id, p_to_bin => v_bin, p_from_proj => pr.id,
+                       p_from_bal => t.balance_id, p_to_bal => v_dest, p_cond_from => t.condition, p_cond_to => v_cond, p_note => e->>'note');
+      end loop;
+      perform inv_reservation_return(pr.id, i.id, null, v_qty);
+      v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty, 'condition', v_cond, 'available', v_cond = 'good');
+    end if;
+  end loop;
+  perform inv_refresh_project_requests(pr.id);
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('project_id', pr.id, 'lines', v_out));
+end;
+$$;
+
+-- Direct project-to-project transfer in ONE transaction: the first project's custody is closed and the second opened, after the
+-- destination has been checked again under the item locks. Who: the manager of the project the equipment is on, or the warehouse
+-- that operates it. The destination project must be ongoing and has a request (p_request_id). The unit / quantity must be reserved for
+-- that request, or free for the window and is then reserved for it; a reservation held by a third project is never displaced.
+--   Lines: {"unit_id"} or {"item_id","qty","rental_id","location_id"}  (location_id only if the warehouse of the stock cannot be worked out)
+create or replace function inv_transfer_between_projects(p_company_id uuid, p_from_project_id uuid, p_to_project_id uuid, p_key text, p_lines jsonb,
+                                                         p_request_id uuid, p_expected_return_at timestamptz default null, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  fp proj_projects; tp proj_projects; q inv_requests; h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; t record;
+  v_can_manage boolean; v_exp timestamptz; v_seen uuid[] := '{}'; v_res text; v_line uuid; v_qty numeric; v_rental uuid; v_dest uuid;
+  v_taken numeric; v_covered numeric; v_origin uuid; v_r numeric; v_shelf numeric; v_out jsonb := '[]'::jsonb; v_reserved boolean; v_new_res integer := 0;
+begin
+  perform inv_ctx(p_company_id);
+  perform inv_lines_array(p_lines);
+  if p_from_project_id is null or p_to_project_id is null or p_from_project_id = p_to_project_id then raise exception 'Choose two different projects' using errcode = '22023'; end if;
+  select * into fp from proj_projects where id = p_from_project_id;
+  if fp.id is null or fp.company_id <> p_company_id then raise exception 'Unknown project' using errcode = '22023'; end if;
+  v_can_manage := proj_can_manage(fp.id);
+  if not (v_can_manage or inv_has_capability(p_company_id, 'warehouse')) then
+    raise exception 'Only the manager of the project the equipment is on, or the warehouse, can move it to another project' using errcode = '42501';
+  end if;
+  select * into q from inv_requests where id = p_request_id;
+  if q.id is null or q.company_id <> p_company_id then raise exception 'A transfer needs the destination project''s equipment request' using errcode = '22023'; end if;
+  if q.kind <> 'project' or q.project_id is distinct from p_to_project_id then raise exception 'That request is not for the destination project' using errcode = '23514'; end if;
+  if q.status not in ('submitted', 'in_progress') then raise exception 'Request % is % and cannot receive equipment', q.code, q.status using errcode = '23514'; end if;
+  v_exp := coalesce(p_expected_return_at, q.expected_return_at, q.needed_until);
+  if v_exp is null then raise exception 'Say when the equipment is expected back' using errcode = '22023'; end if;
+  if v_exp <= now() then raise exception 'The expected return date must be in the future' using errcode = '22023'; end if;
+  h := inv_begin_movement(p_company_id, 'transfer_project', p_key,
+         jsonb_build_object('from', p_from_project_id, 'to', p_to_project_id, 'lines', p_lines, 'request', p_request_id, 'expected', p_expected_return_at, 'note', p_note),
+         jsonb_build_object('project_id', p_from_project_id, 'to_project_id', p_to_project_id, 'request_id', p_request_id, 'expected_return_at', v_exp, 'note', p_note));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines(p_lines);
+  -- The destination is checked AFTER the locks are held, so a project that completed meanwhile is caught.
+  tp := inv_get_project(p_to_project_id, true);
+  select * into q from inv_requests where id = p_request_id for update;
+  if q.status not in ('submitted', 'in_progress') then raise exception 'Request % is % and cannot receive equipment', q.code, q.status using errcode = '23514'; end if;
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    if nullif(e->>'unit_id', '') is not null then
+      u := inv_unit_lock((e->>'unit_id')::uuid);
+      if u.id = any (v_seen) then raise exception '% is listed twice', u.code using errcode = '22023'; end if;
+      v_seen := v_seen || u.id;
+      i := inv_get_item(u.item_id);
+      if u.lifecycle <> 'active' then raise exception '% is not active (it is %)', u.code, u.lifecycle using errcode = '23514'; end if;
+      if u.custody_kind <> 'project' or u.project_id is distinct from fp.id then
+        raise exception '% is not on project % (it is %)', u.code, fp.reference, inv_custody_words(u.custody_kind) using errcode = '23514';
+      end if;
+      if not (v_can_manage or (u.location_id is not null and inv_can_operate(u.location_id))) then
+        raise exception 'You are not allowed to move % to another project. You need to manage project % or work at the warehouse it came from', u.code, fp.reference using errcode = '42501';
+      end if;
+      perform inv_check_sharing(i.company_id, tp.company_id);
+      -- close the first project's custody and reservation
+      perform inv_reservation_return(fp.id, u.item_id, u.id, 1);
+      -- the destination: reserved for the request already, or free for the window and reserved now
+      select exists (select 1 from inv_reservations r join inv_request_lines rl on rl.id = r.request_line_id
+                      where rl.request_id = q.id and r.unit_id = u.id and r.status = 'active' and r.dispatched_qty < r.qty) into v_reserved;
+      if v_reserved then
+        perform inv_reservation_take(q.id, u.item_id, u.id, 1, null);
+      else
+        v_res := inv_unit_reserved_by(u.id, now(), v_exp);
+        if v_res is not null then
+          raise exception '% is reserved for % in that period. A reservation held by another request is never displaced', u.code, v_res using errcode = '23514';
+        end if;
+        select rl.id into v_line from inv_request_lines rl where rl.request_id = q.id and inv_effective_item(rl) = u.item_id and rl.status = 'open'
+           and rl.qty - coalesce((select sum(r.qty) from inv_reservations r where r.request_line_id = rl.id and r.status in ('active', 'completed')), 0) >= 1
+         order by rl.sort_order, rl.created_at limit 1;
+        if v_line is null then raise exception 'Request % has no open line for % with room for another one', q.code, i.name using errcode = '23514'; end if;
+        insert into inv_reservations (company_id, request_line_id, item_id, unit_id, qty, dispatched_qty, reserved_during, made_by)
+        values (q.company_id, v_line, u.item_id, u.id, 1, 1, tstzrange(now(), v_exp), auth.uid());
+        v_new_res := v_new_res + 1;
+      end if;
+      perform inv_unit_move(u.id, 'project', p_project => tp.id, p_expected => v_exp);
+      perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'project', 'project', p_from_proj => fp.id, p_to_proj => tp.id, p_cond_from => u.condition, p_cond_to => u.condition);
+      v_out := v_out || jsonb_build_object('item_id', u.item_id, 'unit_id', u.id, 'code', u.code);
+    else
+      i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+      if i.tracking <> 'quantity' then raise exception '% cannot be moved by quantity', i.name using errcode = '23514'; end if;
+      v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+      v_rental := nullif(e->>'rental_id', '')::uuid;
+      perform inv_check_sharing(i.company_id, tp.company_id);
+      v_taken := 0; v_origin := null;
+      for t in select * from inv_take_qty(i.id, v_qty, 'project', p_project => fp.id, p_rental => v_rental,
+                                           p_rentals => case when v_rental is null then 'any' else 'only' end, p_where => 'on project ' || fp.reference) loop
+        if v_origin is null then
+          select l2.from_location_id into v_origin from inv_movement_lines l2 where l2.to_balance_id = t.balance_id and l2.from_location_id is not null
+           order by l2.id limit 1;
+        end if;
+        v_dest := inv_bal_ensure(i.company_id, i.id, 'project', t.condition, p_project => tp.id, p_rental => t.rental_id, p_expected => v_exp);
+        perform inv_bal_change(t.balance_id, -t.taken);
+        perform inv_bal_change(v_dest, t.taken, v_exp);
+        perform inv_ml(v_mid, p_company_id, i.id, null, t.taken, 'project', 'project', p_from_proj => fp.id, p_to_proj => tp.id,
+                       p_from_bal => t.balance_id, p_to_bal => v_dest, p_cond_from => t.condition, p_cond_to => t.condition);
+        v_taken := v_taken + t.taken;
+      end loop;
+      v_origin := coalesce(v_origin, nullif(e->>'location_id', '')::uuid);
+      if not (v_can_manage or (v_origin is not null and inv_can_operate(v_origin))) then
+        raise exception 'You are not allowed to move % to another project. You need to manage project % or work at the warehouse it came from', i.name, fp.reference using errcode = '42501';
+      end if;
+      perform inv_reservation_return(fp.id, i.id, null, v_taken);
+      v_covered := inv_reservation_take(q.id, i.id, null, v_taken, null);
+      if v_covered < v_taken then
+        if v_origin is null then raise exception 'Say which warehouse the % belongs to (location_id on the line)', i.name using errcode = '22023'; end if;
+        select coalesce(sum(r.qty - r.dispatched_qty), 0) into v_r
+          from inv_reservations r join inv_request_lines rl on rl.id = r.request_line_id join inv_requests rq on rq.id = rl.request_id
+         where r.item_id = i.id and r.unit_id is null and r.location_id = v_origin and r.status = 'active'
+           and r.reserved_during && tstzrange(now(), v_exp) and rq.project_id is distinct from fp.id and rq.id <> q.id;
+        select coalesce(sum(b.qty), 0) into v_shelf from inv_balances b
+         where b.item_id = i.id and b.holder_kind = 'warehouse' and b.location_id = v_origin and b.condition = 'good' and (b.rental_id is not null) = (v_rental is not null);
+        if v_r > v_shelf then
+          raise exception 'Moving % to project % until % would leave a reservation of another project short. Reservations of other projects are never displaced',
+            i.name, tp.reference, to_char(v_exp at time zone 'UTC', 'YYYY-MM-DD') using errcode = '23514';
+        end if;
+        select rl.id into v_line from inv_request_lines rl where rl.request_id = q.id and inv_effective_item(rl) = i.id and rl.status = 'open'
+           and rl.qty - coalesce((select sum(r.qty) from inv_reservations r where r.request_line_id = rl.id and r.status in ('active', 'completed')), 0) >= v_taken - v_covered
+         order by rl.sort_order, rl.created_at limit 1;
+        if v_line is null then raise exception 'Request % has no open line for % with room for % more', q.code, i.name, trim_scale(v_taken - v_covered) using errcode = '23514'; end if;
+        insert into inv_reservations (company_id, request_line_id, item_id, location_id, qty, dispatched_qty, reserved_during, made_by)
+        values (q.company_id, v_line, i.id, v_origin, v_taken - v_covered, v_taken - v_covered, tstzrange(now(), v_exp), auth.uid());
+        v_new_res := v_new_res + 1;
+      end if;
+      v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty);
+    end if;
+  end loop;
+  perform inv_refresh_request_status(q.id);
+  perform inv_refresh_project_requests(fp.id);
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('from_project_id', fp.id, 'to_project_id', tp.id, 'request_id', q.id,
+           'expected_return_at', v_exp, 'new_reservations', v_new_res, 'lines', v_out));
+end;
+$$;
+
+-- Warehouse transfer, part 1: dispatch. Creates the transfer record and puts the stock in transit (not available anywhere until received).
+--   Lines: {"unit_id"} or {"item_id","qty","bin_id","condition","rental_id"}
+create or replace function inv_transfer_dispatch(p_company_id uuid, p_from_location_id uuid, p_to_location_id uuid, p_key text, p_lines jsonb,
+                                                 p_expected_at timestamptz default null, p_carrier text default null, p_reference text default null,
+                                                 p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  lf inv_locations; lt inv_locations; h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; t record; tr inv_transfers;
+  v_seen uuid[] := '{}'; v_why text; v_res text; v_qty numeric; v_rental uuid; v_cond text; v_free numeric; v_dest uuid; v_out jsonb := '[]'::jsonb; v_prev jsonb;
+begin
+  perform inv_ctx(p_company_id);
+  lf := inv_loc(p_company_id, p_from_location_id);
+  select * into lt from inv_locations where id = p_to_location_id and is_active;
+  if lt.id is null then raise exception 'Unknown destination location' using errcode = '22023'; end if;
+  if lt.id = lf.id then raise exception 'The destination must be a different location' using errcode = '22023'; end if;
+  perform inv_lines_array(p_lines);
+  if p_expected_at is not null and p_expected_at <= now() and not inv_replaying(p_company_id, p_key) then raise exception 'The expected arrival must be in the future' using errcode = '22023'; end if;
+  -- The transfer record exists before the movement header that names it (the header is immutable), so the key is checked first.
+  v_prev := inv_idem_begin(p_company_id, p_key, 'transfer_dispatch',
+         jsonb_build_object('from', p_from_location_id, 'to', p_to_location_id, 'lines', p_lines, 'expected', p_expected_at, 'carrier', p_carrier, 'reference', p_reference, 'note', p_note));
+  if v_prev is not null then return v_prev; end if;
+  insert into inv_transfers (company_id, code, from_location_id, to_location_id, carrier, reference, dispatched_by, expected_at, note)
+  values (p_company_id, inv_next_code(p_company_id, 'transfer'), lf.id, lt.id, nullif(btrim(p_carrier), ''), nullif(btrim(p_reference), ''), auth.uid(), p_expected_at, nullif(btrim(p_note), ''))
+  returning * into tr;
+  h := inv_begin_movement(p_company_id, 'transfer_dispatch', p_key, '{}'::jsonb,
+         jsonb_build_object('from_location_id', lf.id, 'to_location_id', lt.id, 'transfer_id', tr.id, 'expected_return_at', p_expected_at, 'note', p_note), true);
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines(p_lines);
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    if nullif(e->>'unit_id', '') is not null then
+      u := inv_unit_lock((e->>'unit_id')::uuid);
+      if u.id = any (v_seen) then raise exception '% is listed twice', u.code using errcode = '22023'; end if;
+      v_seen := v_seen || u.id;
+      i := inv_get_item(u.item_id);
+      perform inv_check_sharing(i.company_id, lf.company_id);
+      perform inv_check_sharing(i.company_id, lt.company_id);
+      v_why := inv_unit_block_reason(u, lf.id, false);
+      if v_why is not null then raise exception '%', v_why using errcode = '23514'; end if;
+      v_res := inv_unit_reserved_by(u.id, now(), null);
+      if v_res is not null then raise exception '% is reserved for %. Release or change that reservation before moving it to another location', u.code, v_res using errcode = '23514'; end if;
+      perform inv_unit_move(u.id, 'transit', p_transfer => tr.id);
+      perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'warehouse', 'transit', p_from_loc => lf.id, p_from_bin => u.bin_id, p_to_loc => lt.id,
+                     p_cond_from => u.condition, p_cond_to => u.condition);
+      v_out := v_out || jsonb_build_object('item_id', u.item_id, 'unit_id', u.id, 'code', u.code);
+    else
+      i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+      if i.tracking not in ('quantity', 'consumable') then raise exception '% is tracked unit by unit. Name the units to move', i.name using errcode = '23514'; end if;
+      perform inv_check_sharing(i.company_id, lf.company_id);
+      perform inv_check_sharing(i.company_id, lt.company_id);
+      v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+      v_cond := inv_valid_condition(coalesce(e->>'condition', 'good'), true);
+      v_rental := nullif(e->>'rental_id', '')::uuid;
+      if v_cond = 'good' then
+        v_free := inv_qty_free(i.id, lf.id, now(), null, null, v_rental is not null);
+        if v_qty > v_free then
+          raise exception 'Only % of % can be moved now: the rest is not on the shelf or is reserved for upcoming requests', trim_scale(v_free), i.name using errcode = '23514';
+        end if;
+      end if;
+      for t in select * from inv_take_qty(i.id, v_qty, 'warehouse', lf.id, nullif(e->>'bin_id', '')::uuid, p_condition => v_cond, p_rental => v_rental,
+                                           p_rentals => case when v_rental is null then 'owned' else 'only' end, p_where => 'on the shelf here') loop
+        v_dest := inv_bal_ensure(i.company_id, i.id, 'transit', v_cond, p_transfer => tr.id, p_rental => t.rental_id);
+        perform inv_bal_change(t.balance_id, -t.taken);
+        perform inv_bal_change(v_dest, t.taken);
+        perform inv_ml(v_mid, p_company_id, i.id, null, t.taken, 'warehouse', 'transit', p_from_loc => lf.id, p_from_bin => t.bin_id, p_to_loc => lt.id,
+                       p_from_bal => t.balance_id, p_to_bal => v_dest, p_cond_from => v_cond, p_cond_to => v_cond);
+      end loop;
+      v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty);
+    end if;
+  end loop;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('transfer_id', tr.id, 'transfer_code', tr.code, 'status', tr.status, 'lines', v_out));
+end;
+$$;
+
+-- Warehouse transfer, part 3: receipt at the destination (who works there). Without lines everything still on the way is received. Receipts may
+-- be partial: what is not listed stays in transit and the transfer stays open. A received unit or quantity is available only from now on, and
+-- only if its condition is good (anything else is held).
+--   Lines: {"unit_id","condition","bin_id"} or {"item_id","qty","condition","bin_id","rental_id"}
+create or replace function inv_transfer_receive(p_company_id uuid, p_transfer_id uuid, p_key text, p_lines jsonb default null, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  tr inv_transfers; lt inv_locations; lf inv_locations; h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; t record; r record;
+  v_lines jsonb; v_seen uuid[] := '{}'; v_cond text; v_bin uuid; v_qty numeric; v_rental uuid; v_dest uuid; v_out jsonb := '[]'::jsonb; v_left integer;
+  v_status text;
+begin
+  perform inv_ctx(p_company_id);
+  select * into tr from inv_transfers where id = p_transfer_id;
+  if tr.id is null then raise exception 'Transfer not found' using errcode = 'P0002'; end if;
+  lt := inv_loc(p_company_id, tr.to_location_id);
+  select * into lf from inv_locations where id = tr.from_location_id;
+  h := inv_begin_movement(p_company_id, 'transfer_receive', p_key,
+         jsonb_build_object('transfer', p_transfer_id, 'lines', p_lines, 'note', p_note),
+         jsonb_build_object('transfer_id', tr.id, 'from_location_id', tr.from_location_id, 'to_location_id', lt.id, 'note', p_note));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  select * into tr from inv_transfers where id = p_transfer_id for update;
+  if tr.status <> 'in_transit' then raise exception 'Transfer % is already %', tr.code, tr.status using errcode = '23514'; end if;
+  if p_lines is null or p_lines = '[]'::jsonb then
+    select coalesce(jsonb_agg(jsonb_build_object('unit_id', x.id)), '[]'::jsonb) into v_lines from inv_units x
+     where x.transfer_id = tr.id and x.custody_kind = 'transit' and x.lifecycle = 'active';
+    select v_lines || coalesce(jsonb_agg(jsonb_build_object('item_id', b.item_id, 'qty', b.qty, 'from_condition', b.condition, 'condition', b.condition, 'rental_id', b.rental_id)), '[]'::jsonb) into v_lines
+      from inv_balances b where b.transfer_id = tr.id and b.holder_kind = 'transit' and b.qty > 0;
+  else
+    v_lines := p_lines;
+  end if;
+  perform inv_lines_array(v_lines);
+  perform inv_lock_lines(v_lines);
+  for e in select x from jsonb_array_elements(v_lines) x loop
+    v_bin := nullif(e->>'bin_id', '')::uuid;
+    perform inv_check_bin(v_bin, lt.id);
+    if nullif(e->>'unit_id', '') is not null then
+      u := inv_unit_lock((e->>'unit_id')::uuid);
+      if u.id = any (v_seen) then raise exception '% is listed twice', u.code using errcode = '22023'; end if;
+      v_seen := v_seen || u.id;
+      if u.custody_kind <> 'transit' or u.transfer_id is distinct from tr.id then
+        raise exception '% is not part of transfer % (it is %)', u.code, tr.code, inv_custody_words(u.custody_kind) using errcode = '23514';
+      end if;
+      v_cond := inv_valid_condition(coalesce(e->>'condition', u.condition));
+      perform inv_unit_move(u.id, 'warehouse', lt.id, v_bin, p_condition => v_cond);
+      perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'transit', 'warehouse', p_from_loc => tr.from_location_id, p_to_loc => lt.id, p_to_bin => v_bin,
+                     p_cond_from => u.condition, p_cond_to => v_cond, p_note => e->>'note');
+      v_out := v_out || jsonb_build_object('item_id', u.item_id, 'unit_id', u.id, 'code', u.code, 'condition', v_cond, 'available', v_cond in ('good', 'fair'));
+    else
+      i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+      v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+      v_rental := nullif(e->>'rental_id', '')::uuid;
+      for t in select * from inv_take_qty(i.id, v_qty, 'transit', p_transfer => tr.id, p_condition => nullif(e->>'from_condition', ''), p_rental => v_rental,
+                                           p_rentals => case when v_rental is null then 'any' else 'only' end, p_where => 'in transit on ' || tr.code) loop
+        v_cond := inv_valid_condition(coalesce(nullif(e->>'condition', ''), t.condition), true);
+        v_dest := inv_bal_ensure(i.company_id, i.id, 'warehouse', v_cond, lt.id, v_bin, p_rental => t.rental_id);
+        perform inv_bal_change(t.balance_id, -t.taken);
+        perform inv_bal_change(v_dest, t.taken);
+        perform inv_ml(v_mid, p_company_id, i.id, null, t.taken, 'transit', 'warehouse', p_from_loc => tr.from_location_id, p_to_loc => lt.id, p_to_bin => v_bin,
+                       p_from_bal => t.balance_id, p_to_bal => v_dest, p_cond_from => t.condition, p_cond_to => v_cond, p_note => e->>'note');
+        v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', t.taken, 'condition', v_cond, 'available', v_cond = 'good');
+      end loop;
+    end if;
+  end loop;
+  select (select count(*) from inv_units x where x.transfer_id = tr.id and x.custody_kind = 'transit' and x.lifecycle = 'active')
+       + (select count(*) from inv_balances b where b.transfer_id = tr.id and b.holder_kind = 'transit' and b.qty > 0) into v_left;
+  if v_left = 0 then
+    update inv_transfers set status = 'received', received_by = auth.uid(), received_at = now() where id = tr.id;
+    v_status := 'received';
+  else
+    v_status := 'in_transit';
+  end if;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('transfer_id', tr.id, 'transfer_code', tr.code, 'status', v_status, 'still_on_the_way', v_left, 'lines', v_out));
+end;
+$$;
+
+-- Consumables: used up, no expected return. Recipient (optional): an employee or a project. With a request, the use counts against that
+-- request's reservations first. Lines: {"item_id","qty","bin_id"}
+create or replace function inv_consume(p_company_id uuid, p_location_id uuid, p_key text, p_lines jsonb, p_employee_id uuid default null,
+                                       p_project_id uuid default null, p_request_id uuid default null, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l inv_locations; emp employees; pr proj_projects; q inv_requests; h jsonb; v_mid uuid; e jsonb; i inv_items; t record;
+  v_qty numeric; v_free numeric; v_covered numeric; v_out jsonb := '[]'::jsonb;
+begin
+  perform inv_ctx(p_company_id);
+  l := inv_loc(p_company_id, p_location_id);
+  perform inv_lines_array(p_lines);
+  if p_employee_id is not null and p_project_id is not null then raise exception 'Name the employee or the project that used it, not both' using errcode = '22023'; end if;
+  if p_employee_id is not null then emp := inv_get_employee(p_employee_id, true); end if;
+  if p_request_id is not null then
+    select * into q from inv_requests where id = p_request_id;
+    if q.id is null or q.company_id <> p_company_id then raise exception 'Unknown request' using errcode = '22023'; end if;
+    if q.kind <> 'project' or q.project_id is distinct from p_project_id then raise exception 'That request is not for this project' using errcode = '23514'; end if;
+  end if;
+  h := inv_begin_movement(p_company_id, 'consume', p_key,
+         jsonb_build_object('location', p_location_id, 'employee', p_employee_id, 'project', p_project_id, 'request', p_request_id, 'lines', p_lines, 'note', p_note),
+         jsonb_build_object('employee_id', p_employee_id, 'recipient_employee_id', p_employee_id, 'project_id', p_project_id, 'request_id', p_request_id,
+                            'from_location_id', l.id, 'note', p_note));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines(p_lines);
+  if p_project_id is not null then pr := inv_get_project(p_project_id, true); end if;
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+    if i.tracking <> 'consumable' then raise exception '% is not a consumable. Issue or dispatch it instead', i.name using errcode = '23514'; end if;
+    perform inv_check_sharing(i.company_id, l.company_id);
+    if emp.id is not null then perform inv_check_sharing(i.company_id, emp.company_id); end if;
+    if pr.id is not null then perform inv_check_sharing(i.company_id, pr.company_id); end if;
+    v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+    v_free := inv_qty_free(i.id, l.id, now(), null, null, false);
+    v_covered := 0;
+    if q.id is not null then v_covered := inv_reservation_take(q.id, i.id, null, v_qty, l.id, true); end if;
+    if v_qty - v_covered > v_free then
+      raise exception 'Only % of % can be used now: the rest is not on the shelf or is reserved for upcoming requests', trim_scale(v_free + v_covered), i.name using errcode = '23514';
+    end if;
+    for t in select * from inv_take_qty(i.id, v_qty, 'warehouse', l.id, nullif(e->>'bin_id', '')::uuid, p_condition => 'good', p_rentals => 'owned', p_where => 'on the shelf here') loop
+      perform inv_bal_change(t.balance_id, -t.taken);
+      perform inv_ml(v_mid, p_company_id, i.id, null, t.taken, 'warehouse', 'consumed', p_from_loc => l.id, p_from_bin => t.bin_id, p_from_bal => t.balance_id,
+                     p_cond_from => 'good', p_note => e->>'note');
+    end loop;
+    v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty);
+  end loop;
+  if q.id is not null then perform inv_refresh_request_status(q.id); end if;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('lines', v_out));
+end;
+$$;
+
+-- Unused consumables go back to the shelf only by an explicit return, and never more than that employee / project consumed.
+-- Lines: {"item_id","qty","bin_id","condition"}
+create or replace function inv_return_unused(p_company_id uuid, p_location_id uuid, p_key text, p_lines jsonb, p_employee_id uuid default null,
+                                             p_project_id uuid default null, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l inv_locations; h jsonb; v_mid uuid; e jsonb; i inv_items; v_qty numeric; v_net numeric; v_cond text; v_bin uuid; v_dest uuid; v_out jsonb := '[]'::jsonb;
+begin
+  perform inv_ctx(p_company_id);
+  l := inv_loc(p_company_id, p_location_id);
+  perform inv_lines_array(p_lines);
+  if (p_employee_id is null) = (p_project_id is null) then raise exception 'Name the employee or the project the unused items come back from' using errcode = '22023'; end if;
+  h := inv_begin_movement(p_company_id, 'return_unused', p_key,
+         jsonb_build_object('location', p_location_id, 'employee', p_employee_id, 'project', p_project_id, 'lines', p_lines, 'note', p_note),
+         jsonb_build_object('employee_id', p_employee_id, 'recipient_employee_id', p_employee_id, 'project_id', p_project_id, 'to_location_id', l.id, 'note', p_note));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines(p_lines);
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+    if i.tracking <> 'consumable' then raise exception '% is not a consumable', i.name using errcode = '23514'; end if;
+    perform inv_check_sharing(i.company_id, l.company_id);
+    v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+    v_cond := inv_valid_condition(coalesce(e->>'condition', 'good'), true);
+    v_bin := nullif(e->>'bin_id', '')::uuid;
+    perform inv_check_bin(v_bin, l.id);
+    select coalesce(sum(case m.kind when 'consume' then ln.qty else -ln.qty end), 0) into v_net
+      from inv_movement_lines ln join inv_movements m on m.id = ln.movement_id
+     where ln.item_id = i.id and m.kind in ('consume', 'return_unused')
+       and ((p_employee_id is not null and m.employee_id = p_employee_id) or (p_project_id is not null and m.project_id = p_project_id));
+    if v_qty > v_net then
+      raise exception 'Only % of % was consumed by them, so no more than that can be returned as unused', trim_scale(v_net), i.name using errcode = '23514';
+    end if;
+    v_dest := inv_bal_ensure(i.company_id, i.id, 'warehouse', v_cond, l.id, v_bin);
+    perform inv_bal_change(v_dest, v_qty);
+    perform inv_ml(v_mid, p_company_id, i.id, null, v_qty, case when p_employee_id is not null then 'employee' else 'project' end, 'warehouse',
+                   p_to_loc => l.id, p_to_bin => v_bin, p_from_emp => p_employee_id, p_from_proj => p_project_id, p_to_bal => v_dest, p_cond_to => v_cond, p_note => e->>'note');
+    v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty, 'condition', v_cond, 'available', v_cond = 'good');
+  end loop;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('lines', v_out));
+end;
+$$;
+
+-- Repair out: equipment (or held quantities) leave the shelf for a repairer; they are not available until repair_in.
+--   Lines: {"unit_id"} or {"item_id","qty","bin_id","condition"}
+create or replace function inv_repair_out(p_company_id uuid, p_location_id uuid, p_key text, p_lines jsonb, p_repair_reference text,
+                                          p_expected_return_at timestamptz default null, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l inv_locations; h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; t record; v_ref text := btrim(coalesce(p_repair_reference, ''));
+  v_seen uuid[] := '{}'; v_why text; v_res text; v_qty numeric; v_cond text; v_free numeric; v_dest uuid; v_out jsonb := '[]'::jsonb;
+begin
+  perform inv_ctx(p_company_id);
+  l := inv_loc(p_company_id, p_location_id);
+  perform inv_lines_array(p_lines);
+  if length(v_ref) = 0 then raise exception 'Give the repair reference (repairer or job number)' using errcode = '22023'; end if;
+  if p_expected_return_at is not null and p_expected_return_at <= now() and not inv_replaying(p_company_id, p_key) then raise exception 'The expected return date must be in the future' using errcode = '22023'; end if;
+  h := inv_begin_movement(p_company_id, 'repair_out', p_key,
+         jsonb_build_object('location', p_location_id, 'lines', p_lines, 'ref', v_ref, 'expected', p_expected_return_at, 'note', p_note),
+         jsonb_build_object('from_location_id', l.id, 'expected_return_at', p_expected_return_at, 'note', coalesce(p_note, v_ref)));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines(p_lines);
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    if nullif(e->>'unit_id', '') is not null then
+      u := inv_unit_lock((e->>'unit_id')::uuid);
+      if u.id = any (v_seen) then raise exception '% is listed twice', u.code using errcode = '22023'; end if;
+      v_seen := v_seen || u.id;
+      v_why := inv_unit_block_reason(u, l.id, false);
+      if v_why is not null then raise exception '%', v_why using errcode = '23514'; end if;
+      v_res := inv_unit_reserved_by(u.id, now(), p_expected_return_at);
+      if v_res is not null then raise exception '% is reserved for % in that period and cannot go for repair now', u.code, v_res using errcode = '23514'; end if;
+      perform inv_unit_move(u.id, 'repair', p_repair => v_ref, p_expected => p_expected_return_at);
+      perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'warehouse', 'repair', p_from_loc => l.id, p_from_bin => u.bin_id, p_cond_from => u.condition, p_cond_to => u.condition);
+      v_out := v_out || jsonb_build_object('item_id', u.item_id, 'unit_id', u.id, 'code', u.code);
+    else
+      i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+      if i.tracking not in ('quantity', 'consumable') then raise exception '% is tracked unit by unit. Name the units', i.name using errcode = '23514'; end if;
+      v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+      v_cond := inv_valid_condition(coalesce(e->>'condition', 'good'), true);
+      if v_cond = 'good' then
+        v_free := inv_qty_free(i.id, l.id, now(), p_expected_return_at, null, false);
+        if v_qty > v_free then raise exception 'Only % of % can go for repair now: the rest is reserved for upcoming requests', trim_scale(v_free), i.name using errcode = '23514'; end if;
+      end if;
+      for t in select * from inv_take_qty(i.id, v_qty, 'warehouse', l.id, nullif(e->>'bin_id', '')::uuid, p_condition => v_cond, p_rentals => 'owned', p_where => 'on the shelf here') loop
+        v_dest := inv_bal_ensure(i.company_id, i.id, 'repair', v_cond, p_repair => v_ref, p_expected => p_expected_return_at);
+        perform inv_bal_change(t.balance_id, -t.taken);
+        perform inv_bal_change(v_dest, t.taken, p_expected_return_at);
+        perform inv_ml(v_mid, p_company_id, i.id, null, t.taken, 'warehouse', 'repair', p_from_loc => l.id, p_from_bin => t.bin_id,
+                       p_from_bal => t.balance_id, p_to_bal => v_dest, p_cond_from => v_cond, p_cond_to => v_cond);
+      end loop;
+      v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty);
+    end if;
+  end loop;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('repair_reference', v_ref, 'lines', v_out));
+end;
+$$;
+
+-- Repair in: back from the repairer with the condition found. good / fair is available; anything else is held for inspection.
+--   Lines: {"unit_id","condition","bin_id","note"} or {"item_id","qty","repair_reference","condition","bin_id"}
+create or replace function inv_repair_in(p_company_id uuid, p_location_id uuid, p_key text, p_lines jsonb, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l inv_locations; h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; t record; v_seen uuid[] := '{}'; v_cond text; v_bin uuid; v_qty numeric;
+  v_dest uuid; v_out jsonb := '[]'::jsonb;
+begin
+  perform inv_ctx(p_company_id);
+  l := inv_loc(p_company_id, p_location_id);
+  perform inv_lines_array(p_lines);
+  h := inv_begin_movement(p_company_id, 'repair_in', p_key, jsonb_build_object('location', p_location_id, 'lines', p_lines, 'note', p_note),
+         jsonb_build_object('to_location_id', l.id, 'note', p_note));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines(p_lines);
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    v_bin := nullif(e->>'bin_id', '')::uuid;
+    perform inv_check_bin(v_bin, l.id);
+    if nullif(e->>'unit_id', '') is not null then
+      u := inv_unit_lock((e->>'unit_id')::uuid);
+      if u.id = any (v_seen) then raise exception '% is listed twice', u.code using errcode = '22023'; end if;
+      v_seen := v_seen || u.id;
+      i := inv_get_item(u.item_id);
+      perform inv_check_sharing(i.company_id, l.company_id);
+      if u.custody_kind <> 'repair' then raise exception '% is not out for repair (it is %)', u.code, inv_custody_words(u.custody_kind) using errcode = '23514'; end if;
+      v_cond := inv_valid_condition(e->>'condition');
+      perform inv_unit_move(u.id, 'warehouse', l.id, v_bin, p_condition => v_cond);
+      perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'repair', 'warehouse', p_to_loc => l.id, p_to_bin => v_bin, p_cond_from => u.condition, p_cond_to => v_cond, p_note => e->>'note');
+      v_out := v_out || jsonb_build_object('item_id', u.item_id, 'unit_id', u.id, 'code', u.code, 'condition', v_cond, 'available', v_cond in ('good', 'fair'));
+    else
+      i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+      perform inv_check_sharing(i.company_id, l.company_id);
+      v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+      v_cond := inv_valid_condition(e->>'condition', true);
+      perform inv_nonblank(e->>'repair_reference', 'Name the repair reference the quantity came back on');
+      for t in select * from inv_take_qty(i.id, v_qty, 'repair', p_repair => btrim(e->>'repair_reference'), p_where => 'out for repair') loop
+        v_dest := inv_bal_ensure(i.company_id, i.id, 'warehouse', v_cond, l.id, v_bin);
+        perform inv_bal_change(t.balance_id, -t.taken);
+        perform inv_bal_change(v_dest, t.taken);
+        perform inv_ml(v_mid, p_company_id, i.id, null, t.taken, 'repair', 'warehouse', p_to_loc => l.id, p_to_bin => v_bin, p_from_bal => t.balance_id,
+                       p_to_bal => v_dest, p_cond_from => t.condition, p_cond_to => v_cond, p_note => e->>'note');
+      end loop;
+      v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty, 'condition', v_cond, 'available', v_cond = 'good');
+    end if;
+  end loop;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('lines', v_out));
+end;
+$$;
+
+-- Pack a kit against its checklist. Present items are moved INTO the kit (custody 'kit': never available on their own); missing and
+-- substituted items are recorded, never hidden. A kit cannot go inside a kit, and a unit sits in at most one kit.
+--   Lines: {"item_id","unit_id"?,"qty"?,"status":"present|missing|substituted","substitute_item_id"?,"expected_qty"?,"is_required"?,"note"?}
+create or replace function inv_pack_kit(p_company_id uuid, p_location_id uuid, p_key text, p_kit_unit_id uuid, p_lines jsonb, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l inv_locations; k inv_units; ki inv_items; h jsonb; v_mid uuid; e jsonb; c inv_units; ex inv_items; sub inv_items; actual inv_items; t record;
+  kc inv_kit_contents; v_status text; v_qty numeric; v_exp numeric; v_req boolean; v_why text; v_res text; v_dest uuid; v_present numeric;
+  v_extra uuid[]; v_seen uuid[] := '{}'; v_out jsonb := '[]'::jsonb; v_missing jsonb; v_final text;
+begin
+  perform inv_ctx(p_company_id);
+  l := inv_loc(p_company_id, p_location_id);
+  perform inv_lines_array(p_lines);
+  select * into k from inv_units where id = p_kit_unit_id;
+  if k.id is null then raise exception 'Unknown kit' using errcode = '22023'; end if;
+  select * into ki from inv_items where id = k.item_id;
+  if ki.tracking <> 'kit' or k.company_id <> p_company_id then raise exception '% is not a kit of this company', k.code using errcode = '23514'; end if;
+  h := inv_begin_movement(p_company_id, 'pack_kit', p_key, jsonb_build_object('location', p_location_id, 'kit', p_kit_unit_id, 'lines', p_lines, 'note', p_note),
+         jsonb_build_object('from_location_id', l.id, 'to_location_id', l.id, 'note', p_note));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  select array_agg(distinct x) into v_extra from (
+    select ki.id as x union select nullif(z->>'substitute_item_id', '')::uuid from jsonb_array_elements(p_lines) z) s where x is not null;
+  perform inv_lock_lines(p_lines, v_extra);
+  k := inv_unit_lock(p_kit_unit_id);
+  v_why := inv_unit_block_reason(k, l.id, false);
+  if v_why is not null then raise exception '%', v_why using errcode = '23514'; end if;
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    ex := inv_get_item(nullif(e->>'item_id', '')::uuid);
+    if ex.company_id <> p_company_id then raise exception '% belongs to another company', ex.name using errcode = '23514'; end if;
+    if ex.tracking = 'kit' then raise exception 'A kit cannot be packed inside another kit' using errcode = '23514'; end if;
+    v_status := coalesce(nullif(e->>'status', ''), case when nullif(e->>'unit_id', '') is not null or nullif(e->>'qty', '') is not null then 'present' else 'missing' end);
+    if v_status not in ('present', 'missing', 'substituted') then raise exception 'A kit line is present, missing or substituted' using errcode = '22023'; end if;
+    v_req := coalesce((e->>'is_required')::boolean, true);
+    select * into kc from inv_kit_contents where kit_unit_id = k.id and item_id = ex.id order by (status = 'substituted') limit 1 for update;
+    v_exp := coalesce(nullif(e->>'expected_qty', '')::numeric, kc.expected_qty, 1);
+    if ex.tracking = 'individual' then v_exp := 1; end if;
+    if v_exp <= 0 then raise exception 'The expected quantity must be above zero' using errcode = '22023'; end if;
+
+    if v_status = 'missing' then
+      if kc.id is not null and (kc.content_unit_id is not null or kc.present_qty > 0) then
+        raise exception '% is packed in the kit. Unpack it first, then mark it missing', ex.name using errcode = '23514';
+      end if;
+      if kc.id is null then
+        insert into inv_kit_contents (company_id, kit_unit_id, item_id, expected_qty, is_required, status, note)
+        values (p_company_id, k.id, ex.id, v_exp, v_req, 'missing', nullif(btrim(e->>'note'), ''));
+      else
+        update inv_kit_contents set expected_qty = v_exp, is_required = v_req, status = 'missing', substitute_item_id = null, note = coalesce(nullif(btrim(e->>'note'), ''), note), updated_at = now() where id = kc.id;
+      end if;
+      v_out := v_out || jsonb_build_object('item_id', ex.id, 'status', 'missing');
+      continue;
+    end if;
+
+    actual := ex;
+    if v_status = 'substituted' then
+      sub := inv_get_item(nullif(e->>'substitute_item_id', '')::uuid);
+      if sub.id = ex.id then raise exception 'A substitute has to be a different item' using errcode = '22023'; end if;
+      if sub.tracking = 'kit' then raise exception 'A kit cannot be packed inside another kit' using errcode = '23514'; end if;
+      if sub.company_id <> p_company_id then raise exception '% belongs to another company', sub.name using errcode = '23514'; end if;
+      actual := sub;
+    end if;
+    if actual.tracking = 'individual' then
+      c := inv_unit_lock(nullif(e->>'unit_id', '')::uuid);
+      if c.item_id <> actual.id then raise exception '% is not a %', c.code, actual.name using errcode = '22023'; end if;
+      if c.id = any (v_seen) then raise exception '% is listed twice', c.code using errcode = '22023'; end if;
+      v_seen := v_seen || c.id;
+      if exists (select 1 from inv_kit_contents x where x.content_unit_id = c.id) then
+        raise exception '% is already packed in a kit. A unit can be in one kit only', c.code using errcode = '23514';
+      end if;
+      v_why := inv_unit_block_reason(c, l.id);
+      if v_why is not null then raise exception '%', v_why using errcode = '23514'; end if;
+      v_res := inv_unit_reserved_by(c.id, now(), null);
+      if v_res is not null then raise exception '% is reserved for % and cannot be packed into a kit now', c.code, v_res using errcode = '23514'; end if;
+      if kc.id is not null and kc.content_unit_id is not null and kc.content_unit_id <> c.id then
+        raise exception 'The kit already holds a unit for %. Unpack it first', ex.name using errcode = '23514';
+      end if;
+      perform inv_unit_move(c.id, 'kit', p_kit => k.id);
+      perform inv_ml(v_mid, p_company_id, c.item_id, c.id, 1, 'warehouse', 'kit', p_from_loc => l.id, p_from_bin => c.bin_id, p_cond_from => c.condition, p_cond_to => c.condition, p_note => e->>'note');
+      if kc.id is null then
+        insert into inv_kit_contents (company_id, kit_unit_id, item_id, expected_qty, is_required, status, content_unit_id, substitute_item_id, note)
+        values (p_company_id, k.id, ex.id, v_exp, v_req, v_status, c.id, case when v_status = 'substituted' then sub.id end, nullif(btrim(e->>'note'), ''));
+      else
+        update inv_kit_contents set expected_qty = v_exp, is_required = v_req, status = v_status, content_unit_id = c.id,
+               substitute_item_id = case when v_status = 'substituted' then sub.id end, note = coalesce(nullif(btrim(e->>'note'), ''), note), updated_at = now() where id = kc.id;
+      end if;
+      v_out := v_out || jsonb_build_object('item_id', ex.id, 'unit_id', c.id, 'code', c.code, 'status', v_status);
+    else
+      v_qty := inv_check_qty(actual.id, (e->>'qty')::numeric);
+      v_present := 0;
+      for t in select * from inv_take_qty(actual.id, v_qty, 'warehouse', l.id, nullif(e->>'bin_id', '')::uuid, p_condition => 'good', p_rentals => 'owned', p_where => 'on the shelf here') loop
+        v_dest := inv_bal_ensure(actual.company_id, actual.id, 'kit', 'good', p_kit => k.id);
+        perform inv_bal_change(t.balance_id, -t.taken);
+        perform inv_bal_change(v_dest, t.taken);
+        perform inv_ml(v_mid, p_company_id, actual.id, null, t.taken, 'warehouse', 'kit', p_from_loc => l.id, p_from_bin => t.bin_id, p_from_bal => t.balance_id,
+                       p_to_bal => v_dest, p_cond_from => 'good', p_cond_to => 'good', p_note => e->>'note');
+      end loop;
+      v_present := coalesce(kc.present_qty, 0) + v_qty;
+      v_final := case when v_status = 'substituted' then 'substituted' when v_present >= v_exp then 'present' else 'missing' end;
+      if kc.id is null then
+        insert into inv_kit_contents (company_id, kit_unit_id, item_id, expected_qty, is_required, status, present_qty, substitute_item_id, note)
+        values (p_company_id, k.id, ex.id, v_exp, v_req, v_final, v_present, case when v_final = 'substituted' then sub.id end, nullif(btrim(e->>'note'), ''));
+      else
+        update inv_kit_contents set expected_qty = v_exp, is_required = v_req, status = v_final, present_qty = v_present,
+               substitute_item_id = case when v_final = 'substituted' then sub.id end, note = coalesce(nullif(btrim(e->>'note'), ''), note), updated_at = now() where id = kc.id;
+      end if;
+      v_out := v_out || jsonb_build_object('item_id', ex.id, 'qty', v_qty, 'present_qty', v_present, 'status', v_final);
+    end if;
+  end loop;
+  select coalesce(jsonb_agg(jsonb_build_object('item_id', x.item_id, 'name', i2.name, 'expected_qty', x.expected_qty, 'present_qty', x.present_qty)), '[]'::jsonb)
+    into v_missing from inv_kit_contents x join inv_items i2 on i2.id = x.item_id where x.kit_unit_id = k.id and x.status = 'missing' and x.is_required;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('kit_unit_id', k.id, 'kit_code', k.code, 'lines', v_out, 'missing_required', v_missing));
+end;
+$$;
+
+-- Unpack a kit (everything, or the lines given). Contents go back on the shelf at the kit's location and the checklist line becomes
+-- 'missing' again (the history stays in the ledger).   Lines: {"unit_id","bin_id"} or {"item_id","qty","bin_id"}
+create or replace function inv_unpack_kit(p_company_id uuid, p_location_id uuid, p_key text, p_kit_unit_id uuid, p_lines jsonb default null, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l inv_locations; k inv_units; h jsonb; v_mid uuid; e jsonb; c inv_units; t record; kc inv_kit_contents; v_lines jsonb; v_why text; v_bin uuid;
+  v_qty numeric; v_dest uuid; v_out jsonb := '[]'::jsonb; v_extra uuid[]; v_seen uuid[] := '{}';
+begin
+  perform inv_ctx(p_company_id);
+  l := inv_loc(p_company_id, p_location_id);
+  select * into k from inv_units where id = p_kit_unit_id;
+  if k.id is null or k.company_id <> p_company_id then raise exception 'Unknown kit' using errcode = '22023'; end if;
+  h := inv_begin_movement(p_company_id, 'unpack_kit', p_key, jsonb_build_object('location', p_location_id, 'kit', p_kit_unit_id, 'lines', p_lines, 'note', p_note),
+         jsonb_build_object('from_location_id', l.id, 'to_location_id', l.id, 'note', p_note));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_item(k.item_id);
+  if p_lines is null or p_lines = '[]'::jsonb then
+    select coalesce(jsonb_agg(jsonb_build_object('unit_id', x.id)), '[]'::jsonb) into v_lines from inv_units x where x.in_kit_id = k.id;
+    select v_lines || coalesce(jsonb_agg(jsonb_build_object('item_id', b.item_id, 'qty', b.qty)), '[]'::jsonb) into v_lines from inv_balances b where b.kit_unit_id = k.id and b.qty > 0;
+  else
+    v_lines := p_lines;
+  end if;
+  if jsonb_array_length(v_lines) = 0 then raise exception 'There is nothing in this kit to unpack' using errcode = '23514'; end if;
+  perform inv_lock_lines(v_lines, array[k.item_id]);
+  k := inv_unit_lock(p_kit_unit_id);
+  v_why := inv_unit_block_reason(k, l.id, false);
+  if v_why is not null then raise exception '%', v_why using errcode = '23514'; end if;
+  for e in select x from jsonb_array_elements(v_lines) x loop
+    v_bin := nullif(e->>'bin_id', '')::uuid;
+    perform inv_check_bin(v_bin, l.id);
+    if nullif(e->>'unit_id', '') is not null then
+      c := inv_unit_lock((e->>'unit_id')::uuid);
+      if c.id = any (v_seen) then raise exception '% is listed twice', c.code using errcode = '22023'; end if;
+      v_seen := v_seen || c.id;
+      if c.in_kit_id is distinct from k.id then raise exception '% is not packed in kit %', c.code, k.code using errcode = '23514'; end if;
+      perform inv_unit_move(c.id, 'warehouse', l.id, v_bin);
+      perform inv_ml(v_mid, p_company_id, c.item_id, c.id, 1, 'kit', 'warehouse', p_to_loc => l.id, p_to_bin => v_bin, p_cond_from => c.condition, p_cond_to => c.condition);
+      update inv_kit_contents set content_unit_id = null, status = 'missing', substitute_item_id = null, updated_at = now() where content_unit_id = c.id;
+      v_out := v_out || jsonb_build_object('item_id', c.item_id, 'unit_id', c.id, 'code', c.code);
+    else
+      v_qty := (e->>'qty')::numeric;
+      for t in select * from inv_take_qty((e->>'item_id')::uuid, v_qty, 'kit', p_kit => k.id, p_where => 'in kit ' || k.code) loop
+        v_dest := inv_bal_ensure(k.company_id, (e->>'item_id')::uuid, 'warehouse', t.condition, l.id, v_bin);
+        perform inv_bal_change(t.balance_id, -t.taken);
+        perform inv_bal_change(v_dest, t.taken);
+        perform inv_ml(v_mid, p_company_id, (e->>'item_id')::uuid, null, t.taken, 'kit', 'warehouse', p_to_loc => l.id, p_to_bin => v_bin, p_from_bal => t.balance_id,
+                       p_to_bal => v_dest, p_cond_from => t.condition, p_cond_to => t.condition);
+      end loop;
+      -- the checklist line for this item (or the item that stood in for it)
+      select * into kc from inv_kit_contents where kit_unit_id = k.id and (item_id = (e->>'item_id')::uuid or substitute_item_id = (e->>'item_id')::uuid) order by (status = 'substituted') limit 1 for update;
+      if kc.id is not null then
+        update inv_kit_contents set present_qty = greatest(0, present_qty - v_qty),
+               status = case when present_qty - v_qty <= 0 then 'missing' when status = 'substituted' then 'substituted'
+                             when present_qty - v_qty >= expected_qty then 'present' else 'missing' end,
+               substitute_item_id = case when present_qty - v_qty <= 0 then null else substitute_item_id end,
+               updated_at = now() where id = kc.id;
+      end if;
+      v_out := v_out || jsonb_build_object('item_id', (e->>'item_id')::uuid, 'qty', v_qty);
+    end if;
+  end loop;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('kit_unit_id', k.id, 'kit_code', k.code, 'lines', v_out));
+end;
+$$;
+
+-- Edit one checklist line of a kit without moving stock: what is expected, whether it is required, a note, or remove an empty line.
+create or replace function inv_set_kit_line(p_company_id uuid, p_kit_unit_id uuid, p_item_id uuid, p_expected_qty numeric default null,
+                                            p_is_required boolean default null, p_note text default null, p_remove boolean default false)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare k inv_units; ki inv_items; i inv_items; kc inv_kit_contents; v_id uuid;
+begin
+  perform inv_ctx(p_company_id);
+  select * into k from inv_units where id = p_kit_unit_id;
+  if k.id is null or k.company_id <> p_company_id then raise exception 'Unknown kit' using errcode = '22023'; end if;
+  select * into ki from inv_items where id = k.item_id;
+  if ki.tracking <> 'kit' then raise exception '% is not a kit', k.code using errcode = '23514'; end if;
+  if not ((k.location_id is not null and inv_can_operate(k.location_id)) or inv_has_capability(p_company_id, 'manage_catalogue')) then
+    raise exception 'You are not allowed to change the checklist of this kit' using errcode = '42501';
+  end if;
+  i := inv_get_item(p_item_id);
+  if i.company_id <> p_company_id then raise exception '% belongs to another company', i.name using errcode = '23514'; end if;
+  perform inv_lock_item(i.id);
+  select * into kc from inv_kit_contents where kit_unit_id = k.id and item_id = i.id order by (status = 'substituted') limit 1 for update;
+  if coalesce(p_remove, false) then
+    if kc.id is null then return null; end if;
+    if kc.content_unit_id is not null or kc.present_qty > 0 then raise exception '% is packed in the kit. Unpack it before removing the line', i.name using errcode = '23514'; end if;
+    delete from inv_kit_contents where id = kc.id;
+    return kc.id;
+  end if;
+  if i.tracking = 'kit' then raise exception 'A kit cannot be part of another kit' using errcode = '23514'; end if;
+  if p_expected_qty is not null then
+    if i.tracking = 'individual' and p_expected_qty <> 1 then raise exception 'Individually tracked equipment is expected once per kit' using errcode = '22023'; end if;
+    perform inv_check_qty(i.id, p_expected_qty);
+  end if;
+  if kc.id is null then
+    insert into inv_kit_contents (company_id, kit_unit_id, item_id, expected_qty, is_required, status, note)
+    values (p_company_id, k.id, i.id, coalesce(p_expected_qty, 1), coalesce(p_is_required, true), 'missing', nullif(btrim(p_note), '')) returning id into v_id;
+  else
+    update inv_kit_contents set expected_qty = coalesce(p_expected_qty, expected_qty), is_required = coalesce(p_is_required, is_required),
+           note = coalesce(nullif(btrim(p_note), ''), note), updated_at = now(),
+           status = case when status = 'present' and coalesce(p_expected_qty, expected_qty) > present_qty then 'missing' else status end
+     where id = kc.id returning id into v_id;
+  end if;
+  return v_id;
+end;
+$$;
+
+-- Condition check of stock on the shelf: releases held items (needs_inspection -> good) or holds them (good -> damaged), with a ledger line.
+--   Lines: {"unit_id","condition","note"} or {"item_id","qty","from_condition","condition","bin_id","note"}
+create or replace function inv_check_condition(p_company_id uuid, p_location_id uuid, p_key text, p_lines jsonb, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l inv_locations; h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; t record; v_seen uuid[] := '{}'; v_why text; v_cond text; v_from text; v_qty numeric;
+  v_dest uuid; v_out jsonb := '[]'::jsonb;
+begin
+  perform inv_ctx(p_company_id);
+  l := inv_loc(p_company_id, p_location_id);
+  perform inv_lines_array(p_lines);
+  h := inv_begin_movement(p_company_id, 'condition_check', p_key, jsonb_build_object('location', p_location_id, 'lines', p_lines, 'note', p_note),
+         jsonb_build_object('from_location_id', l.id, 'to_location_id', l.id, 'note', p_note));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines(p_lines);
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    if nullif(e->>'unit_id', '') is not null then
+      u := inv_unit_lock((e->>'unit_id')::uuid);
+      if u.id = any (v_seen) then raise exception '% is listed twice', u.code using errcode = '22023'; end if;
+      v_seen := v_seen || u.id;
+      v_why := inv_unit_block_reason(u, l.id, false);
+      if v_why is not null then raise exception '%', v_why using errcode = '23514'; end if;
+      v_cond := inv_valid_condition(e->>'condition');
+      if v_cond = u.condition then raise exception '% is already %', u.code, replace(v_cond, '_', ' ') using errcode = '23514'; end if;
+      update inv_units set condition = v_cond, version = version + 1 where id = u.id;
+      perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'warehouse', 'warehouse', p_from_loc => l.id, p_to_loc => l.id, p_from_bin => u.bin_id, p_to_bin => u.bin_id,
+                     p_cond_from => u.condition, p_cond_to => v_cond, p_note => e->>'note');
+      v_out := v_out || jsonb_build_object('item_id', u.item_id, 'unit_id', u.id, 'code', u.code, 'condition', v_cond, 'available', v_cond in ('good', 'fair'));
+    else
+      i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+      if i.tracking not in ('quantity', 'consumable') then raise exception '% is checked unit by unit', i.name using errcode = '23514'; end if;
+      v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+      v_from := inv_valid_condition(e->>'from_condition', true);
+      v_cond := inv_valid_condition(e->>'condition', true);
+      if v_from = v_cond then raise exception '% is already %', i.name, replace(v_cond, '_', ' ') using errcode = '23514'; end if;
+      for t in select * from inv_take_qty(i.id, v_qty, 'warehouse', l.id, nullif(e->>'bin_id', '')::uuid, p_condition => v_from, p_rentals => 'any', p_where => 'on the shelf here') loop
+        v_dest := inv_bal_ensure(i.company_id, i.id, 'warehouse', v_cond, l.id, t.bin_id, p_rental => t.rental_id);
+        perform inv_bal_change(t.balance_id, -t.taken);
+        perform inv_bal_change(v_dest, t.taken);
+        perform inv_ml(v_mid, p_company_id, i.id, null, t.taken, 'warehouse', 'warehouse', p_from_loc => l.id, p_to_loc => l.id, p_from_bin => t.bin_id, p_to_bin => t.bin_id,
+                       p_from_bal => t.balance_id, p_to_bal => v_dest, p_cond_from => v_from, p_cond_to => v_cond, p_note => e->>'note');
+      end loop;
+      v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty, 'condition', v_cond, 'available', v_cond = 'good');
+    end if;
+  end loop;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('lines', v_out));
+end;
+$$;
+
+-- Missing / found / retire. A reason is mandatory. Nothing is deleted: the unit stays with its history, lifecycle changes.
+--   p_action: 'missing' | 'found' | 'retire'
+--   Lines: {"unit_id","bin_id","condition"} or {"item_id","qty","bin_id","condition","rental_id"}
+-- Found equipment is held for inspection unless a condition is given. Found quantity cannot exceed what was recorded missing.
+create or replace function inv_adjust_stock(p_company_id uuid, p_location_id uuid, p_key text, p_action text, p_lines jsonb, p_reason text)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l inv_locations; h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; t record; v_seen uuid[] := '{}'; v_reason text; v_kind text;
+  v_qty numeric; v_cond text; v_bin uuid; v_dest uuid; v_net numeric; v_free numeric; v_out jsonb := '[]'::jsonb; v_rental uuid; v_res text; v_was text;
+begin
+  perform inv_ctx(p_company_id);
+  l := inv_loc(p_company_id, p_location_id);
+  perform inv_lines_array(p_lines);
+  if p_action is null or p_action not in ('missing', 'found', 'retire') then raise exception 'The action is missing, found or retire' using errcode = '22023'; end if;
+  v_reason := inv_nonblank(p_reason, 'Say why (a reason is needed for every adjustment)');
+  v_kind := 'adjust_' || case p_action when 'retire' then 'retire' else p_action end;
+  h := inv_begin_movement(p_company_id, v_kind, p_key, jsonb_build_object('location', p_location_id, 'action', p_action, 'lines', p_lines, 'reason', v_reason),
+         jsonb_build_object('from_location_id', l.id, 'reason', v_reason, 'note', v_reason));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines(p_lines);
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    v_bin := nullif(e->>'bin_id', '')::uuid;
+    perform inv_check_bin(v_bin, l.id);
+    if nullif(e->>'unit_id', '') is not null then
+      u := inv_unit_lock((e->>'unit_id')::uuid);
+      if u.id = any (v_seen) then raise exception '% is listed twice', u.code using errcode = '22023'; end if;
+      v_seen := v_seen || u.id;
+      if u.company_id <> p_company_id then raise exception '% belongs to another company', u.code using errcode = '23514'; end if;
+      if u.lifecycle = 'draft' then raise exception '% has not been confirmed yet. Count it first', u.code using errcode = '23514'; end if;
+      if u.custody_kind = 'kit' then raise exception '% is packed in a kit. Unpack it first', u.code using errcode = '23514'; end if;
+      v_was := u.custody_kind;
+      if p_action = 'missing' then
+        if u.lifecycle <> 'active' then raise exception '% is already %', u.code, u.lifecycle using errcode = '23514'; end if;
+        update inv_units set lifecycle = 'missing', version = version + 1 where id = u.id;
+        perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, v_was, 'adjustment', p_from_loc => case when v_was = 'warehouse' then u.location_id end,
+                       p_from_bin => u.bin_id, p_from_emp => u.employee_id, p_from_proj => u.project_id, p_cond_from => u.condition, p_note => v_reason);
+        if v_was = 'employee' then perform inv_mirror_legacy(u.id); end if;
+      elsif p_action = 'found' then
+        if u.lifecycle <> 'missing' then raise exception '% is not recorded as missing', u.code using errcode = '23514'; end if;
+        v_cond := inv_valid_condition(coalesce(nullif(e->>'condition', ''), 'needs_inspection'));
+        perform inv_unit_move(u.id, 'warehouse', l.id, v_bin, p_condition => v_cond);
+        update inv_units set lifecycle = 'active' where id = u.id;
+        perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'adjustment', 'warehouse', p_to_loc => l.id, p_to_bin => v_bin, p_cond_from => u.condition, p_cond_to => v_cond, p_note => v_reason);
+        if v_was = 'employee' then perform inv_mirror_legacy(u.id); end if;
+        v_out := v_out || jsonb_build_object('item_id', u.item_id, 'unit_id', u.id, 'code', u.code, 'condition', v_cond, 'available', v_cond in ('good', 'fair'));
+        continue;
+      else
+        if u.lifecycle = 'retired' then raise exception '% is already retired', u.code using errcode = '23514'; end if;
+        if u.lifecycle = 'active' and v_was not in ('warehouse', 'repair') then
+          raise exception '% is % . Bring it back before retiring it', u.code, inv_custody_words(v_was) using errcode = '23514';
+        end if;
+        if exists (select 1 from inv_units k where k.in_kit_id = u.id) or exists (select 1 from inv_balances b where b.kit_unit_id = u.id and b.qty > 0) then
+          raise exception '% still has items packed in it. Unpack the kit first', u.code using errcode = '23514';
+        end if;
+        v_res := inv_unit_reserved_by(u.id, now(), null);
+        if v_res is not null then raise exception '% is reserved for %. Release that reservation first', u.code, v_res using errcode = '23514'; end if;
+        update inv_units set lifecycle = 'retired', retired_at = now(), version = version + 1 where id = u.id;
+        perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, case when u.lifecycle = 'missing' then 'adjustment' else v_was end, 'adjustment',
+                       p_from_loc => case when v_was = 'warehouse' then u.location_id end, p_from_bin => u.bin_id, p_cond_from => u.condition, p_note => v_reason);
+      end if;
+      v_out := v_out || jsonb_build_object('item_id', u.item_id, 'unit_id', u.id, 'code', u.code, 'lifecycle', case p_action when 'missing' then 'missing' else 'retired' end);
+    else
+      i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+      if i.company_id <> p_company_id then raise exception '% belongs to another company', i.name using errcode = '23514'; end if;
+      if i.tracking not in ('quantity', 'consumable') then raise exception '% is adjusted unit by unit', i.name using errcode = '23514'; end if;
+      v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+      v_rental := nullif(e->>'rental_id', '')::uuid;
+      if p_action = 'found' then
+        select coalesce(sum(case m.kind when 'adjust_missing' then ln.qty when 'adjust_found' then -ln.qty else 0 end), 0) into v_net
+          from inv_movement_lines ln join inv_movements m on m.id = ln.movement_id
+         where ln.item_id = i.id and m.company_id = p_company_id and m.kind in ('adjust_missing', 'adjust_found');
+        if v_qty > v_net then raise exception 'Only % of % has been recorded as missing, so no more than that can be found', trim_scale(v_net), i.name using errcode = '23514'; end if;
+        v_cond := inv_valid_condition(coalesce(nullif(e->>'condition', ''), 'needs_inspection'), true);
+        v_dest := inv_bal_ensure(i.company_id, i.id, 'warehouse', v_cond, l.id, v_bin);
+        perform inv_bal_change(v_dest, v_qty);
+        perform inv_ml(v_mid, p_company_id, i.id, null, v_qty, 'adjustment', 'warehouse', p_to_loc => l.id, p_to_bin => v_bin, p_to_bal => v_dest, p_cond_to => v_cond, p_note => v_reason);
+        v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty, 'condition', v_cond, 'available', v_cond = 'good');
+      else
+        v_cond := nullif(e->>'condition', '');
+        if v_cond is not null then perform inv_valid_condition(v_cond, true); end if;
+        if p_action = 'retire' and coalesce(v_cond, 'good') = 'good' then
+          v_free := inv_qty_free(i.id, l.id, now(), null, null, v_rental is not null);
+          if v_qty > v_free and v_cond = 'good' then
+            raise exception 'Only % of % is not promised to upcoming requests, so no more than that can be written off', trim_scale(v_free), i.name using errcode = '23514';
+          end if;
+        end if;
+        for t in select * from inv_take_qty(i.id, v_qty, 'warehouse', l.id, v_bin, p_condition => v_cond, p_rental => v_rental,
+                                             p_rentals => case when v_rental is null then 'owned' else 'only' end, p_where => 'on the shelf here') loop
+          perform inv_bal_change(t.balance_id, -t.taken);
+          perform inv_ml(v_mid, p_company_id, i.id, null, t.taken, 'warehouse', 'adjustment', p_from_loc => l.id, p_from_bin => t.bin_id, p_from_bal => t.balance_id,
+                         p_cond_from => t.condition, p_note => v_reason);
+        end loop;
+        v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty);
+      end if;
+    end if;
+  end loop;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('action', p_action, 'lines', v_out));
+end;
+$$;
+
+-- A correction is a NEW movement that names the original and says why; the original is never touched. Only stock that appeared
+-- through a receipt, opening, found stock, count or return, and consumption, can be corrected this way (give the right total for the line).
+-- For anything else, move the stock back with the proper movement.   Lines: {"line_id":"<original movement line>","qty":<the right quantity>}
+create or replace function inv_correct_movement(p_company_id uuid, p_movement_id uuid, p_key text, p_reason text, p_lines jsonb)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  m inv_movements; h jsonb; v_mid uuid; e jsonb; ol inv_movement_lines; v_reason text; v_new numeric; v_eff numeric; v_delta numeric; i inv_items; v_out jsonb := '[]'::jsonb;
+  v_consume boolean;
+begin
+  perform inv_ctx(p_company_id);
+  perform inv_require_cap(p_company_id, 'confirm_stock', 'Only a founder, or someone allowed to confirm stock, can correct a movement');
+  perform inv_lines_array(p_lines);
+  v_reason := inv_nonblank(p_reason, 'Say why the movement is being corrected');
+  select * into m from inv_movements where id = p_movement_id and company_id = p_company_id;
+  if m.id is null then raise exception 'Movement not found' using errcode = 'P0002'; end if;
+  if m.kind = 'correction' then raise exception 'A correction cannot itself be corrected. Correct the original movement again' using errcode = '23514'; end if;
+  h := inv_begin_movement(p_company_id, 'correction', p_key, jsonb_build_object('movement', p_movement_id, 'lines', p_lines, 'reason', v_reason),
+         jsonb_build_object('corrects_movement_id', m.id, 'reason', v_reason, 'note', 'Correction of ' || m.code));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines((select jsonb_agg(jsonb_build_object('item_id', l.item_id)) from inv_movement_lines l
+                           where l.movement_id = m.id and l.id in (select (x->>'line_id')::uuid from jsonb_array_elements(p_lines) x)));
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    select * into ol from inv_movement_lines where id = nullif(e->>'line_id', '')::uuid and movement_id = m.id;
+    if ol.id is null then raise exception 'That line is not part of movement %', m.code using errcode = '22023'; end if;
+    if ol.unit_id is not null then
+      raise exception 'Equipment units are corrected with an adjustment (missing, found, retire) or a condition check, not by quantity' using errcode = '23514';
+    end if;
+    v_consume := ol.from_balance_id is not null and ol.to_balance_id is null and ol.to_kind = 'consumed';
+    if not (v_consume or (ol.from_balance_id is null and ol.to_balance_id is not null)) then
+      raise exception 'Only received, opening, found, counted or consumed quantities can be corrected this way. Move the stock back with the proper movement instead' using errcode = '23514';
+    end if;
+    i := inv_get_item(ol.item_id);
+    v_new := (e->>'qty')::numeric;
+    if v_new is null or v_new < 0 then raise exception 'Give the right quantity (zero or more)' using errcode = '22023'; end if;
+    if v_new <> round(v_new, i.quantity_scale) then raise exception 'The quantity of % can have at most % decimal place(s)', i.name, i.quantity_scale using errcode = '22023'; end if;
+    select ol.qty + coalesce(sum(case when v_consume then (case when cl.to_kind = 'consumed' then cl.qty else -cl.qty end)
+                                      else (case when cl.from_kind = 'adjustment' then cl.qty else -cl.qty end) end), 0) into v_eff
+      from inv_movement_lines cl where cl.corrects_line_id = ol.id;
+    v_delta := v_new - v_eff;
+    if v_delta = 0 then raise exception 'The quantity on that line is already %', v_eff using errcode = '23514'; end if;
+    if not v_consume then
+      if v_delta > 0 then
+        perform inv_bal_change(ol.to_balance_id, v_delta);
+        perform inv_ml(v_mid, p_company_id, ol.item_id, null, v_delta, 'adjustment', ol.to_kind, p_to_loc => ol.to_location_id, p_to_bin => ol.to_bin_id, p_to_emp => ol.to_employee_id,
+                       p_to_proj => ol.to_project_id, p_to_bal => ol.to_balance_id, p_cond_to => ol.condition_to, p_note => v_reason, p_corrects => ol.id);
+      else
+        begin
+          perform inv_bal_change(ol.to_balance_id, v_delta);
+        exception when check_violation or sqlstate '23514' then
+          raise exception 'Part of that stock has already been used or moved, so it cannot be taken away again. Record the movement that used it, or an adjustment' using errcode = '23514';
+        end;
+        perform inv_ml(v_mid, p_company_id, ol.item_id, null, -v_delta, ol.to_kind, 'adjustment', p_from_loc => ol.to_location_id, p_from_bin => ol.to_bin_id, p_from_emp => ol.to_employee_id,
+                       p_from_proj => ol.to_project_id, p_from_bal => ol.to_balance_id, p_cond_from => ol.condition_to, p_note => v_reason, p_corrects => ol.id);
+      end if;
+    else
+      if v_delta > 0 then
+        perform inv_bal_change(ol.from_balance_id, -v_delta);
+        perform inv_ml(v_mid, p_company_id, ol.item_id, null, v_delta, ol.from_kind, 'consumed', p_from_loc => ol.from_location_id, p_from_bin => ol.from_bin_id,
+                       p_from_emp => ol.from_employee_id, p_from_proj => ol.from_project_id, p_from_bal => ol.from_balance_id, p_cond_from => ol.condition_from, p_note => v_reason, p_corrects => ol.id);
+      else
+        perform inv_bal_change(ol.from_balance_id, -v_delta);
+        perform inv_ml(v_mid, p_company_id, ol.item_id, null, -v_delta, 'adjustment', ol.from_kind, p_to_loc => ol.from_location_id, p_to_bin => ol.from_bin_id,
+                       p_to_emp => ol.from_employee_id, p_to_proj => ol.from_project_id, p_to_bal => ol.from_balance_id, p_cond_to => ol.condition_from, p_note => v_reason, p_corrects => ol.id);
+      end if;
+    end if;
+    v_out := v_out || jsonb_build_object('line_id', ol.id, 'item_id', ol.item_id, 'was', v_eff, 'now', v_new);
+  end loop;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('corrects_movement', m.code, 'reason', v_reason, 'lines', v_out));
+end;
+$$;
+
+-- Rented stock going back to the supplier is a movement too (kind 'rental_return'). Without lines, everything of the rental that is on
+-- the shelf at this location goes back. The rental closes when nothing of it is left.
+--   Lines: {"unit_id"} or {"item_id","qty","bin_id","condition"}
+create or replace function inv_return_rental(p_company_id uuid, p_location_id uuid, p_key text, p_rental_id uuid, p_lines jsonb default null, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l inv_locations; r inv_rentals; h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; t record; v_lines jsonb; v_seen uuid[] := '{}'; v_why text;
+  v_qty numeric; v_out jsonb := '[]'::jsonb; v_left integer; v_status text;
+begin
+  perform inv_ctx(p_company_id);
+  l := inv_loc(p_company_id, p_location_id);
+  select * into r from inv_rentals where id = p_rental_id and company_id = p_company_id;
+  if r.id is null then raise exception 'Unknown rental' using errcode = '22023'; end if;
+  h := inv_begin_movement(p_company_id, 'rental_return', p_key, jsonb_build_object('location', p_location_id, 'rental', p_rental_id, 'lines', p_lines, 'note', p_note),
+         jsonb_build_object('from_location_id', l.id, 'note', coalesce(p_note, 'Returned to ' || r.supplier_name)));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  select * into r from inv_rentals where id = p_rental_id for update;
+  if r.status <> 'open' then raise exception 'That rental has already been returned' using errcode = '23514'; end if;
+  if p_lines is null or p_lines = '[]'::jsonb then
+    select coalesce(jsonb_agg(jsonb_build_object('unit_id', x.id)), '[]'::jsonb) into v_lines from inv_units x
+     where x.rental_id = r.id and x.custody_kind = 'warehouse' and x.location_id = l.id and x.lifecycle = 'active';
+    select v_lines || coalesce(jsonb_agg(jsonb_build_object('item_id', b.item_id, 'qty', b.qty, 'condition', b.condition, 'bin_id', b.bin_id)), '[]'::jsonb) into v_lines
+      from inv_balances b where b.rental_id = r.id and b.holder_kind = 'warehouse' and b.location_id = l.id and b.qty > 0;
+  else
+    v_lines := p_lines;
+  end if;
+  perform inv_lines_array(v_lines);
+  perform inv_lock_lines(v_lines);
+  for e in select x from jsonb_array_elements(v_lines) x loop
+    if nullif(e->>'unit_id', '') is not null then
+      u := inv_unit_lock((e->>'unit_id')::uuid);
+      if u.id = any (v_seen) then raise exception '% is listed twice', u.code using errcode = '22023'; end if;
+      v_seen := v_seen || u.id;
+      if u.rental_id is distinct from r.id then raise exception '% is not part of this rental', u.code using errcode = '23514'; end if;
+      v_why := inv_unit_block_reason(u, l.id, false);
+      if v_why is not null then raise exception '%', v_why using errcode = '23514'; end if;
+      update inv_units set lifecycle = 'retired', retired_at = now(), version = version + 1, notes = coalesce(notes || E'\n', '') || 'Returned to ' || r.supplier_name where id = u.id;
+      perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'warehouse', 'adjustment', p_from_loc => l.id, p_from_bin => u.bin_id, p_cond_from => u.condition, p_note => 'Returned to ' || r.supplier_name);
+      v_out := v_out || jsonb_build_object('item_id', u.item_id, 'unit_id', u.id, 'code', u.code);
+    else
+      i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+      v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+      for t in select * from inv_take_qty(i.id, v_qty, 'warehouse', l.id, nullif(e->>'bin_id', '')::uuid, p_condition => nullif(e->>'condition', ''), p_rental => r.id, p_rentals => 'only',
+                                           p_where => 'of this rental on the shelf here') loop
+        perform inv_bal_change(t.balance_id, -t.taken);
+        perform inv_ml(v_mid, p_company_id, i.id, null, t.taken, 'warehouse', 'adjustment', p_from_loc => l.id, p_from_bin => t.bin_id, p_from_bal => t.balance_id,
+                       p_cond_from => t.condition, p_note => 'Returned to ' || r.supplier_name);
+      end loop;
+      v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty);
+    end if;
+  end loop;
+  select (select count(*) from inv_units x where x.rental_id = r.id and x.lifecycle in ('draft', 'active', 'missing'))
+       + (select count(*) from inv_balances b where b.rental_id = r.id and b.qty > 0) into v_left;
+  if v_left = 0 then
+    update inv_rentals set status = 'returned', returned_at = now() where id = r.id;
+    v_status := 'returned';
+  else
+    v_status := 'open';
+  end if;
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('rental_id', r.id, 'rental_status', v_status, 'still_out', v_left, 'lines', v_out));
+end;
+$$;
+
+-- "Did my request go through?" for a retried or timed-out call. Only the person who used the key (or someone who may read stock) can see it.
+create or replace function inv_transaction_status(p_company_id uuid, p_key text)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare r inv_idempotency; m inv_movements;
+begin
+  perform inv_require_user();
+  select * into r from inv_idempotency where company_id = p_company_id and idem_key = btrim(coalesce(p_key, ''));
+  if r.company_id is null or not (r.performed_by = auth.uid() or inv_can_view_stock(p_company_id)) then
+    return jsonb_build_object('found', false, 'status', 'not_recorded');
+  end if;
+  select * into m from inv_movements where id = r.movement_id;
+  return jsonb_build_object('found', true, 'status', case when r.result is null then 'in_progress' else 'recorded' end, 'kind', r.kind,
+           'movement_id', m.id, 'movement_code', m.code, 'recorded_at', coalesce(m.recorded_at, r.created_at), 'mine', r.performed_by = auth.uid(), 'result', r.result);
+end;
+$$;
+
+-- Read-only consistency check. Returns a row for every stock row whose quantity differs from the sum of the ledger lines that point at it,
+-- and for every unit whose custody disagrees with its last movement line. Empty means the books agree. Only for companies where the
+-- caller may read the audit log.
+create or replace function inv_ledger_problems()
+returns table (problem text, company_id uuid, subject_id uuid, detail text)
+language sql stable security definer
+set search_path = public
+as $$
+  select 'balance_differs_from_ledger'::text, b.company_id, b.id,
+         format('Stock row holds %s but the ledger lines add up to %s', b.qty, coalesce(s.net, 0))
+    from inv_balances b
+    left join lateral (select sum(case when l.to_balance_id = b.id then l.qty else 0 end) - sum(case when l.from_balance_id = b.id then l.qty else 0 end) as net
+                         from inv_movement_lines l where l.to_balance_id = b.id or l.from_balance_id = b.id) s on true
+   where b.qty <> coalesce(s.net, 0) and inv_has_capability(b.company_id, 'view_audit')
+  union all
+  select 'unit_custody_differs_from_last_movement'::text, u.company_id, u.id,
+         format('%s is recorded as %s but its last movement says %s', u.code, u.custody_kind || '/' || u.lifecycle, x.to_kind)
+    from inv_units u
+    join (select distinct on (l.unit_id) l.unit_id, l.to_kind, l.to_location_id, l.to_employee_id, l.to_project_id
+            from inv_movement_lines l join inv_movements m on m.id = l.movement_id
+           where l.unit_id is not null
+           order by l.unit_id, m.recorded_at desc, m.code desc, l.id desc) x on x.unit_id = u.id
+   where inv_has_capability(u.company_id, 'view_audit')
+     and not (case x.to_kind
+                when 'warehouse' then u.custody_kind = 'warehouse' and u.location_id is not distinct from x.to_location_id and u.lifecycle in ('active', 'draft')
+                when 'employee' then u.custody_kind = 'employee' and u.employee_id is not distinct from x.to_employee_id
+                when 'project' then u.custody_kind = 'project' and u.project_id is not distinct from x.to_project_id
+                when 'transit' then u.custody_kind = 'transit'
+                when 'repair' then u.custody_kind = 'repair'
+                when 'kit' then u.custody_kind = 'kit'
+                when 'adjustment' then u.lifecycle in ('missing', 'retired')
+                else false end);
+$$;
+
+-- =============================================================================
+-- Privileges: every client-facing function is executable by signed-in users only (each checks its own permissions inside);
+-- internal helpers stay closed.
+-- =============================================================================
+revoke all on function
+  inv_ctx(uuid), inv_require_cap(uuid, text, text), inv_loc(uuid, uuid, boolean), inv_check_bin(uuid, uuid), inv_check_sharing(uuid, uuid),
+  inv_get_item(uuid), inv_get_employee(uuid, boolean), inv_get_project(uuid, boolean), inv_lines_array(jsonb), inv_lock_lines(jsonb, uuid[]),
+  inv_unit_lock(uuid), inv_custody_words(text), inv_unit_block_reason(inv_units, uuid, boolean),
+  inv_unit_reserved_by(uuid, timestamptz, timestamptz, uuid, uuid), inv_valid_condition(text, boolean),
+  inv_bal_ensure(uuid, uuid, text, text, uuid, uuid, uuid, uuid, uuid, uuid, text, uuid, timestamptz), inv_bal_change(uuid, numeric, timestamptz),
+  inv_take_qty(uuid, numeric, text, uuid, uuid, uuid, uuid, uuid, text, uuid, text, text, uuid, text),
+  inv_ml(uuid, uuid, uuid, uuid, numeric, text, text, uuid, uuid, uuid, uuid, uuid, uuid, uuid, uuid, uuid, uuid, text, text, text, uuid),
+  inv_unit_move(uuid, text, uuid, uuid, uuid, uuid, uuid, text, uuid, timestamptz, text),
+  inv_idem_begin(uuid, text, text, jsonb), inv_begin_movement(uuid, text, text, jsonb, jsonb, boolean), inv_finish_movement(uuid, text, jsonb),
+  inv_reservation_take(uuid, uuid, uuid, numeric, uuid, boolean), inv_reservation_return(uuid, uuid, uuid, numeric),
+  inv_nonblank(text, text), inv_cost_fields_present(jsonb), inv_refresh_request_status(uuid), inv_refresh_project_requests(uuid)
+  from public, anon, authenticated;
+
+revoke all on function
+  inv_save_location(uuid, uuid, text, text, text, text, text, boolean), inv_save_bin(uuid, uuid, text, text, boolean),
+  inv_set_operator_locations(uuid, uuid, uuid[]), inv_save_category(uuid, uuid, text, uuid, integer, boolean), inv_save_item(uuid, uuid, jsonb),
+  inv_replace_item(uuid, jsonb, text), inv_set_company_sharing(uuid, uuid, boolean, text),
+  inv_register_unit(uuid, uuid, text, uuid, uuid, text, jsonb, jsonb, text, text), inv_ensure_bin_label(uuid, uuid, uuid, uuid),
+  inv_record_label_print(uuid, uuid, uuid),
+  inv_start_count(uuid, uuid, text, text), inv_save_count_line(uuid, numeric, uuid, uuid, uuid, text, text, text, uuid),
+  inv_confirm_count(uuid, uuid, text, text), inv_cancel_count(uuid, uuid, text), inv_confirm_opening_custody(uuid, text, jsonb, text),
+  inv_receive_stock(uuid, uuid, text, jsonb, jsonb, text), inv_issue_to_employee(uuid, uuid, uuid, text, jsonb, timestamptz, text, uuid),
+  inv_return_from_employee(uuid, uuid, uuid, text, jsonb, text), inv_dispatch_to_project(uuid, uuid, uuid, text, jsonb, uuid, timestamptz, text),
+  inv_return_from_project(uuid, uuid, uuid, text, jsonb, text), inv_transfer_between_projects(uuid, uuid, uuid, text, jsonb, uuid, timestamptz, text),
+  inv_transfer_dispatch(uuid, uuid, uuid, text, jsonb, timestamptz, text, text, text), inv_transfer_receive(uuid, uuid, text, jsonb, text),
+  inv_consume(uuid, uuid, text, jsonb, uuid, uuid, uuid, text), inv_return_unused(uuid, uuid, text, jsonb, uuid, uuid, text),
+  inv_repair_out(uuid, uuid, text, jsonb, text, timestamptz, text), inv_repair_in(uuid, uuid, text, jsonb, text),
+  inv_pack_kit(uuid, uuid, text, uuid, jsonb, text), inv_unpack_kit(uuid, uuid, text, uuid, jsonb, text),
+  inv_set_kit_line(uuid, uuid, uuid, numeric, boolean, text, boolean), inv_check_condition(uuid, uuid, text, jsonb, text),
+  inv_adjust_stock(uuid, uuid, text, text, jsonb, text), inv_correct_movement(uuid, uuid, text, text, jsonb),
+  inv_return_rental(uuid, uuid, text, uuid, jsonb, text), inv_transaction_status(uuid, text), inv_ledger_problems()
+  from public, anon, authenticated;
+
+grant execute on function
+  inv_save_location(uuid, uuid, text, text, text, text, text, boolean), inv_save_bin(uuid, uuid, text, text, boolean),
+  inv_set_operator_locations(uuid, uuid, uuid[]), inv_save_category(uuid, uuid, text, uuid, integer, boolean), inv_save_item(uuid, uuid, jsonb),
+  inv_replace_item(uuid, jsonb, text), inv_set_company_sharing(uuid, uuid, boolean, text),
+  inv_register_unit(uuid, uuid, text, uuid, uuid, text, jsonb, jsonb, text, text), inv_ensure_bin_label(uuid, uuid, uuid, uuid),
+  inv_record_label_print(uuid, uuid, uuid),
+  inv_start_count(uuid, uuid, text, text), inv_save_count_line(uuid, numeric, uuid, uuid, uuid, text, text, text, uuid),
+  inv_confirm_count(uuid, uuid, text, text), inv_cancel_count(uuid, uuid, text), inv_confirm_opening_custody(uuid, text, jsonb, text),
+  inv_receive_stock(uuid, uuid, text, jsonb, jsonb, text), inv_issue_to_employee(uuid, uuid, uuid, text, jsonb, timestamptz, text, uuid),
+  inv_return_from_employee(uuid, uuid, uuid, text, jsonb, text), inv_dispatch_to_project(uuid, uuid, uuid, text, jsonb, uuid, timestamptz, text),
+  inv_return_from_project(uuid, uuid, uuid, text, jsonb, text), inv_transfer_between_projects(uuid, uuid, uuid, text, jsonb, uuid, timestamptz, text),
+  inv_transfer_dispatch(uuid, uuid, uuid, text, jsonb, timestamptz, text, text, text), inv_transfer_receive(uuid, uuid, text, jsonb, text),
+  inv_consume(uuid, uuid, text, jsonb, uuid, uuid, uuid, text), inv_return_unused(uuid, uuid, text, jsonb, uuid, uuid, text),
+  inv_repair_out(uuid, uuid, text, jsonb, text, timestamptz, text), inv_repair_in(uuid, uuid, text, jsonb, text),
+  inv_pack_kit(uuid, uuid, text, uuid, jsonb, text), inv_unpack_kit(uuid, uuid, text, uuid, jsonb, text),
+  inv_set_kit_line(uuid, uuid, uuid, numeric, boolean, text, boolean), inv_check_condition(uuid, uuid, text, jsonb, text),
+  inv_adjust_stock(uuid, uuid, text, text, jsonb, text), inv_correct_movement(uuid, uuid, text, text, jsonb),
+  inv_return_rental(uuid, uuid, text, uuid, jsonb, text), inv_transaction_status(uuid, text), inv_ledger_problems()
+  to authenticated;
+
+revoke all on table inv_company_sharing, inv_idempotency from anon, authenticated, public;
+grant select on table inv_company_sharing to authenticated;
+
+-- ROLLBACK (only before any Inventory stock exists; afterwards use the safe-disable script, never drop):
+--   drop function if exists <every function named in this file>;
+--   drop table if exists inv_idempotency, inv_company_sharing cascade;
+--   alter table inv_movement_lines drop column if exists corrects_line_id;
+--   (the widened inv_movements kind check only adds 'rental_return'; it can stay)
+
+-- ---- 20261201000400_inv_planning_functions.sql ----
+-- Inventory, migration 5 of 6: technology templates, equipment requests, reservations, availability, Sales checks, Projects hooks.
+--
+-- Prerequisites: migrations 1-3 and the shared helpers (20261201000250). This file reads the tables of those migrations and the shared
+-- helpers inv_lock_item, inv_check_qty, inv_local_to_utc, inv_unit_free, inv_qty_free ONLY. It does not call any stock-movement function
+-- (migration 4), so it applies and works on its own. Dispatch (migration 4) updates inv_reservations.dispatched_qty / returned_qty;
+-- this migration only creates and releases reservations and never touches those two columns.
+--
+-- CLIENT-FACING FUNCTIONS (all SECURITY DEFINER, search_path = public; 42501 permission, 23514 state, 22023 input, 40001 stale version)
+--   templates
+--     inv_save_technology(p_company_id uuid, p_technology_id uuid, p_name text, p_description text default null,
+--                         p_expected_version integer default null) returns uuid
+--     inv_save_technology_components(p_technology_id uuid, p_components jsonb, p_expected_version integer default null) returns integer
+--     inv_set_technology_status(p_technology_id uuid, p_status text, p_expected_version integer default null) returns void
+--   requests
+--     inv_create_request(p_kind text, p_project_id uuid default null, p_employee_id uuid default null, p_title text default null,
+--                        p_plan jsonb default null, p_timezone text default null, p_destination text default null,
+--                        p_pickup_location_id uuid default null, p_note text default null) returns uuid
+--     inv_save_request_plan(p_request_id uuid, p_plan jsonb, p_timezone text default null, p_expected_version integer default null) returns jsonb
+--     inv_add_request_line(p_request_id uuid, p_item_id uuid, p_qty numeric, p_note text default null,
+--                          p_expected_version integer default null) returns uuid
+--     inv_expand_technology(p_request_id uuid, p_technology_id uuid, p_multiplier numeric default 1, p_choices jsonb default '{}') returns jsonb
+--     inv_update_request_line(p_line_id uuid, p_qty numeric default null, p_note text default null, p_expected_version integer default null) returns void
+--     inv_cancel_request_line(p_line_id uuid, p_reason text default null) returns jsonb
+--     inv_submit_request(p_request_id uuid, p_expected_version integer default null) returns void
+--     inv_cancel_request(p_request_id uuid, p_reason text default null) returns jsonb
+--     inv_propose_substitution(p_line_id uuid, p_item_id uuid, p_note text default null, p_expected_version integer default null) returns void
+--     inv_decide_substitution(p_line_id uuid, p_accept boolean, p_note text default null) returns jsonb
+--     inv_set_shortage_action(p_line_id uuid, p_action text, p_note text default null, p_rental_reference text default null) returns void
+--   reservations
+--     inv_reserve(p_line_id uuid, p_location_id uuid, p_unit_ids uuid[] default null, p_qty numeric default null,
+--                 p_shortage_action text default null, p_rental_reference text default null) returns jsonb
+--     inv_release_reservation(p_reservation_id uuid, p_reason text default null) returns jsonb
+--     inv_change_request_window(p_request_id uuid, p_plan jsonb, p_timezone text default null, p_expected_version integer default null) returns jsonb
+--   availability
+--     inv_availability(p_item_id uuid, p_location_id uuid, p_from timestamptz, p_until timestamptz) returns jsonb
+--     inv_technology_availability(p_technology_id uuid, p_qty numeric, p_location_id uuid, p_from timestamptz, p_until timestamptz) returns jsonb
+--   Sales
+--     inv_request_opportunity_check(p_opportunity_id uuid, p_location_id uuid default null) returns uuid
+--     inv_record_opportunity_check(p_opportunity_id uuid, p_location_id uuid default null, p_note text default null) returns uuid
+--     inv_opportunity_availability(p_opportunity_id uuid) returns jsonb
+--   Projects
+--     inv_project_equipment(p_project_id uuid) returns jsonb
+--     inv_import_handover_requirements(p_project_id uuid) returns uuid
+--   triggers on proj_projects (internal): inv_proj_projects_import (AFTER INSERT, client projects), inv_proj_projects_release (AFTER UPDATE OF status)
+--
+-- Nothing in this file writes a CRM, Projects or HR table. Winning an opportunity or moving any CRM stage never reserves anything: a
+-- reservation exists only because a person called inv_reserve on a request line.
+
+-- =============================================================================
+-- Internal helpers
+-- =============================================================================
+create or replace function inv_user_name(p_user_id uuid)
+returns text
+language sql stable security definer
+set search_path = public
+as $$
+  select coalesce(nullif(btrim(p.full_name), ''), split_part(p.email, '@', 1)) from profiles p where p.id = p_user_id;
+$$;
+
+create or replace function inv_check_version(p_current integer, p_expected integer)
+returns void
+language plpgsql immutable
+as $$
+begin
+  if p_expected is not null and p_expected <> p_current then
+    raise exception 'This was changed by someone else. Reload and try again' using errcode = '40001';
+  end if;
+end;
+$$;
+
+-- Locks and returns a request the caller can at least see. Not-visible and not-existing read the same.
+create or replace function inv_lock_request(p_request_id uuid)
+returns inv_requests
+language plpgsql security definer
+set search_path = public
+as $$
+declare r inv_requests;
+begin
+  perform inv_require_user();
+  select * into r from inv_requests where id = p_request_id for update;
+  if not found or not inv_can_see_request(r.id) then
+    raise exception 'Request not found' using errcode = 'P0002';
+  end if;
+  return r;
+end;
+$$;
+
+-- Who may change a request: warehouse staff and founders of the company; for a project request the Project Manager (or acting PM, or
+-- project founder) through proj_can_manage; for an employee request the person who made it while they still may.
+create or replace function inv_can_edit_request(r inv_requests)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select inv_has_capability(r.company_id, 'warehouse')
+      or (r.kind = 'project' and proj_can_manage(r.project_id))
+      or (r.kind = 'employee' and r.requested_by = auth.uid()
+          and (inv_has_capability(r.company_id, 'request_for_employees') or is_manager_of(r.employee_id)));
+$$;
+
+create or replace function inv_require_edit(r inv_requests)
+returns void
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  if not inv_can_edit_request(r) then
+    raise exception 'You cannot change this request. Only the project manager, the person who made it, or warehouse staff can' using errcode = '42501';
+  end if;
+end;
+$$;
+
+-- Plan dates are LOCAL wall-clock times of the request's IANA zone ("2030-03-30 12:00"), never carrying an offset. Each is converted to a
+-- UTC instant with inv_local_to_utc (daylight saving handled in one place). The window is [earliest given, latest given]. A single
+-- date gives an incomplete window (from only). expected_return_at is return_due, or dismantle_end when no return date is given.
+create or replace function inv_plan_window(p_plan jsonb, p_tz text, out o_plan jsonb, out o_from timestamptz, out o_until timestamptz, out o_return timestamptz)
+language plpgsql stable
+as $$
+declare
+  v_keys constant text[] := array['prep_start', 'dispatch', 'install_start', 'show_start', 'show_end', 'dismantle_end', 'return_due', 'inspect_until'];
+  k text;
+  v text;
+  v_local timestamp;
+  v_t timestamptz;
+  v_dismantle timestamptz;
+begin
+  if p_plan is null then p_plan := '{}'::jsonb; end if;
+  if jsonb_typeof(p_plan) <> 'object' then
+    raise exception 'The plan must be a set of named dates' using errcode = '22023';
+  end if;
+  if not proj_valid_timezone(p_tz) then
+    raise exception 'Unknown time zone %', coalesce(p_tz, '(none)') using errcode = '22023';
+  end if;
+  for k in select jsonb_object_keys(p_plan) loop
+    if not (k = any (v_keys)) then
+      raise exception 'Unknown plan date "%". Use: %', k, array_to_string(v_keys, ', ') using errcode = '22023';
+    end if;
+  end loop;
+  o_plan := '{}'::jsonb;
+  foreach k in array v_keys loop
+    if not (p_plan ? k) or jsonb_typeof(p_plan->k) = 'null' or btrim(coalesce(p_plan->>k, '')) = '' then continue; end if;
+    if jsonb_typeof(p_plan->k) <> 'string' then
+      raise exception 'The date "%" must be written as YYYY-MM-DD HH:MM', k using errcode = '22023';
+    end if;
+    v := btrim(p_plan->>k);
+    if v !~ '^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?)?$' then
+      raise exception 'The date "%" must be local time written as YYYY-MM-DD HH:MM, without a time zone offset', k using errcode = '22023';
+    end if;
+    begin
+      v_local := v::timestamp;
+    exception when others then
+      raise exception 'The date "%" is not a real date or time', k using errcode = '22023';
+    end;
+    v_t := inv_local_to_utc(v_local, p_tz);
+    o_plan := o_plan || jsonb_build_object(k, to_char(v_local, 'YYYY-MM-DD"T"HH24:MI'));
+    if o_from is null or v_t < o_from then o_from := v_t; end if;
+    if o_until is null or v_t > o_until then o_until := v_t; end if;
+    if k = 'return_due' then o_return := v_t; end if;
+    if k = 'dismantle_end' then v_dismantle := v_t; end if;
+  end loop;
+  if o_return is null then o_return := v_dismantle; end if;
+  if o_from is not null and o_from = o_until then o_until := null; o_return := null; end if;
+end;
+$$;
+
+-- The item the warehouse treats as the requirement: while a substitute is only proposed, the original; afterwards the line's item.
+create or replace function inv_effective_item(l inv_request_lines)
+returns uuid
+language sql immutable
+as $$
+  select case when l.substitution_status = 'proposed' and l.original_item_id is not null then l.original_item_id else l.item_id end;
+$$;
+
+-- Why a unit cannot be reserved for [p_from, p_until) at a location, in plain words; null when it is free. Another project's name is
+-- only mentioned to a caller who can see that project.
+create or replace function inv_reserve_block_reason(p_unit_id uuid, p_from timestamptz, p_until timestamptz, p_location_id uuid, p_exclude_line uuid default null)
+returns text
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  u inv_units;
+  k inv_units;
+  t inv_transfers;
+  res inv_reservations;
+  rq inv_requests;
+  v_tz text;
+  v_who text := '';
+begin
+  select * into u from inv_units where id = p_unit_id;
+  if not found then return 'Unknown unit'; end if;
+  if inv_unit_free(u.id, p_from, p_until, p_location_id, p_exclude_line) then return null; end if;
+  select timezone into v_tz from inv_locations where id = p_location_id;
+  v_tz := coalesce(v_tz, 'UTC');
+  if u.lifecycle = 'draft' then return u.code || ' is still a draft record: it has not been counted and verified, so it cannot be reserved'; end if;
+  if u.lifecycle = 'retired' then return u.code || ' is retired'; end if;
+  if u.lifecycle = 'missing' then return u.code || ' is recorded as missing'; end if;
+  if u.condition = 'needs_inspection' then return u.code || ' is waiting for inspection'; end if;
+  if u.condition in ('damaged', 'unserviceable') then return u.code || ' is ' || u.condition || ' and is not available'; end if;
+  if u.in_kit_id is not null then
+    select * into k from inv_units where id = u.in_kit_id;
+    return u.code || ' is packed in kit ' || coalesce(k.code, '?') || '. Reserve the kit, not the part';
+  end if;
+  if u.custody_kind = 'employee' then return u.code || ' is assigned to an employee and is not available'; end if;
+  if u.custody_kind = 'repair' then return u.code || ' is out for repair'; end if;
+  if u.custody_kind = 'warehouse' and u.location_id is distinct from p_location_id then return u.code || ' is at a different location'; end if;
+  if u.custody_kind = 'project' then
+    if u.expected_return_at is null then return u.code || ' is out on a project with no return date'; end if;
+    if u.expected_return_at < now() then return u.code || ' is overdue back from a project and is not counted as ready'; end if;
+    if u.expected_return_at > p_from then return u.code || ' is out on a project and not expected back before the start of this window'; end if;
+    if u.location_id is distinct from p_location_id then return u.code || ' will return to a different location'; end if;
+  end if;
+  if u.custody_kind = 'transit' then
+    select * into t from inv_transfers where id = u.transfer_id;
+    if t.expected_at is null then return u.code || ' is in transit with no expected arrival'; end if;
+    if t.expected_at < now() then return u.code || ' is overdue in transit and is not counted as ready'; end if;
+    if t.expected_at > p_from or t.to_location_id is distinct from p_location_id then return u.code || ' is in transit and will not be here before the start of this window'; end if;
+  end if;
+  select r.* into res from inv_reservations r
+   where r.unit_id = u.id and r.status = 'active' and r.reserved_during && tstzrange(p_from, p_until)
+     and (p_exclude_line is null or r.request_line_id <> p_exclude_line)
+   order by lower(r.reserved_during) limit 1;
+  if found then
+    select q.* into rq from inv_request_lines l join inv_requests q on q.id = l.request_id where l.id = res.request_line_id;
+    if rq.project_id is not null and proj_can_view_summary(rq.project_id) then
+      v_who := ' for ' || (select name from proj_projects where id = rq.project_id);
+    end if;
+    return format('%s is already reserved from %s to %s (%s)%s', u.code,
+                  to_char(lower(res.reserved_during) at time zone v_tz, 'DD Mon YYYY HH24:MI'),
+                  to_char(upper(res.reserved_during) at time zone v_tz, 'DD Mon YYYY HH24:MI'), v_tz, v_who);
+  end if;
+  return u.code || ' is not available for these dates';
+end;
+$$;
+
+-- How many of an item can be promised for the range at a location: owned units counted one by one (a kit counts once; parts packed in a
+-- kit never count by themselves), quantity stock through inv_qty_free.
+create or replace function inv_free_count(p_item_id uuid, p_location_id uuid, p_from timestamptz, p_until timestamptz, p_exclude_line uuid default null)
+returns numeric
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare v_tracking text;
+begin
+  select tracking into v_tracking from inv_items where id = p_item_id;
+  if v_tracking in ('individual', 'kit') then
+    return (select count(*) from inv_units u
+             where u.item_id = p_item_id and u.ownership = 'owned' and inv_unit_free(u.id, p_from, p_until, p_location_id, p_exclude_line));
+  end if;
+  return inv_qty_free(p_item_id, p_location_id, p_from, p_until, p_exclude_line, false);
+end;
+$$;
+
+-- =============================================================================
+-- Technology templates: recipes, never stock
+-- =============================================================================
+create or replace function inv_save_technology(
+  p_company_id uuid,
+  p_technology_id uuid,
+  p_name text,
+  p_description text default null,
+  p_expected_version integer default null
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  t inv_technologies;
+  v_name text := btrim(coalesce(p_name, ''));
+  v_id uuid;
+begin
+  perform inv_require_user();
+  if not inv_has_capability(p_company_id, 'manage_catalogue') then
+    raise exception 'Only catalogue managers can create or change technology templates' using errcode = '42501';
+  end if;
+  perform inv_require_enabled(p_company_id);
+  if length(v_name) not between 1 and 160 then
+    raise exception 'Give the technology a name (up to 160 characters)' using errcode = '22023';
+  end if;
+  if p_technology_id is null then
+    insert into inv_technologies (company_id, name, description, created_by)
+    values (p_company_id, v_name, nullif(btrim(p_description), ''), auth.uid())
+    returning id into v_id;
+    return v_id;
+  end if;
+  select * into t from inv_technologies where id = p_technology_id and company_id = p_company_id for update;
+  if not found then raise exception 'Technology not found' using errcode = 'P0002'; end if;
+  perform inv_check_version(t.version, p_expected_version);
+  if t.status = 'retired' then raise exception 'A retired template cannot be edited' using errcode = '23514'; end if;
+  update inv_technologies set name = v_name, description = nullif(btrim(p_description), ''), version = version + 1, updated_at = now()
+   where id = t.id;
+  return t.id;
+exception when unique_violation then
+  raise exception 'A technology called "%" already exists', v_name using errcode = '23505';
+end;
+$$;
+
+-- Replaces the whole component list. Every element: {item_id, qty, alt_group?, is_optional?, note?, sort_order?}. Components with the same
+-- alt_group are alternatives to each other (the first by sort order is the standard choice). Never edits request lines: lines hold their
+-- own snapshot.
+create or replace function inv_save_technology_components(p_technology_id uuid, p_components jsonb, p_expected_version integer default null)
+returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  t inv_technologies;
+  e jsonb;
+  n integer := 0;
+  v_item inv_items;
+  v_qty numeric;
+  v_group text;
+  v_opt boolean;
+  v_seen uuid[] := '{}';
+  v_groups jsonb := '{}'::jsonb;
+begin
+  perform inv_require_user();
+  select * into t from inv_technologies where id = p_technology_id for update;
+  if not found or not inv_can_browse(t.company_id) then raise exception 'Technology not found' using errcode = 'P0002'; end if;
+  if not inv_has_capability(t.company_id, 'manage_catalogue') then
+    raise exception 'Only catalogue managers can change technology templates' using errcode = '42501';
+  end if;
+  perform inv_require_enabled(t.company_id);
+  perform inv_check_version(t.version, p_expected_version);
+  if t.status = 'retired' then raise exception 'A retired template cannot be edited' using errcode = '23514'; end if;
+  if p_components is null or jsonb_typeof(p_components) <> 'array' then
+    raise exception 'The components must be a list' using errcode = '22023';
+  end if;
+
+  delete from inv_technology_components where technology_id = t.id;
+  for e in select * from jsonb_array_elements(p_components) loop
+    n := n + 1;
+    if jsonb_typeof(e) <> 'object' then raise exception 'Each component needs an item and a quantity' using errcode = '22023'; end if;
+    select * into v_item from inv_items where id = nullif(e->>'item_id', '')::uuid and company_id = t.company_id;
+    if not found then raise exception 'Component % uses an item that does not exist in this company', n using errcode = '22023'; end if;
+    if v_item.status = 'retired' then raise exception '% is retired and cannot be part of a template', v_item.name using errcode = '23514'; end if;
+    if v_item.id = any (v_seen) then
+      raise exception '% appears twice. List an item once, and use an alternative group for look-alikes', v_item.name using errcode = '22023';
+    end if;
+    v_seen := v_seen || v_item.id;
+    v_qty := inv_check_qty(v_item.id, (e->>'qty')::numeric);
+    v_group := nullif(btrim(e->>'alt_group'), '');
+    if v_group is not null and length(v_group) > 60 then raise exception 'An alternative group name is at most 60 characters' using errcode = '22023'; end if;
+    v_opt := coalesce((e->>'is_optional')::boolean, false);
+    if v_group is not null then
+      if v_groups ? v_group and (v_groups->>v_group)::boolean <> v_opt then
+        raise exception 'All alternatives in group "%" must be required, or all optional', v_group using errcode = '22023';
+      end if;
+      v_groups := v_groups || jsonb_build_object(v_group, v_opt);
+    end if;
+    insert into inv_technology_components (technology_id, company_id, item_id, qty, alt_group, is_optional, note, sort_order)
+    values (t.id, t.company_id, v_item.id, v_qty, v_group, v_opt, nullif(btrim(e->>'note'), ''), coalesce((e->>'sort_order')::integer, n * 10));
+  end loop;
+  if t.status = 'complete' and not exists (select 1 from inv_technology_components where technology_id = t.id and not is_optional) then
+    raise exception 'A complete template needs at least one required component. Set it back to draft first' using errcode = '23514';
+  end if;
+  update inv_technologies set version = version + 1, updated_at = now() where id = t.id returning version into n;
+  return n;
+end;
+$$;
+
+create or replace function inv_set_technology_status(p_technology_id uuid, p_status text, p_expected_version integer default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare t inv_technologies;
+begin
+  perform inv_require_user();
+  select * into t from inv_technologies where id = p_technology_id for update;
+  if not found or not inv_can_browse(t.company_id) then raise exception 'Technology not found' using errcode = 'P0002'; end if;
+  if not inv_has_capability(t.company_id, 'manage_catalogue') then
+    raise exception 'Only catalogue managers can change technology templates' using errcode = '42501';
+  end if;
+  perform inv_require_enabled(t.company_id);
+  perform inv_check_version(t.version, p_expected_version);
+  if p_status not in ('draft', 'complete', 'retired') then
+    raise exception 'The status must be draft, complete or retired' using errcode = '22023';
+  end if;
+  if t.status = p_status then return; end if;
+  if p_status = 'complete' then
+    if not exists (select 1 from inv_technology_components where technology_id = t.id and not is_optional) then
+      raise exception 'A complete template needs at least one required component' using errcode = '23514';
+    end if;
+    if exists (select 1 from inv_technology_components c join inv_items i on i.id = c.item_id where c.technology_id = t.id and i.status = 'retired') then
+      raise exception 'A component of this template is a retired item. Replace it first' using errcode = '23514';
+    end if;
+  end if;
+  update inv_technologies set status = p_status, updated_at = now() where id = t.id;
+exception when unique_violation then
+  raise exception 'Another active technology already uses the name "%"', t.name using errcode = '23505';
+end;
+$$;
+
+-- =============================================================================
+-- Requests
+-- =============================================================================
+create or replace function inv_create_request(
+  p_kind text,
+  p_project_id uuid default null,
+  p_employee_id uuid default null,
+  p_title text default null,
+  p_plan jsonb default null,
+  p_timezone text default null,
+  p_destination text default null,
+  p_pickup_location_id uuid default null,
+  p_note text default null
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_company uuid;
+  v_tz text;
+  pr proj_projects;
+  emp employees;
+  v_loc_tz text;
+  w record;
+  v_id uuid;
+begin
+  perform inv_require_user();
+  if p_kind not in ('project', 'employee') then raise exception 'A request is for a project or for an employee' using errcode = '22023'; end if;
+  if p_kind = 'project' then
+    if p_employee_id is not null then raise exception 'A project request has no employee' using errcode = '22023'; end if;
+    select * into pr from proj_projects where id = p_project_id;
+    if not found then raise exception 'Project not found' using errcode = 'P0002'; end if;
+    v_company := pr.company_id;
+    if not (proj_can_manage(pr.id) or inv_has_capability(v_company, 'warehouse')) then
+      raise exception 'Only the project manager, an acting project manager or warehouse staff can request equipment for this project' using errcode = '42501';
+    end if;
+    if pr.status in ('completed', 'archived') then
+      raise exception 'A completed or archived project cannot get new equipment requests' using errcode = '23514';
+    end if;
+    select site_timezone into v_tz from proj_project_details where project_id = pr.id;
+  else
+    if p_project_id is not null then raise exception 'An employee request has no project' using errcode = '22023'; end if;
+    select * into emp from employees where id = p_employee_id and deleted_at is null;
+    if not found then raise exception 'Employee not found' using errcode = 'P0002'; end if;
+    v_company := emp.company_id;
+    if not (inv_has_capability(v_company, 'request_for_employees')
+            or (is_manager_of(emp.id) and exists (select 1 from employees me where me.id = current_employee_id() and me.company_id = emp.company_id))) then
+      raise exception 'Only department heads with that right, or the employee''s manager, can request equipment for an employee' using errcode = '42501';
+    end if;
+    if emp.employment_status <> 'active' then
+      raise exception 'Equipment can only be requested for an active employee' using errcode = '23514';
+    end if;
+  end if;
+  perform inv_require_enabled(v_company);
+  if p_pickup_location_id is not null then
+    select timezone into v_loc_tz from inv_locations where id = p_pickup_location_id and company_id = v_company and is_active;
+    if not found then raise exception 'Pickup location not found' using errcode = '22023'; end if;
+  end if;
+  v_tz := coalesce(nullif(btrim(p_timezone), ''), v_tz, v_loc_tz);
+  if v_tz is null then raise exception 'Choose the time zone of the dates, or a pickup location' using errcode = '22023'; end if;
+  select * into w from inv_plan_window(p_plan, v_tz);
+  insert into inv_requests (company_id, code, kind, project_id, employee_id, requested_by, title, destination, pickup_location_id, timezone,
+                            plan, needed_from, needed_until, expected_return_at, note)
+  values (v_company, inv_next_code(v_company, 'request'), p_kind, p_project_id, p_employee_id, auth.uid(), nullif(btrim(p_title), ''),
+          nullif(btrim(p_destination), ''), p_pickup_location_id, v_tz, w.o_plan, w.o_from, w.o_until, w.o_return, nullif(btrim(p_note), ''))
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- Planning dates while nothing is reserved. Once reservations exist the dates move through inv_change_request_window.
+create or replace function inv_save_request_plan(p_request_id uuid, p_plan jsonb, p_timezone text default null, p_expected_version integer default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  r inv_requests;
+  w record;
+  v_tz text;
+  v_version integer;
+begin
+  r := inv_lock_request(p_request_id);
+  perform inv_require_edit(r);
+  perform inv_require_enabled(r.company_id);
+  perform inv_check_version(r.version, p_expected_version);
+  if r.status not in ('draft', 'submitted', 'in_progress') then
+    raise exception 'A % request can no longer be changed', r.status using errcode = '23514';
+  end if;
+  if exists (select 1 from inv_reservations x join inv_request_lines l on l.id = x.request_line_id where l.request_id = r.id and x.status = 'active') then
+    raise exception 'Equipment is already reserved for this request. Change its dates with the date-change action, which rechecks every reservation' using errcode = '23514';
+  end if;
+  v_tz := coalesce(nullif(btrim(p_timezone), ''), r.timezone);
+  select * into w from inv_plan_window(p_plan, v_tz);
+  update inv_requests set plan = w.o_plan, needed_from = w.o_from, needed_until = w.o_until, expected_return_at = w.o_return,
+         timezone = v_tz, version = version + 1
+   where id = r.id returning version into v_version;
+  return jsonb_build_object('request_id', r.id, 'version', v_version, 'timezone', v_tz, 'plan', w.o_plan,
+                            'needed_from', w.o_from, 'needed_until', w.o_until, 'expected_return_at', w.o_return);
+end;
+$$;
+
+create or replace function inv_add_request_line(p_request_id uuid, p_item_id uuid, p_qty numeric, p_note text default null, p_expected_version integer default null)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  r inv_requests;
+  v_item inv_items;
+  v_id uuid;
+begin
+  r := inv_lock_request(p_request_id);
+  perform inv_require_edit(r);
+  perform inv_require_enabled(r.company_id);
+  perform inv_check_version(r.version, p_expected_version);
+  if r.status not in ('draft', 'submitted', 'in_progress') then
+    raise exception 'A % request can no longer be changed', r.status using errcode = '23514';
+  end if;
+  select * into v_item from inv_items where id = p_item_id and company_id = r.company_id;
+  if not found then raise exception 'Unknown item' using errcode = '22023'; end if;
+  if v_item.status = 'retired' then raise exception '% is retired and cannot be requested', v_item.name using errcode = '23514'; end if;
+  perform inv_check_qty(v_item.id, p_qty);
+  insert into inv_request_lines (request_id, company_id, item_id, qty, note, sort_order)
+  values (r.id, r.company_id, v_item.id, p_qty, nullif(btrim(p_note), ''),
+          (select coalesce(max(sort_order), 0) + 10 from inv_request_lines where request_id = r.id))
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- Copies a technology's components x multiplier into the request as request lines (a SNAPSHOT: later template edits never reach them).
+-- Returns the created line ids and, per alternative group, the alternatives that were only offered.
+create or replace function inv_expand_into_request(r inv_requests, p_technology_id uuid, p_multiplier numeric, p_choices jsonb)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  t inv_technologies;
+  g record;
+  c inv_technology_components;
+  v_std inv_technology_components;
+  v_chosen inv_technology_components;
+  v_item inv_items;
+  v_std_item inv_items;
+  v_ids uuid[];
+  v_lines uuid[] := '{}';
+  v_offered jsonb := '[]'::jsonb;
+  v_alts jsonb;
+  v_choice text;
+  v_line uuid;
+  v_sort integer;
+begin
+  select * into t from inv_technologies where id = p_technology_id and company_id = r.company_id;
+  if not found then raise exception 'Technology not found' using errcode = 'P0002'; end if;
+  if t.status <> 'complete' then
+    raise exception 'Only a complete template can be added to a request. "%" is %', t.name, t.status using errcode = '23514';
+  end if;
+  if not exists (select 1 from inv_technology_components where technology_id = t.id and not is_optional) then
+    raise exception 'The template "%" has no required component', t.name using errcode = '23514';
+  end if;
+  if p_multiplier is null or p_multiplier <= 0 then raise exception 'The quantity of the technology must be more than zero' using errcode = '22023'; end if;
+  if p_choices is null then p_choices := '{}'::jsonb; end if;
+  if jsonb_typeof(p_choices) <> 'object' then raise exception 'The alternative choices must be {group: item}' using errcode = '22023'; end if;
+  for v_choice in select jsonb_object_keys(p_choices) loop
+    if not exists (select 1 from inv_technology_components where technology_id = t.id and alt_group = v_choice) then
+      raise exception 'The template "%" has no alternative group "%"', t.name, v_choice using errcode = '22023';
+    end if;
+  end loop;
+  select coalesce(max(sort_order), 0) into v_sort from inv_request_lines where request_id = r.id;
+
+  for g in
+    select coalesce(x.alt_group, 'component:' || x.id::text) as slot, min(x.alt_group) as alt_group,
+           array_agg(x.id order by x.sort_order, x.id) as ids, min(x.sort_order) as first_sort
+      from inv_technology_components x where x.technology_id = t.id
+     group by coalesce(x.alt_group, 'component:' || x.id::text)
+     order by min(x.sort_order), 1
+  loop
+    v_ids := g.ids;
+    select * into v_std from inv_technology_components where id = v_ids[1];
+    v_chosen := v_std;
+    if g.alt_group is not null and p_choices ? g.alt_group then
+      select * into v_chosen from inv_technology_components
+       where technology_id = t.id and alt_group = g.alt_group and item_id = nullif(p_choices->>g.alt_group, '')::uuid;
+      if not found then
+        raise exception 'The item chosen for group "%" is not one of its alternatives in the template', g.alt_group using errcode = '22023';
+      end if;
+    end if;
+    select * into v_item from inv_items where id = v_chosen.item_id;
+    select * into v_std_item from inv_items where id = v_std.item_id;
+    if v_item.status = 'retired' then
+      raise exception '% is retired. Edit the template "%" first', v_item.name, t.name using errcode = '23514';
+    end if;
+    perform inv_check_qty(v_item.id, v_chosen.qty * p_multiplier);
+    select coalesce(jsonb_agg(jsonb_build_object('item_id', a.item_id, 'item_name', ai.name, 'qty', a.qty) order by a.sort_order, a.id), '[]'::jsonb)
+      into v_alts
+      from inv_technology_components a join inv_items ai on ai.id = a.item_id
+     where a.technology_id = t.id and a.alt_group is not null and a.alt_group = g.alt_group and a.id <> v_chosen.id;
+    v_sort := v_sort + 10;
+    insert into inv_request_lines (request_id, company_id, item_id, qty, technology_id, technology_snapshot, alt_group, is_optional,
+                                   original_item_id, substitution_status, note, sort_order)
+    values (r.id, r.company_id, v_item.id, v_chosen.qty * p_multiplier, t.id,
+            jsonb_build_object('technology_id', t.id, 'name', t.name, 'version', t.version, 'multiplier', p_multiplier, 'expanded_at', now(),
+              'component', jsonb_build_object('item_id', v_item.id, 'item_name', v_item.name, 'qty', v_chosen.qty, 'note', v_chosen.note,
+                                              'is_optional', v_chosen.is_optional, 'alt_group', v_chosen.alt_group),
+              'standard_item_id', v_std.item_id, 'standard_qty', v_std.qty, 'alternatives', v_alts),
+            v_chosen.alt_group, v_chosen.is_optional,
+            case when v_chosen.id <> v_std.id then v_std.item_id end,
+            case when v_chosen.id <> v_std.id then 'proposed' else 'none' end,
+            v_chosen.note, v_sort)
+    returning id into v_line;
+    v_lines := v_lines || v_line;
+    if g.alt_group is not null then
+      v_offered := v_offered || jsonb_build_object('alt_group', g.alt_group, 'line_id', v_line, 'chosen_item_id', v_item.id,
+                     'standard_item_id', v_std.item_id, 'standard_item_name', v_std_item.name, 'alternatives', v_alts);
+    end if;
+  end loop;
+  return jsonb_build_object('request_id', r.id, 'technology_id', t.id, 'technology_version', t.version, 'line_ids', to_jsonb(v_lines),
+                            'offered_alternatives', v_offered);
+end;
+$$;
+
+create or replace function inv_expand_technology(p_request_id uuid, p_technology_id uuid, p_multiplier numeric default 1, p_choices jsonb default '{}'::jsonb)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare r inv_requests;
+begin
+  r := inv_lock_request(p_request_id);
+  perform inv_require_edit(r);
+  perform inv_require_enabled(r.company_id);
+  if r.status not in ('draft', 'submitted', 'in_progress') then
+    raise exception 'A % request can no longer be changed', r.status using errcode = '23514';
+  end if;
+  return inv_expand_into_request(r, p_technology_id, p_multiplier, p_choices);
+end;
+$$;
+
+create or replace function inv_update_request_line(p_line_id uuid, p_qty numeric default null, p_note text default null, p_expected_version integer default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  r inv_requests;
+  l inv_request_lines;
+  v_req uuid;
+  v_reserved numeric;
+begin
+  select request_id into v_req from inv_request_lines where id = p_line_id;
+  if not found then raise exception 'Request line not found' using errcode = 'P0002'; end if;
+  r := inv_lock_request(v_req);
+  perform inv_require_edit(r);
+  perform inv_require_enabled(r.company_id);
+  select * into l from inv_request_lines where id = p_line_id for update;
+  perform inv_check_version(l.version, p_expected_version);
+  if r.status not in ('draft', 'submitted', 'in_progress') then
+    raise exception 'A % request can no longer be changed', r.status using errcode = '23514';
+  end if;
+  if l.status <> 'open' then raise exception 'This line is %, so it cannot be changed', l.status using errcode = '23514'; end if;
+  if p_qty is not null then
+    perform inv_check_qty(l.item_id, p_qty);
+    select coalesce(sum(qty), 0) into v_reserved from inv_reservations where request_line_id = l.id and status in ('active', 'completed');
+    if p_qty < v_reserved then
+      raise exception 'This line already has % reserved. Release some of it before asking for less', trim_scale(v_reserved) using errcode = '23514';
+    end if;
+  end if;
+  update inv_request_lines set qty = coalesce(p_qty, qty), note = case when p_note is not null then nullif(btrim(p_note), '') else note end,
+         version = version + 1
+   where id = l.id;
+end;
+$$;
+
+-- Releases the UNUSED part of one reservation (nothing dispatched). A reservation with equipment already out keeps exactly the
+-- dispatched quantity; the unused rest is kept in history as a released row. Returns the quantity released.
+create or replace function inv_release_row(res inv_reservations, p_reason text)
+returns numeric
+language plpgsql security definer
+set search_path = public
+as $$
+declare v_rest numeric;
+begin
+  if res.status <> 'active' then return 0; end if;
+  if res.dispatched_qty = 0 then
+    update inv_reservations set status = 'released', released_at = now(), released_reason = p_reason where id = res.id;
+    return res.qty;
+  end if;
+  if res.dispatched_qty < res.qty then
+    v_rest := res.qty - res.dispatched_qty;
+    insert into inv_reservations (company_id, request_line_id, item_id, unit_id, location_id, qty, reserved_during, status, released_reason,
+                                  made_by, made_at, released_at)
+    values (res.company_id, res.request_line_id, res.item_id, res.unit_id, res.location_id, v_rest, res.reserved_during, 'released', p_reason,
+            res.made_by, res.made_at, now());
+    update inv_reservations set qty = res.dispatched_qty where id = res.id;
+    return v_rest;
+  end if;
+  return 0;
+end;
+$$;
+
+-- Releases every unused reservation of a line; equipment that is already out stays outstanding (nothing is returned on paper).
+create or replace function inv_release_unused(p_line_id uuid, p_reason text)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  res inv_reservations;
+  v_released numeric := 0;
+  v_count integer := 0;
+  v_q numeric;
+begin
+  for res in select * from inv_reservations where request_line_id = p_line_id and status = 'active' order by made_at, id for update loop
+    v_q := inv_release_row(res, p_reason);
+    if v_q > 0 then v_released := v_released + v_q; v_count := v_count + 1; end if;
+  end loop;
+  return jsonb_build_object('released_qty', v_released, 'released_reservations', v_count,
+    'outstanding_qty', (select coalesce(sum(dispatched_qty - returned_qty), 0) from inv_reservations where request_line_id = p_line_id and status = 'active'));
+end;
+$$;
+
+create or replace function inv_cancel_request_line(p_line_id uuid, p_reason text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  r inv_requests;
+  l inv_request_lines;
+  v_req uuid;
+  v_rel jsonb;
+begin
+  select request_id into v_req from inv_request_lines where id = p_line_id;
+  if not found then raise exception 'Request line not found' using errcode = 'P0002'; end if;
+  r := inv_lock_request(v_req);
+  perform inv_require_edit(r);
+  perform inv_require_enabled(r.company_id);
+  select * into l from inv_request_lines where id = p_line_id for update;
+  if l.status = 'cancelled' then
+    return jsonb_build_object('line_id', l.id, 'status', 'cancelled', 'released_qty', 0, 'outstanding_qty',
+      (select coalesce(sum(dispatched_qty - returned_qty), 0) from inv_reservations where request_line_id = l.id and status = 'active'));
+  end if;
+  if r.status in ('cancelled', 'closed') then raise exception 'A % request can no longer be changed', r.status using errcode = '23514'; end if;
+  if l.status <> 'open' then raise exception 'This line is %, so it cannot be cancelled', l.status using errcode = '23514'; end if;
+  v_rel := inv_release_unused(l.id, coalesce(nullif(btrim(p_reason), ''), 'Line cancelled'));
+  update inv_request_lines set status = 'cancelled', version = version + 1 where id = l.id;
+  perform inv_refresh_request_status(l.request_id);
+  return v_rel || jsonb_build_object('line_id', l.id, 'status', 'cancelled');
+end;
+$$;
+
+create or replace function inv_submit_request(p_request_id uuid, p_expected_version integer default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare r inv_requests;
+begin
+  r := inv_lock_request(p_request_id);
+  perform inv_require_edit(r);
+  perform inv_require_enabled(r.company_id);
+  if r.status in ('submitted', 'in_progress', 'fulfilled') then return; end if;     -- repeated click
+  if r.status <> 'draft' then raise exception 'A % request cannot be submitted', r.status using errcode = '23514'; end if;
+  perform inv_check_version(r.version, p_expected_version);
+  if not exists (select 1 from inv_request_lines where request_id = r.id and status = 'open') then
+    raise exception 'Add at least one item before submitting' using errcode = '23514';
+  end if;
+  if r.needed_from is null or r.needed_until is null then
+    raise exception 'Set the planning dates (at least a start and an end) before submitting' using errcode = '23514';
+  end if;
+  if r.needed_until <= now() then raise exception 'The planning dates are already in the past' using errcode = '23514'; end if;
+  update inv_requests set status = 'submitted', submitted_at = now(), version = version + 1 where id = r.id;
+end;
+$$;
+
+-- Cancels a request and every open line: unused reservations are released, equipment already out stays outstanding.
+create or replace function inv_cancel_request_internal(p_request_id uuid, p_reason text)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  l record;
+  v_rel jsonb;
+  v_released numeric := 0;
+  v_outstanding numeric := 0;
+begin
+  for l in select id from inv_request_lines where request_id = p_request_id order by sort_order, id for update loop
+    v_rel := inv_release_unused(l.id, p_reason);
+    v_released := v_released + (v_rel->>'released_qty')::numeric;
+    v_outstanding := v_outstanding + (v_rel->>'outstanding_qty')::numeric;
+    update inv_request_lines set status = 'cancelled', version = version + 1 where id = l.id and status = 'open';
+  end loop;
+  update inv_requests set status = 'cancelled', cancelled_at = now(), cancel_reason = p_reason, version = version + 1
+   where id = p_request_id and status <> 'cancelled';
+  return jsonb_build_object('request_id', p_request_id, 'status', 'cancelled', 'released_qty', v_released, 'outstanding_qty', v_outstanding);
+end;
+$$;
+
+create or replace function inv_cancel_request(p_request_id uuid, p_reason text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  r inv_requests;
+  v_reason text := nullif(btrim(p_reason), '');
+begin
+  r := inv_lock_request(p_request_id);
+  perform inv_require_edit(r);
+  perform inv_require_enabled(r.company_id);
+  if r.status = 'cancelled' then
+    return jsonb_build_object('request_id', r.id, 'status', 'cancelled', 'released_qty', 0, 'outstanding_qty',
+      (select coalesce(sum(x.dispatched_qty - x.returned_qty), 0) from inv_reservations x join inv_request_lines l on l.id = x.request_line_id
+        where l.request_id = r.id and x.status = 'active'));
+  end if;
+  if r.status in ('fulfilled', 'closed') then
+    raise exception 'A % request cannot be cancelled', r.status using errcode = '23514';
+  end if;
+  if r.status in ('submitted', 'in_progress') and v_reason is null then
+    raise exception 'Say why the request is cancelled' using errcode = '22023';
+  end if;
+  return inv_cancel_request_internal(r.id, coalesce(v_reason, 'Request cancelled'));
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Substitutions: only alternatives written into the template are offered, and the warehouse treats the ORIGINAL as the requirement until
+-- an authorised project person accepts. The warehouse operator can propose, never decide.
+-- -----------------------------------------------------------------------------
+create or replace function inv_propose_substitution(p_line_id uuid, p_item_id uuid, p_note text default null, p_expected_version integer default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  r inv_requests;
+  l inv_request_lines;
+  v_req uuid;
+  v_std uuid;
+  v_new inv_items;
+  v_mult numeric;
+  v_qty numeric;
+begin
+  select request_id into v_req from inv_request_lines where id = p_line_id;
+  if not found then raise exception 'Request line not found' using errcode = 'P0002'; end if;
+  r := inv_lock_request(v_req);
+  perform inv_require_edit(r);
+  perform inv_require_enabled(r.company_id);
+  select * into l from inv_request_lines where id = p_line_id for update;
+  perform inv_check_version(l.version, p_expected_version);
+  if r.status not in ('draft', 'submitted', 'in_progress') then raise exception 'A % request can no longer be changed', r.status using errcode = '23514'; end if;
+  if l.status <> 'open' then raise exception 'This line is %, so it cannot be changed', l.status using errcode = '23514'; end if;
+  if l.technology_id is null or l.alt_group is null or l.technology_snapshot is null then
+    raise exception 'Only alternatives written into the technology template can be offered. This line has none' using errcode = '23514';
+  end if;
+  v_std := (l.technology_snapshot->>'standard_item_id')::uuid;
+  if p_item_id is distinct from v_std and not exists (
+       select 1 from jsonb_array_elements(l.technology_snapshot->'alternatives') a where (a->>'item_id')::uuid = p_item_id) then
+    raise exception 'That item is not an alternative listed in the template for this line. Technically different models are never assumed interchangeable' using errcode = '23514';
+  end if;
+  if exists (select 1 from inv_reservations where request_line_id = l.id and status = 'active') then
+    raise exception 'Release the reservations of this line before changing its item' using errcode = '23514';
+  end if;
+  select * into v_new from inv_items where id = p_item_id and company_id = r.company_id;
+  if not found then raise exception 'Unknown item' using errcode = '22023'; end if;
+  if v_new.status = 'retired' then raise exception '% is retired', v_new.name using errcode = '23514'; end if;
+  v_mult := coalesce((l.technology_snapshot->>'multiplier')::numeric, 1);
+  if p_item_id = v_std then
+    v_qty := coalesce((l.technology_snapshot->>'standard_qty')::numeric * v_mult, l.qty);
+    perform inv_check_qty(v_std, v_qty);
+    update inv_request_lines set item_id = v_std, original_item_id = null, substitution_status = 'none', substitution_by = null,
+           substitution_at = null, substitution_note = nullif(btrim(p_note), ''), qty = v_qty, version = version + 1 where id = l.id;
+  else
+    select (a->>'qty')::numeric * v_mult into v_qty from jsonb_array_elements(l.technology_snapshot->'alternatives') a where (a->>'item_id')::uuid = p_item_id;
+    perform inv_check_qty(p_item_id, v_qty);
+    update inv_request_lines set item_id = p_item_id, original_item_id = v_std, substitution_status = 'proposed', substitution_by = null,
+           substitution_at = null, substitution_note = nullif(btrim(p_note), ''), qty = v_qty, version = version + 1
+     where id = l.id;
+  end if;
+end;
+$$;
+
+create or replace function inv_decide_substitution(p_line_id uuid, p_accept boolean, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  r inv_requests;
+  l inv_request_lines;
+  v_req uuid;
+  v_rel jsonb := jsonb_build_object('released_qty', 0);
+  v_qty numeric;
+begin
+  select request_id into v_req from inv_request_lines where id = p_line_id;
+  if not found then raise exception 'Request line not found' using errcode = 'P0002'; end if;
+  r := inv_lock_request(v_req);
+  if not ((r.kind = 'project' and proj_can_manage(r.project_id))
+          or (r.kind = 'employee' and (r.requested_by = auth.uid() or is_manager_of(r.employee_id)))) then
+    raise exception 'Only the project manager (or whoever is accountable for the request) can accept or decline a substitute. The warehouse cannot decide it alone' using errcode = '42501';
+  end if;
+  perform inv_require_enabled(r.company_id);
+  select * into l from inv_request_lines where id = p_line_id for update;
+  if p_accept is null then raise exception 'Accept or decline' using errcode = '22023'; end if;
+  if l.substitution_status <> 'proposed' then
+    raise exception 'This line has no substitute waiting for a decision' using errcode = '23514';
+  end if;
+  if p_accept then
+    if exists (select 1 from inv_reservations where request_line_id = l.id and status = 'active' and dispatched_qty > 0) then
+      raise exception 'The original item is already out on the project, so the substitute cannot be accepted for this line' using errcode = '23514';
+    end if;
+    v_rel := inv_release_unused(l.id, 'Substitute accepted: the line now needs a different item');
+    update inv_request_lines set substitution_status = 'accepted', substitution_by = auth.uid(), substitution_at = now(),
+           substitution_note = coalesce(nullif(btrim(p_note), ''), substitution_note), version = version + 1 where id = l.id;
+  else
+    v_qty := coalesce((l.technology_snapshot->>'standard_qty')::numeric * coalesce((l.technology_snapshot->>'multiplier')::numeric, 1), l.qty);
+    update inv_request_lines set item_id = l.original_item_id, substitution_status = 'declined', substitution_by = auth.uid(), substitution_at = now(),
+           substitution_note = coalesce(nullif(btrim(p_note), ''), substitution_note), qty = v_qty, version = version + 1
+     where id = l.id;
+  end if;
+  return jsonb_build_object('line_id', l.id, 'substitution_status', case when p_accept then 'accepted' else 'declined' end) || v_rel;
+end;
+$$;
+
+create or replace function inv_set_shortage_action(p_line_id uuid, p_action text, p_note text default null, p_rental_reference text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  r inv_requests;
+  v_req uuid;
+  v_ref text := nullif(btrim(p_rental_reference), '');
+begin
+  select request_id into v_req from inv_request_lines where id = p_line_id;
+  if not found then raise exception 'Request line not found' using errcode = 'P0002'; end if;
+  r := inv_lock_request(v_req);
+  perform inv_require_edit(r);
+  perform inv_require_enabled(r.company_id);
+  if p_action not in ('none', 'need_to_buy', 'need_to_rent') then
+    raise exception 'The shortage action must be none, need_to_buy or need_to_rent' using errcode = '22023';
+  end if;
+  if v_ref is not null and p_action <> 'need_to_rent' then
+    raise exception 'A rental reference only belongs to a need to rent' using errcode = '22023';
+  end if;
+  if v_ref is not null and length(v_ref) > 160 then raise exception 'The rental reference is at most 160 characters' using errcode = '22023'; end if;
+  update inv_request_lines set shortage_action = p_action, shortage_note = case when p_action = 'none' then null else nullif(btrim(p_note), '') end,
+         rental_reference = case when p_action = 'need_to_rent' then v_ref end, version = version + 1
+   where id = p_line_id;
+end;
+$$;
+
+-- =============================================================================
+-- Reservations
+-- =============================================================================
+-- Reserves for a request line from one location, for the request's window. Individual equipment: pass the units you want (all or nothing)
+-- or a quantity to let the system pick free units (what is free is reserved, the rest is reported). Quantity stock: pass a quantity.
+-- Units go through inv_unit_free + the exclusion constraint; quantities through inv_lock_item + inv_qty_free, so simultaneous callers can
+-- never oversell. The caller must be able to operate the location (a warehouse operator assigned to it, or a founder).
+create or replace function inv_reserve(
+  p_line_id uuid,
+  p_location_id uuid,
+  p_unit_ids uuid[] default null,
+  p_qty numeric default null,
+  p_shortage_action text default null,
+  p_rental_reference text default null
+) returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  r inv_requests;
+  l inv_request_lines;
+  loc inv_locations;
+  v_item inv_items;
+  v_item_id uuid;
+  v_req uuid;
+  v_unit inv_units;
+  v_uid uuid;
+  v_ids uuid[];
+  v_reason text;
+  v_rid uuid;
+  v_taken numeric;
+  v_remaining numeric;
+  v_ask numeric;
+  v_free numeric;
+  v_now numeric := 0;
+  v_short numeric;
+  v_still numeric;
+  v_made jsonb := '[]'::jsonb;
+  v_action text;
+  v_ref text;
+  v_range tstzrange;
+begin
+  perform inv_require_user();
+  select request_id into v_req from inv_request_lines where id = p_line_id;
+  if not found then raise exception 'Request line not found' using errcode = 'P0002'; end if;
+  r := inv_lock_request(v_req);
+  select * into l from inv_request_lines where id = p_line_id for update;
+  select * into loc from inv_locations where id = p_location_id and company_id = r.company_id;
+  if not found then raise exception 'Location not found' using errcode = 'P0002'; end if;
+  if not inv_can_operate(loc.id) then
+    raise exception 'Only warehouse staff who work at this location (or a founder) can reserve from it' using errcode = '42501';
+  end if;
+  perform inv_require_enabled(r.company_id);
+  if r.status not in ('submitted', 'in_progress') then
+    raise exception 'Only a submitted request can be reserved. This one is %', r.status using errcode = '23514';
+  end if;
+  if l.status <> 'open' then raise exception 'This line is %, so nothing can be reserved for it', l.status using errcode = '23514'; end if;
+  if r.needed_from is null or r.needed_until is null then
+    raise exception 'The request has no planning window. Set its dates first: a reservation covers the whole window' using errcode = '23514';
+  end if;
+  if r.needed_until <= now() then raise exception 'The request window has already ended' using errcode = '23514'; end if;
+
+  v_item_id := inv_effective_item(l);
+  select * into v_item from inv_items where id = v_item_id;
+  perform inv_lock_item(v_item_id);                       -- everything below sees and serialises on the stock of this item
+  v_range := tstzrange(r.needed_from, r.needed_until);
+  select coalesce(sum(qty), 0) into v_taken from inv_reservations where request_line_id = l.id and status in ('active', 'completed');
+  v_remaining := l.qty - v_taken;
+  if v_remaining <= 0 then raise exception 'This line is already fully reserved' using errcode = '23514'; end if;
+
+  if v_item.tracking in ('individual', 'kit') then
+    if p_unit_ids is not null and cardinality(p_unit_ids) > 0 then
+      if p_qty is not null then raise exception 'Give either the units or a quantity, not both' using errcode = '22023'; end if;
+      select array_agg(distinct u order by u) into v_ids from unnest(p_unit_ids) u;
+      if cardinality(v_ids) > v_remaining then
+        raise exception 'This line needs only % more', trim_scale(v_remaining) using errcode = '23514';
+      end if;
+      foreach v_uid in array v_ids loop
+        select * into v_unit from inv_units where id = v_uid;
+        if not found or v_unit.item_id <> v_item_id or v_unit.company_id <> r.company_id then
+          raise exception 'That unit is not a %', v_item.name using errcode = '23514';
+        end if;
+        v_reason := inv_reserve_block_reason(v_uid, r.needed_from, r.needed_until, loc.id, null);
+        if v_reason is not null then raise exception '%', v_reason using errcode = '23514'; end if;
+        begin
+          insert into inv_reservations (company_id, request_line_id, item_id, unit_id, location_id, qty, reserved_during, made_by)
+          values (r.company_id, l.id, v_item_id, v_uid, loc.id, 1, v_range, auth.uid())
+          returning id into v_rid;
+        exception when exclusion_violation then
+          raise exception '% was just reserved for the same dates by someone else', v_unit.code using errcode = '23514';
+        end;
+        v_made := v_made || jsonb_build_object('reservation_id', v_rid, 'unit_id', v_uid, 'unit_code', v_unit.code, 'qty', 1);
+        v_now := v_now + 1;
+      end loop;
+      v_ask := v_now;
+    else
+      v_ask := inv_check_qty(v_item_id, coalesce(p_qty, v_remaining));
+      if v_ask > v_remaining then raise exception 'This line needs only % more', trim_scale(v_remaining) using errcode = '23514'; end if;
+      for v_unit in
+        select u.* from inv_units u
+         where u.item_id = v_item_id and u.company_id = r.company_id and u.ownership = 'owned'
+           and inv_unit_free(u.id, r.needed_from, r.needed_until, loc.id, null)
+         order by (u.custody_kind = 'warehouse') desc, u.code
+         limit floor(v_ask)::bigint
+      loop
+        begin
+          insert into inv_reservations (company_id, request_line_id, item_id, unit_id, location_id, qty, reserved_during, made_by)
+          values (r.company_id, l.id, v_item_id, v_unit.id, loc.id, 1, v_range, auth.uid())
+          returning id into v_rid;
+        exception when exclusion_violation then
+          continue;
+        end;
+        v_made := v_made || jsonb_build_object('reservation_id', v_rid, 'unit_id', v_unit.id, 'unit_code', v_unit.code, 'qty', 1);
+        v_now := v_now + 1;
+      end loop;
+    end if;
+  else
+    if p_unit_ids is not null and cardinality(p_unit_ids) > 0 then
+      raise exception '% is counted by quantity, so units cannot be chosen', v_item.name using errcode = '22023';
+    end if;
+    v_ask := inv_check_qty(v_item_id, coalesce(p_qty, v_remaining));
+    if v_ask > v_remaining then raise exception 'This line needs only % more', trim_scale(v_remaining) using errcode = '23514'; end if;
+    v_free := inv_qty_free(v_item_id, loc.id, r.needed_from, r.needed_until, null, false);
+    v_now := trunc(least(v_ask, v_free), v_item.quantity_scale);
+    if v_now > 0 then
+      insert into inv_reservations (company_id, request_line_id, item_id, location_id, qty, reserved_during, made_by)
+      values (r.company_id, l.id, v_item_id, loc.id, v_now, v_range, auth.uid())
+      returning id into v_rid;
+      v_made := v_made || jsonb_build_object('reservation_id', v_rid, 'qty', v_now);
+    end if;
+  end if;
+
+  v_short := v_ask - v_now;
+  v_still := v_remaining - v_now;
+  v_action := l.shortage_action;
+  v_ref := l.rental_reference;
+  if v_still > 0 and p_shortage_action is not null then
+    if p_shortage_action not in ('none', 'need_to_buy', 'need_to_rent') then
+      raise exception 'The shortage action must be none, need_to_buy or need_to_rent' using errcode = '22023';
+    end if;
+    if nullif(btrim(p_rental_reference), '') is not null and p_shortage_action <> 'need_to_rent' then
+      raise exception 'A rental reference only belongs to a need to rent' using errcode = '22023';
+    end if;
+    v_action := p_shortage_action;
+    v_ref := case when p_shortage_action = 'need_to_rent' then nullif(btrim(p_rental_reference), '') end;
+    update inv_request_lines set shortage_action = v_action, rental_reference = v_ref, version = version + 1 where id = l.id;
+  end if;
+  if v_now > 0 and r.status = 'submitted' then
+    update inv_requests set status = 'in_progress', version = version + 1 where id = r.id;
+  end if;
+  return jsonb_build_object(
+    'line_id', l.id, 'request_id', r.id, 'item_id', v_item_id, 'item_name', v_item.name, 'location_id', loc.id,
+    'window', jsonb_build_object('from', r.needed_from, 'until', r.needed_until),
+    'line_qty', l.qty, 'requested', v_ask, 'reserved_now', v_now, 'shortage', v_short,
+    'reserved_total', v_taken + v_now, 'still_needed', v_still,
+    'reservations', v_made,
+    'need', case when v_still > 0 and v_action <> 'none'
+                 then jsonb_build_object('action', v_action, 'qty', v_still, 'rental_reference', v_ref) end);
+end;
+$$;
+
+create or replace function inv_release_reservation(p_reservation_id uuid, p_reason text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  res inv_reservations;
+  l inv_request_lines;
+  r inv_requests;
+  v_released numeric;
+begin
+  perform inv_require_user();
+  select * into res from inv_reservations where id = p_reservation_id;
+  if not found then raise exception 'Reservation not found' using errcode = 'P0002'; end if;
+  select * into l from inv_request_lines where id = res.request_line_id;
+  r := inv_lock_request(l.request_id);
+  select * into res from inv_reservations where id = p_reservation_id for update;
+  if not ((r.kind = 'project' and proj_can_manage(r.project_id))
+          or (r.kind = 'employee' and r.requested_by = auth.uid())
+          or inv_is_founder(r.company_id)
+          or (res.location_id is not null and inv_can_operate(res.location_id))) then
+    raise exception 'Only the project manager, the person who made the request, or warehouse staff at that location can release a reservation' using errcode = '42501';
+  end if;
+  perform inv_require_enabled(r.company_id);
+  if res.status <> 'active' then raise exception 'This reservation is already %', res.status using errcode = '23514'; end if;
+  v_released := inv_release_row(res, coalesce(nullif(btrim(p_reason), ''), 'Released'));
+  return jsonb_build_object('reservation_id', res.id, 'released_qty', v_released, 'kept_dispatched_qty', res.dispatched_qty);
+end;
+$$;
+
+-- Moves the request's dates and rechecks EVERY active reservation. A reservation whose new range is free is moved; a line where another
+-- reservation (or the stock) conflicts keeps its old range untouched (all or nothing per line), is reported in "conflicts" and is never
+-- taken away from anybody. Equipment already out keeps its start and is only ever extended at the end.
+create or replace function inv_change_request_window(p_request_id uuid, p_plan jsonb, p_timezone text default null, p_expected_version integer default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  r inv_requests;
+  w record;
+  v_tz text;
+  v_version integer;
+  l inv_request_lines;
+  res inv_reservations;
+  u inv_units;
+  q record;
+  v_item uuid;
+  v_new tstzrange;
+  v_lo timestamptz;
+  v_hi timestamptz;
+  v_reason text;
+  v_free numeric;
+  v_conflict boolean;
+  v_why text;
+  v_short numeric;
+  v_plan_ids uuid[];
+  v_plan_ranges tstzrange[];
+  v_extended jsonb := '[]'::jsonb;
+  v_unchanged jsonb := '[]'::jsonb;
+  v_conflicts jsonb := '[]'::jsonb;
+  v_changed integer;
+  i integer;
+begin
+  r := inv_lock_request(p_request_id);
+  perform inv_require_edit(r);
+  perform inv_require_enabled(r.company_id);
+  perform inv_check_version(r.version, p_expected_version);
+  if r.status not in ('draft', 'submitted', 'in_progress') then
+    raise exception 'A % request can no longer be changed', r.status using errcode = '23514';
+  end if;
+  v_tz := coalesce(nullif(btrim(p_timezone), ''), r.timezone);
+  select * into w from inv_plan_window(p_plan, v_tz);
+  if w.o_from is null or w.o_until is null then
+    raise exception 'Give at least a start and an end date' using errcode = '22023';
+  end if;
+  -- Lock every affected item (sorted: two callers can never deadlock) before looking at any stock or reservation.
+  for v_item in
+    select distinct inv_effective_item(x) from inv_request_lines x
+     where x.request_id = r.id and exists (select 1 from inv_reservations y where y.request_line_id = x.id and y.status = 'active')
+     order by 1
+  loop
+    perform inv_lock_item(v_item);
+  end loop;
+
+  update inv_requests set plan = w.o_plan, needed_from = w.o_from, needed_until = w.o_until, expected_return_at = w.o_return,
+         timezone = v_tz, version = version + 1
+   where id = r.id returning version into v_version;
+
+  for l in select * from inv_request_lines x where x.request_id = r.id and x.status = 'open'
+            and exists (select 1 from inv_reservations y where y.request_line_id = x.id and y.status = 'active') order by x.sort_order, x.id loop
+    v_plan_ids := '{}'; v_plan_ranges := '{}';
+    v_conflict := false; v_why := null; v_short := 0;
+    -- Pass 1: the range every active reservation of the line would get, and whether it is free.
+    for res in select * from inv_reservations where request_line_id = l.id and status = 'active' order by made_at, id loop
+      if res.dispatched_qty > 0 then
+        v_lo := lower(res.reserved_during);
+        v_hi := greatest(upper(res.reserved_during), w.o_until);
+      else
+        v_lo := w.o_from; v_hi := w.o_until;
+      end if;
+      v_new := tstzrange(v_lo, v_hi);
+      if v_new = res.reserved_during then continue; end if;
+      v_plan_ids := v_plan_ids || res.id;
+      v_plan_ranges := v_plan_ranges || v_new;
+      if res.unit_id is not null then
+        if res.dispatched_qty > 0 then
+          -- Out on the project: only the extension must be free of other bookings of the same unit.
+          if exists (select 1 from inv_reservations o where o.unit_id = res.unit_id and o.status = 'active' and o.id <> res.id
+                       and o.reserved_during && v_new) then
+            v_conflict := true; v_short := v_short + 1;
+            v_why := coalesce(v_why, inv_reserve_block_reason(res.unit_id, v_lo, v_hi, coalesce(res.location_id, (select location_id from inv_units where id = res.unit_id)), l.id));
+          end if;
+        else
+          v_reason := inv_reserve_block_reason(res.unit_id, v_lo, v_hi, coalesce(res.location_id, (select location_id from inv_units where id = res.unit_id)), l.id);
+          if v_reason is not null then v_conflict := true; v_short := v_short + 1; v_why := coalesce(v_why, v_reason); end if;
+        end if;
+      end if;
+    end loop;
+    -- Quantity reservations: the undispatched part must still be free over the union of the new ranges.
+    for q in
+      select y.location_id, sum(y.qty - y.dispatched_qty) as need, min(case when y.dispatched_qty > 0 then lower(y.reserved_during) else w.o_from end) as lo,
+             max(case when y.dispatched_qty > 0 then greatest(upper(y.reserved_during), w.o_until) else w.o_until end) as hi
+        from inv_reservations y
+       where y.request_line_id = l.id and y.status = 'active' and y.unit_id is null and y.id = any (v_plan_ids) and y.qty > y.dispatched_qty
+       group by y.location_id
+    loop
+      v_free := inv_qty_free(inv_effective_item(l), q.location_id, q.lo, q.hi, l.id, false);
+      if v_free < q.need then
+        v_conflict := true; v_short := v_short + (q.need - v_free);
+        v_why := coalesce(v_why, format('Only %s of %s are free for the new dates', trim_scale(v_free), trim_scale(q.need)));
+      end if;
+    end loop;
+
+    if cardinality(v_plan_ids) = 0 then
+      v_unchanged := v_unchanged || jsonb_build_object('line_id', l.id);
+    elsif v_conflict then
+      v_conflicts := v_conflicts || jsonb_build_object(
+        'line_id', l.id, 'item_id', inv_effective_item(l), 'item_name', (select name from inv_items where id = inv_effective_item(l)),
+        'kept_window', (select jsonb_build_object('from', min(lower(reserved_during)), 'until', max(upper(reserved_during)))
+                          from inv_reservations where request_line_id = l.id and status = 'active'),
+        'wanted_window', jsonb_build_object('from', w.o_from, 'until', w.o_until),
+        'shortage', v_short, 'reason', v_why);
+    else
+      v_changed := 0;
+      for i in 1..cardinality(v_plan_ids) loop
+        update inv_reservations set reserved_during = v_plan_ranges[i] where id = v_plan_ids[i];
+        v_changed := v_changed + 1;
+      end loop;
+      v_extended := v_extended || jsonb_build_object('line_id', l.id, 'reservations', v_changed);
+    end if;
+  end loop;
+  return jsonb_build_object('request_id', r.id, 'version', v_version, 'timezone', v_tz,
+    'window', jsonb_build_object('from', w.o_from, 'until', w.o_until),
+    'extended', v_extended, 'unchanged', v_unchanged, 'conflicts', v_conflicts);
+exception when exclusion_violation then
+  raise exception 'Another reservation was made for the same equipment at the same moment. Try again' using errcode = '40001';
+end;
+$$;
+
+-- =============================================================================
+-- Availability (counts only; unit-level detail is for callers with stock access)
+-- =============================================================================
+create or replace function inv_availability(p_item_id uuid, p_location_id uuid, p_from timestamptz, p_until timestamptz)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_item inv_items;
+  loc inv_locations;
+  v_basis text;
+  v jsonb;
+  v_units jsonb;
+begin
+  perform inv_require_user();
+  select * into v_item from inv_items where id = p_item_id;
+  if not found or not inv_can_browse(v_item.company_id) then raise exception 'Item not found' using errcode = 'P0002'; end if;
+  select * into loc from inv_locations where id = p_location_id and company_id = v_item.company_id;
+  if not found then raise exception 'Location not found' using errcode = 'P0002'; end if;
+  if p_from is null or p_until is null or p_until <= p_from then
+    raise exception 'Give a start and an end, the end after the start' using errcode = '22023';
+  end if;
+  v_basis := case when p_from <= now() then 'now' else 'future' end;
+
+  if v_item.tracking in ('individual', 'kit') then
+    select jsonb_build_object(
+      'physical_at_location', count(*) filter (where u.custody_kind = 'warehouse' and u.lifecycle = 'active' and u.location_id = loc.id),
+      'usable_now', count(*) filter (where inv_unit_usable(u) and u.location_id = loc.id),
+      'dispatched_to_projects', count(*) filter (where u.custody_kind = 'project' and u.lifecycle = 'active' and u.location_id = loc.id),
+      'assigned_to_employees', count(*) filter (where u.custody_kind = 'employee' and u.lifecycle = 'active' and u.location_id = loc.id),
+      'in_transit', count(*) filter (where u.custody_kind = 'transit' and u.lifecycle = 'active'
+                       and (u.location_id = loc.id or exists (select 1 from inv_transfers t where t.id = u.transfer_id and t.to_location_id = loc.id))),
+      'awaiting_inspection', count(*) filter (where u.custody_kind = 'warehouse' and u.lifecycle = 'active' and u.condition = 'needs_inspection' and u.location_id = loc.id),
+      'damaged_repair_missing', count(*) filter (where u.location_id = loc.id and (
+                       (u.lifecycle = 'active' and u.custody_kind = 'warehouse' and u.condition in ('damaged', 'unserviceable'))
+                    or (u.lifecycle = 'active' and u.custody_kind = 'repair') or u.lifecycle = 'missing')),
+      'draft_unverified', count(*) filter (where u.lifecycle = 'draft' and u.location_id = loc.id),
+      'free_for_range', count(*) filter (where u.ownership = 'owned' and inv_unit_free(u.id, p_from, p_until, loc.id, null)),
+      'rental_free_for_range', count(*) filter (where u.ownership = 'rental' and inv_unit_free(u.id, p_from, p_until, loc.id, null)),
+      'returning_on_time', count(*) filter (where u.ownership = 'owned' and u.custody_kind in ('project', 'transit') and inv_unit_free(u.id, p_from, p_until, loc.id, null)),
+      'overdue', count(*) filter (where u.lifecycle = 'active' and (
+                       (u.custody_kind in ('project', 'employee') and u.location_id = loc.id and u.expected_return_at is not null and u.expected_return_at < now())
+                    or (u.custody_kind = 'transit' and exists (select 1 from inv_transfers t where t.id = u.transfer_id and t.expected_at is not null and t.expected_at < now()
+                                                                  and loc.id in (t.from_location_id, t.to_location_id)))))
+    ) into v from inv_units u where u.item_id = v_item.id;
+    v := v || jsonb_build_object('reserved_in_range', (
+      select count(distinct r.unit_id) from inv_reservations r join inv_units u on u.id = r.unit_id
+       where r.item_id = v_item.id and r.status = 'active' and r.dispatched_qty = 0 and r.reserved_during && tstzrange(p_from, p_until)
+         and coalesce(r.location_id, u.location_id) = loc.id));
+    if inv_can_view_stock(v_item.company_id) then
+      select coalesce(jsonb_agg(jsonb_build_object('unit_id', u.id, 'code', u.code, 'serial_number', u.serial_number, 'lifecycle', u.lifecycle,
+               'condition', u.condition, 'custody', u.custody_kind, 'in_kit', u.in_kit_id is not null,
+               'free', inv_unit_free(u.id, p_from, p_until, loc.id, null),
+               'reason', inv_reserve_block_reason(u.id, p_from, p_until, loc.id, null)) order by u.code), '[]'::jsonb)
+        into v_units from inv_units u where u.item_id = v_item.id and (u.location_id = loc.id or u.location_id is null);
+      v := v || jsonb_build_object('units', v_units);
+    end if;
+  else
+    with b as (
+      select x.*,
+             case x.holder_kind
+               when 'warehouse' then x.location_id = loc.id
+               when 'transit' then exists (select 1 from inv_transfers t where t.id = x.transfer_id and loc.id in (t.from_location_id, t.to_location_id))
+               when 'kit' then false
+               else exists (select 1 from inv_movement_lines l where l.to_balance_id = x.id and l.from_location_id = loc.id)
+             end as here
+        from inv_balances x where x.item_id = v_item.id and x.rental_id is null)
+    select jsonb_build_object(
+      'physical_at_location', coalesce(sum(qty) filter (where holder_kind = 'warehouse' and here), 0),
+      'usable_now', coalesce(sum(qty) filter (where holder_kind = 'warehouse' and here and condition = 'good'), 0),
+      'dispatched_to_projects', coalesce(sum(qty) filter (where holder_kind = 'project' and here), 0),
+      'assigned_to_employees', coalesce(sum(qty) filter (where holder_kind = 'employee' and here), 0),
+      'in_transit', coalesce(sum(qty) filter (where holder_kind = 'transit' and here), 0),
+      'awaiting_inspection', coalesce(sum(qty) filter (where holder_kind = 'warehouse' and here and condition = 'needs_inspection'), 0),
+      'damaged_repair_missing', coalesce(sum(qty) filter (where here and ((holder_kind = 'warehouse' and condition = 'damaged') or holder_kind = 'repair')), 0),
+      'draft_unverified', 0,
+      'overdue', coalesce(sum(qty) filter (where here and holder_kind in ('project', 'employee') and expected_return_at is not null and expected_return_at < now()), 0)
+                 + coalesce((select sum(b2.qty) from inv_balances b2 join inv_transfers t on t.id = b2.transfer_id
+                              where b2.item_id = v_item.id and b2.holder_kind = 'transit' and b2.rental_id is null
+                                and t.expected_at is not null and t.expected_at < now() and loc.id in (t.from_location_id, t.to_location_id)), 0)
+    ) into v from b;
+    v := v || jsonb_build_object(
+      'free_for_range', inv_qty_free(v_item.id, loc.id, p_from, p_until, null, false),
+      'rental_free_for_range', inv_qty_free(v_item.id, loc.id, p_from, p_until, null, true),
+      'returning_on_time', coalesce((select sum(b3.qty) from inv_balances b3
+                                      where b3.item_id = v_item.id and b3.holder_kind = 'project' and b3.condition = 'good' and b3.rental_id is null
+                                        and b3.expected_return_at is not null and b3.expected_return_at >= now() and b3.expected_return_at <= p_from
+                                        and exists (select 1 from inv_movement_lines l where l.to_balance_id = b3.id and l.from_location_id = loc.id)), 0)
+                              + coalesce((select sum(b4.qty) from inv_balances b4 join inv_transfers t on t.id = b4.transfer_id
+                                           where b4.item_id = v_item.id and b4.holder_kind = 'transit' and b4.condition = 'good' and b4.rental_id is null
+                                             and t.to_location_id = loc.id and t.expected_at is not null and t.expected_at >= now() and t.expected_at <= p_from), 0),
+      'reserved_in_range', coalesce((select sum(r.qty - r.dispatched_qty) from inv_reservations r
+                                      where r.item_id = v_item.id and r.unit_id is null and r.location_id = loc.id and r.status = 'active'
+                                        and r.reserved_during && tstzrange(p_from, p_until)), 0));
+  end if;
+  return jsonb_build_object('item_id', v_item.id, 'item_name', v_item.name, 'tracking', v_item.tracking, 'unit_of_measure', v_item.unit_of_measure,
+    'location_id', loc.id, 'location_name', loc.name, 'from', p_from, 'until', p_until,
+    'basis', v_basis, 'available_now', v_basis = 'now') || coalesce(v, '{}'::jsonb);
+end;
+$$;
+
+-- The shared engine behind technology availability and Sales checks. p_pairs = [{technology_id, qty}]. Free stock is a pool shared by
+-- every technology in the list, so two technologies that need the same item never both count the same units.
+-- Per required slot (a component, or an alternative group): 'available' (the standard item covers it), 'alternative' (the standard item
+-- does not, a listed alternative does: a substitute the project must accept), 'partial' or 'short'. Optional components are listed but
+-- never change the result.
+create or replace function inv_demand_check(p_pairs jsonb, p_location_id uuid, p_from timestamptz, p_until timestamptz)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_pool jsonb := '{}'::jsonb;
+  pr jsonb;
+  t inv_technologies;
+  g record;
+  v_cands jsonb;
+  v_qty numeric;
+  v_techs jsonb := '[]'::jsonb;
+  v_rows jsonb;
+  v_row_status text;
+  k integer;
+  v_item text;
+  v_need numeric;
+  v_free numeric;
+  v_alt integer;
+  v_alts jsonb;
+  v_short numeric;
+  v_consume_item text;
+  v_consume numeric;
+  v_req integer;
+  v_av integer;
+  v_sh integer;
+  v_any_alt boolean := false;
+  v_t_result text;
+  v_all_av boolean := true;
+  v_all_sh boolean := true;
+  v_n integer := 0;
+  v_sub boolean;
+begin
+  for pr in select * from jsonb_array_elements(p_pairs) loop
+    select * into t from inv_technologies where id = (pr->>'technology_id')::uuid;
+    v_qty := (pr->>'qty')::numeric;
+    v_rows := '[]'::jsonb;
+    v_req := 0; v_av := 0; v_sh := 0; v_sub := false;
+    for g in
+      select coalesce(x.alt_group, 'component:' || x.id::text) as slot, min(x.alt_group) as alt_group, bool_and(x.is_optional) as is_optional,
+             min(x.sort_order) as first_sort
+        from inv_technology_components x where x.technology_id = t.id
+       group by coalesce(x.alt_group, 'component:' || x.id::text)
+       order by min(x.sort_order), 1
+    loop
+      select jsonb_agg(jsonb_build_object('item_id', c.item_id, 'item_name', i.name, 'tracking', i.tracking, 'needed', c.qty * v_qty) order by c.sort_order, c.id)
+        into v_cands
+        from inv_technology_components c join inv_items i on i.id = c.item_id
+       where c.technology_id = t.id and coalesce(c.alt_group, 'component:' || c.id::text) = g.slot;
+      for k in 0..jsonb_array_length(v_cands) - 1 loop
+        v_item := v_cands->k->>'item_id';
+        if not (v_pool ? v_item) then
+          v_pool := v_pool || jsonb_build_object(v_item, inv_free_count(v_item::uuid, p_location_id, p_from, p_until));
+        end if;
+      end loop;
+      v_need := (v_cands->0->>'needed')::numeric;
+      v_free := (v_pool->>(v_cands->0->>'item_id'))::numeric;
+      v_alt := null; v_short := 0; v_consume_item := null; v_consume := 0;
+      select coalesce(jsonb_agg(jsonb_build_object('item_id', a->>'item_id', 'item_name', a->>'item_name', 'needed', (a->>'needed')::numeric,
+               'free', (v_pool->>(a->>'item_id'))::numeric, 'covers', (v_pool->>(a->>'item_id'))::numeric >= (a->>'needed')::numeric)), '[]'::jsonb)
+        into v_alts from jsonb_array_elements(v_cands) with ordinality as e(a, n) where n > 1;
+      if v_free >= v_need then
+        v_row_status := 'available'; v_consume_item := v_cands->0->>'item_id'; v_consume := v_need;
+      else
+        for k in 1..jsonb_array_length(v_cands) - 1 loop
+          if (v_pool->>(v_cands->k->>'item_id'))::numeric >= (v_cands->k->>'needed')::numeric then v_alt := k; exit; end if;
+        end loop;
+        if v_alt is not null then
+          v_row_status := 'alternative'; v_consume_item := v_cands->v_alt->>'item_id'; v_consume := (v_cands->v_alt->>'needed')::numeric;
+          v_short := v_need - v_free;
+        elsif v_free > 0 then
+          v_row_status := 'partial'; v_consume_item := v_cands->0->>'item_id'; v_consume := v_free; v_short := v_need - v_free;
+        else
+          v_row_status := 'short'; v_short := v_need;
+        end if;
+      end if;
+      v_rows := v_rows || jsonb_build_object('item_id', v_cands->0->>'item_id', 'item_name', v_cands->0->>'item_name', 'tracking', v_cands->0->>'tracking',
+                 'alt_group', g.alt_group, 'is_optional', g.is_optional, 'needed', v_need, 'free', v_free, 'short', v_short, 'status', v_row_status,
+                 'alternative_item_id', case when v_row_status = 'alternative' then v_cands->v_alt->>'item_id' end, 'alternatives', v_alts);
+      if not g.is_optional then
+        v_req := v_req + 1;
+        if v_row_status = 'available' then v_av := v_av + 1; end if;
+        if v_row_status <> 'short' then v_sh := v_sh + 1; end if;
+        if v_row_status = 'alternative' then v_sub := true; end if;
+        if v_consume_item is not null then
+          v_pool := jsonb_set(v_pool, array[v_consume_item], to_jsonb((v_pool->>v_consume_item)::numeric - v_consume));
+        end if;
+      end if;
+    end loop;
+    v_t_result := case when v_av = v_req then 'available' when v_sh = 0 then 'short' else 'partial' end;
+    v_techs := v_techs || jsonb_build_object('technology_id', t.id, 'name', t.name, 'version', t.version, 'qty', v_qty, 'result', v_t_result,
+                                             'needs_substitution', v_sub, 'rows', v_rows);
+    v_n := v_n + 1;
+    if v_t_result <> 'available' then v_all_av := false; end if;
+    if v_t_result <> 'short' then v_all_sh := false; end if;
+    if v_sub then v_any_alt := true; end if;
+  end loop;
+  return jsonb_build_object('result', case when v_n = 0 then 'check_required' when v_all_av then 'available' when v_all_sh then 'short' else 'partial' end,
+                            'needs_substitution', v_any_alt, 'technologies', v_techs);
+end;
+$$;
+
+create or replace function inv_technology_availability(p_technology_id uuid, p_qty numeric, p_location_id uuid, p_from timestamptz, p_until timestamptz)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  t inv_technologies;
+  loc inv_locations;
+  v_res jsonb;
+  v_basis text;
+  v_tech jsonb;
+begin
+  perform inv_require_user();
+  select * into t from inv_technologies where id = p_technology_id;
+  if not found or not inv_can_browse(t.company_id) then raise exception 'Technology not found' using errcode = 'P0002'; end if;
+  select * into loc from inv_locations where id = p_location_id and company_id = t.company_id;
+  if not found then raise exception 'Location not found' using errcode = 'P0002'; end if;
+  if p_qty is null or p_qty <= 0 then raise exception 'The quantity must be more than zero' using errcode = '22023'; end if;
+  if p_from is null or p_until is null or p_until <= p_from then
+    raise exception 'Give a start and an end, the end after the start' using errcode = '22023';
+  end if;
+  v_basis := case when p_from <= now() then 'now' else 'future' end;
+  if t.status <> 'complete' or not exists (select 1 from inv_technology_components where technology_id = t.id and not is_optional) then
+    return jsonb_build_object('technology_id', t.id, 'name', t.name, 'template_status', t.status, 'qty', p_qty, 'location_id', loc.id,
+      'from', p_from, 'until', p_until, 'basis', v_basis, 'result', 'check_required', 'message', 'Warehouse check required',
+      'needs_substitution', false, 'rows', '[]'::jsonb, 'shortages', '[]'::jsonb);
+  end if;
+  v_res := inv_demand_check(jsonb_build_array(jsonb_build_object('technology_id', t.id, 'qty', p_qty)), loc.id, p_from, p_until);
+  v_tech := v_res->'technologies'->0;
+  return jsonb_build_object('technology_id', t.id, 'name', t.name, 'version', t.version, 'template_status', t.status, 'qty', p_qty,
+    'location_id', loc.id, 'from', p_from, 'until', p_until, 'basis', v_basis,
+    'result', v_res->>'result', 'needs_substitution', (v_res->>'needs_substitution')::boolean, 'rows', v_tech->'rows',
+    'shortages', coalesce((select jsonb_agg(jsonb_build_object('item_id', x->>'item_id', 'item_name', x->>'item_name', 'short', (x->>'short')::numeric,
+                                                              'covered_by_alternative', x->>'status' = 'alternative'))
+                             from jsonb_array_elements(v_tech->'rows') x where (x->>'short')::numeric > 0 and not (x->>'is_optional')::boolean), '[]'::jsonb));
+end;
+$$;
+
+-- =============================================================================
+-- Sales availability checks (a dated record, never a reservation)
+-- =============================================================================
+-- Computes the check for an opportunity at a location. A technology without a COMPLETE template is 'check_required' ("Warehouse check
+-- required"): nothing is ever invented as available. Dates: install_start (or event_start) to the end of event_end, in the location's zone.
+create or replace function inv_opportunity_compute(o crm_opportunities, p_location_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  loc inv_locations;
+  d_from date;
+  d_until date;
+  v_from timestamptz;
+  v_until timestamptz;
+  e jsonb;
+  v_tid uuid;
+  v_pairs jsonb := '[]'::jsonb;
+  v_slots jsonb := '[]'::jsonb;
+  v_summary jsonb := '[]'::jsonb;
+  v_check jsonb;
+  v_tech jsonb;
+  v_pi integer := 0;
+  s jsonb;
+  v_unmatched boolean := false;
+  v_result text;
+  v_qty numeric;
+  v_n integer := 0;
+begin
+  select * into loc from inv_locations where id = p_location_id;
+  d_from := coalesce(o.install_start, o.event_start, o.event_end);
+  d_until := coalesce(o.event_end, o.event_start, o.install_start);
+  if d_from is not null then
+    if d_until < d_from then d_until := d_from; end if;
+    v_from := inv_local_to_utc(d_from::timestamp, loc.timezone);
+    v_until := inv_local_to_utc((d_until + 1)::timestamp, loc.timezone);
+  end if;
+  for e in select * from jsonb_array_elements(o.technologies) loop
+    v_n := v_n + 1;
+    v_qty := coalesce(nullif(e->>'qty', '')::numeric, 1);
+    select t.id into v_tid from inv_technologies t
+     where t.company_id = o.company_id and t.status = 'complete' and lower(btrim(t.name)) = lower(btrim(e->>'name'))
+       and exists (select 1 from inv_technology_components c where c.technology_id = t.id and not c.is_optional)
+     limit 1;
+    if v_tid is null then
+      v_unmatched := true;
+      v_slots := v_slots || jsonb_build_object('technology', e->>'name', 'qty', v_qty, 'status', 'check_required', 'message', 'Warehouse check required');
+    elsif v_from is null then
+      v_unmatched := true;
+      v_slots := v_slots || jsonb_build_object('technology', e->>'name', 'qty', v_qty, 'technology_id', v_tid, 'status', 'check_required',
+                                               'message', 'Warehouse check required: the opportunity has no dates yet');
+    else
+      v_pairs := v_pairs || jsonb_build_object('technology_id', v_tid, 'qty', v_qty);
+      v_slots := v_slots || jsonb_build_object('technology', e->>'name', 'qty', v_qty, 'technology_id', v_tid, 'pair', jsonb_array_length(v_pairs) - 1);
+    end if;
+  end loop;
+  if jsonb_array_length(v_pairs) > 0 then v_check := inv_demand_check(v_pairs, p_location_id, v_from, v_until); end if;
+  for s in select * from jsonb_array_elements(v_slots) loop
+    if s ? 'pair' then
+      v_tech := v_check->'technologies'->((s->>'pair')::integer);
+      v_summary := v_summary || jsonb_build_object('technology', s->>'technology', 'qty', s->'qty', 'technology_id', s->'technology_id',
+        'status', v_tech->>'result', 'needs_substitution', v_tech->'needs_substitution',
+        'message', case v_tech->>'result' when 'available' then 'Available' when 'partial' then 'Partly available' else 'Not available' end,
+        'shortages', coalesce((select jsonb_agg(jsonb_build_object('item_name', x->>'item_name', 'short', (x->>'short')::numeric))
+                                 from jsonb_array_elements(v_tech->'rows') x where (x->>'short')::numeric > 0 and not (x->>'is_optional')::boolean), '[]'::jsonb),
+        'alternatives', coalesce((select jsonb_agg(jsonb_build_object('instead_of', x->>'item_name', 'use',
+                                    (select a->>'item_name' from jsonb_array_elements(x->'alternatives') a where a->>'item_id' = x->>'alternative_item_id' limit 1)))
+                                   from jsonb_array_elements(v_tech->'rows') x where x->>'status' = 'alternative'), '[]'::jsonb));
+    else
+      v_summary := v_summary || (s - 'pair');
+    end if;
+  end loop;
+  if v_n = 0 then
+    v_unmatched := true;
+    v_summary := jsonb_build_array(jsonb_build_object('technology', null, 'status', 'check_required', 'message', 'Warehouse check required: no technologies are listed'));
+  end if;
+  v_result := case when v_unmatched then 'check_required' else v_check->>'result' end;
+  return jsonb_build_object('result', v_result, 'summary', v_summary, 'location_id', loc.id,
+    'window', jsonb_build_object('from', v_from, 'until', v_until, 'timezone', loc.timezone));
+end;
+$$;
+
+create or replace function inv_request_opportunity_check(p_opportunity_id uuid, p_location_id uuid default null)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  o crm_opportunities;
+  v_id uuid;
+  v_loc uuid;
+begin
+  perform inv_require_user();
+  select * into o from crm_opportunities where id = p_opportunity_id;
+  if not found or not crm_has_access(o.company_id) then raise exception 'Opportunity not found' using errcode = 'P0002'; end if;
+  if o.owner_id <> auth.uid() and not crm_is_founder(o.company_id) then
+    raise exception 'Only the owner of this opportunity or a Sales founder can ask for an availability check' using errcode = '42501';
+  end if;
+  if o.stage in ('won', 'lost') then raise exception 'A closed opportunity needs no availability check' using errcode = '23514'; end if;
+  perform inv_require_enabled(o.company_id);
+  if p_location_id is not null then
+    select id into v_loc from inv_locations where id = p_location_id and company_id = o.company_id and is_active;
+    if not found then raise exception 'Location not found' using errcode = '22023'; end if;
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('inv_opp_check:' || o.id::text, 0));
+  select id into v_id from inv_availability_checks where opportunity_id = o.id and result = 'pending' for update;
+  if found then
+    if v_loc is not null then update inv_availability_checks set location_id = v_loc where id = v_id and location_id is null; end if;
+    return v_id;
+  end if;
+  insert into inv_availability_checks (company_id, opportunity_id, location_id, requested_by)
+  values (o.company_id, o.id, v_loc, auth.uid())
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+create or replace function inv_record_opportunity_check(p_opportunity_id uuid, p_location_id uuid default null, p_note text default null)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  o crm_opportunities;
+  pend inv_availability_checks;
+  v_loc uuid;
+  v_calc jsonb;
+  v_covers jsonb;
+  v_id uuid;
+begin
+  perform inv_require_user();
+  select * into o from crm_opportunities where id = p_opportunity_id;
+  if not found then raise exception 'Opportunity not found' using errcode = 'P0002'; end if;
+  if not (inv_has_capability(o.company_id, 'warehouse') or inv_has_capability(o.company_id, 'manage_catalogue')) then
+    raise exception 'Only warehouse staff, catalogue managers or a founder can record an availability check' using errcode = '42501';
+  end if;
+  perform inv_require_enabled(o.company_id);
+  perform pg_advisory_xact_lock(hashtextextended('inv_opp_check:' || o.id::text, 0));
+  select * into pend from inv_availability_checks where opportunity_id = o.id and result = 'pending' for update;
+  v_loc := coalesce(p_location_id, pend.location_id);
+  if v_loc is null then raise exception 'Choose the location to check against' using errcode = '22023'; end if;
+  if not exists (select 1 from inv_locations where id = v_loc and company_id = o.company_id and is_active) then
+    raise exception 'Location not found' using errcode = '22023';
+  end if;
+  select * into o from crm_opportunities where id = p_opportunity_id;
+  v_calc := inv_opportunity_compute(o, v_loc);
+  v_covers := jsonb_build_object('install_start', o.install_start, 'event_start', o.event_start, 'event_end', o.event_end,
+                                 'technologies', o.technologies, 'location', o.location, 'location_id', v_loc);
+  if pend.id is not null then
+    update inv_availability_checks set location_id = v_loc, checked_by = auth.uid(), checked_at = now(), result = v_calc->>'result',
+           summary = v_calc->'summary', covers = v_covers, note = nullif(btrim(p_note), '')
+     where id = pend.id returning id into v_id;
+  else
+    insert into inv_availability_checks (company_id, opportunity_id, location_id, requested_by, checked_by, checked_at, result, summary, covers, note)
+    values (o.company_id, o.id, v_loc, auth.uid(), auth.uid(), now(), v_calc->>'result', v_calc->'summary', v_covers, nullif(btrim(p_note), ''))
+    returning id into v_id;
+  end if;
+  update inv_availability_checks set superseded_by = v_id
+   where opportunity_id = o.id and id <> v_id and superseded_by is null and result <> 'pending';
+  return v_id;
+end;
+$$;
+
+-- What Sales sees: the latest check, who made it and when, whether it is out of date, and a live per-technology summary. Item names and
+-- counts at summary level only: no costs, no custody, no employee or other project information.
+create or replace function inv_opportunity_availability(p_opportunity_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  o crm_opportunities;
+  latest inv_availability_checks;
+  pend inv_availability_checks;
+  v_loc uuid;
+  v_live jsonb;
+  v_recheck boolean := false;
+  v_state text;
+begin
+  perform inv_require_user();
+  select * into o from crm_opportunities where id = p_opportunity_id;
+  if not found then raise exception 'Opportunity not found' using errcode = 'P0002'; end if;
+  if not ((crm_has_access(o.company_id) and (o.owner_id = auth.uid() or crm_is_founder(o.company_id)))
+          or inv_has_capability(o.company_id, 'warehouse') or inv_has_capability(o.company_id, 'manage_catalogue')) then
+    raise exception 'Opportunity not found' using errcode = 'P0002';
+  end if;
+  select * into latest from inv_availability_checks where opportunity_id = o.id and result <> 'pending' and superseded_by is null
+   order by checked_at desc limit 1;
+  select * into pend from inv_availability_checks where opportunity_id = o.id and result = 'pending' limit 1;
+  if latest.id is not null then
+    v_recheck := (latest.covers - 'location_id') is distinct from jsonb_build_object(
+      'install_start', o.install_start, 'event_start', o.event_start, 'event_end', o.event_end, 'technologies', o.technologies, 'location', o.location);
+    v_state := 'checked';
+  elsif pend.id is not null then v_state := 'pending';
+  else v_state := 'none';
+  end if;
+  v_loc := coalesce(latest.location_id, pend.location_id);
+  if v_loc is not null then
+    v_live := inv_opportunity_compute(o, v_loc);
+  end if;
+  return jsonb_build_object(
+    'opportunity_id', o.id, 'state', v_state,
+    'message', case v_state when 'none' then 'Warehouse check required' when 'pending' then 'Waiting for the warehouse' else null end,
+    'needs_recheck', v_recheck,
+    'latest', case when latest.id is not null then jsonb_build_object(
+        'check_id', latest.id, 'result', latest.result, 'checked_at', latest.checked_at, 'checked_by', inv_user_name(latest.checked_by),
+        'requested_at', latest.requested_at, 'location_id', latest.location_id,
+        'location_name', (select name from inv_locations where id = latest.location_id), 'note', latest.note,
+        'summary', latest.summary, 'covers', latest.covers - 'location_id') end,
+    'pending', case when pend.id is not null then jsonb_build_object('check_id', pend.id, 'requested_at', pend.requested_at,
+        'requested_by', inv_user_name(pend.requested_by)) end,
+    'live', v_live);
+end;
+$$;
+
+-- =============================================================================
+-- Projects: handover import, equipment view, project triggers
+-- =============================================================================
+-- Imports the FROZEN handover technologies into ONE draft request per project and opportunity. Idempotent. Unmatched technologies (no
+-- complete template) are written in the request note and the import log, never invented as lines. No permission check here: the public
+-- function and the trigger decide who may call it.
+create or replace function inv_import_handover_internal(p_project_id uuid, p_actor uuid)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  pr proj_projects;
+  h proj_handovers;
+  v_existing uuid;
+  v_req inv_requests;
+  v_enabled boolean;
+  v_plan jsonb := '{}'::jsonb;
+  w record;
+  e jsonb;
+  v_tid uuid;
+  v_qty numeric;
+  v_unmatched text[] := '{}';
+  v_matched integer := 0;
+  v_note text;
+  v_detail text;
+begin
+  select * into pr from proj_projects where id = p_project_id;
+  if not found then raise exception 'Project not found' using errcode = 'P0002'; end if;
+  if pr.kind <> 'client' or pr.crm_opportunity_id is null then
+    raise exception 'Only a project that came from a Sales handover has a handover to import' using errcode = '23514';
+  end if;
+  select id into v_existing from inv_requests where project_id = pr.id and source = 'sales_handover' and source_ref = pr.crm_opportunity_id;
+  if found then return v_existing; end if;
+  select * into h from proj_handovers where id = pr.handover_id;
+  if not found then
+    insert into inv_import_log (company_id, project_id, source_ref, outcome, detail)
+    values (pr.company_id, pr.id, pr.crm_opportunity_id, 'nothing_to_import', 'The project has no handover record');
+    return null;
+  end if;
+  select is_enabled into v_enabled from inv_company_settings where company_id = pr.company_id;
+  if v_enabled is not true then
+    insert into inv_import_log (company_id, project_id, source_ref, outcome, detail)
+    values (pr.company_id, pr.id, pr.crm_opportunity_id, 'nothing_to_import', 'Inventory is not set up or is switched off for this company. The project manager can import the equipment later');
+    return null;
+  end if;
+  if jsonb_array_length(h.technologies) = 0 then
+    insert into inv_import_log (company_id, project_id, source_ref, outcome, detail)
+    values (pr.company_id, pr.id, pr.crm_opportunity_id, 'nothing_to_import', 'The handover lists no technologies');
+    return null;
+  end if;
+
+  if h.install_start is not null then v_plan := v_plan || jsonb_build_object('install_start', h.install_start::text); end if;
+  if h.event_start is not null then v_plan := v_plan || jsonb_build_object('show_start', h.event_start::text); end if;
+  if h.event_end is not null then v_plan := v_plan || jsonb_build_object('show_end', (h.event_end + 1)::text); end if;
+  select * into w from inv_plan_window(v_plan, h.site_timezone);
+  insert into inv_requests (company_id, code, kind, project_id, requested_by, status, title, timezone, plan, needed_from, needed_until,
+                            expected_return_at, source, source_ref)
+  values (pr.company_id, inv_next_code(pr.company_id, 'request'), 'project', pr.id, coalesce(p_actor, auth.uid(), pr.pm_user_id), 'draft',
+          'Equipment from the Sales handover', h.site_timezone, w.o_plan, w.o_from, w.o_until, w.o_return, 'sales_handover', pr.crm_opportunity_id)
+  on conflict (project_id, source_ref) where source = 'sales_handover' do nothing
+  returning * into v_req;
+  if v_req.id is null then
+    select id into v_existing from inv_requests where project_id = pr.id and source = 'sales_handover' and source_ref = pr.crm_opportunity_id;
+    return v_existing;
+  end if;
+
+  for e in select * from jsonb_array_elements(h.technologies) loop
+    v_qty := coalesce(nullif(e->>'qty', '')::numeric, 1);
+    select t.id into v_tid from inv_technologies t
+     where t.company_id = pr.company_id and t.status = 'complete' and lower(btrim(t.name)) = lower(btrim(e->>'name'))
+       and exists (select 1 from inv_technology_components c where c.technology_id = t.id and not c.is_optional)
+     limit 1;
+    if v_tid is null then
+      v_unmatched := v_unmatched || format('%s x%s', btrim(e->>'name'), v_qty::bigint);
+    else
+      perform inv_expand_into_request(v_req, v_tid, v_qty, '{}'::jsonb);
+      v_matched := v_matched + 1;
+    end if;
+  end loop;
+
+  v_note := 'Imported from the Sales handover (' || h.crm_reference || '). Dates are whole days taken from the handover: confirm the real dispatch and return times.';
+  if cardinality(v_unmatched) > 0 then
+    v_note := v_note || ' No complete technology template for: ' || array_to_string(v_unmatched, ', ') || '. Add those items by hand, or ask the warehouse to check them.';
+  end if;
+  update inv_requests set note = v_note where id = v_req.id;
+  v_detail := format('%s technolog%s expanded into request %s', v_matched, case when v_matched = 1 then 'y' else 'ies' end, v_req.code);
+  if cardinality(v_unmatched) > 0 then v_detail := v_detail || '. Not matched (no complete template): ' || array_to_string(v_unmatched, ', '); end if;
+  insert into inv_import_log (company_id, project_id, source_ref, outcome, detail)
+  values (pr.company_id, pr.id, pr.crm_opportunity_id, 'imported', v_detail);
+  return v_req.id;
+end;
+$$;
+
+create or replace function inv_import_handover_requirements(p_project_id uuid)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare pr proj_projects;
+begin
+  perform inv_require_user();
+  select * into pr from proj_projects where id = p_project_id;
+  if not found then raise exception 'Project not found' using errcode = 'P0002'; end if;
+  if not (proj_can_manage(pr.id) or inv_is_founder(pr.company_id)) then
+    raise exception 'Only the project manager, an acting project manager or a founder can import the handover equipment' using errcode = '42501';
+  end if;
+  perform inv_require_enabled(pr.company_id);
+  if pr.status in ('completed', 'archived') then
+    raise exception 'A completed or archived project cannot get new equipment requests' using errcode = '23514';
+  end if;
+  return inv_import_handover_internal(pr.id, auth.uid());
+end;
+$$;
+
+-- Progress of one request line, from its reservations. reserved_for_window counts what really covers the request's window (a line left
+-- with an old range after a refused date change shows a shortage); equipment already out counts as covering.
+create or replace function inv_line_progress(l inv_request_lines)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  r inv_requests;
+  v_res numeric; v_win numeric; v_disp numeric; v_ret numeric; v_short numeric := 0;
+begin
+  select * into r from inv_requests where id = l.request_id;
+  select coalesce(sum(x.qty), 0),
+         coalesce(sum(x.qty) filter (where r.needed_from is not null and r.needed_until is not null and (
+             (x.dispatched_qty > 0 and upper(x.reserved_during) >= r.needed_until)
+             or (lower(x.reserved_during) <= r.needed_from and upper(x.reserved_during) >= r.needed_until))), 0),
+         coalesce(sum(x.dispatched_qty), 0), coalesce(sum(x.returned_qty), 0)
+    into v_res, v_win, v_disp, v_ret
+    from inv_reservations x where x.request_line_id = l.id and x.status in ('active', 'completed');
+  if l.status = 'open' and r.status in ('submitted', 'in_progress') then v_short := greatest(0, l.qty - v_win); end if;
+  return jsonb_build_object('reserved', v_res, 'reserved_for_window', v_win, 'dispatched', v_disp, 'returned', v_ret,
+                            'outstanding', v_disp - v_ret, 'shortage', v_short);
+end;
+$$;
+
+create or replace function inv_project_equipment(p_project_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  pr proj_projects;
+  v_requests jsonb;
+  v_short jsonb;
+  v_out jsonb;
+begin
+  perform inv_require_user();
+  select * into pr from proj_projects where id = p_project_id;
+  if not found or not (proj_can_view_details(pr.id) or inv_is_founder(pr.company_id) or inv_has_capability(pr.company_id, 'warehouse')) then
+    raise exception 'Project not found' using errcode = 'P0002';
+  end if;
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'id', q.id, 'code', q.code, 'status', q.status, 'title', q.title, 'destination', q.destination, 'timezone', q.timezone, 'plan', q.plan,
+      'needed_from', q.needed_from, 'needed_until', q.needed_until, 'expected_return_at', q.expected_return_at,
+      'source', q.source, 'note', q.note, 'version', q.version, 'submitted_at', q.submitted_at, 'cancelled_at', q.cancelled_at, 'cancel_reason', q.cancel_reason,
+      'lines', coalesce((
+        select jsonb_agg(jsonb_build_object(
+            'id', l.id, 'item_id', l.item_id, 'item_name', i.name, 'model', i.model, 'qty', l.qty, 'status', l.status, 'is_optional', l.is_optional,
+            'technology', l.technology_snapshot->>'name', 'alt_group', l.alt_group,
+            'substitution_status', l.substitution_status, 'original_item_id', l.original_item_id, 'original_item_name', oi.name,
+            'shortage_action', l.shortage_action, 'shortage_note', l.shortage_note, 'rental_reference', l.rental_reference, 'note', l.note,
+            'progress', inv_line_progress(l),
+            'reservations', coalesce((
+              select jsonb_agg(jsonb_build_object(
+                  'id', x.id, 'unit_id', x.unit_id, 'unit_code', u.code, 'serial_number', u.serial_number, 'item_name', xi.name, 'qty', x.qty,
+                  'dispatched_qty', x.dispatched_qty, 'returned_qty', x.returned_qty, 'from', lower(x.reserved_during), 'until', upper(x.reserved_during),
+                  'status', x.status, 'released_reason', x.released_reason,
+                  'covers_request_window', q.needed_from is not null and lower(x.reserved_during) <= q.needed_from and upper(x.reserved_during) >= q.needed_until)
+                  order by x.made_at, x.id)
+                from inv_reservations x join inv_items xi on xi.id = x.item_id left join inv_units u on u.id = x.unit_id
+               where x.request_line_id = l.id), '[]'::jsonb)) order by l.sort_order, l.id)
+          from inv_request_lines l join inv_items i on i.id = l.item_id left join inv_items oi on oi.id = l.original_item_id
+         where l.request_id = q.id), '[]'::jsonb)) order by q.created_at, q.id), '[]'::jsonb)
+    into v_requests from inv_requests q where q.project_id = pr.id;
+  select coalesce(jsonb_agg(jsonb_build_object('request_code', q.code, 'line_id', l.id, 'item_name', i.name, 'short_qty', (inv_line_progress(l)->>'shortage')::numeric,
+           'shortage_action', l.shortage_action, 'rental_reference', l.rental_reference) order by q.created_at, l.sort_order), '[]'::jsonb)
+    into v_short
+    from inv_requests q join inv_request_lines l on l.request_id = q.id join inv_items i on i.id = l.item_id
+   where q.project_id = pr.id and (inv_line_progress(l)->>'shortage')::numeric > 0;
+  v_out := jsonb_build_object('project_id', pr.id, 'requests', v_requests, 'shortages', v_short,
+    'outstanding', coalesce((
+      select jsonb_agg(jsonb_build_object('request_code', q.code, 'line_id', l.id, 'item_name', i.name, 'unit_code', u.code, 'serial_number', u.serial_number,
+               'qty_outstanding', x.dispatched_qty - x.returned_qty, 'unit_lifecycle', u.lifecycle) order by q.created_at, x.made_at)
+        from inv_reservations x join inv_request_lines l on l.id = x.request_line_id join inv_requests q on q.id = l.request_id
+             join inv_items i on i.id = x.item_id left join inv_units u on u.id = x.unit_id
+       where q.project_id = pr.id and x.status = 'active' and x.dispatched_qty > x.returned_qty), '[]'::jsonb));
+  return v_out;
+end;
+$$;
+
+-- Trigger: a client project gets its draft equipment request from the handover. NEVER blocks: any failure is written to the log.
+create or replace function inv_proj_after_insert()
+returns trigger
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  begin
+    perform inv_import_handover_internal(new.id, null);
+  exception when others then
+    begin
+      insert into inv_import_log (company_id, project_id, source_ref, outcome, detail)
+      values (new.company_id, new.id, new.crm_opportunity_id, 'failed', left(sqlerrm, 500));
+    exception when others then
+      null;
+    end;
+  end;
+  return null;
+end;
+$$;
+
+-- Trigger: when a project becomes completed or archived, unused reservations are released and draft / submitted requests are cancelled.
+-- Dispatched equipment stays outstanding. Completion itself is never blocked or altered.
+create or replace function inv_proj_after_status()
+returns trigger
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  q record;
+  l record;
+  v_reason text := 'Project ' || new.status;
+begin
+  begin
+    for q in select id, status from inv_requests where project_id = new.id and status in ('draft', 'submitted', 'in_progress') order by created_at, id loop
+      if q.status in ('draft', 'submitted') then
+        perform inv_cancel_request_internal(q.id, v_reason);
+      else
+        for l in select id from inv_request_lines where request_id = q.id and status = 'open' loop
+          perform inv_release_unused(l.id, v_reason);
+        end loop;
+      end if;
+    end loop;
+  exception when others then
+    begin
+      insert into inv_import_log (company_id, project_id, source_ref, outcome, detail)
+      values (new.company_id, new.id, new.crm_opportunity_id, 'failed', left('Releasing equipment at project ' || new.status || ' failed: ' || sqlerrm, 500));
+    exception when others then
+      null;
+    end;
+  end;
+  return null;
+end;
+$$;
+
+drop trigger if exists inv_proj_projects_import on proj_projects;
+create trigger inv_proj_projects_import after insert on proj_projects
+  for each row when (new.kind = 'client') execute function inv_proj_after_insert();
+drop trigger if exists inv_proj_projects_release on proj_projects;
+create trigger inv_proj_projects_release after update of status on proj_projects
+  for each row when (new.status in ('completed', 'archived') and old.status is distinct from new.status) execute function inv_proj_after_status();
+
+-- =============================================================================
+-- Privileges: internal helpers and trigger functions are closed; the client-facing functions are open to signed-in users (each one
+-- checks who is calling).
+-- =============================================================================
+do $$
+declare
+  f record;
+  v_internal text[] := array[
+    'inv_user_name', 'inv_check_version', 'inv_lock_request', 'inv_can_edit_request', 'inv_require_edit', 'inv_plan_window', 'inv_effective_item',
+    'inv_reserve_block_reason', 'inv_free_count', 'inv_expand_into_request', 'inv_release_row', 'inv_release_unused', 'inv_cancel_request_internal',
+    'inv_demand_check', 'inv_opportunity_compute', 'inv_import_handover_internal', 'inv_line_progress', 'inv_proj_after_insert', 'inv_proj_after_status'];
+  v_public text[] := array[
+    'inv_save_technology', 'inv_save_technology_components', 'inv_set_technology_status', 'inv_create_request', 'inv_save_request_plan',
+    'inv_add_request_line', 'inv_expand_technology', 'inv_update_request_line', 'inv_cancel_request_line', 'inv_submit_request',
+    'inv_cancel_request', 'inv_propose_substitution', 'inv_decide_substitution', 'inv_set_shortage_action', 'inv_reserve',
+    'inv_release_reservation', 'inv_change_request_window', 'inv_availability', 'inv_technology_availability', 'inv_request_opportunity_check',
+    'inv_record_opportunity_check', 'inv_opportunity_availability', 'inv_project_equipment', 'inv_import_handover_requirements'];
+begin
+  for f in select p.oid::regprocedure as sig, p.proname from pg_proc p
+            where p.pronamespace = 'public'::regnamespace and p.proname = any (v_internal || v_public) loop
+    execute format('revoke all on function %s from public, anon, authenticated', f.sig);
+    if f.proname = any (v_public) then execute format('grant execute on function %s to authenticated', f.sig); end if;
+  end loop;
+end $$;
+
+-- ROLLBACK (only before any Inventory planning data exists):
+--   drop trigger if exists inv_proj_projects_release on proj_projects; drop trigger if exists inv_proj_projects_import on proj_projects;
+--   drop function if exists inv_proj_after_status(), inv_proj_after_insert(), inv_project_equipment(uuid), inv_line_progress(inv_request_lines),
+--     inv_import_handover_requirements(uuid), inv_import_handover_internal(uuid, uuid), inv_opportunity_availability(uuid),
+--     inv_record_opportunity_check(uuid, uuid, text), inv_request_opportunity_check(uuid, uuid), inv_opportunity_compute(crm_opportunities, uuid),
+--     inv_technology_availability(uuid, numeric, uuid, timestamptz, timestamptz), inv_demand_check(jsonb, uuid, timestamptz, timestamptz),
+--     inv_availability(uuid, uuid, timestamptz, timestamptz), inv_change_request_window(uuid, jsonb, text, integer),
+--     inv_release_reservation(uuid, text), inv_reserve(uuid, uuid, uuid[], numeric, text, text), inv_set_shortage_action(uuid, text, text, text),
+--     inv_decide_substitution(uuid, boolean, text), inv_propose_substitution(uuid, uuid, text, integer), inv_cancel_request(uuid, text),
+--     inv_cancel_request_internal(uuid, text), inv_submit_request(uuid, integer), inv_cancel_request_line(uuid, text), inv_release_unused(uuid, text),
+--     inv_release_row(inv_reservations, text), inv_update_request_line(uuid, numeric, text, integer), inv_expand_technology(uuid, uuid, numeric, jsonb),
+--     inv_expand_into_request(inv_requests, uuid, numeric, jsonb), inv_add_request_line(uuid, uuid, numeric, text, integer),
+--     inv_save_request_plan(uuid, jsonb, text, integer), inv_create_request(text, uuid, uuid, text, jsonb, text, text, uuid, text),
+--     inv_set_technology_status(uuid, text, integer), inv_save_technology_components(uuid, jsonb, integer),
+--     inv_save_technology(uuid, uuid, text, text, integer), inv_free_count(uuid, uuid, timestamptz, timestamptz, uuid),
+--     inv_reserve_block_reason(uuid, timestamptz, timestamptz, uuid, uuid), inv_effective_item(inv_request_lines),
+--     inv_plan_window(jsonb, text), inv_require_edit(inv_requests), inv_can_edit_request(inv_requests), inv_lock_request(uuid),
+--     inv_check_version(integer, integer), inv_user_name(uuid);
+
+-- ---- 20261201000500_inv_employee_legacy.sql ----
+-- Inventory, migration 6 of 6 (file 20261201000500): employees and the earlier HR asset register.
+--
+-- CLIENT-FACING FUNCTIONS (all security definer, search_path = public, executable by authenticated only)
+--   inv_employee_lookup(p_company_id uuid, p_query text)
+--       returns table (employee_id uuid, display_name text, employee_number text, department_name text)
+--   inv_my_equipment()
+--       returns table (kind text, unit_id uuid, balance_id uuid, code text, item_id uuid, item_name text, serial_number text, qty numeric,
+--                      unit_of_measure text, issued_at timestamptz, expected_return_at timestamptz, condition text, lifecycle text,
+--                      is_overdue boolean, company_id uuid)
+--   inv_employee_outstanding(p_company_id uuid, p_employee_id uuid default null, p_include_inactive boolean default true)
+--       returns table (employee_id uuid, display_name text, employee_number text, employment_status text, termination_date date,
+--                      is_active boolean, is_removed boolean, holding_kind text, unit_id uuid, balance_id uuid, code text, item_id uuid,
+--                      item_name text, serial_number text, qty numeric, unit_of_measure text, issued_at timestamptz,
+--                      expected_return_at timestamptz, condition text, lifecycle text, is_overdue boolean)
+--   inv_reassign_unit(p_unit_id uuid, p_to text, p_employee_id uuid, p_reason text, p_key text) returns jsonb
+--       p_to = 'employee' (p_employee_id required) or 'pool' (p_employee_id must be null: the unit goes back to the warehouse pool at
+--       its recorded location). Returns {movement_id, movement_code, unit_id, to, employee_id, replayed}.
+--   inv_preview_legacy_assets(p_company_id uuid)
+--       returns table (asset_id uuid, asset_tag text, category text, description text, status text, purchase_date date, value numeric,
+--                      open_assignment_count integer, employee_id uuid, employee_name text, employee_number text, employee_active boolean,
+--                      issued_date date, already_linked boolean, unit_id uuid, unit_code text)
+--   inv_import_legacy_assets(p_company_id uuid, p_rows jsonb) returns jsonb
+--       p_rows = [{asset_id, item_id, location_id}, ...]; returns {created, skipped, results: [{asset_id, outcome, reason, unit_id, unit_code}]}
+-- INTERNAL (revoked from clients)
+--   inv_mirror_legacy(p_unit_id uuid) returns void      replaces the no-op of migration 3b (identical signature)
+--   inv_is_warehouse_operator(uuid), inv_employee_active(uuid), inv_legacy_guard()
+-- GRANTED TO authenticated BECAUSE THE GUARD TRIGGER RUNS AS THE EDITING USER: inv_asset_is_linked(uuid) (a yes/no for one asset id).
+--
+-- INTENDED CHANGE TO EXISTING HR TABLES (design section 1, item 1): two row triggers, nothing else about assets or asset_assignments
+-- changes (no column, policy or privilege):
+--   inv_legacy_guard_assets        BEFORE UPDATE OR DELETE ON assets
+--   inv_legacy_guard_assignments   BEFORE INSERT OR UPDATE OR DELETE ON asset_assignments
+-- Both refuse the change with "This item is managed in Inventory. Use Inventory to issue or return it." when the asset is linked to an
+-- Inventory unit (inv_units.legacy_asset_id), unless the write comes from inv_mirror_legacy (transaction-local flag inv.mirror = 'on',
+-- honoured only when the statement does not run as a browser session role, so a signed-in user cannot switch the guard off by setting
+-- the flag themselves). Assets that were never imported are untouched and behave exactly as before.
+--
+-- Employee data rule: Inventory reads employees only through the functions below, and each returns a fixed, short column list
+-- (id, name, employee number, department name, employment status / termination date for HR's exit view). No salary, leave, documents,
+-- personal e-mail, phone, birth date, nationality or reporting line is ever selected. Nothing here writes any HR table except the
+-- legacy mirror for assets that a founder imported.
+--
+-- "Active employee" (inv_employee_active): not removed, employment_status active or on_leave, and not past a termination date.
+
+-- -----------------------------------------------------------------------------
+-- Internal helpers
+-- -----------------------------------------------------------------------------
+-- Warehouse operator of the company: holds 'warehouse' and either works at least one active location of the company or has
+-- 'cross_location'. Founders count (they hold every capability).
+create or replace function inv_is_warehouse_operator(p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select inv_has_capability(p_company_id, 'warehouse')
+     and (inv_has_capability(p_company_id, 'cross_location')
+          or exists (select 1 from inv_operator_locations o join inv_locations l on l.id = o.location_id
+                      where o.user_id = auth.uid() and o.removed_at is null and l.company_id = p_company_id and l.is_active));
+$$;
+
+create or replace function inv_employee_active(p_employee_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (select 1 from employees e
+                  where e.id = p_employee_id and e.deleted_at is null and e.employment_status in ('active', 'on_leave')
+                    and (e.termination_date is null or e.termination_date >= current_date));
+$$;
+
+-- Is this HR asset linked to an Inventory unit? Used by the guard triggers; runs with definer rights so the answer does not depend on
+-- the editing user's Inventory visibility.
+create or replace function inv_asset_is_linked(p_asset_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (select 1 from inv_units where legacy_asset_id = p_asset_id);
+$$;
+
+-- -----------------------------------------------------------------------------
+-- 1. Restricted employee lookup (for choosing who equipment is issued or requested for)
+-- -----------------------------------------------------------------------------
+create or replace function inv_employee_lookup(p_company_id uuid, p_query text)
+returns table (employee_id uuid, display_name text, employee_number text, department_name text)
+language plpgsql stable security definer
+set search_path = public
+as $$
+#variable_conflict use_column
+declare
+  v_q text := btrim(coalesce(p_query, ''));
+  v_tokens text[];
+begin
+  perform inv_require_user();
+  if not (inv_is_warehouse_operator(p_company_id) or inv_has_capability(p_company_id, 'request_for_employees')) then
+    raise exception 'Only warehouse operators, founders and people who may request equipment for employees can look up employees' using errcode = '42501';
+  end if;
+  if length(v_q) < 2 then return; end if;
+  -- every word must match the name or the employee number; % _ and \ typed by the user are matched literally
+  select array_agg(replace(replace(replace(t, '\', '\\'), '%', '\%'), '_', '\_')) into v_tokens
+    from unnest(regexp_split_to_array(v_q, '\s+')) t where t <> '';
+  return query
+    select e.id, btrim(e.first_name || ' ' || e.last_name), e.employee_number, d.name
+      from employees e
+      left join departments d on d.id = e.department_id and d.deleted_at is null
+     where e.company_id = p_company_id
+       and e.deleted_at is null and e.employment_status in ('active', 'on_leave')
+       and (e.termination_date is null or e.termination_date >= current_date)
+       and not exists (select 1 from unnest(v_tokens) t
+                        where not ((e.first_name || ' ' || e.last_name) ilike '%' || t || '%' or e.employee_number ilike '%' || t || '%'))
+     order by btrim(e.first_name || ' ' || e.last_name), e.employee_number
+     limit 20;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- 2. My equipment: what the employee record linked to the signed-in account holds. No capability needed, no costs.
+-- -----------------------------------------------------------------------------
+create or replace function inv_my_equipment()
+returns table (kind text, unit_id uuid, balance_id uuid, code text, item_id uuid, item_name text, serial_number text, qty numeric,
+               unit_of_measure text, issued_at timestamptz, expected_return_at timestamptz, condition text, lifecycle text,
+               is_overdue boolean, company_id uuid)
+language plpgsql stable security definer
+set search_path = public
+as $$
+#variable_conflict use_column
+begin
+  perform inv_require_user();
+  if not exists (select 1 from profiles p where p.id = auth.uid() and p.is_active) then return; end if;
+  return query
+    select 'unit'::text, u.id, null::uuid, u.code, u.item_id, i.name, u.serial_number, 1::numeric, i.unit_of_measure,
+           coalesce((select m.occurred_at from inv_movement_lines l join inv_movements m on m.id = l.movement_id
+                      where l.unit_id = u.id and l.to_kind = 'employee' and l.to_employee_id = u.employee_id
+                      order by m.occurred_at desc, m.recorded_at desc limit 1),
+                    (select aa.issued_date::timestamptz from asset_assignments aa
+                      where aa.asset_id = u.legacy_asset_id and aa.employee_id = u.employee_id and aa.returned_date is null
+                      order by aa.issued_date desc, aa.id limit 1)),
+           u.expected_return_at, u.condition, u.lifecycle,
+           (u.expected_return_at is not null and u.expected_return_at < now()), u.company_id
+      from inv_units u join inv_items i on i.id = u.item_id
+     where u.custody_kind = 'employee' and u.lifecycle <> 'retired'
+       and u.employee_id in (select e.id from employees e where e.user_id = auth.uid() and e.deleted_at is null)
+    union all
+    select 'quantity'::text, null::uuid, b.id, null::text, b.item_id, i.name, null::text, b.qty, i.unit_of_measure,
+           (select m.occurred_at from inv_movement_lines l join inv_movements m on m.id = l.movement_id
+             where l.to_balance_id = b.id order by m.occurred_at desc, m.recorded_at desc limit 1),
+           b.expected_return_at, b.condition, null::text,
+           (b.expected_return_at is not null and b.expected_return_at < now()), b.company_id
+      from inv_balances b join inv_items i on i.id = b.item_id
+     where b.holder_kind = 'employee' and b.qty > 0
+       and b.employee_id in (select e.id from employees e where e.user_id = auth.uid() and e.deleted_at is null)
+    order by 6, 4;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- 3. HR / warehouse view: outstanding equipment per employee, including people who have left
+-- -----------------------------------------------------------------------------
+create or replace function inv_employee_outstanding(p_company_id uuid, p_employee_id uuid default null, p_include_inactive boolean default true)
+returns table (employee_id uuid, display_name text, employee_number text, employment_status text, termination_date date,
+               is_active boolean, is_removed boolean, holding_kind text, unit_id uuid, balance_id uuid, code text, item_id uuid,
+               item_name text, serial_number text, qty numeric, unit_of_measure text, issued_at timestamptz,
+               expected_return_at timestamptz, condition text, lifecycle text, is_overdue boolean)
+language plpgsql stable security definer
+set search_path = public
+as $$
+#variable_conflict use_column
+begin
+  perform inv_require_user();
+  if not (inv_has_capability(p_company_id, 'view_employee_custody') or inv_is_warehouse_operator(p_company_id)) then
+    raise exception 'Only a founder, a warehouse operator or someone given employee-custody access can see what employees hold' using errcode = '42501';
+  end if;
+  return query
+    with held as (
+      select u.employee_id as eid, 'unit'::text as hk, u.id as uid, null::uuid as bid, u.code as ucode, u.item_id as iid, u.serial_number as serial,
+             1::numeric as q, u.expected_return_at as ret, u.condition as cond, u.lifecycle as life,
+             coalesce((select m.occurred_at from inv_movement_lines l join inv_movements m on m.id = l.movement_id
+                        where l.unit_id = u.id and l.to_kind = 'employee' and l.to_employee_id = u.employee_id
+                        order by m.occurred_at desc, m.recorded_at desc limit 1),
+                      (select aa.issued_date::timestamptz from asset_assignments aa
+                        where aa.asset_id = u.legacy_asset_id and aa.employee_id = u.employee_id and aa.returned_date is null
+                        order by aa.issued_date desc, aa.id limit 1)) as issued
+        from inv_units u
+       where u.company_id = p_company_id and u.custody_kind = 'employee' and u.lifecycle <> 'retired'
+         and (p_employee_id is null or u.employee_id = p_employee_id)
+      union all
+      select b.employee_id, 'quantity', null::uuid, b.id, null::text, b.item_id, null::text, b.qty, b.expected_return_at, b.condition, null::text,
+             (select m.occurred_at from inv_movement_lines l join inv_movements m on m.id = l.movement_id
+               where l.to_balance_id = b.id order by m.occurred_at desc, m.recorded_at desc limit 1)
+        from inv_balances b
+       where b.company_id = p_company_id and b.holder_kind = 'employee' and b.qty > 0
+         and (p_employee_id is null or b.employee_id = p_employee_id)
+    )
+    select e.id, btrim(e.first_name || ' ' || e.last_name), e.employee_number, e.employment_status::text, e.termination_date,
+           (e.deleted_at is null and e.employment_status in ('active', 'on_leave') and (e.termination_date is null or e.termination_date >= current_date)),
+           (e.deleted_at is not null),
+           h.hk, h.uid, h.bid, h.ucode, h.iid, i.name, h.serial, h.q, i.unit_of_measure, h.issued, h.ret, h.cond, h.life,
+           (h.ret is not null and h.ret < now())
+      from held h
+      join employees e on e.id = h.eid
+      join inv_items i on i.id = h.iid
+     where p_include_inactive
+        or (e.deleted_at is null and e.employment_status in ('active', 'on_leave') and (e.termination_date is null or e.termination_date >= current_date))
+     order by 6, 2, 3, i.name, h.ucode;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- 4. Reassignment: employee <-> project pool (and employee -> employee), always with history
+-- -----------------------------------------------------------------------------
+create or replace function inv_reassign_unit(p_unit_id uuid, p_to text, p_employee_id uuid, p_reason text, p_key text)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_reason text := btrim(coalesce(p_reason, ''));
+  v_company uuid;
+  v_item uuid;
+  v_loc uuid;
+  v_unit inv_units;
+  v_emp employees;
+  v_move inv_movements;
+  v_kind text;
+  v_code text;
+  v_move_id uuid;
+  v_loc_active boolean;
+  v_booking text;
+  v_denied constant text := 'Only a founder or a warehouse operator at this location can change who holds equipment';
+begin
+  perform inv_require_user();
+  if p_to is null or p_to not in ('employee', 'pool') then
+    raise exception 'Choose where the equipment goes: to an employee or back to the pool' using errcode = '22023';
+  end if;
+  if p_key is null or length(p_key) not between 8 and 120 then
+    raise exception 'The request key must be 8 to 120 characters' using errcode = '22023';
+  end if;
+  if length(v_reason) = 0 then
+    raise exception 'Give a reason for the change' using errcode = '22023';
+  end if;
+  if p_to = 'employee' and p_employee_id is null then
+    raise exception 'Choose the employee' using errcode = '22023';
+  end if;
+  if p_to = 'pool' and p_employee_id is not null then
+    raise exception 'Do not choose an employee when returning equipment to the pool' using errcode = '22023';
+  end if;
+
+  select company_id, item_id, location_id into v_company, v_item, v_loc from inv_units where id = p_unit_id;
+  -- unknown equipment and equipment you may not touch look the same
+  if v_company is null then raise exception '%', v_denied using errcode = '42501'; end if;
+  if not (inv_is_founder(v_company)
+          or (inv_has_capability(v_company, 'warehouse')
+              and (inv_has_capability(v_company, 'cross_location') or (v_loc is not null and inv_can_operate(v_loc))))) then
+    raise exception '%', v_denied using errcode = '42501';
+  end if;
+  perform inv_require_enabled(v_company);
+
+  perform inv_lock_item(v_item);
+  perform pg_advisory_xact_lock(hashtextextended('inv_key:' || v_company::text || ':' || p_key, 0));
+
+  -- a retried call with the same key and the same content returns the first result and changes nothing
+  select * into v_move from inv_movements where company_id = v_company and idempotency_key = p_key;
+  if found then
+    if v_move.performed_by = auth.uid() and v_move.kind in ('reassign_employee', 'pool_change')
+       and v_move.reason is not distinct from v_reason
+       and exists (select 1 from inv_movement_lines l
+                    where l.movement_id = v_move.id and l.unit_id = p_unit_id
+                      and l.to_employee_id is not distinct from (case when p_to = 'employee' then p_employee_id end)
+                      and (l.to_kind = 'employee') = (p_to = 'employee')) then
+      return jsonb_build_object('movement_id', v_move.id, 'movement_code', v_move.code, 'unit_id', p_unit_id, 'to', p_to,
+                                'employee_id', p_employee_id, 'replayed', true);
+    end if;
+    raise exception 'That request key was already used for a different request' using errcode = '23505';
+  end if;
+
+  select * into v_unit from inv_units where id = p_unit_id for update;
+  if v_unit.lifecycle not in ('draft', 'active') then
+    raise exception 'Retired or missing equipment cannot be reassigned' using errcode = '23514';
+  end if;
+  if v_unit.custody_kind not in ('warehouse', 'employee') then
+    raise exception 'This unit is not in the warehouse or with an employee (it is out on a project, in transit, in repair or packed in a kit). Bring it back first.' using errcode = '23514';
+  end if;
+
+  if p_to = 'employee' then
+    select * into v_emp from employees where id = p_employee_id;
+    if v_emp.id is null or v_emp.deleted_at is not null then
+      raise exception 'Unknown employee' using errcode = '22023';
+    end if;
+    if v_emp.company_id <> v_company then
+      raise exception 'That employee does not belong to the company that owns this equipment' using errcode = '22023';
+    end if;
+    if not inv_employee_active(p_employee_id) then
+      raise exception 'That employee is no longer active, so equipment cannot be assigned to them' using errcode = '23514';
+    end if;
+    if v_unit.custody_kind = 'employee' and v_unit.employee_id = p_employee_id then
+      raise exception 'This unit is already assigned to that employee' using errcode = '23514';
+    end if;
+    if v_unit.custody_kind = 'warehouse' and v_unit.condition not in ('good', 'fair') then
+      raise exception 'Only equipment in good or fair condition can be assigned to an employee. Check and repair it first.' using errcode = '23514';
+    end if;
+    -- An employee-assigned unit can never be booked for a project, so a live booking would be broken by this change.
+    select coalesce(rq.code, 'a request') into v_booking
+      from inv_reservations r join inv_request_lines rl on rl.id = r.request_line_id join inv_requests rq on rq.id = rl.request_id
+     where r.unit_id = v_unit.id and r.status = 'active' and upper(r.reserved_during) > now()
+     order by lower(r.reserved_during) limit 1;
+    if found then
+      raise exception 'This unit is reserved for % and cannot be assigned to an employee. Release the reservation first.', v_booking using errcode = '23514';
+    end if;
+    v_kind := 'reassign_employee';
+  else
+    if v_unit.custody_kind <> 'employee' then
+      raise exception 'This unit is already in the warehouse pool' using errcode = '23514';
+    end if;
+    if v_unit.location_id is null then
+      raise exception 'This unit has no recorded storage location. Return it through the warehouse screen instead.' using errcode = '23514';
+    end if;
+    select is_active into v_loc_active from inv_locations where id = v_unit.location_id;
+    if not coalesce(v_loc_active, false) then
+      raise exception 'The location this unit belongs to is no longer active' using errcode = '23514';
+    end if;
+    v_kind := 'pool_change';
+  end if;
+
+  v_code := inv_next_code(v_company, 'movement');
+  insert into inv_movements (company_id, code, kind, performed_by, recipient_user_id, recipient_employee_id, recipient_name, employee_id,
+                             from_location_id, to_location_id, reason, idempotency_key)
+  values (v_company, v_code, v_kind, auth.uid(),
+          case when p_to = 'employee' then v_emp.user_id end,
+          case when p_to = 'employee' then v_emp.id end,
+          case when p_to = 'employee' then btrim(v_emp.first_name || ' ' || v_emp.last_name) end,
+          case when p_to = 'employee' then v_emp.id else v_unit.employee_id end,
+          case when v_unit.custody_kind = 'warehouse' then v_unit.location_id end,
+          case when p_to = 'pool' then v_unit.location_id end,
+          v_reason, p_key)
+  returning id into v_move_id;
+
+  insert into inv_movement_lines (movement_id, company_id, item_id, unit_id, qty, from_kind, to_kind, from_location_id, to_location_id,
+                                  from_bin_id, to_bin_id, from_employee_id, to_employee_id, condition_from, condition_to)
+  values (v_move_id, v_company, v_unit.item_id, v_unit.id, 1, v_unit.custody_kind, case when p_to = 'employee' then 'employee' else 'warehouse' end,
+          case when v_unit.custody_kind = 'warehouse' then v_unit.location_id end,
+          case when p_to = 'pool' then v_unit.location_id end,
+          case when v_unit.custody_kind = 'warehouse' then v_unit.bin_id end,
+          case when p_to = 'pool' then v_unit.bin_id end,
+          v_unit.employee_id,
+          case when p_to = 'employee' then p_employee_id end,
+          v_unit.condition, v_unit.condition);
+
+  -- the location and bin stay as the place the unit left from, so it can come back to the same shelf
+  update inv_units
+     set custody_kind = case when p_to = 'employee' then 'employee' else 'warehouse' end,
+         employee_id = case when p_to = 'employee' then p_employee_id end,
+         expected_return_at = null,
+         version = version + 1
+   where id = v_unit.id;
+
+  perform inv_mirror_legacy(v_unit.id);
+
+  return jsonb_build_object('movement_id', v_move_id, 'movement_code', v_code, 'unit_id', v_unit.id, 'to', p_to,
+                            'employee_id', p_employee_id, 'replayed', false);
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- 5. Legacy mirror: keep the HR register in step for units that were reconciled from it
+-- -----------------------------------------------------------------------------
+-- Called by every Inventory function that changes who holds a unit, in the same transaction. For a unit with legacy_asset_id:
+--   custody employee            exactly one open asset_assignments row for that employee (inserted when missing; another employee's
+--                               open row is closed with the movement's date), assets.status = issued
+--   custody warehouse/project/transit/kit   open rows closed, status in_stock
+--   custody repair              open rows closed, status under_repair
+--   lifecycle retired           open rows closed, status retired
+--   lifecycle missing           nothing (the HR register has no "missing"; Inventory keeps the record)
+-- The writes run under inv.mirror = 'on' (transaction-local, switched back afterwards) which the guard triggers recognise.
+create or replace function inv_mirror_legacy(p_unit_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_unit inv_units;
+  v_asset assets;
+  v_prev text;
+  v_when timestamptz;
+  v_by uuid;
+  v_tz text;
+  v_date date;
+  v_status asset_status;
+  v_keep uuid;
+begin
+  select * into v_unit from inv_units where id = p_unit_id;
+  if v_unit.id is null or v_unit.legacy_asset_id is null then return; end if;
+  if v_unit.lifecycle = 'missing' then return; end if;
+  select * into v_asset from assets where id = v_unit.legacy_asset_id for update;
+  if v_asset.id is null then return; end if;
+
+  select m.occurred_at, m.performed_by into v_when, v_by
+    from inv_movement_lines l join inv_movements m on m.id = l.movement_id
+   where l.unit_id = p_unit_id order by m.occurred_at desc, m.recorded_at desc limit 1;
+  select timezone into v_tz from inv_locations where id = v_unit.location_id;
+  v_date := (coalesce(v_when, now()) at time zone coalesce(v_tz, 'UTC'))::date;
+
+  v_prev := current_setting('inv.mirror', true);
+  perform set_config('inv.mirror', 'on', true);
+
+  if v_unit.lifecycle = 'retired' then
+    v_status := 'retired';
+  elsif v_unit.custody_kind = 'employee' then
+    v_status := 'issued';
+  elsif v_unit.custody_kind = 'repair' then
+    v_status := 'under_repair';
+  else
+    v_status := 'in_stock';
+  end if;
+
+  if v_status = 'issued' then
+    update asset_assignments
+       set returned_date = greatest(v_date, issued_date), condition_on_return = coalesce(condition_on_return, v_unit.condition)
+     where asset_id = v_asset.id and returned_date is null and employee_id <> v_unit.employee_id;
+    select id into v_keep from asset_assignments
+     where asset_id = v_asset.id and employee_id = v_unit.employee_id and returned_date is null
+     order by issued_date, id limit 1;
+    if v_keep is null then
+      insert into asset_assignments (asset_id, employee_id, issued_date, condition_on_issue, issued_by)
+      values (v_asset.id, v_unit.employee_id, v_date, v_unit.condition,
+              coalesce(auth.uid(), v_by, v_unit.verified_by, v_unit.created_by, '00000000-0000-0000-0000-000000000000'::uuid));
+    else
+      update asset_assignments set returned_date = greatest(v_date, issued_date)
+       where asset_id = v_asset.id and employee_id = v_unit.employee_id and returned_date is null and id <> v_keep;
+    end if;
+  else
+    update asset_assignments
+       set returned_date = greatest(v_date, issued_date), condition_on_return = coalesce(condition_on_return, v_unit.condition)
+     where asset_id = v_asset.id and returned_date is null;
+  end if;
+
+  if v_asset.status is distinct from v_status then
+    update assets set status = v_status where id = v_asset.id;
+  end if;
+
+  perform set_config('inv.mirror', coalesce(v_prev, ''), true);
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- 6. Guard triggers on the HR register (the intended change to existing tables)
+-- -----------------------------------------------------------------------------
+-- Deliberately NOT security definer: current_user must be the editing role, so the flag is honoured only for the Inventory mirror
+-- (which runs as the function owner) and never for a browser session (authenticated / anon).
+create or replace function inv_legacy_guard()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_msg constant text := 'This item is managed in Inventory. Use Inventory to issue or return it.';
+begin
+  if current_setting('inv.mirror', true) = 'on' and current_user not in ('anon', 'authenticated') then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+  if tg_table_name = 'assets' then
+    if inv_asset_is_linked(old.id) then raise exception '%', v_msg using errcode = '23514'; end if;
+  else
+    if tg_op in ('UPDATE', 'DELETE') and inv_asset_is_linked(old.asset_id) then raise exception '%', v_msg using errcode = '23514'; end if;
+    if tg_op in ('INSERT', 'UPDATE') and inv_asset_is_linked(new.asset_id) then raise exception '%', v_msg using errcode = '23514'; end if;
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+
+drop trigger if exists inv_legacy_guard_assets on assets;
+create trigger inv_legacy_guard_assets before update or delete on assets
+  for each row execute function inv_legacy_guard();
+drop trigger if exists inv_legacy_guard_assignments on asset_assignments;
+create trigger inv_legacy_guard_assignments before insert or update or delete on asset_assignments
+  for each row execute function inv_legacy_guard();
+
+-- -----------------------------------------------------------------------------
+-- 7. Legacy reconciliation: preview (read only) and import (founder chooses item and location per asset; nothing is guessed)
+-- -----------------------------------------------------------------------------
+create or replace function inv_preview_legacy_assets(p_company_id uuid)
+returns table (asset_id uuid, asset_tag text, category text, description text, status text, purchase_date date, value numeric,
+               open_assignment_count integer, employee_id uuid, employee_name text, employee_number text, employee_active boolean,
+               issued_date date, already_linked boolean, unit_id uuid, unit_code text)
+language plpgsql stable security definer
+set search_path = public
+as $$
+#variable_conflict use_column
+declare v_costs boolean;
+begin
+  perform inv_require_user();
+  if not inv_is_founder(p_company_id) then
+    raise exception 'Only an Inventory founder can review the earlier asset register' using errcode = '42501';
+  end if;
+  v_costs := inv_has_capability(p_company_id, 'view_costs');
+  return query
+    select a.id, a.asset_tag, a.category, a.description, a.status::text,
+           case when v_costs then a.purchase_date end, case when v_costs then a.value end,
+           (select count(*)::integer from asset_assignments x where x.asset_id = a.id and x.returned_date is null),
+           oa.employee_id, case when e.id is not null then btrim(e.first_name || ' ' || e.last_name) end, e.employee_number,
+           case when e.id is not null then inv_employee_active(e.id) end,
+           oa.issued_date, (u.id is not null), u.id, u.code
+      from assets a
+      left join lateral (select x.employee_id, x.issued_date from asset_assignments x
+                          where x.asset_id = a.id and x.returned_date is null order by x.issued_date desc, x.id limit 1) oa on true
+      left join employees e on e.id = oa.employee_id
+      left join inv_units u on u.legacy_asset_id = a.id
+     where a.company_id = p_company_id and a.deleted_at is null
+     order by a.asset_tag;
+end;
+$$;
+
+create or replace function inv_import_legacy_assets(p_company_id uuid, p_rows jsonb)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_uuid constant text := '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
+  v_row jsonb;
+  v_results jsonb := '[]'::jsonb;
+  v_created integer := 0;
+  v_skipped integer := 0;
+  v_seen uuid[] := '{}';
+  v_asset assets;
+  v_asset_id uuid;
+  v_item inv_items;
+  v_loc inv_locations;
+  v_unit inv_units;
+  v_open asset_assignments;
+  v_open_count integer;
+  v_costs boolean;
+  v_currency text;
+  v_reason text;
+  v_unit_id uuid;
+  v_unit_code text;
+  v_notes text;
+begin
+  perform inv_require_user();
+  if not inv_is_founder(p_company_id) then
+    raise exception 'Only an Inventory founder can import the earlier asset register' using errcode = '42501';
+  end if;
+  perform inv_require_enabled(p_company_id);
+  if p_rows is null or jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) = 0 then
+    raise exception 'Choose at least one asset to import' using errcode = '22023';
+  end if;
+  if jsonb_array_length(p_rows) > 500 then
+    raise exception 'Import at most 500 assets at a time' using errcode = '22023';
+  end if;
+  for v_row in select value from jsonb_array_elements(p_rows) loop
+    if jsonb_typeof(v_row) <> 'object' or coalesce(v_row->>'asset_id', '') !~ v_uuid or coalesce(v_row->>'item_id', '') !~ v_uuid
+       or coalesce(v_row->>'location_id', '') !~ v_uuid then
+      raise exception 'Every row needs an asset_id, an item_id and a location_id' using errcode = '22023';
+    end if;
+  end loop;
+
+  perform pg_advisory_xact_lock(hashtextextended('inv_legacy_import:' || p_company_id::text, 0));
+  v_costs := inv_has_capability(p_company_id, 'view_costs');
+  select default_currency into v_currency from companies where id = p_company_id;
+
+  for v_row in select value from jsonb_array_elements(p_rows) loop
+    v_asset_id := (v_row->>'asset_id')::uuid;
+    v_reason := null; v_unit_id := null; v_unit_code := null;
+
+    if v_asset_id = any (v_seen) then
+      v_reason := 'duplicate_in_request';
+    else
+      v_seen := v_seen || v_asset_id;
+      select * into v_asset from assets where id = v_asset_id and company_id = p_company_id and deleted_at is null for update;
+      if v_asset.id is null then
+        v_reason := 'asset_not_found';
+      else
+        select * into v_unit from inv_units where legacy_asset_id = v_asset.id;
+        if v_unit.id is not null then
+          v_reason := 'already_linked'; v_unit_id := v_unit.id; v_unit_code := v_unit.code;
+        elsif v_asset.status = 'retired' then
+          v_reason := 'retired_asset';
+        else
+          select * into v_item from inv_items
+           where id = (v_row->>'item_id')::uuid and company_id = p_company_id and tracking = 'individual' and status <> 'retired';
+          select * into v_loc from inv_locations where id = (v_row->>'location_id')::uuid and company_id = p_company_id and is_active;
+          if v_item.id is null then
+            v_reason := 'item_not_usable';
+          elsif v_loc.id is null then
+            v_reason := 'location_not_usable';
+          end if;
+        end if;
+      end if;
+    end if;
+
+    if v_reason is null then
+      select count(*) into v_open_count from asset_assignments where asset_id = v_asset.id and returned_date is null;
+      select * into v_open from asset_assignments where asset_id = v_asset.id and returned_date is null order by issued_date desc, id limit 1;
+      v_notes := 'Imported from the HR asset register. Old asset tag: ' || v_asset.asset_tag || ' (' || v_asset.category || ')'
+              || case when v_open_count > 1 then '. The HR register showed ' || v_open_count || ' open assignments; the latest was used.' else '' end;
+      v_unit_code := inv_next_code(p_company_id, 'unit');
+      insert into inv_units (company_id, item_id, code, serial_number, ownership, lifecycle, condition, custody_kind, location_id, employee_id,
+                             legacy_asset_id, notes, created_by)
+      values (p_company_id, v_item.id, v_unit_code, null, 'owned', 'draft',
+              case when v_asset.status = 'under_repair' then 'needs_inspection' else 'good' end,
+              case when v_open.id is not null then 'employee' else 'warehouse' end, v_loc.id, v_open.employee_id,
+              v_asset.id, v_notes, auth.uid())
+      returning id into v_unit_id;
+      if v_costs and (v_asset.purchase_date is not null or v_asset.value is not null) then
+        insert into inv_costs (company_id, item_id, unit_id, purchase_date, unit_cost, currency, note, entered_by)
+        values (p_company_id, v_item.id, v_unit_id, v_asset.purchase_date, v_asset.value,
+                case when v_asset.value is not null then v_currency end, 'Copied from the HR asset register', auth.uid());
+      end if;
+      v_created := v_created + 1;
+      v_results := v_results || jsonb_build_object('asset_id', v_asset_id, 'outcome', 'created', 'reason', null, 'unit_id', v_unit_id, 'unit_code', v_unit_code);
+    else
+      v_skipped := v_skipped + 1;
+      v_results := v_results || jsonb_build_object('asset_id', v_asset_id, 'outcome', 'skipped', 'reason', v_reason, 'unit_id', v_unit_id, 'unit_code', v_unit_code);
+    end if;
+  end loop;
+
+  return jsonb_build_object('created', v_created, 'skipped', v_skipped, 'results', v_results);
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges
+-- -----------------------------------------------------------------------------
+revoke all on function
+  inv_is_warehouse_operator(uuid), inv_employee_active(uuid), inv_asset_is_linked(uuid), inv_legacy_guard(), inv_mirror_legacy(uuid),
+  inv_employee_lookup(uuid, text), inv_my_equipment(), inv_employee_outstanding(uuid, uuid, boolean),
+  inv_reassign_unit(uuid, text, uuid, text, text), inv_preview_legacy_assets(uuid), inv_import_legacy_assets(uuid, jsonb)
+  from public, anon, authenticated;
+grant execute on function
+  inv_employee_lookup(uuid, text), inv_my_equipment(), inv_employee_outstanding(uuid, uuid, boolean),
+  inv_reassign_unit(uuid, text, uuid, text, text), inv_preview_legacy_assets(uuid), inv_import_legacy_assets(uuid, jsonb)
+  to authenticated;
+-- the guard trigger runs as the editing user and asks this one question
+grant execute on function inv_asset_is_linked(uuid) to authenticated;
+
+-- ROLLBACK (only before any asset has been imported; afterwards use the safe-disable script):
+--   drop trigger if exists inv_legacy_guard_assignments on asset_assignments;
+--   drop trigger if exists inv_legacy_guard_assets on assets;
+--   drop function if exists inv_legacy_guard(), inv_import_legacy_assets(uuid, jsonb), inv_preview_legacy_assets(uuid),
+--     inv_reassign_unit(uuid, text, uuid, text, text), inv_employee_outstanding(uuid, uuid, boolean), inv_my_equipment(),
+--     inv_employee_lookup(uuid, text), inv_asset_is_linked(uuid), inv_employee_active(uuid), inv_is_warehouse_operator(uuid);
+--   -- inv_mirror_legacy(uuid) goes back to the no-op body of 20261201000250_inv_shared_helpers.sql (create or replace it again).
+
+-- ---- 20261201000600_inv_count_line_remove.sql ----
+-- Inventory, migration 7: a mistaken count line can be taken out of an OPEN count.
+-- inv_save_count_line only replaces the line for the same unit or item, and the confirm step tells the person to "remove it from the
+-- count and check it again", so the removal has to exist. A count line is a worksheet entry, not stock: nothing in the books changes.
+-- Additive: one function.
+
+create or replace function inv_remove_count_line(p_count_id uuid, p_line_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare c inv_counts; n integer;
+begin
+  perform inv_require_user();
+  select * into c from inv_counts where id = p_count_id;
+  if c.id is null then raise exception 'Count not found' using errcode = 'P0002'; end if;
+  perform inv_ctx(c.company_id);
+  perform inv_loc(c.company_id, c.location_id);          -- needs operate rights at the count's location, like saving a line
+  select * into c from inv_counts where id = p_count_id for update;
+  if c.status <> 'open' then raise exception 'This count is already % and can no longer be changed', c.status using errcode = '23514'; end if;
+  delete from inv_count_lines where id = p_line_id and count_id = p_count_id;
+  get diagnostics n = row_count;
+  if n = 0 then raise exception 'That line is not on this count' using errcode = 'P0002'; end if;
+end;
+$$;
+
+revoke all on function inv_remove_count_line(uuid, uuid) from public, anon, authenticated;
+grant execute on function inv_remove_count_line(uuid, uuid) to authenticated;
+
+-- ROLLBACK (only before any Inventory data exists):
+--   drop function if exists inv_remove_count_line(uuid, uuid);
+
+-- ---- 20261201000700_inv_transfer_destination_check.sql ----
+-- Inventory: the destination of a direct project-to-project move is checked too.
+-- Before: the manager of the project the equipment was on could hand it to ANY ongoing project of the company that had a submitted request,
+-- without any standing on the destination project. Now a project manager (the route that does not go through the warehouse) must manage BOTH
+-- projects; warehouse staff at the unit's own location keep moving equipment between any two projects. Same function, same signature, same
+-- privileges (create or replace keeps them), so the function lists and counts of the verify script do not change. Additive: nothing else is touched.
+
+create or replace function inv_transfer_between_projects(p_company_id uuid, p_from_project_id uuid, p_to_project_id uuid, p_key text, p_lines jsonb,
+                                                         p_request_id uuid, p_expected_return_at timestamptz default null, p_note text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  fp proj_projects; tp proj_projects; q inv_requests; h jsonb; v_mid uuid; e jsonb; u inv_units; i inv_items; t record;
+  v_can_manage boolean; v_can_manage_both boolean; v_exp timestamptz; v_seen uuid[] := '{}'; v_res text; v_line uuid; v_qty numeric; v_rental uuid; v_dest uuid;
+  v_taken numeric; v_covered numeric; v_origin uuid; v_r numeric; v_shelf numeric; v_out jsonb := '[]'::jsonb; v_reserved boolean; v_new_res integer := 0;
+begin
+  perform inv_ctx(p_company_id);
+  perform inv_lines_array(p_lines);
+  if p_from_project_id is null or p_to_project_id is null or p_from_project_id = p_to_project_id then raise exception 'Choose two different projects' using errcode = '22023'; end if;
+  select * into fp from proj_projects where id = p_from_project_id;
+  if fp.id is null or fp.company_id <> p_company_id then raise exception 'Unknown project' using errcode = '22023'; end if;
+  v_can_manage := proj_can_manage(fp.id);
+  if not (v_can_manage or inv_has_capability(p_company_id, 'warehouse')) then
+    raise exception 'Only the manager of the project the equipment is on, or the warehouse, can move it to another project' using errcode = '42501';
+  end if;
+  select * into q from inv_requests where id = p_request_id;
+  if q.id is null or q.company_id <> p_company_id then raise exception 'A transfer needs the destination project''s equipment request' using errcode = '22023'; end if;
+  if q.kind <> 'project' or q.project_id is distinct from p_to_project_id then raise exception 'That request is not for the destination project' using errcode = '23514'; end if;
+  if q.status not in ('submitted', 'in_progress') then raise exception 'Request % is % and cannot receive equipment', q.code, q.status using errcode = '23514'; end if;
+  v_exp := coalesce(p_expected_return_at, q.expected_return_at, q.needed_until);
+  if v_exp is null then raise exception 'Say when the equipment is expected back' using errcode = '22023'; end if;
+  if v_exp <= now() then raise exception 'The expected return date must be in the future' using errcode = '22023'; end if;
+  h := inv_begin_movement(p_company_id, 'transfer_project', p_key,
+         jsonb_build_object('from', p_from_project_id, 'to', p_to_project_id, 'lines', p_lines, 'request', p_request_id, 'expected', p_expected_return_at, 'note', p_note),
+         jsonb_build_object('project_id', p_from_project_id, 'to_project_id', p_to_project_id, 'request_id', p_request_id, 'expected_return_at', v_exp, 'note', p_note));
+  if (h->>'replay')::boolean then return h->'result'; end if;
+  v_mid := (h->>'movement_id')::uuid;
+  perform inv_lock_lines(p_lines);
+  -- The destination is checked AFTER the locks are held, so a project that completed meanwhile is caught.
+  tp := inv_get_project(p_to_project_id, true);
+  -- A project manager may only hand equipment to a project he or she also manages; the warehouse (at the unit's own location) may move it between any two projects.
+  v_can_manage_both := v_can_manage and proj_can_manage(tp.id);
+  select * into q from inv_requests where id = p_request_id for update;
+  if q.status not in ('submitted', 'in_progress') then raise exception 'Request % is % and cannot receive equipment', q.code, q.status using errcode = '23514'; end if;
+  for e in select x from jsonb_array_elements(p_lines) x loop
+    if nullif(e->>'unit_id', '') is not null then
+      u := inv_unit_lock((e->>'unit_id')::uuid);
+      if u.id = any (v_seen) then raise exception '% is listed twice', u.code using errcode = '22023'; end if;
+      v_seen := v_seen || u.id;
+      i := inv_get_item(u.item_id);
+      if u.lifecycle <> 'active' then raise exception '% is not active (it is %)', u.code, u.lifecycle using errcode = '23514'; end if;
+      if u.custody_kind <> 'project' or u.project_id is distinct from fp.id then
+        raise exception '% is not on project % (it is %)', u.code, fp.reference, inv_custody_words(u.custody_kind) using errcode = '23514';
+      end if;
+      if not (v_can_manage_both or (u.location_id is not null and inv_can_operate(u.location_id))) then
+        raise exception 'You are not allowed to move % to another project. You need to manage both project % and the project it is going to, or work at the warehouse it came from', u.code, fp.reference using errcode = '42501';
+      end if;
+      perform inv_check_sharing(i.company_id, tp.company_id);
+      -- close the first project's custody and reservation
+      perform inv_reservation_return(fp.id, u.item_id, u.id, 1);
+      -- the destination: reserved for the request already, or free for the window and reserved now
+      select exists (select 1 from inv_reservations r join inv_request_lines rl on rl.id = r.request_line_id
+                      where rl.request_id = q.id and r.unit_id = u.id and r.status = 'active' and r.dispatched_qty < r.qty) into v_reserved;
+      if v_reserved then
+        perform inv_reservation_take(q.id, u.item_id, u.id, 1, null);
+      else
+        v_res := inv_unit_reserved_by(u.id, now(), v_exp);
+        if v_res is not null then
+          raise exception '% is reserved for % in that period. A reservation held by another request is never displaced', u.code, v_res using errcode = '23514';
+        end if;
+        select rl.id into v_line from inv_request_lines rl where rl.request_id = q.id and inv_effective_item(rl) = u.item_id and rl.status = 'open'
+           and rl.qty - coalesce((select sum(r.qty) from inv_reservations r where r.request_line_id = rl.id and r.status in ('active', 'completed')), 0) >= 1
+         order by rl.sort_order, rl.created_at limit 1;
+        if v_line is null then raise exception 'Request % has no open line for % with room for another one', q.code, i.name using errcode = '23514'; end if;
+        insert into inv_reservations (company_id, request_line_id, item_id, unit_id, qty, dispatched_qty, reserved_during, made_by)
+        values (q.company_id, v_line, u.item_id, u.id, 1, 1, tstzrange(now(), v_exp), auth.uid());
+        v_new_res := v_new_res + 1;
+      end if;
+      perform inv_unit_move(u.id, 'project', p_project => tp.id, p_expected => v_exp);
+      perform inv_ml(v_mid, p_company_id, u.item_id, u.id, 1, 'project', 'project', p_from_proj => fp.id, p_to_proj => tp.id, p_cond_from => u.condition, p_cond_to => u.condition);
+      v_out := v_out || jsonb_build_object('item_id', u.item_id, 'unit_id', u.id, 'code', u.code);
+    else
+      i := inv_get_item(nullif(e->>'item_id', '')::uuid);
+      if i.tracking <> 'quantity' then raise exception '% cannot be moved by quantity', i.name using errcode = '23514'; end if;
+      v_qty := inv_check_qty(i.id, (e->>'qty')::numeric);
+      v_rental := nullif(e->>'rental_id', '')::uuid;
+      perform inv_check_sharing(i.company_id, tp.company_id);
+      v_taken := 0; v_origin := null;
+      for t in select * from inv_take_qty(i.id, v_qty, 'project', p_project => fp.id, p_rental => v_rental,
+                                           p_rentals => case when v_rental is null then 'any' else 'only' end, p_where => 'on project ' || fp.reference) loop
+        if v_origin is null then
+          select l2.from_location_id into v_origin from inv_movement_lines l2 where l2.to_balance_id = t.balance_id and l2.from_location_id is not null
+           order by l2.id limit 1;
+        end if;
+        v_dest := inv_bal_ensure(i.company_id, i.id, 'project', t.condition, p_project => tp.id, p_rental => t.rental_id, p_expected => v_exp);
+        perform inv_bal_change(t.balance_id, -t.taken);
+        perform inv_bal_change(v_dest, t.taken, v_exp);
+        perform inv_ml(v_mid, p_company_id, i.id, null, t.taken, 'project', 'project', p_from_proj => fp.id, p_to_proj => tp.id,
+                       p_from_bal => t.balance_id, p_to_bal => v_dest, p_cond_from => t.condition, p_cond_to => t.condition);
+        v_taken := v_taken + t.taken;
+      end loop;
+      v_origin := coalesce(v_origin, nullif(e->>'location_id', '')::uuid);
+      if not (v_can_manage_both or (v_origin is not null and inv_can_operate(v_origin))) then
+        raise exception 'You are not allowed to move % to another project. You need to manage both project % and the project it is going to, or work at the warehouse it came from', i.name, fp.reference using errcode = '42501';
+      end if;
+      perform inv_reservation_return(fp.id, i.id, null, v_taken);
+      v_covered := inv_reservation_take(q.id, i.id, null, v_taken, null);
+      if v_covered < v_taken then
+        if v_origin is null then raise exception 'Say which warehouse the % belongs to (location_id on the line)', i.name using errcode = '22023'; end if;
+        select coalesce(sum(r.qty - r.dispatched_qty), 0) into v_r
+          from inv_reservations r join inv_request_lines rl on rl.id = r.request_line_id join inv_requests rq on rq.id = rl.request_id
+         where r.item_id = i.id and r.unit_id is null and r.location_id = v_origin and r.status = 'active'
+           and r.reserved_during && tstzrange(now(), v_exp) and rq.project_id is distinct from fp.id and rq.id <> q.id;
+        select coalesce(sum(b.qty), 0) into v_shelf from inv_balances b
+         where b.item_id = i.id and b.holder_kind = 'warehouse' and b.location_id = v_origin and b.condition = 'good' and (b.rental_id is not null) = (v_rental is not null);
+        if v_r > v_shelf then
+          raise exception 'Moving % to project % until % would leave a reservation of another project short. Reservations of other projects are never displaced',
+            i.name, tp.reference, to_char(v_exp at time zone 'UTC', 'YYYY-MM-DD') using errcode = '23514';
+        end if;
+        select rl.id into v_line from inv_request_lines rl where rl.request_id = q.id and inv_effective_item(rl) = i.id and rl.status = 'open'
+           and rl.qty - coalesce((select sum(r.qty) from inv_reservations r where r.request_line_id = rl.id and r.status in ('active', 'completed')), 0) >= v_taken - v_covered
+         order by rl.sort_order, rl.created_at limit 1;
+        if v_line is null then raise exception 'Request % has no open line for % with room for % more', q.code, i.name, trim_scale(v_taken - v_covered) using errcode = '23514'; end if;
+        insert into inv_reservations (company_id, request_line_id, item_id, location_id, qty, dispatched_qty, reserved_during, made_by)
+        values (q.company_id, v_line, i.id, v_origin, v_taken - v_covered, v_taken - v_covered, tstzrange(now(), v_exp), auth.uid());
+        v_new_res := v_new_res + 1;
+      end if;
+      v_out := v_out || jsonb_build_object('item_id', i.id, 'qty', v_qty);
+    end if;
+  end loop;
+  perform inv_refresh_request_status(q.id);
+  perform inv_refresh_project_requests(fp.id);
+  return inv_finish_movement(p_company_id, p_key, jsonb_build_object('from_project_id', fp.id, 'to_project_id', tp.id, 'request_id', q.id,
+           'expected_return_at', v_exp, 'new_reservations', v_new_res, 'lines', v_out));
+end;
+$$;
+
+-- ---- 20261201000800_inv_project_equipment_unlinked.sql ----
+-- Inventory: a project's Equipment page now shows ALL equipment out on the project.
+-- Before: "Equipment still out" was built only from reservations of the project's requests. Equipment the warehouse dispatched to the project
+-- WITHOUT naming a request (the request is optional on the Dispatch form) was on the project but invisible to its manager ("Nothing is out on this
+-- project right now"), and no outstanding line said when it was due back or that it was overdue.
+-- Now the function also returns each outstanding line's expected return and whether it is overdue, and an `unlinked` list of units and quantities held by the
+-- project that no request accounts for. Same name and signature (jsonb), same privileges (create or replace keeps them); only the jsonb it returns grows.
+
+create or replace function inv_project_equipment(p_project_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  pr proj_projects;
+  v_requests jsonb;
+  v_short jsonb;
+  v_out jsonb;
+begin
+  perform inv_require_user();
+  select * into pr from proj_projects where id = p_project_id;
+  if not found or not (proj_can_view_details(pr.id) or inv_is_founder(pr.company_id) or inv_has_capability(pr.company_id, 'warehouse')) then
+    raise exception 'Project not found' using errcode = 'P0002';
+  end if;
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'id', q.id, 'code', q.code, 'status', q.status, 'title', q.title, 'destination', q.destination, 'timezone', q.timezone, 'plan', q.plan,
+      'needed_from', q.needed_from, 'needed_until', q.needed_until, 'expected_return_at', q.expected_return_at,
+      'source', q.source, 'note', q.note, 'version', q.version, 'submitted_at', q.submitted_at, 'cancelled_at', q.cancelled_at, 'cancel_reason', q.cancel_reason,
+      'lines', coalesce((
+        select jsonb_agg(jsonb_build_object(
+            'id', l.id, 'item_id', l.item_id, 'item_name', i.name, 'model', i.model, 'qty', l.qty, 'status', l.status, 'is_optional', l.is_optional,
+            'technology', l.technology_snapshot->>'name', 'alt_group', l.alt_group,
+            'substitution_status', l.substitution_status, 'original_item_id', l.original_item_id, 'original_item_name', oi.name,
+            'shortage_action', l.shortage_action, 'shortage_note', l.shortage_note, 'rental_reference', l.rental_reference, 'note', l.note,
+            'progress', inv_line_progress(l),
+            'reservations', coalesce((
+              select jsonb_agg(jsonb_build_object(
+                  'id', x.id, 'unit_id', x.unit_id, 'unit_code', u.code, 'serial_number', u.serial_number, 'item_name', xi.name, 'qty', x.qty,
+                  'dispatched_qty', x.dispatched_qty, 'returned_qty', x.returned_qty, 'from', lower(x.reserved_during), 'until', upper(x.reserved_during),
+                  'status', x.status, 'released_reason', x.released_reason,
+                  'covers_request_window', q.needed_from is not null and lower(x.reserved_during) <= q.needed_from and upper(x.reserved_during) >= q.needed_until)
+                  order by x.made_at, x.id)
+                from inv_reservations x join inv_items xi on xi.id = x.item_id left join inv_units u on u.id = x.unit_id
+               where x.request_line_id = l.id), '[]'::jsonb)) order by l.sort_order, l.id)
+          from inv_request_lines l join inv_items i on i.id = l.item_id left join inv_items oi on oi.id = l.original_item_id
+         where l.request_id = q.id), '[]'::jsonb)) order by q.created_at, q.id), '[]'::jsonb)
+    into v_requests from inv_requests q where q.project_id = pr.id;
+  select coalesce(jsonb_agg(jsonb_build_object('request_code', q.code, 'line_id', l.id, 'item_name', i.name, 'short_qty', (inv_line_progress(l)->>'shortage')::numeric,
+           'shortage_action', l.shortage_action, 'rental_reference', l.rental_reference) order by q.created_at, l.sort_order), '[]'::jsonb)
+    into v_short
+    from inv_requests q join inv_request_lines l on l.request_id = q.id join inv_items i on i.id = l.item_id
+   where q.project_id = pr.id and (inv_line_progress(l)->>'shortage')::numeric > 0;
+  v_out := jsonb_build_object('project_id', pr.id, 'requests', v_requests, 'shortages', v_short,
+    'outstanding', coalesce((
+      select jsonb_agg(jsonb_build_object('request_code', q.code, 'line_id', l.id, 'item_name', i.name, 'unit_code', u.code, 'serial_number', u.serial_number,
+               'qty_outstanding', x.dispatched_qty - x.returned_qty, 'unit_lifecycle', u.lifecycle,
+               'expected_return_at', coalesce(u.expected_return_at, (select min(b.expected_return_at) from inv_balances b where b.holder_kind = 'project' and b.project_id = pr.id and b.item_id = x.item_id and b.qty > 0)),
+               'overdue', coalesce(coalesce(u.expected_return_at, (select min(b.expected_return_at) from inv_balances b where b.holder_kind = 'project' and b.project_id = pr.id and b.item_id = x.item_id and b.qty > 0)) < now(), false)) order by q.created_at, x.made_at)
+        from inv_reservations x join inv_request_lines l on l.id = x.request_line_id join inv_requests q on q.id = l.request_id
+             join inv_items i on i.id = x.item_id left join inv_units u on u.id = x.unit_id
+       where q.project_id = pr.id and x.status = 'active' and x.dispatched_qty > x.returned_qty), '[]'::jsonb),
+    -- Equipment the warehouse sent to this project WITHOUT naming a request (the request is optional when dispatching): it is on the project all the
+    -- same, so the project sees it, with the date it is due back and whether that has passed.
+    'unlinked', (
+      coalesce((
+        select jsonb_agg(jsonb_build_object('item_name', i.name, 'unit_of_measure', i.unit_of_measure, 'unit_code', u.code, 'serial_number', u.serial_number, 'qty_outstanding', 1, 'unit_lifecycle', u.lifecycle,
+                 'expected_return_at', u.expected_return_at, 'overdue', coalesce(u.expected_return_at < now(), false)) order by u.code)
+          from inv_units u join inv_items i on i.id = u.item_id
+         where u.custody_kind = 'project' and u.project_id = pr.id
+           and not exists (select 1 from inv_reservations x where x.unit_id = u.id and x.status = 'active' and x.dispatched_qty > x.returned_qty)), '[]'::jsonb)
+      ||
+      coalesce((
+        select jsonb_agg(jsonb_build_object('item_name', i.name, 'unit_of_measure', i.unit_of_measure, 'unit_code', null, 'serial_number', null, 'qty_outstanding', h.held - h.linked, 'unit_lifecycle', 'active',
+                 'expected_return_at', h.due, 'overdue', coalesce(h.due < now(), false)) order by i.name)
+          from (select b.item_id, sum(b.qty) as held, min(b.expected_return_at) as due,
+                       coalesce((select sum(x.dispatched_qty - x.returned_qty) from inv_reservations x join inv_request_lines l on l.id = x.request_line_id join inv_requests q on q.id = l.request_id
+                                  where q.project_id = pr.id and x.item_id = b.item_id and x.unit_id is null and x.status = 'active' and x.dispatched_qty > x.returned_qty), 0) as linked
+                  from inv_balances b where b.holder_kind = 'project' and b.project_id = pr.id and b.qty > 0 group by b.item_id) h
+          join inv_items i on i.id = h.item_id
+         where h.held > h.linked), '[]'::jsonb)));
+  return v_out;
+end;
+$$;
