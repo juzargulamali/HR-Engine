@@ -68,6 +68,8 @@ Run this with the real warehouse operator on a test copy (or with test records t
 - [ ] The warehouse reserves it. A shortage is reported clearly, with "need to buy / rent" available.
 - [ ] Dispatch part of it, return part with one item **damaged**. The damaged item is not available; the rest shows as outstanding.
 - [ ] Move equipment directly from one project to another: it appears with the second project and leaves the first.
+- [ ] A project manager can move equipment to another project only if they manage both; the warehouse can move it between any two projects. A unit another project has reserved for later is never taken away: the move is refused and says which request holds it.
+- [ ] Dispatch something to a project WITHOUT naming a request: it still shows on that project's Equipment page ("not part of a request"), with its due date, and is flagged **Overdue** once that date has passed.
 - [ ] Try to reserve the same unit for overlapping dates: refused, nobody else's booking is displaced.
 
 **Employees**

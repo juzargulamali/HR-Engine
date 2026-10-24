@@ -14,7 +14,7 @@ import { LoadError } from "@/components/workspace/states";
 import { firstParam, parseRecordId } from "@/components/workspace/url-state";
 import { formatDateTime } from "@/lib/projects/format";
 import { getInventoryContext } from "@/lib/inventory/context";
-import { asArray, asRecord, num, progressFromDb, shortageLabel, str, windowLabel } from "@/lib/inventory/planning";
+import { asArray, asRecord, formatInZone, num, progressFromDb, shortageLabel, str, windowLabel } from "@/lib/inventory/planning";
 import { canManageProjectEquipment, loadRequestModels, loadTechnologies, loadVisibleLocations } from "@/lib/inventory/planning-data";
 import { formatQty } from "@/lib/inventory/words";
 import { isNotInstalled } from "@/lib/projects/errors";
@@ -87,6 +87,13 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
   const canEditList = (manage || warehouse) && !off;
   const technologies = canEditList ? await loadTechnologies(project.company_id).catch(() => []) : [];
   const outstanding = asArray(equipment.outstanding).map(asRecord);
+  // Held by the project but not named on any request (the warehouse may dispatch without naming one): still out, so listed too.
+  const unlinked = asArray(equipment.unlinked).map(asRecord);
+  const stillOut = outstanding.length + unlinked.length;
+  // A due date is written in the local time of the request it belongs to (equipment with no request: the project's first request, or Dubai).
+  const tzOfRequest = new Map(requestsJson.map((r) => [String(r.code), str(r.timezone) ?? "Asia/Dubai"] as const));
+  const fallbackTz = str(requestsJson[0]?.timezone) ?? "Asia/Dubai";
+  const dueBack = (iso: string | null, tz: string) => (iso ? ` · due back ${formatInZone(iso, tz)} (${tz})` : "");
   // Metres and other measured units are written with their unit, as on the request lines.
   const unitOfLine = new Map(models.flatMap((m) => m.lines.map((l) => [l.id, l.unit] as const)));
   const shortages = asArray(equipment.shortages).map(asRecord);
@@ -121,10 +128,10 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
       <Panel
         title="Equipment still out"
         description="Dispatched to this project and not yet returned."
-        actions={warehouse && outstanding.length > 0 ? <Link href={`/inventory?action=return&project=${id}`} className={buttonVariants({ size: "sm", variant: "outline" })}>Record a return</Link> : undefined}
-        className={outstanding.length > 0 ? "border-amber-500/50" : undefined}
+        actions={warehouse && stillOut > 0 ? <Link href={`/inventory?action=return&project=${id}`} className={buttonVariants({ size: "sm", variant: "outline" })}>Record a return</Link> : undefined}
+        className={stillOut > 0 ? "border-amber-500/50" : undefined}
       >
-        {outstanding.length === 0 ? (
+        {stillOut === 0 ? (
           <p className="text-sm">Nothing is out on this project right now.</p>
         ) : (
           <>
@@ -133,7 +140,13 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
               {outstanding.map((o, i) => (
                 <li key={`${o.line_id}-${i}`} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2">
                   <span className="min-w-0 break-words font-medium">{str(o.item_name) ?? "Item"}{str(o.unit_code) ? <span className="font-mono font-normal text-muted-foreground"> · {str(o.unit_code)}</span> : null}{str(o.serial_number) ? <span className="font-normal text-muted-foreground"> · serial {str(o.serial_number)}</span> : null}</span>
-                  <span className="text-muted-foreground">{str(o.unit_lifecycle) === "missing" ? <Badge variant="warning" className="mr-2">Recorded as missing</Badge> : null}{formatQty(num(o.qty_outstanding), unitOfLine.get(String(o.line_id)))} {str(o.unit_lifecycle) === "missing" ? "not returned" : "out"} · request {str(o.request_code)}</span>
+                  <span className="text-muted-foreground">{str(o.unit_lifecycle) === "missing" ? <Badge variant="warning" className="mr-2">Recorded as missing</Badge> : null}{o.overdue === true ? <Badge variant="warning" className="mr-2">Overdue</Badge> : null}{formatQty(num(o.qty_outstanding), unitOfLine.get(String(o.line_id)))} {str(o.unit_lifecycle) === "missing" ? "not returned" : "out"} · request {str(o.request_code)}{dueBack(str(o.expected_return_at), tzOfRequest.get(String(o.request_code)) ?? fallbackTz)}</span>
+                </li>
+              ))}
+              {unlinked.map((o, i) => (
+                <li key={`unlinked-${i}`} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2">
+                  <span className="min-w-0 break-words font-medium">{str(o.item_name) ?? "Item"}{str(o.unit_code) ? <span className="font-mono font-normal text-muted-foreground"> · {str(o.unit_code)}</span> : null}{str(o.serial_number) ? <span className="font-normal text-muted-foreground"> · serial {str(o.serial_number)}</span> : null}</span>
+                  <span className="text-muted-foreground">{str(o.unit_lifecycle) === "missing" ? <Badge variant="warning" className="mr-2">Recorded as missing</Badge> : null}{o.overdue === true ? <Badge variant="warning" className="mr-2">Overdue</Badge> : null}{formatQty(num(o.qty_outstanding), str(o.unit_of_measure))} {str(o.unit_lifecycle) === "missing" ? "not returned" : "out"} · not part of a request{dueBack(str(o.expected_return_at), fallbackTz)}</span>
                 </li>
               ))}
             </ul>

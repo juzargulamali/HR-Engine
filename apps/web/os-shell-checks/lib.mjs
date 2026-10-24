@@ -12,8 +12,8 @@ if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(BASE)) throw new Error(`r
 export const PASSWORD = "local-stack-password";
 const DB = process.env.LOCAL_DB_NAME ?? "hr_local_stack";
 export const psql = (q) => execSync(`psql -h 127.0.0.1 -U postgres -d ${DB} -Atc "${q}"`, { env: { ...process.env, PGPASSWORD: process.env.PGPASSWORD ?? "postgres" } }).toString().trim();
-export async function newPage(browser, viewport = { width: 1280, height: 900 }, theme = "dark") {
-  const ctx = await browser.newContext({ viewport });
+export async function newPage(browser, viewport = { width: 1280, height: 900 }, theme = "dark", contextOptions = {}) {
+  const ctx = await browser.newContext({ viewport, ...contextOptions });
   await ctx.addInitScript((t) => { try { if (!localStorage.getItem("theme")) localStorage.setItem("theme", t); } catch {} }, theme);
   const page = await ctx.newPage(); page.errors = [];
   page.on("pageerror", (e) => page.errors.push(`pageerror: ${e.message}`));

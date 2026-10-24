@@ -33,7 +33,10 @@ export function makeRunner(prefix, { shots = SHOTS } = {}) {
     async start() { browser.b = await chromium.launch(); },
     async stop() { await st.page?.context().close().catch(() => {}); await browser.b?.close(); },
     /** Sign in as a persona (closing the previous session) and return the page. */
-    async as(key, viewport) { if (st.page) await st.page.context().close(); const p = await newPage(browser.b, viewport); await login(p, PERSONA[key][0]); st.page = p; return p; },
+    async as(key, viewport, theme, contextOptions) { if (st.page) await st.page.context().close(); const p = await newPage(browser.b, viewport, theme, contextOptions); await login(p, PERSONA[key][0]); st.page = p; return p; },
+    /** A second, independent signed-in browser session (does not replace R.page). Close it with p.context().close(). */
+    async extra(key, viewport, theme, contextOptions) { const p = await newPage(browser.b, viewport, theme, contextOptions); await login(p, PERSONA[key][0]); return p; },
+    get browser() { return browser.b; },
     get page() { return st.page; },
     dialog: () => st.page.locator("dialog[open]"),
     panel: () => st.page.locator("aside[role=dialog]"),
@@ -75,3 +78,100 @@ export function makeRunner(prefix, { shots = SHOTS } = {}) {
 /** Waits until fn() is truthy (polling the database, usually). */
 export async function until(fn, ms = 15000, what = "") { const t = Date.now(); for (;;) { try { if (fn()) return; } catch {} if (Date.now() - t > ms) throw new Error("condition not reached " + what + fn.toString().slice(0, 120)); await new Promise((r) => setTimeout(r, 300)); } }
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// Direct calls to the data service (PostgREST) with a person's REAL token, obtained by signing in through the local gateway exactly as the
+// app does. This is what a person (or a script) could do without the app: the database must refuse what is not theirs.
+// ---------------------------------------------------------------------------------------------------------------------------
+export const GATEWAY = "http://127.0.0.1:54321";
+const tokenCache = new Map();
+export async function tokenFor(key) {
+  if (tokenCache.has(key)) return tokenCache.get(key);
+  const r = await fetch(`${GATEWAY}/auth/v1/token?grant_type=password`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: PERSONA[key][0], password: "local-stack-password" }) });
+  const j = await r.json(); if (!j.access_token) throw new Error(`could not sign in ${key}: ${JSON.stringify(j)}`);
+  tokenCache.set(key, j.access_token); return j.access_token;
+}
+/** rest("hr1", "GET", "/inv_units?select=id") -> { status, body } (body parsed when JSON). A signed-out call uses key = null. */
+export async function rest(key, method, path, body, headers = {}) {
+  const tok = key ? await tokenFor(key) : null;
+  const r = await fetch(`${GATEWAY}/rest/v1${path}`, { method, headers: { "content-type": "application/json", ...(tok ? { authorization: `Bearer ${tok}` } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const text = await r.text(); let parsed = text; try { parsed = text ? JSON.parse(text) : null; } catch { /* plain text */ }
+  return { status: r.status, body: parsed };
+}
+export const rpc = (key, fn, args = {}) => rest(key, "POST", `/rpc/${fn}`, args);
+/** The message of a refused call, flattened. */
+export const refusal = (r) => (r.status >= 400 ? String(r.body?.message ?? JSON.stringify(r.body)) : "");
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// Shared screen helpers (requests, reserve dialog, movement forms) used by the flow-4/5 checks. They drive the real screens.
+// ---------------------------------------------------------------------------------------------------------------------------
+export const dayAt = (n, hhmm = "08:00") => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10) + "T" + hhmm;
+
+/** A project's Equipment page -> "New equipment request" -> Create draft. Returns the new request id. Dates are local time in `tz`. */
+export async function newProjectRequestUI(R, projectId, { title, pickup = "Dubai", leaves, back, tz = "Asia/Dubai" }) {
+  const before = new Set(sqlRows("select id from inv_requests"));
+  await R.go(`/projects/${projectId}/equipment`);
+  await R.page.getByRole("button", { name: "New equipment request" }).first().click();
+  await R.dialog().waitFor();
+  await R.dialog().getByLabel("What is it for", { exact: true }).fill(title);
+  await R.dialog().getByLabel("Pickup location (optional)").selectOption({ label: pickup });
+  await R.dialog().getByLabel("Leaves the warehouse", { exact: true }).fill(leaves);
+  await R.dialog().getByLabel("Due back", { exact: true }).fill(back);
+  await R.dialog().locator("summary", { hasText: "Add more details" }).click();
+  await R.dialog().getByLabel("Time zone of the dates").fill(tz);
+  await R.dialog().getByRole("button", { name: "Create draft" }).click();
+  await R.closedDialog();
+  await until(() => sqlRows("select id from inv_requests").some((id) => !before.has(id)));
+  return sqlRows("select id from inv_requests").find((id) => !before.has(id));
+}
+/** On a project's Equipment page with ?request= open: add a line for an item (by search text and exact item name). */
+export async function addLineUI(R, itemName, search, qty) {
+  const reqId = new URL(R.page.url()).searchParams.get("request");
+  const count = () => Number(psql(`select count(*) from inv_request_lines where request_id='${reqId}'`));
+  const before = count();
+  const d = R.page.locator("details:has(> summary:text-is('Add an item'))").first();
+  if (!(await d.evaluate((e) => e.open))) await d.locator("summary").first().click();
+  const list = d.getByLabel("Matching items");
+  for (let attempt = 0; attempt < 4; attempt++) {   // a keystroke that lands before the page is interactive is lost: type it again
+    await d.getByLabel("Item", { exact: true }).fill(""); await d.getByLabel("Item", { exact: true }).fill(search);
+    if (await list.waitFor({ timeout: 4000 }).then(() => true, () => false)) break;
+  }
+  await list.waitFor({ timeout: 8000 });
+  const labels = await list.locator("option").allTextContents();
+  const label = labels.find((l) => l === itemName) ?? labels.find((l) => l.startsWith(itemName + " "));   // "Name · model" when the item has a model
+  if (!label) throw new Error(`no matching item "${itemName}" among: ${labels.join(" | ")}`);
+  await list.selectOption({ label });
+  await d.getByLabel("Quantity", { exact: true }).fill(String(qty));
+  await d.getByRole("button", { name: "Add line" }).click();
+  await until(() => count() === before + 1, 15000, "line added ");
+  await sleep(600);
+}
+export const submitRequestUI = async (R) => { await R.page.getByRole("button", { name: "Submit to the warehouse" }).click(); };
+
+/** Set-up as a person through the real functions (no screen): a submitted project request with one line. Returns { request, line }. */
+export function requestAs(n, projectId, itemId, qty, fromDay, toDay, { title = "set-up request", location = null, tz = "Asia/Dubai", submit = true } = {}) {
+  const plan = JSON.stringify({ dispatch: dayAt(fromDay, "08:00").replace("T", " "), return_due: dayAt(toDay, "17:00").replace("T", " ") });
+  const req = asDb(n, `select inv_create_request('project', '${projectId}', null, '${title}', '${plan}'::jsonb, '${tz}', null, ${location ? `'${location}'` : "null"}, null)`);
+  const line = asDb(n, `select inv_add_request_line('${req}', '${itemId}', ${qty}, null, null)`);
+  if (submit) asDb(n, `select inv_submit_request('${req}', null)`);
+  return { request: req, line };
+}
+
+/** The movement panel (a side panel opened through the address) and its list editor. */
+export function movementHelpers(R) {
+  const mv = () => R.panel();
+  return {
+    mv,
+    async searchAdd(query, addName, times = 1) {
+      const box = mv().getByLabel("Search for an item or unit to add");
+      await box.fill(""); await box.fill(query);
+      const results = mv().getByRole("list", { name: "Search results" });
+      await results.waitFor();
+      for (let n = 0; n < times; n++) await results.getByRole("button", { name: addName }).nth(n).click().then(() => sleep(250));
+      await box.fill("");
+    },
+    qtyOf: (label) => mv().getByLabel(`Quantity of ${label}`, { exact: true }),
+    async text() { return (await mv().innerText()).replace(/\s+/g, " "); },
+    async review() { await mv().getByRole("button", { name: "Review", exact: true }).click(); await mv().getByText("Check before you confirm").waitFor(); },
+  };
+}

@@ -1,4 +1,4 @@
--- READ-ONLY. Run in the SQL Editor of "Enginious HR Engine_V2" AFTER the seven Inventory migrations
+-- READ-ONLY. Run in the SQL Editor of "Enginious HR Engine_V2" AFTER the ten Inventory migrations
 -- (20261201000000, 000100, 000200, 000250, 000300, 000400, 000500). Run the WHOLE file; it returns ONE result table
 -- (check | result | detail). Every row in the "result" column must read OK (INFO rows are information, the last SUMMARY row
 -- counts the failures). It changes nothing. Send me the full result.

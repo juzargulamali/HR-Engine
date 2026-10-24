@@ -76,7 +76,7 @@ inspect_until. The reserved window is [earliest given, latest given] converted w
 | `confirm_stock` | counts | confirm opening stock and counts as verified |
 | `request_for_employees` (department heads) | own requests | create employee equipment requests |
 | `view_employee_custody` (HR) | outstanding equipment per employee | read only (including inactive employees) |
-| Project Manager / department head of an ongoing project | catalogue summary, their project's requests, reservations, dispatches, returns | prepare/submit requests, expand templates, accept substitutions, cancel unused lines (via `proj_can_manage`) |
+| Project Manager / department head of an ongoing project | catalogue summary, their project's requests, reservations, dispatches, returns | prepare/submit requests, expand templates, accept substitutions, cancel unused lines (via `proj_can_manage`). Handing equipment straight to another project needs the manager of **both** projects (migration `20261201000700`); otherwise the warehouse records the move. The project's Equipment page lists everything out on it, including equipment dispatched without naming a request (migration `20261201000800`) |
 | Sales (existing Sales scope) | per-opportunity technology availability summary, who checked and when | request a warehouse check; no costs, no custody, no unrelated projects |
 | any signed-in employee | their own assigned equipment (`inv_my_equipment`) | nothing else |
 

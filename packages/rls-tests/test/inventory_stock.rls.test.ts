@@ -845,6 +845,43 @@ describe("Inventory stock core", () => {
         await call(U.opDubai, `inv_return_from_project('${CO.uae}', '${L.dubai}', '${PRJ.p3}', '${key()}', ${j([{ unit_id: u, condition: "good" }])})`);
       }
     });
+    it("a project manager must manage the destination project as well; warehouse staff at the unit's location need not", async () => {
+      const projFp = async () => JSON.stringify(await admin(`select (select count(*) from proj_projects) n, (select md5(string_agg(row(p.id, p.status, p.pm_user_id, p.updated_at, p.version)::text, ',' order by p.id)) from proj_projects p) fp`));
+      expect(await projFp()).toBe(projBefore);   // nothing Inventory did so far changed a project
+      await dispatch(PRJ.p1!, [{ unit_id: UN.led4 }]);
+      await admin(`update proj_projects set pm_user_id = '${U.pm2}' where id = '${PRJ.p3}'`);   // set-up only: p3 now has another manager
+      try {
+        await expect(move(U.pm, PRJ.p1!, PRJ.p3!, [{ unit_id: UN.led4 }], reqP3)).rejects.toThrow(/manage both project UAE-P-1 and the project it is going to/);
+        expect(await unit(UN.led4!)).toMatchObject({ custody_kind: "project", project_id: PRJ.p1 });
+        await expect(move(U.pm2, PRJ.p1!, PRJ.p3!, [{ unit_id: UN.led4 }], reqP3)).rejects.toThrow(/Only the manager of the project/);   // the new manager of p3 does not manage p1
+        const r = await move(U.opDubai, PRJ.p1!, PRJ.p3!, [{ unit_id: UN.led4 }], reqP3);   // the warehouse may move between any two projects
+        expect(r).toMatchObject({ kind: "transfer_project" });
+        expect(await unit(UN.led4!)).toMatchObject({ project_id: PRJ.p3 });
+      } finally {
+        await admin(`update proj_projects set pm_user_id = '${U.pm}' where id = '${PRJ.p3}'`);
+      }
+      projBefore = await projFp();   // the set-up above touched updated_at of one row; the invariant continues from here
+      await call(U.opDubai, `inv_return_from_project('${CO.uae}', '${L.dubai}', '${PRJ.p3}', '${key()}', ${j([{ unit_id: UN.led4, condition: "good" }])})`);
+    });
+    it("a project's equipment view also shows what was dispatched to it WITHOUT naming a request, with its due date and whether it is overdue", async () => {
+      const back = (lines: unknown[]) => call(U.opDubai, `inv_return_from_project('${CO.uae}', '${L.dubai}', '${PRJ.p1}', '${key()}', ${j(lines)})`);
+      await dispatch(PRJ.p1!, [{ unit_id: UN.led4 }, { item_id: IT.cable, qty: 3 }]);   // no request on purpose
+      await admin(`update inv_units set expected_return_at = now() - interval '2 days' where id = '${UN.led4}'`);
+      const code = (await admin<{ code: string }>(`select code from inv_units where id = '${UN.led4}'`))[0].code;
+      const pe = (await q<{ r: Row }>(U.opDubai, `select inv_project_equipment('${PRJ.p1}') as r`))[0].r;
+      const unlinked = pe.unlinked as Row[];
+      expect(unlinked.find((o) => o.unit_code === code)).toMatchObject({ qty_outstanding: 1, overdue: true, unit_lifecycle: "active" });
+      const counted = unlinked.find((o) => o.unit_code === null);
+      expect(counted).toMatchObject({ qty_outstanding: 3, overdue: false });
+      expect(counted!.unit_of_measure).toBeTruthy();
+      expect((pe.outstanding as Row[]).some((o) => o.unit_code === code)).toBe(false);
+      // someone who may not see the project's equipment learns nothing
+      await expect(q(U.outsider, `select inv_project_equipment('${PRJ.p1}')`)).rejects.toThrow(/Project not found/);
+      // once it is returned the lists are empty again
+      await back([{ unit_id: UN.led4, condition: "good" }, { item_id: IT.cable, qty: 3, condition: "good" }]);
+      const pe2 = (await q<{ r: Row }>(U.opDubai, `select inv_project_equipment('${PRJ.p1}') as r`))[0].r;
+      expect((pe2.unlinked as Row[]).some((o) => o.unit_code === code || o.unit_code === null)).toBe(false);
+    });
   });
 
   // ---------------------------------------------------------------------------------------------------------------

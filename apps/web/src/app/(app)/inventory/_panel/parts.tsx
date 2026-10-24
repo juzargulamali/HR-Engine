@@ -8,7 +8,7 @@ export function Stat({ label, value, hint }: { label: string; value: string; hin
     <div className="rounded-md border border-border bg-card px-3 py-2">
       <dt className="text-[13px] text-muted-foreground">{label}</dt>
       <dd className="text-lg font-semibold tabular-nums">{value}</dd>
-      {hint ? <p className="text-[13px] text-muted-foreground">{hint}</p> : null}
+      {hint ? <dd className="text-[13px] text-muted-foreground">{hint}</dd> : null}
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { Printer } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PanelLink } from "@/components/workspace/panel-link";
-import { listTable } from "@/components/workspace/list-table";
+import { compactTable, stackedInNarrowContainer, stackedOnPhone } from "@/components/workspace/list-table";
 import { cn } from "@/lib/utils";
 
 export interface UnitRowView {
@@ -33,7 +33,8 @@ export function UnitsTable({ units, showWhere, showCost, truncated }: { units: r
         <p className="text-sm text-muted-foreground" role="status">{units.length} unit{units.length === 1 ? "" : "s"}{truncated ? " (the first ones; use search to find others)" : ""}</p>
         {codes.length > 0 ? <Link href={labelHref(codes)} className={cn(buttonVariants({ variant: "outline", size: "sm" }))}><Printer className="h-4 w-4" aria-hidden /> Print {codes.length} label{codes.length === 1 ? "" : "s"}</Link> : null}
       </div>
-      <Table className={cn("min-w-[28rem]", listTable)}>
+      <div className="@container">
+      <Table className={cn("min-w-[28rem]", compactTable, stackedOnPhone, stackedInNarrowContainer)}>
         <caption className="sr-only">Units of this item</caption>
         <TableHeader>
           <TableRow>
@@ -48,13 +49,13 @@ export function UnitsTable({ units, showWhere, showCost, truncated }: { units: r
         <TableBody>
           {units.map((u) => (
             <TableRow key={u.id} className="align-top">
-              <TableCell><PanelLink href={u.href} className="font-mono font-medium underline-offset-2 hover:underline">{u.code}</PanelLink></TableCell>
-              <TableCell data-label="Serial">{u.serial ?? <span className="text-muted-foreground">—</span>}</TableCell>
+              <TableCell className="whitespace-nowrap"><PanelLink href={u.href} className="font-mono font-medium underline-offset-2 hover:underline">{u.code}</PanelLink></TableCell>
+              <TableCell data-label="Serial" className="whitespace-nowrap">{u.serial ?? <span className="text-muted-foreground">—</span>}</TableCell>
               <TableCell data-label="Condition">{u.condition}{u.lifecycle ? <span className="block text-[13px] text-muted-foreground">{u.lifecycle}</span> : null}</TableCell>
               {showWhere ? <TableCell data-label="Where" className="break-words">{u.where ?? "—"}</TableCell> : null}
               {showCost ? <TableCell data-label="Cost" className="whitespace-nowrap">{u.cost ?? "—"}</TableCell> : null}
               <TableCell data-label="Label">
-                <span className="inline-flex items-center gap-3">
+                <span className="inline-flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
                   <label className="inline-flex items-center gap-1.5 text-sm"><input type="checkbox" checked={picked.has(u.id)} onChange={() => toggle(u.id)} aria-label={`Select ${u.code} to print its label`} className="h-4 w-4" /> Select</label>
                   <Link href={labelHref([u.code])} className="whitespace-nowrap text-sm font-medium underline-offset-2 hover:underline" aria-label={`Print the label for ${u.code}`}>Print label</Link>
                 </span>
@@ -63,6 +64,7 @@ export function UnitsTable({ units, showWhere, showCost, truncated }: { units: r
           ))}
         </TableBody>
       </Table>
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
--- READ-ONLY. Run in the SQL Editor of "Enginious HR Engine_V2" BEFORE the seven Inventory migrations
+-- READ-ONLY. Run in the SQL Editor of "Enginious HR Engine_V2" BEFORE the ten Inventory migrations
 -- (20261201000000, 000100, 000200, 000250, 000300, 000400, 000500). Run the WHOLE file; it returns ONE result table
 -- (section | item | detail). It creates, changes and deletes nothing. Send me the full result (screenshot or Export -> CSV).
 --

@@ -48,6 +48,8 @@ Apply **in exactly this order** (the file names sort in this order too):
 | 6 | `20261201000400_inv_planning_functions.sql` | Templates, requests, reservations, availability, the Sales check, the Projects functions, and **two triggers on `proj_projects`** (§6). |
 | 7 | `20261201000500_inv_employee_legacy.sql` | The restricted employee lookup, "my equipment", HR's outstanding-equipment view, reassignment, the preview and import of the HR asset register, the real legacy mirror, and **two triggers on `assets` / `asset_assignments`** (§6). |
 | 8 | `20261201000600_inv_count_line_remove.sql` | One function: take a mistaken line out of an open count (nothing in the stock books changes). |
+| 9 | `20261201000700_inv_transfer_destination_check.sql` | One function replaced (`inv_transfer_between_projects`): a project manager moving equipment straight to another project must manage **both** projects (warehouse staff at the unit's location still may move it between any two). Found by the browser access checks. |
+| 10 | `20261201000800_inv_project_equipment_unlinked.sql` | One function replaced (`inv_project_equipment`): a project's Equipment page also lists equipment dispatched to it **without naming a request**, with its due date and an overdue flag. Found by the browser transfer checks. |
 
 No other Inventory migration exists; if one appears later it is listed here and `inv_20_verify_readonly.sql` is extended with it.
 
@@ -85,7 +87,7 @@ Run each file in the Supabase SQL Editor of **Enginious HR Engine_V2**, **the wh
 | Step | What | Check |
 |---|---|---|
 | 1 | Preflight (§4.2) and snapshot (§4.3) | All OK; paste lines saved |
-| 2 | Run, **one at a time and in this order**, the seven migration files in §3 | Each ends without an error |
+| 2 | Run, **one at a time and in this order**, the ten migration files in §3 | Each ends without an error |
 | 3 | `inv_20_verify_readonly.sql` (leave `expect_fresh = true`) | Every row **OK**; the last row says OK. Run it promptly: it expects an empty module |
 | 4 | `inv_05_preservation_check_readonly.sql` in "compare" mode (paste the saved lines where the file says: above the `('__none__', '')` line, which stays) | Summary says **PASS: nothing HR, Sales, Projects or the HR asset register own changed**; the four `intended:trigger:` rows say SAME and `intended:four_triggers` says "4 present" |
 | 5 | Merge the pull request when you are ready; Vercel deploys the app | The app opens; **people without Inventory access see no Inventory menu** |
