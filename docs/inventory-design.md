@@ -139,3 +139,26 @@ Migration 6 (employees and legacy, `20261201000500_inv_employee_legacy.sql`)
 `inv_00_preflight_readonly.sql`, `inv_05_preservation_check_readonly.sql` (snapshot before, compare after; extended only for the intended
 changes of section 1), `inv_20_verify_readonly.sql`, `inv_30_bootstrap_founders.sql` (explicit real emails typed by the owner, no
 defaults), `inv_80_safe_disable_and_restore.sql`, `inv_90_rollback.sql` (restrictions once real data exists).
+
+## 9. As built: decisions made while building, and known limits
+
+Decisions (all are in the code and covered by tests):
+
+* **Who may do what with locations**: only a founder adds or edits a location (the brief said locations are configured by an authorised user and by founders). Bins, categories, items and technology templates need `manage_catalogue` (or founder).
+* **Receipts count as verified** (the person who receives records it); **opening stock** goes through a count confirmed by someone with `confirm_stock`, with who/when. Opening stock is never a purchase and carries no cost unless a `view_costs` holder enters one.
+* **Counts**: starting a count and entering lines needs operating rights at the location; confirming needs `confirm_stock`. A mistaken line is removed with `inv_remove_count_line` (migration 8) while the count is open.
+* **Corrections** (`inv_correct_movement`) cover quantities that appeared (receipt, opening, found, count, return) and consumption. Unit moves and transfers are corrected by the proper opposite movement, never by editing.
+* **Retries**: every movement takes an idempotency key. A repeated call with the same key by the same person returns the original result even if the time-dependent checks of the first call (a return date, an open request) would now fail (`inv_replaying`).
+* **Replacing an item** retires the old item and creates the new one; it moves no stock (the old stock keeps its original tracking and history). The screen says so.
+* **Cross-company use** needs an active `inv_company_sharing` row made by a founder of the owning company. A movement is filed under the operating (location) company.
+* **Request lifecycle**: draft, submitted (waiting for the warehouse), in progress (reserved), fulfilled (everything dispatched), closed (everything back). A unit declared missing stays outstanding, so its request stays "fulfilled".
+* **The HR Assets page**: assets that a founder imported into Inventory can no longer be edited from the old HR Assets page (the message points to Inventory); unlinked assets behave exactly as before.
+
+Known limits and owner decisions:
+
+* A warehouse-only operator has no Sales access, so they cannot see Sales' pending check requests; the check is recorded from the enquiry panel by a founder or someone with Sales access. An "inbox of pending checks" for the warehouse would expose CRM titles to the warehouse: not built, an owner decision.
+* `permanently_delete_employee` fails safely with a raw database message for an employee who only has Inventory records.
+* Department heads need the `request_for_employees` capability to pick an employee (a plain line manager cannot use the employee lookup).
+* People who can only view stock see "An employee" instead of names in some lists (the name lookup needs operator rights).
+* Counted stock held by projects or employees is not split by location in the "Out" column when a location filter is set.
+* Phone-camera scanning is verified only with a simulated camera in a desktop browser; real iPhone Safari and Android Chrome are unverified.
