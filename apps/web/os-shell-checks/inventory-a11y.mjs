@@ -85,6 +85,8 @@ const tabTo = async (page, test, max = 80) => {
     await page.keyboard.press("ArrowDown");
     await tabTo(page, (f) => f.tag === "SELECT" && /project/i.test(f.name)); if (!(await focusInfo(page))?.ring) throw new Error("no focus ring on the project select");
     await page.keyboard.press("ArrowDown");
+    // a dispatch needs a return date: name the request (its return date is used), again with the keyboard only
+    await tabTo(page, (f) => f.tag === "SELECT" && /^Request/i.test(f.name)); await page.keyboard.press("ArrowDown");
     await tabTo(page, (f) => f.tag === "INPUT" && /Search for an item or unit/i.test(f.name));
     await page.keyboard.type("HDMI");
     await panel.getByRole("list", { name: "Search results" }).waitFor();
