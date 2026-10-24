@@ -67,7 +67,7 @@ internal_definer_fns as (select unnest(array[
   'inv_get_employee', 'inv_get_item', 'inv_get_project', 'inv_idem_begin', 'inv_import_handover_internal', 'inv_is_warehouse_operator',
   'inv_line_progress', 'inv_loc', 'inv_lock_request', 'inv_mirror_legacy', 'inv_next_code', 'inv_opportunity_compute',
   'inv_proj_after_insert', 'inv_proj_after_status', 'inv_refresh_project_requests', 'inv_refresh_request_status', 'inv_release_row',
-  'inv_release_unused', 'inv_require_cap', 'inv_require_edit', 'inv_require_enabled', 'inv_reserve_block_reason', 'inv_user_name']) as proname),
+  'inv_release_unused', 'inv_replaying', 'inv_require_cap', 'inv_require_edit', 'inv_require_enabled', 'inv_reserve_block_reason', 'inv_user_name']) as proname),
 -- internal plain helpers and trigger functions (30): they run as the calling function, are never reachable by a browser, and are closed too
 internal_invoker_fns as (select unnest(array[
   'inv_bal_change', 'inv_bal_ensure', 'inv_check_qty', 'inv_check_version', 'inv_cost_fields_present', 'inv_custody_words',
@@ -125,9 +125,9 @@ select ord, check_name, result, detail from (
 
   -- 8-13 the functions -------------------------------------------------------------------------------------------------------
   union all
-  select 8, 'every Inventory function is one of the 149 expected (84 for the app, 35 internal, 30 plain internal helpers)',
+  select 8, 'every Inventory function is one of the 150 expected (84 for the app, 36 internal, 30 plain internal helpers)',
          case when not exists (select 1 from inv_funcs f where f.proname not in (select proname from client_fns union all select proname from internal_definer_fns union all select proname from internal_invoker_fns))
-               and (select count(*) from inv_funcs) = 149
+               and (select count(*) from inv_funcs) = 150
                and not exists (select 1 from (select proname from client_fns union all select proname from internal_definer_fns union all select proname from internal_invoker_fns) e where not exists (select 1 from inv_funcs f where f.proname = e.proname)) then 'OK' else 'FAIL' end,
          (select count(*)::text from inv_funcs) || ' found'
          || coalesce('; UNKNOWN: ' || (select string_agg(f.proname, ', ') from inv_funcs f where f.proname not in (select proname from client_fns union all select proname from internal_definer_fns union all select proname from internal_invoker_fns)), '')

@@ -1690,6 +1690,17 @@ $$;
 
 -- Issue equipment or quantities to an employee. Lines: {"unit_id"} or {"item_id","qty","bin_id","rental_id"}.
 -- Consumables are not issued: they are consumed (inv_consume).
+-- True when this caller already used this key: a repeated call then gets the original result back, so the time-dependent checks that
+-- ran the first time (a return date that was still in the future, a request that was still open) must not run again.
+create or replace function inv_replaying(p_company_id uuid, p_key text)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (select 1 from inv_idempotency where company_id = p_company_id and idem_key = p_key and performed_by = auth.uid());
+$$;
+revoke all on function inv_replaying(uuid, text) from public, anon, authenticated;
+
 create or replace function inv_issue_to_employee(p_company_id uuid, p_location_id uuid, p_employee_id uuid, p_key text, p_lines jsonb,
                                                  p_expected_return_at timestamptz default null, p_note text default null, p_request_id uuid default null)
 returns jsonb
@@ -1704,14 +1715,14 @@ begin
   perform inv_ctx(p_company_id);
   l := inv_loc(p_company_id, p_location_id);
   perform inv_lines_array(p_lines);
-  emp := inv_get_employee(p_employee_id, true);
+  emp := inv_get_employee(p_employee_id, not inv_replaying(p_company_id, p_key));
   if p_request_id is not null then
     select * into q from inv_requests where id = p_request_id;
     if q.id is null or q.company_id <> p_company_id then raise exception 'Unknown request' using errcode = '22023'; end if;
     if q.kind <> 'employee' or q.employee_id is distinct from emp.id then raise exception 'That request is not for this employee' using errcode = '23514'; end if;
-    if q.status not in ('submitted', 'in_progress') then raise exception 'Request % is % and cannot be issued against', q.code, q.status using errcode = '23514'; end if;
+    if q.status not in ('submitted', 'in_progress') and not inv_replaying(p_company_id, p_key) then raise exception 'Request % is % and cannot be issued against', q.code, q.status using errcode = '23514'; end if;
   end if;
-  if p_expected_return_at is not null and p_expected_return_at <= now() then raise exception 'The expected return date must be in the future' using errcode = '22023'; end if;
+  if p_expected_return_at is not null and p_expected_return_at <= now() and not inv_replaying(p_company_id, p_key) then raise exception 'The expected return date must be in the future' using errcode = '22023'; end if;
   h := inv_begin_movement(p_company_id, 'issue_employee', p_key,
          jsonb_build_object('location', p_location_id, 'employee', p_employee_id, 'lines', p_lines, 'expected', p_expected_return_at, 'note', p_note, 'request', p_request_id),
          jsonb_build_object('employee_id', emp.id, 'recipient_employee_id', emp.id, 'from_location_id', l.id, 'expected_return_at', p_expected_return_at, 'note', p_note,
@@ -1864,11 +1875,11 @@ begin
     select * into q from inv_requests where id = p_request_id;
     if q.id is null or q.company_id <> p_company_id then raise exception 'Unknown request' using errcode = '22023'; end if;
     if q.kind <> 'project' or q.project_id is distinct from p_project_id then raise exception 'That request is not for this project' using errcode = '23514'; end if;
-    if q.status not in ('submitted', 'in_progress') then raise exception 'Request % is % and cannot be dispatched against', q.code, q.status using errcode = '23514'; end if;
+    if q.status not in ('submitted', 'in_progress') and not inv_replaying(p_company_id, p_key) then raise exception 'Request % is % and cannot be dispatched against', q.code, q.status using errcode = '23514'; end if;
   end if;
   v_exp := coalesce(p_expected_return_at, q.expected_return_at, q.needed_until);
   if v_exp is null then raise exception 'Say when the equipment is expected back' using errcode = '22023'; end if;
-  if v_exp <= now() then raise exception 'The expected return date must be in the future' using errcode = '22023'; end if;
+  if v_exp <= now() and not inv_replaying(p_company_id, p_key) then raise exception 'The expected return date must be in the future' using errcode = '22023'; end if;
   h := inv_begin_movement(p_company_id, 'dispatch_project', p_key,
          jsonb_build_object('location', p_location_id, 'project', p_project_id, 'lines', p_lines, 'request', p_request_id, 'expected', p_expected_return_at, 'note', p_note),
          jsonb_build_object('project_id', p_project_id, 'request_id', p_request_id, 'from_location_id', l.id, 'expected_return_at', v_exp, 'note', p_note));
@@ -2155,7 +2166,7 @@ begin
   if lt.id is null then raise exception 'Unknown destination location' using errcode = '22023'; end if;
   if lt.id = lf.id then raise exception 'The destination must be a different location' using errcode = '22023'; end if;
   perform inv_lines_array(p_lines);
-  if p_expected_at is not null and p_expected_at <= now() then raise exception 'The expected arrival must be in the future' using errcode = '22023'; end if;
+  if p_expected_at is not null and p_expected_at <= now() and not inv_replaying(p_company_id, p_key) then raise exception 'The expected arrival must be in the future' using errcode = '22023'; end if;
   -- The transfer record exists before the movement header that names it (the header is immutable), so the key is checked first.
   v_prev := inv_idem_begin(p_company_id, p_key, 'transfer_dispatch',
          jsonb_build_object('from', p_from_location_id, 'to', p_to_location_id, 'lines', p_lines, 'expected', p_expected_at, 'carrier', p_carrier, 'reference', p_reference, 'note', p_note));
@@ -2408,7 +2419,7 @@ begin
   l := inv_loc(p_company_id, p_location_id);
   perform inv_lines_array(p_lines);
   if length(v_ref) = 0 then raise exception 'Give the repair reference (repairer or job number)' using errcode = '22023'; end if;
-  if p_expected_return_at is not null and p_expected_return_at <= now() then raise exception 'The expected return date must be in the future' using errcode = '22023'; end if;
+  if p_expected_return_at is not null and p_expected_return_at <= now() and not inv_replaying(p_company_id, p_key) then raise exception 'The expected return date must be in the future' using errcode = '22023'; end if;
   h := inv_begin_movement(p_company_id, 'repair_out', p_key,
          jsonb_build_object('location', p_location_id, 'lines', p_lines, 'ref', v_ref, 'expected', p_expected_return_at, 'note', p_note),
          jsonb_build_object('from_location_id', l.id, 'expected_return_at', p_expected_return_at, 'note', coalesce(p_note, v_ref)));
