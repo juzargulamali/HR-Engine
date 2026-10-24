@@ -43,6 +43,8 @@ export function utcOffsetLabel(tz: string, at: Date = new Date()): string | null
   const raw = parts.find((p) => p.type === "timeZoneName")?.value ?? "GMT";
   const m = /^GMT(?:([+-])(\d{1,2})(?::(\d{2}))?)?$/.exec(raw);
   if (!m || !m[1]) return "UTC";
+  // Some Node/ICU builds write UTC itself as "GMT+00:00": an offset of nothing is "UTC", whichever way the runtime spells it.
+  if (Number(m[2]) === 0 && (!m[3] || Number(m[3]) === 0)) return "UTC";
   const hours = String(Number(m[2]));
   return `UTC${m[1]}${hours}${m[3] && m[3] !== "00" ? `:${m[3]}` : ""}`;
 }

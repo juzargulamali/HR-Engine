@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   canChangeGrant, canConfirmCount, capabilityDisabledReason, computeChecklist, COMMON_TIMEZONES, countDifference, isCapabilityDisabled, isValidTimezone,
   legacyRowsIncomplete, legacyRowsToImport, legacySkipWords, linesMissingReason, missingSuggestions, normaliseLocationCode, operatorNeedsLocations,
@@ -95,6 +95,21 @@ describe("time zones", () => {
     expect(utcOffsetLabel("Asia/Kolkata", new Date("2026-01-01T00:00:00Z"))).toBe("UTC+5:30");
     expect(utcOffsetLabel("UTC")).toBe("UTC");
     expect(utcOffsetLabel("nope")).toBeNull();
+  });
+
+  it("calls an offset of nothing UTC even when the runtime spells it GMT+00:00 (as some Node/ICU builds do)", () => {
+    const real = Intl.DateTimeFormat;
+    const spy = vi.spyOn(Intl, "DateTimeFormat").mockImplementation(function (this: unknown, locale?: string | string[], options?: Intl.DateTimeFormatOptions) {
+      const f = new real(locale, options);
+      if (options?.timeZoneName !== "longOffset") return f;
+      return { formatToParts: () => [{ type: "timeZoneName", value: "GMT+00:00" }] } as unknown as Intl.DateTimeFormat;
+    } as unknown as typeof Intl.DateTimeFormat);
+    try {
+      expect(utcOffsetLabel("UTC")).toBe("UTC");
+      expect(utcOffsetLabel("Europe/London", new Date("2026-01-01T00:00:00Z"))).toBe("UTC");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
