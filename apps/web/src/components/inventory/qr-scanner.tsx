@@ -30,7 +30,11 @@ export function QrScanner({ onRead, onClose, deps, autoStart = false }: { onRead
   const [problem, setProblem] = useState<CameraProblem | null>(null);
   const [typed, setTyped] = useState("");
   const activeDeps = useRef<ScanDeps>(deps ?? {});
-  activeDeps.current = deps ?? browserDeps();
+  const loopRef = useRef<() => void>(() => undefined);
+  // The browser's camera objects are read when the camera starts, never during render.
+  useEffect(() => {
+    activeDeps.current = deps ?? browserDeps();
+  });
 
   const stop = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -58,9 +62,12 @@ export function QrScanner({ onRead, onClose, deps, autoStart = false }: { onRead
       })
       .catch(() => undefined)
       .finally(() => {
-        if (streamRef.current) timerRef.current = setTimeout(loop, 140);
+        if (streamRef.current) timerRef.current = setTimeout(() => loopRef.current(), 140);
       });
   }, [onRead]);
+  useEffect(() => {
+    loopRef.current = loop;
+  }, [loop]);
 
   const start = useCallback(async () => {
     stop();
@@ -110,7 +117,7 @@ export function QrScanner({ onRead, onClose, deps, autoStart = false }: { onRead
   }, [stop]);
 
   useEffect(() => {
-    if (autoStart) void start();
+    if (autoStart) queueMicrotask(() => void start());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -123,7 +130,6 @@ export function QrScanner({ onRead, onClose, deps, autoStart = false }: { onRead
   return (
     <div className="space-y-3">
       <div className={phase === "scanning" || phase === "starting" ? "overflow-hidden rounded-md border border-border bg-black" : "hidden"}>
-        {/* eslint-disable-next-line jsx-a11y/media-has-caption -- a live camera preview has no audio or captions */}
         <video ref={videoRef} className="aspect-[4/3] w-full object-cover" aria-label="Camera view" playsInline muted />
       </div>
       {phase === "starting" ? <p role="status" className="text-sm text-muted-foreground">Starting the camera…</p> : null}

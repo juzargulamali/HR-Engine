@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { isUncertain } from "@/lib/inventory/action-utils";
+import { isUncertain } from "@/lib/inventory/uncertain";
 import { newMovementKey } from "@/lib/inventory/idempotency";
 import type { MovementInput } from "@/lib/inventory/stock-movements";
 import type { MovementOutcome } from "@/lib/actions/inventoryStock";

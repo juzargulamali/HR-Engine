@@ -29,10 +29,7 @@ export const fail = (message: string): InvActionState => ({ error: friendlyInven
 export const ok = (extra: Partial<InvActionState> = {}): InvActionState => ({ error: null, ...extra });
 export const firstIssue = (e: z.ZodError) => e.issues[0]?.message ?? "Check the form and try again.";
 
-/** True when the error means "we do not know whether it was saved" (so the page offers the result check, not a blind retry). */
-export function isUncertain(message: string | null | undefined): boolean {
-  return !!message && /did not finish in time/i.test(message);
-}
+export { isUncertain } from "./uncertain";
 export { isNotInstalled };
 
 /** Everything that shows Inventory data is re-read after a change (also the pages of the other modules that embed Inventory). */

@@ -2,7 +2,11 @@
 import { createRequire } from "node:module";
 import { execSync } from "node:child_process";
 const require = createRequire(new URL("../../../packages/e2e-tests/package.json", import.meta.url));
-export const { chromium } = require("@playwright/test");
+import { existsSync } from "node:fs";
+const playwright = require("@playwright/test");
+// Uses the sandbox image's own Chromium when it is there (CHROMIUM_PATH overrides), so a newer Playwright does not need its own download.
+const SYSTEM_CHROMIUM = process.env.CHROMIUM_PATH ?? (existsSync("/opt/pw-browsers/chromium") ? "/opt/pw-browsers/chromium" : undefined);
+export const chromium = { launch: (options = {}) => playwright.chromium.launch({ ...(SYSTEM_CHROMIUM ? { executablePath: SYSTEM_CHROMIUM, args: ["--no-sandbox"] } : {}), ...options }) };
 export const BASE = process.env.BASE_URL ?? "http://127.0.0.1:3000";
 if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(BASE)) throw new Error(`refusing to run against ${BASE}: these checks write to the app they drive and are for the local stack only`);
 export const PASSWORD = "local-stack-password";
