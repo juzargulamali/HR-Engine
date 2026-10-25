@@ -23,10 +23,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.resolve(__dirname, "../../../supabase/migrations");
 const FIRST_CRM_MIGRATION = "20261115000000_crm_access_audit_settings.sql";
 const PLANNING_MIGRATION = "20261201000400_inv_planning_functions.sql";
+const PENDING_CHECKS_MIGRATION = "20261201000900_inv_pending_sales_checks.sql"; // depends only on tables and helpers from the earlier migrations
 const STOCK_PREFIX = "20261201000300";
 const WITH_STOCK = process.env.INV_PLANNING_WITHOUT_STOCK !== "1";
 const LATE_MIGRATIONS = readdirSync(MIGRATIONS_DIR)
-  .filter((f) => f >= FIRST_CRM_MIGRATION && f <= PLANNING_MIGRATION && f.endsWith(".sql") && (WITH_STOCK || !f.startsWith(STOCK_PREFIX)))
+  .filter((f) => f >= FIRST_CRM_MIGRATION && (f <= PLANNING_MIGRATION || f === PENDING_CHECKS_MIGRATION) && f.endsWith(".sql") && (WITH_STOCK || !f.startsWith(STOCK_PREFIX)))
   .sort();
 
 const id = () => randomUUID();
@@ -195,7 +196,7 @@ describe("Inventory planning", () => {
         "inv_add_request_line", "inv_expand_technology", "inv_update_request_line", "inv_cancel_request_line", "inv_submit_request", "inv_cancel_request",
         "inv_propose_substitution", "inv_decide_substitution", "inv_set_shortage_action", "inv_reserve", "inv_release_reservation", "inv_change_request_window",
         "inv_availability", "inv_technology_availability", "inv_request_opportunity_check", "inv_record_opportunity_check", "inv_opportunity_availability",
-        "inv_project_equipment", "inv_import_handover_requirements"];
+        "inv_project_equipment", "inv_import_handover_requirements", "inv_pending_sales_checks"];
       const internal = ["inv_user_name", "inv_check_version", "inv_lock_request", "inv_can_edit_request", "inv_require_edit", "inv_plan_window", "inv_effective_item",
         "inv_reserve_block_reason", "inv_free_count", "inv_expand_into_request", "inv_release_row", "inv_release_unused", "inv_cancel_request_internal",
         "inv_demand_check", "inv_opportunity_compute", "inv_import_handover_internal", "inv_line_progress", "inv_proj_after_insert", "inv_proj_after_status"];
@@ -1275,6 +1276,33 @@ describe("Inventory planning", () => {
       await fails(U.outsider, `select inv_opportunity_availability('${o}')`, /not found/i);
       expect((await q<{ r: Row }>(U.crmFounder, `select inv_opportunity_availability('${o}') as r`))[0].r.state).toBe("pending");
       expect((await q<{ r: Row }>(U.whA, `select inv_opportunity_availability('${o}') as r`))[0].r.state).toBe("pending");
+    });
+    it("lists the checks waiting for the warehouse, with the least about the enquiry and nothing private, only to people who can answer", async () => {
+      const item = await newItem("individual", { name: nm("Pending item") });
+      const n = nm("Pending tech");
+      await mkTech(n, [{ item, qty: 1 }]);
+      const o = await mkOpp(U.salesA, { techs: [{ name: n, qty: 2 }], install: "2030-10-01", start: "2030-10-02", end: "2030-10-04", scope: "SECRET SCOPE TEXT" });
+      await commit(U.salesA, `select inv_request_opportunity_check('${o}', '${LOC.a}')`);
+      const list = async (user: string) => (await q<{ r: Row[] }>(user, `select inv_pending_sales_checks() as r`))[0].r;
+      const mine = (await list(U.whA)).find((x: Row) => x.opportunity_id === o);
+      expect(mine).toBeTruthy();
+      expect(Object.keys(mine!).sort()).toEqual(["check_id", "company_id", "event_end", "event_start", "install_start", "location_id", "location_name", "opportunity_id", "reference", "requested_at", "requested_by", "technologies"]);
+      expect(mine).toMatchObject({ location_name: "Dubai warehouse", install_start: "2030-10-01", event_start: "2030-10-02", event_end: "2030-10-04", requested_by: "salesA", technologies: [{ name: n, qty: 2 }] });
+      // nothing else about the enquiry travels with it: no title, client, agency, value, owner or text
+      expect(JSON.stringify(mine)).not.toMatch(/SECRET SCOPE|100000|Opp |agency|client|owner/i);
+      // a founder sees it; an operator of another location does not (the check names Dubai); Sales and outsiders have nothing to answer
+      expect((await list(U.founder)).some((x: Row) => x.opportunity_id === o)).toBe(true);
+      expect((await list(U.whB)).some((x: Row) => x.opportunity_id === o)).toBe(false);
+      expect(await list(U.salesA)).toEqual([]);
+      expect(await list(U.outsider)).toEqual([]);
+      // a request that names no location yet is visible to every operator of the company, and once answered it leaves the list
+      const o2 = await mkOpp(U.salesA, { techs: [{ name: n, qty: 1 }], start: "2030-10-02", end: "2030-10-04" });
+      await commit(U.salesA, `select inv_request_opportunity_check('${o2}')`);
+      expect((await list(U.whB)).some((x: Row) => x.opportunity_id === o2)).toBe(true);
+      await commit(U.whB, `select inv_record_opportunity_check('${o2}', '${LOC.b}')`);
+      expect((await list(U.whB)).some((x: Row) => x.opportunity_id === o2)).toBe(false);
+      await commit(U.whA, `select inv_record_opportunity_check('${o}', '${LOC.a}')`);
+      expect((await list(U.whA)).some((x: Row) => x.opportunity_id === o)).toBe(false);
     });
     it("exposes no cost, employee custody or unrelated project data to Sales, by function and by table", async () => {
       const item = await newItem("individual", { name: nm("Leaky item") });

@@ -78,7 +78,7 @@ Run this with the real warehouse operator on a test copy (or with test records t
 - [ ] The warehouse screens show no salary, leave or personal data.
 
 **Sales**
-- [ ] A salesperson asks for an availability check. The answer says who checked and when, never reserves anything, and says **Warehouse check required** when no template exists.
+- [ ] A salesperson asks the warehouse for an availability check. It appears for the warehouse under Inventory, Requests, Sales checks waiting. The answer says who checked and when, never reserves anything, and says **Warehouse check required** when no template exists.
 - [ ] Changing the dates in the enquiry makes the check "out of date"; the old check stays in the history.
 
 **Control**
@@ -93,17 +93,17 @@ Run this with the real warehouse operator on a test copy (or with test records t
 * **A unit that cannot be found**: mark it **missing** (reason required). It is no longer offered. If it turns up, mark it **found**; it returns "needs checking".
 * **Pause everything**: Setup → switch Inventory off, or the owner's `inv_80` script. Nothing is deleted. Labels stay valid.
 
-## 7. Temporary process: Sales availability checks (until a warehouse inbox exists)
+## 7. Sales availability checks (the warehouse's list)
 
-The warehouse operator has no Sales access, so a request made with **Ask the warehouse to check** on the enquiry is **not shown on any warehouse screen**. Until the owner decides to build that inbox, do not rely on that button. Use this manual routine. It is temporary and changes no stock.
+A salesperson can ask the warehouse whether equipment is free for an enquiry's dates. The warehouse has no access to Sales, so the request reaches it here and nowhere else:
 
-1. **Sales asks in person.** The salesperson messages or calls the warehouse with the items or technology, quantities, dates and location.
-2. **The warehouse looks.** In **Inventory → Stock**, open the item and press **Check availability** (location and dates). It reserves nothing and uses the same figures a reservation uses. A technology without a complete template gives **Warehouse check required**: count it by hand.
-3. **The warehouse replies** to the salesperson: how many are free for those dates, what is short, and when anything that is out is due back.
-4. **The result is recorded on the enquiry** by a founder, or a person who has both Sales access and the warehouse right: open the enquiry, press **Record the check now**. This works out the result from stock today for the enquiry's dates and saves it with their name and the time. Nothing is reserved. If nobody with that right is available, Sales keeps the warehouse's reply in the enquiry notes.
-5. **If the enquiry's dates, location or quantities change**, the check shows **out of date**. Repeat from step 1. The old check stays in the history.
+1. **Sales asks.** On the enquiry, **Ask the warehouse to check** (optionally naming the location). The enquiry then says "Waiting for the warehouse".
+2. **The warehouse sees it.** Open **Inventory → Requests**. At the top, **Sales checks waiting** lists each request with only what is needed to answer it: the enquiry reference, the technologies with quantities, the dates, the location asked for, and who asked and when. The client, title, value and notes are never shown here.
+3. **The warehouse answers.** Press **Record the check**, confirm the location, add a note if useful, and press **Record the check**. The result is worked out from stock for those dates and saved with your name and the time. The request leaves the list and the enquiry shows the result to Sales.
+4. **A check never holds equipment.** To hold it, a Project Manager prepares an equipment list and the warehouse reserves it.
+5. **If the enquiry's dates, location or quantities change**, the check shows **out of date**: Sales asks again. The old check stays in the history.
 
-A check never holds equipment. To hold it, a Project Manager prepares an equipment list and the warehouse reserves it.
+Who sees the list: warehouse operators for their own locations (and for requests that name no location yet), catalogue managers and Inventory founders. A founder can also press **Record the check now** on the enquiry itself.
 
 ## 8. Not verified yet
 

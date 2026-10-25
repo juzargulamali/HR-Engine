@@ -630,3 +630,38 @@ export function leftLabel(g: Pick<EmployeeHolding, "removed" | "status" | "termi
   if (g.terminationDate) return `Left on ${plainDateWords(g.terminationDate)}`;
   return g.status === "terminated" || g.status === "resigned" ? "Has left" : "Not active";
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Sales checks waiting for the warehouse (inv_pending_sales_checks: the least about an enquiry that is needed to answer it)
+// ---------------------------------------------------------------------------------------------------------------
+export interface PendingSalesCheck {
+  check_id: string;
+  opportunity_id: string;
+  company_id: string;
+  reference: string;
+  requested_at: string;
+  requested_by: string;
+  location_id: string | null;
+  location_name: string | null;
+  install_start: string | null;
+  event_start: string | null;
+  event_end: string | null;
+  technologies: { name: string; qty: number | string }[];
+}
+
+/** "Laptop × 2, LED wall × 1"; nothing listed says so in words (the check then reads "Warehouse check required"). */
+export function pendingTechnologies(c: Pick<PendingSalesCheck, "technologies">): string {
+  const list = (c.technologies ?? []).filter((t) => t && String(t.name ?? "").trim() !== "");
+  if (list.length === 0) return "No technologies listed yet";
+  return list.map((t) => `${String(t.name).trim()} × ${formatQty(t.qty, "")}`.trim()).join(", ");
+}
+
+/** The dates Sales gave, in the order they happen; "Dates not set" when there are none. */
+export function pendingDates(c: Pick<PendingSalesCheck, "install_start" | "event_start" | "event_end">): string {
+  const day = (v: string) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${v}T00:00:00Z`));
+  const parts: string[] = [];
+  if (c.install_start) parts.push(`Install ${day(c.install_start)}`);
+  if (c.event_start && c.event_end && c.event_start !== c.event_end) parts.push(`Event ${day(c.event_start)} to ${day(c.event_end)}`);
+  else if (c.event_start || c.event_end) parts.push(`Event ${day((c.event_start ?? c.event_end) as string)}`);
+  return parts.length > 0 ? parts.join(" · ") : "Dates not set";
+}

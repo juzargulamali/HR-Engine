@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { AvailabilityButton } from "@/components/inventory/planning/availability-dialog";
 import { RequestsQuickAdd } from "@/components/inventory/planning/requests-quick-add";
 import { RequestSidePanel } from "@/components/inventory/planning/request-panel";
+import { SalesChecksWaiting } from "@/components/inventory/planning/sales-checks-waiting";
 import { RequestStatusBadge } from "@/components/inventory/planning/status";
 import { ListToolbar, type ToolbarFilter } from "@/components/workspace/list-toolbar";
 import { PanelLink } from "@/components/workspace/panel-link";
@@ -93,6 +94,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
   const offNote = switchedOff.length > 0 ? (
     <Alert variant="warning" role="status">Inventory is switched off for {switchedOff.map((c) => c.name).join(", ")}. You can read its requests, but nothing can be created or changed until a founder switches it on.</Alert>
   ) : null;
+  const waiting = <SalesChecksWaiting locations={locations} />;
   const panel = openId ? <RequestSidePanel openId={openId} closeHref={here({ open: null })} retryHref={here()} /> : null;
 
   let list: Awaited<ReturnType<typeof loadRequestList>>;
@@ -104,6 +106,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
       <div className="space-y-4">
         {header}
         {offNote}
+        {waiting}
         <LoadError what="the equipment requests" retryHref={here()} />
         {panel}
       </div>
@@ -115,6 +118,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
       <div className="space-y-5">
         {header}
         {offNote}
+        {waiting}
         <EmptyState
           title="No equipment requests yet"
           description={canAdd ? "Start a request for a project or an employee. It stays a draft until you submit it to the warehouse." : "Requests you are part of will appear here. Project managers ask for equipment from their project's Equipment page."}
@@ -142,6 +146,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
     <div className="space-y-4">
       {header}
       {offNote}
+      {waiting}
       <ListToolbar search={{ value: q, placeholder: "Search request, project, employee or destination" }} filters={filters} clearHref={clearHref} />
       {rows.length === 0 ? (
         <EmptyState title="Nothing matches" description="Clear a filter or search for something else." action={<Link href={clearHref} scroll={false} className={buttonVariants({ variant: "outline", size: "sm" })}>Clear filters</Link>} />

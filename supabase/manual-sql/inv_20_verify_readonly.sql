@@ -1,4 +1,4 @@
--- READ-ONLY. Run in the SQL Editor of "Enginious HR Engine_V2" AFTER the ten Inventory migrations
+-- READ-ONLY. Run in the SQL Editor of "Enginious HR Engine_V2" AFTER the Inventory migrations
 -- (20261201000000, 000100, 000200, 000250, 000300, 000400, 000500). Run the WHOLE file; it returns ONE result table
 -- (check | result | detail). Every row in the "result" column must read OK (INFO rows are information, the last SUMMARY row
 -- counts the failures). It changes nothing. Send me the full result.
@@ -42,7 +42,7 @@ audited_tables as (select unnest(array[
   'inv_availability_checks', 'inv_balances', 'inv_bins', 'inv_categories', 'inv_company_grants', 'inv_company_settings', 'inv_company_sharing',
   'inv_costs', 'inv_count_lines', 'inv_counts', 'inv_items', 'inv_kit_contents', 'inv_locations', 'inv_operator_locations', 'inv_rentals',
   'inv_request_lines', 'inv_requests', 'inv_reservations', 'inv_technologies', 'inv_technology_components', 'inv_transfers', 'inv_units']) as relname),
--- the 84 functions the app calls (signed-in users may execute; each checks its own permission inside)
+-- the 85 functions the app calls (signed-in users may execute; each checks its own permission inside)
 client_fns as (select unnest(array[
   'inv_accessible_company_ids', 'inv_add_request_line', 'inv_adjust_stock', 'inv_asset_is_linked', 'inv_availability', 'inv_can_browse',
   'inv_can_operate', 'inv_can_see_request', 'inv_can_view_stock', 'inv_cancel_count', 'inv_cancel_request', 'inv_cancel_request_line',
@@ -51,7 +51,7 @@ client_fns as (select unnest(array[
   'inv_employee_outstanding', 'inv_ensure_bin_label', 'inv_expand_technology', 'inv_grant_access', 'inv_has_access', 'inv_has_any_access',
   'inv_has_capability', 'inv_import_handover_requirements', 'inv_import_legacy_assets', 'inv_is_any_founder', 'inv_is_founder',
   'inv_issue_to_employee', 'inv_ledger_problems', 'inv_my_equipment', 'inv_opportunity_availability', 'inv_pack_kit',
-  'inv_preview_legacy_assets', 'inv_project_equipment', 'inv_propose_substitution', 'inv_reassign_unit', 'inv_receive_stock',
+  'inv_pending_sales_checks', 'inv_preview_legacy_assets', 'inv_project_equipment', 'inv_propose_substitution', 'inv_reassign_unit', 'inv_receive_stock',
   'inv_record_label_print', 'inv_record_opportunity_check', 'inv_register_unit', 'inv_release_reservation', 'inv_remove_count_line', 'inv_repair_in',
   'inv_repair_out', 'inv_replace_item', 'inv_request_opportunity_check', 'inv_reserve', 'inv_return_from_employee',
   'inv_return_from_project', 'inv_return_rental', 'inv_return_unused', 'inv_revoke_access', 'inv_save_bin', 'inv_save_category',
@@ -125,9 +125,9 @@ select ord, check_name, result, detail from (
 
   -- 8-13 the functions -------------------------------------------------------------------------------------------------------
   union all
-  select 8, 'every Inventory function is one of the 150 expected (84 for the app, 36 internal, 30 plain internal helpers)',
+  select 8, 'every Inventory function is one of the 151 expected (85 for the app, 36 internal, 30 plain internal helpers)',
          case when not exists (select 1 from inv_funcs f where f.proname not in (select proname from client_fns union all select proname from internal_definer_fns union all select proname from internal_invoker_fns))
-               and (select count(*) from inv_funcs) = 150
+               and (select count(*) from inv_funcs) = 151
                and not exists (select 1 from (select proname from client_fns union all select proname from internal_definer_fns union all select proname from internal_invoker_fns) e where not exists (select 1 from inv_funcs f where f.proname = e.proname)) then 'OK' else 'FAIL' end,
          (select count(*)::text from inv_funcs) || ' found'
          || coalesce('; UNKNOWN: ' || (select string_agg(f.proname, ', ') from inv_funcs f where f.proname not in (select proname from client_fns union all select proname from internal_definer_fns union all select proname from internal_invoker_fns)), '')
@@ -147,7 +147,7 @@ select ord, check_name, result, detail from (
          case when not exists (select 1 from inv_funcs f where f.proname in (select proname from internal_definer_fns union all select proname from internal_invoker_fns) and has_function_privilege('authenticated', f.oid, 'execute')) then 'OK' else 'FAIL' end,
          coalesce((select string_agg(f.proname, ', ') from inv_funcs f where f.proname in (select proname from internal_definer_fns union all select proname from internal_invoker_fns) and has_function_privilege('authenticated', f.oid, 'execute')), 'none reachable')
   union all
-  select 12, 'signed-in users can execute all 84 functions the app calls (each one checks the caller''s permission inside)',
+  select 12, 'signed-in users can execute all 85 functions the app calls (each one checks the caller''s permission inside)',
          case when not exists (select 1 from inv_funcs f where f.proname in (select proname from client_fns) and not has_function_privilege('authenticated', f.oid, 'execute')) then 'OK' else 'FAIL' end,
          coalesce((select string_agg(f.proname, ', ') from inv_funcs f where f.proname in (select proname from client_fns) and not has_function_privilege('authenticated', f.oid, 'execute')), 'all callable')
   union all

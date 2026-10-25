@@ -1866,6 +1866,7 @@ export interface Database {
       inv_import_handover_requirements: { Args: { p_project_id: string }; Returns: string };
       inv_employee_lookup: { Args: { p_company_id: string; p_query: string }; Returns: { employee_id: string; display_name: string; employee_number: string; department_name: string | null }[] };
       inv_my_equipment: { Args: Record<string, never>; Returns: InvMyEquipmentRow[] };
+      inv_pending_sales_checks: { Args: Record<string, never>; Returns: InvJson };
       inv_employee_outstanding: { Args: { p_company_id: string; p_employee_id?: string | null; p_include_inactive?: boolean }; Returns: InvOutstandingRow[] };
       inv_reassign_unit: { Args: { p_unit_id: string; p_to: string; p_employee_id: string | null; p_reason: string; p_key: string }; Returns: InvJson };
       inv_preview_legacy_assets: { Args: { p_company_id: string }; Returns: InvLegacyAssetRow[] };

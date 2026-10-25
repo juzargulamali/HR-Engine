@@ -364,7 +364,11 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
             <option value="">Choose the destination…</option>
             {destinations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </Select>
-          <p className="text-sm text-muted-foreground">It will be in transit, and not available at the destination, until someone there records it as received.</p>
+          {destinations.length === 0 ? (
+            <p className="text-sm text-muted-foreground" role="status">There is no other location to send to yet. Add one in Manage, Setup, Locations, then come back.</p>
+          ) : (
+            <p className="text-sm text-muted-foreground">It will be in transit, and not available at the destination, until someone there records it as received.</p>
+          )}
         </div>
       ) : null}
 

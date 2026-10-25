@@ -18,7 +18,7 @@ order, and each step has a check before the next one. Design and decisions: [inv
 
 | | |
 |---|---|
-| **Added** | An **Inventory** area in the existing app (`/inventory`): the catalogue (categories, items, technology templates), locations and bins, individually tracked units with permanent codes and QR labels, quantity and consumable stock, kits, counts, issue / return / dispatch / transfer / repair movements, an immutable stock ledger, equipment requests and date reservations for projects, availability (also shown to Sales as a summary), each person's own equipment, HR's view of what an employee still holds, and a one-off reconciliation of the earlier HR asset register. Twenty-nine new `inv_*` tables, 150 database functions (84 that the app calls, 66 internal), one sequence, no storage bucket. |
+| **Added** | An **Inventory** area in the existing app (`/inventory`): the catalogue (categories, items, technology templates), locations and bins, individually tracked units with permanent codes and QR labels, quantity and consumable stock, kits, counts, issue / return / dispatch / transfer / repair movements, an immutable stock ledger, equipment requests and date reservations for projects, availability (also shown to Sales as a summary), each person's own equipment, HR's view of what an employee still holds, and a one-off reconciliation of the earlier HR asset register. Twenty-nine new `inv_*` tables, 151 database functions (85 that the app calls, 66 internal), one sequence, no storage bucket. |
 | **Not touched** | Every HR table, column, policy, function, calculation, approval route and page; every Sales and Projects table, column, policy and function. Attendance, Recovery Leave, leave, expenses, payroll and appraisals behave exactly as before. **The only additions to existing tables are four triggers (§6).** |
 | **Separate access** | Inventory access is its own table (`inv_company_grants`), **per company**, independent of HR roles, Sales grants and Projects grants. **Nobody receives any automatically.** People without it do not see the module. The first founders are named by you in `inv_30_bootstrap_founders.sql`; after that founders grant access inside the app (Inventory → Access). |
 | **Costs** | Purchase date, cost and currency live in their own table and are read only with the separate `view_costs` right, which only a founder can grant and which nothing implies (§9). |
@@ -50,6 +50,7 @@ Apply **in exactly this order** (the file names sort in this order too):
 | 8 | `20261201000600_inv_count_line_remove.sql` | One function: take a mistaken line out of an open count (nothing in the stock books changes). |
 | 9 | `20261201000700_inv_transfer_destination_check.sql` | One function replaced (`inv_transfer_between_projects`): a project manager moving equipment straight to another project must manage **both** projects (warehouse staff at the unit's location still may move it between any two). Found by the browser access checks. |
 | 10 | `20261201000800_inv_project_equipment_unlinked.sql` | One function replaced (`inv_project_equipment`): a project's Equipment page also lists equipment dispatched to it **without naming a request**, with its due date and an overdue flag. Found by the browser transfer checks. |
+| 11 | `20261201000900_inv_pending_sales_checks.sql` | One new function (`inv_pending_sales_checks`): the warehouse's list of Sales availability checks waiting to be answered. It returns only the enquiry reference, dates, technologies with quantities, the location asked for, and who asked and when (never the title, client, value, owner or notes), and only to people who can answer a check. Added after the owner's first rehearsal showed a Sales request reached nobody. |
 
 No other Inventory migration exists; if one appears later it is listed here and `inv_20_verify_readonly.sql` is extended with it.
 
@@ -87,7 +88,7 @@ Run each file in the Supabase SQL Editor of **Enginious HR Engine_V2**, **the wh
 | Step | What | Check |
 |---|---|---|
 | 1 | Preflight (§4.2) and snapshot (§4.3) | All OK; paste lines saved |
-| 2 | Run, **one at a time and in this order**, the ten migration files in §3 | Each ends without an error |
+| 2 | Run, **one at a time and in this order**, the eleven migration files in §3 (if you already applied 1 to 10, apply only 11) | Each ends without an error |
 | 3 | `inv_20_verify_readonly.sql` (leave `expect_fresh = true`) | Every row **OK**; the last row says OK. Run it promptly: it expects an empty module |
 | 4 | `inv_05_preservation_check_readonly.sql` in "compare" mode (paste the saved lines where the file says: above the `('__none__', '')` line, which stays) | Summary says **PASS: nothing HR, Sales, Projects or the HR asset register own changed**; the four `intended:trigger:` rows say SAME and `intended:four_triggers` says "4 present" |
 | 5 | Merge the pull request when you are ready; Vercel deploys the app | The app opens; **people without Inventory access see no Inventory menu** |
@@ -235,11 +236,11 @@ policies, indexes, constraints and sequence), then every remaining `inv_` functi
   it does **not** give HR's plain "Cannot permanently delete: this employee has real history" message: it runs on until the database stops it with a **raw foreign-key error** naming an `inv_`
   table. **Nothing is deleted** (the whole call is undone). Use Remove (the soft delete) for such an employee; Inventory deliberately keeps equipment history for people who have left. (Shown by a test in
   `packages/rls-tests/test/inventory_disable.rls.test.ts`.)
-- **Deferred (owner decision): the warehouse has no inbox of Sales check requests.** A warehouse-only operator has no Sales access, so Sales availability checks follow the temporary manual process in `docs/inventory-warehouse-guide.md` §7 until the owner decides whether the warehouse may see CRM titles.
+- **Sales check requests reach the warehouse** through Inventory → Requests → Sales checks waiting (migration 11). Until migration 11 is applied that list is simply absent and Sales checks can only be recorded from the enquiry by a founder (`docs/inventory-warehouse-guide.md` §7).
 - **Deferred: the wording of the employee-deletion message** (above) is unchanged on purpose.
 - **Location filter on the stock list:** with a location chosen, counted stock held outside the warehouse (on projects, with employees, in transit) cannot be placed at a location, so those "out" figures show "—" instead of a partial number. Individual items are placed by their own location and stay exact. The per-location figures in the item panel and the availability dialog come from the database and are exact.
 - Inventory's own consistency check `inv_ledger_problems()` is empty when run as the owner (see §10); use the direct reconciliation rows of `inv_20_verify_readonly.sql`.
-- The owner scripts read the lists of expected tables (29) and functions (150) from this release; a later Inventory migration needs the matching update of `inv_20_verify_readonly.sql` or it will (correctly) report an unknown object.
+- The owner scripts read the lists of expected tables (29) and functions (151) from this release; a later Inventory migration needs the matching update of `inv_20_verify_readonly.sql` or it will (correctly) report an unknown object.
 - `inv_05_preservation_check_readonly.sql` fingerprints the HR asset register in full (it has no creation dates). If HR edits an asset between your snapshot and your compare, the row is DIFFERENT for a harmless
   reason: ask HR or repeat both runs quickly. Tables without creation dates other than the two asset tables are covered by structure only, as in the other modules' checks.
 - The service key (used by the server, as everywhere in the system) is not limited by Inventory's row-level security or function grants; the checks above describe signed-in users, anon and PUBLIC.

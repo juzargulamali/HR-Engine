@@ -288,6 +288,12 @@ describe("MovementForm: returns", () => {
 });
 
 describe("MovementForm: transfers", () => {
+  it("says there is no other location to send to when the company has only one", () => {
+    const only = { ...context, destinations: [context.destinations[0]!] };
+    render(<MovementForm kind="transfer" services={services()} context={only} initial={{ candidates: [laptop], locationId: "l1" }} />);
+    expect(screen.getByText(/no other location to send to yet/i)).toBeTruthy();
+    expect(screen.queryByText(/not available at the destination/i)).toBeNull();
+  });
   it("says the stock is in transit and not available at the destination", async () => {
     const s = services();
     render(<MovementForm kind="transfer" services={s} context={context} initial={{ candidates: [laptop], locationId: "l1" }} />);

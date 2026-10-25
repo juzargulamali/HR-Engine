@@ -31,7 +31,8 @@ export function ActionMenu({ specs, context, dialogs, label = "More actions" }: 
   const close = () => setChosen(null);
   return (
     <>
-      <MoreMenu items={items} label={label} />
+      {/* These menus sit at the left of a side panel: opening towards the right keeps the list inside the panel (it was clipped when it opened to the left). */}
+      <MoreMenu items={items} label={label} align="start" />
       {spec && "movement" in spec ? (
         <MovementDialog open onClose={close} kind={spec.movement.kind} context={context} initial={spec.movement.initial} title={spec.movement.title} description={spec.movement.description} />
       ) : null}
