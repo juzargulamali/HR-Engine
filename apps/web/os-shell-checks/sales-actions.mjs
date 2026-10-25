@@ -128,7 +128,8 @@ await step("close as won with PO evidence, then prepare handover", async () => {
 });
 await step("founder reopens with reason + new next action; closure history kept", async () => {
   await page.goto(url, { waitUntil: "networkidle" }); await page.getByRole("button", { name: /^reopen/i }).first().click();
-  await dialog().getByLabel("Why is it being reopened?").fill("Client asked to revise the scope"); await dialog().getByLabel(/what needs to happen/i).fill("Call Hana about the revised scope"); await dialog().getByLabel(/^date/i).first().fill("2026-10-25");
+  await dialog().getByLabel("Why is it being reopened?").fill("Client asked to revise the scope"); await dialog().getByLabel(/what needs to happen/i).fill("Call Hana about the revised scope"); await dialog().getByLabel(/^date/i).first().fill(new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10)); // a future date in Dubai, whatever day the check runs on
+ 
   await dialog().getByRole("button", { name: /reopen/i }).last().click(); await closed();
   if (sql(`select count(*) from crm_closures where opportunity_id='${oppId()}' and reopened_at is not null`) !== "1") throw new Error("closure not marked reopened");
   await tab("Activity & history"); await page.waitForTimeout(500); const hm = await main(); if (!/Reopened|reopened/.test(hm)) throw new Error("history does not show it: " + hm.slice(0, 400));
