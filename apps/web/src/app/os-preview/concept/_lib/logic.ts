@@ -152,11 +152,18 @@ export function filterTasks(list: readonly Task[], f: TaskFilter, me: Persona): 
     if (f.team && t.team !== f.team) return false;
     if (f.show === "open" && t.status === "done") return false;
     if (f.show === "mine" && t.assignee !== me.personId) return false;
-    if (f.show === "attention" && !(t.blocked || t.status === "review" || !t.assignee || isOverdue(t.due, t.status === "done"))) return false;
+    // Needs attention: blocked, without an owner, or overdue. Work waiting for review has its own count ("Awaiting review").
+    if (f.show === "attention" && !((t.blocked && t.status !== "done") || (!t.assignee && t.status !== "done") || isOverdue(t.due, t.status === "done"))) return false;
     if (q && ![t.title, personFirst(t.assignee), t.team].join(" ").toLowerCase().includes(q)) return false;
     return true;
   });
 }
+/** The week the concept's "today" falls in, Monday to Sunday. */
+export const WEEK_START = "2026-10-26";
+export const WEEK_END = "2026-11-01";
+/** "This week": due Monday to Sunday of this week, plus anything still open that is overdue. Never hides a task from "All tasks". */
+export const isThisWeek = (t: Task) => (t.due >= WEEK_START && t.due <= WEEK_END) || (t.status !== "done" && t.due < WEEK_START);
+
 export const sortTasks = (list: readonly Task[]) => [...list].sort((a, b) => Number(a.status === "done") - Number(b.status === "done") || a.due.localeCompare(b.due) || a.title.localeCompare(b.title));
 
 // ---------------------------------------------------------------------------------------------------------------

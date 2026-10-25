@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PERSONAS, PROJECTS, TASKS, TIMELINE, EQUIPMENT, projectById, tasksOf, type Persona, type Task } from "./sample";
 import {
-  attentionOf, canAcceptReview, canAssign, canEditStatus, filterProjects, isMember, nextActions, overlapMinutes, parallelDays, readProjectFilter,
+  isThisWeek, filterTasks, attentionOf, canAcceptReview, canAssign, canEditStatus, filterProjects, isMember, nextActions, overlapMinutes, parallelDays, readProjectFilter,
   siteClashFor, statusRefusal, visibleProjects,
 } from "./logic";
 
@@ -25,7 +25,7 @@ describe("who may change what", () => {
   });
   it("nobody accepts their own work", () => {
     expect(canAcceptReview(persona("pm"), task("t2"))).toBe(true);
-    expect(canAcceptReview({ ...persona("pm"), personId: "ravi" }, task("t2"))).toBe(false);
+    expect(canAcceptReview({ ...persona("pm"), personId: "hana" }, task("t2"))).toBe(false);
   });
 });
 
@@ -50,7 +50,7 @@ describe("what needs attention", () => {
   const notes = attentionOf(aurora, tasksOf("aurora"), TIMELINE.filter((t) => t.projectId === "aurora"), EQUIPMENT.filter((e) => e.projectId === "aurora"));
   it("finds the blocked, review, unassigned, overdue and shortage items of the scenario", () => {
     expect(notes.filter((n) => n.id.startsWith("b-"))).toHaveLength(1);
-    expect(notes.filter((n) => n.id.startsWith("r-"))).toHaveLength(1);
+    expect(notes.filter((n) => n.id.startsWith("r-"))).toHaveLength(3);
     expect(notes.filter((n) => n.id.startsWith("u-"))).toHaveLength(1);
     expect(notes.filter((n) => n.id.startsWith("o-"))).toHaveLength(1);
     expect(notes.filter((n) => n.id.startsWith("e-"))).toHaveLength(1);
@@ -63,6 +63,20 @@ describe("what needs attention", () => {
   it("a team member is only asked about their own work, never to assign or review", () => {
     const next = nextActions(persona("member"), tasksOf("aurora"), [], []);
     expect(next.every((n) => n.id === "b-t7" ? false : !n.id.startsWith("u-") && !n.id.startsWith("r-"))).toBe(true);
+  });
+});
+
+describe("the This week view", () => {
+  const aurora = tasksOf("aurora");
+  it("is this week plus anything open and overdue, and never counts a finished older task", () => {
+    expect(aurora.filter(isThisWeek)).toHaveLength(10);
+    expect(isThisWeek(task("t1"))).toBe(false); // done, due 5 Oct
+    expect(isThisWeek(task("t10"))).toBe(false); // due 5 Nov
+  });
+  it("the summary counts come from all tasks: open, needing attention (blocked or unowned or overdue) and awaiting review", () => {
+    expect(aurora.filter((t) => t.status !== "done")).toHaveLength(12);
+    expect(filterTasks(aurora, { q: "", who: "", status: "", team: "", show: "attention" }, persona("pm"))).toHaveLength(2);
+    expect(aurora.filter((t) => t.status === "review")).toHaveLength(3);
   });
 });
 

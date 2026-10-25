@@ -91,6 +91,22 @@ check("the project just left is marked", (await p.locator('.cx-table tr[data-sel
 // ---- 4 .. 7 work: add, panel, status, assignee, blocker, review
 await go(p, "/aurora");
 check("next action is offered first (the blocked task)", /Resolve a blocker/.test(await body(p)));
+{
+  await p.setViewportSize({ width: 1586, height: 992 });
+  await p.waitForTimeout(200);
+  const m = await p.getByRole("region", { name: "Delivery milestones" }).boundingBox();
+  const t = await p.getByRole("region", { name: "Tasks" }).boundingBox();
+  const stats = await p.getByRole("group", { name: "Task summary" }).boundingBox();
+  const rail = await p.getByRole("region", { name: "Next action" }).boundingBox();
+  check("desktop: the milestone strip sits under the task list and is on the first screen", !!m && !!t && m.y > t.y && m.y + m.height <= 992, JSON.stringify([m?.y, m?.height, t?.y]));
+  check("desktop: the right rail starts beside the summary cards", !!stats && !!rail && Math.abs(stats.y - rail.y) <= 4 && rail.x > stats.x + stats.width, JSON.stringify([stats, rail]));
+  check("desktop: the default list is labelled This week, says how many it shows, and offers View all tasks", (await p.getByRole("heading", { name: "This week" }).count()) === 1 && /showing 5 of 10/.test(await body(p)) && (await p.getByRole("link", { name: /View all tasks \(13\)/ }).count()) === 1);
+  check("desktop: the counts agree (Open tasks card, Work tab badge)", /12\s*Open tasks/.test((await p.getByRole("group", { name: "Task summary" }).innerText()).replace(/\n+/g, " ")) && /Work\s*12/.test((await p.getByRole("navigation", { name: "Project sections" }).innerText()).replace(/\n+/g, " ")));
+  const hero = await p.locator(".cx-hero").boundingBox();
+  check("desktop: the header is compact", !!hero && hero.height <= 140, String(hero?.height));
+const h1 = await p.locator(".cx-hero h1").boundingBox();
+  check("desktop: the header title stays in the left half, clear of the drawing", !!hero && !!h1 && h1.x + h1.width <= hero.x + hero.width * 0.5, JSON.stringify([hero?.x, hero?.width, h1?.x, h1?.width]));
+}
 check("a blocked task and a review task are visible in the list", /Two of the six motor controllers/.test(await body(p)) && (await p.getByText("In review").count()) > 0);
 await p.getByRole("button", { name: "Add task" }).first().click();
 await p.locator("dialog").getByLabel("Title").fill("Check cable labels");
@@ -100,14 +116,19 @@ check("a sample task is added and opens in the panel", (await p.getByRole("dialo
 check("the panel says the data is sample", /Sample data: changes to this task stay in this browser tab/.test(await body(p)));
 await p.keyboard.press("Escape");
 await p.waitForFunction(() => !location.search.includes("task="));
-check("Escape closes the panel and the list is still there", (await p.getByRole("dialog").count()) === 0 && (await rows(p)) === 14);
+check("Escape closes the panel and the This week list is still there", (await p.getByRole("dialog").count()) === 0 && (await rows(p)) === 5 && /showing 5 of 11/.test(await body(p)));
+await p.getByRole("link", { name: /View all tasks \(14\)/ }).click();
+await p.waitForURL(/tasks=all/);
+check("View all tasks shows every task, labelled All tasks", (await rows(p)) === 14 && (await p.getByRole("heading", { name: "All tasks" }).count()) === 1);
 await p.getByRole("link", { name: "Scene switching API" }).focus();
 await p.keyboard.press("Enter");
 await p.waitForURL(/task=t6/);
 check("keyboard opens the panel and focus moves to its heading", await p.waitForFunction(() => document.activeElement?.tagName === "H2", null, { timeout: 4000 }).then(() => true, () => false));
+check("the open task's row is highlighted as selected", (await p.locator('.cx-table tr[data-selected="true"]').count()) === 1);
 await p.keyboard.press("Escape");
 await p.waitForFunction(() => !location.search.includes("task="));
 check("focus returns to the task link after closing", await p.evaluate(() => document.activeElement?.textContent?.includes("Scene switching API")));
+check("keyboard focus is a solid outline and the row is not shown as selected", await p.evaluate(() => getComputedStyle(document.activeElement).outlineStyle === "solid") && (await p.locator('.cx-table tr[data-selected="true"]').count()) === 0);
 await pick(p, "Scene switching API", "Status", "In progress");
 check("status change shows saving then saved", await toast(p, /Saved/));
 check("the new status is in the row", /In progress/.test(await pillOf(p, "Scene switching API", "Status").getAttribute("aria-label")));
@@ -121,7 +142,7 @@ await p.keyboard.press("Escape");
 await p.getByRole("button", { name: "Preview options" }).click();
 await p.getByLabel("Make the next save fail").check();
 await p.keyboard.press("Escape");
-await pick(p, "Frame and cable layout drawing", "Status", "To do");
+await pick(p, "Sensor and cable layout", "Status", "To do");
 check("a failed save says so and offers Try again", await toast(p, /was not saved/) && (await p.getByRole("button", { name: "Try again" }).count()) > 0);
 await p.getByRole("button", { name: "Try again" }).click();
 check("Try again saves", await toast(p, /Saved/));
@@ -136,7 +157,7 @@ check("a team member cannot accept a review", (await p.getByRole("button", { nam
 
 // ---- 8 timeline
 await go(p, "/aurora?tab=timeline");
-check("timeline lists milestones, deliverables and timed site bookings", /Hardware demo/.test(await body(p)) && /Installation, crew A/.test(await body(p)) && /08:00–18:00/.test(await body(p)));
+check("timeline lists milestones, deliverables and timed site bookings", /Hardware demo/.test(await body(p)) && /Installation & testing/.test(await body(p)) && /08:00–18:00/.test(await body(p)));
 check("timezone is shown for timed events", /GST \(Dubai, UTC\+4\)/.test(await body(p)));
 check("client-facing and internal are distinct", (await p.getByText("Client-facing", { exact: true }).count()) > 1 && (await p.getByText("Internal", { exact: true }).count()) > 1);
 check("one overdue milestone is marked", (await p.getByText(/Overdue by 2 days/).count()) === 1);
@@ -153,7 +174,7 @@ check("typing @ offers colleagues", (await p.getByRole("button", { name: "@Sara 
 await p.getByRole("button", { name: "@Sara Nasser" }).click();
 await p.getByLabel("Link to a task").selectOption("t5");
 await p.getByRole("button", { name: "Send" }).click();
-check("message is added locally and linked to a task", await toast(p, /Saved your message/) && /Checking in/.test(await body(p)) && (await p.getByRole("link", { name: /Touch-floor interaction logic/ }).count()) >= 2);
+check("message is added locally and linked to a task", await toast(p, /Saved your message/) && /Checking in/.test(await body(p)) && (await p.getByRole("link", { name: /Touch-floor interaction/ }).count()) >= 2);
 await p.getByRole("button", { name: "Reply" }).first().click();
 check("reply shows who is being answered", /Replying to/.test(await body(p)));
 await go(p, "/harbour?tab=discussion&as=member");
@@ -205,6 +226,25 @@ check("phone: cards instead of a table", (await p.locator(".cx-table").first().i
 await p.getByRole("link", { name: "Aurora Pavilion: interactive LED floor" }).click();
 await p.waitForURL(/concept\/aurora/);
 check("phone: project opens, no horizontal scroll", await overflow(p));
+{
+  const bars = await p.locator("header.cx-topbar").boundingBox();
+  const strip = await p.getByRole("complementary", { name: "Concept notice" }).boundingBox();
+  check("phone: the top bar and notice take little height", !!bars && !!strip && bars.height <= 52 && bars.height + strip.height <= 80, JSON.stringify([bars?.height, strip?.height]));
+  const hero = await p.locator(".cx-hero").boundingBox();
+  check("phone: the project header is compact", !!hero && hero.height <= 250, String(hero?.height));
+  const h1 = await p.locator(".cx-hero h1").boundingBox();
+  check("phone: the title starts below the drawing's corner", !!hero && !!h1 && h1.y - hero.y >= 36, JSON.stringify([hero?.y, h1?.y]));
+  const tabs = p.getByRole("navigation", { name: "Project sections" }).getByRole("link");
+  const boxes = await tabs.evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.right), Math.round(r.top)]; }));
+  check("phone: all four tabs are visible without sideways scrolling", boxes.length === 4 && boxes.every(([l, r, t]) => l >= 0 && r <= 391 && t < 844), JSON.stringify(boxes));
+  const m = await p.getByRole("region", { name: "Delivery milestones" }).boundingBox();
+  check("phone: upcoming milestones start on the first screen", !!m && m.y < 844, JSON.stringify(m));
+  const t = await p.getByRole("region", { name: "Tasks" }).boundingBox();
+  check("phone: milestones sit above the tasks", !!m && !!t && m.y < t.y, JSON.stringify([m?.y, t?.y]));
+  check("phone: supporting cards are folded until opened", (await p.getByRole("button", { name: "Team activity", expanded: false }).count()) === 1 && (await p.getByRole("button", { name: "Next on site", expanded: false }).count()) === 1);
+  await p.getByRole("button", { name: "Team activity" }).click();
+  check("phone: a folded card opens", (await p.getByRole("button", { name: "Team activity", expanded: true }).count()) === 1 && (await p.getByText(/submitted storyboard/).first().isVisible()));
+}
 await p.getByRole("link", { name: "Motor controller firmware" }).click();
 await p.waitForURL(/task=t7/);
 const panel = await p.getByRole("dialog", { name: "Motor controller firmware" }).boundingBox();
@@ -214,6 +254,8 @@ const h = await p.getByRole("button", { name: "Close details" }).boundingBox();
 check("phone: close button is a comfortable tap target", !!h && h.height >= 32 && h.width >= 32, JSON.stringify(h));
 await p.getByRole("button", { name: "Close details" }).click();
 await p.waitForFunction(() => !location.search.includes("task="));
+await p.getByRole("link", { name: /View all tasks/ }).click();
+await p.waitForURL(/tasks=all/);
 await pick(p, "Scene switching API", "Status", "In progress");
 check("phone: status can be changed from the list", await toast(p, /Saved/));
 await p.getByRole("link", { name: "Board", exact: true }).click();

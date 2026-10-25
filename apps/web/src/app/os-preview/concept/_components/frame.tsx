@@ -44,7 +44,7 @@ export function Frame({ children }: { children: React.ReactNode }) {
               <Image src="/brand/enginious-logo.png" alt="Enginious: Driven by Innovation" width={464} height={289} priority style={{ height: 58, width: "auto" }} />
             </Link>
           </div>
-          <nav className="flex flex-1 flex-col gap-1 px-3 pt-2">
+          <nav className="flex flex-1 flex-col gap-2 px-3 pt-3">
             {NAV.map(({ label, href: to, Icon }) => {
               const active = label === "Projects";
               return (
@@ -67,7 +67,7 @@ export function Frame({ children }: { children: React.ReactNode }) {
         </aside>
 
         <div className="min-w-0">
-          <header className="cx-chrome cx-topbar sticky top-0 z-40 flex h-16 items-center gap-3 px-4 sm:px-6 lg:z-50">
+          <header className="cx-chrome cx-topbar sticky top-0 z-40 flex h-12 items-center gap-3 px-4 sm:px-6 lg:z-50 lg:h-16">
             <Link href={href("/os-preview/concept")} className="flex min-w-0 items-center gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:hidden">
               {/* The mark from the logo files, unchanged: only its height is set. */}
               <Image src="/brand/enginious-icon.png" alt="" width={147} height={105} priority style={{ height: 30, width: "auto" }} className="flex-none" />
@@ -82,8 +82,8 @@ export function Frame({ children }: { children: React.ReactNode }) {
             <span className="cx-badge ml-2 hidden xl:inline-flex" data-tone="blue">{CHIP}</span>
             <div className="ml-auto"><PreviewOptions name={me} /></div>
           </header>
-          <aside aria-label="Concept notice" className="border-b border-border/60 bg-background/80 px-4 py-1.5 text-[13px] text-muted-foreground sm:px-6 xl:hidden">
-            <span className="font-semibold text-foreground">{CHIP}.</span> Nothing is saved or sent.
+          <aside aria-label="Concept notice" className="border-b border-border/60 bg-background/80 px-4 py-1 text-xs font-semibold text-foreground sm:px-6 xl:hidden">
+            {CHIP}
           </aside>
           <main id="cx-main" tabIndex={-1} className="outline-none">{children}</main>
         </div>

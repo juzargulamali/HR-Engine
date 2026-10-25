@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams, usePathname } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Calendar, ClipboardList, MessageSquare, Package } from "lucide-react";
 import { MoreMenu } from "@/components/workspace/more-menu";
 import { withParams } from "@/components/workspace/url-state";
 import { fmtDay, pmName, projectById, timelineOf, type Project } from "../_lib/sample";
@@ -18,8 +18,8 @@ import { TaskPanel } from "./task-panel";
 
 const BASE = "/os-preview/concept";
 export type TabId = "work" | "timeline" | "discussion" | "equipment";
-const TABS: { id: TabId; label: string }[] = [{ id: "work", label: "Work" }, { id: "timeline", label: "Timeline" }, { id: "discussion", label: "Discussion" }, { id: "equipment", label: "Equipment" }];
-const SHELL = "mx-auto w-full max-w-[1400px] px-4 pb-24 pt-5 sm:px-6 lg:px-8";
+const TABS: { id: TabId; label: string; Icon: typeof Calendar }[] = [{ id: "work", label: "Work", Icon: ClipboardList }, { id: "timeline", label: "Timeline", Icon: Calendar }, { id: "discussion", label: "Discussion", Icon: MessageSquare }, { id: "equipment", label: "Equipment", Icon: Package }];
+const SHELL = "mx-auto w-full max-w-[1400px] px-4 pb-24 pt-3 sm:px-6 sm:pt-2 lg:px-8";
 
 export function ProjectWorkspaceView({ id }: { id: string }) {
   const { persona, listQuery, href } = useConcept();
@@ -93,7 +93,7 @@ function Workspace({ project, back, href }: { project: Project; back: string; hr
         <Hero
           eyebrow={project.ref}
           title={title}
-          sub={subtitle}
+          sub={<><span className="hidden sm:inline">{project.ref} · </span>{subtitle}</>}
           meta={<>
             <StageBadge stage={project.stage} />
             <span>Manager: <span className="font-medium text-white">{pmName(project.pm)}</span></span>
@@ -115,17 +115,23 @@ function Workspace({ project, back, href }: { project: Project; back: string; hr
         </Hero>
       </div>
 
-      <nav aria-label="Project sections" className="mt-5 flex gap-1 overflow-x-auto border-b border-border">
+      <nav aria-label="Project sections" className="mt-3 grid grid-cols-4 border-b border-border sm:mt-3 sm:flex sm:gap-1">
         {TABS.map((t) => (
           <Link key={t.id} href={go({ tab: t.id === "work" ? null : t.id, task: null, ms: null, eq: null })} scroll={false} aria-current={tab === t.id ? "page" : undefined}
-            className={`-mb-px inline-flex min-h-11 flex-none items-center gap-2 border-b-2 px-4 text-[0.9375rem] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${tab === t.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-            {t.label}
-            {tabCount[t.id] ? <Badge tone={t.id === "equipment" ? "amber" : t.id === "discussion" ? "blue" : "neutral"}>{tabCount[t.id]}</Badge> : null}
+            className={`-mb-px flex min-h-[3.5rem] flex-col items-center justify-center gap-1 border-b-[3px] px-1 text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:inline-flex sm:min-h-10 sm:flex-row sm:gap-2 sm:border-b-2 sm:px-4 sm:text-[0.9375rem] sm:font-medium ${tab === t.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+            <span>{t.label}</span>
+            {tabCount[t.id] ? <span className="hidden sm:inline-flex"><Badge tone={t.id === "equipment" ? "amber" : t.id === "discussion" ? "blue" : "neutral"}>{tabCount[t.id]}</Badge></span> : null}
+            {tabCount[t.id] ? <span className="sr-only sm:hidden">{tabCount[t.id]}</span> : null}
+            <span className="relative order-first sm:hidden" aria-hidden>
+              <t.Icon className="h-5 w-5" />
+              {tabCount[t.id] && t.id !== "equipment" ? <span className="absolute -right-3.5 -top-2 min-w-[1.1rem] rounded-full bg-[hsl(var(--foreground)/0.14)] px-1 text-center text-[11px] font-bold leading-[1.1rem] text-foreground">{tabCount[t.id]}</span> : null}
+              {tabCount[t.id] && t.id === "equipment" ? <span className="absolute -right-1.5 -top-1 h-2.5 w-2.5 rounded-full bg-[hsl(var(--cx-amber))]" /> : null}
+            </span>
           </Link>
         ))}
       </nav>
 
-      <div className="mt-5">
+      <div className="mt-4 sm:mt-5">
         {forced === "loading" ? <SkeletonRows label={`Loading ${tab}`} /> : forced === "error" ? <LoadError what={TABS.find((t) => t.id === tab)!.label} onRetry={() => setForced("none")} /> : (
           tab === "work" ? <WorkView project={project} tasks={projectTasks} items={items} actions={actions} here={here} /> :
           tab === "timeline" ? <TimelineView project={project} tasks={projectTasks} items={items} here={here} /> :
