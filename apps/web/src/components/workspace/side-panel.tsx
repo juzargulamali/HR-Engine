@@ -37,6 +37,8 @@ export function SidePanel({ title, subtitle, closeHref, fullPageHref, children }
       if (e.key !== "Escape" || e.defaultPrevented) return;
       // A dialog opened from the panel (hold, close as won…) handles its own Escape.
       if (document.querySelector("dialog[open]")) return;
+      // An open "..." menu closes first: Escape must not also close the panel the menu sits in.
+      if (document.querySelector('[role="menu"]:not([inert])')) return;
       close();
     };
     document.addEventListener("keydown", onKey);
