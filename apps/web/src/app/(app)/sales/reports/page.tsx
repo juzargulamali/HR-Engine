@@ -124,7 +124,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       ) : (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <ReportCard title="Open pipeline by stage" description="Open opportunities now. Each currency on its own line; never added together." note={`n = ${stages.reduce((n, s) => n + s.count, 0)} open opportunities`}>
-            <Table>
+            <Table stack>
               <caption className="sr-only">Open pipeline by stage</caption>
               <TableHeader><TableRow><TableHead scope="col">Stage</TableHead><TableHead scope="col" className="text-right">Open</TableHead><TableHead scope="col" className="text-right">Value</TableHead></TableRow></TableHeader>
               <TableBody>
@@ -143,7 +143,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             {owners.length === 0 ? (
               <p className="text-sm text-muted-foreground">No open opportunities.</p>
             ) : (
-              <Table>
+              <Table stack>
                 <caption className="sr-only">Open pipeline by owner</caption>
                 <TableHeader><TableRow><TableHead scope="col">Owner</TableHead><TableHead scope="col" className="text-right">Open</TableHead><TableHead scope="col" className="text-right">Value</TableHead></TableRow></TableHeader>
                 <TableBody>

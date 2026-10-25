@@ -112,7 +112,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               {windowsRules ? (
-                <Table>
+                <Table stack>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Rule</TableHead>
@@ -211,7 +211,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             <CardTitle>Leave types</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Code</TableHead>

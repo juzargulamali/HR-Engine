@@ -66,7 +66,7 @@ export default async function ProjectPeoplePage({ params }: { params: Promise<{ 
         {people.length === 0 ? (
           <EmptyState dense title="No members" description="The Project Manager is always a member. Add the people who work on this project." />
         ) : (
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow><TableHead>Name</TableHead><TableHead>Role</TableHead><TableHead>Department</TableHead><TableHead>Open tasks</TableHead>{canEdit ? <TableHead>Actions</TableHead> : null}</TableRow>
             </TableHeader>
@@ -120,7 +120,7 @@ export default async function ProjectPeoplePage({ params }: { params: Promise<{ 
         {teams.length === 0 ? (
           <EmptyState dense title="No department teams yet" description={canEdit ? "Add one for each department that delivers part of this project, such as Programming or Content." : "The Project Manager adds department teams when departments deliver part of the project."} />
         ) : (
-          <Table>
+          <Table stack>
             <TableHeader><TableRow><TableHead>Team</TableHead><TableHead>Head</TableHead><TableHead>People</TableHead>{canEdit ? <TableHead>Actions</TableHead> : null}</TableRow></TableHeader>
             <TableBody>
               {teams.map((t) => (

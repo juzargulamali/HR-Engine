@@ -180,7 +180,7 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
           <CardTitle>Recent activity{count != null ? ` (${count} total)` : ""}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>When</TableHead>

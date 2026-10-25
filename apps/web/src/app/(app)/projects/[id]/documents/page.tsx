@@ -60,7 +60,7 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
         {files.length === 0 ? (
           <EmptyState dense title="No files or links yet" description="Add the documents the team needs: briefs, drawings, confirmations. Commercial documents belong in Sales & CRM, not here." />
         ) : (
-          <Table>
+          <Table stack>
             <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Kind</TableHead><TableHead>Added</TableHead><TableHead><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
             <TableBody>
               {files.map((f) => {

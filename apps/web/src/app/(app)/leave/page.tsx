@@ -12,10 +12,14 @@ import { CancelRequestButton } from "./cancel-request-button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
 import type { RequestStatus } from "@/types/database.types";
+import { CalendarDays, Clock } from "lucide-react";
+import { OsStatCard } from "@/components/os/stat-card";
 
 export const metadata = { title: "Leave" };
 
 const STATUS_VALUES: RequestStatus[] = ["submitted", "pending_approval", "approved", "rejected", "cancelled"];
+
+const sentenceCase = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
 export default async function LeavePage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
   const { status: statusParam } = await searchParams;
@@ -69,23 +73,11 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
         </Link>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {(leaveBalances ?? []).map((b) => (
-          <Card key={b.leave_type_code}>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium capitalize text-muted-foreground">
-                {b.leave_type_code.replace(/_/g, " ")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-2xl font-semibold">{b.balance_days} days</CardContent>
-          </Card>
+          <OsStatCard key={b.leave_type_code} label={sentenceCase(b.leave_type_code.replace(/_/g, " "))} value={`${b.balance_days} days`} icon={CalendarDays} edge={Number(b.balance_days) > 0 ? "cyan" : "muted"} compact={false} />
         ))}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">Comp-off</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold">{compBalance?.balance_days ?? 0} days</CardContent>
-        </Card>
+        <OsStatCard label="Comp-off" value={`${compBalance?.balance_days ?? 0} days`} icon={Clock} edge={Number(compBalance?.balance_days ?? 0) > 0 ? "blue" : "muted"} compact={false} />
       </div>
 
       <Card>
@@ -114,7 +106,7 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
               </Link>
             ) : null}
           </form>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Type</TableHead>

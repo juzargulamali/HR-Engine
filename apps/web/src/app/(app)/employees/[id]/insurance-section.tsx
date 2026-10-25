@@ -25,7 +25,7 @@ export async function InsuranceSection({ employeeId, canEdit }: { employeeId: st
 
   return (
     <div className="space-y-4">
-      <Table>
+      <Table stack>
         <TableHeader>
           <TableRow>
             <TableHead>Insurance</TableHead>

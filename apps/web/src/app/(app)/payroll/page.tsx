@@ -72,7 +72,7 @@ export default async function PayrollPage() {
           <CardTitle>Export runs</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Period</TableHead>

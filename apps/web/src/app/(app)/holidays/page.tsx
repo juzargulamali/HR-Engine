@@ -74,7 +74,7 @@ export default async function HolidaysPage() {
           <CardTitle>Calendar</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>

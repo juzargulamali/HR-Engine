@@ -87,7 +87,7 @@ export default async function PerformancePage() {
           <CardTitle>Goals</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Cycle</TableHead>
@@ -139,7 +139,7 @@ export default async function PerformancePage() {
           <CardTitle>Appraisals</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Cycle</TableHead>

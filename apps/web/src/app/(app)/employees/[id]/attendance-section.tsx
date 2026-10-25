@@ -28,7 +28,7 @@ export async function AttendanceSection({ employeeId, canManage }: { employeeId:
 
   return (
     <div className="space-y-4">
-      <Table>
+      <Table stack>
         <TableHeader>
           <TableRow>
             <TableHead>Date</TableHead>

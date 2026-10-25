@@ -142,7 +142,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>

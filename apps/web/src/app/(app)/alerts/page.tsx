@@ -167,7 +167,7 @@ export default async function AlertsPage() {
             <AutoRefresh generatedAt={generatedAt} timeZone={resolveCountryTimeZone(null)} intervalSeconds={60} />
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
@@ -233,7 +233,7 @@ export default async function AlertsPage() {
             <CardTitle>Contracts ending</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
@@ -269,7 +269,7 @@ export default async function AlertsPage() {
             <CardTitle>Probation reviews due</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
@@ -303,7 +303,7 @@ export default async function AlertsPage() {
             <CardTitle>Documents expiring or expired</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
@@ -337,7 +337,7 @@ export default async function AlertsPage() {
             <CardTitle>Identity documents expiring soon</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>

@@ -67,7 +67,7 @@ export default async function ReimbursementsPage() {
           <CardTitle>My claims</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>

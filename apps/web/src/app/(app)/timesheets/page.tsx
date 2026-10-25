@@ -74,7 +74,7 @@ export default async function TimesheetsPage() {
           <CardTitle>My timesheets</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Period</TableHead>

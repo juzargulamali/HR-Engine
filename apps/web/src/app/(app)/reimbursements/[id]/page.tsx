@@ -65,7 +65,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
           <CardTitle>Expense lines</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>

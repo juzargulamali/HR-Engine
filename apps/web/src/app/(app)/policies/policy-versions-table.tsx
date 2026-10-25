@@ -46,7 +46,7 @@ export function PolicyVersionsTable({ rows }: { rows: PolicyVersionRow[] }) {
           {showOlder ? "Hide older versions" : `Show older versions (${olderCount})`}
         </Button>
       ) : null}
-      <Table>
+      <Table stack>
         <TableHeader>
           <TableRow>
             <TableHead>Country</TableHead>

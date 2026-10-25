@@ -76,7 +76,7 @@ export default async function AssetsPage() {
           <CardTitle>Inventory</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Tag</TableHead>

@@ -32,7 +32,7 @@ interface ShellChromeProps {
 function Crumbs({ modules }: { modules: NavModuleData[] }) {
   const pathname = usePathname();
   const { module, page } = breadcrumbFor(pathname, modules);
-  if (!module) return <span className="truncate text-sm text-muted-foreground">ENGINIOUS OS</span>;
+  if (!module) return <p className="truncate text-sm text-muted-foreground">ENGINIOUS OS</p>;
   return (
     <p className="truncate text-sm text-muted-foreground">
       <span className={page ? "" : "font-medium text-foreground"}>{module}</span>

@@ -406,7 +406,7 @@ export default async function ApprovalsPage() {
             <CardTitle>Leave requests</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
@@ -464,7 +464,7 @@ export default async function ApprovalsPage() {
             <CardTitle>Reimbursement claims</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
@@ -514,7 +514,7 @@ export default async function ApprovalsPage() {
             <CardTitle>Timesheets</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
@@ -556,7 +556,7 @@ export default async function ApprovalsPage() {
             <CardTitle>Letters</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
@@ -596,7 +596,7 @@ export default async function ApprovalsPage() {
             <CardTitle>Payroll exports</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Period</TableHead>
@@ -640,7 +640,7 @@ export default async function ApprovalsPage() {
             </p>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
@@ -809,7 +809,7 @@ export default async function ApprovalsPage() {
             </p>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>

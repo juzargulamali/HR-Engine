@@ -120,7 +120,7 @@ export default async function LettersPage() {
             <CardTitle>Templates</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
@@ -158,7 +158,7 @@ export default async function LettersPage() {
           <CardTitle>{canManage ? "Issued letters" : "My letters"}</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 {canManage ? <TableHead>Employee</TableHead> : null}

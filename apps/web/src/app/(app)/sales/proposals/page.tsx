@@ -95,7 +95,7 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
       ) : (
         <>
           <div className="hidden md:block">
-            <Table>
+            <Table stack>
               <caption className="sr-only">Proposal versions</caption>
               <TableHeader>
                 <TableRow>

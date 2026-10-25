@@ -39,7 +39,7 @@ export default async function AiSuggestionsPage() {
           <CardTitle>Pending review</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Agent</TableHead>

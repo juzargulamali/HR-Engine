@@ -35,7 +35,7 @@ export default async function CompaniesPage() {
           <CardTitle>All companies</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Legal name</TableHead>

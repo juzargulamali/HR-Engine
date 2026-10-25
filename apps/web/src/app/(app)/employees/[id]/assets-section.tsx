@@ -33,7 +33,7 @@ export async function AssetsSection({
 
   return (
     <div className="space-y-4">
-      <Table>
+      <Table stack>
         <TableHeader>
           <TableRow>
             <TableHead>Asset</TableHead>

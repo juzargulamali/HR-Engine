@@ -1,10 +1,17 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { listTable } from "@/components/workspace/list-table";
+import { TableLabels } from "./table-labels";
 
-export function Table({ className, ...props }: React.HTMLAttributes<HTMLTableElement>) {
+/**
+ * `stack`: below the `md` breakpoint each row becomes a small card (the first cell is its title, the other cells show their column heading),
+ * so a list never needs a sideways scroll on a phone. The headings are read from the header row (see TableLabels).
+ */
+export function Table({ className, stack, ...props }: React.HTMLAttributes<HTMLTableElement> & { stack?: boolean }) {
   return (
     <div className="os-table-wrap relative w-full overflow-x-auto rounded-md border border-border">
-      <table className={cn("w-full caption-bottom text-sm", className)} {...props} />
+      <table className={cn("w-full caption-bottom text-sm", stack && listTable, className)} {...props} />
+      {stack ? <TableLabels /> : null}
     </div>
   );
 }
