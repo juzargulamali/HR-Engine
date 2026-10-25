@@ -112,7 +112,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
     );
   }
 
-  const addButton = canAdd ? <QuickAddItem companies={list.companies.filter((c) => canManageCatalogue(ctx.grants, c.id)).map((c) => ({ id: c.id, name: c.name, categories: list.categories.filter((k) => k.company_id === c.id && k.is_active).map((k) => ({ id: k.id, label: categoryPath(list.categories, k.id) ?? k.name })).sort((a, b) => a.label.localeCompare(b.label)) }))} /> : null;
+  const addButton = canAdd ? <QuickAddItem companies={ctx.companies.filter((c) => canManageCatalogue(ctx.grants, c.id)).map((c) => ({ id: c.id, name: c.name, categories: list.categories.filter((k) => k.company_id === c.id && k.is_active).map((k) => ({ id: k.id, label: categoryPath(list.categories, k.id) ?? k.name })).sort((a, b) => a.label.localeCompare(b.label)) }))} /> : null;
   const filter: StockFilter = { q, category: list.categories.some((c) => c.id === firstParam(sp, "category")) ? firstParam(sp, "category") : "", location, tracking, condition, company: list.companies.some((c) => c.id === firstParam(sp, "company")) ? firstParam(sp, "company") : "", status };
   const filterActive = isFilterActive(filter);
 
