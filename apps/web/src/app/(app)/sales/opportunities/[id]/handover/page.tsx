@@ -12,7 +12,9 @@ import { HANDOVER_REOPENED_NOTICE } from "../closure-helpers";
 import { ContactsPanel } from "../contacts-panel";
 import { buildHandoverPackage, dateRangeText, fileDisplayName, HANDOVER_STATUS_LABELS } from "../helpers";
 import { Fact, Muted, Panel } from "../parts";
+import { suggestSiteTimezone } from "@/lib/projects/site-timezone";
 import { buildOppView } from "../view";
+import { HandoverProcess } from "@/components/projects/handover-process";
 import { HandoverForm } from "./handover-form";
 import { loadProjectHandover, ProjectHandoverPanel } from "./project-handover";
 
@@ -67,9 +69,12 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
     );
   }
 
+  const projectHandover = await loadProjectHandover(opp.id);
+  // The Sales-side Project Manager and status form is only the working route when Projects & Tasks is not installed. Otherwise the one
+  // process below is the route and the Project Manager is named on Projects, Handovers, so the directory is not needed here.
   // Project Managers are any active staff (not only Sales users): read through the directory function, names only for non-founders.
   let staff: { id: string; name: string }[] = [];
-  if (canEdit) {
+  if (canEdit && !projectHandover.installed) {
     const supabase = await createClient();
     const { data } = await supabase.rpc("crm_staff_directory");
     staff = (data ?? []).map((p) => ({ id: p.user_id, name: displayNameFor(p) }));
@@ -81,17 +86,17 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
   // Keep the currently chosen Project Manager selectable even if the directory did not return them.
   const people = pmId && !staff.some((p) => p.id === pmId) ? [...staff, { id: pmId, name: pmName ?? "Former colleague" }] : staff;
 
-  const projectHandover = await loadProjectHandover(opp.id);
+  // A NEW brief suggests the site's time zone from the enquiry's location, then the company's country (not always Dubai). A saved brief keeps its own.
+  const suggestion = suggestSiteTimezone({ location: opp.location, countryCode: ctx.companies.find((c) => c.id === opp.company_id)?.countryCode });
   const pkg = buildHandoverPackage({ opp, proposals: detail.proposals, files: detail.files, contactCount: detail.contacts.length, availability: detail.item.availability });
   const latestSent = detail.proposals.find((p) => p.status === "sent");
   const show = dateRangeText(opp.event_start, opp.event_end, formatDate);
   const zoho = detail.zoho;
+  const earlierRecord = !!handover && (status !== "draft" || !!pmId || !!(handover.notes ?? "").trim());
+  // Only used when Projects & Tasks is not installed in this environment (the older, Sales-side record is then the only handover there is).
   const steps = [
     { label: "Commercially won", done: true, detail: `${pkg.evidenceLabel ?? "Evidence"} ${pkg.evidenceReference ?? ""}, dated ${formatDate(pkg.evidenceDate)}` },
     { label: "Handover package", done: status !== "draft", detail: HANDOVER_STATUS_LABELS[status] ?? status },
-    projectHandover.status?.status === "accepted"
-      ? { label: "Project created", done: true, detail: `${projectHandover.status.project_reference ?? "The project"} was created when the Project Manager accepted the project handover.` }
-      : { label: "Project created", done: false, detail: "Created when the Project Manager accepts the project handover below." },
   ];
 
   return (
@@ -103,20 +108,28 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
           <h1 className="mt-1 break-words text-2xl font-semibold">{opp.title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">Everything the Project Manager needs to start, taken from the opportunity as it stands. It is a summary of agreed facts, not a project.</p>
         </div>
-        <Alert role="status"><strong>Two separate records.</strong> The package and Project Manager choice below are the Sales-side record and notify nobody. The delivery brief further down (Project handover) is what starts delivery: when you submit it, a founder names the Project Manager, who accepts it to create the project.</Alert>
+        {projectHandover.installed ? (
+          <p className="text-sm text-muted-foreground">One process: prepare the delivery brief, submit it, a founder assigns the Project Manager, and the Project Manager accepts it, which creates the project. Commercially won: {pkg.evidenceLabel ?? "evidence"} {pkg.evidenceReference ?? ""}, dated {formatDate(pkg.evidenceDate)}.</p>
+        ) : (
+          <Alert role="status">Projects &amp; Tasks is not installed in this environment, so only the Sales-side package below can be recorded here.</Alert>
+        )}
       </header>
 
-      <ol className="grid gap-3 sm:grid-cols-3" aria-label="Handover progress">
-        {steps.map((s) => (
-          <li key={s.label} className="flex gap-2.5 rounded-lg border border-border bg-card px-4 py-3">
-            {s.done ? <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none text-success" aria-hidden /> : <Circle className="mt-0.5 h-4 w-4 flex-none text-muted-foreground" aria-hidden />}
-            <div className="min-w-0">
-              <p className="text-sm font-medium">{s.label} <span className="font-normal text-muted-foreground">· {s.done ? "Done" : "Not yet"}</span></p>
-              <p className="break-words text-sm text-muted-foreground">{s.detail}</p>
-            </div>
-          </li>
-        ))}
-      </ol>
+      {projectHandover.installed ? (
+        <HandoverProcess status={projectHandover.status?.status ?? null} />
+      ) : (
+        <ol className="grid gap-3 sm:grid-cols-2" aria-label="Handover progress">
+          {steps.map((s) => (
+            <li key={s.label} className="flex gap-2.5 rounded-lg border border-border bg-card px-4 py-3">
+              {s.done ? <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none text-success" aria-hidden /> : <Circle className="mt-0.5 h-4 w-4 flex-none text-muted-foreground" aria-hidden />}
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{s.label} <span className="font-normal text-muted-foreground">· {s.done ? "Done" : "Not yet"}</span></p>
+                <p className="break-words text-sm text-muted-foreground">{s.detail}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
 
       {pkg.gaps.length > 0 ? (
         <Alert variant="warning">
@@ -125,21 +138,23 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
         </Alert>
       ) : null}
 
-      <Panel
-        title="Project Manager and status"
-        description={handover?.prepared_at ? `Prepared ${formatDateTime(handover.prepared_at)}${handover.prepared_by ? ` by ${ctx.personName(handover.prepared_by)}` : ""}.${handover.handed_over_at ? ` Handed over ${formatDateTime(handover.handed_over_at)}.` : ""}` : "Not marked ready yet."}
-      >
-        {canEdit ? (
-          <HandoverForm key={handover?.updated_at ?? "new"} opportunityId={opp.id} status={status} pmUserId={pmId} notes={handover?.notes ?? null} people={people} />
-        ) : (
-          <dl className="grid gap-3 sm:grid-cols-3">
-            <Fact label="Project Manager">{pmName ?? "Not chosen yet"}</Fact>
-            <Fact label="Status">{HANDOVER_STATUS_LABELS[status] ?? status}</Fact>
-            <Fact label="Notes">{handover?.notes ?? "None"}</Fact>
-          </dl>
-        )}
-        {!canEdit ? <p className="mt-3 text-sm text-muted-foreground">Only the owner ({view.ownerName}) or a founder can change this.</p> : null}
-      </Panel>
+      {!projectHandover.installed ? (
+        <Panel
+          title="Project Manager and status"
+          description={handover?.prepared_at ? `Prepared ${formatDateTime(handover.prepared_at)}${handover.prepared_by ? ` by ${ctx.personName(handover.prepared_by)}` : ""}.${handover.handed_over_at ? ` Handed over ${formatDateTime(handover.handed_over_at)}.` : ""}` : "Not marked ready yet."}
+        >
+          {canEdit ? (
+            <HandoverForm key={handover?.updated_at ?? "new"} opportunityId={opp.id} status={status} pmUserId={pmId} notes={handover?.notes ?? null} people={people} />
+          ) : (
+            <dl className="grid gap-3 sm:grid-cols-3">
+              <Fact label="Project Manager">{pmName ?? "Not chosen yet"}</Fact>
+              <Fact label="Status">{HANDOVER_STATUS_LABELS[status] ?? status}</Fact>
+              <Fact label="Notes">{handover?.notes ?? "None"}</Fact>
+            </dl>
+          )}
+          {!canEdit ? <p className="mt-3 text-sm text-muted-foreground">Only the owner ({view.ownerName}) or a founder can change this.</p> : null}
+        </Panel>
+      ) : null}
 
       <ProjectHandoverPanel
         state={projectHandover}
@@ -147,10 +162,27 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
         canEdit={canEdit}
         personName={(id) => (id ? ctx.personName(id) : "Unknown")}
         defaults={{
-          title: opp.title, clientName: "", location: opp.location ?? "", siteTimezone: "Asia/Dubai", installStart: opp.install_start ?? "", eventStart: opp.event_start ?? "",
+          title: opp.title, clientName: "", location: opp.location ?? "", siteTimezone: suggestion.zone, siteTimezoneNote: suggestion.because, installStart: opp.install_start ?? "", eventStart: opp.event_start ?? "",
           eventEnd: opp.event_end ?? "", scope: opp.scope ?? "", exclusions: opp.exclusions ?? "", notes: "", technologies: opp.technologies,
         }}
       />
+
+      {projectHandover.installed && earlierRecord ? (
+        <details className="rounded-lg border border-border bg-card px-4 py-3">
+          <summary className="cursor-pointer text-sm font-medium">Earlier Sales-side handover record (kept for history)</summary>
+          <div className="mt-3 space-y-3">
+            <p className="text-sm text-muted-foreground">
+              This is the older Sales-side note, kept exactly as it was and no longer edited. The Project Manager is named, and the project is created, through the process above.
+              {handover?.prepared_at ? ` Prepared ${formatDateTime(handover.prepared_at)}${handover.prepared_by ? ` by ${ctx.personName(handover.prepared_by)}` : ""}.` : ""}{handover?.handed_over_at ? ` Marked handed over ${formatDateTime(handover.handed_over_at)}.` : ""}
+            </p>
+            <dl className="grid gap-3 sm:grid-cols-3">
+              <Fact label="Project Manager then chosen">{pmName ?? "Not chosen"}</Fact>
+              <Fact label="Status then">{HANDOVER_STATUS_LABELS[status] ?? status}</Fact>
+              <Fact label="Notes">{handover?.notes ?? "None"}</Fact>
+            </dl>
+          </div>
+        </details>
+      ) : null}
 
       <div className="grid gap-6 md:grid-cols-2">
         <Panel title="Accepted scope">

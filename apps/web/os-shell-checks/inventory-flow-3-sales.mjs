@@ -103,10 +103,10 @@ const recordCheck = async (note) => {
 await step("founder records the check with no template: both technologies read 'Warehouse check required' (summary, who and when, nothing reserved)", async () => {
   await recordCheck("First look, templates are still being written");
   await until(() => s1(`select count(*) from inv_availability_checks where opportunity_id='${OPP}' and result <> 'pending'`) === "1");
-  await card().getByText(/Checked by/).waitFor();
+  await card().getByText(/Recorded by/).waitFor();
   const t = await cardText();
   console.log("   card:", t.slice(0, 500));
-  check(/Checked by .+ on \d/.test(t), "who and when are shown");
+  check(/Recorded by .+ on \d/.test(t), "who and when are shown");
   for (const name of ["Interactive floor", "Mystery rig"]) {
     const row = sectionOf(name);
     check(/Warehouse check required/.test(await row.innerText()), `${name}: warehouse check required`);
@@ -166,7 +166,7 @@ let CHECK2 = "";
 await step("founder records the second check: Interactive floor x2 is summarised against stock (shortages shown), Mystery rig still needs a check, nothing is reserved", async () => {
   await recordCheck("After the Interactive floor template was completed");
   await until(() => s1(`select count(*) from inv_availability_checks where opportunity_id='${OPP}' and result <> 'pending'`) === "2");
-  await card().getByText(/After the Interactive floor template|Checked by/).first().waitFor();
+  await card().getByText(/After the Interactive floor template|Recorded by/).first().waitFor();
   const t = await cardText();
   console.log("   card:", t.slice(0, 900));
   const floor = (await sectionOf("Interactive floor").innerText()).replace(/\s+/g, " ");
@@ -175,7 +175,7 @@ await step("founder records the second check: Interactive floor x2 is summarised
   check(/short|shortage|Motor/i.test(floor), "its shortage is described at summary level (4 motors are needed, 2 exist): " + floor);
   check(/Warehouse check required/.test(await sectionOf("Mystery rig").innerText()), "Mystery rig (no template) still reads Warehouse check required");
   check(!/emerald|green/.test((await sectionOf("Mystery rig").locator("span.font-medium").last().getAttribute("class")) ?? ""), "Mystery rig is not green");
-  check(/Checked by ceo on \d/.test(t), "who and when");
+  check(/Recorded by ceo on \d/.test(t), "who and when");
   eq(s1("select count(*) from inv_reservations"), 0, "no reservation row");
   eq(s1(`select count(*) from inv_availability_checks where opportunity_id='${OPP}' and result <> 'pending'`), 2, "both checks are kept");
   CHECK2 = s1(`select id from inv_availability_checks where opportunity_id='${OPP}' and result <> 'pending' order by checked_at desc nulls last limit 1`);
@@ -208,7 +208,7 @@ await step("the dates are changed in the normal CRM edit screen: the card says O
   const t = await cardText();
   console.log("   card:", t.slice(0, 520));
   check(/Out of date/.test(t) && /Ask the warehouse to check again/.test(t), "says it is out of date and to ask again");
-  check(/Checked by ceo on/.test(t), "the earlier check is still shown (who and when)");
+  check(/Recorded by ceo on/.test(t), "the earlier check is still shown (who and when)");
   eq(s1(`select count(*) from inv_availability_checks where opportunity_id='${OPP}' and result <> 'pending'`), 2, "both earlier checks are still in the history");
   eq(s1("select count(*) from inv_reservations"), 0, "no reservation");
   await shotCard("flow3-card-out-of-date");

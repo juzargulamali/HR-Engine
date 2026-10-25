@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { Inbox } from "lucide-react";
-import { HANDOVER_STATUS_LABELS, hasProjCapability } from "@enginious-hr/domain";
+import { hasProjCapability } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { HandoverBrief } from "@/components/projects/handover-brief";
+import { HandoverProcess } from "@/components/projects/handover-process";
 import { HandoverStatusBadge } from "@/components/projects/badges";
 import { Muted, PageHeader, Panel } from "@/components/projects/parts";
 import { formatDateTime } from "@/components/sales/format";
@@ -15,15 +16,6 @@ import { AcceptHandoverForm, AssignPmForm, ClarifyHandoverForm } from "./handove
 
 export const metadata = { title: "Handovers" };
 
-/** Who acts next, in words, for each state. */
-const NEXT: Record<string, string> = {
-  draft: "Sales is still preparing it. Nothing is needed from you yet.",
-  submitted: "Waiting for a Project Manager. A founder, or someone they gave PM assignment to, names one.",
-  pm_assigned: "Waiting for the Project Manager to accept it, or to ask Sales to clarify.",
-  clarification_requested: "The Project Manager asked Sales a question. Sales answers and resubmits; the same Project Manager then decides.",
-  accepted: "Accepted. The project exists and this brief is kept as the agreed snapshot.",
-  withdrawn: "Sales withdrew it before acceptance.",
-};
 const ORDER = ["submitted", "pm_assigned", "clarification_requested", "accepted", "withdrawn"];
 
 export default async function HandoversPage() {
@@ -52,7 +44,7 @@ export default async function HandoversPage() {
     <div className="space-y-6">
       <PageHeader
         title="Handovers"
-        description="Sales hands a won opportunity to delivery here. A founder names the Project Manager, who accepts it (which creates the project) or asks Sales to clarify. The brief carries no prices, budgets or purchase-order details."
+        description="Sales hands a won opportunity to delivery here, in one process: prepare brief, submit, assign PM, PM accepts, project created. A founder names the Project Manager, who accepts it (which creates the project) or asks Sales to clarify. The brief carries no prices, budgets or purchase-order details."
       />
 
       {mine.length > 0 ? (
@@ -61,6 +53,7 @@ export default async function HandoversPage() {
           {mine.map((h) => (
             <Panel key={h.id} title={`${h.title}`} description={`${ctx.companyName(h.company_id)} · Sales ${h.crm_reference} · submitted ${formatDateTime(h.submitted_at)} by ${nameOf(h.prepared_by)}`} actions={<HandoverStatusBadge status={h.status} />}>
               <div className="space-y-5">
+                <HandoverProcess status={h.status} />
                 {h.status === "clarification_requested" ? (
                   <Alert variant="warning" role="status">
                     You asked Sales: “{h.clarification_note}”. Sales has not resubmitted yet; you will be told when they do.
@@ -102,7 +95,7 @@ export default async function HandoversPage() {
                 actions={<HandoverStatusBadge status={h.status} />}
               >
                 <div className="space-y-5">
-                  <p className="text-sm">{NEXT[h.status] ?? HANDOVER_STATUS_LABELS[h.status]}</p>
+                  <HandoverProcess status={h.status} />
                   <dl className="grid gap-3 text-sm sm:grid-cols-3">
                     <div><dt className="text-muted-foreground">Project Manager</dt><dd className="mt-0.5">{nameOf(h.pm_user_id)}{h.pm_assigned_at ? ` (named ${formatDateTime(h.pm_assigned_at)})` : ""}</dd></div>
                     <div><dt className="text-muted-foreground">Revision</dt><dd className="mt-0.5">{h.revision}</dd></div>
