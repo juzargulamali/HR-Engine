@@ -120,7 +120,10 @@ await step("colleague who is not the owner sees no contact-changing buttons", as
 await step("close as won with PO evidence, then prepare handover", async () => {
   await page.goto(`${url}/close`, { waitUntil: "networkidle" }); await page.getByLabel("PO number").fill("PO-555"); await page.getByLabel("Date on the document").fill("2026-10-16");
   await page.getByRole("button", { name: /confirm as won/i }).click(); await page.waitForURL(new RegExp(oppId() + "$"), { timeout: 15000 }); if (!/Won/.test(await main())) throw new Error("not won");
-  await page.goto(`${url}/handover`, { waitUntil: "networkidle" }); await page.getByLabel("Status").selectOption({ index: 1 }).catch(() => {}); await page.getByRole("button", { name: /save handover/i }).click(); await page.waitForTimeout(1200);
+  await page.goto(`${url}/handover`, { waitUntil: "networkidle" }); const handoverText = await main();
+  // One process (Prepare brief, Submit, Assign PM, PM accepts, Project created); no second Project Manager or status form beside the brief.
+  for (const step of ["Prepare brief", "Submit", "Assign PM", "PM accepts", "Project created"]) if (!handoverText.includes(step)) throw new Error("handover process step missing: " + step);
+  if (/Save handover/.test(handoverText) || /Project Manager and status/.test(handoverText)) throw new Error("the duplicate Sales-side PM and status form is still offered");
   if (!/Project Manager/i.test(await main())) throw new Error("handover page not rendered");
 });
 await step("founder reopens with reason + new next action; closure history kept", async () => {
