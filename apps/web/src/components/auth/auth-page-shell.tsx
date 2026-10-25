@@ -1,4 +1,4 @@
-import Image from "next/image";
+import { OsLogo } from "@/components/brand/os-logo";
 import type { ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -18,7 +18,7 @@ export function AuthPageShell({ title, subtitle, children }: { title: ReactNode;
       />
       <div className="relative w-full max-w-sm space-y-6">
         <div className="space-y-3 text-center">
-          <Image src="/brand/enginious-icon.png" alt="" width={52} height={52} className="mx-auto" priority />
+          <OsLogo height={46} endorsement />
           <div>
             <h1 className="font-heading text-2xl font-bold tracking-tight">{title}</h1>
             <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>

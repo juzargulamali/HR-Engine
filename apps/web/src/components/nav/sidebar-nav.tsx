@@ -24,14 +24,17 @@ function currentSubHref(pathname: string, m: NavModuleData): string | null {
   return best;
 }
 
+/**
+ * The ENGINIOUS OS product lockup: the original Enginious symbol and lettering with the OS mark (built from the original artwork by
+ * scripts/brand/build-os-lockups.mjs). Collapsed, only the symbol. Height is set, width follows, so it is never stretched.
+ */
 export function BrandMark({ compact }: { compact?: boolean }) {
   return (
-    <Link href="/" className={cn("flex items-center gap-2.5 px-4 py-4", compact && "justify-center px-2")} aria-label="ENGINIOUS OS, My Day">
-      <Image src="/brand/enginious-icon.png" alt="" width={28} height={28} priority style={{ width: 28, height: 28 }} className="flex-none" />
-      {compact ? null : (
-        <div className="min-w-0 leading-tight">
-          <div className="truncate font-heading text-sm font-bold tracking-tight">ENGINIOUS OS</div>
-        </div>
+    <Link href="/" className={cn("flex items-center px-4 py-5", compact ? "justify-center px-2" : "")} aria-label="ENGINIOUS OS, My Day">
+      {compact ? (
+        <Image src="/brand/enginious-os-symbol-dark.png" alt="" width={255} height={181} priority style={{ height: 26, width: "auto" }} className="flex-none" />
+      ) : (
+        <Image src="/brand/enginious-os-lockup-dark.png" alt="" width={772} height={124} priority style={{ height: 30, width: "auto" }} className="flex-none" />
       )}
     </Link>
   );
@@ -41,7 +44,7 @@ export function BrandMark({ compact }: { compact?: boolean }) {
 function ComingSoonRow({ m, collapsed }: { m: NavModuleData; collapsed?: boolean }) {
   const Icon = NAV_ICONS[m.iconKey];
   const row = (
-    <div aria-disabled="true" className={cn("flex cursor-default items-center gap-2.5 rounded-md px-2.5 py-1.5 text-subtle", collapsed && "justify-center px-0 py-2.5")}>
+    <div aria-disabled="true" className={cn("flex cursor-default items-center gap-3 rounded-[10px] px-3.5 py-2 text-subtle", collapsed && "justify-center px-0 py-2.5")}>
       <Icon className="h-4 w-4 flex-none" aria-hidden />
       {collapsed ? (
         <span className="sr-only">{m.label}, coming soon</span>
@@ -69,7 +72,7 @@ export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: 
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
 
   return (
-    <nav aria-label="Modules" className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2.5 py-3">
+    <nav aria-label="Modules" className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-3 py-2">
       {modules.map((m) => {
         if (m.comingSoon) return <ComingSoonRow key={m.id} m={m} collapsed={collapsed} />;
         const Icon = NAV_ICONS[m.iconKey];
@@ -77,15 +80,10 @@ export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: 
         const hasSub = m.sections.length > 0;
         const open = !collapsed && hasSub && (overrides[m.id] ?? isActive);
         const sub = currentSubHref(pathname, m);
-        const rowClass = cn(
-          "relative flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
-          collapsed && "justify-center px-0 py-2.5",
-          isActive ? "bg-accent/15 font-semibold text-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground",
-        );
+        const rowClass = cn("os-nav-link min-w-0 flex-1", collapsed && "justify-center px-0");
         const link = (
-          <Link href={m.href} onClick={onNavigate} aria-current={isActive && (!hasSub || (!open && sub === m.href)) ? "page" : undefined} className={rowClass}>
-            {isActive ? <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-accent" aria-hidden /> : null}
-            <Icon className="h-4 w-4 flex-none" aria-hidden />
+          <Link href={m.href} onClick={onNavigate} data-active={isActive ? "true" : undefined} aria-current={isActive && (!hasSub || (!open && sub === m.href)) ? "page" : undefined} className={rowClass}>
+            <Icon className="h-[1.15rem] w-[1.15rem] flex-none" aria-hidden />
             {collapsed ? <span className="sr-only">{m.label}</span> : <span className="truncate">{m.label}</span>}
           </Link>
         );
@@ -112,7 +110,7 @@ export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: 
               ) : null}
             </div>
             {open ? (
-              <div className="mb-1.5 ml-[1.4rem] mt-0.5 flex flex-col gap-0.5 border-l border-border pl-2.5">
+              <div className="mb-1.5 ml-[1.6rem] mt-1 flex flex-col gap-0.5 border-l border-border pl-3">
                 {m.sections.map((s) => (
                   <div key={s.label} className="flex flex-col gap-px">
                     {m.sections.length > 1 && s.label !== m.label ? <p className="px-2.5 pb-0.5 pt-2 text-[13px] font-semibold uppercase tracking-[0.08em] text-subtle">{s.label}</p> : null}
@@ -132,12 +130,8 @@ export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: 
                           href={l.href}
                           onClick={onNavigate}
                           aria-current={subActive ? "page" : undefined}
-                          className={cn(
-                            "relative rounded-md px-2.5 py-1.5 text-sm transition-colors",
-                            subActive ? "bg-secondary font-semibold text-foreground" : "text-muted-foreground hover:bg-secondary/70 hover:text-foreground",
-                          )}
+                          className="os-nav-sub"
                         >
-                          {subActive ? <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-accent" aria-hidden /> : null}
                           {l.label}
                         </Link>
                       );
@@ -199,9 +193,9 @@ export function DesktopSidebar({
     <aside
       aria-label="ENGINIOUS OS modules"
       className={cn(
-        "sticky top-0 hidden h-screen flex-none flex-col border-r border-border bg-chrome transition-[width] duration-200 lg:flex",
+        "os-chrome os-sidebar sticky top-0 hidden h-screen flex-none flex-col transition-[width] duration-200 lg:flex",
         collapseReady ? "" : "duration-0",
-        collapsed ? "w-[4.5rem]" : "w-[17rem]",
+        collapsed ? "w-[4.5rem]" : "w-[16rem]",
       )}
     >
       <BrandMark compact={collapsed} />
