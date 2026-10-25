@@ -1,8 +1,10 @@
 import Link from "next/link";
-import { ClipboardCheck } from "lucide-react";
+import { AlertTriangle, ClipboardCheck, ListChecks, ShieldAlert, Users } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { OsHero } from "@/components/os/hero";
+import { OsStatCard } from "@/components/os/stat-card";
 import { MyProjects, type MyProjectItem } from "@/components/projects/my-projects";
 import { Muted, PageHeader, Panel } from "@/components/projects/parts";
 import { TaskBoard } from "@/components/projects/tasks/task-board";
@@ -112,7 +114,14 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
 
   return (
     <div className="space-y-5">
-      <PageHeader title="My Work" description="Tasks assigned to you and work waiting for your review. Having several tasks on one day is normal and is never flagged." />
+      <OsHero title="My Work" eyebrow="Projects" sub="Tasks assigned to you and work waiting for your review. Having several tasks on one day is normal and is never flagged." />
+
+      <ul className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Your work at a glance">
+        <li><OsStatCard href={withParams(BASE, current, { show: null })} label="My open tasks" value={counts.mine} icon={ListChecks} edge="cyan" active={show === "mine"} /></li>
+        <li><OsStatCard href={withParams(BASE, current, { show: "overdue" })} label="Overdue" value={counts.overdue} icon={AlertTriangle} edge="amber" active={show === "overdue"} /></li>
+        <li><OsStatCard href={withParams(BASE, current, { show: "review" })} label="Waiting for my review" value={counts.review} icon={ShieldAlert} edge="blue" active={show === "review"} /></li>
+        {work.canSeeTeam ? <li><OsStatCard href={withParams(BASE, current, { show: "team" })} label="My team's open tasks" value={counts.team} icon={Users} edge="muted" active={show === "team"} /></li> : null}
+      </ul>
 
       {attention.handoversWaiting > 0 ? (
         <Alert role="status" className="flex flex-wrap items-center justify-between gap-2">

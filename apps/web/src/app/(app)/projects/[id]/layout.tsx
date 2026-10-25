@@ -3,18 +3,20 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { allowedStatusMoves, canReopenProject, isFinishedProject, projectStatusLabel } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
+import { OsHero, OsTeamStack } from "@/components/os/hero";
 import { KindBadge, PriorityBadge, ProjectStatusBadge } from "@/components/projects/badges";
 import { ManageMenu } from "@/components/projects/manage-menu";
 import { ProjectTabs } from "@/components/projects/project-tabs";
 import { getProjectsContext } from "@/lib/projects/context";
 import { loadProjectView } from "@/lib/projects/data";
+import { dateRangeText, dateText } from "@/lib/projects/format";
 import { manageItems, projectTabs } from "@/lib/projects/workspace-nav";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * One project. Members and founders get four sections (Overview, Work, Plan, Discussion) and one "Manage project" menu for the rest;
- * a person who can only see the summary (a Projects-access holder who is not a member, or a linked Sales person) gets the summary
- * page and neither: the details, discussion, plans and files are not theirs.
+ * One project. Members and founders get a compact banner, four sections (Work, Timeline, Discussion, Equipment) and one "Manage project"
+ * menu for the rest; a person who can only see the summary (a Projects-access holder who is not a member, or a linked Sales person) gets
+ * the summary page and neither: the details, discussion, plans and files are not theirs.
  */
 export default async function ProjectLayout({ children, params }: { children: React.ReactNode; params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -43,30 +45,33 @@ export default async function ProjectLayout({ children, params }: { children: Re
           eventStart: details.event_start, eventEnd: details.event_end, scope: details.scope, exclusions: details.exclusions,
         }
       : null;
+  const team = view.level === "details" ? [...new Set([project.pm_user_id, ...view.people.map((p) => p.user_id)].filter((x): x is string => !!x))].map((u) => view.nameOf(u)).filter((n) => n && n !== "—") : [];
 
   return (
-    <div className="space-y-5">
-      <div>
-        <Link href="/projects" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> All projects
-        </Link>
-        <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <h1 className="break-words text-2xl font-semibold">{project.name}</h1>
-              <ProjectStatusBadge status={project.status} />
-              <PriorityBadge priority={project.priority} />
-              <KindBadge kind={project.kind} ongoing={project.is_ongoing} />
-            </div>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {project.reference} · {view.companyName} · Project Manager {view.pmName}
-            </p>
-          </div>
-          {view.level === "details" ? (
-            <ManageMenu projectId={id} projectName={project.name} items={items} editable={editable} moves={moves} currentStatusLabel={projectStatusLabel(project.status)} />
-          ) : null}
-        </div>
-      </div>
+    <div className="space-y-4">
+      <Link href="/projects" className="inline-flex items-center gap-1 rounded-md py-0.5 text-sm text-muted-foreground hover:text-foreground">
+        <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> All projects
+      </Link>
+      <OsHero
+        eyebrow={project.reference}
+        title={project.name}
+        sub={<><span className="hidden sm:inline">{project.reference} · </span>{view.companyName}</>}
+        meta={
+          <>
+            <ProjectStatusBadge status={project.status} />
+            <PriorityBadge priority={project.priority} />
+            <KindBadge kind={project.kind} ongoing={project.is_ongoing} />
+            <span>Project Manager: <span className="font-medium text-white">{view.pmName}</span></span>
+            {details?.install_start ? <span>Installation: <span className="font-medium text-white">{dateText(details.install_start)}</span></span> : null}
+            {details?.event_start ? <span>Event: <span className="font-medium text-white">{dateRangeText(details.event_start, details.event_end)}</span></span> : null}
+          </>
+        }
+      >
+        {team.length > 0 ? <OsTeamStack names={team} /> : null}
+        {view.level === "details" ? (
+          <ManageMenu projectId={id} projectName={project.name} items={items} editable={editable} moves={moves} currentStatusLabel={projectStatusLabel(project.status)} />
+        ) : null}
+      </OsHero>
       {view.level === "summary" ? (
         <Alert role="status">
           Summary only. Details, tasks, discussion and files are for the people working on this project; the Project Manager can add you if you should take part.

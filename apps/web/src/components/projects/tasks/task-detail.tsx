@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { OsPill } from "@/components/os/pills";
 import { BlockedBadge, PriorityBadge, TaskStatusBadge } from "@/components/projects/badges";
 import { Fact, Muted, Panel } from "@/components/projects/parts";
 import { PanelLink } from "@/components/workspace/panel-link";
@@ -31,7 +32,7 @@ export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData;
           <TaskStatusBadge status={task.status} />
           {task.blocked_at ? <BlockedBadge /> : null}
           <PriorityBadge priority={task.priority} />
-          {task.requires_review ? <Badge variant="outline" className="text-muted-foreground">Needs review</Badge> : null}
+          {task.requires_review ? <OsPill tone="blue">Needs review</OsPill> : null}
         </div>
         {task.description ? <p className="mt-2 whitespace-pre-wrap text-sm">{task.description}</p> : <Muted className="mt-2">No description.</Muted>}
       </div>
@@ -44,7 +45,7 @@ export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData;
       ) : null}
 
       <div className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-border p-3">
-        <dl className="grid min-w-0 flex-1 gap-x-6 gap-y-3 sm:grid-cols-3">
+        <dl className="grid min-w-0 flex-1 gap-x-6 gap-y-3 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.1fr)]">
           <div className="min-w-0"><dt className="mb-1 text-sm text-muted-foreground">Status</dt><dd><TaskStatusControl row={control} /></dd></div>
           <div className="min-w-0"><dt className="mb-1 text-sm text-muted-foreground">Assignee</dt><dd className="text-sm"><TaskAssigneeControl row={control} /></dd></div>
           <div className="min-w-0"><dt className="mb-1 text-sm text-muted-foreground">Due</dt><dd className="text-sm"><TaskDueControl row={control} /></dd></div>

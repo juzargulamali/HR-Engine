@@ -2,7 +2,7 @@
 // Seed first with the local stack (founder ceo@, PM mgr@, department head lead@, member hr@, directory-only hr1@, Sales emp@ who owns a Won
 // opportunity, admin@ with no Projects access), then run this against the production build. Writes to the local database only.
 import { execSync } from "node:child_process";
-import { chromium, newPage, login, BASE, psql as sql } from "./lib.mjs";
+import { chromium, newPage, login, BASE, optionTexts, choose, psql as sql } from "./lib.mjs";
 const SHOTS = process.env.SHOTS_DIR ?? "/tmp";
 const browser = await chromium.launch();
 let page = null; let fails = 0; let passes = 0; let url = "";
@@ -44,8 +44,6 @@ const pick = async (button, item) => { await openMenu(button); await page.locato
 // The Milestones & deliverables section is collapsed once milestones exist.
 const openMilestones = async () => { const d = page.locator("details#milestones"); if (!(await d.evaluate((e) => e.open))) await d.locator("summary").first().click(); };
 const taskRow = (title) => page.locator("main tbody tr", { hasText: title }).first();
-const optionTexts = (sel) => sel.locator("option").allInnerTexts();
-const choose = async (sel, re) => { const opts = await optionTexts(sel); const o = opts.find((x) => re.test(x)); if (!o) throw new Error(`no option ${re} among: ${opts.join(" | ")}`); await sel.selectOption({ label: o }); return o; };
 // Add task (Quick Add): what, who, when; "more" fills the optional details first.
 const addTask = async (t, { assignee, due, more, dbl = false } = {}) => {
   await page.getByRole("button", { name: /^Add task$/ }).first().click();
@@ -181,7 +179,7 @@ await as("hr@e2e.local");
 await step("Member: cannot manage people or milestones (no controls, a short Manage menu, and the database refuses)", async () => {
   await go(`/projects/${P}/people`); const t = await mainText();
   if (/Add department team|Add to project|Appoint/.test(t)) throw new Error("management controls shown to a member");
-  await go(`/projects/${P}/work`);
+  await go(`/projects/${P}/work?tasks=all`);
   if ((await page.getByRole("button", { name: /^Plan$/, exact: true }).count()) > 0) throw new Error("Plan menu (add milestone / deliverable) shown to a member");
   const items = await menuItems("Manage project");
   if (items.some((i) => /Edit details|Change status|Complete project|Reopen/.test(i))) throw new Error("manager items in a member's Manage menu: " + items.join(" | "));
@@ -193,7 +191,7 @@ await step("Member: cannot manage people or milestones (no controls, a short Man
 await as("mgr@e2e.local");
 let MS1 = ""; let DL = "";
 await step("PM: add two milestones and a deliverable for Programming (Plan menu on Work)", async () => {
-  await go(`/projects/${P}/work`);
+  await go(`/projects/${P}/work?tasks=all`);
   await pick("Plan", /Add milestone/);
   await dialog().getByLabel("Title").fill("First draft approved"); await dialog().getByLabel("Due date").fill(dayIso(30));
   await dialog().getByRole("button", { name: /^Add milestone$/ }).click(); await closed();
@@ -211,7 +209,7 @@ await step("PM: add two milestones and a deliverable for Programming (Plan menu 
 await as("lead@e2e.local");
 let T1 = ""; let T2 = "";
 await step("Department head: Add task for a team member with the review rule; cannot assign outside the team", async () => {
-  await go(`/projects/${P}/work`);
+  await go(`/projects/${P}/work?tasks=all`);
   await addTask("Shader prototype", {
     assignee: "hr", due: dayIso(10),
     more: async (d) => {
@@ -246,7 +244,7 @@ await step("Member: starts the task in place, sends it for review through its fo
   if (opts.some((o) => /Accept and complete|Mark done|Request changes/.test(o))) throw new Error("self-review offered: " + opts.join(" | "));
 });
 await step("Member: adds a task for themself only (one click, no duplicate); routine tasks finish without review; blocking needs a reason", async () => {
-  await go(`/projects/${P}/work`);
+  await go(`/projects/${P}/work?tasks=all`);
   await page.getByRole("button", { name: /^Add task$/ }).first().click();
   const o = await optionTexts(dialog().getByLabel("Assignee", { exact: true })); await page.keyboard.press("Escape"); await closed();
   if (o.length !== 1) throw new Error("member can assign to others: " + o.join(","));
@@ -276,7 +274,7 @@ await step("Department head: accepts the reviewed task (confirm form) so the del
 });
 await as("mgr@e2e.local");
 await step("Changing a due date in the table lists dependent work and moves nothing", async () => {
-  await go(`/projects/${P}/work`);
+  await go(`/projects/${P}/work?tasks=all`);
   await addTask("Rig test", { assignee: "hr", due: dayIso(12), more: async (d) => { await d.getByLabel("Start date").fill(dayIso(5)); } });
   await addTask("Hardware demo", { assignee: "hr", due: dayIso(16), more: async (d) => { await d.getByLabel("Start date").fill(dayIso(13)); await d.getByLabel(/Depends on/).selectOption({ label: "Rig test" }); } });
   if (db("select count(*) from proj_task_dependencies") !== "1") throw new Error("dependency not stored");
@@ -298,7 +296,7 @@ await step("Changing a due date in the table lists dependent work and moves noth
 });
 await as("lead@e2e.local");
 await step("Department head: accepts the team's deliverable (only theirs); has no milestone or deliverable creation", async () => {
-  await go(`/projects/${P}/work`);
+  await go(`/projects/${P}/work?tasks=all`);
   if ((await page.getByRole("button", { name: /^Plan$/, exact: true }).count()) > 0) throw new Error("PM-only Plan menu shown to a head");
   await openMilestones();
   if ((await page.getByRole("button", { name: /add milestone|add deliverable/i }).count()) > 0) throw new Error("PM-only controls shown to a head");
@@ -309,7 +307,7 @@ await step("Department head: accepts the team's deliverable (only theirs); has n
 });
 await as("mgr@e2e.local");
 await step("PM: accepts the milestone; progress states its basis (1 of 2 required milestones accepted)", async () => {
-  await go(`/projects/${P}/work`); await openMilestones();
+  await go(`/projects/${P}/work?tasks=all`); await openMilestones();
   await page.locator("#milestone-list li", { hasText: "First draft approved" }).getByRole("button", { name: /change status/i }).click();
   await dialog().getByLabel("New status").selectOption({ label: "Accepted" });
   await dialog().getByRole("button", { name: /change status/i }).click(); await closed();
@@ -490,7 +488,7 @@ await step("Discussion: a mention posts once (double click), appears on another 
   if (!payload || /Truss arrives/.test(payload)) throw new Error("mention notification missing or carries the message text: " + payload);
 });
 await step("Notifications: the mentioned person sees it in My Work, in plain words, without the message text", async () => {
-  await lp.goto(`${BASE}/projects/work`, { waitUntil: "networkidle" });
+  await lp.goto(`${BASE}/projects/work?tasks=all`, { waitUntil: "networkidle" });
   const t = (await lp.locator("main").innerText()).replace(/\s+/g, " ");
   if (!/mention/i.test(t)) throw new Error("no mention notice: " + t.slice(0, 300));
   if (/Truss arrives/.test(t)) throw new Error("message text in a notification");
@@ -620,7 +618,7 @@ await step("Completion: complete with explicit decisions and the client's e-mail
   if (db("select count(*) from proj_tasks where status in ('todo','in_progress','ready_for_review')") !== "0") throw new Error("open tasks remain");
   if (db("select count(*) from proj_tasks where status='done' and title in ('Rig test','Hardware demo')") !== "1") { /* Rig test was finished? only deferred/cancelled expected below */ }
   await go(`/projects/${P}`); await expectText(/Completed/); await expectText(/Sara, Orbit Motors|signed off/);
-  await go(`/projects/${P}/work`);
+  await go(`/projects/${P}/work?tasks=all`);
   if ((await page.getByRole("button", { name: /new task/i }).count()) > 0) throw new Error("New task offered on a completed project");
 });
 await as("mgr@e2e.local");
@@ -651,7 +649,7 @@ await step("Completed projects are listed under Show: Completed and archived (no
   await go("/projects"); const t = await mainText(); if (/Showroom technology refresh/.test(t)) throw new Error("a completed project is still in Ongoing");
   await go("/projects?show=finished"); await expectText(/Showroom technology refresh/); await expectText(/Completed/);
   if (await page.getByRole("navigation", { name: "View" }).count()) throw new Error("Table/Board switch offered for completed projects");
-  await go(`/projects/${INT}/work`); if ((await page.getByRole("button", { name: /^Add task$/ }).count()) > 0) throw new Error("Add task offered on a completed project");
+  await go(`/projects/${INT}/work?tasks=all`); if ((await page.getByRole("button", { name: /^Add task$/ }).count()) > 0) throw new Error("Add task offered on a completed project");
 });
 console.log(`\nverdict: ${fails === 0 ? "ALL PASS" : `${fails} FAIL`} (${passes} passed)`);
 await browser.close(); process.exit(fails === 0 ? 0 : 1);

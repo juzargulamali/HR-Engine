@@ -1,6 +1,7 @@
 import { Alert } from "@/components/ui/alert";
 import { PageHeader } from "@/components/projects/parts";
 import { LoadError } from "@/components/workspace/states";
+import { OsScope } from "@/components/os/scope";
 import { getProjectsContext } from "@/lib/projects/context";
 
 /**
@@ -13,27 +14,27 @@ export default async function ProjectsLayout({ children }: { children: React.Rea
   if (!ctx) return null;
   if (!ctx.installed) {
     return (
-      <div className="space-y-4">
+      <OsScope className="space-y-4">
         <PageHeader title="Projects & Tasks" />
         <Alert role="status">Projects &amp; Tasks is not installed in this environment yet. The database changes it needs have not been applied here, so nothing is shown.</Alert>
-      </div>
+      </OsScope>
     );
   }
   if (ctx.loadFailed) {
     return (
-      <div className="space-y-4">
+      <OsScope className="space-y-4">
         <PageHeader title="Projects & Tasks" />
         <LoadError what="Projects & Tasks" />
-      </div>
+      </OsScope>
     );
   }
   if (!ctx.hasAnyAccess) {
     return (
-      <div className="space-y-4">
+      <OsScope className="space-y-4">
         <PageHeader title="Projects & Tasks" />
         <Alert>You do not have Projects access. It is granted per company by the founders. Ask one of them if you need to see or work on projects.</Alert>
-      </div>
+      </OsScope>
     );
   }
-  return <div className="space-y-6">{children}</div>;
+  return <OsScope className="space-y-5">{children}</OsScope>;
 }

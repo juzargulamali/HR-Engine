@@ -36,12 +36,13 @@ describe("legacy addresses", () => {
 
 describe("workspace tabs and the Manage project menu", () => {
   it("has exactly four primary sections", () => {
-    expect(projectTabs("/projects/p1", "3").map((t) => t.label)).toEqual(["Overview", "Work", "Plan", "Discussion"]);
-    expect(projectTabs("/projects/p1", "3")[3]?.badge).toBe("3");
+    expect(projectTabs("/projects/p1", "3").map((t) => t.label)).toEqual(["Work", "Timeline", "Discussion", "Equipment"]);
+    expect(projectTabs("/projects/p1", "3")[2]?.badge).toBe("3");
   });
   it("lights up the new home of every old section and none for the secondary pages", () => {
     const b = "/projects/p1";
-    expect(activeTabHref(b, b)).toBe(b);
+    expect(activeTabHref(b, b)).toBe(`${b}/work`);
+    expect(activeTabHref(`${b}/equipment`, b)).toBe(`${b}/equipment`);
     expect(activeTabHref(`${b}/work/tasks/t1`, b)).toBe(`${b}/work`);
     expect(activeTabHref(`${b}/timeline`, b)).toBe(`${b}/plan`);
     expect(activeTabHref(`${b}/calendar`, b)).toBe(`${b}/plan`);

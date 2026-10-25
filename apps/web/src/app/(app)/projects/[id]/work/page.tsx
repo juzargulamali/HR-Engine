@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { CalendarCheck, ListChecks } from "lucide-react";
-import { isFinishedProject, isOpenTask, milestoneProgress, TASK_STATUS_LABELS, TASK_STATUSES } from "@enginious-hr/domain";
+import { AlertTriangle, CalendarCheck, CheckCircle2, Clock, ListChecks, ShieldAlert } from "lucide-react";
+import { canManageProject, COMPLETION_EVIDENCE_TYPES, isFinishedProject, isOpenTask, milestoneProgress, TASK_STATUS_LABELS, TASK_STATUSES } from "@enginious-hr/domain";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { DeliverableStatusBadge, MilestoneStatusBadge } from "@/components/projects/badges";
-import { Muted, Panel } from "@/components/projects/parts";
+import { OsStatCard } from "@/components/os/stat-card";
+import { Fact, Muted, Panel } from "@/components/projects/parts";
+import { MilestoneStrip, NextActionCard, NextOnSiteCard, type ActionItem } from "@/components/projects/work-parts";
 import { QuickAddTask } from "@/components/projects/tasks/quick-add-task";
 import { TaskBoard } from "@/components/projects/tasks/task-board";
 import { TaskPanel } from "@/components/projects/tasks/task-panel";
@@ -23,15 +26,17 @@ import { firstParam, paramsToRecord, parseColumns, parseView, withParams } from 
 import { ViewSwitch } from "@/components/workspace/view-switch";
 import { getProjectsContext } from "@/lib/projects/context";
 import { loadProjectView, memberOptions } from "@/lib/projects/data";
-import { dateText, formatDateTime, todayIso } from "@/lib/projects/format";
+import { dateText, formatDate, formatDateTime, todayIso } from "@/lib/projects/format";
 import { createClient } from "@/lib/supabase/server";
+import { ProjectDetailsCard } from "./details-card";
 import { AddDeliverableButton, DeliverableStatusButton, EditDeliverableButton } from "./deliverable-forms";
 import {
-  deliverableMoves, dueWords, filterTasks, groupDeliverables, hasActiveFilters, milestoneMoves, newTaskOptions, parseTaskFilters, quickAssigneeChoices, reviewQueue, showChoiceOf,
-  sortTasks, taskCountsByDeliverable,
+  deliverableMoves, dueWords, filterTasks, groupDeliverables, hasActiveFilters, isDueThisWeekOrOverdue, milestoneMoves, needsAttention, newTaskOptions, parseTaskFilters, quickAssigneeChoices,
+  reviewQueue, showChoiceOf, sortTasks, taskCountsByDeliverable, weekWindow,
 } from "./helpers";
 import { AddMilestoneButton, EditMilestoneButton, MilestoneStatusButton } from "./milestone-forms";
 import { PlanAddMenu } from "./plan-add-menu";
+import { blockers, holdReviewState, resolutionSummary } from "../overview-helpers";
 
 export const metadata = { title: "Work" };
 
@@ -62,13 +67,18 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
   const today = todayIso();
 
   const supabase = await createClient();
-  const [msRes, dlRes, taskRes, progressRes] = await Promise.all([
+  const manager = canManageProject(view.standing);
+  const [msRes, dlRes, taskRes, progressRes, feedbackRes, bookingRes, completionRes, outdatedRes] = await Promise.all([
     supabase.from("proj_milestones").select("*").eq("project_id", id).order("sort_order").order("due_date", { nullsFirst: false }),
     supabase.from("proj_deliverables").select("*").eq("project_id", id).order("due_date", { nullsFirst: false }),
     supabase.from("proj_tasks").select("*").eq("project_id", id),
     supabase.rpc("proj_milestone_progress", { p_project_id: id }),
+    supabase.from("proj_feedback").select("status").eq("project_id", id),
+    supabase.from("proj_site_bookings").select("id, user_id, location, starts_at, ends_at, tz, state").eq("project_id", id).order("starts_at"),
+    supabase.from("proj_completions").select("*").eq("project_id", id).order("completed_at", { ascending: false }),
+    manager && view.project.kind === "client" ? supabase.rpc("proj_plan_outdated", { p_project_id: id }) : Promise.resolve({ data: null, error: null }),
   ]);
-  if (msRes.error || dlRes.error || taskRes.error) {
+  if (msRes.error || dlRes.error || taskRes.error || completionRes.error) {
     return <LoadError what="this project's work" retryHref={withParams(basePath, current)} />;
   }
   const ms = msRes.data ?? [];
@@ -104,6 +114,48 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
   const clearHref = withParams(basePath, current, {}, ["q", "status", "assignee", "team", "deliverable", "show", "mine", "overdue", "blocked"]);
   const filtered = hasActiveFilters(filters);
 
+  // ---- The summary cards and the "This week" list: every number is counted from this project's tasks, in the same way as the filter behind it.
+  const week = weekWindow(today);
+  const openTasks = allTasks.filter((t) => isOpenTask(t.status));
+  const dueThisWeek = openTasks.filter((t) => t.due_date && t.due_date >= week.start && t.due_date <= week.end).length;
+  const attentionCount = allTasks.filter((t) => needsAttention(t, today)).length;
+  const inReviewCount = allTasks.filter((t) => t.status === "ready_for_review").length;
+  const showAll = firstParam(sp, "tasks") === "all";
+  const weekMode = !showAll && !filtered && mode === "table" && group === "none";
+  const focusRows = rows.filter((r) => { const t = allTasks.find((x) => x.id === r.id); return !!t && (isDueThisWeekOrOverdue(t, today) || needsAttention(t, today)); });
+  const WEEK_CAP = 6;
+  const listRows = weekMode ? focusRows.slice(0, WEEK_CAP) : rows;
+  const taskAt = (taskId: string) => withParams(basePath, current, { task: taskId });
+  const allHref = withParams(basePath, current, { tasks: "all" }, ["status", "show", "mine", "overdue", "blocked", "q", "assignee", "team", "deliverable"]);
+  const weekHref = withParams(basePath, current, {}, ["tasks", "status", "show", "mine", "overdue", "blocked", "q", "assignee", "team", "deliverable", "view", "group"]);
+
+  // ---- Right rail: what needs action, the next site visit, the project's details.
+  const milestoneStrip = ms.map((m) => ({ id: m.id, title: m.title, status: m.status, dueDate: m.due_date, isRequired: m.is_required }));
+  const lateMilestones = ms.filter((m) => m.due_date && m.due_date < today && ["planned", "in_progress", "ready_for_acceptance"].includes(m.status));
+  const blocked = blockers(allTasks);
+  const actionAll: ActionItem[] = [
+    ...blocked.map((t) => ({
+      key: `b-${t.id}`, href: taskAt(t.id), tone: "red" as const, title: `Blocked: ${t.title}`,
+      detail: [t.blocked_reason, t.unblock_owner_id ? `${view.nameOf(t.unblock_owner_id)} can unblock it` : null, t.unblock_action].filter(Boolean).join(" · "),
+    })),
+    ...queue.map((t) => ({ key: `r-${t.id}`, href: taskAt(t.id), tone: "blue" as const, title: `Review: ${t.title}`, detail: `Done by ${view.nameOf(t.assignee_id)}. You can accept it or send it back.` })),
+    ...lateMilestones.map((m) => ({ key: `m-${m.id}`, href: `${basePath}?ms=1#milestone-list`, tone: "amber" as const, title: `Overdue milestone: ${m.title}`, detail: `Was due ${formatDate(m.due_date as string)}` })),
+  ];
+  const nowIso = new Date().toISOString();
+  const upcomingBookings = (bookingRes.data ?? []).filter((b) => (b.state === "tentative" || b.state === "confirmed") && b.ends_at > nowIso);
+  const nextBooking = upcomingBookings[0] ?? null;
+  const bookingWhen = nextBooking
+    ? `${new Intl.DateTimeFormat("en-GB", { timeZone: nextBooking.tz, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(nextBooking.starts_at))} (${nextBooking.tz})`
+    : "";
+  const feedbackOpen = (feedbackRes.data ?? []).filter((f) => f.status === "open" || f.status === "in_progress").length;
+  const completions = completionRes.data ?? [];
+  const completion = completions.find((c) => !c.reopened_at) ?? null;
+  const reopenedEarlier = completions.some((c) => c.reopened_at);
+  const details = view.details;
+  const holdState = holdReviewState(details?.hold_review_date ?? null, today);
+  const acting = view.people.filter((p) => p.role === "acting_pm" && p.acting_until && p.acting_until >= today).map((p) => view.nameOf(p.user_id));
+  const teamNames = view.teams.map((t) => `${t.name}${t.head_user_id ? ` (head: ${view.nameOf(t.head_user_id)})` : ""}`);
+
   const toolbarFilters = [
     { name: "status", label: "Show", value: filters.status === "open" ? "" : filters.status, options: [{ value: "", label: "Open tasks" }, { value: "all", label: "All tasks" }, ...TASK_STATUSES.map((s) => ({ value: s, label: TASK_STATUS_LABELS[s] }))] },
     { name: "assignee", label: "Assignee", value: filters.assignee ?? "", options: [{ value: "", label: "Anyone" }, ...members.map((m) => ({ value: m.id, label: m.name }))] },
@@ -114,77 +166,152 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
   ];
 
   const openMilestones = current.ms === "1" || ms.length === 0;
+  const taskCountWords = `${allTasks.length} task${allTasks.length === 1 ? "" : "s"}`;
+
+  const addControls = (
+    <>
+      {canManage ? <PlanAddMenu projectId={id} teams={teamOptions} milestones={milestoneOptions} /> : null}
+      {canCreateTask ? (
+        <QuickAddTask projectId={id} options={options} choices={choices} milestones={milestoneOptions} tasks={sortTasks(allTasks.filter((t) => isOpenTask(t.status))).map((t) => ({ id: t.id, name: t.title }))} collaborators={members} defaultAssignee={ctx.userId} />
+      ) : null}
+    </>
+  );
+
+  const taskList =
+    listRows.length === 0 ? (
+      <EmptyState
+        icon={ListChecks}
+        title={allTasks.length === 0 ? "No tasks yet" : weekMode ? "Nothing due this week" : "No tasks match"}
+        description={
+          allTasks.length === 0
+            ? canCreateTask ? "Use Add task above. Department heads distribute deliverables into tasks; any member can add a task for themself." : "Department heads distribute deliverables into tasks; any member can add a task for themself."
+            : weekMode ? "No open task is due this week, overdue or blocked. Open all tasks to see what is coming later." : "Clear the filters, or choose All tasks to include finished ones."
+        }
+        action={
+          filtered ? <Link href={clearHref} scroll={false} className={buttonVariants({ variant: "outline", size: "sm" })}>Clear filters</Link>
+          : weekMode && allTasks.length > 0 ? <Link href={allHref} scroll={false} className={buttonVariants({ variant: "outline", size: "sm" })}>View all tasks ({allTasks.length})</Link> : undefined
+        }
+      />
+    ) : mode === "board" ? (
+      <TaskBoard rows={rows} basePath={basePath} current={current} showProject={false} />
+    ) : group === "none" ? (
+      <TaskTable rows={listRows} columns={columns} sort={sort} basePath={basePath} current={current} showProject={false} caption={weekMode ? "Tasks due this week, overdue or blocked" : "Tasks of this project"} />
+    ) : (
+      <div className="space-y-3">
+        {groups.map((g) => (
+          <GroupBlock
+            key={g.key}
+            group={g}
+            by={group}
+            milestone={group === "milestone" && !g.none ? ms.find((m) => m.id === g.key) : undefined}
+            deliverables={group === "milestone" ? dls.filter((d) => (g.none ? !d.milestone_id || !ms.some((m) => m.id === d.milestone_id) : d.milestone_id === g.key)) : []}
+            counts={counts}
+            teams={view.teams}
+          >
+            <TaskTable rows={g.rows} columns={columns} sort={sort} basePath={basePath} current={current} showProject={false} caption={`Tasks: ${g.label}`} />
+          </GroupBlock>
+        ))}
+      </div>
+    );
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {readOnly ? <Muted>This project is {view.project.status}. Its plan is read-only; a founder can reopen it from History.</Muted> : null}
-
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">
-            {rows.length} shown of {allTasks.length} task{allTasks.length === 1 ? "" : "s"} · {openTaskCount} open. Dates are never moved automatically: changing one records history and lists the work it touches.
+      {view.project.status === "on_hold" ? (
+        <Alert variant="warning" role="status">
+          <p className="font-medium">On hold{details?.hold_reason ? `: ${details.hold_reason}` : ""}</p>
+          <p className="mt-0.5">
+            Review date {dateText(details?.hold_review_date)}
+            {holdState === "overdue" ? ", which has passed: decide whether to resume it." : holdState === "today" ? ", which is today." : "."}
           </p>
-          <div className="flex flex-wrap items-center gap-2">
-            {mode === "table" ? <ColumnsMenu columns={TASK_COLUMNS.map((c) => ({ id: c.id, label: c.label }))} selected={columns} defaults={DEFAULT_TASK_COLUMNS} /> : null}
-            <ViewSwitch current={mode} tableHref={withParams(basePath, current, { view: null })} boardHref={withParams(basePath, current, { view: "board" })} />
-            {canManage ? <PlanAddMenu projectId={id} teams={teamOptions} milestones={milestoneOptions} /> : null}
-            {canCreateTask ? (
-              <QuickAddTask projectId={id} options={options} choices={choices} milestones={milestoneOptions} tasks={sortTasks(allTasks.filter((t) => isOpenTask(t.status))).map((t) => ({ id: t.id, name: t.title }))} collaborators={members} defaultAssignee={ctx.userId} />
-            ) : null}
-          </div>
-        </div>
-        <ListToolbar search={{ value: filters.q, placeholder: "Search tasks" }} filters={toolbarFilters} clearHref={filtered ? clearHref : undefined} />
-      </div>
-
-      {queue.length > 0 ? (
-        <Panel title={`Waiting for your review (${queue.length})`} description="Tasks sent for review that you may accept or send back. You never review your own work.">
-          <ul className="divide-y divide-border">
-            {queue.map((t) => (
-              <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                <div className="min-w-0">
-                  <PanelLink href={withParams(basePath, current, { task: t.id })} className="font-medium underline-offset-4 hover:underline">{t.title}</PanelLink>
-                  <p className="text-sm text-muted-foreground">Done by {view.nameOf(t.assignee_id)} · {dueWords(t.due_date, true, today, fmt).text}</p>
-                </div>
-                <PanelLink href={withParams(basePath, current, { task: t.id })} className={buttonVariants({ variant: "outline", size: "sm" })}>Review</PanelLink>
-              </li>
-            ))}
-          </ul>
-        </Panel>
+        </Alert>
+      ) : null}
+      {outdatedRes.data === true ? (
+        <Alert variant="warning" role="status">
+          The issued client timeline is out of date: the client-facing plan has changed since it was issued. Issue a new version from{" "}
+          <Link href={`/projects/${id}/documents`} className="font-medium underline">Files &amp; client plan</Link>.
+        </Alert>
+      ) : null}
+      {reopenedEarlier && !completion ? (
+        <Alert role="status">This project was completed and then reopened. The earlier completion record is kept on the <Link href={`/projects/${id}/history`} className="font-medium underline">History</Link> page.</Alert>
       ) : null}
 
-      {/* ---- The task list ---- */}
-      {rows.length === 0 ? (
-        <EmptyState
-          icon={ListChecks}
-          title={allTasks.length === 0 ? "No tasks yet" : "No tasks match"}
-          description={allTasks.length === 0 ? (canCreateTask ? "Use Add task above. Department heads distribute deliverables into tasks; any member can add a task for themself." : "Department heads distribute deliverables into tasks; any member can add a task for themself.") : "Clear the filters, or choose All tasks to include finished ones."}
-          action={filtered ? <Link href={clearHref} scroll={false} className={buttonVariants({ variant: "outline", size: "sm" })}>Clear filters</Link> : undefined}
-        />
-      ) : mode === "board" ? (
-        <TaskBoard rows={rows} basePath={basePath} current={current} showProject={false} />
-      ) : group === "none" ? (
-        <TaskTable rows={rows} columns={columns} sort={sort} basePath={basePath} current={current} showProject={false} caption="Tasks of this project" />
-      ) : (
-        <div className="space-y-3">
-          {groups.map((g) => (
-            <GroupBlock
-              key={g.key}
-              group={g}
-              by={group}
-              milestone={group === "milestone" && !g.none ? ms.find((m) => m.id === g.key) : undefined}
-              deliverables={group === "milestone" ? dls.filter((d) => (g.none ? !d.milestone_id || !ms.some((m) => m.id === d.milestone_id) : d.milestone_id === g.key)) : []}
-              counts={counts}
-              teams={view.teams}
-            >
-              <TaskTable rows={g.rows} columns={columns} sort={sort} basePath={basePath} current={current} showProject={false} caption={`Tasks: ${g.label}`} />
-            </GroupBlock>
-          ))}
+      <ul className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Where the work stands">
+        <li><OsStatCard href={allHref} label={openTaskCount === 1 ? "Open task" : "Open tasks"} value={openTaskCount} icon={ListChecks} edge="cyan" active={showAll && !filtered} /></li>
+        <li><OsStatCard href={weekHref} label="Due this week" value={dueThisWeek} icon={Clock} edge="blue" active={weekMode} /></li>
+        <li><OsStatCard href={withParams(basePath, current, { show: "attention" }, ["status", "tasks", "mine", "overdue", "blocked"])} label="Need attention" value={attentionCount} icon={AlertTriangle} edge="amber" active={filters.attention} /></li>
+        <li><OsStatCard href={withParams(basePath, current, { status: "ready_for_review" }, ["tasks", "show", "mine", "overdue", "blocked"])} label="In review" value={inReviewCount} icon={ShieldAlert} edge="muted" active={filters.status === "ready_for_review"} /></li>
+      </ul>
+
+      <MilestoneStrip milestones={milestoneStrip} today={today} basis={progress?.basis ?? null} percent={progress?.percent ?? null} manageHref={`${basePath}?ms=1#milestone-list`} />
+
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_21rem]">
+        <div className="min-w-0 space-y-4">
+          <section aria-label="Tasks" className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0 grow basis-56">
+                <h2 className="font-heading text-lg font-semibold">{weekMode ? "This week" : filtered || showAll || mode === "board" || group !== "none" ? "Tasks" : "This week"}</h2>
+                <p className="text-sm text-muted-foreground">
+                  {weekMode
+                    ? `Due this week, overdue or blocked · showing ${listRows.length} of ${focusRows.length}`
+                    : `${rows.length} shown of ${taskCountWords} · ${openTaskCount} open.`}
+                </p>
+              </div>
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                {mode === "table" ? <ColumnsMenu columns={TASK_COLUMNS.map((c) => ({ id: c.id, label: c.label }))} selected={columns} defaults={DEFAULT_TASK_COLUMNS} /> : null}
+                <ViewSwitch current={mode} tableHref={withParams(basePath, current, { view: null })} boardHref={withParams(basePath, current, { view: "board" })} />
+                {addControls}
+              </div>
+            </div>
+            <ListToolbar search={{ value: filters.q, placeholder: "Search tasks" }} filters={toolbarFilters} clearHref={filtered || showAll ? (filtered ? clearHref : weekHref) : undefined} />
+          </section>
+
+          {taskList}
+
+          {weekMode && allTasks.length > listRows.length ? (
+            <div className="flex justify-center">
+              <Link href={allHref} scroll={false} className={buttonVariants({ variant: "outline" })}>View all tasks ({allTasks.length})</Link>
+            </div>
+          ) : null}
+
+          {queue.length > 0 ? (
+            <Panel title={`Waiting for your review (${queue.length})`} description="Tasks sent for review that you may accept or send back. You never review your own work.">
+              <ul className="divide-y divide-border">
+                {queue.map((t) => (
+                  <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                    <div className="min-w-0">
+                      <PanelLink href={taskAt(t.id)} className="font-medium underline-offset-4 hover:underline">{t.title}</PanelLink>
+                      <p className="text-sm text-muted-foreground">Done by {view.nameOf(t.assignee_id)} · {dueWords(t.due_date, true, today, fmt).text}</p>
+                    </div>
+                    <PanelLink href={taskAt(t.id)} className={buttonVariants({ variant: "outline", size: "sm" })}>Review</PanelLink>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          ) : null}
+
         </div>
-      )}
+
+        <aside aria-label="Project support" className="min-w-0 space-y-4">
+          <NextActionCard items={actionAll.slice(0, 4)} total={actionAll.length} />
+          <NextOnSiteCard
+            booking={nextBooking ? { id: nextBooking.id, location: nextBooking.location, startsAt: nextBooking.starts_at, endsAt: nextBooking.ends_at, state: nextBooking.state, who: view.nameOf(nextBooking.user_id) } : null}
+            count={upcomingBookings.length}
+            href={`/projects/${id}/plan?plan=site`}
+            when={bookingWhen}
+          />
+          {details ? (
+            <ProjectDetailsCard
+              pmName={view.pmName} acting={acting} team={teamNames} peopleCount={view.people.length} start={view.project.start_date} end={view.project.end_date}
+              details={details} internal={view.project.kind === "internal"} feedbackOpen={feedbackOpen} feedbackHref={`/projects/${id}/changes`}
+            />
+          ) : null}
+        </aside>
+      </div>
 
       {/* ---- Milestones and deliverables ---- */}
-      <details id="milestones" open={openMilestones} className="group rounded-lg border border-border bg-card">
-        <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-lg px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <details id="milestones" open={openMilestones} className="os-card group">
+        <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-[14px] px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <span className="text-sm font-semibold">Milestones &amp; deliverables <span className="font-normal text-muted-foreground">({ms.length} milestone{ms.length === 1 ? "" : "s"}, {dls.length} deliverable{dls.length === 1 ? "" : "s"})</span></span>
           <span className="text-sm text-muted-foreground">{progress ? progress.basis : "No required milestone set yet"}</span>
         </summary>
@@ -287,6 +414,20 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
         </div>
       </details>
 
+      {completion ? (
+        <Panel title="Completion" description="Recorded when the project was completed. Read-only.">
+          <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <Fact label="Completed">{formatDateTime(completion.completed_at)} by {view.nameOf(completion.completed_by)}</Fact>
+            <Fact label="Evidence">{COMPLETION_EVIDENCE_TYPES.find((e) => e.id === completion.evidence_type)?.label ?? "Internal completion note"}</Fact>
+            {completion.evidence_reference ? <Fact label="Reference">{completion.evidence_reference}</Fact> : null}
+            {completion.confirmed_on ? <Fact label="Client confirmed on">{formatDate(completion.confirmed_on)}</Fact> : null}
+            {completion.client_contact ? <Fact label="Confirmed by">{completion.client_contact}</Fact> : null}
+            <Fact label="Left unfinished">{resolutionSummary(completion.resolutions)}</Fact>
+          </dl>
+          <p className="mt-3 whitespace-pre-wrap text-sm">{completion.completion_note}</p>
+        </Panel>
+      ) : null}
+
       {firstParam(sp, "task") ? <TaskPanel rawTaskId={firstParam(sp, "task")} projectId={id} basePath={basePath} current={current} /> : null}
     </div>
   );
@@ -306,7 +447,7 @@ function GroupBlock({ group, by, milestone, deliverables, counts, teams, childre
   children: React.ReactNode;
 }) {
   return (
-    <details open className="rounded-lg border border-border bg-card">
+    <details open className="os-card">
       <summary className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-4 py-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <span className="font-semibold">{group.label}</span>
         <span className="text-muted-foreground">{group.rows.length} task{group.rows.length === 1 ? "" : "s"}</span>

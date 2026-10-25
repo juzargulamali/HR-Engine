@@ -68,7 +68,7 @@ const tabTo = async (page, test, max = 60) => {
   const page = await newPage(browser); await login(page, "hr@e2e.local");
   await step("My Work: the status control of a task is reachable by Tab, named for its task, with a focus ring", async () => {
     await page.goto(`${BASE}/projects/work`, { waitUntil: "networkidle" });
-    const { f } = await tabTo(page, (x) => x.tag === "SELECT" && /status of/i.test(x.name), 80);
+    const { f } = await tabTo(page, (x) => (x.tag === "SELECT" || x.tag === "BUTTON") && /status of/i.test(x.name), 80);
     if (!f.ring) throw new Error("no visible focus ring");
   });
   await page.context().close();

@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { listTable } from "@/components/workspace/list-table";
 import { Badge } from "@/components/ui/badge";
+import { OsPill } from "@/components/os/pills";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { BlockedBadge, PriorityBadge } from "@/components/projects/badges";
 import { PanelLink } from "@/components/workspace/panel-link";
@@ -21,7 +22,7 @@ export function TaskFlags({ r }: { r: Pick<TaskRowData, "blocked" | "needsReview
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1.5">
       {r.blocked ? <BlockedBadge /> : null}
-      {r.needsReview ? <Badge variant="outline" className="text-muted-foreground">Needs review</Badge> : null}
+      {r.needsReview ? <OsPill tone="blue">Needs review</OsPill> : null}
       <PriorityBadge priority={r.priority} />
     </div>
   );
@@ -64,7 +65,7 @@ export function TaskTable({ rows, columns, sort, basePath, current, showProject,
       </TableHeader>
       <TableBody>
         {rows.map((r) => (
-          <TableRow key={r.id} className="align-top">
+          <TableRow key={r.id} className="align-top" data-selected={current[panelParam] === r.id ? "true" : undefined}>
             <TableCell className="min-w-[13rem] max-w-[22rem] px-3 py-2.5">
               <PanelLink href={withParams(basePath, current, { [panelParam]: r.id })} className="break-words font-medium underline-offset-2 hover:underline">{r.title}</PanelLink>
               <TaskFlags r={r} />
