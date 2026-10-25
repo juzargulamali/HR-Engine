@@ -1,4 +1,4 @@
-import Image from "next/image";
+import { OsLogo } from "@/components/brand/os-logo";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { LoginForm } from "./login-form";
 
@@ -23,11 +23,9 @@ export default async function LoginPage({
       </div>
       <div className="relative w-full max-w-sm space-y-6">
         <div className="space-y-3 text-center">
-          <Image src="/brand/enginious-icon.png" alt="" width={52} height={52} className="mx-auto" priority />
+          <OsLogo height={52} endorsement />
           <div>
-            <h1 className="font-heading text-2xl font-bold tracking-tight">
-              <span className="brand-gradient-text">ENGINIOUS</span> OS
-            </h1>
+            <h1 className="sr-only">ENGINIOUS OS</h1>
             <p className="mt-1 text-sm text-muted-foreground">Sign in with the account your HR team set up for you.</p>
           </div>
         </div>

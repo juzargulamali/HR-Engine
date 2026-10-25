@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BellRing, Briefcase, Clock, LayoutDashboard, Menu, MoreHorizontal, Users } from "lucide-react";
@@ -62,7 +63,7 @@ export function ShellChrome({ modules, showAlertsLink, isEmployee, clockOpenSinc
 
   return (
     <>
-      <header className="sticky top-0 z-40 flex items-center gap-2 border-b border-border bg-chrome px-3 py-2 sm:px-5 lg:gap-4 lg:px-6">
+      <header className="os-chrome os-topbar sticky top-0 z-40 flex h-14 items-center gap-2 px-3 sm:px-5 lg:h-16 lg:gap-4 lg:px-6">
         <button
           type="button"
           aria-label="Open menu"
@@ -71,6 +72,9 @@ export function ShellChrome({ modules, showAlertsLink, isEmployee, clockOpenSinc
         >
           <Menu className="h-5 w-5" aria-hidden />
         </button>
+        <Link href="/" aria-label="ENGINIOUS OS, My Day" className="flex-none rounded-md lg:hidden">
+          <Image src="/brand/enginious-os-symbol-dark.png" alt="" width={255} height={181} priority style={{ height: 24, width: "auto" }} />
+        </Link>
         <div className="min-w-0 flex-1 lg:flex-none lg:basis-52">
           <Crumbs modules={modules} />
         </div>
@@ -88,6 +92,7 @@ export function ShellChrome({ modules, showAlertsLink, isEmployee, clockOpenSinc
         </div>
       </header>
 
+      <div className="os-chrome" style={{ display: "contents" }}>
       <Drawer open={drawer} onClose={() => setDrawer(false)} title="ENGINIOUS OS menu">
         <div className="flex h-full flex-col">
           <BrandMark />
@@ -97,8 +102,9 @@ export function ShellChrome({ modules, showAlertsLink, isEmployee, clockOpenSinc
           </div>
         </div>
       </Drawer>
+      </div>
 
-      <nav aria-label="Primary" className="fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-chrome pb-[env(safe-area-inset-bottom)] lg:hidden">
+      <nav aria-label="Primary" className="os-chrome fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-chrome pb-[env(safe-area-inset-bottom)] lg:hidden">
         <Link href="/" aria-current={active === "my-day" ? "page" : undefined} className={tabClass(active === "my-day")}>
           <LayoutDashboard className="h-5 w-5" aria-hidden />
           <span>My Day</span>

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Manrope, Sora } from "next/font/google";
 import { cn } from "@/lib/utils";
 import "./globals.css";
+import "./os-design.css";
 
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope" });
 const sora = Sora({ subsets: ["latin"], variable: "--font-sora" });

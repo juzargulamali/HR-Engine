@@ -9,11 +9,13 @@ import { describe, expect, it } from "vitest";
  * (docs/os-theme-contrast.md); this test only covers the tokens.
  */
 const css = readFileSync(path.join(import.meta.dirname, "globals.css"), "utf8");
+// The v2 design (os-design.css) re-points the same tokens while a migrated page is on screen; it is held to the same rules.
+const v2css = readFileSync(path.join(import.meta.dirname, "os-design.css"), "utf8");
 
-function block(selector: string): Record<string, string> {
-  const start = css.indexOf(`${selector} {`);
-  if (start < 0) throw new Error(`no ${selector} block in globals.css`);
-  const body = css.slice(start, css.indexOf("\n}", start));
+function block(selector: string, source: string = css): Record<string, string> {
+  const start = source.indexOf(`${selector} {`);
+  if (start < 0) throw new Error(`no ${selector} block`);
+  const body = source.slice(start, source.indexOf("\n}", start));
   const out: Record<string, string> = {};
   for (const m of body.matchAll(/--([a-z-]+):\s*([^;]+);/g)) out[m[1]!] = m[2]!.trim();
   return out;
@@ -43,7 +45,12 @@ function ratio(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-const THEMES = { dark: block(":root"), light: { ...block(":root"), ...block(':root[data-theme="light"]') } };
+const THEMES = {
+  dark: block(":root"),
+  light: { ...block(":root"), ...block(':root[data-theme="light"]') },
+  "dark (v2 pages)": { ...block(":root"), ...block('html:not([data-theme="light"]):has(.os-v2)', v2css) },
+  "light (v2 pages)": { ...block(":root"), ...block(':root[data-theme="light"]'), ...block('html[data-theme="light"]:has(.os-v2)', v2css) },
+};
 
 describe.each(Object.entries(THEMES))("%s theme tokens meet WCAG AA", (_name, t) => {
   const surfaces = ["background", "chrome", "card", "raised", "field"] as const;
@@ -104,8 +111,17 @@ describe("theme structure", () => {
   it("the dark variant follows the app's own theme attribute, not the OS setting", () => {
     expect(css).toContain("@custom-variant dark");
   });
-  it("light surfaces are soft: no pure-white page, sidebar or cards", () => {
-    const light = THEMES.light;
-    for (const s of ["background", "chrome", "card"] as const) expect(parseFloat(light[s]!.split(/\s+/)[2]!)).toBeLessThan(98.5);
+  it("light surfaces are soft: no pure-white page or sidebar (v2 cards are white by design: they sit on a grey canvas)", () => {
+    for (const light of [THEMES.light, THEMES["light (v2 pages)"]]) {
+      for (const s of ["background", "chrome"] as const) expect(parseFloat(light[s]!.split(/\s+/)[2]!)).toBeLessThan(98.5);
+    }
+    expect(parseFloat(THEMES.light.card!.split(/\s+/)[2]!)).toBeLessThan(98.5);
+  });
+  it("the shell stays dark in both themes (fixed values in .os-chrome) with readable text", () => {
+    const chrome = block(".os-chrome", v2css);
+    expect(ratio(chrome.foreground!, chrome["chrome"]!)).toBeGreaterThanOrEqual(7);
+    expect(ratio(chrome["muted-foreground"]!, chrome["chrome"]!)).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(chrome["subtle"]!, chrome["chrome"]!)).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(chrome["ring"]!, chrome["chrome"]!)).toBeGreaterThanOrEqual(3);
   });
 });

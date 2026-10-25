@@ -51,7 +51,7 @@ export function SidePanel({ title, subtitle, closeHref, fullPageHref, children }
       role="dialog"
       aria-modal="false"
       aria-label={title}
-      className="fixed inset-0 z-[45] flex flex-col bg-background lg:inset-y-0 lg:left-auto lg:right-0 lg:top-[53px] lg:w-[min(38rem,94vw)] lg:border-l lg:border-border lg:shadow-[var(--shadow-pop)]"
+      className="fixed inset-0 z-[45] flex flex-col bg-background lg:inset-y-0 lg:left-auto lg:right-0 lg:top-16 lg:w-[min(38rem,94vw)] lg:border-l lg:border-border lg:shadow-[var(--shadow-pop)]"
     >
       <header className="flex items-start justify-between gap-3 border-b border-border bg-chrome px-4 py-3">
         <div className="min-w-0">
