@@ -15,7 +15,8 @@ import { PROJECTS, STAGES, fmtDay, pmName, stageLabel, tasksOf, timelineOf, type
 import { attentionOf, attentionSummary, filterProjects, readProjectFilter, sortProjects, visibleProjects, isOverdue } from "../_lib/logic";
 import { useConcept } from "../_lib/store";
 import { useUrlSearch } from "../_lib/use-url-search";
-import { AttentionNote, Badge, EmptyNote, LoadError, Notice, SkeletonRows, StageBadge } from "./bits";
+import { AttentionNote, Avatar, Badge, EmptyNote, LoadError, Notice, SkeletonRows, StageBadge } from "./bits";
+import { Hero } from "./hero";
 
 const BASE = "/os-preview/concept";
 const PMS = ["layla", "hamza", "karim"];
@@ -59,16 +60,13 @@ export function ProjectsWorkspace() {
   const open = (p: Project) => href(`${BASE}/${p.id}`);
 
   return (
-    <div className="mx-auto w-full max-w-[1320px] px-4 pb-24 pt-6 sm:px-6">
-      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-        <div className="min-w-0">
-          <h1 className="font-heading text-2xl font-semibold tracking-tight">Projects</h1>
-          <p className="mt-1 text-sm text-muted-foreground" aria-live="polite">
-            {forced === "none" ? `${rows.length} ${rows.length === 1 ? "project" : "projects"}` : "Loading…"}{companyName ? ` · ${companyName}` : persona.companies.length > 1 ? " · Both companies" : ""}
-          </p>
-        </div>
+    <div className="mx-auto w-full max-w-[1400px] px-4 pb-24 pt-5 sm:px-6 lg:px-8">
+      <Hero
+        title="Projects"
+        sub={<span aria-live="polite">{forced === "none" ? `${rows.length} ${rows.length === 1 ? "project" : "projects"}` : "Loading…"}{companyName ? ` · ${companyName}` : persona.companies.length > 1 ? " · Both companies" : ""}</span>}
+      >
         {!summaryOnly ? <Button type="button" onClick={() => setAdding(true)}><Plus className="h-4 w-4" aria-hidden /> Add project</Button> : null}
-      </div>
+      </Hero>
 
       {summaryOnly ? (
         <div className="mt-4">
@@ -76,7 +74,7 @@ export function ProjectsWorkspace() {
         </div>
       ) : null}
 
-      <div className="mt-5 flex flex-wrap items-center gap-2.5" role="search" aria-label="Find projects">
+      <div className="cx-card mt-4 flex flex-wrap items-center gap-2.5 p-3" role="search" aria-label="Find projects">
         <div className="relative min-w-0 flex-1 basis-full sm:basis-64 sm:max-w-sm">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
           <Input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search projects" aria-label="Search projects by reference, name, client or manager" className="h-10 pl-9" />
@@ -91,7 +89,7 @@ export function ProjectsWorkspace() {
       </div>
 
       {panel ? (
-        <div className="mt-3 rounded-lg bg-card p-4">
+        <div className="cx-card mt-3 p-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="grid gap-3 sm:contents md:hidden">{primaryFilters(true)}</div>
             <Field label="Client or internal">
@@ -199,12 +197,12 @@ const nameLink = "font-medium hover:underline focus-visible:outline-none focus-v
 function ProjectTable({ rows, summaryOnly, open, remember, attentionFor, last }: ListProps & { last: string }) {
   const router = useRouter();
   return (
-    <div className="hidden overflow-clip rounded-lg bg-card lg:block">
+    <div className="cx-card hidden p-2 lg:block">
       <table className="cx-table">
         <caption className="sr-only">Projects</caption>
         <colgroup>
-          <col style={{ width: summaryOnly ? "40%" : "27%" }} /><col style={{ width: summaryOnly ? "22%" : "15%" }} /><col style={{ width: summaryOnly ? "20%" : "11%" }} /><col style={{ width: summaryOnly ? "18%" : "17%" }} />
-          {summaryOnly ? null : <><col style={{ width: "15%" }} /><col style={{ width: "15%" }} /></>}
+          <col style={{ width: summaryOnly ? "40%" : "25%" }} /><col style={{ width: summaryOnly ? "22%" : "15%" }} /><col style={{ width: summaryOnly ? "20%" : "15%" }} /><col style={{ width: summaryOnly ? "18%" : "17%" }} />
+          {summaryOnly ? null : <><col style={{ width: "14%" }} /><col style={{ width: "14%" }} /></>}
         </colgroup>
         <thead><tr><th scope="col">Project</th><th scope="col">Client</th><th scope="col">Manager</th><th scope="col">Stage</th>{summaryOnly ? null : <><th scope="col">Next milestone</th><th scope="col">Attention needed</th></>}</tr></thead>
         <tbody>
@@ -215,7 +213,7 @@ function ProjectTable({ rows, summaryOnly, open, remember, attentionFor, last }:
                 <span className="text-[13px] text-muted-foreground">{p.ref}</span>
               </td>
               <td><ClientCell p={p} /></td>
-              <td><span className="cx-trunc" title={pmName(p.pm)}>{pmName(p.pm)}</span></td>
+              <td><span className="flex min-w-0 items-center gap-2"><Avatar name={pmName(p.pm)} size="sm" /><span className="cx-trunc" title={pmName(p.pm)}>{pmName(p.pm)}</span></span></td>
               <td><StageBadge stage={p.stage} /></td>
               {summaryOnly ? null : <><td><NextCell p={p} /></td><td><AttentionCell notes={attentionFor(p)} /></td></>}
             </tr>
@@ -231,7 +229,7 @@ function ProjectCards({ rows, summaryOnly, open, remember, attentionFor }: ListP
   return (
     <ul className="space-y-2.5 lg:hidden" aria-label="Projects">
       {rows.map((p) => (
-        <li key={p.id} className="relative rounded-lg bg-card p-4 transition-colors hover:bg-secondary/40">
+        <li key={p.id} className="cx-card relative p-4 transition-colors hover:brightness-110">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-[13px] text-muted-foreground">{p.ref}</p>

@@ -150,6 +150,7 @@ export function filterTasks(list: readonly Task[], f: TaskFilter, me: Persona): 
     if (f.who === "none" ? !!t.assignee : f.who ? t.assignee !== f.who : false) return false;
     if (f.status && t.status !== f.status) return false;
     if (f.team && t.team !== f.team) return false;
+    if (f.show === "open" && t.status === "done") return false;
     if (f.show === "mine" && t.assignee !== me.personId) return false;
     if (f.show === "attention" && !(t.blocked || t.status === "review" || !t.assignee || isOverdue(t.due, t.status === "done"))) return false;
     if (q && ![t.title, personFirst(t.assignee), t.team].join(" ").toLowerCase().includes(q)) return false;

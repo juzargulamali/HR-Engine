@@ -41,6 +41,14 @@ const rows = (p) => p.locator(".cx-table tbody tr").count();
 const toast = (p, re) => p.locator('[role="status"]').filter({ hasText: re }).first().waitFor({ timeout: 4000 }).then(() => true, () => false);
 // The same control exists in the table and in the phone cards; only the one on screen counts.
 const vis = (loc) => loc.locator("visible=true");
+// Click-to-edit: the row's status or assignee pill opens a menu of choices (scoped to the row, since every row has one).
+const rowOf = (p, text) => vis(p.locator("tr, li", { hasText: text })).first();
+const pick = async (p, rowText, field, option) => {
+  const row = rowOf(p, rowText);
+  await row.getByRole("button", { name: new RegExp(`^${field}:`) }).click();
+  await row.getByRole("menuitem", { name: new RegExp(`^${option}`) }).click();
+};
+const pillOf = (p, rowText, field) => rowOf(p, rowText).getByRole("button", { name: new RegExp(`^${field}:`) });
 const overflow = (p) => p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
 
 // ---- 1, 2 projects: search, filters, Table / Board
@@ -74,7 +82,7 @@ await p.evaluate(() => window.scrollTo(0, 120));
 await p.getByRole("link", { name: "Aurora Pavilion: interactive LED floor" }).click();
 await p.waitForURL(/concept\/aurora/);
 check("project workspace shows its name, reference and four sections only", /ENG-P-0007/.test(await body(p)) && (await p.getByRole("navigation", { name: "Project sections" }).getByRole("link").count()) === 4 && !/Overview/.test(await p.getByRole("navigation", { name: "Project sections" }).innerText()));
-await p.getByRole("link", { name: "Projects", exact: true }).first().click();
+await p.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Projects" }).click();
 await p.waitForURL(/concept\?kind=client/);
 await p.waitForTimeout(300);
 check("returning keeps the filter, the row count and the scroll position", (await rows(p)) === before && (await p.evaluate(() => window.scrollY)) > 60);
@@ -83,8 +91,8 @@ check("the project just left is marked", (await p.locator('.cx-table tr[data-sel
 // ---- 4 .. 7 work: add, panel, status, assignee, blocker, review
 await go(p, "/aurora");
 check("next action is offered first (the blocked task)", /Resolve a blocker/.test(await body(p)));
-check("a blocked task and a review task are visible in the list", /Two of the six motor controllers/.test(await body(p)) && (await p.getByText("Waiting for review").count()) > 0);
-await p.getByRole("button", { name: "Add task" }).click();
+check("a blocked task and a review task are visible in the list", /Two of the six motor controllers/.test(await body(p)) && (await p.getByText("In review").count()) > 0);
+await p.getByRole("button", { name: "Add task" }).first().click();
 await p.locator("dialog").getByLabel("Title").fill("Check cable labels");
 await p.locator("dialog").getByRole("button", { name: "Add task" }).click();
 await p.waitForURL(/task=n/);
@@ -96,24 +104,24 @@ check("Escape closes the panel and the list is still there", (await p.getByRole(
 await p.getByRole("link", { name: "Scene switching API" }).focus();
 await p.keyboard.press("Enter");
 await p.waitForURL(/task=t6/);
-check("keyboard opens the panel and focus moves to its heading", await p.evaluate(() => document.activeElement?.tagName === "H2"));
+check("keyboard opens the panel and focus moves to its heading", await p.waitForFunction(() => document.activeElement?.tagName === "H2", null, { timeout: 4000 }).then(() => true, () => false));
 await p.keyboard.press("Escape");
 await p.waitForFunction(() => !location.search.includes("task="));
 check("focus returns to the task link after closing", await p.evaluate(() => document.activeElement?.textContent?.includes("Scene switching API")));
-await vis(p.getByLabel("Status of Scene switching API")).selectOption("doing");
+await pick(p, "Scene switching API", "Status", "In progress");
 check("status change shows saving then saved", await toast(p, /Saved/));
-await p.waitForTimeout(100);
-check("the new status is in the row", (await vis(p.getByLabel("Status of Scene switching API")).inputValue()) === "doing");
-await vis(p.getByLabel("Assignee of Final render: scene 3")).selectOption("ravi");
+check("the new status is in the row", /In progress/.test(await pillOf(p, "Scene switching API", "Status").getAttribute("aria-label")));
+await pick(p, "Final render: scene 3", "Assignee", "Ravi");
 check("assignee change is saved", await toast(p, /Saved the assignee/));
-check("assigning removes that task's unassigned note (only the task added above still needs an owner)", (await vis(p.getByText("Needs an owner")).count()) === 1);
-await vis(p.getByLabel("Status of Motor controller firmware")).selectOption("doing");
-check("a blocked task refuses the move with a reason", /blocked/i.test(await vis(p.getByLabel("Status of Motor controller firmware")).locator("xpath=ancestor::td").innerText()));
+check("assigning removes that task's unassigned state (only the task added above is still unassigned)", (await vis(p.getByRole("button", { name: /^Assignee: Unassigned/ })).count()) === 1);
+await rowOf(p, "Motor controller firmware").getByRole("button", { name: /^Status:/ }).click();
+check("a blocked task offers no move and says why", /blocked/i.test(await rowOf(p, "Motor controller firmware").innerText()) && (await rowOf(p, "Motor controller firmware").getByRole("menuitem", { name: /^In progress/ }).isDisabled()));
+await p.keyboard.press("Escape");
 // simulated failure
 await p.getByRole("button", { name: "Preview options" }).click();
 await p.getByLabel("Make the next save fail").check();
 await p.keyboard.press("Escape");
-await vis(p.getByLabel("Status of Frame and cable layout drawing")).selectOption("todo");
+await pick(p, "Frame and cable layout drawing", "Status", "To do");
 check("a failed save says so and offers Try again", await toast(p, /was not saved/) && (await p.getByRole("button", { name: "Try again" }).count()) > 0);
 await p.getByRole("button", { name: "Try again" }).click();
 check("Try again saves", await toast(p, /Saved/));
@@ -206,7 +214,7 @@ const h = await p.getByRole("button", { name: "Close details" }).boundingBox();
 check("phone: close button is a comfortable tap target", !!h && h.height >= 32 && h.width >= 32, JSON.stringify(h));
 await p.getByRole("button", { name: "Close details" }).click();
 await p.waitForFunction(() => !location.search.includes("task="));
-await vis(p.getByLabel("Status of Scene switching API")).selectOption("doing");
+await pick(p, "Scene switching API", "Status", "In progress");
 check("phone: status can be changed from the list", await toast(p, /Saved/));
 await p.getByRole("link", { name: "Board", exact: true }).click();
 await p.waitForURL(/view=board/);

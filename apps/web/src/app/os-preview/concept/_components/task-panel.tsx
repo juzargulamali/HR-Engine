@@ -6,16 +6,17 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { InlineSelect } from "@/components/workspace/inline-edit";
 import { SidePanel } from "@/components/workspace/side-panel";
 import { useUnsavedChanges } from "@/components/workspace/unsaved";
 
 import { PEOPLE, TIMELINE, fmtDate, fmtDay, personName, type Project, type Task, type TaskStatus } from "../_lib/sample";
-import { canAcceptReview, canAssign, canEditStatus, canManageTask, isOverdue, statusChoices, statusRefusal } from "../_lib/logic";
+import { canAcceptReview, canAssign, canEditStatus, canManageTask, isOverdue, statusRefusal } from "../_lib/logic";
 import { useConcept } from "../_lib/store";
-import { AttentionNote, Notice, TaskStatusBadge } from "./bits";
+import { AttentionNote, Avatar, Notice, TaskStatusBadge } from "./bits";
+import { ChoiceMenu, type Choice } from "./choice-menu";
+import { statusChoicesFor } from "./work-view";
 
-const ASSIGNEES = [{ value: "", label: "Unassigned" }, ...PEOPLE.filter((p) => p.id !== "mina").map((p) => ({ value: p.id, label: p.name }))];
+const ASSIGNEES: Choice[] = [{ value: "", label: "Unassigned" }, ...PEOPLE.filter((p) => p.id !== "mina").map((p) => ({ value: p.id, label: p.name, avatar: p.name }))];
 
 /** One task beside the list. The list behind it keeps its filters, view and scroll; the address holds the task, so Back closes it. */
 export function TaskPanel({ task, project, closeHref, here }: { task: Task; project: Project; closeHref: string; here: string }) {
@@ -63,17 +64,17 @@ export function TaskPanel({ task, project, closeHref, here }: { task: Task; proj
           </section>
         ) : null}
 
-        <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
-          <div><dt className="mb-1 text-muted-foreground">Assignee</dt><dd>{canAssign(persona, task) ? <InlineSelect value={task.assignee ?? ""} options={ASSIGNEES} label="Assignee" onSave={async (n) => ({ error: (await setAssignee(task.id, n || null)) ? null : "Not saved. Your change was not kept." })} /> : <span>{personName(task.assignee)}</span>}</dd></div>
-          <div><dt className="mb-1 text-muted-foreground">Status</dt><dd>{edit ? <InlineSelect value={task.status} options={statusChoices(persona, task)} label="Status" onSave={saveStatus} /> : <TaskStatusBadge status={task.status} />}</dd></div>
+        <dl className="cx-card grid gap-x-6 gap-y-4 p-4 sm:grid-cols-2">
+          <div><dt className="mb-1 text-muted-foreground">Assignee</dt><dd>{canAssign(persona, task) ? <ChoiceMenu label="Assignee" value={task.assignee ?? ""} choices={ASSIGNEES} pill={false} onSave={async (n) => ({ error: (await setAssignee(task.id, n || null)) ? null : "Not saved. Your change was not kept." })} /> : <span className="inline-flex items-center gap-2">{task.assignee ? <Avatar name={personName(task.assignee)} size="sm" /> : null}{personName(task.assignee)}</span>}</dd></div>
+          <div><dt className="mb-1 text-muted-foreground">Status</dt><dd>{edit ? <ChoiceMenu label="Status" value={task.status} choices={statusChoicesFor(persona, task).map((c) => (task.blocked && task.status !== "done" && c.value === task.status ? { ...c, label: "Blocked", tone: "red" as const } : c))} onSave={saveStatus} /> : <TaskStatusBadge status={task.status} blocked={!!task.blocked} />}</dd></div>
           <div><dt className="mb-1 text-muted-foreground">Due</dt><dd className={late ? "font-semibold text-[hsl(var(--cx-amber))]" : ""}>{fmtDate(task.due)}{late ? " · overdue" : ""}</dd></div>
           <div><dt className="mb-1 text-muted-foreground">Milestone or deliverable</dt><dd>{ms ? <Link href={href(here, { tab: "timeline", ms: ms.id, task: null })} scroll={false} className="rounded-sm underline underline-offset-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{ms.title} · {fmtDay(ms.date)}</Link> : <span className="text-muted-foreground">None</span>}</dd></div>
         </dl>
         {!canAssign(persona, task) || !edit ? <p className="-mt-3 text-[13px] text-muted-foreground">{edit ? "Only a manager assigns work." : "You can read this task. Its owner or a manager changes it."}</p> : null}
 
-        {task.description ? <section><h3 className="mb-1 font-heading text-sm font-semibold">Description</h3><p className="whitespace-pre-line text-muted-foreground">{task.description}</p></section> : null}
+        {task.description ? <section className="cx-card p-4"><h3 className="mb-1 font-heading text-sm font-semibold">Description</h3><p className="whitespace-pre-line text-muted-foreground">{task.description}</p></section> : null}
 
-        <section aria-label="Checklist">
+        <section aria-label="Checklist" className="cx-card p-4">
           <h3 className="mb-2 flex items-baseline justify-between font-heading text-sm font-semibold">Checklist <span className="font-sans text-[13px] font-normal text-muted-foreground">{task.checklist.length ? `${done} of ${task.checklist.length} done` : "None"}</span></h3>
           {task.checklist.length ? (
             <ul className="space-y-1">
@@ -89,14 +90,17 @@ export function TaskPanel({ task, project, closeHref, here }: { task: Task; proj
           ) : <p className="text-muted-foreground">No checklist on this task.</p>}
         </section>
 
-        <section aria-label="Comments and activity">
+        <section aria-label="Comments and activity" className="cx-card p-4">
           <h3 className="mb-2 font-heading text-sm font-semibold">Comments and activity</h3>
           {task.activity.length ? (
             <ol className="space-y-3">
               {task.activity.map((a) => (
-                <li key={a.id} className={a.kind === "comment" ? "rounded-lg bg-secondary/50 px-3 py-2.5" : "px-1 text-muted-foreground"}>
-                  <p className={a.kind === "comment" ? "" : "text-[13px]"}><span className="font-medium text-foreground">{personName(a.who)}</span> · <span className="text-muted-foreground">{a.at}</span></p>
-                  <p className={a.kind === "comment" ? "mt-0.5" : "text-[13px]"}>{a.text}</p>
+                <li key={a.id} className="flex gap-3">
+                  <Avatar name={personName(a.who)} />
+                  <div className={`min-w-0 flex-1 ${a.kind === "comment" ? "rounded-xl bg-secondary/50 px-3 py-2" : "py-1 text-muted-foreground"}`}>
+                    <p className="text-[13px]"><span className="font-semibold text-foreground">{personName(a.who)}</span> · {a.at}</p>
+                    <p className={`break-words ${a.kind === "comment" ? "mt-0.5 text-sm text-foreground" : "text-[13px]"}`}>{a.text}</p>
+                  </div>
                 </li>
               ))}
             </ol>
@@ -108,9 +112,9 @@ export function TaskPanel({ task, project, closeHref, here }: { task: Task; proj
           </form>
         </section>
 
-        <details className="group rounded-lg border border-border">
-          <summary className="cursor-pointer select-none rounded-lg px-3 py-2.5 font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">More details</summary>
-          <div className="space-y-4 border-t border-border p-3">
+        <details className="cx-card group">
+          <summary className="cursor-pointer select-none rounded-[14px] px-4 py-3 font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">More details</summary>
+          <div className="space-y-4 border-t border-border p-4">
             <dl className="grid gap-3 sm:grid-cols-2">
               <div><dt className="text-muted-foreground">Team</dt><dd>{task.team}</dd></div>
               <div><dt className="text-muted-foreground">Needs a review before it is done</dt><dd>{task.needsReview ? "Yes" : "No"}</dd></div>

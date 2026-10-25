@@ -46,7 +46,7 @@ export function EquipmentView({ project, lines, here }: { project: Project; line
 
       <dl className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-5" aria-label="Equipment summary">
         {stats.map(([label, n, warn]) => (
-          <div key={label} className={`rounded-lg bg-card px-4 py-3 ${warn ? "ring-1 ring-[hsl(var(--cx-amber)/0.6)]" : ""}`}>
+          <div key={label} className="cx-card cx-stat !block" data-edge={warn ? "amber" : label === "Requested" ? undefined : label === "Returned" ? "muted" : "blue"}>
             <dt className="flex items-center gap-1.5 text-sm text-muted-foreground">{warn ? <AlertTriangle className="h-3.5 w-3.5 text-[hsl(var(--cx-amber))]" aria-hidden /> : null}{label}</dt>
             <dd className="font-heading text-2xl font-semibold tabular-nums">{n}</dd>
           </div>
@@ -57,7 +57,7 @@ export function EquipmentView({ project, lines, here }: { project: Project; line
       <div className="mt-4">
         {lines.length === 0 ? <EmptyNote title="No equipment requested" action={<Button type="button" onClick={() => setAsking(true)}>Request equipment</Button>}>Request what the project needs. The request goes to the warehouse team in the live app.</EmptyNote> : (
           <>
-            <div className="hidden overflow-clip rounded-lg bg-card lg:block">
+            <div className="cx-card hidden p-2 lg:block">
               <table className="cx-table">
                 <caption className="sr-only">Equipment lines</caption>
                 <colgroup><col style={{ width: "30%" }} /><col style={{ width: "10%" }} /><col style={{ width: "10%" }} /><col style={{ width: "11%" }} /><col style={{ width: "10%" }} /><col style={{ width: "29%" }} /></colgroup>
@@ -75,7 +75,7 @@ export function EquipmentView({ project, lines, here }: { project: Project; line
             </div>
             <ul className="space-y-2.5 lg:hidden" aria-label="Equipment lines">
               {lines.map((l) => (
-                <li key={l.id} className="rounded-lg bg-card p-4">
+                <li key={l.id} className="cx-card p-4">
                   <PanelLink href={eqHref(l.id)} className="block break-words font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm">{l.item}</PanelLink>
                   <p className="mt-1 text-sm text-muted-foreground">Requested {l.requested}{l.draft ? "" : ` · Reserved ${l.reserved} · Dispatched ${l.dispatched} · Returned ${l.returned}`}</p>
                   <div className="mt-2"><LineState l={l} /></div>

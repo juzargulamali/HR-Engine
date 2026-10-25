@@ -38,7 +38,7 @@ export function TimelineView({ project, tasks, items, here }: { project: Project
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <nav aria-label="Audience" className="inline-flex gap-0.5 rounded-md border border-border bg-secondary/50 p-0.5">
+        <nav aria-label="Audience" className="cx-card inline-flex gap-0.5 !rounded-lg p-0.5">
           {([["", "All"], ["client", "Client-facing"], ["internal", "Internal"]] as const).map(([v, label]) => (
             <Link key={v} href={patch(v)} scroll={false} aria-current={aud === v ? "page" : undefined} className={`inline-flex h-8 items-center rounded-[5px] px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${aud === v ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>{label}</Link>
           ))}
@@ -54,11 +54,11 @@ export function TimelineView({ project, tasks, items, here }: { project: Project
           return (
             <Fragment key={i.id}>
               {idx === firstFuture ? <li aria-label="Today" className="flex items-center gap-3 py-1 text-[13px] font-semibold text-accent"><span className="h-px flex-1 bg-primary/50" aria-hidden />Today · {fmtDay(TODAY)}<span className="h-px flex-1 bg-primary/50" aria-hidden /></li> : null}
-              <li className={`relative grid gap-x-4 rounded-lg bg-card p-3.5 sm:grid-cols-[7.5rem_1fr] ${open?.id === i.id ? "ring-2 ring-primary" : ""} ${i.kind === "site" ? "border-l-4 border-l-[hsl(var(--cx-info))]" : ""}`}>
+              <li className={`cx-card relative grid gap-x-4 p-3.5 sm:grid-cols-[7.5rem_1fr] ${open?.id === i.id ? "ring-2 ring-primary" : ""} ${i.kind === "site" ? "border-l-4 border-l-[hsl(var(--cx-info))]" : ""}`}>
                 <div className="text-sm text-muted-foreground"><span className="font-medium text-foreground">{fmtDay(i.date)}</span>{timeWords(i) ? <span className="block">{timeWords(i)}</span> : null}</div>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-                    <K.Icon className="h-4 w-4 flex-none text-muted-foreground" aria-hidden />
+                    <span className="cx-node !h-6 !w-6 flex-none" data-state={i.done ? "done" : late(i) ? "late" : "todo"} aria-hidden>{i.done ? <Check className="h-3 w-3" /> : <K.Icon className="h-3 w-3 text-muted-foreground" />}</span>
                     <PanelLink href={msHref(i.id)} className="rounded-sm font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{i.title}</PanelLink>
                     <Badge tone="quiet">{K.label}</Badge>
                     <Badge tone={i.clientFacing ? "cyan" : "neutral"}>{i.clientFacing ? "Client-facing" : "Internal"}</Badge>
@@ -93,7 +93,7 @@ export function TimelineView({ project, tasks, items, here }: { project: Project
             <section aria-label="Related tasks">
               <h3 className="mb-2 font-heading text-sm font-semibold">Tasks for this date</h3>
               {tasks.filter((t) => t.milestoneId === open.id).length ? (
-                <ul className="divide-y divide-border/60 rounded-lg bg-secondary/40">
+                <ul className="divide-y divide-border/60 rounded-xl bg-secondary/40">
                   {tasks.filter((t) => t.milestoneId === open.id).map((t) => (
                     <li key={t.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
                       <PanelLink href={href(here, { task: t.id, ms: null, tab: "timeline" })} className="min-w-0 rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><span className="block truncate">{t.title}</span><span className="text-[13px] text-muted-foreground">{personFirst(t.assignee)}</span></PanelLink>

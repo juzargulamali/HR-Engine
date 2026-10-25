@@ -9,7 +9,7 @@ import { PanelLink } from "@/components/workspace/panel-link";
 import { useUnsavedChanges } from "@/components/workspace/unsaved";
 import { PEOPLE, personFirst, personName, type Message, type Project, type Task } from "../_lib/sample";
 import { useConcept } from "../_lib/store";
-import { Badge, EmptyNote, Notice } from "./bits";
+import { Avatar, Badge, EmptyNote, Notice } from "./bits";
 
 function withMentions(text: string) {
   return text.split(/(@[a-z]+)/gi).map((part, i) => {
@@ -52,7 +52,9 @@ export function DiscussionView({ project, tasks, member, here }: { project: Proj
             const parent = m.replyTo ? list.find((x) => x.id === m.replyTo) : null;
             const task = m.taskId ? tasks.find((t) => t.id === m.taskId) : null;
             return (
-              <li key={m.id} className={`rounded-lg bg-card p-4 ${parent ? "ml-4 sm:ml-8" : ""}`}>
+              <li key={m.id} className={`cx-card flex gap-3 p-4 ${parent ? "ml-4 sm:ml-8" : ""}`}>
+                <Avatar name={personName(m.who)} size="lg" />
+                <div className="min-w-0 flex-1">
                 <p className="text-sm"><span className="font-semibold">{personName(m.who)}</span> <span className="text-muted-foreground">· {m.at}</span></p>
                 {parent ? <p className="mt-1 border-l-2 border-border pl-2.5 text-[13px] text-muted-foreground">Replying to {personFirst(parent.who)}: {parent.text.slice(0, 80)}{parent.text.length > 80 ? "…" : ""}</p> : null}
                 <p className="mt-1.5 whitespace-pre-line break-words text-sm leading-relaxed">{withMentions(m.text)}</p>
@@ -60,13 +62,14 @@ export function DiscussionView({ project, tasks, member, here }: { project: Proj
                   {task ? <PanelLink href={href(here, { tab: "discussion", task: task.id })} className="inline-flex max-w-full items-center gap-1.5 rounded-md bg-secondary/60 px-2 py-1 hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Badge tone="quiet">Task</Badge><span className="truncate">{task.title}</span></PanelLink> : null}
                   <button type="button" onClick={() => { setReplyTo(m); document.getElementById("cx-compose")?.focus(); }} className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Reply className="h-3.5 w-3.5" aria-hidden /> Reply</button>
                 </div>
+                </div>
               </li>
             );
           })}
         </ol>
       )}
 
-      <form onSubmit={send} className="mt-5 rounded-lg bg-card p-4" aria-label="New message">
+      <form onSubmit={send} className="cx-card mt-5 p-4" aria-label="New message">
         {replyTo ? (
           <p className="mb-2 flex items-center justify-between gap-2 rounded-md bg-secondary/50 px-2.5 py-1.5 text-[13px] text-muted-foreground">
             <span className="min-w-0 truncate">Replying to {personFirst(replyTo.who)}: {replyTo.text}</span>

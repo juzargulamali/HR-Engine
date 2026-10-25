@@ -9,16 +9,19 @@ A reviewable concept, not a change to the signed-in app. It lives at `/os-previe
 
 ## Screens
 
-1. **Projects** (`/os-preview/concept`): Table (default) or Board of the same records; search; Stage, Manager and "Needs attention" filters; "More filters" for client/internal, company (founder only) and completed. Columns: reference and name, client or internal, manager, stage, next milestone with date, attention needed. Filters, view and scroll position survive opening a project and coming back.
-2. **Project** (`/os-preview/concept/aurora`): compact header, one "Next" action, four sections (Work, Timeline, Discussion, Equipment), and a "More" menu for settings, people, files, history and completion.
-3. **Task panel** (`?task=t7`): fields first, then checklist, comments and activity; blocker and review states; rare items under "More details". The address holds the task, so Back and Escape close it.
-4. **Phone**: cards instead of tables, full-height panel, "Move to" instead of dragging, filters behind one button.
+The layout, surfaces and colours follow the approved dark and light renders (sidebar and top bar stay dark in both themes).
 
-Open `?as=directory` for the summary-only view, `?as=member` for a team member, `?as=founder` for both companies. "Preview options" also switches theme and shows loading, error and failed-save states.
+1. **Projects** (`/os-preview/concept`): header graphic, search, Stage, Manager and "Needs attention" filters, "More filters", Table (default) or Board. Columns: reference and name, client or internal, manager, stage, next milestone with date, **Attention needed**. Filters, view and scroll position survive opening a project and coming back.
+2. **Project** (`/os-preview/concept/aurora`): header graphic with team, stage and dates; four sections only (Work, Timeline, Discussion, Equipment). Work has three summary cards that are also filters (Open tasks, Need attention, In review; the same counts as the tab badge and the list), a task table or board, a "Next" card, "Next on site", "Team activity" and a milestone strip. Every figure is counted from the sample records.
+3. **Click-to-edit:** the Owner and Status pills in a row (and in the task panel) open a menu of choices. A choice that is not allowed is listed with its reason. Saving shows "Saving…", then "Saved" or a clear failure with "Try again".
+4. **Task panel** (`?task=t7`): fields first, then checklist, comments and activity; blocker and review states; rare items under "More details". The address holds the task, so Back and Escape close it.
+5. **Phone**: compact header, summary cards in one row, task cards, full-height panel, "Move to" instead of dragging.
+
+Open `?as=directory` for the summary-only view, `?as=member` for a team member, `?as=founder` for both companies. The avatar menu ("Preview options") switches who you preview as, the theme, and shows loading, error and failed-save states.
 
 ## Brand and fonts
 
-The repository has the logo and icon files but no brand guide or company profile. The colours extend the app's existing tokens (teal and cyan taken from the logo) and the fonts are the app's existing ones (Manrope, Sora). They are an interpretation, not an official palette. The icon is used unmodified (height set, width automatic) beside the plain words "ENGINIOUS OS". Circuit lines appear only in the top bar and the empty page background.
+The repository has the logo and icon files but no brand guide or company profile. The colours extend the app's existing tokens (teal and cyan taken from the logo) and the fonts are the app's existing ones (Manrope, Sora). They are an interpretation, not an official palette. The full logo file is used unchanged (height set, width automatic) on a light plate in the sidebar, so its dark-teal lettering stays legible. The product name "ENGINIOUS OS" is plain text in the top bar, not a second wordmark. On a phone the logo mark (icon file, unchanged) sits beside it. Fine lines appear only in the header graphic, which keeps its words on a plain area to the left.
 
 ## Checks
 
@@ -26,6 +29,7 @@ The repository has the logo and icon files but no brand guide or company profile
 
 ## Known limitations
 
+- The sidebar items other than Projects open the existing design-preview pages of those modules (they are not part of this concept).
 - Add project, settings, people and access, files, history, completion, date changes and sending a request only explain that they are outside the concept.
 - Axe reports one minor finding on the panels: the shared SidePanel uses `role="dialog"` on an `<aside>`. It is the same in the live app and was left alone.
 - The Board component (shared) scrolls sideways inside its own region when five stage columns do not fit.
