@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlarmClock, CalendarClock, CalendarDays, ClipboardCheck, FolderKanban, Inbox, ReceiptText, UserPlus, Users } from "lucide-react";
+import { AlarmClock, CalendarClock, CalendarDays, ClipboardCheck, FolderKanban, Inbox, Layers, PackageCheck, ReceiptText, ShoppingBag, UserPlus, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
   canCreateEmployee,
@@ -18,24 +18,35 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentWeather } from "@/lib/weather";
 import { Alert } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
+import { OsHero } from "@/components/os/hero";
+import { OsScope } from "@/components/os/scope";
+import { OsStatCard } from "@/components/os/stat-card";
+import { DecisionsCard } from "@/components/my-day/decisions-card";
+import { DeliveryWeekCard } from "@/components/my-day/delivery-week";
+import { HrAttention, HrStatCards, QuickActions, TeamDistribution } from "@/components/my-day/hr-section";
+import { NextDispatch } from "@/components/my-day/next-dispatch";
+import { PeopleToday } from "@/components/my-day/people-today";
+import { ProjectHealth } from "@/components/my-day/project-health";
+import { SalesPipeline } from "@/components/my-day/sales-pipeline";
+import { splitActions, sumCounts } from "@/lib/my-day/groups";
+import { loadEquipment, loadLiveClock, loadPortfolio, type Equipment, type Portfolio } from "@/lib/my-day/loaders";
+import type { LiveSummary } from "@/lib/my-day/live";
 import { cn } from "@/lib/utils";
 import { logServerError } from "@/lib/log";
 import { BirthdaysSection } from "./birthdays-section";
 import { getCompanySnapshot } from "./dashboard-data";
-import { WorkforceSnapshot } from "./workforce-snapshot";
 import { CompanyComparisonTable } from "./company-comparison-table";
 import { attendanceSentence, CALENDAR_NOTE } from "./attendance-summary";
-import { ActionCentre, attentionSentence, buildActionItems, type ActionItem } from "./action-centre";
+import { attentionSentence, buildActionItems, type ActionItem } from "./action-centre";
 import { AttendanceClockCard } from "./attendance-clock-card";
 import { AttendanceCompletionBar } from "./attendance-completion-bar";
 import { UpcomingSection } from "./upcoming-section";
 import { DashboardHeader } from "./dashboard-header";
-import { SalesToday } from "./sales-today";
 import { loadSalesToday } from "@/lib/crm/my-day";
 import { getProjectsContext } from "@/lib/projects/context";
 import { projectDayRows } from "@/lib/projects/my-day";
 import { loadProjectsAttention } from "@/lib/projects/my-work";
-import { ProjectsToday } from "./projects-today";
+import type { ProjectsContext } from "@/lib/projects/context";
 
 export const metadata = { title: "My Day" };
 
@@ -236,6 +247,17 @@ export default async function DashboardPage() {
     },
   );
 
+  // LIVE clock status (open sessions), for the people the overview covers. Separate from the recorded attendance in `totals`.
+  let live: LiveSummary | "error" | null = null;
+  if (showHrView && !hrSectionError) {
+    try {
+      live = await loadLiveClock(new Set(snapshots.flatMap((snap) => snap.employees.map((e) => e.id))));
+    } catch (e) {
+      logServerError({ route: ROUTE, operation: "load live clock status" }, e);
+      live = "error";
+    }
+  }
+
   // Real, permission-scoped, and role-prioritized — never a decorative
   // default. "Approving" outranks everything else since it's blocking
   // someone else's work; HR's own creation flow comes next; a plain
@@ -267,13 +289,35 @@ export default async function DashboardPage() {
 
   // Projects & Tasks for people with Projects access (null for everyone else, and when it is not installed). Real counts only.
   let projectRows: ReturnType<typeof projectDayRows> | "error" | null = null;
+  let projectsCtx: ProjectsContext | null = null;
   try {
-    const projectsCtx = await getProjectsContext();
+    projectsCtx = await getProjectsContext();
     if (projectsCtx?.installed && projectsCtx.grants.length > 0) projectRows = projectDayRows(await loadProjectsAttention(projectsCtx));
   } catch (e) {
     console.error("[projects] my day load failed", e);
     projectRows = "error";
   }
+  const hasProjects = projectRows !== null && !!projectsCtx?.installed && projectsCtx.grants.length > 0;
+  let portfolio: Portfolio | "error" | null = null;
+  if (hasProjects && projectsCtx) {
+    try {
+      portfolio = await loadPortfolio(projectsCtx, today);
+    } catch (e) {
+      console.error("[projects] my day portfolio failed", e);
+      portfolio = "error";
+    }
+  }
+  // Equipment requests for people with Inventory access (null otherwise, and when Inventory is not installed).
+  let equipment: Equipment | "error" | null = null;
+  try {
+    equipment = await loadEquipment();
+  } catch (e) {
+    console.error("[inventory] my day equipment failed", e);
+    equipment = "error";
+  }
+  const quietProjectItems: ActionItem[] = Array.isArray(projectRows)
+    ? projectRows.filter((r) => !r.needsYou).map((r) => ({ key: r.key, icon: FolderKanban, label: r.label, count: r.count, href: r.href }))
+    : [];
   const projectActionItems: ActionItem[] = Array.isArray(projectRows)
     ? projectRows.filter((r) => r.needsYou).map((r) => ({ key: r.key, icon: FolderKanban, label: r.label, count: r.count, href: r.href }))
     : [];
@@ -286,11 +330,9 @@ export default async function DashboardPage() {
     extraItems: [...salesActionItems, ...projectActionItems],
   });
 
-  const summarySentence = hrSectionError
-    ? "Workforce data couldn't be loaded right now — the numbers below may be incomplete."
-    : showHrView
-      ? `${attendanceSentence(totals)} ${attentionSentence(actionItems)}`
-      : attentionSentence(actionItems);
+  const summarySentence = hrSectionError ? "Workforce data couldn't be loaded right now — the numbers below may be incomplete." : attentionSentence(actionItems);
+  const groups = splitActions(actionItems);
+  const decisionsWaiting = sumCounts(groups.decision);
 
   // Cross-company CEO/HR view -> Dubai; an employee-only view -> that
   // employee's own company's country (myCountryCode, resolved above
@@ -308,44 +350,50 @@ export default async function DashboardPage() {
   const headerInitialDateLabel = formatBusinessDateLong(dashboardTimeZone, now);
   const headerInitialTimeLabel = formatBusinessTime(dashboardTimeZone, now);
 
+  const stats: React.ReactNode[] = [];
+  if (hasProjects) {
+    stats.push(<OsStatCard key="projects" href="/projects" label="Active projects" value={portfolio && portfolio !== "error" ? portfolio.activeCount : "—"} icon={Layers} edge="blue" hint={portfolio === "error" ? "Could not be loaded" : undefined} />);
+  }
+  if (salesToday.status === "ok") {
+    stats.push(<OsStatCard key="sales" href="/sales/opportunities" label="Open enquiries" value={salesToday.data.openCount} icon={ShoppingBag} edge="cyan" />);
+  } else if (salesToday.status === "error") {
+    stats.push(<OsStatCard key="sales" href="/sales/opportunities" label="Open enquiries" value="—" icon={ShoppingBag} edge="cyan" hint="Could not be loaded" />);
+  }
+  stats.push(<OsStatCard key="decisions" href="#decisions" label="Decisions waiting" value={decisionsWaiting} icon={ClipboardCheck} edge="amber" />);
+  if (equipment && equipment !== "error") {
+    stats.push(<OsStatCard key="equipment" href="/inventory/requests" label="Live equipment requests" value={equipment.summary.live} icon={PackageCheck} edge="cyan" hint={equipment.summary.withShortage > 0 ? `${equipment.summary.withShortage} with a shortage` : undefined} />);
+  } else if (equipment === "error") {
+    stats.push(<OsStatCard key="equipment" href="/inventory/requests" label="Live equipment requests" value="—" icon={PackageCheck} edge="cyan" hint="Could not be loaded" />);
+  }
+  const hasLeft = hasProjects || salesToday.status !== "none";
+  const statCols = ({ 1: "xl:grid-cols-1", 2: "xl:grid-cols-2", 3: "xl:grid-cols-3", 4: "xl:grid-cols-4" } as Record<number, string>)[Math.min(4, stats.length)];
+
   return (
-    <div className="space-y-8">
+    <OsScope className="space-y-4">
       {isMyBirthdayToday ? (
         <Alert variant="success">
           <span className="font-heading font-semibold">Enginious wishes you a very Happy Birthday{firstName ? `, ${firstName}` : ""}!</span>
         </Alert>
       ) : null}
 
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h1 className="font-heading text-2xl font-bold sm:text-3xl">
-            Good {greetingPeriod(getBusinessHour(dashboardTimeZone, now))}
-            {firstName ? `, ${firstName}` : ""}
-          </h1>
-          <div className="mt-1">
-            <DashboardHeader
-              timeZone={dashboardTimeZone}
-              locationLabel={headerLocationLabel}
-              initialDateLabel={headerInitialDateLabel}
-              initialTimeLabel={headerInitialTimeLabel}
-              weather={headerWeather}
-            />
-          </div>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground sm:text-base">{summarySentence}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Link href={primaryAction.href} className={cn(buttonVariants({ variant: "default" }))}>
-            <primaryAction.icon className="h-4 w-4" aria-hidden />
-            {primaryAction.label}
+      <OsHero
+        title={`Good ${greetingPeriod(getBusinessHour(dashboardTimeZone, now))}${firstName ? `, ${firstName}` : ""}`}
+        sub={summarySentence}
+        meta={
+          <DashboardHeader timeZone={dashboardTimeZone} locationLabel={headerLocationLabel} initialDateLabel={headerInitialDateLabel} initialTimeLabel={headerInitialTimeLabel} weather={headerWeather} />
+        }
+      >
+        <Link href={primaryAction.href} className={cn(buttonVariants({ variant: "default" }))}>
+          <primaryAction.icon className="h-4 w-4" aria-hidden />
+          {primaryAction.label}
+        </Link>
+        {secondaryActions.map((action) => (
+          <Link key={action.href} href={action.href} className={cn(buttonVariants({ variant: "outline" }))}>
+            <action.icon className="h-4 w-4" aria-hidden />
+            {action.label}
           </Link>
-          {secondaryActions.map((action) => (
-            <Link key={action.href} href={action.href} className={cn(buttonVariants({ variant: "outline" }))}>
-              <action.icon className="h-4 w-4" aria-hidden />
-              {action.label}
-            </Link>
-          ))}
-        </div>
-      </header>
+        ))}
+      </OsHero>
 
       {hrSectionError ? (
         <Alert variant="warning">
@@ -354,62 +402,68 @@ export default async function DashboardPage() {
         </Alert>
       ) : null}
 
-      {/* The clock comes first on a phone (order-1); on a wide screen it and today's attendance completion share the right-hand column
-          beside what needs attention. */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        {session.employeeId ? (
-          <div className="order-1 lg:col-start-3 lg:row-start-1">
-            <AttendanceClockCard employeeId={session.employeeId} />
-          </div>
-        ) : null}
-        <div className="order-2 space-y-6 lg:col-span-2 lg:col-start-1 lg:row-span-3 lg:row-start-1">
-          <ActionCentre title="Needs you today" items={actionItems} />
-          <SalesToday result={salesToday} />
-          <ProjectsToday rows={projectRows} />
-          {showHrView ? <UpcomingSection holidays={upcomingHolidays} onLeaveToday={onLeaveToday} /> : null}
+      <ul className={cn("grid grid-cols-2 gap-3", statCols)} aria-label="Today at a glance">
+        {stats.map((card, n) => <li key={n} className={stats.length % 2 === 1 && n === stats.length - 1 ? "col-span-2 xl:col-span-1" : undefined}>{card}</li>)}
+      </ul>
+
+      {/* On a phone the order is what needs you first, then the clock; on a wide screen the left column is the week and the pipeline, the right one what waits on you. */}
+      <div className={cn("flex flex-col gap-4 xl:items-start", hasLeft ? "xl:grid xl:grid-cols-[minmax(0,68fr)_minmax(0,32fr)]" : "xl:grid xl:grid-cols-1")}>
+        <div className="contents xl:flex xl:min-w-0 xl:flex-col xl:gap-4">
+          {hasProjects ? <div className="order-4 min-w-0 xl:order-none"><DeliveryWeekCard week={portfolio === "error" || portfolio === null ? "error" : portfolio.delivery} /></div> : null}
+          {hasProjects || salesToday.status !== "none" ? (
+            <div className={cn("order-5 grid min-w-0 gap-4 xl:order-none", hasProjects && salesToday.status !== "none" && "md:grid-cols-2")}>
+              {salesToday.status !== "none" ? <SalesPipeline result={salesToday} /> : null}
+              {hasProjects ? <ProjectHealth portfolio={portfolio ?? "error"} /> : null}
+            </div>
+          ) : null}
         </div>
-        {showHrView ? (
-          <div className="order-3 lg:col-start-3">
-            <AttendanceCompletionBar
-              present={totals.presentCount}
-              leave={totals.leaveCount}
-              absent={totals.absentCount}
-              notRecorded={totals.notRecordedScheduledCount}
-              rest={totals.notRecordedRestCount}
-              unknown={totals.notRecordedUnknownCount}
-            />
-          </div>
-        ) : null}
+        <div className={cn("contents xl:min-w-0", hasLeft ? "xl:flex xl:flex-col xl:gap-4" : "xl:grid xl:grid-cols-3 xl:items-start xl:gap-4")}>
+          <div className="order-1 min-w-0 xl:order-none"><DecisionsCard decisions={groups.decision} other={[...groups.other, ...quietProjectItems]} /></div>
+          {session.employeeId ? <div className="order-2 min-w-0 xl:order-none"><AttendanceClockCard employeeId={session.employeeId} /></div> : null}
+          {showHrView && live !== null ? <div className="order-3 min-w-0 xl:order-none"><PeopleToday live={live} /></div> : null}
+          {equipment !== null ? <div className="order-6 min-w-0 xl:order-none"><NextDispatch equipment={equipment} /></div> : null}
+        </div>
       </div>
 
       {showHrView ? (
-        <section aria-labelledby="hr-today" className="space-y-6">
-          <h2 id="hr-today" className="font-heading text-xl font-semibold">
-            People &amp; HR today
-          </h2>
-          <p className="-mt-3 text-sm text-muted-foreground">{CALENDAR_NOTE}</p>
-          <WorkforceSnapshot
-            totalEmployees={totals.totalEmployees}
-            presentCount={totals.presentCount}
-            leaveCount={totals.leaveCount}
-            notRecordedScheduledCount={totals.notRecordedScheduledCount}
-            notRecordedRestCount={totals.notRecordedRestCount}
-            notRecordedUnknownCount={totals.notRecordedUnknownCount}
-            leaveRequestsAwaitingDecision={totals.leaveRequestsAwaitingDecision}
-          />
-
-          <CompanyComparisonTable
-            snapshots={snapshots}
-            canAssignByCompany={Object.fromEntries(overviewCompanies.map((c) => [c.id, canCreateEmployee(session.grants, c.id)]))}
-          />
-
-          <BirthdaysSection />
+        <section aria-labelledby="hr-today" className="space-y-4 pt-2">
+          <div>
+            <h2 id="hr-today" className="font-heading text-xl font-semibold">
+              People &amp; HR today
+            </h2>
+            <p className="text-sm text-muted-foreground">{CALENDAR_NOTE}</p>
+          </div>
+          <HrStatCards employees={totals.totalEmployees} present={totals.presentCount} onLeave={totals.leaveCount} leaveInReview={totals.leaveRequestsAwaitingDecision} />
+          <div className="flex flex-col gap-4 xl:grid xl:grid-cols-[minmax(0,68fr)_minmax(0,32fr)] xl:items-start">
+            <div className="min-w-0 space-y-4">
+              <AttendanceCompletionBar
+                sentence={hrSectionError ? null : attendanceSentence(totals)}
+                present={totals.presentCount}
+                leave={totals.leaveCount}
+                absent={totals.absentCount}
+                notRecorded={totals.notRecordedScheduledCount}
+                rest={totals.notRecordedRestCount}
+                unknown={totals.notRecordedUnknownCount}
+              />
+              <CompanyComparisonTable
+                snapshots={snapshots}
+                canAssignByCompany={Object.fromEntries(overviewCompanies.map((c) => [c.id, canCreateEmployee(session.grants, c.id)]))}
+              />
+              <UpcomingSection holidays={upcomingHolidays} onLeaveToday={onLeaveToday} />
+              <BirthdaysSection />
+            </div>
+            <div className="min-w-0 space-y-4">
+              <TeamDistribution byCountry={snapshots.filter((snap) => !snap.error).map((snap) => ({ countryCode: snap.countryCode, employees: snap.totalEmployees }))} />
+              <HrAttention items={groups.hr} />
+              <QuickActions />
+            </div>
+          </div>
         </section>
       ) : null}
 
       {/* The sidebar already lists these; this is only a quiet reminder, with no figures. */}
-      <p className="text-sm text-muted-foreground">Coming soon to ENGINIOUS OS: Inventory, Vendors &amp; Purchasing and KPIs.</p>
-    </div>
+      <p className="text-sm text-muted-foreground">Coming soon to ENGINIOUS OS: Vendors &amp; Purchasing and KPIs.</p>
+    </OsScope>
   );
 }
 

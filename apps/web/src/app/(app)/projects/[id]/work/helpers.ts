@@ -60,13 +60,8 @@ export const isTaskOverdue = (t: Pick<ProjTaskRow, "status" | "due_date">, today
 /** An open task that is blocked or overdue: the same definition for the summary card, the count and the filter behind it. */
 export const needsAttention = (t: Pick<ProjTaskRow, "status" | "due_date" | "blocked_at">, today: string) => isOpenTask(t.status) && (!!t.blocked_at || isTaskOverdue(t, today));
 
-/** Monday to Sunday of the week that contains `today`, as plain dates (no time zone, no local-time Date objects). */
-export function weekWindow(today: string): { start: string; end: string } {
-  const d = new Date(`${today}T00:00:00Z`);
-  const back = (d.getUTCDay() + 6) % 7; // Monday = 0
-  const iso = (offset: number) => new Date(d.getTime() + offset * 86_400_000).toISOString().slice(0, 10);
-  return { start: iso(-back), end: iso(6 - back) };
-}
+export { weekWindow } from "@/lib/projects/week";
+import { weekWindow } from "@/lib/projects/week";
 
 /** "This week": an open task due by the end of this week, so overdue work is always in it. Undated tasks are not (they stay under All tasks). */
 export const isDueThisWeekOrOverdue = (t: Pick<ProjTaskRow, "status" | "due_date">, today: string) => isOpenTask(t.status) && !!t.due_date && t.due_date <= weekWindow(today).end;
