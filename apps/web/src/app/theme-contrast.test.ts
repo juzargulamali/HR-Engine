@@ -125,3 +125,12 @@ describe("theme structure", () => {
     expect(ratio(chrome["ring"]!, chrome["chrome"]!)).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe.each([["dark (v2 pages)", THEMES["dark (v2 pages)"]], ["light (v2 pages)", THEMES["light (v2 pages)"]]] as const)("%s chart fills are readable shapes", (_name, t) => {
+  const fills = ["fill-teal", "fill-blue", "fill-amber", "fill-red", "fill-green"] as const;
+  it.each(fills)("%s is at least 3:1 against the card and the table surface it is drawn on (WCAG non-text contrast)", (f) => {
+    expect(t[f], `${f} is defined`).toBeTruthy();
+    expect(ratio(t[f]!, t.card!)).toBeGreaterThanOrEqual(3);
+    expect(ratio(t[f]!, t.field!)).toBeGreaterThanOrEqual(3);
+  });
+});

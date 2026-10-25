@@ -1,8 +1,8 @@
 import "server-only";
-import { isCrmOpen } from "@enginious-hr/domain";
+import { crmStageLabel, isCrmOpen } from "@enginious-hr/domain";
 import { getCrmContext } from "./context";
 import { loadFollowUps, loadOpportunities } from "./data";
-import { attentionItems, type AttentionItem } from "./reports";
+import { attentionItems, openPipelineByStage, type AttentionItem } from "./reports";
 
 export interface SalesToday {
   /** Items the signed-in person owns or is assigned, most urgent first. */
@@ -13,6 +13,8 @@ export interface SalesToday {
   /** Open opportunities visible to this person across the companies they hold a Sales grant for. */
   openCount: number;
   opportunityCount: number;
+  /** Open opportunities by stage, as on the Enquiries board (the six working stages, then On hold). Counts only: no values are read here. */
+  pipeline: { stage: string; label: string; count: number }[];
 }
 
 export type SalesTodayResult = { status: "none" } | { status: "error" } | { status: "ok"; data: SalesToday };
@@ -38,6 +40,7 @@ export async function loadSalesToday(): Promise<SalesTodayResult> {
         noFirstResponse: count("no_first_response"),
         openCount: opportunities.filter((o) => isCrmOpen(o.opp.stage)).length,
         opportunityCount: opportunities.length,
+        pipeline: openPipelineByStage(opportunities.map((i) => ({ ...i.opp, value: i.value }))).map((b) => ({ stage: b.stage, label: crmStageLabel(b.stage), count: b.count })),
       },
     };
   } catch (e) {

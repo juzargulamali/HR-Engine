@@ -89,11 +89,11 @@ export function CompanyComparisonTable({
                     </Badge>
                   ) : null}
                 </span>
-                <span className="text-right sm:text-right">{s.totalEmployees}</span>
-                <span className="text-right text-success">{s.presentCount}</span>
-                <span className="text-right">{s.leaveCount}</span>
-                <span className={cn("text-right", s.notRecordedScheduledCount > 0 && "text-warning")}>{s.notRecordedScheduledCount}</span>
-                <span className={cn("text-right", s.leaveRequestsAwaitingDecision > 0 && "text-accent")}>{s.leaveRequestsAwaitingDecision}</span>
+                <span className="flex justify-between gap-2 sm:block sm:text-right"><span className="text-muted-foreground sm:hidden">Employees</span>{s.totalEmployees}</span>
+                <span className="flex justify-between gap-2 text-success sm:block sm:text-right"><span className="text-muted-foreground sm:hidden">Present</span>{s.presentCount}</span>
+                <span className="flex justify-between gap-2 sm:block sm:text-right"><span className="text-muted-foreground sm:hidden">On leave</span>{s.leaveCount}</span>
+                <span className={cn("flex justify-between gap-2 sm:block sm:text-right", s.notRecordedScheduledCount > 0 && "text-warning")}><span className="text-muted-foreground sm:hidden">No record</span>{s.notRecordedScheduledCount}</span>
+                <span className={cn("flex justify-between gap-2 sm:block sm:text-right", s.leaveRequestsAwaitingDecision > 0 && "text-accent")}><span className="text-muted-foreground sm:hidden">In review</span>{s.leaveRequestsAwaitingDecision}</span>
                 <ChevronDown className={cn("hidden h-4 w-4 justify-self-end text-muted-foreground transition-transform duration-150 sm:block", isOpen && "rotate-180")} aria-hidden />
               </button>
               {isOpen ? (

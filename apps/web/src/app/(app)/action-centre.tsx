@@ -1,9 +1,5 @@
-import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { CalendarClock, ClipboardCheck, FileClock, IdCard, ShieldCheck } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { EmptyState } from "@/components/ui/empty-state";
 
 export type ActionItem = {
   key: string;
@@ -58,36 +54,4 @@ export function attentionSentence(items: readonly ActionItem[]): string {
   const total = items.reduce((n, i) => n + i.count, 0);
   if (total === 0) return "Nothing needs your attention right now.";
   return `Your updates for today: ${total} ${total === 1 ? "item needs" : "items need"} your attention.`;
-}
-
-export function ActionCentre({ items, title = "Needs your attention" }: { items: readonly ActionItem[]; title?: string }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {items.length === 0 ? (
-          <EmptyState dense title="Nothing needs your attention right now." description="New approvals or expiring items will show up here." />
-        ) : (
-          <ul className="divide-y divide-border">
-            {items.map((item) => (
-              <li key={item.key}>
-                <Link
-                  href={item.href}
-                  className="flex items-center justify-between gap-3 rounded-md px-2 py-3 text-sm transition-colors hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <span className="flex items-center gap-2.5">
-                    <item.icon className="h-4 w-4 flex-none text-muted-foreground" aria-hidden />
-                    {item.label}
-                  </span>
-                  <Badge variant="warning">{item.count}</Badge>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
-  );
 }

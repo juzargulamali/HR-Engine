@@ -18,6 +18,7 @@ const SEGMENTS = [
  * state instead of an empty bar.
  */
 export function AttendanceCompletionBar({
+  sentence,
   present,
   leave,
   absent,
@@ -25,6 +26,8 @@ export function AttendanceCompletionBar({
   rest,
   unknown,
 }: {
+  /** The one-sentence reading of today's recorded attendance (null when it could not be loaded). */
+  sentence?: string | null;
   present: number;
   leave: number;
   absent: number;
@@ -42,14 +45,15 @@ export function AttendanceCompletionBar({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Today&apos;s attendance completion</CardTitle>
+        <CardTitle>Attendance today</CardTitle>
       </CardHeader>
       <CardContent>
         {total === 0 ? (
           <EmptyState dense title="No active employees yet." description="Attendance completion will appear once employees are on record." />
         ) : (
           <div className="space-y-3">
-            <svg viewBox="0 0 100 10" width="100%" height="14" role="img" aria-label={`${present} of ${total} employees present today`} preserveAspectRatio="none">
+            {sentence ? <p className="text-sm">{sentence}</p> : null}
+            <svg viewBox="0 0 100 10" width="100%" height="14" className="rounded-full" role="img" aria-label={`${present} of ${total} employees present today`} preserveAspectRatio="none">
               <title>Attendance completion for today</title>
               {(() => {
                 let x = 0;

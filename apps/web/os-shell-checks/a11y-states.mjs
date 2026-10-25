@@ -81,6 +81,8 @@ const pages = [
   ["mgr@e2e.local", "/projects"], ["mgr@e2e.local", "/projects?view=board"], ["hr@e2e.local", "/projects/work"],
   ["mgr@e2e.local", `/projects/${PRJ}`], ["mgr@e2e.local", `/projects/${PRJ}/work`], ["mgr@e2e.local", `/projects/${PRJ}/work?task=${TASK}`],
   ["mgr@e2e.local", `/projects/${PRJ}/plan`], ["mgr@e2e.local", `/projects/${PRJ}/discussion`],
+  // My Day: the CEO overview with People & HR below, an HR admin, a manager and an employee (best run on seed/my-day.sh, which has the richest data)
+  ["ceo@e2e.local", "/"], ["hr@e2e.local", "/"], ["mgr@e2e.local", "/"], ["emp@e2e.local", "/"],
 ];
 for (const [vp, size] of [["desktop", { width: 1280, height: 900 }], ["phone", { width: 390, height: 844 }]]) {
   for (const theme of ["dark", "light"]) {
