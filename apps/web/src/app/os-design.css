@@ -366,6 +366,9 @@ html[data-theme="light"] .os-pill[data-tone="red"] { color: hsl(355 68% 32%); }
 html[data-theme="light"] .os-badge[data-tone="blue"] { color: hsl(213 80% 30%); }
 html[data-theme="light"] .os-badge[data-tone="amber"] { color: hsl(30 95% 19%); }
 html[data-theme="light"] .os-badge[data-tone="red"] { color: hsl(355 68% 32%); }
+html[data-theme="light"] .os-badge[data-tone="cyan"] { color: hsl(180 90% 15%); }
+html[data-theme="light"] .os-badge[data-tone="green"] { color: hsl(152 70% 18%); }
+html[data-theme="light"] .os-pill[data-tone="green"] { color: hsl(152 70% 18%); }
 
 /* Form selects sit on the darker field colour instead of relying on a bright edge; the edge stays at the 3:1 the tokens guarantee. */
 .os-v2 select:not([multiple]) { background-color: hsl(var(--field)); }

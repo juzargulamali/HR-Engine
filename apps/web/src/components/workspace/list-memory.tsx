@@ -42,15 +42,19 @@ export function RememberList({ section }: { section: string }) {
     window.addEventListener("scroll", onScroll, { passive: true });
     const wanted = read(key(section, "restore")) === "1" ? Number(read(key(section, "y"))) : 0;
     write(key(section, "restore"), null);
-    let tries = 0, timer: ReturnType<typeof setTimeout> | undefined;
+    // The page may still be rendering, and the router scrolls to the top once the navigation has finished: keep putting the place back for
+    // about two and a half seconds, and stop at once when the person scrolls or presses a key themselves.
+    let cancelled = false, tries = 0, timer: ReturnType<typeof setTimeout> | undefined;
+    const stop = () => { cancelled = true; };
+    const inputs = ["wheel", "touchstart", "keydown", "mousedown"] as const;
+    if (wanted > 0) inputs.forEach((e) => window.addEventListener(e, stop, { passive: true, once: true }));
     const restore = () => {
-      if (!(wanted > 0)) return;
-      window.scrollTo({ top: wanted, behavior: "auto" });
-      // The list may still be rendering: try again a few times until the page is tall enough.
-      if (Math.abs(window.scrollY - wanted) > 4 && tries++ < 12) timer = setTimeout(restore, 80);
+      if (cancelled || !(wanted > 0)) return;
+      if (Math.abs(window.scrollY - wanted) > 4) window.scrollTo({ top: wanted, behavior: "auto" });
+      if (tries++ < 30) timer = setTimeout(restore, 80);
     };
     restore();
-    return () => { window.removeEventListener("scroll", onScroll); if (frame) cancelAnimationFrame(frame); if (timer) clearTimeout(timer); };
+    return () => { window.removeEventListener("scroll", onScroll); inputs.forEach((e) => window.removeEventListener(e, stop)); cancelled = true; if (frame) cancelAnimationFrame(frame); if (timer) clearTimeout(timer); };
   }, [section]);
   return null;
 }
