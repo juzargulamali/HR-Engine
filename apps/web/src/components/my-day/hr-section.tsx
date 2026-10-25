@@ -27,7 +27,7 @@ export function TeamDistribution({ byCountry }: { byCountry: { countryCode: stri
   return (
     <MyDayCard title="Team distribution" label="Team distribution by country">
       {merged.length === 0 ? <p className="text-sm text-muted-foreground">No employees on record yet.</p> : (
-        <OsDonut caption="Employees by country" size={140} segments={merged.map(([code, value], i) => ({ key: code, label: COUNTRY_NAMES[code] ?? code, value, color: RING[i % RING.length]! }))} center={<span className="px-2 text-[13px] leading-tight text-muted-foreground">by company country</span>} />
+        <OsDonut caption="Employees by country" size={140} segments={merged.map(([code, value], i) => ({ key: code, label: COUNTRY_NAMES[code] ?? code, value, color: RING[i % RING.length]! }))} center={<span className="max-w-[62%] text-[13px] font-medium leading-tight text-muted-foreground">By country</span>} />
       )}
     </MyDayCard>
   );

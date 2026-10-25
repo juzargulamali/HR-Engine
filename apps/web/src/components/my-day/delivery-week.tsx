@@ -40,7 +40,7 @@ export function DeliveryWeekCard({ week }: { week: DeliveryWeek | "error" }) {
             <div className="px-3 py-2">Project</div>
             <div className="grid grid-cols-7">
               {week.days.map((d) => (
-                <div key={d.iso} className={cn("px-1 py-1.5 text-center leading-tight", d.col === week.todayCol && "text-foreground")}>
+                <div key={d.iso} className={cn("px-1 py-1.5 text-center leading-tight", d.col === week.todayCol && "bg-[hsl(var(--fill-teal)/0.16)] text-foreground")}>
                   <div>{dayName(d.iso)}</div><div className="font-normal">{dayDate(d.iso)}</div>
                 </div>
               ))}
@@ -81,8 +81,7 @@ function GridRow({ row, todayCol }: { row: DeliveryRow; todayCol: number | null 
         <p className="truncate text-[12.5px] text-muted-foreground">{row.project.reference}{row.project.pmName ? ` · ${row.project.pmName}` : ""}</p>
       </div>
       <div className="relative grid grid-cols-7 content-center gap-y-1 py-2" style={{ gridTemplateRows: `repeat(${row.lanes + (row.marks.length > 0 ? 1 : 0)}, 1.5rem)` }}>
-        {Array.from({ length: 7 }, (_, c) => <div key={c} className="pointer-events-none border-l border-border/50 first:border-l-0" style={{ gridColumn: c + 1, gridRow: `1 / span ${row.lanes + (row.marks.length > 0 ? 1 : 0)}` }} />)}
-        {todayCol !== null ? <div className="pointer-events-none z-10 w-0.5 justify-self-center bg-[hsl(var(--fill-teal))]" style={{ gridColumn: todayCol + 1, gridRow: `1 / span ${row.lanes + (row.marks.length > 0 ? 1 : 0)}` }} /> : null}
+        {Array.from({ length: 7 }, (_, c) => <div key={c} className={cn("pointer-events-none border-l border-border/50 first:border-l-0", c === todayCol && "bg-[hsl(var(--fill-teal)/0.10)]")} style={{ gridColumn: c + 1, gridRow: `1 / span ${row.lanes + (row.marks.length > 0 ? 1 : 0)}` }} />)}
         {row.bars.map((b) => (
           <div key={b.id} title={`${b.title} (${BAR_WORDS[b.status]})`} className={cn("z-[5] mx-0.5 flex min-w-0 items-center border px-2 text-[12.5px] font-medium", BAR_STYLE[b.status], b.cutStart ? "rounded-l-none" : "rounded-l-full", b.cutEnd ? "rounded-r-none" : "rounded-r-full")} style={{ gridColumn: `${b.col + 1} / span ${b.span}`, gridRow: b.lane + 1 }}>
             <span className="truncate">{b.title}</span>
