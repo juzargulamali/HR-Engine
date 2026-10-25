@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { DeliverableStatusBadge, MilestoneStatusBadge } from "@/components/projects/badges";
+import { OsFilterBar } from "@/components/os/filter-bar";
 import { OsStatCard } from "@/components/os/stat-card";
 import { Fact, Muted, Panel } from "@/components/projects/parts";
 import { MilestoneStrip, NextActionCard, NextOnSiteCard, type ActionItem } from "@/components/projects/work-parts";
@@ -19,7 +20,6 @@ import {
   type TaskGroup, type TaskRowData,
 } from "@/components/projects/tasks/task-logic";
 import { ColumnsMenu } from "@/components/workspace/columns-menu";
-import { ListToolbar } from "@/components/workspace/list-toolbar";
 import { LoadError } from "@/components/workspace/states";
 import { PanelLink } from "@/components/workspace/panel-link";
 import { firstParam, paramsToRecord, parseColumns, parseView, withParams } from "@/components/workspace/url-state";
@@ -167,7 +167,9 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
 
   const openMilestones = current.ms === "1" || ms.length === 0;
   const taskCountWords = `${allTasks.length} task${allTasks.length === 1 ? "" : "s"}`;
-
+  const viewAll = (
+    <Link href={allHref} scroll={false} className={buttonVariants({ variant: "outline", size: "sm" })}>View all tasks ({allTasks.length})</Link>
+  );
   const addControls = (
     <>
       {canManage ? <PlanAddMenu projectId={id} teams={teamOptions} milestones={milestoneOptions} /> : null}
@@ -176,24 +178,33 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
       ) : null}
     </>
   );
+  const listTitle = weekMode ? "This week" : "Tasks";
+
+  /** A compact empty state inside the task card: one line of words and the two ways forward. */
+  const emptyList = (
+    <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-xl border border-border bg-[hsl(var(--field))] px-4 py-4">
+      <div className="flex min-w-0 flex-1 basis-60 items-start gap-3">
+        <ListChecks className="mt-0.5 h-5 w-5 flex-none text-muted-foreground" aria-hidden />
+        <div className="min-w-0">
+          <p className="font-medium">{allTasks.length === 0 ? "No tasks yet" : weekMode ? "Nothing due this week" : "No tasks match"}</p>
+          <p className="text-sm text-muted-foreground">
+            {allTasks.length === 0
+              ? canCreateTask ? "Add the first task. Department heads give deliverables out as tasks; any member can add one for themself." : "Department heads give deliverables out as tasks; any member can add one for themself."
+              : weekMode ? "No open task is due this week, overdue or blocked." : "Clear the filters, or open all tasks to include finished ones."}
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {filtered ? <Link href={clearHref} scroll={false} className={buttonVariants({ variant: "outline", size: "sm" })}>Clear filters</Link> : null}
+        {allTasks.length === 0 ? addControls : null}
+        {!filtered ? viewAll : null}
+      </div>
+    </div>
+  );
 
   const taskList =
-    listRows.length === 0 ? (
-      <EmptyState
-        icon={ListChecks}
-        title={allTasks.length === 0 ? "No tasks yet" : weekMode ? "Nothing due this week" : "No tasks match"}
-        description={
-          allTasks.length === 0
-            ? canCreateTask ? "Use Add task above. Department heads distribute deliverables into tasks; any member can add a task for themself." : "Department heads distribute deliverables into tasks; any member can add a task for themself."
-            : weekMode ? "No open task is due this week, overdue or blocked. Open all tasks to see what is coming later." : "Clear the filters, or choose All tasks to include finished ones."
-        }
-        action={
-          filtered ? <Link href={clearHref} scroll={false} className={buttonVariants({ variant: "outline", size: "sm" })}>Clear filters</Link>
-          : weekMode && allTasks.length > 0 ? <Link href={allHref} scroll={false} className={buttonVariants({ variant: "outline", size: "sm" })}>View all tasks ({allTasks.length})</Link> : undefined
-        }
-      />
-    ) : mode === "board" ? (
-      <TaskBoard rows={rows} basePath={basePath} current={current} showProject={false} />
+    listRows.length === 0 ? emptyList : mode === "board" ? (
+      <div><TaskBoard rows={rows} basePath={basePath} current={current} showProject={false} /></div>
     ) : group === "none" ? (
       <TaskTable rows={listRows} columns={columns} sort={sort} basePath={basePath} current={current} showProject={false} caption={weekMode ? "Tasks due this week, overdue or blocked" : "Tasks of this project"} />
     ) : (
@@ -236,43 +247,44 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
         <Alert role="status">This project was completed and then reopened. The earlier completion record is kept on the <Link href={`/projects/${id}/history`} className="font-medium underline">History</Link> page.</Alert>
       ) : null}
 
-      <ul className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Where the work stands">
-        <li><OsStatCard href={allHref} label={openTaskCount === 1 ? "Open task" : "Open tasks"} value={openTaskCount} icon={ListChecks} edge="cyan" active={showAll && !filtered} /></li>
-        <li><OsStatCard href={weekHref} label="Due this week" value={dueThisWeek} icon={Clock} edge="blue" active={weekMode} /></li>
-        <li><OsStatCard href={withParams(basePath, current, { show: "attention" }, ["status", "tasks", "mine", "overdue", "blocked"])} label="Need attention" value={attentionCount} icon={AlertTriangle} edge="amber" active={filters.attention} /></li>
-        <li><OsStatCard href={withParams(basePath, current, { status: "ready_for_review" }, ["tasks", "show", "mine", "overdue", "blocked"])} label="In review" value={inReviewCount} icon={ShieldAlert} edge="muted" active={filters.status === "ready_for_review"} /></li>
-      </ul>
-
-      <MilestoneStrip milestones={milestoneStrip} today={today} basis={progress?.basis ?? null} percent={progress?.percent ?? null} manageHref={`${basePath}?ms=1#milestone-list`} />
-
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_21rem]">
+      {/* Main column (about 72%) and a narrower right rail (about 28%); the rail's first card starts level with the summary cards. */}
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,72fr)_minmax(0,28fr)]">
         <div className="min-w-0 space-y-4">
-          <section aria-label="Tasks" className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0 grow basis-56">
-                <h2 className="font-heading text-lg font-semibold">{weekMode ? "This week" : filtered || showAll || mode === "board" || group !== "none" ? "Tasks" : "This week"}</h2>
-                <p className="text-sm text-muted-foreground">
-                  {weekMode
-                    ? `Due this week, overdue or blocked · showing ${listRows.length} of ${focusRows.length}`
-                    : `${rows.length} shown of ${taskCountWords} · ${openTaskCount} open.`}
-                </p>
+          <ul className="grid grid-cols-3 gap-2.5 sm:gap-3" aria-label="Where the work stands">
+            <li><OsStatCard href={allHref} label={openTaskCount === 1 ? "Open task" : "Open tasks"} value={openTaskCount} icon={ListChecks} edge="cyan" active={showAll && !filtered} /></li>
+            <li><OsStatCard href={withParams(basePath, current, { show: "attention" }, ["status", "tasks", "mine", "overdue", "blocked"])} label="Need attention" value={attentionCount} icon={AlertTriangle} edge="amber" active={filters.attention} /></li>
+            <li><OsStatCard href={withParams(basePath, current, { status: "ready_for_review" }, ["tasks", "show", "mine", "overdue", "blocked"])} label="In review" value={inReviewCount} icon={ShieldAlert} edge="blue" active={filters.status === "ready_for_review"} /></li>
+          </ul>
+
+          <section aria-label="Tasks" className="os-card os-task-card">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 pb-2.5 pt-3.5 sm:px-5">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                <h2 className="font-heading text-lg font-semibold">{listTitle}</h2>
+                <Link href={weekHref} scroll={false} aria-current={weekMode ? "true" : undefined} className="os-badge" data-tone="blue">
+                  <Clock className="h-3.5 w-3.5" aria-hidden /> {dueThisWeek} due this week
+                </Link>
+                {!weekMode && (showAll || filtered || mode === "board" || group !== "none") ? <Link href={weekHref} scroll={false} className="text-sm font-medium text-accent underline-offset-4 hover:underline">Back to this week</Link> : null}
               </div>
-              <div className="ml-auto flex flex-wrap items-center gap-2">
-                {mode === "table" ? <ColumnsMenu columns={TASK_COLUMNS.map((c) => ({ id: c.id, label: c.label }))} selected={columns} defaults={DEFAULT_TASK_COLUMNS} /> : null}
+              <div className="flex flex-wrap items-center gap-2">{allTasks.length === 0 ? null : addControls}</div>
+            </div>
+            <div className="px-4 pb-3 sm:px-5">
+              <OsFilterBar search={{ value: filters.q, placeholder: "Search tasks" }} filters={toolbarFilters} clearHref={filtered ? clearHref : undefined}>
                 <ViewSwitch current={mode} tableHref={withParams(basePath, current, { view: null })} boardHref={withParams(basePath, current, { view: "board" })} />
-                {addControls}
+              </OsFilterBar>
+            </div>
+            <div className="px-3 pb-3 sm:px-4">{taskList}</div>
+            {listRows.length > 0 ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/70 px-4 py-2.5 sm:px-5">
+                <p className="text-sm text-muted-foreground">
+                  {weekMode ? `Showing ${listRows.length} of ${focusRows.length} due this week, overdue or blocked` : `${rows.length} shown of ${taskCountWords}`} · {openTaskCount} open
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  {mode === "table" ? <ColumnsMenu columns={TASK_COLUMNS.map((c) => ({ id: c.id, label: c.label }))} selected={columns} defaults={DEFAULT_TASK_COLUMNS} /> : null}
+                  {weekMode && allTasks.length > listRows.length ? viewAll : null}
+                </div>
               </div>
-            </div>
-            <ListToolbar search={{ value: filters.q, placeholder: "Search tasks" }} filters={toolbarFilters} clearHref={filtered || showAll ? (filtered ? clearHref : weekHref) : undefined} />
+            ) : null}
           </section>
-
-          {taskList}
-
-          {weekMode && allTasks.length > listRows.length ? (
-            <div className="flex justify-center">
-              <Link href={allHref} scroll={false} className={buttonVariants({ variant: "outline" })}>View all tasks ({allTasks.length})</Link>
-            </div>
-          ) : null}
 
           {queue.length > 0 ? (
             <Panel title={`Waiting for your review (${queue.length})`} description="Tasks sent for review that you may accept or send back. You never review your own work.">
@@ -290,6 +302,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
             </Panel>
           ) : null}
 
+          <MilestoneStrip milestones={milestoneStrip} today={today} basis={progress?.basis ?? null} percent={progress?.percent ?? null} manageHref={`${basePath}?ms=1#milestone-list`} />
         </div>
 
         <aside aria-label="Project support" className="min-w-0 space-y-4">

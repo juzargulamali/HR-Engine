@@ -15,12 +15,40 @@ The approved visual direction applied to the real, signed-in Projects module. No
 | Milestones & deliverables (add/edit/status) | Unchanged section on the Work page ("Manage milestones" in the strip opens it). |
 | My Work | Same lists, filters, Board and notices; header and summary cards (My open tasks, Overdue, Waiting for my review, My team's open tasks) now link to the same `?show=` filters. |
 
+## Page composition (Work)
+
+Below the project tabs: a main column and a narrower right rail (about 72% / 28% at wide widths; one column on a phone, work first).
+
+- **Main column:** three summary cards (Open tasks, Need attention, In review), then one "This week" card (title, "N due this week", Add task / Plan, then a compact toolbar: Table | Board, search, **Filters**), the task table on a darker inset surface, and a footer with "Showing X of Y", Columns and **View all tasks (N)**. Then work waiting for your review, then the milestones (one milestone is a single compact row, two or more a strip), then "Milestones & deliverables" (add/edit/status) and the completion record.
+- **Filters** open in place; every filter that is on is also a chip with its own remove link and a "Clear all", and the button counts them. Group by, Department, Deliverable, Assignee, Status and "Narrow to" all live there.
+- **Right rail:** "Needs action" first, level with the summary cards (blocked tasks, work waiting for your review, overdue milestones; hidden when there is none), next site booking, project details, agreed scope. No activity feed: there is none to read.
+- **Empty project:** a compact card with "No tasks yet", Plan / Add task and "View all tasks (0)". Nothing is invented.
+
+## Colour roles
+
+Dark: deep page, raised petrol cards with a fine teal highlight edge, a darker inset table surface, and a teal wash for hover and a stronger one with a teal edge for the selected row. Light: soft grey page, slightly tinted (not pure white) cards, a table surface one step darker than the card.
+
+| Meaning | Colour |
+| --- | --- |
+| Primary actions, selection, in progress | teal |
+| In review, information | blue |
+| Needs attention, overdue, high or urgent priority | amber |
+| Blocked | muted red (red is used for nothing else) |
+| To do, neutral | grey |
+| Done, accepted | green dot |
+
+Status pills are one component, so the Table, the Board and the task panel always show the same colour for the same status. States are distinct: default (quiet edge), hover (brighter edge and tint), open or selected (teal edge), keyboard focus (strong ring), saving (dashed edge, "Saving…") and disabled (dimmed).
+
+## Click a row
+
+A click on the empty part of a project row, a task row, a phone card or a board card opens that record. The title stays a real link (keyboard, middle click, new tab); Ctrl/Cmd-click opens a new tab. Status, assignee, the due-date button, menus, dialogs, checkboxes and any other control do only their own job; a click that ends a text selection opens nothing. The rule is `components/workspace/row-click.ts`; `apps/web/os-shell-checks/row-click.mjs` drives it in a real browser.
+
 ## What the cards count
 
 | Card | Counted as | Opens |
 | --- | --- | --- |
 | Open tasks | tasks that are to do, in progress or ready for review | All tasks |
-| Due this week | open tasks due Monday to Sunday of the current week (Dubai date) | This week |
+| "N due this week" (in the task card) | open tasks due Monday to Sunday of the current week (Dubai date) | This week |
 | Need attention | open tasks that are blocked or overdue (same definition as the filter) | All tasks, filter "Need attention" |
 | In review | tasks ready for review | All tasks, status "Ready for review" |
 

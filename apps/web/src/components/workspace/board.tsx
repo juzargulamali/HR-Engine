@@ -1,8 +1,11 @@
 "use client";
 
 import { useId, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Select } from "@/components/ui/select";
+import { shouldOpenRow } from "./row-click";
+import { confirmDiscard } from "./unsaved";
 
 export interface BoardColumn {
   id: string;
@@ -21,6 +24,10 @@ export interface BoardItem {
   /** Columns this record may be moved to. Default: every other column. Empty: it cannot be moved (and says why in `lockedReason`). */
   moveTo?: readonly string[];
   lockedReason?: string;
+  /** Where the card leads. When set, a click on the empty part of the card opens it (its own title link stays a real link). */
+  href?: string;
+  /** The address opens a side panel: ask before discarding unsaved edits in the panel that is open. */
+  panel?: boolean;
 }
 
 /** What a move request turned into. `dialog` means more information is needed first (a reason, evidence…): the card does not move yet. */
@@ -36,6 +43,7 @@ export type MoveOutcome =
  * that works with a keyboard and on a phone.
  */
 export function Board({ columns, items, onMove, ariaLabel, emptyColumnText = "Nothing here" }: { columns: readonly BoardColumn[]; items: readonly BoardItem[]; onMove: (item: BoardItem, to: string) => Promise<MoveOutcome>; ariaLabel: string; emptyColumnText?: string }) {
+  const router = useRouter();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [dialog, setDialog] = useState<React.ReactNode>(null);
@@ -114,7 +122,14 @@ export function Board({ columns, items, onMove, ariaLabel, emptyColumnText = "No
                           draggable={!busy && targets.length > 0}
                           onDragStart={(e) => { e.dataTransfer.setData("text/plain", item.id); e.dataTransfer.effectAllowed = "move"; }}
                           aria-busy={busy}
-                          className={cn("rounded-lg border border-border bg-card p-3 shadow-sm", busy && "opacity-60")}
+                          data-clickable={item.href ? "true" : undefined}
+                          onClick={item.href ? (e) => {
+                            if (!shouldOpenRow(e.target as Element | null, e.currentTarget, { defaultPrevented: e.defaultPrevented, button: e.button }, window.getSelection()?.toString() ?? "")) return;
+                            if (e.metaKey || e.ctrlKey) { window.open(item.href, "_blank", "noopener"); return; }
+                            if (item.panel && !confirmDiscard()) return;
+                            router.push(item.href as string, { scroll: false });
+                          } : undefined}
+                          className={cn("os-board-card rounded-lg border border-border bg-card p-3 shadow-sm", item.href && "cursor-pointer", busy && "opacity-60")}
                         >
                           {item.card}
                           <div className="mt-2.5 border-t border-border pt-2">

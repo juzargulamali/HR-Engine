@@ -10,7 +10,7 @@ export const buttonVariants = cva(
         default:
           "brand-gradient text-primary-foreground hover:brightness-110",
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/70",
-        outline: "border border-input bg-transparent hover:border-accent/60 hover:bg-secondary/70",
+        outline: "os-btn-outline border border-input bg-transparent hover:border-accent/60 hover:bg-secondary/70",
         ghost: "hover:bg-secondary/70",
         destructive: "bg-destructive text-destructive-foreground hover:opacity-90",
       },

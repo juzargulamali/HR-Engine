@@ -14,6 +14,7 @@ import { ProjectBoard, type BoardProject } from "@/components/projects/project-b
 import { QuickNewProject, type QuickProjectCompany } from "@/components/projects/quick-new-project";
 import { SummaryPanel } from "@/components/projects/summary-panel";
 import { ListToolbar } from "@/components/workspace/list-toolbar";
+import { ClickableRow } from "@/components/workspace/clickable-row";
 import { PanelLink } from "@/components/workspace/panel-link";
 import { SidePanel } from "@/components/workspace/side-panel";
 import { SortHead } from "@/components/workspace/sort-head";
@@ -173,7 +174,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
                 const next = nextBy.get(p.id);
                 const Name = details ? Link : PanelLink;
                 return (
-                  <TableRow key={p.id} className="align-top">
+                  <ClickableRow key={p.id} href={detailsHref(p.id, details)} panel={!details} selected={openRow?.id === p.id} className="align-top">
                     <TableCell className="min-w-[13rem]">
                       <Name href={detailsHref(p.id, details)} className="break-words font-medium underline-offset-2 hover:underline">{p.name}</Name>
                       {unreadBy.get(p.id) ? <span className="ml-2 rounded-full bg-accent px-1.5 text-[13px] font-semibold text-accent-foreground">{unreadBy.get(p.id)} unread</span> : null}
@@ -188,7 +189,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
                         {!details ? <span className="text-muted-foreground">Members only</span> : milestoneError ? <span className="text-muted-foreground">Not available</span> : next ? <>{next.title}<span className="block text-muted-foreground">{formatDate(next.due)}</span></> : <span className="text-muted-foreground">None dated</span>}
                       </TableCell>
                     ) : null}
-                  </TableRow>
+                  </ClickableRow>
                 );
               })}
             </TableBody>

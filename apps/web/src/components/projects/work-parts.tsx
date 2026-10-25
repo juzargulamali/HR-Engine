@@ -20,6 +20,25 @@ const STATUS_WORDS: Record<string, string> = {
 export function MilestoneStrip({ milestones, today, basis, percent, manageHref, max = 6 }: { milestones: readonly StripMilestone[]; today: string; basis: string | null; percent: number | null; manageHref: string; max?: number }) {
   const steps = stripSteps(milestones, today);
   if (steps.length === 0) return null;
+  if (steps.length === 1) {
+    // One milestone does not need a strip: a single quiet row says what it is, when, and where it stands.
+    const { m, state } = steps[0]!;
+    return (
+      <section aria-label="Milestones" className="os-card flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-3">
+        <span className="os-node flex-none" data-state={state === "later" ? undefined : state}>
+          {state === "done" ? <Check className="h-3.5 w-3.5" aria-hidden /> : null}
+          {state === "late" ? <AlertTriangle className="h-3 w-3 text-[hsl(var(--os-amber))]" aria-hidden /> : null}
+        </span>
+        <div className="min-w-0 flex-1 basis-48">
+          <p className="truncate text-sm font-semibold" title={m.title}><span className="font-normal text-muted-foreground">Milestone · </span>{m.title}</p>
+          <p className={cn("text-[13px]", state === "late" ? "font-medium text-[hsl(var(--os-amber))]" : "text-muted-foreground")}>
+            {state === "late" ? "Overdue · " : ""}{m.dueDate ? dateText(m.dueDate) : "No date"} · {STATUS_WORDS[m.status] ?? m.status}{m.isRequired ? "" : " · optional"}{basis ? ` · ${basis}` : ""}
+          </p>
+        </div>
+        <Link href={manageHref} className="text-sm font-medium text-accent underline-offset-4 hover:underline">Manage milestones</Link>
+      </section>
+    );
+  }
   // Keep the next one in view when there are more than fit: show it and the ones around it, always the last accepted before it.
   const firstOpen = steps.findIndex((s) => s.state !== "done");
   const start = steps.length <= max ? 0 : Math.min(Math.max(0, (firstOpen === -1 ? steps.length : firstOpen) - 1), steps.length - max);

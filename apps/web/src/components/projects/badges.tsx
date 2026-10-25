@@ -30,7 +30,7 @@ export const HandoverStatusBadge = ({ status }: { status: string }) => <StatusPi
 
 export function PriorityBadge({ priority }: { priority: string }) {
   if (priority === "normal") return null;
-  return <OsPill tone={priority === "urgent" ? "red" : priority === "high" ? "amber" : "neutral"}>{PRIORITY_LABELS[priority as keyof typeof PRIORITY_LABELS] ?? priority} priority</OsPill>;
+  return <OsPill tone={priority === "urgent" || priority === "high" ? "amber" : "neutral"}>{PRIORITY_LABELS[priority as keyof typeof PRIORITY_LABELS] ?? priority} priority</OsPill>;
 }
 
 export function KindBadge({ kind, ongoing }: { kind: string; ongoing?: boolean }) {

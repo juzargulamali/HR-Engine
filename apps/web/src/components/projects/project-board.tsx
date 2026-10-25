@@ -39,6 +39,8 @@ export function ProjectBoard({ projects }: { projects: BoardProject[] }) {
       id: p.id,
       columnId: p.status,
       title: p.name,
+      href: p.href,
+      panel: p.panel,
       moveTo: lanes,
       lockedReason: p.canMove ? "This project cannot be moved from here." : "Only the Project Manager or a founder can change the status.",
       card: (

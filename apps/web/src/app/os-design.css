@@ -21,20 +21,21 @@
 
 /* ------------------------------------------------------------------ v2 tokens (only while a migrated page is shown) */
 html:not([data-theme="light"]):has(.os-v2) {
-  --background: 195 38% 9.5%;
+  --background: 195 52% 5.4%;
   --chrome: 195 44% 6.5%;
-  --card: 195 32% 13%;
-  --raised: 195 30% 17%;
-  --field: 195 40% 10.5%;
+  --card: 195 38% 11%;
+  --raised: 195 32% 15%;
+  --field: 195 48% 7.2%;
+  --ctl-border: 195 18% 27%;
   --foreground: 180 25% 95%;
   --card-foreground: 180 25% 95%;
   --muted-foreground: 190 18% 77%;
   --subtle: 190 14% 65%;
   --primary: 176 68% 46%;
   --primary-foreground: 195 60% 6%;
-  --secondary: 195 26% 19%;
+  --secondary: 195 28% 16%;
   --secondary-foreground: 180 16% 92%;
-  --muted: 195 26% 17%;
+  --muted: 195 28% 14%;
   --accent: 180 72% 62%;
   --accent-foreground: 195 60% 6%;
   --destructive: 355 85% 72%;
@@ -43,8 +44,8 @@ html:not([data-theme="light"]):has(.os-v2) {
   --success-foreground: 152 60% 8%;
   --warning: 40 92% 60%;
   --warning-foreground: 40 80% 8%;
-  --border: 195 28% 20%;
-  --input: 192 18% 50%;
+  --border: 195 28% 19%;
+  --input: 192 15% 43%;
   --ring: 184 85% 66%;
   --brand-deep: 176 66% 42%;
   --brand-glow: 178 70% 50%;
@@ -52,17 +53,18 @@ html:not([data-theme="light"]):has(.os-v2) {
   --os-amber: 38 94% 62%;
   --os-red: 6 88% 72%;
   --os-green: 152 55% 58%;
-  --os-card-bg: linear-gradient(180deg, hsl(195 32% 14.5%), hsl(195 34% 12%));
+  --os-card-bg: linear-gradient(180deg, hsl(195 40% 13%), hsl(195 42% 10.5%));
   --os-card-shadow: inset 0 1px 0 hsl(180 50% 90% / 0.05), 0 8px 24px -14px hsl(195 80% 2% / 0.8);
   --os-warm: 34 36% 13.5%;
   --os-cool: 178 36% 13%;
 }
 html[data-theme="light"]:has(.os-v2) {
-  --background: 195 26% 92%;
+  --background: 195 26% 91%;
   --chrome: 200 16% 88%;
-  --card: 0 0% 100%;
+  --card: 195 30% 98%;
   --raised: 195 30% 99%;
-  --field: 195 30% 98%;
+  --field: 195 24% 94.5%;
+  --ctl-border: 200 14% 72%;
   --foreground: 200 45% 12%;
   --card-foreground: 200 45% 12%;
   --muted-foreground: 200 22% 32%;
@@ -89,7 +91,7 @@ html[data-theme="light"]:has(.os-v2) {
   --os-amber: 30 95% 24%;
   --os-red: 355 68% 40%;
   --os-green: 152 62% 26%;
-  --os-card-bg: hsl(0 0% 100%);
+  --os-card-bg: linear-gradient(180deg, hsl(195 32% 98.8%), hsl(195 28% 97%));
   --os-card-shadow: 0 1px 2px hsl(200 40% 20% / 0.06), 0 6px 18px -10px hsl(200 40% 20% / 0.18);
   --os-warm: 38 92% 94%;
   --os-cool: 168 50% 93%;
@@ -135,24 +137,24 @@ html:not([data-theme="light"]):has(.os-v2) body {
 
 /* ------------------------------------------------------------------ surfaces */
 .os-card, .os-v2 .os-surface { background: var(--os-card-bg, hsl(var(--card))); border: 1px solid hsl(var(--border)); border-radius: 14px; box-shadow: var(--os-card-shadow, none); }
-html[data-theme="light"] .os-card, html[data-theme="light"] .os-v2 .os-surface { border-color: hsl(195 22% 88%); }
+html[data-theme="light"] .os-card, html[data-theme="light"] .os-v2 .os-surface { border-color: hsl(195 20% 85%); }
 html:not([data-theme="light"]) .os-card, html:not([data-theme="light"]) .os-v2 .os-surface {
   border-color: transparent;
   background:
-    linear-gradient(180deg, hsl(194 30% 14.5%), hsl(195 34% 11.5%)) padding-box,
-    linear-gradient(180deg, hsl(178 50% 60% / 0.34), hsl(190 28% 32% / 0.26) 38%, hsl(195 26% 22% / 0.4)) border-box;
+    linear-gradient(180deg, hsl(194 40% 13.5%), hsl(195 44% 10.5%)) padding-box,
+    linear-gradient(180deg, hsl(178 50% 60% / 0.3), hsl(190 28% 32% / 0.2) 38%, hsl(195 26% 22% / 0.34)) border-box;
 }
 /* Warm: a decision is needed. Cool: supporting information. A soft corner glow on the same layered surface, never a flat fill. */
 html:not([data-theme="light"]) .os-card.os-warm {
   background:
     radial-gradient(90% 130% at 0% 0%, hsl(36 85% 48% / 0.2), transparent 62%) padding-box,
-    linear-gradient(180deg, hsl(30 22% 14.5%), hsl(24 22% 11.5%)) padding-box,
+    linear-gradient(180deg, hsl(30 26% 13%), hsl(24 26% 10%)) padding-box,
     linear-gradient(150deg, hsl(38 92% 58% / 0.85), hsl(34 60% 36% / 0.3) 55%, hsl(30 40% 28% / 0.35)) border-box;
 }
 html:not([data-theme="light"]) .os-card.os-cool {
   background:
     radial-gradient(110% 100% at 100% 100%, hsl(178 65% 36% / 0.3), transparent 62%) padding-box,
-    linear-gradient(180deg, hsl(194 32% 14.5%), hsl(195 36% 11.5%)) padding-box,
+    linear-gradient(180deg, hsl(194 40% 13%), hsl(195 44% 10%)) padding-box,
     linear-gradient(200deg, hsl(178 55% 55% / 0.5), hsl(190 28% 30% / 0.25) 50%, hsl(195 26% 22% / 0.4)) border-box;
 }
 html[data-theme="light"] .os-card.os-warm { background: linear-gradient(180deg, hsl(38 100% 96.5%), hsl(36 92% 93%)); border-color: hsl(var(--os-amber) / 0.45); }
@@ -199,7 +201,7 @@ html[data-theme="light"] .os-card.os-cool { background: linear-gradient(180deg, 
   .os-badge[data-tone="red"] { background: hsl(var(--os-red) / 0.14); color: hsl(var(--os-red)); }
   .os-badge[data-tone="quiet"] { background: transparent; color: hsl(var(--muted-foreground)); padding-left: 0; padding-right: 0; }
   .os-dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; flex: none; background: hsl(var(--subtle)); }
-  .os-dot[data-tone="cyan"] { background: hsl(var(--os-green)); }
+  .os-dot[data-tone="cyan"] { background: hsl(var(--primary)); }
   .os-dot[data-tone="blue"] { background: hsl(var(--os-info)); }
   .os-dot[data-tone="amber"] { background: hsl(var(--os-amber)); }
   .os-dot[data-tone="red"] { background: hsl(var(--os-red)); }
@@ -211,11 +213,16 @@ html[data-theme="light"] .os-card.os-cool { background: linear-gradient(180deg, 
     font-size: 0.8125rem; font-weight: 600; white-space: nowrap; max-width: 100%;
     background: hsl(var(--secondary)); color: hsl(var(--foreground));
   }
-  .os-pill[data-tone="blue"] { background: hsl(var(--os-info) / 0.16); }
-  .os-pill[data-tone="cyan"] { background: hsl(var(--os-green) / 0.14); }
-  .os-pill[data-tone="amber"] { background: hsl(var(--os-amber) / 0.16); }
-  .os-pill[data-tone="red"] { background: hsl(var(--os-red) / 0.14); }
-  button.os-pill:hover, button.os-pill[aria-expanded="true"] { border-color: hsl(var(--input)); }
+  .os-pill[data-tone="blue"] { background: hsl(var(--os-info) / 0.2); color: hsl(var(--os-info)); }
+  .os-pill[data-tone="cyan"] { background: hsl(var(--primary) / 0.2); }
+  .os-pill[data-tone="amber"] { background: hsl(var(--os-amber) / 0.2); color: hsl(var(--os-amber)); }
+  .os-pill[data-tone="red"] { background: hsl(var(--os-red) / 0.2); color: hsl(var(--os-red)); }
+  /* Default, hover, open, keyboard focus, saving and disabled each look different. */
+  button.os-pill { cursor: pointer; transition: background-color 120ms, border-color 120ms; }
+  button.os-pill:hover { border-color: hsl(var(--foreground) / 0.28); filter: brightness(1.12); }
+  button.os-pill[aria-expanded="true"] { border-color: hsl(var(--primary) / 0.75); box-shadow: 0 0 0 3px hsl(var(--primary) / 0.16); }
+  button.os-pill[aria-busy="true"] { opacity: 0.75; cursor: progress; border-style: dashed; border-color: hsl(var(--foreground) / 0.35); }
+  button.os-pill:disabled:not([aria-busy="true"]) { opacity: 0.5; cursor: not-allowed; }
 
   .os-avatar {
     display: inline-flex; align-items: center; justify-content: center; flex: none; width: 1.75rem; height: 1.75rem; border-radius: 999px;
@@ -299,3 +306,55 @@ html[data-theme="light"] .os-card.os-cool { background: linear-gradient(180deg, 
 .os-v2 table tbody tr:hover { background: hsl(var(--secondary) / 0.5); }
 .os-v2 table tbody tr[data-selected="true"],
 .os-v2 table tbody tr:has([aria-expanded="true"]) { background: linear-gradient(90deg, hsl(var(--primary) / 0.17), hsl(var(--primary) / 0.06) 70%); box-shadow: inset 4px 0 0 hsl(var(--primary)); }
+
+/* A table that sits inside a card (the project's task card) is part of the card: no second frame, rows divided by fine lines. */
+.os-v2 .os-task-card .os-table-wrap { border: 1px solid hsl(var(--border)); border-radius: 12px; background: hsl(var(--field)); box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.03); }
+.os-v2 .os-task-card table thead { background: hsl(var(--secondary) / 0.55); }
+.os-v2 .os-task-card th { padding-top: 0.6rem; padding-bottom: 0.6rem; }
+.os-v2 .os-task-card table tbody tr { border-bottom: 1px solid hsl(var(--border) / 0.7); }
+.os-v2 .os-task-card table tbody tr:last-child { border-bottom: 0; }
+
+/* Ordinary outline buttons (Filters, Columns, Plan, View all ...): a quiet edge, never a bright permanent outline. Teal shows hover,
+   an open menu and selection; the keyboard focus ring stays the strongest signal. */
+.os-v2 .os-btn-outline { border-color: hsl(var(--ctl-border)); background: hsl(var(--foreground) / 0.03); }
+.os-v2 .os-btn-outline:hover { border-color: hsl(var(--primary) / 0.6); background: hsl(var(--primary) / 0.1); }
+.os-v2 .os-btn-outline[aria-expanded="true"] { border-color: hsl(var(--primary) / 0.75); background: hsl(var(--primary) / 0.14); }
+.os-v2 .os-btn-outline:disabled { opacity: 0.45; }
+.os-v2 nav[aria-label="View"] { border-color: hsl(var(--ctl-border)); background: hsl(var(--field)); }
+.os-v2 nav[aria-label="View"] a[aria-current="page"] { background: hsl(var(--primary) / 0.2); color: hsl(var(--foreground)); box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.55); }
+.os-v2 nav[aria-label="View"] a:not([aria-current="page"]):hover { background: hsl(var(--foreground) / 0.06); }
+
+/* Table surfaces are the darkest layer inside a card: a clear step below the raised petrol card and above the deep page. */
+.os-v2 .os-table-wrap { background: hsl(var(--field)); }
+.os-v2 table tbody tr { border-color: hsl(var(--border) / 0.8); }
+.os-v2 table thead { background: hsl(var(--secondary) / 0.55); }
+html[data-theme="light"] .os-v2 table thead { background: hsl(195 22% 91%); }
+
+/* Rows that open their record: a subtle teal wash on hover, a quieter one while a control inside has keyboard focus; the selected row
+   (open in the side panel) keeps the stronger gradient and the teal edge from above. */
+.os-v2 tr[data-clickable]:hover { background: hsl(var(--primary) / 0.075); }
+.os-v2 tr[data-clickable]:focus-within { background: hsl(var(--primary) / 0.05); }
+.os-v2 tr[data-clickable][data-selected="true"] { background: linear-gradient(90deg, hsl(var(--primary) / 0.2), hsl(var(--primary) / 0.07) 70%); box-shadow: inset 4px 0 0 hsl(var(--primary)); }
+
+/* Board cards: the same quiet hover and teal edge as a table row. */
+.os-v2 .os-board-card { background: linear-gradient(180deg, hsl(var(--raised)), hsl(var(--card))); }
+.os-v2 .os-board-card[data-clickable]:hover { border-color: hsl(var(--primary) / 0.5); box-shadow: 0 6px 16px -10px hsl(195 80% 2% / 0.7); }
+.os-v2 .os-board-card[data-clickable]:focus-within { border-color: hsl(var(--primary) / 0.35); }
+
+/* The search box is identified by its magnifier and its words, so it needs only a quiet edge (like the other ordinary controls); its
+   focus ring is the strong signal. Form fields and selects keep the full 3:1 edge from the tokens. */
+.os-v2 .os-search { border-color: hsl(var(--ctl-border)); background: hsl(var(--field)); }
+.os-v2 .os-search:hover { border-color: hsl(var(--foreground) / 0.3); }
+.os-v2 .os-search:focus-visible { border-color: hsl(var(--primary) / 0.7); }
+
+/* Light theme: the tinted pills carry darker words so they stay readable on their own tint (WCAG AA). */
+html[data-theme="light"] .os-pill[data-tone="blue"] { color: hsl(213 80% 30%); }
+html[data-theme="light"] .os-pill[data-tone="amber"] { color: hsl(30 95% 19%); }
+html[data-theme="light"] .os-pill[data-tone="red"] { color: hsl(355 68% 32%); }
+html[data-theme="light"] .os-badge[data-tone="blue"] { color: hsl(213 80% 30%); }
+html[data-theme="light"] .os-badge[data-tone="amber"] { color: hsl(30 95% 19%); }
+html[data-theme="light"] .os-badge[data-tone="red"] { color: hsl(355 68% 32%); }
+
+/* Form selects sit on the darker field colour instead of relying on a bright edge; the edge stays at the 3:1 the tokens guarantee. */
+.os-v2 select:not([multiple]) { background-color: hsl(var(--field)); }
+.os-v2 select:not([multiple]):hover { border-color: hsl(var(--foreground) / 0.35); }
