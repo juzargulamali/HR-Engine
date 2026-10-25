@@ -476,15 +476,18 @@ export interface SalesCheckView {
   rows: SalesSummaryRow[];
   /** True when any technology could not be checked from a complete template. */
   warehouseCheckRequired: boolean;
+  /** What the stock supports RIGHT NOW (calculated, not recorded). Null before any check or request has named a location. */
+  live: SalesLiveView | null;
+  /** Technologies whose recorded result the stock no longer supports; null when nothing got worse (or the check is out of date, which says so itself). */
+  stockChanged: { technologies: string[]; overall: boolean } | null;
 }
+export interface SalesLiveView { headline: string; tone: Tone; rows: SalesSummaryRow[]; warehouseCheckRequired: boolean }
 
-export function salesCheckView(data: unknown): SalesCheckView | null {
-  const d = asRecord(data);
-  const state = d.state === "pending" || d.state === "checked" || d.state === "none" ? d.state : null;
-  if (!state) return null;
-  const latest = asRecord(d.latest);
-  const pending = asRecord(d.pending);
-  const rows: SalesSummaryRow[] = asArray(latest.summary).map((s) => {
+/** A result is worth more the more of the request the stock covers. A technology that could not be checked has no rank to lose. */
+const RESULT_RANK: Record<string, number> = { check_required: 0, short: 1, partial: 2, available: 3 };
+
+function summaryRows(summary: unknown): SalesSummaryRow[] {
+  return asArray(summary).map((s) => {
     const x = asRecord(s);
     const status = str(x.status) ?? "check_required";
     const text = status === "check_required" ? "Warehouse check required" : (AVAILABILITY_RESULT_WORDS[status] ?? str(x.message) ?? status);
@@ -497,6 +500,25 @@ export function salesCheckView(data: unknown): SalesCheckView | null {
       alternatives: asArray(x.alternatives).map((a) => `${str(asRecord(a).use) ?? "A listed alternative"} instead of ${str(asRecord(a).instead_of) ?? "the standard item"} (the project must accept the substitute)`),
     };
   });
+}
+
+/** The raw status of each technology in a summary, by name, for comparing the recorded check with the stock as it is now. */
+function statusByName(summary: unknown): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const s of asArray(summary)) {
+    const x = asRecord(s);
+    m.set(str(x.technology) ?? "Technologies", str(x.status) ?? "check_required");
+  }
+  return m;
+}
+
+export function salesCheckView(data: unknown): SalesCheckView | null {
+  const d = asRecord(data);
+  const state = d.state === "pending" || d.state === "checked" || d.state === "none" ? d.state : null;
+  if (!state) return null;
+  const latest = asRecord(d.latest);
+  const pending = asRecord(d.pending);
+  const rows = summaryRows(latest.summary);
   const outOfDate = state === "checked" && d.needs_recheck === true;
   const result = str(latest.result);
   const anyUnchecked = rows.some((r) => r.status === "Warehouse check required");
@@ -509,9 +531,39 @@ export function salesCheckView(data: unknown): SalesCheckView | null {
     // Green only for a current, complete "available": a check that is out of date, or that has any technology without a complete template, is never green.
     tone = result === "available" && !outOfDate && !anyUnchecked ? "good" : result === "short" ? "bad" : "warn";
   }
+
+  // The stock as it is now (the database recalculates it on every read; it is never stored). Shown apart from the recorded check.
+  const liveRaw = asRecord(d.live);
+  const liveRows = summaryRows(liveRaw.summary);
+  const liveResult = str(liveRaw.result);
+  const liveUnchecked = liveRows.some((r) => r.status === "Warehouse check required");
+  const live: SalesLiveView | null = state !== "none" && liveResult
+    ? {
+        headline: AVAILABILITY_RESULT_WORDS[liveResult] ?? "Warehouse check required",
+        tone: liveResult === "available" && !liveUnchecked ? "good" : liveResult === "short" ? "bad" : "warn",
+        rows: liveRows,
+        warehouseCheckRequired: liveResult === "check_required" || liveUnchecked,
+      }
+    : null;
+
+  // Has the stock got worse since the check? Only meaningful when the enquiry itself has not changed (otherwise "out of date" already says so).
+  let stockChanged: SalesCheckView["stockChanged"] = null;
+  if (state === "checked" && !outOfDate && live && result) {
+    const was = statusByName(latest.summary);
+    const now = statusByName(liveRaw.summary);
+    const worse: string[] = [];
+    for (const [name, saved] of was) {
+      const current = now.get(name);
+      if (current === undefined) continue;
+      if ((RESULT_RANK[saved] ?? 0) > 0 && (RESULT_RANK[current] ?? 0) < (RESULT_RANK[saved] ?? 0)) worse.push(name);
+    }
+    const overall = (RESULT_RANK[result] ?? 0) > 0 && (RESULT_RANK[liveResult ?? ""] ?? 0) < (RESULT_RANK[result] ?? 0);
+    if (worse.length > 0 || overall) stockChanged = { technologies: worse, overall };
+  }
   return {
     state, headline, tone, outOfDate, checkedBy: str(latest.checked_by), checkedAt: str(latest.checked_at), locationName: str(latest.location_name), note: str(latest.note),
     pendingBy: str(pending.requested_by), pendingAt: str(pending.requested_at), rows, warehouseCheckRequired: state === "none" || result === "check_required" || anyUnchecked,
+    live, stockChanged,
   };
 }
 

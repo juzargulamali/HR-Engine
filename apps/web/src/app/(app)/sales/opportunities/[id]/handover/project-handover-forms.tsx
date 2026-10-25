@@ -15,6 +15,8 @@ export interface BriefValues {
   clientName: string;
   location: string;
   siteTimezone: string;
+  /** Why this zone was suggested (a new brief only); empty for a saved brief, which keeps the zone it was saved with. */
+  siteTimezoneNote?: string;
   installStart: string;
   eventStart: string;
   eventEnd: string;
@@ -66,7 +68,7 @@ export function ProjectHandoverForm({ opportunityId, version, values, existing }
         <Field label="Project name" htmlFor="ph-title"><Input id="ph-title" name="title" defaultValue={values.title} required maxLength={200} /></Field>
         <Field label="Client" htmlFor="ph-client" hint={existing ? undefined : "Leave blank to use the client or agency name from the opportunity."}><Input id="ph-client" name="clientName" defaultValue={values.clientName} /></Field>
         <Field label="Location" htmlFor="ph-location"><Input id="ph-location" name="location" defaultValue={values.location} /></Field>
-        <Field label="Site time zone" htmlFor="ph-tz" hint="Installation and show bookings are written in this zone.">
+        <Field label="Site time zone" htmlFor="ph-tz" hint={values.siteTimezoneNote ? `Suggested because ${values.siteTimezoneNote}. Change it if the site is elsewhere. Installation and show bookings are written in this zone.` : "Installation and show bookings are written in this zone. Change it if the site is elsewhere."}>
           <Select id="ph-tz" name="siteTimezone" defaultValue={values.siteTimezone}>
             {[...new Set([values.siteTimezone, ...COMMON_TIME_ZONES])].map((z) => <option key={z} value={z}>{z}</option>)}
           </Select>

@@ -1,10 +1,12 @@
 /**
  * @vitest-environment jsdom
  */
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+const refresh = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push: vi.fn() }) }));
 vi.mock("@/lib/actions/inventoryPlanning", () => ({ requestOpportunityCheck: vi.fn(), recordOpportunityCheck: vi.fn() }));
 const rpc = vi.fn();
 const eq2 = { order: async () => ({ data: [{ id: "loc1", name: "Dubai warehouse" }] }) };
@@ -47,7 +49,7 @@ describe("the Sales equipment availability card", () => {
   it("shows a current complete 'Available' as the only green state", () => {
     render(<AvailabilityCardView {...props} view={view(checked())} />);
     expect(badge().getAttribute("data-tone")).toBe("good");
-    expect(screen.getByText(/Checked by Amal Haddad/)).toBeTruthy();
+    expect(screen.getByText(/Recorded by Amal Haddad/)).toBeTruthy();
     expect(screen.getByText(/against Dubai warehouse/)).toBeTruthy();
   });
 
@@ -78,14 +80,79 @@ describe("the Sales equipment availability card", () => {
   });
 });
 
+describe("recorded check versus current availability", () => {
+  const live = (result: string, summary: unknown[]) => ({ live: { result, summary } });
+  const row = (status: string) => [{ technology: "LED tunnel", qty: 2, status }];
+
+  it("shows the last recorded check and the current availability as two separate things", () => {
+    render(<AvailabilityCardView {...props} view={view(checked(live("available", row("available"))))} />);
+    expect(screen.getByLabelText("Last recorded check")).toBeTruthy();
+    expect(screen.getByLabelText("Current availability")).toBeTruthy();
+    expect(screen.getByText(/This is what the warehouse found then/)).toBeTruthy();
+    expect(screen.getByText(/It is not a recorded check and changes as stock moves/)).toBeTruthy();
+    expect(screen.queryByText(/Stock has changed since the last check/)).toBeNull();
+  });
+
+  it("warns, naming the technology, when current stock no longer supports the recorded result", () => {
+    render(<AvailabilityCardView {...props} view={view(checked(live("short", row("short"))))} />);
+    expect(screen.getByText(/Stock has changed since the last check: the recorded result is no longer supported for LED tunnel/)).toBeTruthy();
+    const recorded = screen.getByLabelText("Last recorded check");
+    const current = screen.getByLabelText("Current availability");
+    expect(recorded.textContent).toContain("Available");   // the old result is not rewritten
+    expect(current.textContent).toContain("Not enough in stock");
+    expect(document.querySelector("[data-live-tone]")?.getAttribute("data-live-tone")).toBe("bad");
+  });
+
+  it("does not warn when stock is the same or better, or when the enquiry itself changed (out of date says that)", () => {
+    const better = view(checked(live("available", row("available")), { result: "partial", summary: row("partial") }));
+    expect(better.stockChanged).toBeNull();
+    const outOfDate = view(checked({ needs_recheck: true, ...live("short", row("short")) }));
+    expect(outOfDate.stockChanged).toBeNull();
+    expect(outOfDate.outOfDate).toBe(true);
+  });
+
+  it("shows current availability for a request that is still pending, but no stock-changed warning", () => {
+    const v = view({ state: "pending", pending: { requested_by: "Sales A", requested_at: "2030-01-05T09:00:00Z" }, live: { result: "partial", summary: row("partial") } });
+    render(<AvailabilityCardView {...props} view={v} />);
+    expect(screen.getByText(/No check is recorded yet/)).toBeTruthy();
+    expect(screen.getByLabelText("Current availability").textContent).toContain("Partly available");
+    expect(v.stockChanged).toBeNull();
+  });
+
+  it("shows no current-availability block when nothing named a location yet", () => {
+    render(<AvailabilityCardView {...props} view={view({ state: "none" })} />);
+    expect(screen.queryByLabelText("Current availability")).toBeNull();
+  });
+});
+
 describe("the card loader", () => {
   const p = { opportunityId: "o1", companyId: "c1", stage: "qualified", canAsk: true };
 
-  it("renders nothing when the data service fails, and never throws into the Sales panel", async () => {
-    rpc.mockResolvedValue({ data: null, error: { message: "connection refused", code: "08006" } });
-    expect(await EquipmentAvailabilityCardContent(p)).toBeNull();
+  it("says it could not load, with a Retry, when the data service fails, and never throws into the Sales panel", async () => {
+    for (const fail of [() => rpc.mockResolvedValue({ data: null, error: { message: "connection refused", code: "08006" } }), () => rpc.mockRejectedValue(new Error("network down"))]) {
+      fail();
+      const el = await EquipmentAvailabilityCardContent(p);
+      expect(el).not.toBeNull();
+      const { unmount } = render(el!);
+      expect(screen.getByText("Could not load—retry")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+      expect(document.querySelector("[data-tone]")).toBeNull(); // no made-up answer
+      unmount();
+    }
+  });
+
+  it("Retry asks the server for the card again", async () => {
     rpc.mockRejectedValue(new Error("network down"));
-    expect(await EquipmentAvailabilityCardContent(p)).toBeNull();
+    refresh.mockClear();
+    render((await EquipmentAvailabilityCardContent(p))!);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats an answer it cannot read as a failed load, not as 'no check'", async () => {
+    rpc.mockResolvedValue({ data: { state: "unknown shape" }, error: null });
+    render((await EquipmentAvailabilityCardContent(p))!);
+    expect(screen.getByText("Could not load—retry")).toBeTruthy();
   });
 
   it("renders nothing when Inventory is not installed or the person has no use for it", async () => {
@@ -93,7 +160,7 @@ describe("the card loader", () => {
     expect(await EquipmentAvailabilityCardContent(p)).toBeNull();
     rpc.mockResolvedValue({ data: null, error: { message: "Opportunity not found", code: "P0002" } });
     expect(await EquipmentAvailabilityCardContent(p)).toBeNull();
-    rpc.mockResolvedValue({ data: { state: "unknown shape" }, error: null });
+    rpc.mockResolvedValue({ data: null, error: { message: "permission denied", code: "42501" } });
     expect(await EquipmentAvailabilityCardContent(p)).toBeNull();
   });
 

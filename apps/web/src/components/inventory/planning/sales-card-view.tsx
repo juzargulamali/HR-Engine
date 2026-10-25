@@ -28,44 +28,51 @@ export function AvailabilityCardView({ view, opportunityId, locations, canAsk, c
   const close = () => setDialog(null);
   return (
     <section aria-label="Warehouse stock check" className="rounded-lg border border-border bg-card p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        {/* Not "Equipment availability": that is the name of Sales' own manual confirmation lower on the same panel, and two things with one name contradict each other. */}
-        <h3 className="text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">Warehouse stock check</h3>
-        <Badge variant="outline" className={cn("whitespace-nowrap", TONE_BADGE[view.tone])} data-tone={view.tone}>{view.headline}</Badge>
+      {/* Not "Equipment availability": that is the name of Sales' own manual confirmation lower on the same panel, and two things with one name contradict each other. */}
+      <h3 className="text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">Warehouse stock check</h3>
+
+      <div className="mt-3" aria-label="Last recorded check">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h4 className="text-sm font-semibold">{view.state === "checked" ? "Last recorded check" : "Recorded check"}</h4>
+          <Badge variant="outline" className={cn("whitespace-nowrap", TONE_BADGE[view.tone])} data-tone={view.tone}>{view.headline}</Badge>
+        </div>
+
+        {view.state === "none" ? (
+          <p className="mt-2 text-sm">Nobody has checked the warehouse for this enquiry yet. <strong>Warehouse check required.</strong></p>
+        ) : null}
+        {view.state === "pending" ? (
+          <p className="mt-2 text-sm">No check is recorded yet. Waiting for the warehouse{view.pendingBy ? `: asked by ${view.pendingBy}` : ""}{view.pendingAt ? ` on ${formatDateTime(view.pendingAt)}` : ""}.</p>
+        ) : null}
+        {view.state === "checked" ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            Recorded{view.checkedBy ? ` by ${view.checkedBy}` : ""}{view.checkedAt ? ` on ${formatDateTime(view.checkedAt)}` : ""}{view.locationName ? ` against ${view.locationName}` : ""}. This is what the warehouse found then.{view.note ? ` Note: ${view.note}` : ""}
+          </p>
+        ) : null}
+
+        {view.outOfDate ? (
+          <Alert variant="warning" role="status" className="mt-3">Out of date: dates, location, technologies or quantities changed since the check. Ask the warehouse to check again before relying on it.</Alert>
+        ) : null}
+        {view.state === "checked" && view.warehouseCheckRequired ? (
+          <Alert variant="warning" role="status" className="mt-3">Warehouse check required for at least one technology: it has no complete template, so nothing can be said about it from stock.</Alert>
+        ) : null}
+
+        {view.rows.length > 0 ? <SummaryList rows={view.rows} /> : null}
       </div>
 
-      {view.state === "none" ? (
-        <p className="mt-2 text-sm">Nobody has checked the warehouse for this enquiry yet. <strong>Warehouse check required.</strong></p>
-      ) : null}
-      {view.state === "pending" ? (
-        <p className="mt-2 text-sm">Waiting for the warehouse{view.pendingBy ? `: asked by ${view.pendingBy}` : ""}{view.pendingAt ? ` on ${formatDateTime(view.pendingAt)}` : ""}.</p>
-      ) : null}
-      {view.state === "checked" ? (
-        <p className="mt-2 text-sm text-muted-foreground">
-          Checked{view.checkedBy ? ` by ${view.checkedBy}` : ""}{view.checkedAt ? ` on ${formatDateTime(view.checkedAt)}` : ""}{view.locationName ? ` against ${view.locationName}` : ""}.{view.note ? ` Note: ${view.note}` : ""}
-        </p>
-      ) : null}
-
-      {view.outOfDate ? (
-        <Alert variant="warning" role="status" className="mt-3">Out of date: dates, location, technologies or quantities changed since the check. Ask the warehouse to check again before relying on it.</Alert>
-      ) : null}
-      {view.state === "checked" && view.warehouseCheckRequired ? (
-        <Alert variant="warning" role="status" className="mt-3">Warehouse check required for at least one technology: it has no complete template, so nothing can be said about it from stock.</Alert>
-      ) : null}
-
-      {view.rows.length > 0 ? (
-        <ul className="mt-3 divide-y divide-border rounded-md border border-border text-sm">
-          {view.rows.map((r, i) => (
-            <li key={`${r.name}-${i}`} className="px-3 py-2">
-              <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                <span className="min-w-0 break-words font-medium">{r.name}{r.qty ? <span className="font-normal text-muted-foreground"> × {r.qty}</span> : null}</span>
-                <span className={cn("font-medium", TONE_TEXT[r.tone])}>{r.status}</span>
-              </div>
-              {r.shortages.map((s) => <p key={s} className="text-muted-foreground">{s}</p>)}
-              {r.alternatives.map((a) => <p key={a} className="text-muted-foreground">{a}</p>)}
-            </li>
-          ))}
-        </ul>
+      {view.live ? (
+        <div className="mt-4 border-t border-border pt-3" aria-label="Current availability">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold">Current availability</h4>
+            <Badge variant="outline" className={cn("whitespace-nowrap", TONE_BADGE[view.live.tone])} data-live-tone={view.live.tone}>{view.live.headline}</Badge>
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">Worked out now from the stock and bookings of {view.locationName ?? "the chosen location"}. It is not a recorded check and changes as stock moves.</p>
+          {view.stockChanged ? (
+            <Alert variant="warning" role="status" className="mt-3">
+              Stock has changed since the last check: the recorded result is no longer supported{view.stockChanged.technologies.length > 0 ? ` for ${view.stockChanged.technologies.join(", ")}` : ""}. Ask the warehouse to check again before relying on it.
+            </Alert>
+          ) : null}
+          {view.live.rows.length > 0 ? <SummaryList rows={view.live.rows} /> : null}
+        </div>
       ) : null}
 
       <p className="mt-3 text-sm text-muted-foreground">Checking availability does not reserve anything.</p>
@@ -95,6 +102,23 @@ export function AvailabilityCardView({ view, opportunityId, locations, canAsk, c
         </Modal>
       ) : null}
     </section>
+  );
+}
+
+function SummaryList({ rows }: { rows: SalesCheckView["rows"] }) {
+  return (
+    <ul className="mt-3 divide-y divide-border rounded-md border border-border text-sm">
+      {rows.map((r, i) => (
+        <li key={`${r.name}-${i}`} className="px-3 py-2">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+            <span className="min-w-0 break-words font-medium">{r.name}{r.qty ? <span className="font-normal text-muted-foreground"> × {r.qty}</span> : null}</span>
+            <span className={cn("font-medium", TONE_TEXT[r.tone])}>{r.status}</span>
+          </div>
+          {r.shortages.map((sh) => <p key={sh} className="text-muted-foreground">{sh}</p>)}
+          {r.alternatives.map((alt) => <p key={alt} className="text-muted-foreground">{alt}</p>)}
+        </li>
+      ))}
+    </ul>
   );
 }
 
