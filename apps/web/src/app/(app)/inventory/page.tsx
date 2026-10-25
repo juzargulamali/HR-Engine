@@ -11,6 +11,7 @@ import { QuickAddItem } from "@/components/inventory/stock/quick-add-item";
 import { ColumnsMenu } from "@/components/workspace/columns-menu";
 import { listTable } from "@/components/workspace/list-table";
 import { ListToolbar, type ToolbarFilter } from "@/components/workspace/list-toolbar";
+import { ClickableRow } from "@/components/workspace/clickable-row";
 import { PanelLink } from "@/components/workspace/panel-link";
 import { SortHead } from "@/components/workspace/sort-head";
 import { LoadError } from "@/components/workspace/states";
@@ -180,13 +181,13 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
             </TableHeader>
             <TableBody>
               {shown.map((r) => (
-                <TableRow key={r.id} className={cn("align-top", openId === r.id && "bg-secondary/50")} aria-selected={openId === r.id || undefined}>
+                <ClickableRow key={r.id} href={here({ open: r.id, unit: null, action: null, bin: null })} panel selected={openId === r.id} className="align-top" aria-selected={openId === r.id || undefined}>
                   {cols.map((c) => (
                     <TableCell key={c} data-label={c === cols[0] ? undefined : STOCK_COLUMNS.find((x) => x.id === c)?.label} className={cellClass(c)}>
                       <Cell column={c} row={r} href={here({ open: r.id, unit: null, action: null, bin: null })} companyName={ctx.companyName(r.companyId)} />
                     </TableCell>
                   ))}
-                </TableRow>
+                </ClickableRow>
               ))}
             </TableBody>
           </Table>

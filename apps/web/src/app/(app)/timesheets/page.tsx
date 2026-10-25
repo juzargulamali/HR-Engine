@@ -6,6 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { NewTimesheetForm } from "./new-timesheet-form";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ClickableRow } from "@/components/workspace/clickable-row";
+import { RememberList } from "@/components/workspace/list-memory";
 
 export const metadata = { title: "Timesheets" };
 
@@ -52,6 +54,7 @@ export default async function TimesheetsPage() {
 
   return (
     <div className="space-y-6">
+      <RememberList section="timesheets" />
       <div>
         <h1 className="text-2xl font-semibold">My Timesheets</h1>
         <p className="text-muted-foreground">Log hours for a period and submit them for approval.</p>
@@ -81,7 +84,7 @@ export default async function TimesheetsPage() {
             </TableHeader>
             <TableBody>
               {(timesheets ?? []).map((t) => (
-                <TableRow key={t.id}>
+                <ClickableRow key={t.id} href={`/timesheets/${t.id}`}>
                   <TableCell>
                     <Link href={`/timesheets/${t.id}`} className="hover:underline">
                       {t.period_start} – {t.period_end}
@@ -91,7 +94,7 @@ export default async function TimesheetsPage() {
                   <TableCell>
                     <Badge variant={STATUS_VARIANT[t.status] ?? "outline"}>{t.status.replace(/_/g, " ")}</Badge>
                   </TableCell>
-                </TableRow>
+                </ClickableRow>
               ))}
               {(timesheets ?? []).length === 0 ? (
                 <TableRow>

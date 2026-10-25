@@ -8,6 +8,7 @@ import { CheckTransaction } from "@/components/inventory/stock/check-transaction
 import { DateRangeFilter } from "@/components/inventory/stock/movement-filters";
 import { listTable } from "@/components/workspace/list-table";
 import { ListToolbar, type ToolbarFilter } from "@/components/workspace/list-toolbar";
+import { ClickableRow } from "@/components/workspace/clickable-row";
 import { PanelLink } from "@/components/workspace/panel-link";
 import { LoadError } from "@/components/workspace/states";
 import { firstParam, parseRecordId, withParams } from "@/components/workspace/url-state";
@@ -128,7 +129,7 @@ export default async function MovementsPage({ searchParams }: { searchParams: Pr
                 const { from: f, to: t } = movementFromTo(m, resolver);
                 const about = [m.project_id ? `Project ${list.names.project(m.project_id)}` : null, m.employee_id ? list.names.employee(m.employee_id) : null, m.request_id ? `Request ${list.names.request(m.request_id)}` : null].filter(Boolean).join(" · ");
                 return (
-                  <TableRow key={m.id} className={cn("align-top", openId === m.id && "bg-secondary/50")} aria-selected={openId === m.id || undefined}>
+                  <ClickableRow key={m.id} href={here({ open: m.id })} panel selected={openId === m.id} className="align-top" aria-selected={openId === m.id || undefined}>
                     <TableCell className="min-w-[9rem]">
                       <PanelLink href={here({ open: m.id })} className="font-medium underline-offset-2 hover:underline">{movementWhen(m.occurred_at, zone)}</PanelLink>
                       <div className="mt-0.5 font-mono text-[13px] text-muted-foreground">{m.code}</div>
@@ -139,7 +140,7 @@ export default async function MovementsPage({ searchParams }: { searchParams: Pr
                     <TableCell data-label="Who" className="whitespace-nowrap">{list.names.user(m.performed_by)}</TableCell>
                     <TableCell data-label="Project, employee or request" className="break-words">{about || "—"}</TableCell>
                     <TableCell data-label="Note" className="max-w-[16rem] break-words">{m.note ?? m.reason ?? "—"}</TableCell>
-                  </TableRow>
+                  </ClickableRow>
                 );
               })}
             </TableBody>

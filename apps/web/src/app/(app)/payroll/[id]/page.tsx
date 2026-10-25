@@ -5,11 +5,12 @@ import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Alert } from "@/components/ui/alert";
 import { RunActions } from "./run-actions";
 import { EditPayrollLineForm } from "./edit-payroll-line-form";
 import { DeletePayrollLineButton } from "./delete-payroll-line-button";
 import { AddManualPayrollLineForm } from "./add-manual-payroll-line-form";
+import { BackLink } from "@/components/workspace/list-memory";
+import { AccessNotice } from "@/components/os/access-notice";
 
 export const metadata = { title: "Payroll run" };
 
@@ -41,7 +42,7 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
   // would otherwise be the only thing standing between an unauthorized
   // signed-in user and this run's full salary line items.
   if (!canViewPayrollExport(session.grants, run.company_id)) {
-    return <Alert variant="destructive">Payroll export is restricted to HR Admin, Finance, CEO, and CTO.</Alert>;
+    return <AccessNotice title="Payroll">Payroll export is restricted to HR Admin, Finance, CEO, and CTO.</AccessNotice>;
   }
 
   const [{ data: lines }, { data: employees }, { data: company }] = await Promise.all([
@@ -72,9 +73,7 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
 
   return (
     <div className="space-y-6">
-      <Link href="/payroll" className="text-sm text-muted-foreground hover:underline">
-        ← Back to payroll
-      </Link>
+      <BackLink section="payroll" fallback="/payroll">Back to payroll</BackLink>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">

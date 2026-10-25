@@ -5,9 +5,11 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Alert } from "@/components/ui/alert";
 import { NewPayrollRunForm } from "./new-payroll-run-form";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ClickableRow } from "@/components/workspace/clickable-row";
+import { RememberList } from "@/components/workspace/list-memory";
+import { AccessNotice } from "@/components/os/access-notice";
 
 export const metadata = { title: "Payroll" };
 
@@ -33,7 +35,7 @@ export default async function PayrollPage() {
   const canView = employee ? canViewPayrollExport(session.grants, employee.company_id) : false;
 
   if (!canView) {
-    return <Alert variant="destructive">Payroll export is restricted to HR Admin, Finance, CEO, and CTO.</Alert>;
+    return <AccessNotice title="Payroll">Payroll export is restricted to HR Admin, Finance, CEO, and CTO.</AccessNotice>;
   }
 
   const { data: runs } = await supabase
@@ -45,6 +47,7 @@ export default async function PayrollPage() {
 
   return (
     <div className="space-y-6">
+      <RememberList section="payroll" />
       <div>
         <h1 className="text-2xl font-semibold">Payroll-variable export</h1>
         <p className="text-muted-foreground">
@@ -79,7 +82,7 @@ export default async function PayrollPage() {
             </TableHeader>
             <TableBody>
               {(runs ?? []).map((r) => (
-                <TableRow key={r.id}>
+                <ClickableRow key={r.id} href={`/payroll/${r.id}`}>
                   <TableCell>
                     <Link href={`/payroll/${r.id}`} className="hover:underline">
                       {r.period_month}/{r.period_year}
@@ -89,7 +92,7 @@ export default async function PayrollPage() {
                     <Badge variant={STATUS_VARIANT[r.status] ?? "outline"}>{r.status.replace(/_/g, " ")}</Badge>
                   </TableCell>
                   <TableCell>{r.sent_at ? new Date(r.sent_at).toLocaleDateString() : "—"}</TableCell>
-                </TableRow>
+                </ClickableRow>
               ))}
               {(runs ?? []).length === 0 ? (
                 <TableRow>

@@ -4,10 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Alert } from "@/components/ui/alert";
 import { NewAssetForm } from "./new-asset-form";
 import { RetireAssetButton } from "./retire-asset-button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { AccessNotice } from "@/components/os/access-notice";
 
 export const metadata = { title: "Assets" };
 
@@ -24,7 +24,7 @@ export default async function AssetsPage() {
 
   const canView = hasRoleAnyScope(session.grants, "hr_admin") || hasRoleAnyScope(session.grants, "finance");
   if (!canView) {
-    return <Alert variant="destructive">The asset inventory is restricted to HR Admin and Finance.</Alert>;
+    return <AccessNotice title="Assets">The asset inventory is restricted to HR Admin and Finance.</AccessNotice>;
   }
 
   const supabase = await createClient();

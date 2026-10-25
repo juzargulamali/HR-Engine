@@ -21,7 +21,7 @@ export interface ToolbarFilter {
  * can be shared and Back works. The record that is open in the side panel, the view, the sort and the columns are kept.
  * `resetKeys` are cleared whenever a filter changes (for example paging).
  */
-export function ListToolbar({ search, filters, clearHref, children }: { search?: { value: string; placeholder: string; label?: string }; filters: readonly ToolbarFilter[]; clearHref?: string; children?: React.ReactNode }) {
+export function ListToolbar({ search, filters, clearHref, resetKeys, children }: { search?: { value: string; placeholder: string; label?: string }; filters: readonly ToolbarFilter[]; clearHref?: string; /** Address parameters cleared whenever a filter or the search changes (for example the page number). */ resetKeys?: readonly string[]; children?: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -37,7 +37,7 @@ export function ListToolbar({ search, filters, clearHref, children }: { search?:
   }
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
-  const go = (patch: Record<string, string | null>) => start(() => router.replace(withParams(pathname, sp, patch), { scroll: false }));
+  const go = (patch: Record<string, string | null>) => start(() => router.replace(withParams(pathname, sp, { ...Object.fromEntries((resetKeys ?? []).map((k) => [k, null])), ...patch }), { scroll: false }));
   const onSearch = (v: string) => {
     setText(v);
     if (timer.current) clearTimeout(timer.current);

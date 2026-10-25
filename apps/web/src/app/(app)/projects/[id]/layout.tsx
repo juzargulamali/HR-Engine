@@ -12,6 +12,7 @@ import { loadProjectView } from "@/lib/projects/data";
 import { dateRangeText, dateText } from "@/lib/projects/format";
 import { manageItems, projectTabs } from "@/lib/projects/workspace-nav";
 import { createClient } from "@/lib/supabase/server";
+import { BackLink } from "@/components/workspace/list-memory";
 
 /**
  * One project. Members and founders get a compact banner, four sections (Work, Timeline, Discussion, Equipment) and one "Manage project"
@@ -49,9 +50,7 @@ export default async function ProjectLayout({ children, params }: { children: Re
 
   return (
     <div className="space-y-4">
-      <Link href="/projects" className="inline-flex items-center gap-1 rounded-md py-0.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> All projects
-      </Link>
+      <BackLink section="projects" fallback="/projects">All projects</BackLink>
       <OsHero
         eyebrow={project.reference}
         title={project.name}

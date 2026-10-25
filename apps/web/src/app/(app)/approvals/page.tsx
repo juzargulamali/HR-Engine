@@ -11,6 +11,7 @@ import { RecoveryCreditDecisionForm } from "./recovery-credit-decision-form";
 import { RecoveryWindowEvidence, type WindowEvidenceData } from "./recovery-window-evidence";
 import { getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { CLASSIFICATION_LABELS, ROUTE_LABELS, formatHoursMinutes } from "@/lib/recovery/labels";
+import { ClickableRow } from "@/components/workspace/clickable-row";
 
 export const metadata = { title: "Approvals" };
 
@@ -478,7 +479,7 @@ export default async function ApprovalsPage() {
                 {claimApprovals.map((a) => {
                   const claim = claimById.get(a.entity_id)!;
                   return (
-                    <TableRow key={a.id}>
+                    <ClickableRow key={a.id} href={`/reimbursements/${claim.id}`}>
                       <TableCell>{employeeName(claim.employee_id)}</TableCell>
                       <TableCell className="font-mono text-sm">
                         <Link href={`/reimbursements/${claim.id}`} className="hover:underline">
@@ -498,7 +499,7 @@ export default async function ApprovalsPage() {
                       <TableCell>
                         <DecisionButtons approvalId={a.id} />
                       </TableCell>
-                    </TableRow>
+                    </ClickableRow>
                   );
                 })}
               </TableBody>

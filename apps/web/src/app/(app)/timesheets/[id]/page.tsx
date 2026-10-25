@@ -9,6 +9,7 @@ import { AddEntryForm } from "./add-entry-form";
 import { DeleteEntryButton } from "./delete-entry-button";
 import { TimesheetActions } from "./timesheet-actions";
 import { EmptyState } from "@/components/ui/empty-state";
+import { BackLink } from "@/components/workspace/list-memory";
 
 export const metadata = { title: "Timesheet" };
 
@@ -51,9 +52,7 @@ export default async function TimesheetDetailPage({ params }: { params: Promise<
 
   return (
     <div className="space-y-6">
-      <Link href="/timesheets" className="text-sm text-muted-foreground hover:underline">
-        ← Back to timesheets
-      </Link>
+      <BackLink section="timesheets" fallback="/timesheets">Back to timesheets</BackLink>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">

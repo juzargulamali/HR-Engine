@@ -28,6 +28,7 @@ import { dateRangeText, formatDate } from "@/lib/projects/format";
 import { loadProjectsAttention } from "@/lib/projects/my-work";
 import { filterDirectory } from "@/lib/projects/work-logic";
 import { createClient } from "@/lib/supabase/server";
+import { RememberList } from "@/components/workspace/list-memory";
 
 export const metadata = { title: "Projects" };
 
@@ -113,6 +114,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
 
   return (
     <div className="space-y-5">
+      <RememberList section="projects" />
       <OsHero
         title="Projects"
         sub={salesOnly ? "The projects linked to your Sales work, with their handover status." : `${liveCount} ongoing · ${finishedCount} completed or archived${companies.length === 1 ? ` · ${companies[0]![1]}` : ""}`}

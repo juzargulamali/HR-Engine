@@ -12,6 +12,7 @@ import { RequestSidePanel } from "@/components/inventory/planning/request-panel"
 import { SalesChecksWaiting } from "@/components/inventory/planning/sales-checks-waiting";
 import { RequestStatusBadge } from "@/components/inventory/planning/status";
 import { ListToolbar, type ToolbarFilter } from "@/components/workspace/list-toolbar";
+import { ClickableRow } from "@/components/workspace/clickable-row";
 import { PanelLink } from "@/components/workspace/panel-link";
 import { SortHead } from "@/components/workspace/sort-head";
 import { LoadError } from "@/components/workspace/states";
@@ -170,7 +171,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
             </TableHeader>
             <TableBody>
               {rows.map((r) => (
-                <TableRow key={r.id} className={`align-top ${openId === r.id ? "bg-secondary/50" : ""}`} aria-selected={openId === r.id || undefined}>
+                <ClickableRow key={r.id} href={here({ open: r.id })} panel selected={openId === r.id} className="align-top" aria-selected={openId === r.id || undefined}>
                   <TableCell className="min-w-[9rem]">
                     <PanelLink href={here({ open: r.id })} className="break-words font-mono font-medium underline-offset-2 hover:underline">{r.code}</PanelLink>
                     {r.title ? <div className="break-words text-sm text-muted-foreground">{r.title}</div> : null}
@@ -183,7 +184,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
                     {r.shortageLines > 0 ? <Badge variant="outline" className="whitespace-nowrap border-[hsl(var(--os-amber)/0.4)] bg-[hsl(var(--os-amber)/0.1)] text-[hsl(var(--os-amber))]">Short on {r.shortageLines} {r.shortageLines === 1 ? "line" : "lines"}</Badge> : <span className="text-muted-foreground">None</span>}
                   </TableCell>
                   <TableCell data-label="Requested by" className="whitespace-nowrap">{r.requestedByName}</TableCell>
-                </TableRow>
+                </ClickableRow>
               ))}
             </TableBody>
           </Table>

@@ -1,3 +1,5 @@
+import { BackLink } from "@/components/workspace/list-memory";
+import { EmploymentStatusBadge } from "@/components/hr/status";
 import { notFound } from "next/navigation";
 import {
   canDeleteOrRestoreEmployee,
@@ -135,6 +137,8 @@ export default async function EmployeeDetailPage({
         </Alert>
       ) : null}
 
+      {!isSelf ? <BackLink section="employees" fallback="/employees">Employees</BackLink> : null}
+
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">
@@ -145,7 +149,7 @@ export default async function EmployeeDetailPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="secondary">{employee.employment_status}</Badge>
+          <EmploymentStatusBadge status={employee.employment_status} />
           {canDelete ? (
             <RestoreOrRemoveEmployeeButton
               employeeId={employee.id}

@@ -37,6 +37,7 @@ import {
 import { AddMilestoneButton, EditMilestoneButton, MilestoneStatusButton } from "./milestone-forms";
 import { PlanAddMenu } from "./plan-add-menu";
 import { blockers, holdReviewState, resolutionSummary } from "../overview-helpers";
+import { RememberList } from "@/components/workspace/list-memory";
 
 export const metadata = { title: "Work" };
 
@@ -227,6 +228,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
 
   return (
     <div className="space-y-4">
+      <RememberList section={`tasks-${id}`} />
       {readOnly ? <Muted>This project is {view.project.status}. Its plan is read-only; a founder can reopen it from History.</Muted> : null}
       {view.project.status === "on_hold" ? (
         <Alert variant="warning" role="status">

@@ -2,8 +2,8 @@ import { hasRoleAnyScope } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert } from "@/components/ui/alert";
 import { NewEmployeeForm } from "./new-employee-form";
+import { AccessNotice } from "@/components/os/access-notice";
 
 export const metadata = { title: "Add employee" };
 
@@ -16,7 +16,7 @@ export default async function NewEmployeePage() {
   // so there's no single companyId to check here yet either way — the real
   // per-company authorization is canCreateEmployee()/RLS at submission time.
   if (!session || !hasRoleAnyScope(session.grants, "hr_admin")) {
-    return <Alert variant="destructive">You need the HR Admin role to add an employee.</Alert>;
+    return <AccessNotice title="New employee">You need the HR Admin role to add an employee.</AccessNotice>;
   }
 
   const supabase = await createClient();

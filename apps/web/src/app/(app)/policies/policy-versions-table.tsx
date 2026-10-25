@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ActivateButton } from "./activate-button";
 import { DeletePolicyVersionButton } from "./delete-policy-version-button";
+import { ClickableRow } from "@/components/workspace/clickable-row";
 
 export interface PolicyVersionRow {
   id: string;
@@ -58,7 +59,7 @@ export function PolicyVersionsTable({ rows }: { rows: PolicyVersionRow[] }) {
         </TableHeader>
         <TableBody>
           {visibleRows.map((p) => (
-            <TableRow key={p.id}>
+            <ClickableRow key={p.id} href={`/policies/${p.id}`}>
               <TableCell>{p.countryLabel}</TableCell>
               <TableCell className="capitalize">{p.policyType.replace(/_/g, " ")}</TableCell>
               <TableCell>
@@ -88,7 +89,7 @@ export function PolicyVersionsTable({ rows }: { rows: PolicyVersionRow[] }) {
                   {p.status === "draft" && p.isDrafter ? <span className="text-sm text-muted-foreground">awaiting a different approver</span> : null}
                 </div>
               </TableCell>
-            </TableRow>
+            </ClickableRow>
           ))}
           {visibleRows.length === 0 ? (
             <TableRow>
