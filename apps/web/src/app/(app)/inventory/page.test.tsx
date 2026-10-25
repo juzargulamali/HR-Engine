@@ -25,6 +25,8 @@ vi.mock("@/lib/inventory/context", () => ({
   }),
 }));
 vi.mock("./_panel/action-panel", () => ({ ActionSidePanel: () => null, parseAction: (r: string) => (["receive", "issue", "dispatch", "return", "transfer", "scan"].includes(r) ? r : null) }));
+let quickAddCompanies: { id: string; name: string; categories: { id: string; label: string }[] }[] = [];
+vi.mock("@/components/inventory/stock/quick-add-item", () => ({ QuickAddItem: (p: { companies: typeof quickAddCompanies }) => { quickAddCompanies = p.companies; return <button type="button">Add item</button>; } }));
 vi.mock("./_panel/item-panel", () => ({ ItemSidePanel: () => null }));
 vi.mock("./_panel/unit-panel", () => ({ UnitSidePanel: () => null }));
 
@@ -121,6 +123,15 @@ describe("Inventory page", () => {
     const html = await render();
     expect(html).toContain("No items yet");
     expect(html).toContain("Add item");
+  });
+
+  it("offers Add item with the company and its categories even before any item exists", async () => {
+    grants = [{ companyId: C1, capabilities: ["founder"] }];
+    list = { ...listFor(true, false), rows: [], companies: [], categories: [{ id: "cat-1", company_id: C1, name: "Laptops", parent_id: null, sort_order: 0, is_active: true, created_at: "" }] };
+    quickAddCompanies = [];
+    await render();
+    expect(quickAddCompanies.map((c) => c.id)).toEqual([C1]);
+    expect(quickAddCompanies[0]!.categories.map((c) => c.label)).toEqual(["Laptops"]);
   });
 
   it("says nothing matches (with a way to clear) when a search finds nothing", async () => {
