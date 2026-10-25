@@ -21,7 +21,7 @@ export async function EmployeeEquipmentLink({ employeeId, companyId }: { employe
   if (!(await mayShow(companyId))) return null;
   return (
     <p className="text-sm text-muted-foreground">
-      Equipment recorded in Inventory for this employee:{" "}
+      The list above is the earlier HR asset register. Equipment issued through Inventory is kept separately:{" "}
       <Link href={`/inventory/employees?employee=${employeeId}`} className="font-medium text-foreground underline underline-offset-2">see what they hold</Link>.
     </p>
   );
