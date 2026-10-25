@@ -1,5 +1,5 @@
 -- WRITES (inv_company_grants, and inv_company_settings only if you type a reference code below). Run in the SQL Editor of
--- "Enginious HR Engine_V2" AFTER the ten Inventory migrations and after inv_20_verify_readonly.sql shows every row as OK.
+-- "Enginious HR Engine_V2" AFTER the Inventory migrations and after inv_20_verify_readonly.sql shows every row as OK.
 --
 -- WHY: Inventory access is granted from inside the app by a founder (Inventory > Access). The very first founders cannot be
 -- created from the app, because nobody holds the founder right yet. This script creates them. Nobody receives Inventory access
