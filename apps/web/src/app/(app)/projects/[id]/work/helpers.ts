@@ -15,18 +15,20 @@ export interface TaskFilters {
   mine: boolean;
   overdue: boolean;
   blocked: boolean;
+  /** Needs attention: an open task that is blocked or overdue. */
+  attention: boolean;
   /** Free-text search of the title and description (case-insensitive). */
   q: string;
 }
 
-export const DEFAULT_TASK_FILTERS: TaskFilters = { assignee: null, status: "open", team: null, deliverable: null, mine: false, overdue: false, blocked: false, q: "" };
+export const DEFAULT_TASK_FILTERS: TaskFilters = { assignee: null, status: "open", team: null, deliverable: null, mine: false, overdue: false, blocked: false, attention: false, q: "" };
 
 /** The single "Show" choice of the toolbar. Old bookmarks with mine=1, overdue=1 or blocked=1 keep working: they are read as the same filters. */
-export const SHOW_CHOICES = ["mine", "overdue", "blocked"] as const;
+export const SHOW_CHOICES = ["mine", "overdue", "blocked", "attention"] as const;
 export type ShowChoice = (typeof SHOW_CHOICES)[number];
 
 /** The toolbar value that represents these filters ("" for none; the first of several flags, as the toolbar can only show one). */
-export const showChoiceOf = (f: Pick<TaskFilters, "mine" | "overdue" | "blocked">): ShowChoice | "" => (f.mine ? "mine" : f.overdue ? "overdue" : f.blocked ? "blocked" : "");
+export const showChoiceOf = (f: Pick<TaskFilters, "mine" | "overdue" | "blocked" | "attention">): ShowChoice | "" => (f.mine ? "mine" : f.overdue ? "overdue" : f.blocked ? "blocked" : f.attention ? "attention" : "");
 
 type Params = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
@@ -43,17 +45,31 @@ export function parseTaskFilters(sp: Params): TaskFilters {
   const show = one(sp.show);
   return {
     assignee: id(sp.assignee), status, team: id(sp.team), deliverable: id(sp.deliverable),
-    mine: flag(sp.mine) || show === "mine", overdue: flag(sp.overdue) || show === "overdue", blocked: flag(sp.blocked) || show === "blocked",
+    mine: flag(sp.mine) || show === "mine", overdue: flag(sp.overdue) || show === "overdue", blocked: flag(sp.blocked) || show === "blocked", attention: show === "attention",
     q: (one(sp.q) ?? "").trim().slice(0, 100),
   };
 }
 
 /** True when the filters differ from the default view (to show a "Clear filters" link). */
 export const hasActiveFilters = (f: TaskFilters) =>
-  f.assignee !== null || f.status !== "open" || f.team !== null || f.deliverable !== null || f.mine || f.overdue || f.blocked || f.q !== "";
+  f.assignee !== null || f.status !== "open" || f.team !== null || f.deliverable !== null || f.mine || f.overdue || f.blocked || f.attention || f.q !== "";
 
 /** Plain-date overdue test: an open task whose due date is before today. No time zone, no Date objects. */
 export const isTaskOverdue = (t: Pick<ProjTaskRow, "status" | "due_date">, today: string) => isOpenTask(t.status) && !!t.due_date && t.due_date < today;
+
+/** An open task that is blocked or overdue: the same definition for the summary card, the count and the filter behind it. */
+export const needsAttention = (t: Pick<ProjTaskRow, "status" | "due_date" | "blocked_at">, today: string) => isOpenTask(t.status) && (!!t.blocked_at || isTaskOverdue(t, today));
+
+/** Monday to Sunday of the week that contains `today`, as plain dates (no time zone, no local-time Date objects). */
+export function weekWindow(today: string): { start: string; end: string } {
+  const d = new Date(`${today}T00:00:00Z`);
+  const back = (d.getUTCDay() + 6) % 7; // Monday = 0
+  const iso = (offset: number) => new Date(d.getTime() + offset * 86_400_000).toISOString().slice(0, 10);
+  return { start: iso(-back), end: iso(6 - back) };
+}
+
+/** "This week": an open task due by the end of this week, so overdue work is always in it. Undated tasks are not (they stay under All tasks). */
+export const isDueThisWeekOrOverdue = (t: Pick<ProjTaskRow, "status" | "due_date">, today: string) => isOpenTask(t.status) && !!t.due_date && t.due_date <= weekWindow(today).end;
 
 export function filterTasks(tasks: readonly ProjTaskRow[], f: TaskFilters, userId: string, today: string): ProjTaskRow[] {
   const needle = f.q.toLowerCase();
@@ -66,6 +82,7 @@ export function filterTasks(tasks: readonly ProjTaskRow[], f: TaskFilters, userI
     if (f.deliverable && t.deliverable_id !== f.deliverable) return false;
     if (f.blocked && !t.blocked_at) return false;
     if (f.overdue && !isTaskOverdue(t, today)) return false;
+    if (f.attention && !needsAttention(t, today)) return false;
     return true;
   });
 }
@@ -286,4 +303,18 @@ export function describeTaskEvent(e: Pick<ProjTaskEventRow, "kind" | "from_value
     case "review_rule_changed": return `Review ${e.to_value === "true" ? "is now required" : "is no longer required"}.`;
     default: return `${e.kind.replace(/_/g, " ")}.${note}`;
   }
+}
+
+export interface StripMilestone { id: string; title: string; status: string; dueDate: string | null; isRequired: boolean }
+export type StripState = "done" | "next" | "late" | "later";
+
+/**
+ * The milestone strip of the Work page: cancelled and deferred milestones are left out; accepted ones are done; the first one still open
+ * is "next" (or "late" when its date has passed); any later one that is already past due is "late"; the rest are "later".
+ */
+export function stripSteps(milestones: readonly StripMilestone[], today: string): { m: StripMilestone; state: StripState }[] {
+  const live = milestones.filter((m) => m.status !== "cancelled" && m.status !== "deferred");
+  const firstOpen = live.findIndex((m) => m.status !== "accepted");
+  const past = (m: StripMilestone) => !!m.dueDate && m.dueDate < today;
+  return live.map((m, i) => ({ m, state: m.status === "accepted" ? "done" : past(m) ? "late" : i === firstOpen ? "next" : "later" }));
 }

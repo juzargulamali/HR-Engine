@@ -1,14 +1,14 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
+import { useState } from "react";
 import { Pencil } from "lucide-react";
 import { reassignProjectTask, setProjectTaskStatus } from "@/lib/actions/projectsDelivery";
 import { Alert } from "@/components/ui/alert";
-import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
-import { InlineSelect } from "@/components/workspace/inline-edit";
+import { OsAvatar } from "@/components/os/pills";
 import { TASK_STATUS_LABELS, type TaskStatus } from "@enginious-hr/domain";
-import { TaskStatusBadge } from "@/components/projects/badges";
+import { OsChoiceMenu, type OsChoice } from "@/components/os/choice-menu";
+import { statusTone, TaskStatusBadge } from "@/components/projects/badges";
 import { DueDateForm, StatusMoveForm } from "./task-forms";
 import type { TaskMoveSpec } from "./task-logic";
 
@@ -49,44 +49,26 @@ export async function saveMove(row: Pick<ControlRow, "id" | "projectId" | "versi
  * reviewed work, requesting changes, reopening, deferring, cancelling) opens a small form first. With no moves it is just the status.
  */
 export function TaskStatusControl({ row }: { row: ControlRow }) {
-  const id = useId();
   const [dialog, setDialog] = useState<TaskMoveSpec | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [shown, setShown] = useState(CURRENT);
-  const [pending, start] = useTransition();
   if (row.moves.length === 0) return <TaskStatusBadge status={row.status} />;
   const current = TASK_STATUS_LABELS[row.status as TaskStatus] ?? row.status;
+  const choices: OsChoice[] = [
+    { value: CURRENT, label: current, tone: statusTone(row.status) },
+    ...row.moves.map((m, i) => ({ value: `m${i}`, label: `${m.label}${m.mode === "dialog" ? "…" : ""}`, tone: statusTone(m.to) })),
+  ];
   return (
     <div>
-      <label htmlFor={id} className="sr-only">Status of {row.title}</label>
-      <Select
-        id={id}
-        value={shown}
-        disabled={pending}
-        aria-busy={pending}
-        aria-invalid={error ? true : undefined}
-        className="h-8 min-w-[9.5rem] py-0 text-[13px]"
-        onChange={(e) => {
-          const index = Number(e.target.value.replace("m", ""));
-          const move = row.moves[index];
-          setError(null);
-          if (!move) return;
-          if (move.mode === "dialog") { setShown(CURRENT); setDialog(move); return; }
-          setShown(e.target.value);
-          start(async () => {
-            let r: { error: string | null };
-            try { r = await saveMove(row, move.to); } catch { r = { error: "The change could not be saved. Check your connection and try again." }; }
-            if (r.error) setError(r.error);
-            setShown(CURRENT);
-          });
+      <OsChoiceMenu
+        label={`Status of ${row.title}`}
+        value={CURRENT}
+        choices={choices}
+        onSave={async (next) => {
+          const move = row.moves[Number(next.replace("m", ""))];
+          if (!move) return { error: null };
+          if (move.mode === "dialog") { setDialog(move); return { error: null }; }
+          try { return await saveMove(row, move.to); } catch { return { error: "The change could not be saved. Check your connection and try again." }; }
         }}
-      >
-        <option value={CURRENT}>{pending ? "Saving…" : current}</option>
-        <optgroup label="Change to">
-          {row.moves.map((m, i) => <option key={`${m.to}-${m.label}`} value={`m${i}`}>{m.label}{m.mode === "dialog" ? "…" : ""}</option>)}
-        </optgroup>
-      </Select>
-      {error ? <p role="alert" className="mt-0.5 text-[13px] text-destructive">{error}</p> : null}
+      />
       <Modal open={dialog !== null} onClose={() => setDialog(null)} title={dialog?.label ?? ""}>
         {dialog ? <StatusMoveForm projectId={row.projectId} taskId={row.id} version={row.version} move={dialog} taskTitle={row.title} onDone={() => setDialog(null)} /> : null}
       </Modal>
@@ -121,12 +103,13 @@ export function TaskDueControl({ row }: { row: ControlRow }) {
  * owner sees the name as text, however many columns the table has. The database refuses anyone else regardless.
  */
 export function TaskAssigneeControl({ row }: { row: ControlRow }) {
-  if (!row.canReassign) return <span>{row.assigneeName}</span>;
+  if (!row.canReassign) return <span className="inline-flex items-center gap-2"><OsAvatar name={row.assigneeName} size="sm" /><span className="truncate">{row.assigneeName}</span></span>;
   return (
-    <InlineSelect
+    <OsChoiceMenu
       label={`Assignee of ${row.title}`}
       value={row.assigneeId}
-      options={row.reassignOptions.map((o) => ({ value: o.id, label: o.name }))}
+      pill={false}
+      choices={[...(row.reassignOptions.some((o) => o.id === row.assigneeId) ? [] : [{ id: row.assigneeId, name: row.assigneeName }]), ...row.reassignOptions].map((o) => ({ value: o.id, label: o.name, avatar: o.name }))}
       onSave={async (next) => {
         const fd = new FormData();
         fd.set("projectId", row.projectId);

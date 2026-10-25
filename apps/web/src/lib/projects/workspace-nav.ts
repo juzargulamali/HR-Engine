@@ -1,5 +1,5 @@
 /**
- * The project workspace has four primary sections; everything else is under "Manage project". Pure so the rule "what is offered
+ * The project workspace has four primary sections (Work, Timeline, Discussion, Equipment); everything else is under "Manage project". Pure so the rule "what is offered
  * to whom" is tested. The database and the pages still enforce every one of these.
  */
 export interface ProjectTabData {
@@ -10,17 +10,17 @@ export interface ProjectTabData {
 
 export function projectTabs(base: string, unread: string | null): ProjectTabData[] {
   return [
-    { href: base, label: "Overview" },
     { href: `${base}/work`, label: "Work" },
-    { href: `${base}/plan`, label: "Plan" },
+    { href: `${base}/plan`, label: "Timeline" },
     { href: `${base}/discussion`, label: "Discussion", badge: unread },
+    { href: `${base}/equipment`, label: "Equipment" },
   ];
 }
 
-/** Which tab a path belongs to. The overview matches only itself; the legacy section addresses light up their new home. */
+/** Which tab a path belongs to. The old overview address belongs to Work (its content lives there now); the legacy section addresses light up their new home. */
 export function activeTabHref(pathname: string, base: string): string | null {
-  if (pathname === base) return base;
-  const map: [string, string][] = [["/work", `${base}/work`], ["/plan", `${base}/plan`], ["/timeline", `${base}/plan`], ["/calendar", `${base}/plan`], ["/discussion", `${base}/discussion`]];
+  if (pathname === base) return `${base}/work`;
+  const map: [string, string][] = [["/work", `${base}/work`], ["/plan", `${base}/plan`], ["/timeline", `${base}/plan`], ["/calendar", `${base}/plan`], ["/discussion", `${base}/discussion`], ["/equipment", `${base}/equipment`]];
   for (const [seg, href] of map) if (pathname === `${base}${seg}` || pathname.startsWith(`${base}${seg}/`)) return href;
   return null;
 }

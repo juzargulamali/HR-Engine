@@ -7,7 +7,7 @@
 // The end-to-end flow (handover, review rules, plans, site bookings, completion) is projects-flow.mjs; this file is about finding,
 // filtering, moving and quickly changing work, and about who may see or change what.
 import { execSync } from "node:child_process";
-import { chromium, newPage, login, BASE, psql as sql } from "./lib.mjs";
+import { chromium, newPage, login, BASE, optionTexts, choose, psql as sql } from "./lib.mjs";
 const SHOTS = process.env.SHOTS_DIR ?? "/tmp";
 const browser = await chromium.launch();
 let fails = 0; let passes = 0; let page;
@@ -60,8 +60,7 @@ const urlParam = (k) => new URL(page.url()).searchParams.get(k);
 const rowNames = async () => (await page.locator("main tbody tr").evaluateAll((trs) => trs.map((r) => r.querySelector("a")?.textContent?.trim() ?? ""))).filter(Boolean);
 const heads = async () => (await page.locator("main thead th").allInnerTexts()).map((t) => t.trim());
 const html = () => page.content();
-const optionTexts = (sel) => sel.locator("option").allInnerTexts();
-const choose = async (sel, re) => { const opts = await optionTexts(sel); const o = opts.find((x) => re.test(x)); if (!o) throw new Error(`no option ${re} among: ${opts.join(" | ")}`); await sel.selectOption({ label: o }); return o; };
+const openFilters = async () => { const b = page.getByRole("button", { name: /^Filters/ }); if ((await b.getAttribute("aria-expanded")) !== "true") await b.click(); };
 const row = (title) => page.locator("main tbody tr", { hasText: title }).first();
 const board = () => page.locator("main [role=region][aria-label$='Scroll sideways for more columns.']");
 const column = (label) => board().locator("section", { has: page.getByRole("heading", { name: new RegExp(`^${label}`, "i") }) }).first();
@@ -217,7 +216,7 @@ await step("Summary panel: a project the person is not on opens a summary only (
 sql(`delete from proj_company_grants where user_id='${U(6)}'`);
 await step("revoking admin@'s Projects grant takes the module and every project path away at once", async () => {
   await go("/projects"); await until(async () => /do not have Projects access/.test(await main()), "no-access page");
-  for (const path of [`/projects/${P}`, `/projects/${P}/work`, `/projects/work`, `/projects?open=${P}`, `/projects/calendar`]) { await go(path); const b = await main(); if (!/access|not found|could not be found/i.test(b) || leaks(b).length || /Floor projection/.test(b)) throw new Error(`${path} still shows data after revocation: ${b.slice(0, 160)}`); }
+  for (const path of [`/projects/${P}`, `/projects/${P}/work?tasks=all`, `/projects/work?tasks=all`, `/projects?open=${P}`, `/projects/calendar`]) { await go(path); const b = await main(); if (!/access|not found|could not be found/i.test(b) || leaks(b).length || /Floor projection/.test(b)) throw new Error(`${path} still shows data after revocation: ${b.slice(0, 160)}`); }
   const nav = (await page.locator("aside nav[aria-label='Modules']").innerText()).replace(/\s+/g, " "); if (/Projects & Tasks/.test(nav)) throw new Error("module still in the menu");
 });
 await step("a member who opens a project goes straight to its workspace, not a panel; Sales linked sees summary + handover status in the panel", async () => {
@@ -274,12 +273,12 @@ await step("quick changes only where permitted: the task owner changes status an
   if ((await r.getByLabel(/^Status of Sensor calibration/).count()) !== 1) throw new Error("owner has no status control");
   if ((await r.getByRole("button", { name: /Change due date of Sensor calibration/ }).count()) !== 1) throw new Error("owner has no due-date control");
   if ((await r.getByLabel(/^Assignee of/).count()) !== 0) throw new Error("the task owner can reassign");
-  for (const who of ["lead@e2e.local", "mgr@e2e.local"]) { await as(who); await go(`/projects/${P}/work`); if ((await row(T.sensor).getByLabel(/^Assignee of Sensor calibration/).count()) !== 1) throw new Error(`${who} has no assignee control`); }
-  await as("hr1@e2e.local"); await go(`/projects/${P}/work`); if (/Sensor calibration/.test(await main())) throw new Error("hr1@ (not a member) sees the project's tasks");
+  for (const who of ["lead@e2e.local", "mgr@e2e.local"]) { await as(who); await go(`/projects/${P}/work?tasks=all`); if ((await row(T.sensor).getByLabel(/^Assignee of Sensor calibration/).count()) !== 1) throw new Error(`${who} has no assignee control`); }
+  await as("hr1@e2e.local"); await go(`/projects/${P}/work?tasks=all`); if (/Sensor calibration/.test(await main())) throw new Error("hr1@ (not a member) sees the project's tasks");
 });
 await as("lead@e2e.local");
 await step("the head reassigns in place: options are the team only, the change is saved, logged in the task history and told to the new assignee", async () => {
-  await go(`/projects/${P}/work`); const sel = row(T.sensor).getByLabel(/^Assignee of Sensor calibration/);
+  await go(`/projects/${P}/work?tasks=all`); const sel = row(T.sensor).getByLabel(/^Assignee of Sensor calibration/);
   const opts = await optionTexts(sel); if (opts.some((o) => /mgr|ceo|admin/.test(o))) throw new Error("head offered people outside the team: " + opts.join(" | "));
   await choose(sel, /^lead/); await until(() => sql(`select assignee_id from proj_tasks where title='${T.sensor}'`) === U(7), "reassigned");
   if (sql(`select count(*) from proj_task_events where task_id='${taskId(T.sensor)}' and kind='reassigned'`) !== "1") throw new Error("no history entry for the reassignment");
@@ -287,7 +286,7 @@ await step("the head reassigns in place: options are the team only, the change i
   await choose(row(T.sensor).getByLabel(/^Assignee of Sensor calibration/), /^hr/); await until(() => sql(`select assignee_id from proj_tasks where title='${T.sensor}'`) === U(2), "reassigned back");
 });
 await step("a plain status change saves in place; a change that needs a reason opens its form; a stale change is refused in words and the old value comes back", async () => {
-  await go(`/projects/${P}/work`);
+  await go(`/projects/${P}/work?tasks=all`);
   await choose(row(T.sensor).getByLabel(/^Status of Sensor calibration/), /^Start/); await until(() => taskStatus(T.sensor) === "in_progress", "Start saved in place");
   const sel = row(T.guide).getByLabel(/^Status of Write the operator guide/); await choose(sel, /^Defer/); const d = modal(); await d.waitFor();
   if (taskStatus(T.guide) !== "todo") throw new Error("deferred before the form was saved"); await d.getByRole("button", { name: /^Defer$/ }).click(); await sleep(600);
@@ -297,11 +296,11 @@ await step("a plain status change saves in place; a change that needs a reason o
   const sel2 = row(T.guide).getByLabel(/^Status of Write the operator guide/); await choose(sel2, /^Start/);
   await until(async () => /changed by someone else/i.test(await row(T.guide).innerText()), "the stale-change message", 12000);
   if (taskStatus(T.guide) !== "todo") throw new Error("stale change was applied");
-  const shown = await row(T.guide).getByLabel(/^Status of Write the operator guide/).evaluate((e) => e.options[e.selectedIndex].text); if (/Saving|In progress/.test(shown)) throw new Error("old value not restored, shows: " + shown);
+  const shown = await row(T.guide).getByLabel(/^Status of Write the operator guide/).evaluate((e) => (e.options ? e.options[e.selectedIndex].text : e.innerText)); if (/Saving|In progress/.test(shown)) throw new Error("old value not restored, shows: " + shown);
 });
 await as("mgr@e2e.local");
 await step("a due date changed in the table asks for a reason, keeps the old date until saved, and never moves another task's date", async () => {
-  await go(`/projects/${P}/work`); const before = sql("select string_agg(title || due_date::text, ',' order by title) from proj_tasks where title <> 'Confirm power and network with the venue'");
+  await go(`/projects/${P}/work?tasks=all`); const before = sql("select string_agg(title || due_date::text, ',' order by title) from proj_tasks where title <> 'Confirm power and network with the venue'");
   await row(T.power).getByRole("button", { name: /Change due date of Confirm power/ }).click(); const d = modal(); await d.waitFor();
   await d.getByLabel("Due date").fill("2026-11-09"); await d.getByRole("button", { name: /save due date/i }).click(); await sleep(600);
   if (sql(`select due_date::text from proj_tasks where title='${T.power}'`) !== "2026-11-02") throw new Error("saved without a reason");
@@ -361,6 +360,42 @@ await step("a task the person may not read (not a member, another company, made-
 // A project's Work, Plan, Discussion and Manage menu
 // ============================================================================================================================
 await as("mgr@e2e.local", { width: 1280, height: 800 });
+await step("Work opens on 'This week': four cards counted from the tasks, the overdue task is listed, 'View all tasks (4)' opens every open task, the cards filter, and the old overview address lands here with its content", async () => {
+  await go(`/projects/${P}/work`); const t = await main();
+  for (const re of [/4 Open tasks/, /1 Need attention/, /1 In review/, /\d+ due this week/, /Upcoming milestones/, /This week/, /Needs action/, /Project details/, /Agreed scope/]) if (!re.test(t)) throw new Error(`missing ${re} on Work: ${t.slice(0, 300)}`);
+  if (!(await rowNames()).includes(T.guide)) throw new Error("the overdue task is not in This week: " + (await rowNames()).join(" | "));
+  const all = page.getByRole("link", { name: /^View all tasks \(4\)$/ }); if ((await all.count()) < 1) throw new Error("no 'View all tasks (4)' link");
+  await all.first().click(); await until(async () => (await rowNames()).length === 4, "all four open tasks listed");
+  await page.getByRole("link", { name: /Need attention/ }).click(); await until(async () => (await rowNames()).join() === T.guide, "Need attention card narrows to the overdue task");
+  await page.getByRole("link", { name: /In review/ }).click(); await until(async () => (await rowNames()).join() === T.shader, "In review card narrows to the review task");
+  await go(`/projects/${P}`); if (!new URL(page.url()).pathname.endsWith("/work")) throw new Error("overview address did not lead to Work: " + page.url());
+  const tabs = await page.getByRole("navigation", { name: "Project sections" }).innerText(); for (const w of ["Work", "Timeline", "Discussion", "Equipment"]) if (!tabs.includes(w)) throw new Error("tab missing: " + w);
+});
+await step("Work composition: a main column and a narrower right rail (about 72/28), three summary cards level with the rail's first card, This week directly under them, milestones below the task list, a compact toolbar with Table/Board, search and Filters", async () => {
+  await go(`/projects/${P}/work`);
+  const box = (loc) => loc.first().boundingBox();
+  const cards = page.getByRole("list", { name: "Where the work stands" }); if ((await cards.locator("> li").count()) !== 3) throw new Error("expected three summary cards");
+  if (/Due this week/.test(await cards.innerText())) throw new Error("Due this week is still a summary card");
+  const cb = await box(cards), rail = await box(page.getByRole("complementary", { name: "Project support" }).locator("section").first()), taskCard = await box(page.getByRole("region", { name: "Tasks" })), strip = await box(page.getByRole("region", { name: "Milestones" }));
+  if (Math.abs(cb.y - rail.y) > 4) throw new Error(`rail first card (${rail.y}) is not level with the summary cards (${cb.y})`);
+  const ratio = cb.width / (cb.width + rail.width); if (ratio < 0.68 || ratio > 0.76) throw new Error("main/rail split is " + ratio.toFixed(2));
+  if (!(taskCard.y > cb.y + cb.height - 1 && taskCard.y - (cb.y + cb.height) < 40)) throw new Error("This week is not directly under the summary cards");
+  if (!(strip.y > taskCard.y + taskCard.height - 1)) throw new Error("milestones are not below the task list");
+  for (const name of [/^Table$/, /^Board$/, /^Filters/]) if ((await page.getByRole("region", { name: "Tasks" }).getByRole(name === undefined ? "button" : "link", { name }).count()) + (await page.getByRole("region", { name: "Tasks" }).getByRole("button", { name }).count()) < 1) throw new Error("toolbar lacks " + name);
+  if ((await page.getByRole("searchbox", { name: "Search tasks" }).count()) !== 1) throw new Error("no search box");
+  await openFilters(); for (const id of ["#ob-status", "#ob-assignee", "#ob-group"]) if ((await page.locator(id).count()) !== 1) throw new Error(`Filters panel lacks ${id}`);
+});
+await step("An empty project: a compact task card with Add task and View all tasks, one milestone as a single row, nothing invented", async () => {
+  const E = asDb(3, `select proj_create_internal_project('${CO}', 'Empty labelling', '${U(4)}'::uuid, true)`);
+  asDb(4, `select proj_save_milestone('${E}'::uuid, null, '{"title":"Labels approved","due_date":"2026-11-30","is_required":true}'::jsonb)`);
+  await go(`/projects/${E}/work`); const t = await main();
+  if (!/No tasks yet/.test(t)) throw new Error("no empty message: " + t.slice(0, 200));
+  const tc = page.getByRole("region", { name: "Tasks" });
+  for (const n of [/^Add task$/, /^View all tasks/]) if ((await tc.getByRole(/Add/.test(n.source) ? "button" : "link", { name: n }).count()) < 1) throw new Error("empty state lacks " + n);
+  const h = (await tc.boundingBox()).height; if (h > 280) throw new Error(`empty task card is ${Math.round(h)}px tall`);
+  const ms = page.getByRole("region", { name: "Milestones" }); if ((await ms.count()) !== 1 || (await ms.boundingBox()).height > 90) throw new Error("one milestone is not a compact row");
+  if (sql(`select count(*) from proj_tasks where project_id='${E}'`) !== "0") throw new Error("a task appeared in the empty project");
+});
 await step("Work groups tasks by Department, Milestone (with an honest 'Unlinked'), Status or Assignee; an invented group is ignored; the board ignores grouping", async () => {
   await go(`/projects/${P}/work?group=milestone`); const groups = async () => (await page.locator("main details > summary").allInnerTexts()).map((x) => x.replace(/\s+/g, " ").trim());
   let g = await groups(); const ms = g.find((x) => x.startsWith(M1)); const un = g.find((x) => x.startsWith("Unlinked"));
@@ -369,19 +404,20 @@ await step("Work groups tasks by Department, Milestone (with an honest 'Unlinked
   await go(`/projects/${P}/work?group=team`); g = await groups(); if (!g.some((x) => x.startsWith("Programming")) || !g.some((x) => x.startsWith("No department"))) throw new Error("team groups: " + g.join(" | "));
   await go(`/projects/${P}/work?group=status`); g = await groups(); if (!g.some((x) => /^To do/.test(x)) || !g.some((x) => /^Ready for review/.test(x))) throw new Error("status groups: " + g.join(" | "));
   await go(`/projects/${P}/work?group=assignee`); g = await groups(); if (!g.some((x) => /^hr/.test(x)) || !g.some((x) => /^mgr/.test(x))) throw new Error("assignee groups: " + g.join(" | "));
-  await go(`/projects/${P}/work?group=bogus`); if ((await page.locator("main tbody tr").count()) < 4) throw new Error("bogus group broke the list");
+  await go(`/projects/${P}/work?tasks=all&group=bogus`); if ((await page.locator("main tbody tr").count()) < 4) throw new Error("bogus group broke the list");
   await go(`/projects/${P}/work?group=milestone&view=board`); if (!(await board().count())) throw new Error("board missing"); if ((await board().locator("section ul > li").count()) < 4) throw new Error("board lost tasks");
-  await go(`/projects/${P}/work`); await page.locator("#lt-group").selectOption("status"); await page.waitForURL((u) => u.searchParams.get("group") === "status");
+  await go(`/projects/${P}/work?tasks=all`); await openFilters(); await page.locator("#ob-group").selectOption("status"); await page.waitForURL((u) => u.searchParams.get("group") === "status");
 });
 await step("Work: filters and the review queue — 'Waiting for your review' shows the sent-for-review task to the PM and the head, and opening it uses the panel with Accept", async () => {
-  await go(`/projects/${P}/work`); const q = page.locator("main", { has: page.getByText(/Waiting for your review \(1\)/) }); if ((await q.count()) !== 1) throw new Error("PM has no review queue");
+  await go(`/projects/${P}/work?tasks=all`); const q = page.locator("main", { has: page.getByText(/Waiting for your review \(1\)/) }); if ((await q.count()) !== 1) throw new Error("PM has no review queue");
   await page.getByRole("link", { name: /^Review$/ }).first().click(); await page.waitForURL((u) => u.searchParams.get("task") === taskId(T.shader)); await panel().waitFor();
   const opts = await optionTexts(panel().getByLabel(/^Status of Shader prototype/)); if (!opts.some((o) => /Accept and complete/.test(o)) || !opts.some((o) => /Request changes/.test(o))) throw new Error("reviewer options: " + opts.join(" | "));
   await page.keyboard.press("Escape"); await panel().waitFor({ state: "detached" });
-  await page.locator("#lt-status").selectOption("done"); await until(async () => /No tasks match/.test(await main()), "no done tasks yet");
+  await openFilters(); await page.locator("#ob-status").selectOption("done"); await until(async () => /No tasks match/.test(await main()), "no done tasks yet");
+  if (!/Show: Done/.test(await page.getByRole("list", { name: "Filters in use" }).innerText())) throw new Error("an active filter is not shown as a chip");
   await go(`/projects/${P}/work?show=overdue`); await until(async () => (await rowNames()).join() === T.guide, "overdue narrowing");
   await go(`/projects/${P}/work?show=mine`); await until(async () => (await rowNames()).join() === T.power, "my tasks narrowing (the PM's own task)");
-  await as("hr@e2e.local"); await go(`/projects/${P}/work`); if (/Waiting for your review/.test(await main())) throw new Error("review queue shown to the task's own assignee");
+  await as("hr@e2e.local"); await go(`/projects/${P}/work?tasks=all`); if (/Waiting for your review/.test(await main())) throw new Error("review queue shown to the task's own assignee");
 });
 await step("Work: Add task limits — a member can only add for themself; ?add=1 opens it; a refusal keeps what was typed", async () => {
   await go(`/projects/${P}/work?add=1`); const d = modal(); await d.waitFor();
@@ -406,9 +442,9 @@ await step("Discussion: Jump to task opens the task beside the Work list; Files 
   if (sql("select count(*) || ':' || coalesce(string_agg(status || due_date::text, ',' order by id::text), '') from proj_tasks") !== tasksBefore) throw new Error("sending a message changed tasks");
 });
 await as("mgr@e2e.local");
-await step("Overview, Work, Plan, Discussion are the four sections; Manage project reaches People, Feedback & changes, Files & client plan, History and Complete for the PM", async () => {
+await step("Work, Timeline, Discussion, Equipment are the four sections; the old overview address leads to Work; Manage project reaches People, Feedback & changes, Files & client plan, History and Complete for the PM", async () => {
   await go(`/projects/${P}`); const tabs = (await page.locator("main nav[aria-label='Project sections'] a").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").replace(/\d+\s*$/, "").trim());
-  if (tabs.join("|") !== "Overview|Work|Plan|Discussion") throw new Error("tabs: " + tabs.join("|"));
+  if (tabs.join("|") !== "Work|Timeline|Discussion|Equipment") throw new Error("tabs: " + tabs.join("|"));
   const items = await menuItems("Manage project"); for (const want of ["Edit details", "Change status", "People & access", "Feedback & changes", "Files & client plan", "History", "Complete project"]) if (!items.some((i) => i.startsWith(want))) throw new Error(`Manage lacks ${want}: ${items.join(" | ")}`);
   for (const [item, path] of [["People & access", "people"], ["Feedback & changes", "changes"], ["Files & client plan", "documents"], ["History", "history"], ["Complete project", "complete"]]) {
     await go(`/projects/${P}`); await page.locator("main").getByRole("button", { name: "Manage project", exact: true }).click(); await page.locator("main").getByRole("menuitem", { name: new RegExp(`^${item}`) }).click();
@@ -435,7 +471,7 @@ await step("another company's project is invisible to this company's founder (li
   await go("/projects"); let b = await main() + await html(); if (/Warsaw/.test(b)) throw new Error("the Polish project is listed for the UAE founder");
   await page.getByRole("searchbox").fill("warsaw"); await until(async () => /No project matches/.test(await main()), "no match for the other company"); 
   await go(`/projects/${PLP}`); b = await main() + await html(); if (/Warsaw depot refit|Warsaw racks/.test(b)) throw new Error("the Polish project opened for the UAE founder");
-  await go(`/projects/${PLP}/work`); if (/Warsaw/.test(await html())) throw new Error("the Polish Work page opened");
+  await go(`/projects/${PLP}/work?tasks=all`); if (/Warsaw/.test(await html())) throw new Error("the Polish Work page opened");
   await go("/projects/calendar?scope=company&view=agenda&date=2026-11-30"); if (/Warsaw/.test(await html())) throw new Error("the company calendar shows another company's project");
   await as("pol.exec@e2e.local"); await go("/projects"); b = await main() + await html(); if (!/Warsaw depot refit/.test(b)) throw new Error("the Polish founder cannot see their own project");
   if (/Floor projection|Showroom technology|Sensor calibration|Content approved/.test(b)) throw new Error("the Polish founder sees UAE projects: " + b.slice(0, 200));
@@ -447,7 +483,7 @@ await step("membership revoked: the person loses the workspace, their tasks, the
   await as("hr@e2e.local");
   await go("/projects/work"); let b = await main(); if (/Sensor calibration|Shader prototype/.test(b)) throw new Error("tasks of a removed project still listed");
   if ((await page.locator("section[aria-label='My projects']").count()) !== 0) throw new Error("project still in My projects");
-  await go(`/projects/${P}/work`); b = await main(); if (/Sensor calibration|Shader prototype/.test(b) || !/summary only/i.test(b)) throw new Error("workspace still open: " + b.slice(0, 150));
+  await go(`/projects/${P}/work?tasks=all`); b = await main(); if (/Sensor calibration|Shader prototype/.test(b) || !/summary only/i.test(b)) throw new Error("workspace still open: " + b.slice(0, 150));
   await go(`/projects/work?task=${taskId(T.sensor)}`); if (/Sensor calibration/.test(await html())) throw new Error("task panel still opens");
   for (const sub of ["discussion", "documents", "plan", "history"]) { await go(`/projects/${P}/${sub}`); if (/Truss arrives|Sensor calibration|LED floor/.test(await html())) throw new Error(`/${sub} still readable`); }
   sql(`update proj_project_members set removed_at = null where project_id='${P}' and user_id='${U(2)}'`);

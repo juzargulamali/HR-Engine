@@ -13,6 +13,7 @@ export function TaskBoard({ rows, basePath, current, showProject, panelParam = "
       <TaskBoardClient
         cards={onBoard.map((r) => ({
           row: toControlRow(r),
+          href: withParams(basePath, current, { [panelParam]: r.id }),
           card: (
             <div className="text-sm">
               <PanelLink href={withParams(basePath, current, { [panelParam]: r.id })} className="break-words font-medium leading-snug underline-offset-2 hover:underline">{r.title}</PanelLink>

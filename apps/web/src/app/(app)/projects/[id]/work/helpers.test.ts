@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { ProjectStanding } from "@enginious-hr/domain";
 import type { ProjDeliverableRow, ProjProjectPersonRow, ProjTaskRow, ProjTeamRow } from "@/types/projects";
 import {
+  stripSteps,
   deliverableMoves, describeTaskEvent, dueWords, filterTasks, groupDeliverables, hasActiveFilters, isTaskOverdue, milestoneMoves, newTaskOptions, parseTaskFilters,
   quickAssigneeChoices, reviewQueue, showChoiceOf, sortTasks, taskCountsByDeliverable, taskRowFields, DEFAULT_TASK_FILTERS,
+  isDueThisWeekOrOverdue, needsAttention, weekWindow,
 } from "./helpers";
 
 const U = "11111111-1111-4111-8111-111111111111";
@@ -29,7 +31,7 @@ describe("parseTaskFilters", () => {
   });
   it("accepts valid filters, takes the first of repeated parameters, and clamps ids", () => {
     const f = parseTaskFilters({ status: ["done", "all"], assignee: U, team: TEAM, mine: "1", overdue: "1", blocked: "1", deliverable: T2 });
-    expect(f).toEqual({ assignee: U, status: "done", team: TEAM, deliverable: T2, mine: true, overdue: true, blocked: true, q: "" });
+    expect(f).toEqual({ assignee: U, status: "done", team: TEAM, deliverable: T2, mine: true, overdue: true, blocked: true, attention: false, q: "" });
     expect(parseTaskFilters({ status: "all" }).status).toBe("all");
   });
   it("reads the toolbar's single Show choice, a search text, and old multi-flag bookmarks the same way", () => {
@@ -38,8 +40,8 @@ describe("parseTaskFilters", () => {
     expect(parseTaskFilters({ show: "everything" })).toEqual(DEFAULT_TASK_FILTERS);
     expect(parseTaskFilters({ q: "  truss  " }).q).toBe("truss");
     expect(parseTaskFilters({ q: "x".repeat(300) }).q).toHaveLength(100);
-    expect(showChoiceOf({ mine: false, overdue: true, blocked: true })).toBe("overdue");
-    expect(showChoiceOf({ mine: false, overdue: false, blocked: false })).toBe("");
+    expect(showChoiceOf({ mine: false, overdue: true, blocked: true, attention: false })).toBe("overdue");
+    expect(showChoiceOf({ mine: false, overdue: false, blocked: false, attention: false })).toBe("");
   });
   it("searches titles and descriptions, ignoring case", () => {
     const tasks = [task({ id: "1", title: "Truss delivery" }), task({ id: "2", title: "Other", description: "about the TRUSS" }), task({ id: "3", title: "Nothing" })];
@@ -204,5 +206,54 @@ describe("quickAssigneeChoices", () => {
     const o = newTaskOptions({ ...base, standing: standing({ headOfTeamIds: [TEAM] }), manager: false });
     const c = quickAssigneeChoices(o, false);
     expect(c.map((x) => [x.name, x.teamId])).toEqual([["Bea", ""], ["Cy", TEAM]]);
+  });
+});
+
+
+describe("This week and needs attention", () => {
+  const task = (due: string | null, status = "todo", blocked: string | null = null) => ({ status, due_date: due, blocked_at: blocked });
+  it("finds Monday to Sunday of the week of any day", () => {
+    expect(weekWindow("2026-10-26")).toEqual({ start: "2026-10-26", end: "2026-11-01" }); // a Monday
+    expect(weekWindow("2026-10-28")).toEqual({ start: "2026-10-26", end: "2026-11-01" });
+    expect(weekWindow("2026-11-01")).toEqual({ start: "2026-10-26", end: "2026-11-01" }); // a Sunday
+  });
+  it("puts overdue and this-week open tasks in This week, and nothing later, finished or undated", () => {
+    const today = "2026-10-28";
+    expect(isDueThisWeekOrOverdue(task("2026-10-20"), today)).toBe(true);
+    expect(isDueThisWeekOrOverdue(task("2026-11-01"), today)).toBe(true);
+    expect(isDueThisWeekOrOverdue(task("2026-11-02"), today)).toBe(false);
+    expect(isDueThisWeekOrOverdue(task("2026-10-28", "done"), today)).toBe(false);
+    expect(isDueThisWeekOrOverdue(task(null), today)).toBe(false);
+  });
+  it("needs attention means an open task that is blocked or overdue", () => {
+    const today = "2026-10-28";
+    expect(needsAttention(task("2026-10-30", "todo", "2026-10-27T10:00:00Z"), today)).toBe(true);
+    expect(needsAttention(task("2026-10-20"), today)).toBe(true);
+    expect(needsAttention(task("2026-10-30"), today)).toBe(false);
+    expect(needsAttention(task("2026-10-20", "done"), today)).toBe(false);
+  });
+  it("reads show=attention from the address and counts it as an active filter", () => {
+    const f = parseTaskFilters({ show: "attention" });
+    expect(f.attention).toBe(true);
+    expect(hasActiveFilters(f)).toBe(true);
+    expect(showChoiceOf(f)).toBe("attention");
+  });
+});
+
+describe("milestone strip", () => {
+  const m = (id: string, status: string, dueDate: string | null, isRequired = true) => ({ id, title: id, status, dueDate, isRequired });
+  const states = (list: ReturnType<typeof m>[], today = "2026-06-10") => stripSteps(list, today).map((s) => `${s.m.id}:${s.state}`);
+
+  it("marks accepted ones done, the first open one next and the rest later", () => {
+    expect(states([m("a", "accepted", "2026-06-01"), m("b", "in_progress", "2026-06-20"), m("c", "planned", "2026-07-01")])).toEqual(["a:done", "b:next", "c:later"]);
+  });
+  it("marks any open milestone whose date has passed as late, never as done", () => {
+    expect(states([m("a", "planned", "2026-06-01"), m("b", "planned", "2026-06-05"), m("c", "planned", "2026-07-01")])).toEqual(["a:late", "b:late", "c:later"]);
+  });
+  it("leaves cancelled and deferred milestones out, and an undated one is not late", () => {
+    expect(states([m("a", "cancelled", "2026-06-01"), m("b", "deferred", null), m("c", "planned", null)])).toEqual(["c:next"]);
+  });
+  it("is empty when there is no milestone", () => {
+    expect(states([])).toEqual([]);
   });
 });

@@ -9,6 +9,8 @@ import { BOARD_COLUMNS, boardTargets, moveFor } from "./task-logic";
 export interface BoardCardData {
   row: ControlRow;
   card: React.ReactNode;
+  /** The task panel address, so a click on the card opens the task like its title link does. */
+  href?: string;
 }
 
 /**
@@ -18,8 +20,10 @@ export interface BoardCardData {
  */
 export function TaskBoardClient({ cards }: { cards: BoardCardData[] }) {
   const byId = new Map(cards.map((c) => [c.row.id, c.row]));
-  const items: BoardItem[] = cards.map(({ row, card }) => ({
+  const items: BoardItem[] = cards.map(({ row, card, href }) => ({
     id: row.id,
+    href,
+    panel: true,
     columnId: row.status,
     title: row.title,
     card,

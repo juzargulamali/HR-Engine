@@ -8,10 +8,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { buttonVariants } from "@/components/ui/button";
 import { KindBadge, ProjectStatusBadge } from "@/components/projects/badges";
 import { PageHeader, Muted } from "@/components/projects/parts";
+import { OsHero } from "@/components/os/hero";
+import { OsAvatar } from "@/components/os/pills";
 import { ProjectBoard, type BoardProject } from "@/components/projects/project-board";
 import { QuickNewProject, type QuickProjectCompany } from "@/components/projects/quick-new-project";
 import { SummaryPanel } from "@/components/projects/summary-panel";
 import { ListToolbar } from "@/components/workspace/list-toolbar";
+import { ClickableRow } from "@/components/workspace/clickable-row";
 import { PanelLink } from "@/components/workspace/panel-link";
 import { SidePanel } from "@/components/workspace/side-panel";
 import { SortHead } from "@/components/workspace/sort-head";
@@ -110,19 +113,21 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
 
   return (
     <div className="space-y-5">
-      <PageHeader
+      <OsHero
         title="Projects"
-        description={salesOnly ? "The projects linked to your Sales work, with their handover status." : undefined}
-        actions={<>{!salesOnly && addCompanies.length > 0 ? <QuickNewProject companies={addCompanies} /> : null}</>}
-      />
+        sub={salesOnly ? "The projects linked to your Sales work, with their handover status." : `${liveCount} ongoing · ${finishedCount} completed or archived${companies.length === 1 ? ` · ${companies[0]![1]}` : ""}`}
+      >
+        {!salesOnly && addCompanies.length > 0 ? <QuickNewProject companies={addCompanies} /> : null}
+      </OsHero>
 
       {!salesOnly && needs.length > 0 ? (
-        <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+        <section aria-label="Needs you" className="os-card os-warm flex flex-wrap items-center gap-x-5 gap-y-1.5 px-4 py-3 text-sm">
           <span className="font-semibold">Needs you</span>
           {needs.map((n) => <Link key={n.label} href={n.href} className="font-medium underline underline-offset-2 hover:text-foreground">{n.label}</Link>)}
-        </p>
+        </section>
       ) : null}
 
+      <div className="os-card p-3 sm:p-4">
       <ListToolbar
         search={{ value: q, placeholder: "Search by name, reference or Project Manager", label: "Search projects" }}
         clearHref={href({}, ["q", "company", "kind", "status"])}
@@ -135,6 +140,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
       >
         {!finished && !salesOnly ? <ViewSwitch current={view} tableHref={href({ view: null })} boardHref={href({ view: "board" })} boardLabel="Board" /> : null}
       </ListToolbar>
+      </div>
 
       {rows.length === 0 ? (
         <EmptyState
@@ -168,14 +174,14 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
                 const next = nextBy.get(p.id);
                 const Name = details ? Link : PanelLink;
                 return (
-                  <TableRow key={p.id} className="align-top">
+                  <ClickableRow key={p.id} href={detailsHref(p.id, details)} panel={!details} selected={openRow?.id === p.id} className="align-top">
                     <TableCell className="min-w-[13rem]">
                       <Name href={detailsHref(p.id, details)} className="break-words font-medium underline-offset-2 hover:underline">{p.name}</Name>
                       {unreadBy.get(p.id) ? <span className="ml-2 rounded-full bg-accent px-1.5 text-[13px] font-semibold text-accent-foreground">{unreadBy.get(p.id)} unread</span> : null}
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground"><span>{p.reference}</span><KindBadge kind={p.kind} ongoing={p.is_ongoing} /></div>
                     </TableCell>
                     {companies.length > 1 ? <TableCell data-label="Company" className="text-sm">{ctx.companyName(p.company_id)}</TableCell> : null}
-                    <TableCell data-label="Project Manager" className="text-sm">{p.pm_name ?? "—"}</TableCell>
+                    <TableCell data-label="Project Manager" className="text-sm">{p.pm_name ? <span className="inline-flex items-center gap-2"><OsAvatar name={p.pm_name} size="sm" />{p.pm_name}</span> : "—"}</TableCell>
                     <TableCell data-label="Status"><ProjectStatusBadge status={p.status} /></TableCell>
                     <TableCell data-label="Key dates" className="whitespace-nowrap text-sm">{dateRangeText(p.start_date, p.end_date)}</TableCell>
                     {showMilestone ? (
@@ -183,7 +189,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
                         {!details ? <span className="text-muted-foreground">Members only</span> : milestoneError ? <span className="text-muted-foreground">Not available</span> : next ? <>{next.title}<span className="block text-muted-foreground">{formatDate(next.due)}</span></> : <span className="text-muted-foreground">None dated</span>}
                       </TableCell>
                     ) : null}
-                  </TableRow>
+                  </ClickableRow>
                 );
               })}
             </TableBody>

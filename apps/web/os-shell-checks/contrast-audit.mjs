@@ -30,7 +30,20 @@ const evalFn = () => {
     for (let e = el; e; e = e.parentElement) {
       const cs = getComputedStyle(e);
       const bi = cs.backgroundImage;
-      if (bi && bi.includes("gradient")) return { grad: true, colors: [token("--brand-deep"), token("--brand-glow")] };
+      if (bi && bi.includes("gradient")) {
+        // The rendered colour stops of this surface (a semi-transparent stop is judged over the page colour), so a surface that sets its own
+        // gradient (the dark shell, the OS cards) is measured against what it really paints, not against the root theme tokens.
+        // Only the layers that paint behind the content: a layer clipped to the border box (the gradient border trick) shows in the 1px border only.
+        const layers = bi.split(/,\s*(?=(?:repeating-)?(?:linear|radial|conic)-gradient\(|url\()/);
+        const clips = cs.backgroundClip.split(",").map((c) => c.trim());
+        const paints = layers.filter((_, i) => (clips[i % clips.length] ?? "border-box") !== "border-box");
+        const stops = (paints.length > 0 ? paints : layers).flatMap((l) => l.match(/rgba?\([^)]*\)/g) ?? []).map(rgba);
+        if (stops.length > 0) {
+          const under = e.parentElement ? bgOf(e.parentElement).colors : [rgba(getComputedStyle(document.body).backgroundColor)];
+          return { grad: true, colors: stops.flatMap((s) => under.map((u) => over(s, [u[0], u[1], u[2], 1]))) };
+        }
+        return { grad: true, colors: [token("--brand-deep"), token("--brand-glow")] };
+      }
       const c = rgba(cs.backgroundColor); stack.push(c); if (c[3] >= 0.999) break;
     }
     let acc = [0, 0, 0, 0]; for (let i = stack.length - 1; i >= 0; i--) acc = over(stack[i], acc);
@@ -68,11 +81,12 @@ const evalFn = () => {
 };
 
 const browser = await chromium.launch(); const all = {};
+const ONLY = process.env.AUDIT_ONLY ? new RegExp(process.env.AUDIT_ONLY) : null; // e.g. AUDIT_ONLY="^/projects" re-checks one module only
 for (const theme of ["dark", "light"]) {
   const ctx = await browser.newContext({ viewport: vp }); await ctx.addInitScript((t) => { try { localStorage.setItem("theme", t); } catch {} }, theme);
   const page = await ctx.newPage();
   await page.goto(`${BASE}/login`); await page.getByLabel(/email/i).fill(persona); await page.getByLabel(/password/i).first().fill("local-stack-password"); await page.getByRole("button", { name: /sign in|log in/i }).click(); await page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 20000 });
-  for (const p of PAGES) {
+  for (const p of PAGES.filter((q) => !ONLY || ONLY.test(q))) {
     const res = await page.goto(`${BASE}${p}`, { waitUntil: "networkidle" }).catch(() => null);
     await page.waitForTimeout(150);
     all[`${theme} ${p}`] = { status: res?.status(), ...(await page.evaluate(evalFn)) };

@@ -1,8 +1,10 @@
 import { cn } from "@/lib/utils";
 import { listTable } from "@/components/workspace/list-table";
 import { Badge } from "@/components/ui/badge";
+import { OsPill } from "@/components/os/pills";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { BlockedBadge, PriorityBadge } from "@/components/projects/badges";
+import { ClickableRow } from "@/components/workspace/clickable-row";
 import { PanelLink } from "@/components/workspace/panel-link";
 import { SortHead } from "@/components/workspace/sort-head";
 import { nextSort, sortToParam, withParams, type SortState } from "@/components/workspace/url-state";
@@ -21,7 +23,7 @@ export function TaskFlags({ r }: { r: Pick<TaskRowData, "blocked" | "needsReview
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1.5">
       {r.blocked ? <BlockedBadge /> : null}
-      {r.needsReview ? <Badge variant="outline" className="text-muted-foreground">Needs review</Badge> : null}
+      {r.needsReview ? <OsPill tone="blue">Needs review</OsPill> : null}
       <PriorityBadge priority={r.priority} />
     </div>
   );
@@ -64,7 +66,7 @@ export function TaskTable({ rows, columns, sort, basePath, current, showProject,
       </TableHeader>
       <TableBody>
         {rows.map((r) => (
-          <TableRow key={r.id} className="align-top">
+          <ClickableRow key={r.id} href={withParams(basePath, current, { [panelParam]: r.id })} panel selected={current[panelParam] === r.id} className="align-top">
             <TableCell className="min-w-[13rem] max-w-[22rem] px-3 py-2.5">
               <PanelLink href={withParams(basePath, current, { [panelParam]: r.id })} className="break-words font-medium underline-offset-2 hover:underline">{r.title}</PanelLink>
               <TaskFlags r={r} />
@@ -82,7 +84,7 @@ export function TaskTable({ rows, columns, sort, basePath, current, showProject,
             {has("team") ? <TableCell data-label="Department" className="px-3 py-2.5 text-sm">{r.teamName ?? <span className="text-muted-foreground">None</span>}</TableCell> : null}
             {has("milestone") ? <TableCell data-label="Milestone" className="px-3 py-2.5 text-sm">{r.milestoneTitle ?? <span className="text-muted-foreground">Unlinked</span>}</TableCell> : null}
             {has("deliverable") ? <TableCell data-label="Deliverable" className="px-3 py-2.5 text-sm">{r.deliverableTitle ?? <span className="text-muted-foreground">None</span>}</TableCell> : null}
-          </TableRow>
+          </ClickableRow>
         ))}
       </TableBody>
     </Table>

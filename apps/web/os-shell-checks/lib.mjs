@@ -24,3 +24,25 @@ export async function login(page, email) {
   await page.goto(`${BASE}/login`); await page.getByLabel(/email/i).fill(email); await page.getByLabel(/password/i).first().fill(PASSWORD);
   await page.getByRole("button", { name: /sign in|log in/i }).click(); await page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 20000 });
 }
+
+// A value that is changed through a <select> (older screens) or through the ENGINIOUS OS choice menu (a button that opens a list of choices).
+const isMenuButton = (sel) => sel.evaluate((e) => e.tagName === "BUTTON");
+const menuLabels = async (menu) => menu.locator("[role=menuitem]").evaluateAll((items) => items.map((i) => (i.querySelector("span.truncate") ?? i).textContent.replace(/\s+/g, " ").trim()));
+/** The choices a control offers. */
+export async function optionTexts(sel) {
+  if (!(await isMenuButton(sel))) return sel.locator("option").allInnerTexts();
+  await sel.click(); const menu = sel.locator("xpath=..").locator("[role=menu]"); await menu.waitFor();
+  const labels = await menuLabels(menu); await sel.page().keyboard.press("Escape"); return labels;
+}
+/** Picks the first choice whose words match `re`; returns its words. */
+export async function choose(sel, re) {
+  if (!(await isMenuButton(sel))) {
+    const opts = await sel.locator("option").allInnerTexts(); const o = opts.find((x) => re.test(x));
+    if (!o) throw new Error(`no option ${re} among: ${opts.join(" | ")}`);
+    await sel.selectOption({ label: o }); return o;
+  }
+  await sel.click(); const menu = sel.locator("xpath=..").locator("[role=menu]"); await menu.waitFor();
+  const labels = await menuLabels(menu); const i = labels.findIndex((x) => re.test(x));
+  if (i < 0) { await sel.page().keyboard.press("Escape"); throw new Error(`no choice ${re} among: ${labels.join(" | ")}`); }
+  await menu.locator("[role=menuitem]").nth(i).click(); return labels[i];
+}
