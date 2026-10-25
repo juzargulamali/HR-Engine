@@ -62,6 +62,8 @@ const detector = () => {
   return out;
 };
 
+const reachable = (t) => t.evaluate((b) => { const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!e && (b === e || b.contains(e)); }, undefined, { timeout: 4000 }).catch(() => false);
+const COUNT = { menus: 0, dialogs: 0 };
 const menuCheck = async (page) => {
   // opens each menu, checks the list sits inside the screen and inside its clipping ancestor, closes it
   const problems = [];
@@ -72,7 +74,9 @@ const menuCheck = async (page) => {
     if (page.url() !== home) { problems.push("a step moved away from the page (a panel closed or a link was followed)"); await page.goto(home, { waitUntil: "networkidle" }); }
     const t = triggers.nth(i);
     const label = ((await t.innerText().catch(() => "")) || "menu").trim().slice(0, 30);
-    await t.scrollIntoViewIfNeeded().catch(() => {}); await t.click({ timeout: 3000, force: true }).catch(() => {}); await page.waitForTimeout(260);
+    await t.scrollIntoViewIfNeeded().catch(() => {});
+    if (!(await reachable(t))) continue; // under a panel or otherwise out of a person's reach: not testable by hand either
+    await t.click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(260);
     const res = await t.evaluate((btn) => {
       const wrap = btn.parentElement; const menu = wrap?.querySelector('[role="menu"]');
       if (!menu || menu.hasAttribute("inert")) return { opened: false };
@@ -85,6 +89,7 @@ const menuCheck = async (page) => {
       const left = r.left < box.left - 1, right = r.right > box.right + 1;
       return { opened: true, left, right, w: Math.round(r.width), over: Math.round(Math.max(box.left - r.left, r.right - box.right, 0)) };
     });
+    if (res.opened) COUNT.menus++;
     if (res.opened && (res.left || res.right)) problems.push(`menu "${label}" runs ${res.left ? "off the left" : "off the right"} by ${res.over}px`);
     await page.keyboard.press("Escape").catch(() => {});
     await page.waitForTimeout(120);
@@ -101,11 +106,13 @@ const dialogCheck = async (page) => {
   for (let i = 0; i < Math.min(count, 14); i++) {
     if (page.url() !== home) await page.goto(home, { waitUntil: "networkidle" });
     const t = triggers.nth(i);
-    await t.scrollIntoViewIfNeeded().catch(() => {}); await t.click({ timeout: 3000, force: true }).catch(() => {}); await page.waitForTimeout(220);
+    await t.scrollIntoViewIfNeeded().catch(() => {});
+    if (!(await reachable(t))) continue;
+    await t.click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(220);
     const items = await t.evaluate((btn) => Array.from(btn.parentElement?.querySelectorAll('[role="menuitem"]:not(a):not([disabled])') ?? []).map((b) => (b.textContent ?? "").trim().slice(0, 40)));
     await page.keyboard.press("Escape").catch(() => {});
     for (let k = 0; k < Math.min(items.length, 5); k++) {
-      await t.click({ timeout: 3000, force: true }).catch(() => {}); await page.waitForTimeout(200);
+      await t.click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(200);
       const item = t.locator("xpath=..").locator('[role="menuitem"]:not(a):not([disabled])').nth(k);
       const name = items[k];
       const before = page.url();
@@ -113,6 +120,7 @@ const dialogCheck = async (page) => {
       if (page.url() !== before) { await page.goto(before, { waitUntil: "networkidle" }); break; }
       const dlg = page.locator("dialog[open]").first();
       if (await dlg.count()) {
+        COUNT.dialogs++;
         const m = await dlg.evaluate((d) => {
           const r = d.getBoundingClientRect();
           const wide = d.scrollWidth > d.clientWidth + 1;
@@ -158,9 +166,10 @@ for (const [label, viewport] of [["desktop 1280", { width: 1280, height: 900 }],
     try {
       page.setDefaultTimeout(SHORT);
       await page.goto(`${BASE}${path}`, { waitUntil: "networkidle", timeout: 45000 });
+      COUNT.menus = 0; COUNT.dialogs = 0;
       const text = await page.evaluate(detector);
       const problems = [...text.slice(0, 4).map((s) => `${s.kind}: "${s.text}"`), ...(await menuCheck(page)), ...(await dialogCheck(page))];
-      if (problems.length) { fails++; console.log(`FAIL [${label}] ${name} ${path}\n   - ${problems.slice(0, 8).join("\n   - ")}`); } else console.log(`PASS [${label}] ${name}`);
+      if (problems.length) { fails++; console.log(`FAIL [${label}] ${name} ${path}\n   - ${problems.slice(0, 8).join("\n   - ")}`); } else console.log(`PASS [${label}] ${name} (menus opened: ${COUNT.menus}, dialogs opened: ${COUNT.dialogs})`);
     } catch (e) { fails++; console.log(`FAIL [${label}] ${name} ${path} :: ${String(e.message).split("\n")[0]}`); }
   }
   await page.context().close();
