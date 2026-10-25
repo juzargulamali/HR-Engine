@@ -156,8 +156,8 @@ Decisions (all are in the code and covered by tests):
 
 Known limits and owner decisions:
 
-* A warehouse-only operator has no Sales access, so they cannot see Sales' pending check requests; the check is recorded from the enquiry panel by a founder or someone with Sales access. An "inbox of pending checks" for the warehouse would expose CRM titles to the warehouse: not built, an owner decision.
-* `permanently_delete_employee` fails safely with a raw database message for an employee who only has Inventory records.
+* A warehouse-only operator has no Sales access, so they cannot see Sales' pending check requests; the check is recorded from the enquiry panel by a founder or someone with Sales access. An "inbox of pending checks" for the warehouse would expose CRM titles to the warehouse: not built, an owner decision (deferred). Until then Sales checks follow the temporary manual process in `docs/inventory-warehouse-guide.md` §7.
+* `permanently_delete_employee` fails safely with a raw database message for an employee who only has Inventory records (wording deferred; nothing is deleted).
 * Department heads need the `request_for_employees` capability to pick an employee (a plain line manager cannot use the employee lookup).
 * People who can only view stock see "An employee" instead of names in some lists (the name lookup needs operator rights).
 * Counted stock held by projects or employees is not split by location in the "Out" column when a location filter is set.

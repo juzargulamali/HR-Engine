@@ -61,7 +61,7 @@ Run this with the real warehouse operator on a test copy (or with test records t
 - [ ] Receive 20 sending cards and 150.5 m of cable: the numbers show exactly (no rounding of metres).
 - [ ] Try to issue more than is in stock: refused in plain words, nothing changes.
 - [ ] Double-click Confirm: only one movement exists.
-- [ ] Print one label and a batch. Scan one with a phone camera (see "Not verified" below). The right record opens.
+- [ ] Print one label and a batch. Scan one with a phone camera (see "Not verified yet" below). The right record opens.
 
 **Projects**
 - [ ] A Project Manager prepares an equipment list for a project, adds items and a technology template, sets dates and submits.
@@ -93,7 +93,19 @@ Run this with the real warehouse operator on a test copy (or with test records t
 * **A unit that cannot be found**: mark it **missing** (reason required). It is no longer offered. If it turns up, mark it **found**; it returns "needs checking".
 * **Pause everything**: Setup → switch Inventory off, or the owner's `inv_80` script. Nothing is deleted. Labels stay valid.
 
-## 7. Not verified yet
+## 7. Temporary process: Sales availability checks (until a warehouse inbox exists)
+
+The warehouse operator has no Sales access, so a request made with **Ask the warehouse to check** on the enquiry is **not shown on any warehouse screen**. Until the owner decides to build that inbox, do not rely on that button. Use this manual routine. It is temporary and changes no stock.
+
+1. **Sales asks in person.** The salesperson messages or calls the warehouse with the items or technology, quantities, dates and location.
+2. **The warehouse looks.** In **Inventory → Stock**, open the item and press **Check availability** (location and dates). It reserves nothing and uses the same figures a reservation uses. A technology without a complete template gives **Warehouse check required**: count it by hand.
+3. **The warehouse replies** to the salesperson: how many are free for those dates, what is short, and when anything that is out is due back.
+4. **The result is recorded on the enquiry** by a founder, or a person who has both Sales access and the warehouse right: open the enquiry, press **Record the check now**. This works out the result from stock today for the enquiry's dates and saves it with their name and the time. Nothing is reserved. If nobody with that right is available, Sales keeps the warehouse's reply in the enquiry notes.
+5. **If the enquiry's dates, location or quantities change**, the check shows **out of date**. Repeat from step 1. The old check stays in the history.
+
+A check never holds equipment. To hold it, a Project Manager prepares an equipment list and the warehouse reserves it.
+
+## 8. Not verified yet
 
 * Scanning with a real phone camera (iPhone Safari, Android Chrome) has not been tried: the decoding is tested with generated QR images and a simulated camera only. Please test it on the real phones during acceptance and tell us the result.
 * Everything was tried on a local test database, not on the hosted project. Hosted verification is the owner's first step after the SQL is applied.

@@ -37,7 +37,7 @@ const item = (over: Partial<InvItemRow>): InvItemRow => ({
 const listFor = (detail: boolean, withCost: boolean) => ({
   rows: buildStockRows({
     items: [item({})], categories: [],
-    units: detail ? [{ item_id: "33333333-3333-4333-8333-333333333333", code: "UAE-E-00001", serial_number: "SN-SECRET", lifecycle: "active", condition: "good", custody_kind: "employee", location_id: L1, in_kit_id: null, ownership: "owned" }] : [],
+    units: detail ? [{ id: "unit-1", item_id: "33333333-3333-4333-8333-333333333333", code: "UAE-E-00001", serial_number: "SN-SECRET", lifecycle: "active", condition: "good", custody_kind: "employee", location_id: L1, in_kit_id: null, ownership: "owned" }] : [],
     balances: [], reservations: [], detailCompanyIds: new Set(detail ? [C1] : []), locationId: "", now: new Date(),
     costs: withCost ? new Map([["33333333-3333-4333-8333-333333333333", { amount: 4200, currency: "AED" }]]) : undefined,
   }),

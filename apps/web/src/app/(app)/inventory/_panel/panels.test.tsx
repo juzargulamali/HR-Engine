@@ -36,7 +36,7 @@ const unitView = (over: Partial<UnitView> = {}): UnitView => ({
   employee_id: "e1", project_id: null, transfer_id: null, repair_reference: null, in_kit_id: null, expected_return_at: null, verified_at: "2026-10-01T00:00:00Z", verified_by: "u", legacy_asset_id: null, notes: null,
   version: 1, created_by: "u", created_at: "2026-10-01T00:00:00Z", updated_at: "", retired_at: null, where: "With an employee: Sara Ali", employeeName: "Sara Ali", projectName: null, binLabel: null, locationName: "Dubai warehouse", cost: { amount: 4200, currency: "AED" }, overdue: false, ...over,
 });
-const counts = (detail: boolean) => buildStockRows({ items: [item()], categories: [], units: detail ? [{ item_id: I1, code: "UAE-E-00042", serial_number: "SN-1", lifecycle: "active", condition: "good", custody_kind: "employee", location_id: L1, in_kit_id: null, ownership: "owned" }] : [], balances: [], reservations: [], detailCompanyIds: new Set(detail ? [C1] : []), locationId: "", now: new Date() })[0]!;
+const counts = (detail: boolean) => buildStockRows({ items: [item()], categories: [], units: detail ? [{ id: "unit-42", item_id: I1, code: "UAE-E-00042", serial_number: "SN-1", lifecycle: "active", condition: "good", custody_kind: "employee", location_id: L1, in_kit_id: null, ownership: "owned" }] : [], balances: [], reservations: [], detailCompanyIds: new Set(detail ? [C1] : []), locationId: "", now: new Date() })[0]!;
 
 let itemDetail: ItemDetail | null;
 let unitDetail: UnitDetail | null;

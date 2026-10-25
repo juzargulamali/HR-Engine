@@ -38,7 +38,7 @@ export const STOCK_DEFAULT_SORT: SortState<StockSortKey> = { key: "item", dir: "
 // The one line per item
 // ---------------------------------------------------------------------------------------------------------------
 
-export type UnitLite = Pick<InvUnitRow, "item_id" | "code" | "serial_number" | "lifecycle" | "condition" | "custody_kind" | "location_id" | "in_kit_id" | "ownership">;
+export type UnitLite = Pick<InvUnitRow, "id" | "item_id" | "code" | "serial_number" | "lifecycle" | "condition" | "custody_kind" | "location_id" | "in_kit_id" | "ownership">;
 export type BalanceLite = Pick<InvBalanceRow, "item_id" | "holder_kind" | "location_id" | "condition" | "qty" | "label_code" | "rental_id">;
 export type ReservationLite = Pick<InvReservationRow, "item_id" | "unit_id" | "location_id" | "qty" | "dispatched_qty" | "reserved_during" | "status">;
 
@@ -155,6 +155,9 @@ export function buildStockRows(input: BuildInput): StockRow[] {
       return { ...base, usable: null, warehouse: null, outProjects: null, outEmployees: null, inTransit: null, reserved: null, draftUnits: null, attention: null, conditions: [], locationIds: [], search: words.filter(Boolean).join(" ").toLowerCase() };
     }
     let usable = 0, warehouse = 0, outProjects = 0, outEmployees = 0, inTransit = 0, draftUnits = 0, attention = 0;
+    // Counted stock held outside the warehouse has no location of its own, so under a location filter it cannot be assigned to that
+    // location. The "out" numbers are then unknown ("—"), never a partial figure that looks complete.
+    let outUnattributed = false;
     const conditions = new Set<string>();
     const locationIds = new Set<string>();
     for (const u of unitsBy.get(item.id) ?? []) {
@@ -187,8 +190,9 @@ export function buildStockRows(input: BuildInput): StockRow[] {
         warehouse += q;
         if (b.condition === "good") usable += q;
         else attention += q;
-      } else if (locationId === "") {
-        // Out-of-warehouse quantities have no location of their own, so they are only counted when every location is shown.
+      } else if (locationId !== "") {
+        if (b.holder_kind === "project" || b.holder_kind === "employee" || b.holder_kind === "transit") outUnattributed = true;
+      } else {
         if (b.holder_kind === "project") outProjects += q;
         else if (b.holder_kind === "employee") outEmployees += q;
         else if (b.holder_kind === "transit") inTransit += q;
@@ -196,15 +200,18 @@ export function buildStockRows(input: BuildInput): StockRow[] {
       }
     }
     let reserved = 0;
+    const unitLocationById = new Map((unitsBy.get(item.id) ?? []).map((u) => [u.id, u.location_id]));
     for (const r of resBy.get(item.id) ?? []) {
       if (r.status !== "active") continue;
       const end = rangeEnd(r.reserved_during);
       if (end && end.getTime() <= now.getTime()) continue;
-      if (r.location_id && !here(r.location_id)) continue;
+      // A reservation without its own location belongs to where its unit is (same rule as the database's availability numbers).
+      if (!here(r.location_id ?? unitLocationById.get(r.unit_id ?? "") ?? null)) continue;
       reserved += Math.max(0, num(r.qty) - num(r.dispatched_qty));
     }
     return {
-      ...base, usable, warehouse, outProjects, outEmployees, inTransit, reserved, draftUnits, attention,
+      ...base, usable, warehouse, outProjects: outUnattributed ? null : outProjects, outEmployees: outUnattributed ? null : outEmployees,
+      inTransit: outUnattributed ? null : inTransit, reserved, draftUnits, attention,
       conditions: [...conditions], locationIds: [...locationIds], search: words.filter(Boolean).join(" ").toLowerCase(),
     };
   });

@@ -17,7 +17,7 @@ function item(over: Partial<InvItemRow> & { id: string; name: string }): InvItem
   };
 }
 function unit(over: Partial<UnitLite> & { item_id: string; code: string }): UnitLite {
-  return { serial_number: null, lifecycle: "active", condition: "good", custody_kind: "warehouse", location_id: L1, in_kit_id: null, ownership: "owned", ...over };
+  return { id: `unit-${over.code}`, serial_number: null, lifecycle: "active", condition: "good", custody_kind: "warehouse", location_id: L1, in_kit_id: null, ownership: "owned", ...over };
 }
 function bal(over: Partial<BalanceLite> & { item_id: string }): BalanceLite {
   return { holder_kind: "warehouse", location_id: L1, condition: "good", qty: 0, label_code: null, rental_id: null, ...over };
@@ -106,9 +106,32 @@ describe("buildStockRows (person who can view stock)", () => {
     expect(row(here, "laptop").usable).toBe(1);
     expect(row(here, "laptop").warehouse).toBe(2);
     expect(row(here, "xlr").usable).toBe(20);
-    // out-of-warehouse quantities have no location of their own, so they are not counted under a location filter
-    expect(row(here, "xlr").outProjects).toBe(0);
+    // counted stock out on a project has no location of its own: under a location filter that is unknown ("—"), never a partial number
+    expect(row(here, "xlr").outProjects).toBeNull();
+    expect(row(here, "xlr").outEmployees).toBeNull();
+    expect(row(here, "xlr").inTransit).toBeNull();
+    expect(row(build(L2), "xlr").outProjects).toBeNull();
     expect(row(build(L2), "xlr").usable).toBe(7);
+    // individual units out are placed by their own location, so those numbers stay exact
+    expect(row(here, "laptop").outProjects).toBe(1);
+    expect(row(here, "laptop").outEmployees).toBe(1);
+    expect(row(build(L2), "laptop").outProjects).toBe(0);
+    // an item with nothing counted out keeps a real zero
+    expect(row(here, "tape").outProjects).toBe(0);
+  });
+  it("keeps one location's reservations out of another location's total", () => {
+    const res: ReservationLite[] = [
+      { item_id: "xlr", unit_id: null, location_id: L1, qty: 4, dispatched_qty: 0, reserved_during: '["2026-11-01 00:00:00+00","2026-11-05 00:00:00+00")', status: "active" },
+      { item_id: "xlr", unit_id: null, location_id: L2, qty: 2, dispatched_qty: 0, reserved_during: '["2026-11-01 00:00:00+00","2026-11-05 00:00:00+00")', status: "active" },
+      // a unit reservation with no location of its own belongs to where the unit is (L2)
+      { item_id: "laptop", unit_id: "unit-UAE-E-00006", location_id: null, qty: 1, dispatched_qty: 0, reserved_during: '["2026-11-01 00:00:00+00","2026-11-05 00:00:00+00")', status: "active" },
+    ];
+    const at = (loc: string) => buildStockRows({ items, categories: cats, units, balances, reservations: res, detailCompanyIds: new Set([CO]), locationId: loc, now: NOW });
+    expect(row(at(L1), "xlr").reserved).toBe(4);
+    expect(row(at(L2), "xlr").reserved).toBe(2);
+    expect(row(at(""), "xlr").reserved).toBe(6);
+    expect(row(at(L1), "laptop").reserved).toBe(0);
+    expect(row(at(L2), "laptop").reserved).toBe(1);
   });
   it("makes unit codes, serials and bin labels searchable", () => {
     expect(row(rows, "laptop").search).toContain("sn-aaa");

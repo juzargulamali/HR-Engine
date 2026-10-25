@@ -235,6 +235,9 @@ policies, indexes, constraints and sequence), then every remaining `inv_` functi
   it does **not** give HR's plain "Cannot permanently delete: this employee has real history" message: it runs on until the database stops it with a **raw foreign-key error** naming an `inv_`
   table. **Nothing is deleted** (the whole call is undone). Use Remove (the soft delete) for such an employee; Inventory deliberately keeps equipment history for people who have left. (Shown by a test in
   `packages/rls-tests/test/inventory_disable.rls.test.ts`.)
+- **Deferred (owner decision): the warehouse has no inbox of Sales check requests.** A warehouse-only operator has no Sales access, so Sales availability checks follow the temporary manual process in `docs/inventory-warehouse-guide.md` §7 until the owner decides whether the warehouse may see CRM titles.
+- **Deferred: the wording of the employee-deletion message** (above) is unchanged on purpose.
+- **Location filter on the stock list:** with a location chosen, counted stock held outside the warehouse (on projects, with employees, in transit) cannot be placed at a location, so those "out" figures show "—" instead of a partial number. Individual items are placed by their own location and stay exact. The per-location figures in the item panel and the availability dialog come from the database and are exact.
 - Inventory's own consistency check `inv_ledger_problems()` is empty when run as the owner (see §10); use the direct reconciliation rows of `inv_20_verify_readonly.sql`.
 - The owner scripts read the lists of expected tables (29) and functions (150) from this release; a later Inventory migration needs the matching update of `inv_20_verify_readonly.sql` or it will (correctly) report an unknown object.
 - `inv_05_preservation_check_readonly.sql` fingerprints the HR asset register in full (it has no creation dates). If HR edits an asset between your snapshot and your compare, the row is DIFFERENT for a harmless
