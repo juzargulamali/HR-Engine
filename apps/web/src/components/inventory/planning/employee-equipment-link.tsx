@@ -67,7 +67,7 @@ export async function EmployeeEquipmentLink({ employeeId, companyId }: { employe
                 <TableCell className="whitespace-nowrap">{formatDate(i.issuedAt)}</TableCell>
                 <TableCell className="whitespace-nowrap">
                   {i.expectedReturnAt ? formatDate(i.expectedReturnAt) : <span className="text-muted-foreground">No date set</span>}
-                  {i.overdue ? <span className="font-medium text-amber-800 dark:text-amber-300"> · overdue</span> : null}
+                  {i.overdue ? <span className="font-medium text-[hsl(var(--os-amber))]"> · overdue</span> : null}
                 </TableCell>
               </TableRow>
             ))}

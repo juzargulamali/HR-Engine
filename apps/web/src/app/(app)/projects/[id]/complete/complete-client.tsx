@@ -109,7 +109,7 @@ export function CompleteClient({ projectId, projectKind, items, evidenceFiles, t
                           <div className="flex flex-wrap items-baseline gap-x-2">
                             <span className="text-sm font-medium break-words">{i.title}</span>
                             <span className="text-sm text-muted-foreground">{i.status.replace(/_/g, " ")}{i.detail ? ` · ${i.detail}` : ""}</span>
-                            {done ? <span className="text-[13px] text-emerald-800 dark:text-emerald-300">Decided</span> : <span className="text-[13px] text-amber-800 dark:text-amber-300">Needs a decision</span>}
+                            {done ? <span className="text-[13px] text-[hsl(var(--os-green))]">Decided</span> : <span className="text-[13px] text-[hsl(var(--os-amber))]">Needs a decision</span>}
                           </div>
                           <div className="grid gap-2 sm:grid-cols-[12rem_1fr]">
                             <div>

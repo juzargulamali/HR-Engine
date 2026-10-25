@@ -12,6 +12,8 @@ export interface BoardColumn {
   label: string;
   /** Small extra line under the heading (for example per-currency totals). Rendered by the server. */
   hint?: React.ReactNode;
+  /** A coloured top edge for the lane (the words always say what the lane is). */
+  tone?: "cyan" | "blue" | "amber" | "red" | "green";
 }
 
 export interface BoardItem {
@@ -91,6 +93,7 @@ export function Board({ columns, items, onMove, ariaLabel, emptyColumnText = "No
               <section
                 key={col.id}
                 aria-labelledby={`${liveId}-${col.id}`}
+                data-board-col={col.tone ?? "plain"}
                 onDragOver={(e) => { if (pendingId === null) { e.preventDefault(); setOverColumn(col.id); } }}
                 onDragLeave={() => setOverColumn((c) => (c === col.id ? null : c))}
                 onDrop={(e) => {

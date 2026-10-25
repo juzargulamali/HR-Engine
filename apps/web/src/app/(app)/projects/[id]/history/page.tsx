@@ -103,7 +103,7 @@ export default async function ProjectHistoryPage({ params }: { params: Promise<{
               <li key={c.id} className="rounded-md border border-border p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-semibold">Completed {formatDateTime(c.completed_at)} by {view.nameOf(c.completed_by)}</span>
-                  {c.reopened_at ? <Badge variant="outline" className="whitespace-nowrap">Reopened</Badge> : <Badge variant="outline" className="whitespace-nowrap border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300">Current</Badge>}
+                  {c.reopened_at ? <Badge variant="outline" className="whitespace-nowrap">Reopened</Badge> : <Badge variant="outline" className="whitespace-nowrap border-[hsl(var(--os-green)/0.4)] bg-[hsl(var(--os-green)/0.1)] text-[hsl(var(--os-green))]">Current</Badge>}
                 </div>
                 <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <Fact label="Evidence">{COMPLETION_EVIDENCE_TYPES.find((e) => e.id === c.evidence_type)?.label ?? "Internal completion note"}</Fact>

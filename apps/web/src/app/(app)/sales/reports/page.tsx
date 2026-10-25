@@ -194,7 +194,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             </div>
             {wl.winRatePercent === null ? <p className="mt-2 text-sm text-muted-foreground">No opportunities were closed in this period, so there is no win rate.</p> : <p className="mt-2 text-sm text-muted-foreground">Win rate is won as a share of won plus lost. Small numbers move it a lot.</p>}
             {reopened.total > 0 ? <p className="mt-2 text-sm text-muted-foreground">{reopened.total} closure{reopened.total === 1 ? "" : "s"} in this period ({reopened.won} won, {reopened.lost} lost) {reopened.total === 1 ? "was" : "were"} later reopened. They are open again, so they are not counted above; each closure stays in that opportunity&apos;s history.</p> : null}
-            {wl.wonWithoutEvidence > 0 ? <p className="mt-2 text-sm text-amber-800 dark:text-amber-300">{wl.wonWithoutEvidence} won with no evidence recorded, not counted as won.</p> : null}
+            {wl.wonWithoutEvidence > 0 ? <p className="mt-2 text-sm text-[hsl(var(--os-amber))]">{wl.wonWithoutEvidence} won with no evidence recorded, not counted as won.</p> : null}
           </ReportCard>
 
           <ReportCard title="Lost reasons" note={`n = ${wl.lost} lost opportunities`}>

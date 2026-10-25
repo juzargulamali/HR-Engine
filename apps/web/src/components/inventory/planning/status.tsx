@@ -3,9 +3,9 @@ import { cn } from "@/lib/utils";
 import { requestStatusLabel, type Tone } from "@/lib/inventory/planning";
 
 const STATUS_TONE: Record<string, string> = {
-  submitted: "border-sky-500/40 bg-sky-500/10 text-sky-800 dark:text-sky-300",
-  in_progress: "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300",
-  fulfilled: "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300",
+  submitted: "border-[hsl(var(--os-info)/0.4)] bg-[hsl(var(--os-info)/0.1)] text-[hsl(var(--os-info))]",
+  in_progress: "border-[hsl(var(--os-amber)/0.4)] bg-[hsl(var(--os-amber)/0.1)] text-[hsl(var(--os-amber))]",
+  fulfilled: "border-[hsl(var(--os-green)/0.4)] bg-[hsl(var(--os-green)/0.1)] text-[hsl(var(--os-green))]",
   closed: "text-muted-foreground",
   cancelled: "border-border bg-secondary text-muted-foreground",
 };
@@ -16,17 +16,17 @@ export function RequestStatusBadge({ status }: { status: string }) {
 }
 
 export const TONE_TEXT: Record<Tone | "info", string> = {
-  good: "text-emerald-800 dark:text-emerald-300",
-  warn: "text-amber-800 dark:text-amber-300",
+  good: "text-[hsl(var(--os-green))]",
+  warn: "text-[hsl(var(--os-amber))]",
   bad: "text-destructive",
-  info: "text-sky-800 dark:text-sky-300",
+  info: "text-[hsl(var(--os-info))]",
   plain: "text-foreground",
 };
 
 export const TONE_BADGE: Record<Tone | "info", string> = {
-  good: "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300",
-  warn: "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300",
+  good: "border-[hsl(var(--os-green)/0.4)] bg-[hsl(var(--os-green)/0.1)] text-[hsl(var(--os-green))]",
+  warn: "border-[hsl(var(--os-amber)/0.4)] bg-[hsl(var(--os-amber)/0.1)] text-[hsl(var(--os-amber))]",
   bad: "border-destructive/40 bg-destructive/10 text-destructive",
-  info: "border-sky-500/40 bg-sky-500/10 text-sky-800 dark:text-sky-300",
+  info: "border-[hsl(var(--os-info)/0.4)] bg-[hsl(var(--os-info)/0.1)] text-[hsl(var(--os-info))]",
   plain: "text-muted-foreground",
 };

@@ -1,13 +1,18 @@
 import { cn } from "@/lib/utils";
 
-export type OsTone = "neutral" | "cyan" | "blue" | "amber" | "red" | "quiet";
+export type OsTone = "neutral" | "cyan" | "blue" | "amber" | "red" | "green" | "quiet";
 
 /** A small status word on a soft tint. The words always say the state; colour only supports them. */
-export function OsBadge({ tone = "neutral", children, className }: { tone?: OsTone; children: React.ReactNode; className?: string }) {
-  return <span className={cn("os-badge", className)} data-tone={tone}>{children}</span>;
+export function OsBadge({ tone = "neutral", dot, children, className }: { tone?: OsTone; /** A small dot before the words, for statuses that read as a state. */ dot?: boolean; children: React.ReactNode; className?: string }) {
+  return (
+    <span className={cn("os-badge", className)} data-tone={tone}>
+      {dot ? <span className="os-dot" data-tone={DOT[tone]} aria-hidden /> : null}
+      {children}
+    </span>
+  );
 }
 
-const DOT: Record<OsTone, string> = { neutral: "", cyan: "cyan", blue: "blue", amber: "amber", red: "red", quiet: "green" };
+const DOT: Record<OsTone, string> = { neutral: "", cyan: "cyan", blue: "blue", amber: "amber", red: "red", green: "green", quiet: "green" };
 export const dotTone = (t: OsTone) => DOT[t];
 
 /** A status pill: a coloured dot and the words. */

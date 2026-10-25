@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { FileText } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { OsBadge, type OsTone } from "@/components/os/pills";
+import { ClickableCard } from "@/components/workspace/clickable-card";
+import { ClickableRow } from "@/components/workspace/clickable-row";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDate } from "@/components/sales/format";
@@ -26,9 +28,9 @@ const STATUS_HELP: Record<Status, string> = {
   superseded: "Replaced by a newer version",
 };
 
+const STATUS_TONE: Record<Status, OsTone> = { draft: "neutral", sent: "blue", accepted: "green", superseded: "quiet" };
 function StatusBadge({ status }: { status: Status }) {
-  const tone = status === "accepted" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300" : status === "sent" ? "border-sky-500/40 bg-sky-500/10 text-sky-800 dark:text-sky-300" : "text-muted-foreground";
-  return <Badge variant="outline" className={cn("whitespace-nowrap", tone)}>{STATUSES.find((s) => s.id === status)?.label ?? status}</Badge>;
+  return <OsBadge tone={STATUS_TONE[status]} dot={status !== "superseded"} className="whitespace-nowrap">{STATUSES.find((s) => s.id === status)?.label ?? status}</OsBadge>;
 }
 
 type Row = Awaited<ReturnType<typeof loadProposals>>[number];
@@ -107,7 +109,7 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
               </TableHeader>
               <TableBody>
                 {rows.map((r) => (
-                  <TableRow key={r.proposal.id} className="align-top">
+                  <ClickableRow key={r.proposal.id} href={r.opportunity ? `/sales/opportunities/${r.opportunity.opp.id}` : "/sales/proposals"} className="align-top">
                     <TableCell className="min-w-0 max-w-xs">
                       {r.opportunity ? (
                         <>
@@ -122,15 +124,15 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
                     <TableCell className="whitespace-nowrap">{sentText(r.proposal)}</TableCell>
                     <TableCell className="max-w-xs"><FileCell row={r} /></TableCell>
                     <TableCell>{r.opportunity?.ownerName ?? "—"}</TableCell>
-                  </TableRow>
+                  </ClickableRow>
                 ))}
               </TableBody>
             </Table>
           </div>
 
-          <ul className="divide-y divide-border rounded-md border border-border md:hidden">
+          <ul className="divide-y divide-border rounded-xl border border-border md:hidden">
             {rows.map((r) => (
-              <li key={r.proposal.id} className="space-y-1.5 px-4 py-3 text-sm">
+              <ClickableCard as="li" key={r.proposal.id} href={r.opportunity ? `/sales/opportunities/${r.opportunity.opp.id}` : "/sales/proposals"} className="space-y-1.5 px-4 py-3 text-sm">
                 <div className="flex items-start justify-between gap-2">
                   {r.opportunity ? (
                     <Link href={`/sales/opportunities/${r.opportunity.opp.id}`} className="min-w-0 break-words font-medium underline-offset-2 hover:underline">{r.opportunity.opp.title}</Link>
@@ -142,7 +144,7 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
                 </p>
                 {r.proposal.note ? <p className="break-words text-sm text-muted-foreground">{r.proposal.note}</p> : null}
                 <div className="text-sm"><FileCell row={r} /></div>
-              </li>
+              </ClickableCard>
             ))}
           </ul>
         </>

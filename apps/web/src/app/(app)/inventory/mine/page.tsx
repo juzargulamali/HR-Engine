@@ -71,7 +71,7 @@ export default async function MyEquipmentPage() {
                   <TableCell data-label="Since" className="whitespace-nowrap">{formatDate(r.issued_at)}</TableCell>
                   <TableCell data-label="Expected back" className="whitespace-nowrap">
                     {r.expected_return_at ? formatDate(r.expected_return_at) : <span className="text-muted-foreground">No date set</span>}
-                    {r.is_overdue ? <Badge variant="outline" className="ml-2 border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300">Overdue</Badge> : null}
+                    {r.is_overdue ? <Badge variant="outline" className="ml-2 border-[hsl(var(--os-amber)/0.4)] bg-[hsl(var(--os-amber)/0.1)] text-[hsl(var(--os-amber))]">Overdue</Badge> : null}
                   </TableCell>
                   <TableCell data-label="Condition">{conditionText(r.condition)}</TableCell>
                 </TableRow>

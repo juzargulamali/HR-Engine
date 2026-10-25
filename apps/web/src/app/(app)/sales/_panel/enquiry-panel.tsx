@@ -105,7 +105,7 @@ function EnquiryPanelBody({ view, picker }: { view: OppView; picker: ContactPick
           </>
         ) : isActive ? (
           <>
-            <p className="mt-1 text-sm font-medium text-amber-800 dark:text-amber-300">No next action is scheduled. Every active enquiry needs one, so it is not forgotten.</p>
+            <p className="mt-1 text-sm font-medium text-[hsl(var(--os-amber))]">No next action is scheduled. Every active enquiry needs one, so it is not forgotten.</p>
             <div className="mt-3"><NewFollowUpButton label="Schedule next action" opportunityId={opp.id} people={view.people} canAssign={view.canEdit || view.canAssign} currentUserId={ctx.userId} /></div>
           </>
         ) : (

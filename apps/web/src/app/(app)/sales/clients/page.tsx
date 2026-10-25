@@ -1,7 +1,7 @@
 import Link from "next/link";
+import { OsBadge } from "@/components/os/pills";
 import { Building2 } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -122,7 +122,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
                         <CardTitle className="break-words leading-snug">{o.name}</CardTitle>
                         {o.place ? <p className="mt-1 text-sm text-muted-foreground">{o.place}</p> : null}
                       </div>
-                      <Badge variant="outline" className="whitespace-nowrap">{KIND_LABEL[o.kind]}</Badge>
+                      <OsBadge tone={o.kind === "agency" ? "blue" : o.kind === "client" ? "cyan" : "neutral"} className="whitespace-nowrap">{KIND_LABEL[o.kind]}</OsBadge>
                     </div>
                     <p className="text-sm">
                       <span className="font-medium">{o.openCount} open</span>

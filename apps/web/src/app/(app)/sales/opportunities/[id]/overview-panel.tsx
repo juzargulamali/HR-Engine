@@ -72,7 +72,7 @@ export function OverviewPanel({ view, picker = null }: { view: OppView; picker?:
             <Fact label="Created">{formatDate(opp.created_at)} by {ctx.personName(opp.created_by)}</Fact>
             <Fact label="First response">{opp.first_response_at ? formatDateTime(opp.first_response_at) : "None recorded yet"}</Fact>
             <Fact label="In this stage since">{formatDate(opp.stage_changed_at)}</Fact>
-            {item.nextFollowUp ? <Fact label="Next action">{item.nextFollowUp.title}<br /><DueText dueAt={item.nextFollowUp.due_at} className="text-sm" /></Fact> : null}
+            {item.nextFollowUp ? <Fact label="Next action">{item.nextFollowUp.title}<br /><DueText dueAt={item.nextFollowUp.due_at} className="whitespace-normal text-sm" /></Fact> : null}
           </dl>
         </Panel>
       </div>

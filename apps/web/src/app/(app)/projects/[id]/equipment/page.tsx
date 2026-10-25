@@ -129,7 +129,7 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
         title="Equipment still out"
         description="Dispatched to this project and not yet returned."
         actions={warehouse && stillOut > 0 ? <Link href={`/inventory?action=return&project=${id}`} className={buttonVariants({ size: "sm", variant: "outline" })}>Record a return</Link> : undefined}
-        className={stillOut > 0 ? "border-amber-500/50" : undefined}
+        className={stillOut > 0 ? "border-[hsl(var(--os-amber)/0.5)]" : undefined}
       >
         {stillOut === 0 ? (
           <p className="text-sm">Nothing is out on this project right now.</p>

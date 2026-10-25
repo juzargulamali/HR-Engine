@@ -180,7 +180,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
                   <TableCell data-label="Status"><RequestStatusBadge status={r.status} /></TableCell>
                   <TableCell data-label="Lines done" className="whitespace-nowrap tabular-nums">{r.total === 0 ? <span className="text-muted-foreground">No lines</span> : `${r.done} of ${r.total}`}</TableCell>
                   <TableCell data-label="Shortages">
-                    {r.shortageLines > 0 ? <Badge variant="outline" className="whitespace-nowrap border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300">Short on {r.shortageLines} {r.shortageLines === 1 ? "line" : "lines"}</Badge> : <span className="text-muted-foreground">None</span>}
+                    {r.shortageLines > 0 ? <Badge variant="outline" className="whitespace-nowrap border-[hsl(var(--os-amber)/0.4)] bg-[hsl(var(--os-amber)/0.1)] text-[hsl(var(--os-amber))]">Short on {r.shortageLines} {r.shortageLines === 1 ? "line" : "lines"}</Badge> : <span className="text-muted-foreground">None</span>}
                   </TableCell>
                   <TableCell data-label="Requested by" className="whitespace-nowrap">{r.requestedByName}</TableCell>
                 </TableRow>
