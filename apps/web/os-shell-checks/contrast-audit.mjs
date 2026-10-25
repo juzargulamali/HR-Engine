@@ -7,8 +7,12 @@ const oppId = psql("select id from crm_opportunities order by created_at desc li
 const projId = psql("select id from proj_projects where kind='client' limit 1");
 const taskId = psql("select id from proj_tasks limit 1");
 const P = projId ? `/projects/${projId}` : "";
+const invItem = psql("select id from inv_items order by name limit 1"), invUnit = psql("select id from inv_units order by code limit 1"), invReq = psql("select id from inv_requests order by code limit 1");
+const INV = invItem ? ["/inventory", `/inventory?open=${invItem}`, ...(invUnit ? [`/inventory?unit=${invUnit}`] : []), "/inventory?action=receive", "/inventory?action=issue", "/inventory?action=dispatch", "/inventory?action=return", "/inventory?action=transfer", "/inventory?action=scan",
+  "/inventory/requests", ...(invReq ? [`/inventory/requests?open=${invReq}`] : []), "/inventory/movements", "/inventory/manage", "/inventory/access", "/inventory/scan", `/inventory/labels?item=${invItem}`, "/inventory/mine", "/inventory/employees", ...(projId ? [`${P}/equipment`] : [])] : [];
 const PAGES = [...(projId ? ["/projects", "/projects?view=board", "/projects?show=finished", `/projects?open=${projId}`, "/projects/work", "/projects/work?view=board", `/projects/work?task=${taskId}`, "/projects/calendar", "/projects/handovers", "/projects/new", "/projects/access",
     P, `${P}/work`, `${P}/work?view=board`, `${P}/work?task=${taskId}`, `${P}/work/tasks/${taskId}`, `${P}/plan`, `${P}/plan?plan=site`, `${P}/plan?mode=calendar`, `${P}/plan?mode=timeline`, `${P}/discussion`, `${P}/people`, `${P}/changes`, `${P}/documents`, `${P}/history`, `${P}/complete`] : []),
+  ...INV,
   "/", "/sales", "/sales/follow-ups", "/sales/follow-ups?view=done&who=all", `/sales/follow-ups?open=${oppId}`, "/sales/opportunities", "/sales/opportunities?status=all", "/sales/opportunities?view=board&status=all", `/sales/opportunities?open=${oppId}`, "/sales/opportunities?add=1", `/sales/opportunities/${oppId}`,
   "/sales/proposals", "/sales/clients", "/sales/reports", "/sales/settings", "/sales/access", "/sales/new",
   "/attendance", "/employees", "/leave", "/leave/new", "/approvals", "/alerts", "/payroll", "/reimbursements", "/performance", "/policies", "/holidays", "/profile", "/attendance-clock", "/letters", "/admin/users", "/admin/companies", "/audit-log", "/ai-suggestions", "/account/security"];
@@ -100,6 +104,10 @@ for (const theme of ["dark", "light"]) {
     if (p === "/sales/follow-ups") {
       await page.getByRole("button", { name: /^Complete follow-up: / }).first().click().catch(() => {}); await page.waitForTimeout(300); all[`${theme} follow-up complete dialog`] = await page.evaluate(evalFn); await page.keyboard.press("Escape"); await page.waitForTimeout(150);
       await page.getByRole("button", { name: /^more$/i }).first().click().catch(() => {}); await page.waitForTimeout(250); all[`${theme} follow-up row more menu`] = await page.evaluate(evalFn); await page.keyboard.press("Escape");
+    }
+    if (p === "/inventory") {   // Inventory: the Add item dialog and the Issue / Dispatch menu (nothing is submitted)
+      await page.getByRole("button", { name: /^Add item$/ }).first().click().catch(() => {}); await page.waitForTimeout(300); all[`${theme} inventory add-item-dialog`] = await page.evaluate(evalFn); await page.keyboard.press("Escape"); await page.waitForTimeout(150);
+      await page.getByRole("button", { name: /Issue \/ Dispatch/ }).first().click().catch(() => {}); await page.waitForTimeout(250); all[`${theme} inventory issue-dispatch-menu-open`] = await page.evaluate(evalFn); await page.keyboard.press("Escape");
     }
     if (p === "/projects") {
       await page.getByRole("button", { name: /columns/i }).click().catch(() => {}); await page.waitForTimeout(250); all[`${theme} projects columns-menu-open`] = await page.evaluate(evalFn); await page.keyboard.press("Escape");

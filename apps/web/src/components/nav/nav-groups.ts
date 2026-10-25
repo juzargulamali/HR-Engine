@@ -1,5 +1,5 @@
-import { canViewHrAlerts, hasCrmCapability, hasProjCapability, hasRoleAnyScope, isAnyCrmFounder, isSysAdmin } from "@enginious-hr/domain";
-import type { CrmGrant, ProjGrant, RoleGrant } from "@enginious-hr/domain";
+import { canViewHrAlerts, canViewStock, hasCrmCapability, hasInvCapability, hasProjCapability, hasRoleAnyScope, isAnyCrmFounder, isSysAdmin } from "@enginious-hr/domain";
+import type { CrmGrant, InvGrant, ProjGrant, RoleGrant } from "@enginious-hr/domain";
 
 /**
  * String keys only — never a component reference. This data crosses from
@@ -79,6 +79,12 @@ export interface NavOptions {
    * linked to a project as a Sales relationship, and whether a handover is waiting on them. No access means no module.
    */
   projects?: { grants: readonly ProjGrant[]; salesLinked?: boolean; pendingHandovers?: boolean; managesProjects?: boolean };
+  /**
+   * Inventory access: the person's own grants from inv_company_grants (never HR roles, Sales or Projects grants), whether they run a
+   * project (a Project Manager or department head prepares equipment requests without a stock grant), and whether they are an
+   * employee with a linked record (every employee can see the equipment assigned to them). No access of any kind means "Coming soon".
+   */
+  inventory?: { grants: readonly InvGrant[]; managesProjects?: boolean; isEmployee?: boolean };
 }
 
 /**
@@ -235,9 +241,44 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
     });
   }
 
+  // Inventory has its own company-scoped access (inv_company_grants), independent of HR roles, Sales and Projects grants. Three working
+  // sections (Inventory, Requests, Movements) for people with a grant; Project Managers and department heads see the catalogue and their
+  // requests; every employee sees the equipment assigned to them. Setup and Access appear only to those who can use them.
+  const inv = options.inventory;
+  const invGrants = inv?.grants ?? [];
+  const invGrantee = invGrants.length > 0;
+  const invAnyCap = (cap: Parameters<typeof hasInvCapability>[2]) => invGrants.some((g) => hasInvCapability([g], g.companyId, cap));
+  const invStock = invGrants.some((g) => canViewStock([g], g.companyId));
+  const invPlanner = invGrantee || inv?.managesProjects === true;
+  if (invPlanner || inv?.isEmployee === true) {
+    const mainLinks: NavLinkData[] = invPlanner
+      ? [
+          { href: "/inventory", label: "Inventory", iconKey: "inventory" },
+          { href: "/inventory/requests", label: "Requests", iconKey: "inventory" },
+          ...(invStock || invAnyCap("founder") ? [{ href: "/inventory/movements", label: "Movements", iconKey: "inventory" as const }] : []),
+          { href: "/inventory/mine", label: "My equipment", iconKey: "inventory", secondary: true },
+          { href: "/inventory/scan", label: "Scan a label", iconKey: "inventory", secondary: true },
+          // Which company equipment each employee holds: for HR custody access, founders and warehouse operators (the page and the database check again).
+          ...(invAnyCap("view_employee_custody") || invAnyCap("founder") || invAnyCap("warehouse")
+            ? [{ href: "/inventory/employees", label: "Equipment held by employees", iconKey: "inventory" as const, secondary: true }]
+            : []),
+        ]
+      : [{ href: "/inventory/mine", label: "My equipment", iconKey: "inventory" }];
+    const manage: NavLinkData[] = [];
+    if (invAnyCap("manage_catalogue") || invAnyCap("founder")) manage.push({ href: "/inventory/manage", label: "Setup", iconKey: "inventory" });
+    if (invAnyCap("manage_access")) manage.push({ href: "/inventory/access", label: "Access", iconKey: "inventory" });
+    modules.push({
+      id: "inventory",
+      label: "Inventory",
+      iconKey: "inventory",
+      href: invPlanner ? (invGrantee ? "/inventory" : "/inventory/requests") : "/inventory/mine",
+      sections: [{ label: "Inventory", links: mainLinks }, ...(manage.length > 0 ? [{ label: "Manage", links: manage }] : [])],
+    });
+  }
+
   // Modules that are planned but not built: visible to everyone so the roadmap is honest, never links, never any data.
   modules.push(
-    { id: "inventory", label: "Inventory", iconKey: "inventory", href: "", comingSoon: true, sections: [] },
+    ...(invPlanner || inv?.isEmployee === true ? [] : [{ id: "inventory" as const, label: "Inventory", iconKey: "inventory" as const, href: "", comingSoon: true, sections: [] }]),
     { id: "vendors", label: "Vendors & Purchasing", iconKey: "vendors", href: "", comingSoon: true, sections: [] },
     // The existing HR appraisals and goals stay reachable (and are called what they are); the future KPI module is marked.
     {

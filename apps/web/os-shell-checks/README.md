@@ -53,5 +53,58 @@ enquiries owned by emp@ (one overdue, one due today, two upcoming), a Won enquir
 Programming team, tasks (one overdue, one waiting for review) and a short discussion. `sales-actions.mjs` instead starts from the Sales grants
 only (an empty Sales database). Both write to the database they drive: reseed before every run.
 
+`seed/sales.sh` is the Sales-only start of `sales-actions.mjs` (grants for ceo@, mgr@, emp@ and the UAE settings). `seed/base.sh` is the Projects seed (Sales and Projects grants and one Won
+enquiry). `seed/scenario.sh` builds the whole sample scenario above through the real functions as the real people (it runs `seed/base.sh` first). `seed/inventory.sh` is the Inventory
+scenario (it also runs `seed/base.sh`). Each of them resets the database, so run exactly one before a check.
+
 `phone-fit.mjs` and `contrast-audit.mjs` cover the list, board, side panel, Quick Add and menu states of the new Sales and Projects workspaces
 (and skip a panel only where the signed-in person legitimately has no access, for example Sales for a Projects-only user).
+
+## Inventory workflow checks (local stack only)
+
+Real-browser workflows of the Inventory module, each driven as the real people and confirmed in the database. They need the Inventory seed
+(`seed/inventory.sh`, which also builds the Won opportunity of `seed/base.sh`) and **write** to the database they drive, so each one reseeds
+itself first when run with `RESEED=1` (the app keeps running: it holds no database state). Screenshots go to `docs/inventory-screenshots/`
+(`SHOTS_DIR` overrides). Shared plumbing is in `inventory-flow-lib.mjs`.
+
+```bash
+node os-shell-checks/inventory-smoke.mjs                                 # every Inventory screen opens without errors
+RESEED=1 node os-shell-checks/inventory-flow-1-stock-to-reconcile.mjs    # opening count, labels (QR decoded), project request, reserve, partial dispatch,
+                                                                         # partial return (good + damaged), outstanding, final reconciliation, ledger check
+RESEED=1 node os-shell-checks/inventory-flow-2-employee.mjs              # employee request, issue, My equipment, HR view, reserve refusal, return, reassign, leaver, no private data
+RESEED=1 node os-shell-checks/inventory-flow-3-sales.mjs                 # Sales check card, template, out of date, no cost/custody in Sales, winning, handover import once
+```
+
+Each prints PASS/FAIL per step and a verdict, and exits non-zero on a failure. `stack.sh reset|build|start|stop|all` rebuilds the stack after code changes.
+
+### Inventory workflow checks 4 and 5 (transfers, conflicts, access)
+
+```bash
+RESEED=1 node os-shell-checks/inventory-flow-4-transfer-and-conflicts.mjs   # ONLY=A1,A2,A3,A4 runs sections
+                                                                           # A1 project A -> project B in one movement (UI), a third project's reservation never displaced, destination rule
+                                                                           # A2 overlapping reservations refused in words, extension that collides displaces nobody, two sessions race for the last unit / last quantity
+                                                                           # A3 Dubai -> Riyadh: in transit, not reservable at Riyadh, Dubai-only operator cannot receive, partial receipt, overdue never ready
+                                                                           # A4 Poznan time zone across the last Sunday of March / October (browser clock deliberately New York), UTC stored
+RESEED=1 node os-shell-checks/inventory-flow-5-access.mjs                   # ONLY=B1..B9 runs sections
+                                                                           # menu entries per person, pages and page HTML, direct PostgREST calls with each person's real token (functions, tables, read-only),
+                                                                           # costs (founder only, explicit view_costs grant on the Access page), locations, another company and the sharing row,
+                                                                           # access revoked while a page is open, direct addresses and the signed-out scan address, no automatic grants
+```
+
+`inventory-flow-lib.mjs` also exports `rpc` / `rest` / `tokenFor` (sign in through the local gateway as the app does, then call `/rest/v1/...` with that token): this is how the
+checks prove that the DATABASE, not the page, refuses a wrong-role action.
+
+### Inventory accessibility, scanning and screenshots
+
+```bash
+node os-shell-checks/inventory-a11y.mjs            # keyboard + focus, axe (serious/critical) on 22 Inventory pages x desktop/phone x dark/light, and the outage check:
+                                                   # it stops PostgREST, expects "Could not load" (never "no items" / "no access"), then starts PostgREST again with the same
+                                                   # settings as local-stack/start.sh and REWRITES /tmp/inv-stack/postgrest.pid so a later stack.sh reset can stop it
+node os-shell-checks/inventory-scan-camera.mjs     # scanning with a SIMULATED camera (see the warning below)
+RESEED=1 node os-shell-checks/inventory-screenshots.mjs   # dark-*, light-* (1280 px) and mobile-* (390 px) PNGs of every Inventory screen into docs/inventory-screenshots/
+```
+
+**The scan check uses a synthetic camera inside Chromium** (a QR video generated by ffmpeg from the label payload, fed with
+`--use-fake-device-for-media-stream --use-file-for-fake-video-capture`). It is NOT a phone camera. Real iPhone Safari and Android Chrome scanning (focus, glare, small
+printed labels, the browsers' own permission prompts) is not verified by any script here and still needs a real phone.
+

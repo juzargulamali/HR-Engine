@@ -345,3 +345,69 @@ describe("Projects & Tasks navigation", () => {
     expect(breadcrumbFor("/projects/work", modules)).toEqual({ module: "Projects & Tasks", page: "My Work" });
   });
 });
+
+describe("Inventory navigation", () => {
+  const inv = (...caps: string[]) => ({ grants: [{ companyId: "c1", capabilities: caps as never[] }] });
+  const sectionLinks = (mods: ReturnType<typeof buildNavModules>) => mods.find((m) => m.id === "inventory")!.sections.flatMap((s) => s.links.map((l) => `${s.label}:${l.label}${l.secondary ? "*" : ""}`));
+
+  it("stays a 'Coming soon' row for people with no Inventory involvement, whatever their HR roles", () => {
+    for (const roles of [[grant("employee")], [grant("hr_admin")], [grant("ceo")], [grant("sys_admin")], [grant("finance")]]) {
+      const mod = buildNavModules(roles, { inventory: { grants: [], managesProjects: false, isEmployee: false } }).find((m) => m.id === "inventory")!;
+      expect(mod.comingSoon).toBe(true);
+      expect(mod.href).toBe("");
+    }
+  });
+
+  it("gives every employee a 'My equipment' link and nothing else", () => {
+    const mods = buildNavModules([grant("employee")], { inventory: { grants: [], isEmployee: true } });
+    expect(mods.find((m) => m.id === "inventory")?.comingSoon).toBeUndefined();
+    expect(sectionLinks(mods)).toEqual(["Inventory:My equipment"]);
+    expect(mods.find((m) => m.id === "inventory")?.href).toBe("/inventory/mine");
+  });
+
+  it("shows Inventory, Requests and Movements to a warehouse operator, with My equipment and Scan kept out of the menu", () => {
+    const links = sectionLinks(buildNavModules([grant("employee")], { inventory: inv("warehouse") }));
+    expect(links).toEqual(["Inventory:Inventory", "Inventory:Requests", "Inventory:Movements", "Inventory:My equipment*", "Inventory:Scan a label*", "Inventory:Equipment held by employees*"]);
+  });
+
+  it("offers 'Equipment held by employees' (kept out of the menu) only to HR custody access, founders and warehouse operators", () => {
+    const held = (mods: ReturnType<typeof buildNavModules>) => sectionLinks(mods).filter((l) => l.includes("Equipment held by employees"));
+    expect(held(buildNavModules([], { inventory: inv("view_employee_custody") }))).toEqual(["Inventory:Equipment held by employees*"]);
+    expect(held(buildNavModules([], { inventory: inv("founder") }))).toEqual(["Inventory:Equipment held by employees*"]);
+    expect(held(buildNavModules([], { inventory: inv("warehouse") }))).toEqual(["Inventory:Equipment held by employees*"]);
+    // Nothing for stock readers, catalogue managers, department heads, project managers or plain employees: whatever their HR roles.
+    for (const caps of [["view_stock"], ["manage_catalogue"], ["request_for_employees"], ["view_costs"], []]) {
+      expect(held(buildNavModules([grant("hr_admin")], { inventory: inv(...caps) }))).toEqual([]);
+    }
+    expect(held(buildNavModules([grant("hr_admin")], { inventory: { grants: [], managesProjects: true, isEmployee: true } }))).toEqual([]);
+    expect(held(buildNavModules([grant("ceo")], { inventory: { grants: [], isEmployee: true } }))).toEqual([]);
+    // It is a real destination: found by search and it lights up Inventory, but it is not a menu row.
+    const mods = buildNavModules([], { inventory: inv("view_employee_custody") });
+    const link = mods.find((m) => m.id === "inventory")!.sections.flatMap((s) => s.links).find((l) => l.href === "/inventory/employees");
+    expect(link?.secondary).toBe(true);
+    expect(activeModuleId("/inventory/employees", mods)).toBe("inventory");
+  });
+
+  it("gives a Project Manager the catalogue and requests but not Movements, and a plain Inventory grant the same", () => {
+    expect(sectionLinks(buildNavModules([], { inventory: { grants: [], managesProjects: true, isEmployee: true } }))).toEqual([
+      "Inventory:Inventory", "Inventory:Requests", "Inventory:My equipment*", "Inventory:Scan a label*",
+    ]);
+    expect(sectionLinks(buildNavModules([], { inventory: inv() }))).not.toContain("Inventory:Movements");
+  });
+
+  it("shows Setup and Access under Manage only to the people who can use them", () => {
+    expect(sectionLinks(buildNavModules([], { inventory: inv("warehouse") }))).not.toContain("Manage:Setup");
+    expect(sectionLinks(buildNavModules([], { inventory: inv("manage_catalogue") }))).toContain("Manage:Setup");
+    expect(sectionLinks(buildNavModules([], { inventory: inv("manage_catalogue") }))).not.toContain("Manage:Access");
+    expect(sectionLinks(buildNavModules([], { inventory: inv("manage_access") }))).toContain("Manage:Access");
+    const founder = sectionLinks(buildNavModules([], { inventory: inv("founder") }));
+    expect(founder).toEqual(expect.arrayContaining(["Manage:Setup", "Manage:Access", "Inventory:Movements"]));
+  });
+
+  it("opens the module on the page that suits the person", () => {
+    const entry = (o: Parameters<typeof buildNavModules>[1]) => buildNavModules([], o).find((m) => m.id === "inventory")!.href;
+    expect(entry({ inventory: inv("warehouse") })).toBe("/inventory");
+    expect(entry({ inventory: { grants: [], managesProjects: true } })).toBe("/inventory/requests");
+    expect(entry({ inventory: { grants: [], isEmployee: true } })).toBe("/inventory/mine");
+  });
+});

@@ -25,7 +25,7 @@ export function Modal({ open, onClose, title, description, children, size = "def
         if (e.target === ref.current) onClose();
       }}
       aria-labelledby={titleId}
-      className={`m-auto rounded-xl border border-border bg-card p-0 text-card-foreground shadow-xl backdrop:bg-black/50 ${size === "wide" ? "w-[min(44rem,calc(100vw-2rem))]" : "w-[min(32rem,calc(100vw-2rem))]"}`}
+      className={`m-auto rounded-xl border border-border bg-card p-0 text-left text-card-foreground shadow-xl backdrop:bg-black/50 ${size === "wide" ? "w-[min(44rem,calc(100vw-2rem))]" : "w-[min(32rem,calc(100vw-2rem))]"}`}
     >
       <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div>

@@ -5,6 +5,7 @@ import { DueText, StageBadge } from "@/components/sales/badges";
 import { formatDate } from "@/components/sales/format";
 import { AddUpdateButton } from "@/components/sales/add-update-button";
 import { CompleteFollowUpButton, NewFollowUpButton } from "@/components/sales/follow-up-dialogs";
+import { EquipmentAvailabilityCard } from "@/components/inventory/planning/sales-availability-card";
 import { LoadError } from "@/components/workspace/states";
 import { SidePanel } from "@/components/workspace/side-panel";
 import { parseRecordId } from "@/components/workspace/url-state";
@@ -111,6 +112,8 @@ function EnquiryPanelBody({ view, picker }: { view: OppView; picker: ContactPick
           <p className="mt-1 text-sm text-muted-foreground">{isHold ? "None while it is on hold. Resuming asks for one." : "Closed: no further follow-ups."}</p>
         )}
       </section>
+
+      <EquipmentAvailabilityCard opportunityId={opp.id} companyId={opp.company_id} stage={opp.stage} canAsk={view.canEdit} />
 
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Enquiry actions">
         {!isLost ? <AddUpdateButton opportunityId={opp.id} /> : null}

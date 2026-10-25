@@ -21,7 +21,10 @@ for (const [name, email] of Object.entries(PERSONAS)) {
   if (name === "nosales") { ok(/You do not have Sales access/i.test(await page.locator("main").innerText()), "direct /sales shows the no-access message, no data"); }
   if (name === "sales") ok(!links.includes("Settings") && !links.includes("Access"), "Sales user without capabilities sees neither Settings nor Access");
   if (name === "founder") ok(links.includes("Settings") && links.includes("Access"), "founder sees Settings and Access");
-  for (const m of ["Inventory", "Vendors & Purchasing"]) ok(t.includes(m) && new RegExp(`${m.replace(/&/g, "&")}\\s*\\n?\\s*Coming soon`).test(t), `${m} is shown as Coming soon`);
+  // Inventory is a working module now (its own grants; a Project Manager sees it; every employee at least "My equipment"): every persona here is an employee, so it is never "Coming soon" for them.
+  // (Changed on purpose when Inventory shipped. Per-person Inventory menus are covered by inventory-flow-5-access.mjs.) Vendors & Purchasing is still planned.
+  ok(links.includes("Inventory") && !/Inventory\s*\n?\s*Coming soon/.test(t), "Inventory is a working module (not Coming soon) for an employee");
+  ok(/Vendors & Purchasing\s*\n?\s*Coming soon/.test(t), "Vendors & Purchasing is shown as Coming soon");
   // Projects & Tasks is a real module now: only people with Projects access (or a Sales link) see it; nobody sees it as "coming soon".
   ok(!/Projects & Tasks\s*\n?\s*Coming soon/.test(t), "Projects & Tasks is no longer shown as Coming soon");
   await page.goto(`${BASE}/performance`, { waitUntil: "networkidle" });

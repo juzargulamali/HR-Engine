@@ -18,6 +18,9 @@ export function ManageMenu({ projectId, projectName, items, editable, moves, cur
     key: i.key, label: i.label, href: i.href, hint: i.hint, separatorBefore: i.separatorBefore,
     onSelect: i.action ? () => setDialog(i.action ?? null) : undefined,
   }));
+  // Equipment (Inventory) is one more page under this menu, not a new project tab: it sits after Files & client plan.
+  const filesAt = menu.findIndex((m) => m.key === "documents");
+  menu.splice(filesAt >= 0 ? filesAt + 1 : menu.length, 0, { key: "equipment", label: "Equipment", href: `/projects/${projectId}/equipment`, hint: "Requests, reservations and what is still out" });
   return (
     <>
       <MoreMenu items={menu} label="Manage project" />
