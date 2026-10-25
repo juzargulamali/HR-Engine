@@ -161,10 +161,8 @@ html[data-theme="light"] .os-card.os-cool { background: linear-gradient(180deg, 
 /* The compact header: a deep gradient with prepared artwork (public/brand/os-header-art.svg) fading in from the right. Words and
    controls are HTML on top; the title column is capped so it never reaches the drawing. */
 .os-hero {
-  position: relative; border-radius: 16px; color: #eaf7f8; border: 1px solid transparent;
-  background:
-    linear-gradient(100deg, hsl(192 52% 11.5%) 0%, hsl(193 50% 9.5%) 48%, hsl(190 54% 12.5%) 100%) padding-box,
-    linear-gradient(180deg, hsl(178 50% 60% / 0.42), hsl(190 30% 30% / 0.3) 50%, hsl(195 30% 22% / 0.4)) border-box;
+  position: relative; border-radius: 16px; color: #eaf7f8; border: 1px solid hsl(186 36% 32% / 0.75);
+  background: linear-gradient(100deg, hsl(192 52% 11.5%) 0%, hsl(193 50% 9.5%) 48%, hsl(190 54% 12.5%) 100%);
   box-shadow: 0 14px 30px -20px hsl(195 80% 3% / 0.9);
 }
 .os-hero::before {
