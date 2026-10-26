@@ -96,7 +96,7 @@ export async function LeaveSection({ employeeId, canRecordOvernightRecovery = fa
       </Table>
 
       <div className="space-y-2 border-t border-border pt-4">
-        <h3 className="text-sm font-medium">Recovery Leave earning (Line Manager → HR Admin approval)</h3>
+        <h3 className="text-sm font-medium">Recovery Leave earning (Reporting Manager → HR Admin approval)</h3>
         <Table stack>
           <TableHeader>
             <TableRow>

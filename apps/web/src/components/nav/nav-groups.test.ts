@@ -47,7 +47,7 @@ function assertNoFunctions(value: unknown, path = "root"): void {
 
 const GRANT_SCENARIOS: { name: string; grants: RoleGrant[] }[] = [
   { name: "no roles at all", grants: [] },
-  { name: "plain employee (line manager)", grants: [grant("line_manager")] },
+  { name: "plain employee (reporting manager)", grants: [grant("line_manager")] },
   { name: "hr_admin", grants: [grant("hr_admin")] },
   { name: "finance", grants: [grant("finance")] },
   { name: "ceo", grants: [grant("ceo")] },
@@ -143,7 +143,7 @@ describe("buildNavModules", () => {
     expect(hrefsOf(buildNavModules([grant("employee")], { hasPendingApprovals: false }))).not.toContain("/approvals");
   });
 
-  it("shows Approvals but hides Payroll for a Line Manager", () => {
+  it("shows Approvals but hides Payroll for a Reporting Manager", () => {
     const hrefs = hrefsOf(buildNavModules([grant("line_manager")]));
     expect(hrefs).toContain("/approvals");
     expect(hrefs).not.toContain("/payroll");

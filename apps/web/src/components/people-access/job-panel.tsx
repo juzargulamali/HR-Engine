@@ -32,7 +32,7 @@ export function JobPanel(p: JobPanelProps) {
         <dt className="text-muted-foreground">Company</dt><dd>{p.companyName}</dd>
         <dt className="text-muted-foreground">Job title</dt><dd>{p.jobTitle ?? "—"}</dd>
         <dt className="text-muted-foreground">Department</dt><dd>{p.departmentName ?? "—"}</dd>
-        <dt className="text-muted-foreground">Reports to</dt><dd>{p.managerName ?? "—"}</dd>
+        <dt className="text-muted-foreground">Reporting manager</dt><dd>{p.managerName ?? "—"}</dd>
       </dl>
       {p.canEdit ? (
         <ActionForm action={updateJobDetails} submitLabel="Save job details" className="space-y-3 border-t border-border pt-4">
@@ -45,7 +45,7 @@ export function JobPanel(p: JobPanelProps) {
                 {p.departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </Select>
             </Field>
-            <Field label="Reports to" htmlFor="pa-job-mgr">
+            <Field label="Reporting manager" htmlFor="pa-job-mgr">
               <Select id="pa-job-mgr" name="managerId" defaultValue={p.managerId ?? ""}>
                 <option value="">No one</option>
                 {p.managers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}

@@ -13,7 +13,7 @@ const FEATURES = [
   { n: "Payroll", d: "Runs, payslips, letters." },
   { n: "Appraisals", d: "Goals, cycles, reviews." },
   { n: "People, documents, assets, policies, holidays", d: "Directory, expiring documents, equipment issued to employees." },
-  { n: "Accounts and permissions", d: "Sign-in, roles, line managers." },
+  { n: "Accounts and permissions", d: "Sign-in, roles, reporting managers." },
 ];
 
 export default function People() {

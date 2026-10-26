@@ -76,4 +76,23 @@ The grant functions refuse to remove or demote the last holder (Projects, Invent
 * Domain: presets, who-may-give-what, diff, preservation, who sees what (`test/peopleAccess.test.ts`).
 * Web unit: server actions (`peopleAccess.test.ts`: right function per module, unknown rights refused, stale form stopped, locations, job validation, no false success), loader entitlements (`lib/people-access/data.test.ts`: what each viewer does and does not query), module access card (presets preserve, founder-only options disabled, last-manager warnings, locations, remove asks first), navigation.
 * Database: `packages/rls-tests/test/people_access_findings.rls.test.ts` records today's grant authority (no rule changed) including the findings.
-* Browser (local stack): `os-shell-checks/people-access-flow.mjs`.
+* Browser (local stack): `os-shell-checks/people-access-flow.mjs` (46 steps). It covers, among much else: job title, department and reporting manager edited together and separately and cleared (the employee record and its audit row checked in the database); a direct and a longer reporting circle refused; forged requests naming a department or manager of another company, or the person themselves, refused; an over-long title refused; edits refused for the System Administrator, for the person's own reporting manager, for the employee themselves and for an HR Admin of another company, in the page and through the data service; and every old management address (`/admin/users`, `/sales/access`, `/projects/access`, `/inventory/access`, with a trailing slash or a query string) redirecting temporarily to People & Access, signed out and signed in, for each kind of person, with each person still offered exactly the management they had before.
+* The local test setup now has fictional departments (Production Studio and Field Operations in the UAE company, Warsaw Workshop in the Poland company): `packages/e2e-tests/local-stack/seed.sql`.
+
+## Wording
+
+The HR role stored as `line_manager` is shown as **Reporting Manager** everywhere in the interface, and the job field is **Reporting manager**. Only the label changed; the stored value, the permissions and the approval routing are unchanged.
+
+## Not tested here (invitation and authentication flows)
+
+The local stack has no authentication admin service, so these were **not exercised**, before or after this change. The Playwright suites that cover most of them were moved to the new screen and typecheck, but need a hosted-style test project and were **not run**:
+
+* Inviting a person (`inviteUser`, the invitation e-mail) and resending an invitation.
+* Opening an invitation link and setting a first password.
+* Deactivating and reactivating an account (the sign-in ban), and the check that an already signed-in session is cut off.
+* An administrator sending a password reset, and the reset link itself.
+* Deleting an account.
+* The account-status consistency check.
+* `e2e-account-security` and `e2e-tests` specs against a real project: `account-deactivation-reactivation`, `existing-session-blocked-on-deactivation`, `admin-password-invite-actions`, `admin-account-controls-visibility`, `deactivate-requires-confirmation-and-reason`, `50-account-status`, and the specs that read names and statuses through `src/identity.ts`.
+
+What the browser flow does confirm for these: the controls appear only for the System Administrator, only under the person's Account tab, and the Invite panel is present.
