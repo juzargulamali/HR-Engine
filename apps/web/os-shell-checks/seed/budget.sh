@@ -19,7 +19,8 @@ $P -c "insert into pbx_company_grants (user_id, company_id, capabilities, note) 
   ('$U-0000000000a3','$CO','{view}','local seed: read-only'),
   ('$U-0000000000a6','$CO','{executive_approver}','local seed: CEO/CTO approver')"
 
-# STAGE=draft | submitted | approved (budget approved, funding recorded, actual expenses started) builds the scenario up to that point through the REAL functions as the real people (default: nothing, the browser flow starts from here).
+# STAGE=draft | submitted | approved (budget approved, funding recorded, actual expenses started) | executive (hr1@, a Finance person, is the Project Manager;
+# admin@ approves as CEO/CTO approver; final expenses approved; receipts declared by Finance, waiting for the approver's confirmation) builds the scenario up to that point through the REAL functions as the real people (default: nothing, the browser flow starts from here).
 STAGE="${STAGE:-}"
 if [ -n "$STAGE" ]; then
   as() { $P <<SQL | tail -1
@@ -30,22 +31,35 @@ commit;
 SQL
   }
   PRJ=$($P -c "select id from proj_projects limit 1")
-  BUD=$(as 4 "select pbx_create_budget('$PRJ', 'AED')")
+  PMU=4; APPROVER=1
+  if [ "$STAGE" = "executive" ]; then
+    PMU=1; APPROVER=6
+    $P -c "update proj_projects set pm_user_id='$U-0000000000a1' where id='$PRJ'" -c "insert into proj_project_members (project_id, user_id, role) values ('$PRJ','$U-0000000000a1','pm') on conflict do nothing"
+  fi
+  BUD=$(as $PMU "select pbx_create_budget('$PRJ', 'AED')")
   VER=$($P -c "select id from pbx_budget_versions where budget_id='$BUD'")
   CAT() { $P -c "select id from pbx_categories where key='$1' and company_id is null"; }
   ROWS="[{\"category_id\":\"$(CAT food)\",\"description\":\"Lunch for the install team\",\"activity\":\"setup\",\"basis\":\"per_person_day\",\"people\":\"3\",\"days\":\"2\",\"rate\":\"60\"},
         {\"category_id\":\"$(CAT transport)\",\"description\":\"Petrol to the venue\",\"basis\":\"per_km\",\"qty\":\"60\",\"rate\":\"0.5\"},
         {\"category_id\":\"$(CAT transport)\",\"description\":\"Metro cards 20-22 October\",\"basis\":\"fixed\",\"fixed\":\"30\",\"date_from\":\"2026-10-20\",\"date_to\":\"2026-10-22\"},
         {\"category_id\":\"$(CAT logistics)\",\"description\":\"Truck to and from the site\",\"activity\":\"dismantling\",\"basis\":\"per_trip\",\"qty\":\"3\",\"rate\":\"350\"}]"
-  RV=$(as 4 "select pbx_save_budget_draft('$VER', $($P -c "select row_version from pbx_budget_versions where id='$VER'"), '{\"people\":[\"$U-0000000000a4\",\"$U-0000000000a2\"],\"note\":\"Expo set-up\"}'::jsonb, '$ROWS'::jsonb)")
+  RV=$(as $PMU "select pbx_save_budget_draft('$VER', $($P -c "select row_version from pbx_budget_versions where id='$VER'"), '{\"people\":[\"$U-0000000000a4\",\"$U-0000000000a2\"],\"note\":\"Expo set-up\"}'::jsonb, '$ROWS'::jsonb)")
   if [ "$STAGE" != "draft" ]; then
-    as 4 "select pbx_submit_budget('$VER', $RV, gen_random_uuid())" >/dev/null
+    as $PMU "select pbx_submit_budget('$VER', $RV, gen_random_uuid())" >/dev/null
     if [ "$STAGE" != "submitted" ]; then
-      as 1 "select pbx_decide_budget('$VER', 'approve')" >/dev/null
+      as $APPROVER "select pbx_decide_budget('$VER', 'approve')" >/dev/null
       as 1 "select pbx_record_funding('$BUD', '$U-0000000000a4', current_date, 500, 'cash', null, 'PV-1', 'advance', gen_random_uuid())" >/dev/null
       as 1 "select pbx_record_funding('$BUD', '$U-0000000000a4', current_date, 2000, 'pluto', null, null, 'card limit', gen_random_uuid())" >/dev/null
-      SUB=$(as 4 "select pbx_start_actuals('$BUD')")
+      SUB=$(as $PMU "select pbx_start_actuals('$BUD')")
       echo "actuals draft $SUB"
+      if [ "$STAGE" = "executive" ]; then
+        ARV=$($P -c "select row_version from pbx_actual_submissions where id='$SUB'")
+        LINES=$($P -c "select json_agg(json_build_object('budget_row_id', id, 'actual_amount', (case when sort_no=1 then '360' when sort_no=2 then '30' when sort_no=3 then '30' else '1050' end), 'paid_via', (case when sort_no=1 then 'personal' else 'company_card' end), 'paid_by_user_id', (case when sort_no=1 then '$U-0000000000a1' else null end)) order by sort_no) from pbx_budget_rows where version_id='$VER'")
+        ARV=$(as $PMU "select pbx_save_actuals_draft('$SUB', $ARV, '{\"complete_confirmed\": true}'::jsonb, '$LINES'::jsonb)")
+        as $PMU "select pbx_submit_actuals('$SUB', $ARV, gen_random_uuid())" >/dev/null
+        as $APPROVER "select pbx_decide_actuals('$SUB', 'approve')" >/dev/null
+        as 1 "select pbx_record_receipts('$BUD', 'received')" >/dev/null
+      fi
     fi
   fi
   echo "stage $STAGE built"
