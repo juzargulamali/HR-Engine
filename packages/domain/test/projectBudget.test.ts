@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  approvalRouteFor, holdExplanation, routeExplanation, categorySubtotals, currencyDecimals, expenseVariance, fundingIsAdvance, inclusiveDays, moneyText, nextAction, parseDecimal, requiresVarianceNote, roundMoney,
+  approvalRouteFor, settlementRouteFor, holdExplanation, routeExplanation, categorySubtotals, currencyDecimals, expenseVariance, fundingIsAdvance, inclusiveDays, moneyText, nextAction, parseDecimal, requiresVarianceNote, roundMoney,
   rowTotal, settlementBlockers, settlementFigures, subMoney, sumMoney, suggestedRate, varianceLabel, versionStatusTone, type BudgetFlowState,
 } from "../src";
 
@@ -191,6 +191,10 @@ describe("closing settlement and the next action", () => {
     expect(settlementBlockers({ ...ready, advanceToReturn: 300 }, "AED")[0]).toMatch(/AED 300.00 of advance money/);
     expect(settlementBlockers({ ...ready, reimbursementOutstanding: 50 }, "AED")[0]).toMatch(/AED 50.00 of reimbursement/);
     expect(settlementBlockers({ ...ready, actualsAwaitingDecision: true }, "AED")[0]).toMatch(/waiting/);
+    // Finance-submitted expenses: recorded receipts are not enough until an independent CEO/CTO approver confirms them
+    expect(settlementBlockers({ ...ready, settlementByApprover: true, receiptsConfirmedByApprover: false }, "AED")[0]).toMatch(/independent CEO or CTO approver/);
+    expect(settlementBlockers({ ...ready, settlementByApprover: true, receiptsConfirmedByApprover: true }, "AED")).toEqual([]);
+    expect(settlementBlockers({ ...ready, settlementByApprover: false }, "AED")).toEqual([]);
     expect(settlementBlockers({ ...ready, settlementClosed: true }, "AED")).toEqual(["Settlement is already closed."]);
   });
   const base: BudgetFlowState = { hasBudget: true, latestBudget: "approved", latestBudgetKind: "original", hasApprovedBaseline: true, approvalOnHold: false, actuals: null, approvedActuals: false, fundingRecorded: false, receipts: "not_received", settlementClosed: false, blockers: [] };
@@ -230,5 +234,18 @@ describe("closing settlement and the next action", () => {
     expect(nextAction({ ...base, latestBudgetKind: "addition", approvalRoute: "executive" }).text).toMatch(/CEO or CTO approver decides the additional budget request/);
     expect(nextAction({ ...base, latestBudget: "approved", hasApprovedBaseline: true, actuals: "submitted", approvalRoute: "executive" }).text).toMatch(/CEO or CTO approver reviews/);
     expect(nextAction({ ...base, approvalOnHold: true, approvalRoute: "executive" })).toMatchObject({ who: "nobody" });
+  });
+  it("settlement stays with Finance for ordinary PMs and moves to the CEO/CTO approver for Finance-submitted expenses", () => {
+    expect(settlementRouteFor("finance")).toBe("finance");
+    expect(settlementRouteFor(null)).toBe("finance");
+    expect(settlementRouteFor("executive")).toBe("executive");
+    expect(settlementRouteFor("finance", true)).toBe("executive");   // the author has since gained Finance access: still not their own to close
+  });
+  it("hands the last settlement steps to the CEO/CTO approver when Finance submitted the expenses", () => {
+    const base = { hasBudget: true, latestBudget: "approved" as const, latestBudgetKind: "original" as const, hasApprovedBaseline: true, approvalOnHold: false, actuals: "approved" as const, approvedActuals: true, fundingRecorded: true, receipts: "received" as const, settlementClosed: false, settlementByApprover: true };
+    expect(nextAction({ ...base, blockers: ["AED 70.00 of advance money has not been returned.", "The receipts are recorded by Finance but still need confirmation by an independent CEO or CTO approver."] })).toMatchObject({ who: "finance" });
+    expect(nextAction({ ...base, blockers: ["The receipts are recorded by Finance but still need confirmation by an independent CEO or CTO approver."] })).toMatchObject({ who: "executive", section: "settlement", text: expect.stringMatching(/confirms the receipts and authorises closing/) });
+    expect(nextAction({ ...base, blockers: [] })).toMatchObject({ who: "executive" });
+    expect(nextAction({ ...base, settlementByApprover: false, blockers: [] })).toMatchObject({ who: "finance" });
   });
 });

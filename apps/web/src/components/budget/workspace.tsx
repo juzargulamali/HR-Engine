@@ -32,6 +32,7 @@ function flowState(view: PbxBudgetView): BudgetFlowState {
     fundingRecorded: view.funding.some((f) => f.status === "recorded"),
     receipts: view.budget?.receipts_status ?? "not_received",
     settlementClosed: view.budget?.settlement_status === "closed",
+    settlementByApprover: view.budget?.settlement_route === "executive",
     blockers: view.settlement?.blockers ?? [],
   };
 }

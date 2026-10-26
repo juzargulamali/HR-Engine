@@ -58,6 +58,12 @@ export interface PbxBudgetHeader {
   receipts_exception_reason: string | null;
   receipts_recorded_by_name: string | null;
   receipts_recorded_at: string | null;
+  /** An independent CEO / CTO approver confirms receipts where Finance submitted the expenses. */
+  receipts_confirmed_by_name: string | null;
+  receipts_confirmed_at: string | null;
+  settlement_route: "finance" | "executive" | null;
+  can_confirm_receipts: boolean;
+  can_close_settlement: boolean;
   settlement_status: "open" | "closed";
   settlement_closed_at: string | null;
   settlement_closed_by_name: string | null;
@@ -170,6 +176,8 @@ export interface PbxFunding {
   is_advance: boolean;
   reference: string | null;
   note: string | null;
+  /** A declaration by the recorder that involves the recorder themselves (not independently verified). */
+  self_declared: boolean;
   status: "recorded" | "reversed";
   reversal_reason: string | null;
   recorded_by_name: string | null;
@@ -188,6 +196,7 @@ export interface PbxPayment {
   method: string;
   reference: string | null;
   note: string | null;
+  self_declared: boolean;
   status: "recorded" | "reversed";
   reversal_reason: string | null;
   recorded_by_name: string | null;
@@ -290,6 +299,10 @@ export interface PbxInboxActuals extends PbxInboxBase {
 }
 export interface PbxInboxSettlement extends PbxInboxBase {
   receipts_status: ReceiptStatus;
+  settlement_route: "finance" | "executive";
+  receipts_confirmed: boolean;
+  i_can_close: boolean;
+  i_can_confirm_receipts: boolean;
   approved_budget: string | number | null;
   approved_actual_total: string | number | null;
   has_approved_actuals: boolean;

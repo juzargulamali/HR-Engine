@@ -10,10 +10,33 @@ import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { OsBadge } from "@/components/os/pills";
 import { Panel, Muted } from "@/components/projects/parts";
-import { closeSettlement, recordPayment, recordReceipts, reopenSettlement, reversePayment } from "@/lib/actions/projectBudget";
+import { closeSettlement, confirmReceipts, recordPayment, recordReceipts, reopenSettlement, reversePayment } from "@/lib/actions/projectBudget";
 import type { PbxBudgetView, PbxPayment } from "@/types/budget";
 import { ActionMessage, Field, Figure, cleanDecimal, day, money, stamp, useAction } from "./shared";
 import { todayIn } from "./funds-section";
+
+/** Where Finance submitted the expenses, Finance only declares that receipts arrived; an independent CEO / CTO approver confirms them. */
+function ConfirmReceipts({ view }: { view: PbxBudgetView }) {
+  const b = view.budget!;
+  const a = useAction();
+  if (b.settlement_route !== "executive") return null;
+  if (b.receipts_confirmed_at) {
+    return <p className="text-sm"><OsBadge tone="green" dot>Confirmed</OsBadge> <span className="text-muted-foreground">by {b.receipts_confirmed_by_name ?? "the CEO / CTO approver"}, {stamp(b.receipts_confirmed_at, view.project.site_timezone)}</span></p>;
+  }
+  return (
+    <div className="space-y-2 rounded-md border border-border bg-secondary/30 p-3">
+      <p className="text-sm"><strong>Not independently confirmed yet.</strong> These final expenses were submitted by someone with Finance access, so what Finance records here is a declaration. An independent CEO or CTO approver must confirm the receipts before settlement can close. Recording the receipts again withdraws a confirmation.</p>
+      {b.can_confirm_receipts ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="button" disabled={a.pending} onClick={() => a.run(() => confirmReceipts({ projectId: view.project.id, budgetId: b.id }), undefined, "Receipts confirmed.")}>{a.pending ? "Confirming…" : "Confirm the receipts"}</Button>
+          <ActionMessage error={a.error} notice={a.notice} />
+        </div>
+      ) : b.receipts_status === "received" || b.receipts_status === "exception" ? (
+        <p className="text-[13px] text-muted-foreground">Waiting for a CEO or CTO approver of this company who did not prepare, submit or record these.</p>
+      ) : <p className="text-[13px] text-muted-foreground">Finance records the delivery first.</p>}
+    </div>
+  );
+}
 
 function Receipts({ view }: { view: PbxBudgetView }) {
   const b = view.budget!;
@@ -24,13 +47,14 @@ function Receipts({ view }: { view: PbxBudgetView }) {
   const canEdit = view.viewer.is_finance && b.settlement_status === "open";
   const tone = b.receipts_status === "received" ? "green" : b.receipts_status === "exception" ? "amber" : "neutral";
   return (
-    <Panel title="Physical receipts" description="Receipts are handed to Finance outside this application. Finance records here whether they arrived. Nothing is uploaded.">
+    <Panel title="Physical receipts" description="Receipts are handed to Finance outside this application. Finance records here whether they arrived; the page keeps who recorded it and when. Nothing is uploaded.">
       <div className="space-y-3">
         <p className="flex flex-wrap items-center gap-2 text-sm">
           <OsBadge tone={tone} dot>{RECEIPT_LABELS[b.receipts_status]}</OsBadge>
           {b.receipts_recorded_at ? <span className="text-muted-foreground">Recorded {stamp(b.receipts_recorded_at, view.project.site_timezone)} by {b.receipts_recorded_by_name ?? "Finance"}{b.receipts_received_on ? ` · received ${day(b.receipts_received_on)}` : ""}</span> : null}
         </p>
         {b.receipts_exception_reason ? <p className="text-sm"><span className="text-muted-foreground">Exception reason: </span>{b.receipts_exception_reason}</p> : null}
+        <ConfirmReceipts view={view} />
         {canEdit ? (
           <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" onSubmit={(e) => { e.preventDefault(); a.run(() => recordReceipts({ projectId: view.project.id, budgetId: b.id, status, receivedOn: status === "received" || status === "partial" ? date : null, exceptionReason: status === "exception" ? reason : null }), undefined, "Receipt status saved."); }}>
             <Field label="Receipt status" htmlFor="pbx-rs">
@@ -131,8 +155,8 @@ function CloseControls({ view }: { view: PbxBudgetView }) {
   if (b.settlement_status === "closed") {
     return (
       <div className="space-y-2">
-        <Alert role="status" className="text-sm"><strong>Settlement is closed</strong> {stamp(b.settlement_closed_at, view.project.site_timezone)} by {b.settlement_closed_by_name ?? "Finance"}.{b.settlement_note ? ` Note: ${b.settlement_note}` : ""} Nothing can be recorded or edited until Finance reopens it, with a reason.</Alert>
-        {view.viewer.is_finance ? (
+        <Alert role="status" className="text-sm"><strong>Settlement is closed</strong> {stamp(b.settlement_closed_at, view.project.site_timezone)} by {b.settlement_closed_by_name ?? "Finance"}.{b.settlement_note ? ` Note: ${b.settlement_note}` : ""} Nothing can be recorded or edited until it is reopened, with a reason, by Finance or the CEO / CTO approver.</Alert>
+        {view.viewer.is_finance || view.viewer.is_executive ? (
           <div className="flex flex-wrap items-end gap-2">
             <Field label="Reason for reopening" htmlFor="pbx-ro"><Input id="pbx-ro" value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} /></Field>
             <Button type="button" variant="outline" disabled={a.pending || reason.trim() === ""} onClick={() => a.run(() => reopenSettlement({ projectId: view.project.id, budgetId: b.id, reason }), () => setReason(""))}>Reopen settlement</Button>
@@ -151,11 +175,16 @@ function CloseControls({ view }: { view: PbxBudgetView }) {
           <ul className="list-disc space-y-0.5 pl-5 text-sm">{s.blockers.map((x) => <li key={x}>{x}</li>)}</ul>
         </div>
       )}
-      {view.viewer.is_finance ? (
+      {b.settlement_route === "executive" ? (
+        <p className="text-sm text-muted-foreground">Because these final expenses were submitted by someone with Finance access, the company&apos;s CEO or CTO approver confirms the receipts and authorises closure. Finance records the receipts and every payment, but cannot close its own settlement.</p>
+      ) : null}
+      {b.can_close_settlement ? (
         <div className="flex flex-wrap items-end gap-2">
           <Field label="Closing note (optional)" htmlFor="pbx-cn" className="min-w-[16rem] flex-1"><Input id="pbx-cn" value={note} maxLength={1000} onChange={(e) => setNote(e.target.value)} /></Field>
-          <Button type="button" disabled={a.pending || !ready} onClick={() => a.run(() => closeSettlement({ projectId: view.project.id, budgetId: b.id, note: note || null }))}>{a.pending ? "Closing…" : "Confirm reconciliation and close"}</Button>
+          <Button type="button" disabled={a.pending || !ready} onClick={() => a.run(() => closeSettlement({ projectId: view.project.id, budgetId: b.id, note: note || null }))}>{a.pending ? "Closing…" : b.settlement_route === "executive" ? "Authorise closure and close" : "Confirm reconciliation and close"}</Button>
         </div>
+      ) : view.viewer.is_finance && b.settlement_route === "executive" ? (
+        <p className="text-[13px] text-muted-foreground">Closing is for an independent CEO or CTO approver of this company.</p>
       ) : null}
       <ActionMessage error={a.error} />
     </div>
@@ -215,7 +244,7 @@ export function SettlementSection({ view }: { view: PbxBudgetView }) {
       <Receipts view={view} />
 
       {view.viewer.is_finance && open && s.has_approved_actuals ? (
-        <Panel title="Record money returned or a reimbursement paid" description="Partial amounts are allowed; the balance stays visible until it reaches zero.">
+        <Panel title="Record money returned or a reimbursement paid" description="Partial amounts are allowed; the balance stays visible until it reaches zero. Finance entries are declarations of what was handed over; one that involves you yourself is flagged as such, and nothing is paid or checked against a bank from here.">
           <RecordPayment view={view} />
         </Panel>
       ) : null}
@@ -235,6 +264,7 @@ export function SettlementSection({ view }: { view: PbxBudgetView }) {
                   <TableCell className={`text-right tabular-nums ${p.status === "reversed" ? "line-through" : ""}`}>{money(p.amount, currency)}</TableCell>
                   <TableCell className="text-[13px] text-muted-foreground">
                     {p.status === "reversed" ? <OsBadge tone="neutral">Reversed</OsBadge> : null}
+                    {p.self_declared ? <OsBadge tone="amber">Declared by the person it involves</OsBadge> : null}
                     <span className="block">By {p.recorded_by_name ?? "Finance"}, {stamp(p.recorded_at, view.project.site_timezone)}</span>
                     {p.status === "reversed" ? <span className="block">Reversed by {p.reversed_by_name ?? "Finance"}: {p.reversal_reason}</span> : null}
                   </TableCell>

@@ -1886,6 +1886,7 @@ export interface Database {
       pbx_return_approved_actuals: { Args: { p_submission_id: string; p_reason: string }; Returns: undefined };
       pbx_record_receipts: { Args: { p_budget_id: string; p_status: string; p_received_on?: string | null; p_exception_reason?: string | null }; Returns: undefined };
       pbx_record_payment: { Args: { p_budget_id: string; p_kind: string; p_person: string; p_amount: number; p_paid_on: string; p_method: string; p_reference: string | null; p_note: string | null; p_request_id: string }; Returns: string };
+      pbx_confirm_receipts: { Args: { p_budget_id: string }; Returns: undefined };
       pbx_reverse_payment: { Args: { p_payment_id: string; p_reason: string }; Returns: undefined };
       pbx_close_settlement: { Args: { p_budget_id: string; p_note?: string | null }; Returns: undefined };
       pbx_reopen_settlement: { Args: { p_budget_id: string; p_reason: string }; Returns: undefined };

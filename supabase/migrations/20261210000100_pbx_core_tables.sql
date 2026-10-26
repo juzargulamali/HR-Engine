@@ -38,6 +38,10 @@ create table if not exists pbx_budgets (
   receipts_exception_reason text,
   receipts_recorded_by      uuid references auth.users(id),
   receipts_recorded_at      timestamptz,
+  -- Finance records that receipts were delivered (a declaration). Where the final expenses were submitted by someone holding Finance access, an independent
+  -- CEO / CTO approver must also CONFIRM them before settlement can close (pbx_confirm_receipts); Finance never confirms its own receipts.
+  receipts_confirmed_by     uuid references auth.users(id),
+  receipts_confirmed_at     timestamptz,
   settlement_status         text not null default 'open' check (settlement_status in ('open', 'closed')),
   settlement_closed_at      timestamptz,
   settlement_closed_by      uuid references auth.users(id),
@@ -148,6 +152,8 @@ create table if not exists pbx_funding (
   recorded_by       uuid not null references auth.users(id),
   recorded_at       timestamptz not null default now(),
   request_id        uuid not null,
+  -- Finance entries are DECLARATIONS of what was handed over, not independent verification. True when the recorder is the person receiving or returning the money.
+  self_declared     boolean not null default false,
   constraint pbx_funding_request unique (budget_id, request_id),
   constraint pbx_funding_advance_rule check (
     (method in ('cash', 'bank_transfer') and is_advance) or (method = 'pluto' and not is_advance) or method = 'other'),
@@ -248,6 +254,7 @@ create table if not exists pbx_payments (
   recorded_by      uuid not null references auth.users(id),
   recorded_at      timestamptz not null default now(),
   request_id       uuid not null,
+  self_declared    boolean not null default false,   -- see pbx_funding.self_declared
   constraint pbx_payments_request unique (budget_id, request_id),
   constraint pbx_payments_reversal check ((status = 'reversed') = (reversed_at is not null)
     and (status <> 'reversed' or length(btrim(coalesce(reversal_reason, ''))) > 0))

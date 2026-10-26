@@ -150,12 +150,12 @@ begin
     if v_full then
       select coalesce(jsonb_agg(jsonb_build_object(
         'id', f.id, 'recipient_user_id', f.recipient_user_id, 'recipient_name', f.recipient_name, 'funded_on', f.funded_on, 'amount', f.amount,
-        'method', f.method, 'is_advance', f.is_advance, 'reference', f.reference, 'note', f.note, 'status', f.status, 'reversal_reason', f.reversal_reason,
+        'method', f.method, 'is_advance', f.is_advance, 'reference', f.reference, 'note', f.note, 'self_declared', f.self_declared, 'status', f.status, 'reversal_reason', f.reversal_reason,
         'recorded_by_name', pbx_name(f.recorded_by), 'recorded_at', f.recorded_at, 'reversed_by_name', pbx_name(f.reversed_by), 'reversed_at', f.reversed_at)
         order by f.funded_on, f.recorded_at), '[]'::jsonb) into v_funding from pbx_funding f where f.budget_id = b.id;
       select coalesce(jsonb_agg(jsonb_build_object(
         'id', p.id, 'kind', p.kind, 'person_user_id', p.person_user_id, 'person_name', p.person_name, 'amount', p.amount, 'paid_on', p.paid_on,
-        'method', p.method, 'reference', p.reference, 'note', p.note, 'status', p.status, 'reversal_reason', p.reversal_reason,
+        'method', p.method, 'reference', p.reference, 'note', p.note, 'self_declared', p.self_declared, 'status', p.status, 'reversal_reason', p.reversal_reason,
         'recorded_by_name', pbx_name(p.recorded_by), 'recorded_at', p.recorded_at, 'reversed_by_name', pbx_name(p.reversed_by), 'reversed_at', p.reversed_at)
         order by p.paid_on, p.recorded_at), '[]'::jsonb) into v_payments from pbx_payments p where p.budget_id = b.id;
       v_settlement := pbx_settlement_figures(b.id) || jsonb_build_object('blockers', to_jsonb(pbx_settlement_blockers(b.id)));
@@ -168,6 +168,9 @@ begin
     'default_currency', v_default_currency,
     'budget', case when b.id is null then null else jsonb_build_object(
       'id', b.id, 'currency', b.currency, 'receipts_status', b.receipts_status, 'receipts_received_on', b.receipts_received_on,
+      'receipts_confirmed_by_name', pbx_name(b.receipts_confirmed_by), 'receipts_confirmed_at', b.receipts_confirmed_at,
+      'settlement_route', case when v_full then pbx_settlement_route(b.id) end,
+      'can_confirm_receipts', pbx_can_confirm_receipts(b.id), 'can_close_settlement', pbx_can_close_settlement(b.id),
       'receipts_exception_reason', b.receipts_exception_reason, 'receipts_recorded_by_name', pbx_name(b.receipts_recorded_by), 'receipts_recorded_at', b.receipts_recorded_at,
       'settlement_status', b.settlement_status, 'settlement_closed_at', b.settlement_closed_at, 'settlement_closed_by_name', pbx_name(b.settlement_closed_by),
       'settlement_note', b.settlement_note, 'row_version', b.row_version) end,
@@ -225,6 +228,8 @@ begin
   select coalesce(jsonb_agg(jsonb_build_object(
       'budget_id', b.id, 'project_id', b.project_id, 'reference', b.project_reference, 'name', b.project_name, 'company_id', b.company_id,
       'company_name', c.legal_name, 'currency', b.currency, 'pm_name', b.pm_name, 'site_timezone', b.site_timezone, 'receipts_status', b.receipts_status,
+      'settlement_route', pbx_settlement_route(b.id), 'receipts_confirmed', b.receipts_confirmed_at is not null,
+      'i_can_close', pbx_can_close_settlement(b.id), 'i_can_confirm_receipts', pbx_can_confirm_receipts(b.id),
       'approved_budget', f->>'approved_budget', 'approved_actual_total', f->>'approved_actual_total', 'has_approved_actuals', (f->>'has_approved_actuals')::boolean,
       'advance_to_return', f->>'advance_to_return', 'reimbursement_outstanding', f->>'reimbursement_outstanding',
       'advances_provided', f->>'advances_provided',

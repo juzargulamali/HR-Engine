@@ -25,9 +25,10 @@
 --       a submitter WITH Finance access submits            -> the company's CEO / CTO approver decides (either one; both are not required)
 --       nobody ever decides what they prepared or submitted; nobody outside the company's grants decides anything
 --       no eligible independent approver for the route     -> the request is HELD with a clear explanation (nothing is approved or lost)
--- So ONE Finance person is enough for budgets submitted by other Project Managers. A budget prepared by a Finance person needs a CEO / CTO approver for
--- that company, and recording funds to oneself, or confirming receipts for expenses one entered, needs a different Finance person. The script reports,
--- at the end, which of these routes a company can not serve yet; it never grants anything you did not type.
+-- So ONE Finance person is enough, including for the settlement of ordinary Project Managers' projects. A budget or final expenses prepared by a Finance person
+-- needs a CEO / CTO approver for that company, and the settlement of such expenses (confirming the receipts and authorising closure) does too: Finance records
+-- funding, returns, reimbursements and the delivery of receipts as declarations (flagged when they involve the recorder), but never verifies its own receipts
+-- or closes its own settlement. The script reports, at the end, which of these a company can not serve yet; it never grants anything you did not type.
 -- There is no "all companies" and no "everybody" shortcut. While a placeholder (REPLACE-WITH-...) or an address ending in .example is still there, the
 -- script STOPS with a clear message and changes nothing. It also stops, changing nothing, if an email is not an active user, a company is unknown,
 -- inactive or ambiguous (use the company id then), or a capability is not one of the four above.
@@ -133,7 +134,7 @@ begin
       raise notice 'NOTE: % has no Finance person yet: funds, receipts and settlement cannot be recorded, and budgets submitted by ordinary Project Managers are held until one exists.', r.legal_name;
     end if;
     if r.n_exec = 0 then
-      raise notice 'NOTE: % has no CEO / CTO approver yet: a budget submitted by someone who holds Finance access (also as Project Manager) is held until one is authorised.', r.legal_name;
+      raise notice 'NOTE: % has no CEO / CTO approver yet: a budget submitted by someone who holds Finance access (also as Project Manager) is held, and the receipts confirmation and closure of such a settlement wait, until one is authorised.', r.legal_name;
     end if;
   end loop;
   raise notice 'grants created: %; already existing (capabilities added): %', v_created, v_extended;

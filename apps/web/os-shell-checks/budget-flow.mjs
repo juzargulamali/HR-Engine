@@ -306,6 +306,16 @@ await step("a Finance-holding PM's budget is routed to the CEO/CTO approver: Fin
   // the approver reads everything but records nothing: no funding form, no receipts, no close
   await go(`/finance/project-budgets/${P2}?section=funds`);
   await expectNoText(/Record funding/);
+  // Finance may record funding to themselves: a declaration, flagged (no second Finance person is needed)
+  await as("hr1");
+  await go(`/finance/project-budgets/${P2}?section=funds`);
+  await seen(/Record funding/);
+  await page.waitForTimeout(1500);
+  await page.getByLabel("Amount (AED)").fill("100");
+  await page.getByRole("button", { name: "Record funding" }).click();
+  await untilDb("select count(*) from pbx_funding where self_declared and status = 'recorded'", "1");
+  await seen(/Declared by the person it involves/);
+  await shot("funds-self-declared-desktop-dark");
 });
 
 // ---- views, themes, phone ------------------------------------------------------------------------------------------------

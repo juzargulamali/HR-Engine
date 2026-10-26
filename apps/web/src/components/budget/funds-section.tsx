@@ -126,7 +126,7 @@ export function FundsSection({ view }: { view: PbxBudgetView }) {
       ) : null}
 
       {canRecord ? (
-        <Panel title="Record funding" description="One entry per payment or allocation. A recorded entry is never edited: if it was wrong, reverse it with a reason and record the correct one.">
+        <Panel title="Record funding" description="One entry per payment or allocation. These are declarations of what Finance handed over, not independent verification; an entry that involves you yourself is flagged. A recorded entry is never edited: if it was wrong, reverse it with a reason and record the correct one.">
           {approved ? <RecordFunding view={view} /> : <Alert role="status" className="text-sm">Approve the budget before recording funds.</Alert>}
         </Panel>
       ) : null}
@@ -154,6 +154,7 @@ export function FundsSection({ view }: { view: PbxBudgetView }) {
                   <TableCell className={`text-right tabular-nums ${f.status === "reversed" ? "line-through" : ""}`}>{money(f.amount, currency)}</TableCell>
                   <TableCell className="text-[13px] text-muted-foreground">
                     {f.status === "reversed" ? <OsBadge tone="neutral">Reversed</OsBadge> : null}
+                    {f.self_declared ? <OsBadge tone="amber">Declared by the person it involves</OsBadge> : null}
                     <span className="block">By {f.recorded_by_name ?? "Finance"}, {stamp(f.recorded_at, tz)}</span>
                     {f.status === "reversed" ? <span className="block">Reversed by {f.reversed_by_name ?? "Finance"}: {f.reversal_reason}</span> : null}
                   </TableCell>

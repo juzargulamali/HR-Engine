@@ -213,6 +213,13 @@ export async function recordReceipts(input: { projectId: string; budgetId: strin
   return call(p.data.projectId, (s) => s.rpc("pbx_record_receipts", { p_budget_id: p.data.budgetId, p_status: p.data.status, p_received_on: p.data.receivedOn, p_exception_reason: p.data.exceptionReason }));
 }
 
+/** An independent CEO / CTO approver confirms the receipts of a settlement whose final expenses were submitted by someone with Finance access. */
+export async function confirmReceipts(input: { projectId: string; budgetId: string }): Promise<BudgetActionResult> {
+  const p = z.object({ projectId: uuid, budgetId: uuid }).safeParse(input);
+  if (!p.success) return issue(p.error);
+  return call(p.data.projectId, (s) => s.rpc("pbx_confirm_receipts", { p_budget_id: p.data.budgetId }));
+}
+
 export async function recordPayment(input: { projectId: string; budgetId: string; kind: string; person: string; amount: string; paidOn: string; method: string; reference?: string | null; note?: string | null; requestId: string }): Promise<BudgetActionResult> {
   const p = z.object({
     projectId: uuid, budgetId: uuid, kind: z.enum(PAYMENT_KINDS, { message: "Choose whether this is money returned or a reimbursement." }), person: uuid, amount: decimal, paidOn: requiredDate,

@@ -25576,6 +25576,10 @@ create table if not exists pbx_budgets (
   receipts_exception_reason text,
   receipts_recorded_by      uuid references auth.users(id),
   receipts_recorded_at      timestamptz,
+  -- Finance records that receipts were delivered (a declaration). Where the final expenses were submitted by someone holding Finance access, an independent
+  -- CEO / CTO approver must also CONFIRM them before settlement can close (pbx_confirm_receipts); Finance never confirms its own receipts.
+  receipts_confirmed_by     uuid references auth.users(id),
+  receipts_confirmed_at     timestamptz,
   settlement_status         text not null default 'open' check (settlement_status in ('open', 'closed')),
   settlement_closed_at      timestamptz,
   settlement_closed_by      uuid references auth.users(id),
@@ -25686,6 +25690,8 @@ create table if not exists pbx_funding (
   recorded_by       uuid not null references auth.users(id),
   recorded_at       timestamptz not null default now(),
   request_id        uuid not null,
+  -- Finance entries are DECLARATIONS of what was handed over, not independent verification. True when the recorder is the person receiving or returning the money.
+  self_declared     boolean not null default false,
   constraint pbx_funding_request unique (budget_id, request_id),
   constraint pbx_funding_advance_rule check (
     (method in ('cash', 'bank_transfer') and is_advance) or (method = 'pluto' and not is_advance) or method = 'other'),
@@ -25786,6 +25792,7 @@ create table if not exists pbx_payments (
   recorded_by      uuid not null references auth.users(id),
   recorded_at      timestamptz not null default now(),
   request_id       uuid not null,
+  self_declared    boolean not null default false,   -- see pbx_funding.self_declared
   constraint pbx_payments_request unique (budget_id, request_id),
   constraint pbx_payments_reversal check ((status = 'reversed') = (reversed_at is not null)
     and (status <> 'reversed' or length(btrim(coalesce(reversal_reason, ''))) > 0))
@@ -26697,6 +26704,51 @@ as $$
                   where s.budget_id = p_budget_id and s.status <> 'draft' and (s.created_by = p_user_id or s.submitted_by = p_user_id));
 $$;
 
+-- Who settles. Settlement follows the final expenses: when the approved final expenses were submitted by someone who holds (or held, at submission) Finance
+-- access, Finance may still record delivery of receipts and every payment, but the receipts must be CONFIRMED and closure AUTHORISED by an independent
+-- CEO / CTO approver; Finance never verifies its own receipts or closes its own settlement. For ordinary Project Managers Finance handles all of it.
+create or replace function pbx_settlement_route(p_budget_id uuid)
+returns text
+language sql stable security definer
+set search_path = public
+as $$
+  select case when s.id is null then 'finance'
+              when s.approval_route = 'executive' or pbx_user_is_finance(s.created_by, s.company_id) or pbx_user_is_finance(s.submitted_by, s.company_id) then 'executive'
+              else 'finance' end
+  from (select 1) one
+  left join lateral (select * from pbx_actual_submissions where budget_id = p_budget_id and status = 'approved' order by seq desc limit 1) s on true;
+$$;
+
+-- May the CALLER confirm the receipts of this settlement? (executive route only; an authorised CEO / CTO approver who neither prepared or submitted the expenses
+-- nor recorded the receipts)
+create or replace function pbx_can_confirm_receipts(p_budget_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from pbx_budgets b
+     where b.id = p_budget_id and b.settlement_status = 'open' and pbx_settlement_route(b.id) = 'executive'
+       and pbx_has_capability(b.company_id, 'executive_approver')
+       and not pbx_is_actuals_author(b.id, auth.uid())
+       and b.receipts_recorded_by is distinct from auth.uid()
+       and b.receipts_status in ('received', 'exception') and b.receipts_confirmed_at is null);
+$$;
+
+-- May the CALLER close this settlement? Finance for ordinary settlements; an independent CEO / CTO approver where Finance submitted the expenses.
+create or replace function pbx_can_close_settlement(p_budget_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from pbx_budgets b
+     where b.id = p_budget_id and b.settlement_status = 'open'
+       and (case when pbx_settlement_route(b.id) = 'executive'
+                 then pbx_has_capability(b.company_id, 'executive_approver') and not pbx_is_actuals_author(b.id, auth.uid())
+                 else pbx_has_capability(b.company_id, 'finance') end));
+$$;
+
 -- -----------------------------------------------------------------------------
 -- Settlement figures (the single source of the numbers; the TypeScript mirror is tested against it)
 -- -----------------------------------------------------------------------------
@@ -26790,10 +26842,12 @@ begin
   if b.settlement_status = 'closed' then return array['Settlement is already closed.']; end if;
   f := pbx_settlement_figures(b.id);
   if not (f->>'has_approved_actuals')::boolean then out := array_append(out, 'The final expenses are not approved yet.'::text); end if;
-  if exists (select 1 from pbx_actual_submissions where budget_id = b.id and status = 'submitted') then out := array_append(out, 'Final expenses are waiting for a Finance decision.'::text); end if;
-  if exists (select 1 from pbx_budget_versions where budget_id = b.id and status = 'submitted') then out := array_append(out, 'A budget request is waiting for a Finance decision.'::text); end if;
+  if exists (select 1 from pbx_actual_submissions where budget_id = b.id and status = 'submitted') then out := array_append(out, 'Final expenses are waiting for an approval decision.'::text); end if;
+  if exists (select 1 from pbx_budget_versions where budget_id = b.id and status = 'submitted') then out := array_append(out, 'A budget request is waiting for an approval decision.'::text); end if;
   if b.receipts_status in ('not_received', 'partial') then
-    out := array_append(out, 'Finance has not confirmed that the physical receipts were received (or recorded an approved exception).'::text);
+    out := array_append(out, 'Finance has not recorded that the physical receipts were received (or recorded an approved exception).'::text);
+  elsif pbx_settlement_route(b.id) = 'executive' and b.receipts_confirmed_at is null then
+    out := array_append(out, 'The receipts are recorded by Finance but still need confirmation by an independent CEO or CTO approver.'::text);
   end if;
   if b.receipts_status = 'exception' and length(btrim(coalesce(b.receipts_exception_reason, ''))) = 0 then out := array_append(out, 'The receipt exception needs a recorded reason.'::text); end if;
   if (f->>'advance_to_return')::numeric > 0 then out := array_append(out, (pbx_money_text((f->>'advance_to_return')::numeric, b.currency) || ' of advance money has not been returned.')); end if;
@@ -26831,6 +26885,8 @@ declare
   v_id uuid;
   v_adv boolean;
   v_amount numeric;
+  v_ref text;
+  v_note text;
 begin
   b := pbx_lock_budget(p_budget_id);
   perform pbx_require_finance(b, 'record funds');
@@ -26842,15 +26898,22 @@ begin
   if p_recipient is null or not pbx_project_person_ok(b.project_id, p_recipient) then
     raise exception 'The recipient must be the Project Manager or a current member of the project' using errcode = '22023';
   end if;
-  if p_recipient = auth.uid() then raise exception 'You cannot record funds for yourself. Another Finance user must' using errcode = '42501'; end if;
   if p_method not in ('cash', 'bank_transfer', 'pluto', 'other') then raise exception 'Choose how the funds were provided' using errcode = '22023'; end if;
   if p_funded_on is null then raise exception 'Enter the date' using errcode = '22023'; end if;
   v_amount := pbx_amount(p_amount, b.currency, 'the amount');
   v_adv := case p_method when 'cash' then true when 'bank_transfer' then true when 'pluto' then false else p_is_advance end;
   if v_adv is null then raise exception 'Say whether this "other" funding is an advance held by the person, or a card allocation' using errcode = '22023'; end if;
-  insert into pbx_funding (budget_id, company_id, project_id, recipient_user_id, recipient_name, funded_on, amount, currency, method, is_advance, reference, note, recorded_by, request_id)
+  v_ref := nullif(left(btrim(coalesce(p_reference, '')), 120), '');
+  v_note := nullif(left(btrim(coalesce(p_note, '')), 500), '');
+  -- A different click of the same payment is not a retry (that has its own request id): an identical entry is refused so money is not recorded twice.
+  if exists (select 1 from pbx_funding where budget_id = b.id and status = 'recorded' and recipient_user_id = p_recipient and funded_on = p_funded_on and amount = v_amount
+               and method = p_method and coalesce(reference, '') = coalesce(v_ref, '') and coalesce(note, '') = coalesce(v_note, '')) then
+    raise exception 'An identical funding entry is already recorded. If this is a second equal payment, give it its own reference or note so the two can be told apart' using errcode = '23514';
+  end if;
+  -- Finance entries are declarations of what was handed over, not independent verification; one that involves the recorder is flagged as such.
+  insert into pbx_funding (budget_id, company_id, project_id, recipient_user_id, recipient_name, funded_on, amount, currency, method, is_advance, reference, note, recorded_by, request_id, self_declared)
   values (b.id, b.company_id, b.project_id, p_recipient, pbx_name(p_recipient), p_funded_on, v_amount, b.currency, p_method, v_adv,
-          nullif(left(btrim(coalesce(p_reference, '')), 120), ''), nullif(left(btrim(coalesce(p_note, '')), 500), ''), auth.uid(), p_request_id)
+          v_ref, v_note, auth.uid(), p_request_id, p_recipient = auth.uid())
   returning id into v_id;
   perform pbx_notify(p_recipient, 'project_funding_recorded', b, jsonb_build_object('funding_id', v_id, 'amount', v_amount, 'currency', b.currency, 'method', p_method, 'advance', v_adv), 'pbx-fund-' || v_id::text);
   perform pbx_notify(b.pm_user_id, 'project_funding_recorded', b, jsonb_build_object('funding_id', v_id, 'amount', v_amount, 'currency', b.currency, 'method', p_method, 'advance', v_adv), 'pbx-fund-' || v_id::text);
@@ -27217,17 +27280,46 @@ begin
   perform pbx_require_finance(b, 'record the receipt status');
   perform pbx_require_open(b);
   if p_status not in ('not_received', 'partial', 'received', 'exception') then raise exception 'Choose a receipt status' using errcode = '22023'; end if;
-  if pbx_is_actuals_author(b.id, auth.uid()) then
-    raise exception 'You cannot record the receipt status for expenses you prepared or submitted. Another Finance person must record it' using errcode = '42501';
-  end if;
   if p_status = 'exception' and (v_reason is null or length(v_reason) < 3) then
     raise exception 'A receipt exception needs a recorded reason' using errcode = '22023';
   end if;
+  -- Finance records that receipts were delivered: a declaration. Recording again always withdraws an earlier confirmation, so what was confirmed is what is on record.
   update pbx_budgets
      set receipts_status = p_status, receipts_received_on = case when p_status in ('partial', 'received') then coalesce(p_received_on, current_date) else null end,
          receipts_exception_reason = case when p_status = 'exception' then left(v_reason, 500) else null end,
-         receipts_recorded_by = auth.uid(), receipts_recorded_at = now(), row_version = row_version + 1
+         receipts_recorded_by = auth.uid(), receipts_recorded_at = now(), receipts_confirmed_by = null, receipts_confirmed_at = null, row_version = row_version + 1
    where id = b.id;
+end;
+$$;
+
+-- An independent CEO / CTO approver confirms the receipts of a settlement whose final expenses were submitted by someone holding Finance access.
+create or replace function pbx_confirm_receipts(p_budget_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare b pbx_budgets;
+begin
+  b := pbx_lock_budget(p_budget_id);
+  if b.receipts_confirmed_at is not null and b.receipts_confirmed_by = auth.uid() then return; end if;      -- a retry or double click
+  perform pbx_require_open(b);
+  if pbx_settlement_route(b.id) <> 'executive' then
+    raise exception 'Finance confirms the receipts of this settlement when it records them; no separate confirmation is needed' using errcode = '23514';
+  end if;
+  if not pbx_has_capability(b.company_id, 'executive_approver') then
+    raise exception 'These final expenses were submitted by someone with Finance access, so only the company''s authorised CEO or CTO approver can confirm the receipts' using errcode = '42501';
+  end if;
+  if pbx_is_actuals_author(b.id, auth.uid()) then
+    raise exception 'You cannot confirm the receipts for expenses you prepared or submitted' using errcode = '42501';
+  end if;
+  if b.receipts_recorded_by = auth.uid() then
+    raise exception 'You recorded these receipts, so someone else must confirm them' using errcode = '42501';
+  end if;
+  if b.receipts_status not in ('received', 'exception') then
+    raise exception 'Finance has not recorded the receipts as received (or an approved exception) yet' using errcode = '23514';
+  end if;
+  if b.receipts_confirmed_at is not null then raise exception 'The receipts were already confirmed (by %)', coalesce(pbx_name(b.receipts_confirmed_by), 'someone') using errcode = '23514'; end if;
+  update pbx_budgets set receipts_confirmed_by = auth.uid(), receipts_confirmed_at = now(), row_version = row_version + 1 where id = b.id;
 end;
 $$;
 
@@ -27244,6 +27336,8 @@ declare
   f jsonb;
   pp jsonb;
   v_limit numeric;
+  v_ref text;
+  v_note text;
 begin
   b := pbx_lock_budget(p_budget_id);
   perform pbx_require_finance(b, 'record money returned or a reimbursement');
@@ -27254,12 +27348,17 @@ begin
   if p_kind not in ('return', 'reimbursement') then raise exception 'Choose money returned or a reimbursement' using errcode = '22023'; end if;
   if p_method not in ('cash', 'bank_transfer', 'pluto', 'other') then raise exception 'Choose how it was paid' using errcode = '22023'; end if;
   if p_paid_on is null then raise exception 'Enter the date' using errcode = '22023'; end if;
-  if p_person = auth.uid() then raise exception 'You cannot record a payment to or from yourself. Another Finance user must' using errcode = '42501'; end if;
   f := pbx_settlement_figures(b.id);
   if not (f->>'has_approved_actuals')::boolean then raise exception 'The final expenses must be approved before returns and reimbursements are recorded' using errcode = '23514'; end if;
   select x into pp from jsonb_array_elements(f->'per_person') x where (x->>'user_id')::uuid = p_person;
   if pp is null then raise exception 'That person has no advance to return and no reimbursement owed on this project' using errcode = '22023'; end if;
   v_amount := pbx_amount(p_amount, b.currency, 'the amount');
+  v_ref := nullif(left(btrim(coalesce(p_reference, '')), 120), '');
+  v_note := nullif(left(btrim(coalesce(p_note, '')), 500), '');
+  if exists (select 1 from pbx_payments where budget_id = b.id and status = 'recorded' and kind = p_kind and person_user_id = p_person and paid_on = p_paid_on and amount = v_amount
+               and method = p_method and coalesce(reference, '') = coalesce(v_ref, '') and coalesce(note, '') = coalesce(v_note, '')) then
+    raise exception 'An identical payment is already recorded. If this is a second equal payment, give it its own reference or note so the two can be told apart' using errcode = '23514';
+  end if;
   if p_kind = 'return' then
     v_limit := (pp->>'advance_to_return')::numeric;
     if v_amount > v_limit then raise exception 'That is more than the advance still held (%)', pbx_money_text(v_limit, b.currency) using errcode = '22023'; end if;
@@ -27267,9 +27366,8 @@ begin
     v_limit := greatest((pp->>'reimbursement_outstanding')::numeric, 0);
     if v_amount > v_limit then raise exception 'That is more than the reimbursement still owed (%)', pbx_money_text(v_limit, b.currency) using errcode = '22023'; end if;
   end if;
-  insert into pbx_payments (budget_id, company_id, project_id, kind, person_user_id, person_name, amount, paid_on, method, reference, note, recorded_by, request_id)
-  values (b.id, b.company_id, b.project_id, p_kind, p_person, pbx_name(p_person), v_amount, p_paid_on, p_method,
-          nullif(left(btrim(coalesce(p_reference, '')), 120), ''), nullif(left(btrim(coalesce(p_note, '')), 500), ''), auth.uid(), p_request_id)
+  insert into pbx_payments (budget_id, company_id, project_id, kind, person_user_id, person_name, amount, paid_on, method, reference, note, recorded_by, request_id, self_declared)
+  values (b.id, b.company_id, b.project_id, p_kind, p_person, pbx_name(p_person), v_amount, p_paid_on, p_method, v_ref, v_note, auth.uid(), p_request_id, p_person = auth.uid())
   returning id into v_id;
   return v_id;
 end;
@@ -27305,10 +27403,16 @@ declare
   v_blockers text[];
 begin
   b := pbx_lock_budget(p_budget_id);
-  perform pbx_require_finance(b, 'close settlement');
-  if b.settlement_status = 'closed' then return; end if;                          -- a retry: already closed
-  if pbx_is_actuals_author(b.id, auth.uid()) then
-    raise exception 'You cannot close settlement for expenses you prepared or submitted. Another Finance person must close it' using errcode = '42501';
+  if b.settlement_status = 'closed' then return; end if;                          -- a retry or a second click: already closed, nothing more happens
+  if pbx_settlement_route(b.id) = 'executive' then
+    if not pbx_has_capability(b.company_id, 'executive_approver') then
+      raise exception 'These final expenses were submitted by someone with Finance access, so only the company''s authorised CEO or CTO approver can authorise closing this settlement' using errcode = '42501';
+    end if;
+    if pbx_is_actuals_author(b.id, auth.uid()) then
+      raise exception 'You cannot close settlement for expenses you prepared or submitted' using errcode = '42501';
+    end if;
+  else
+    perform pbx_require_finance(b, 'close settlement');
   end if;
   v_blockers := pbx_settlement_blockers(b.id);
   if array_length(v_blockers, 1) is not null then
@@ -27328,7 +27432,9 @@ as $$
 declare b pbx_budgets; v_reason text := btrim(coalesce(p_reason, ''));
 begin
   b := pbx_lock_budget(p_budget_id);
-  perform pbx_require_finance(b, 'reopen settlement');
+  if not (pbx_is_finance(b.company_id) or pbx_has_capability(b.company_id, 'executive_approver')) then
+    raise exception 'Only Finance or the authorised CEO / CTO approver of this company can reopen settlement' using errcode = '42501';
+  end if;
   if b.settlement_status <> 'closed' then raise exception 'Settlement is not closed' using errcode = '23514'; end if;
   if length(v_reason) < 3 then raise exception 'Give the reason for reopening settlement' using errcode = '22023'; end if;
   update pbx_budgets set settlement_status = 'open', settlement_closed_at = null, settlement_closed_by = null,
@@ -27340,13 +27446,14 @@ $$;
 -- Privileges
 -- -----------------------------------------------------------------------------
 revoke all on function
-  pbx_money_text(numeric, text), pbx_amount(numeric, text, text, boolean), pbx_is_actuals_author(uuid, uuid), pbx_settlement_figures(uuid),
+  pbx_money_text(numeric, text), pbx_amount(numeric, text, text, boolean), pbx_is_actuals_author(uuid, uuid), pbx_settlement_route(uuid), pbx_can_confirm_receipts(uuid),
+  pbx_can_close_settlement(uuid), pbx_settlement_figures(uuid),
   pbx_settlement_blockers(uuid), pbx_baseline_rows(uuid),
   pbx_settlement_summary(uuid),
   pbx_record_funding(uuid, uuid, date, numeric, text, boolean, text, text, uuid), pbx_reverse_funding(uuid, text),
   pbx_start_actuals(uuid), pbx_revise_actuals(uuid), pbx_save_actuals_draft(uuid, integer, jsonb, jsonb), pbx_submit_actuals(uuid, integer, uuid),
   pbx_decide_actuals(uuid, text, text), pbx_return_approved_actuals(uuid, text),
-  pbx_record_receipts(uuid, text, date, text), pbx_record_payment(uuid, text, uuid, numeric, date, text, text, text, uuid), pbx_reverse_payment(uuid, text),
+  pbx_record_receipts(uuid, text, date, text), pbx_confirm_receipts(uuid), pbx_record_payment(uuid, text, uuid, numeric, date, text, text, text, uuid), pbx_reverse_payment(uuid, text),
   pbx_close_settlement(uuid, text), pbx_reopen_settlement(uuid, text)
   from public, anon, authenticated;
 grant execute on function
@@ -27354,7 +27461,7 @@ grant execute on function
   pbx_record_funding(uuid, uuid, date, numeric, text, boolean, text, text, uuid), pbx_reverse_funding(uuid, text),
   pbx_start_actuals(uuid), pbx_revise_actuals(uuid), pbx_save_actuals_draft(uuid, integer, jsonb, jsonb), pbx_submit_actuals(uuid, integer, uuid),
   pbx_decide_actuals(uuid, text, text), pbx_return_approved_actuals(uuid, text),
-  pbx_record_receipts(uuid, text, date, text), pbx_record_payment(uuid, text, uuid, numeric, date, text, text, text, uuid), pbx_reverse_payment(uuid, text),
+  pbx_record_receipts(uuid, text, date, text), pbx_confirm_receipts(uuid), pbx_record_payment(uuid, text, uuid, numeric, date, text, text, text, uuid), pbx_reverse_payment(uuid, text),
   pbx_close_settlement(uuid, text), pbx_reopen_settlement(uuid, text)
   to authenticated;
 
@@ -27513,12 +27620,12 @@ begin
     if v_full then
       select coalesce(jsonb_agg(jsonb_build_object(
         'id', f.id, 'recipient_user_id', f.recipient_user_id, 'recipient_name', f.recipient_name, 'funded_on', f.funded_on, 'amount', f.amount,
-        'method', f.method, 'is_advance', f.is_advance, 'reference', f.reference, 'note', f.note, 'status', f.status, 'reversal_reason', f.reversal_reason,
+        'method', f.method, 'is_advance', f.is_advance, 'reference', f.reference, 'note', f.note, 'self_declared', f.self_declared, 'status', f.status, 'reversal_reason', f.reversal_reason,
         'recorded_by_name', pbx_name(f.recorded_by), 'recorded_at', f.recorded_at, 'reversed_by_name', pbx_name(f.reversed_by), 'reversed_at', f.reversed_at)
         order by f.funded_on, f.recorded_at), '[]'::jsonb) into v_funding from pbx_funding f where f.budget_id = b.id;
       select coalesce(jsonb_agg(jsonb_build_object(
         'id', p.id, 'kind', p.kind, 'person_user_id', p.person_user_id, 'person_name', p.person_name, 'amount', p.amount, 'paid_on', p.paid_on,
-        'method', p.method, 'reference', p.reference, 'note', p.note, 'status', p.status, 'reversal_reason', p.reversal_reason,
+        'method', p.method, 'reference', p.reference, 'note', p.note, 'self_declared', p.self_declared, 'status', p.status, 'reversal_reason', p.reversal_reason,
         'recorded_by_name', pbx_name(p.recorded_by), 'recorded_at', p.recorded_at, 'reversed_by_name', pbx_name(p.reversed_by), 'reversed_at', p.reversed_at)
         order by p.paid_on, p.recorded_at), '[]'::jsonb) into v_payments from pbx_payments p where p.budget_id = b.id;
       v_settlement := pbx_settlement_figures(b.id) || jsonb_build_object('blockers', to_jsonb(pbx_settlement_blockers(b.id)));
@@ -27531,6 +27638,9 @@ begin
     'default_currency', v_default_currency,
     'budget', case when b.id is null then null else jsonb_build_object(
       'id', b.id, 'currency', b.currency, 'receipts_status', b.receipts_status, 'receipts_received_on', b.receipts_received_on,
+      'receipts_confirmed_by_name', pbx_name(b.receipts_confirmed_by), 'receipts_confirmed_at', b.receipts_confirmed_at,
+      'settlement_route', case when v_full then pbx_settlement_route(b.id) end,
+      'can_confirm_receipts', pbx_can_confirm_receipts(b.id), 'can_close_settlement', pbx_can_close_settlement(b.id),
       'receipts_exception_reason', b.receipts_exception_reason, 'receipts_recorded_by_name', pbx_name(b.receipts_recorded_by), 'receipts_recorded_at', b.receipts_recorded_at,
       'settlement_status', b.settlement_status, 'settlement_closed_at', b.settlement_closed_at, 'settlement_closed_by_name', pbx_name(b.settlement_closed_by),
       'settlement_note', b.settlement_note, 'row_version', b.row_version) end,
@@ -27588,6 +27698,8 @@ begin
   select coalesce(jsonb_agg(jsonb_build_object(
       'budget_id', b.id, 'project_id', b.project_id, 'reference', b.project_reference, 'name', b.project_name, 'company_id', b.company_id,
       'company_name', c.legal_name, 'currency', b.currency, 'pm_name', b.pm_name, 'site_timezone', b.site_timezone, 'receipts_status', b.receipts_status,
+      'settlement_route', pbx_settlement_route(b.id), 'receipts_confirmed', b.receipts_confirmed_at is not null,
+      'i_can_close', pbx_can_close_settlement(b.id), 'i_can_confirm_receipts', pbx_can_confirm_receipts(b.id),
       'approved_budget', f->>'approved_budget', 'approved_actual_total', f->>'approved_actual_total', 'has_approved_actuals', (f->>'has_approved_actuals')::boolean,
       'advance_to_return', f->>'advance_to_return', 'reimbursement_outstanding', f->>'reimbursement_outstanding',
       'advances_provided', f->>'advances_provided',

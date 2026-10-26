@@ -511,11 +511,21 @@ describe("Project Budget & Expenses", () => {
       expect(num((await view(U.pm, p)).settlement.advances_provided)).toBe(420);
     });
 
-    it("a Finance user who is also the recipient cannot fund themselves", async () => {
+    it("Finance may record funds involving themselves: it is stored as a declaration (flagged), and an identical entry is not recorded twice", async () => {
       const p = await newProject(U.pmFin, [U.member]);
       const b = await approved(p, U.pmFin, U.ceo);
-      await failsCommit(U.pmFin, `select pbx_record_funding('${b.budget}', '${U.pmFin}', current_date, 100, 'cash', null, null, null, '${id()}')`, /cannot record funds for yourself/);
-      await call(U.fin1, `select pbx_record_funding('${b.budget}', '${U.pmFin}', current_date, 100, 'cash', null, null, null, '${id()}')`);
+      const own = await call<string>(U.pmFin, `select pbx_record_funding('${b.budget}', '${U.pmFin}', current_date, 100, 'cash', null, 'PV-9', null, '${id()}')`);
+      expect((await admin<Row>(`select self_declared, recorded_by, recipient_user_id from pbx_funding where id = '${own}'`))[0]).toMatchObject({ self_declared: true, recorded_by: U.pmFin, recipient_user_id: U.pmFin });
+      const other = await call<string>(U.fin1, `select pbx_record_funding('${b.budget}', '${U.member}', current_date, 100, 'cash', null, 'PV-10', null, '${id()}')`);
+      expect((await admin<Row>(`select self_declared from pbx_funding where id = '${other}'`))[0].self_declared).toBe(false);
+      expect((await view(U.pmFin, p)).funding.map((f: Row) => f.self_declared)).toEqual([true, false]);
+      // an identical entry under a NEW request id is a duplicate, not a retry: refused; a second equal payment is told apart by its reference
+      await failsCommit(U.pmFin, `select pbx_record_funding('${b.budget}', '${U.pmFin}', current_date, 100, 'cash', null, 'PV-9', null, '${id()}')`, /identical funding entry is already recorded/);
+      await call(U.pmFin, `select pbx_record_funding('${b.budget}', '${U.pmFin}', current_date, 100, 'cash', null, 'PV-9b', null, '${id()}')`);
+      // the entry keeps its history: reversing is audited, and a reversed entry no longer blocks an identical correction
+      await commit(U.pmFin, `select pbx_reverse_funding('${own}', 'Entered twice by mistake')`);
+      expect(await admin(`select 1 from pbx_audit_log where row_id = '${own}' and table_name = 'pbx_funding'`)).toHaveLength(2);
+      await call(U.pmFin, `select pbx_record_funding('${b.budget}', '${U.pmFin}', current_date, 100, 'cash', null, 'PV-9', null, '${id()}')`);
     });
   });
 
@@ -771,27 +781,131 @@ describe("Project Budget & Expenses", () => {
       await commit(U.fin1, `select pbx_close_settlement('${S.budget}', 'Reconciled again')`);
     });
 
-    it("a PM who also holds Finance cannot confirm receipts, close, or be paid on their own expenses", async () => {
-      const project = await newProject(U.pmFin, [U.member]);
-      const b = await approved(project, U.pmFin, U.ceo);
-      const sub = await call<string>(U.pmFin, `select pbx_start_actuals('${b.budget}')`);
-      const ids = await budgetRowIds(b.budget);
-      const d = await actualDraft(b.budget);
-      const lines = ids.map((rid, i) => ({ budget_row_id: rid, actual_amount: String([360, 30, 30, 1050][i]), paid_via: i === 0 ? "personal" : "company_card", paid_by_user_id: i === 0 ? U.pmFin : undefined }));
-      const rv = await call<number>(U.pmFin, `select pbx_save_actuals_draft('${sub}', ${d.row_version}, ${j({ complete_confirmed: true })}, ${j(lines)})`);
-      await call(U.pmFin, `select pbx_submit_actuals('${sub}', ${rv}, '${id()}')`);
-      await call(U.ceo, `select pbx_decide_actuals('${sub}', 'approve')`);
-      await failsCommit(U.pmFin, `select pbx_record_receipts('${b.budget}', 'received')`, /cannot record the receipt status/);
-      await commit(U.fin1, `select pbx_record_receipts('${b.budget}', 'received')`);
-      await failsCommit(U.pmFin, `select pbx_record_payment('${b.budget}', 'reimbursement', '${U.pmFin}', 100, current_date, 'cash', null, null, '${id()}')`, /cannot record a payment to or from yourself/);
-      await call(U.fin1, `select pbx_record_payment('${b.budget}', 'reimbursement', '${U.pmFin}', 360, current_date, 'cash', null, null, '${id()}')`);
-      await failsCommit(U.pmFin, `select pbx_close_settlement('${b.budget}', null)`, /cannot close settlement/);
-      await commit(U.fin2, `select pbx_close_settlement('${b.budget}', null)`);
-    });
   });
 
   // ---------------------------------------------------------------------------------------------------------------------------------
   // ---------------------------------------------------------------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------------------------------------------------------------
+  describe("settlement authority: Finance declares, an independent CEO/CTO approver confirms what Finance submitted", () => {
+    /** An approved budget with approved final expenses: 360 paid personally by the PM (owed back), the rest on a company card. */
+    async function settleSetup(pm: string, budgetApprover: string, actualsApprover: string, company = CO.uae) {
+      const project = await newProject(pm, [U.member], company);
+      const b = await approved(project, pm, budgetApprover);
+      const sub = await call<string>(pm, `select pbx_start_actuals('${b.budget}')`);
+      const ids = await budgetRowIds(b.budget);
+      const d = await actualDraft(b.budget);
+      const lines = ids.map((rid, i) => ({ budget_row_id: rid, actual_amount: String([360, 30, 30, 1050][i]), paid_via: i === 0 ? "personal" : "company_card", paid_by_user_id: i === 0 ? pm : undefined }));
+      const rv = await call<number>(pm, `select pbx_save_actuals_draft('${sub}', ${d.row_version}, ${j({ complete_confirmed: true })}, ${j(lines)})`);
+      await call(pm, `select pbx_submit_actuals('${sub}', ${rv}, '${id()}')`);
+      await call(actualsApprover, `select pbx_decide_actuals('${sub}', 'approve')`);
+      return { project, b, sub };
+    }
+    const pay = (budget: string, person: string, amount: number, ref: string | null = null, req = id()) =>
+      `select pbx_record_payment('${budget}', 'reimbursement', '${person}', ${amount}, current_date, 'bank_transfer', ${ref ? `'${ref}'` : "null"}, null, '${req}')`;
+    const settlementOf = async (budget: string) => (await admin<Row>(`select settlement_status, settlement_closed_by, receipts_status, receipts_recorded_by, receipts_confirmed_by from pbx_budgets where id = '${budget}'`))[0];
+
+    it("an ordinary PM's settlement is handled entirely by a single Finance person; the CEO/CTO has no part in it", async () => {
+      const s = await settleSetup(U.pm, U.fin1, U.fin1);
+      expect((await admin<Row>(`select pbx_settlement_route('${s.b.budget}') as r`))[0].r).toBe("finance");
+      expect((await view(U.fin1, s.project)).budget).toMatchObject({ settlement_route: "finance", can_close_settlement: true, can_confirm_receipts: false });
+      await failsCommit(U.fin1, `select pbx_close_settlement('${s.b.budget}', null)`, /cannot be closed yet/);
+      await commit(U.fin1, `select pbx_record_receipts('${s.b.budget}', 'received')`);
+      await call(U.fin1, pay(s.b.budget, U.pm, 360));
+      await failsCommit(U.fin1, `select pbx_confirm_receipts('${s.b.budget}')`, /no separate confirmation is needed/);
+      await failsCommit(U.ceo, `select pbx_confirm_receipts('${s.b.budget}')`, /no separate confirmation is needed/);
+      await failsCommit(U.ceo, `select pbx_close_settlement('${s.b.budget}', null)`, /Only Finance/);
+      await commit(U.fin1, `select pbx_close_settlement('${s.b.budget}', 'Reconciled')`);
+      expect(await settlementOf(s.b.budget)).toMatchObject({ settlement_status: "closed", settlement_closed_by: U.fin1 });
+    });
+
+    it("Finance-submitted expenses: Finance declares delivery and payments (also to themselves) but cannot confirm receipts or close; the independent CEO/CTO approver does", async () => {
+      const s = await settleSetup(U.pmFin, U.ceo, U.ceo);                                   // Finance PM: budget and expenses were approved by the CEO/CTO route
+      expect((await admin<Row>(`select pbx_settlement_route('${s.b.budget}') as r`))[0].r).toBe("executive");
+      // Finance records the physical delivery of receipts and the reimbursement paid to themselves: declarations, flagged
+      await commit(U.pmFin, `select pbx_record_receipts('${s.b.budget}', 'received')`);
+      const paid = await call<string>(U.pmFin, pay(s.b.budget, U.pmFin, 360));
+      expect((await admin<Row>(`select self_declared from pbx_payments where id = '${paid}'`))[0].self_declared).toBe(true);
+      expect((await view(U.pmFin, s.project)).payments[0]).toMatchObject({ self_declared: true });
+      // ...but neither the Finance author, nor a Finance colleague, nor any non-approver can confirm or close
+      for (const who of [U.pmFin, U.fin1, U.fin2, U.pm, U.viewer]) {
+        await failsCommit(who, `select pbx_confirm_receipts('${s.b.budget}')`, /CEO or CTO|Budget not found/);
+        await failsCommit(who, `select pbx_close_settlement('${s.b.budget}', null)`, /CEO or CTO|Budget not found/);
+      }
+      expect((await view(U.pmFin, s.project)).budget).toMatchObject({ settlement_route: "executive", can_close_settlement: false, can_confirm_receipts: false });
+      expect((await view(U.pmFin, s.project)).settlement.blockers.join(" ")).toMatch(/still need confirmation by an independent CEO or CTO approver/);
+      // closing is refused even for the approver until the receipts are confirmed
+      await failsCommit(U.ceo, `select pbx_close_settlement('${s.b.budget}', null)`, /still need confirmation/);
+      expect((await view(U.ceo, s.project)).budget).toMatchObject({ can_confirm_receipts: true });
+      await commit(U.ceo, `select pbx_confirm_receipts('${s.b.budget}')`);
+      await commit(U.ceo, `select pbx_confirm_receipts('${s.b.budget}')`);                      // a retry is harmless
+      expect(await settlementOf(s.b.budget)).toMatchObject({ receipts_recorded_by: U.pmFin, receipts_confirmed_by: U.ceo, settlement_status: "open" });
+      await failsCommit(U.pmFin, `select pbx_close_settlement('${s.b.budget}', null)`, /CEO or CTO/);
+      await failsCommit(U.fin1, `select pbx_close_settlement('${s.b.budget}', null)`, /CEO or CTO/);
+      await commit(U.ceo, `select pbx_close_settlement('${s.b.budget}', 'Authorised')`);
+      expect(await settlementOf(s.b.budget)).toMatchObject({ settlement_status: "closed", settlement_closed_by: U.ceo, receipts_recorded_by: U.pmFin, receipts_confirmed_by: U.ceo });
+      expect((await view(U.pmFin, s.project)).budget).toMatchObject({ receipts_confirmed_by_name: expect.any(String), settlement_status: "closed" });
+    });
+
+    it("recording receipts again withdraws a confirmation, and the recorder can never confirm their own receipts", async () => {
+      const s = await settleSetup(U.dual, U.ceo, U.ceo);                                    // dual holds Finance AND executive rights, and is the PM
+      await commit(U.dual, `select pbx_record_receipts('${s.b.budget}', 'received')`);
+      await failsCommit(U.dual, `select pbx_confirm_receipts('${s.b.budget}')`, /cannot confirm the receipts for expenses you prepared or submitted/);
+      await commit(U.cto, `select pbx_confirm_receipts('${s.b.budget}')`);
+      expect((await settlementOf(s.b.budget)).receipts_confirmed_by).toBe(U.cto);
+      await commit(U.fin1, `select pbx_record_receipts('${s.b.budget}', 'exception', null, 'One taxi receipt lost')`);   // a different declaration -> confirmation withdrawn
+      expect((await settlementOf(s.b.budget))).toMatchObject({ receipts_status: "exception", receipts_confirmed_by: null });
+      await failsCommit(U.fin1, `select pbx_confirm_receipts('${s.b.budget}')`, /CEO or CTO/);                  // the Finance recorder cannot confirm
+      await commit(U.ceo, `select pbx_confirm_receipts('${s.b.budget}')`);
+      expect((await settlementOf(s.b.budget)).receipts_confirmed_by).toBe(U.ceo);
+      // an exec who recorded nothing but is also Finance cannot confirm what they themselves recorded
+      await commit(U.dual, `select pbx_record_receipts('${s.b.budget}', 'received')`);
+      await failsCommit(U.dual, `select pbx_confirm_receipts('${s.b.budget}')`, /cannot confirm the receipts/);
+      const audit = await admin<Row>(`select action, old_row->>'receipts_confirmed_by' o, new_row->>'receipts_confirmed_by' n from pbx_audit_log where table_name = 'pbx_budgets' and row_id = '${s.b.budget}' and old_row->>'receipts_status' is not null order by id`);
+      expect(audit.length).toBeGreaterThanOrEqual(4);                                              // every recording, confirmation and withdrawal is on record
+    });
+
+    it("closure and payments cannot be duplicated: simultaneous closes close once; identical payments are refused; retries return the same entry", async () => {
+      const s = await settleSetup(U.pmFin, U.ceo, U.ceo);
+      await commit(U.pmFin, `select pbx_record_receipts('${s.b.budget}', 'received')`);
+      const req = id();
+      const first = await call<string>(U.pmFin, pay(s.b.budget, U.pmFin, 200, "BT-1", req));
+      expect(await call<string>(U.pmFin, pay(s.b.budget, U.pmFin, 200, "BT-1", req))).toBe(first);                           // double click
+      await failsCommit(U.pmFin, pay(s.b.budget, U.pmFin, 100, "BT-1", id()).replace("100", "200"), /identical payment is already recorded/);     // a duplicate with a new request id
+      await call(U.pmFin, pay(s.b.budget, U.pmFin, 160, "BT-2"));
+      await failsCommit(U.pmFin, pay(s.b.budget, U.pmFin, 1, "BT-3"), /more than the reimbursement still owed/);                // no overpayment
+      await commit(U.ceo, `select pbx_confirm_receipts('${s.b.budget}')`);
+      const results = await Promise.allSettled([
+        commit(U.ceo, `select pbx_close_settlement('${s.b.budget}', 'one')`), commit(U.cto, `select pbx_close_settlement('${s.b.budget}', 'two')`),
+        commit(U.ceo, `select pbx_close_settlement('${s.b.budget}', 'three')`),
+      ]);
+      expect(results.filter((r) => r.status === "fulfilled").length).toBeGreaterThanOrEqual(1);
+      expect(await admin(`select 1 from pbx_audit_log where table_name = 'pbx_budgets' and row_id = '${s.b.budget}' and new_row->>'settlement_status' = 'closed' and old_row->>'settlement_status' = 'open'`)).toHaveLength(1);   // closed exactly once
+      await commit(U.cto, `select pbx_close_settlement('${s.b.budget}', 'again')`);                                              // a late second click changes nothing
+      expect(await admin(`select 1 from pbx_audit_log where table_name = 'pbx_budgets' and row_id = '${s.b.budget}' and new_row->>'settlement_status' = 'closed' and old_row->>'settlement_status' = 'open'`)).toHaveLength(1);
+      await failsCommit(U.pmFin, pay(s.b.budget, U.pmFin, 5, "BT-4"), /Settlement is closed/);                                      // nothing is recorded after closure
+    });
+
+    it("without an eligible CEO/CTO approver the closure is held; Finance can still reopen, but cannot re-close", async () => {
+      // KSA: Finance PM; a CEO approver exists only while the expenses are decided, then is removed
+      await commit(U.ksaFin, `select pbx_grant_access('${U.ksaCeo}', '${CO.ksa}', '{executive_approver}')`);
+      const s = await settleSetup(U.ksaFin, U.ksaCeo, U.ksaCeo, CO.ksa);
+      await commit(U.ksaFin, `select pbx_revoke_access('${U.ksaCeo}', '${CO.ksa}')`);
+      await commit(U.ksaFin, `select pbx_record_receipts('${s.b.budget}', 'received')`);
+      await call(U.ksaFin, pay(s.b.budget, U.ksaFin, 360));
+      expect((await view(U.ksaFin, s.project)).budget).toMatchObject({ settlement_route: "executive", can_close_settlement: false, can_confirm_receipts: false });
+      await failsCommit(U.ksaFin, `select pbx_close_settlement('${s.b.budget}', null)`, /CEO or CTO/);
+      await failsCommit(U.ceo, `select pbx_close_settlement('${s.b.budget}', null)`, /Budget not found|CEO or CTO/);            // the UAE approver has no say in KSA
+      await commit(U.ksaFin, `select pbx_grant_access('${U.ksaCeo}', '${CO.ksa}', '{executive_approver}')`);
+      await commit(U.ksaCeo, `select pbx_confirm_receipts('${s.b.budget}')`);
+      await commit(U.ksaCeo, `select pbx_close_settlement('${s.b.budget}', null)`);
+      await commit(U.ksaFin, `select pbx_reopen_settlement('${s.b.budget}', 'A late bank fee')`);                               // Finance may reopen, with a reason
+      expect((await settlementOf(s.b.budget)).settlement_status).toBe("open");
+      await failsCommit(U.ksaFin, `select pbx_close_settlement('${s.b.budget}', null)`, /CEO or CTO/);                           // but not close again
+      await commit(U.ksaCeo, `select pbx_close_settlement('${s.b.budget}', 'Reclosed')`);
+      await commit(U.ksaFin, `select pbx_revoke_access('${U.ksaCeo}', '${CO.ksa}')`);
+    });
+  });
+
   describe("approval routing: Finance for ordinary PMs, the company's CEO/CTO for Finance submitters", () => {
     const oneProject = async (pm: string, company = CO.uae, currency = "AED") => {
       const p = await newProject(pm, [], company);

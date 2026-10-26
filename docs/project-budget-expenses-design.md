@@ -40,8 +40,8 @@ Statuses: Not started, In progress, Implemented, Verified.
 
 | Capability | Meaning |
 | --- | --- |
-| `finance` | Approve, return or reject budgets and actuals **submitted by Project Managers without Finance access**; record funding, receipts, returns, reimbursements; close or reopen settlement; manage rates and categories; read everything of that company. |
-| `executive_approver` | The company's authorised CEO / CTO approver (explicit; a title confers nothing). Decides budgets, additional requests and final expenses **submitted by someone who holds Finance access** for that company; reads the company's budgets; records nothing. Either a CEO or a CTO is enough. |
+| `finance` | Approve, return or reject budgets and actuals **submitted by Project Managers without Finance access**; record funding, receipt delivery, returns, reimbursements (declarations, including ones involving themselves); close settlement for ordinary Project Managers; reopen settlement; manage rates and categories; read everything of that company. |
+| `executive_approver` | The company's authorised CEO / CTO approver (explicit; a title confers nothing). Decides budgets, additional requests and final expenses **submitted by someone who holds Finance access** for that company, confirms the receipts of that settlement and authorises its closure; reads the company's budgets; records no funds, payments or receipts. Either a CEO or a CTO is enough. |
 | `view` | Read-only access to the company's budgets (explicit, for example for a founder; a title confers nothing). |
 | `manage_access` | Grant and revoke these capabilities for the company. |
 
@@ -59,9 +59,9 @@ Statuses: Not started, In progress, Implemented, Verified.
 * `pbx_budget_rows`: category, dates, activity, description, basis, people, days, quantity, rate, fixed amount, server-calculated `total` (a trigger; the client value is never trusted).
 * `pbx_categories`: the six defaults plus company categories added by Finance.
 * `pbx_rates`: per company and currency (`petrol_per_km`, `meal_per_person`), entered by Finance. AED 0.50/km and AED 30/meal are only *suggestions* shown until Finance confirms; no other currency gets a suggestion.
-* `pbx_funding`: instalments (recipient, date, amount, method, `is_advance`, reference, note), reversible with a reason. Pluto/card allocations are not advances.
+* `pbx_funding`: instalments (recipient, date, amount, method, `is_advance`, reference, note, `self_declared`), reversible with a reason; a declaration by Finance, flagged when it involves the recorder; an identical entry is refused. Pluto/card allocations are not advances.
 * `pbx_actual_submissions` + `pbx_actual_rows`: the PM's actuals. Blank (`null`) is not zero; paid-via (advance, company card, direct company payment, personal, existing claim) and who paid; submission requires confirmation that entry is complete.
-* `pbx_payments`: money returned and reimbursements paid, per person, reversible with a reason.
+* `pbx_payments`: money returned and reimbursements paid, per person, reversible with a reason; same declaration flag and duplicate guard. Receipts: `pbx_budgets.receipts_*` records who declared delivery and, on the CEO/CTO settlement route, who independently confirmed it (`receipts_confirmed_by/at`).
 * `pbx_company_grants` (explicit access), `pbx_company_settings` (the on/off switch; no row means on) and `pbx_audit_log`.
 
 Per-person settlement (SQL function `pbx_settlement_summary`, the single source of the figures):
@@ -74,7 +74,7 @@ company-card and direct-paid spending are totals only; card allocations are neve
 existing-claim lines count as expense but are excluded from every balance above
 ```
 
-Settlement can close only when: an approved actuals version exists, receipts are `received` or an exception with a reason is recorded, every advance balance is zero, no reimbursement is outstanding, and no budget or actuals version is awaiting a decision.
+Settlement can close only when: an approved actuals version exists, receipts are `received` or an exception with a reason is recorded (and, where Finance submitted the expenses, confirmed by an independent CEO/CTO approver, who also authorises the closure), every advance balance is zero, no reimbursement is outstanding, and no budget or actuals version is awaiting a decision.
 
 ## 4. Screens
 

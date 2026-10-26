@@ -378,6 +378,9 @@ export interface CloseState {
   reimbursementOutstanding: number;
   overpaidReimbursement: boolean;
   settlementClosed: boolean;
+  /** The approved final expenses were submitted by someone with Finance access: an independent CEO / CTO approver must confirm the receipts and authorise closure. */
+  settlementByApprover?: boolean;
+  receiptsConfirmedByApprover?: boolean;
 }
 
 /** The reasons settlement cannot be closed yet, in plain words (empty when it can). Mirrors pbx_close_settlement. */
@@ -385,9 +388,10 @@ export function settlementBlockers(s: CloseState, currency: string): string[] {
   const out: string[] = [];
   if (s.settlementClosed) return ["Settlement is already closed."];
   if (!s.hasApprovedActuals) out.push("The final expenses are not approved yet.");
-  if (s.actualsAwaitingDecision) out.push("Final expenses are waiting for a Finance decision.");
-  if (s.budgetAwaitingDecision) out.push("A budget request is waiting for a Finance decision.");
-  if (s.receipts === "not_received" || s.receipts === "partial") out.push("Finance has not confirmed that the physical receipts were received (or recorded an approved exception).");
+  if (s.actualsAwaitingDecision) out.push("Final expenses are waiting for an approval decision.");
+  if (s.budgetAwaitingDecision) out.push("A budget request is waiting for an approval decision.");
+  if (s.receipts === "not_received" || s.receipts === "partial") out.push("Finance has not recorded that the physical receipts were received (or recorded an approved exception).");
+  else if (s.settlementByApprover && !s.receiptsConfirmedByApprover) out.push("The receipts are recorded by Finance but still need confirmation by an independent CEO or CTO approver.");
   if (s.receipts === "exception" && !(s.receiptExceptionReason ?? "").trim()) out.push("The receipt exception needs a recorded reason.");
   if (s.advanceToReturn > 0) out.push(`${moneyText(s.advanceToReturn, currency)} of advance money has not been returned.`);
   if (s.reimbursementOutstanding > 0) out.push(`${moneyText(s.reimbursementOutstanding, currency)} of reimbursement is still owed.`);
@@ -412,6 +416,13 @@ export function routeExplanation(route: ApprovalRoute): string {
     ? "Submitted by someone with Finance access, so the company's CEO or CTO approver decides it (either one is enough)."
     : "Decided by Finance.";
 }
+/** Who settles. Finance handles an ordinary Project Manager's settlement; where the approved final expenses were submitted by someone with Finance access, Finance still records
+ *  delivery of receipts and payments (declarations), but an independent CEO / CTO approver confirms the receipts and authorises closure. */
+export type SettlementRoute = "finance" | "executive";
+export function settlementRouteFor(actualsRoute: ApprovalRoute | null, authorHoldsFinance = false): SettlementRoute {
+  return actualsRoute === "executive" || authorHoldsFinance ? "executive" : "finance";
+}
+
 /** The hold message: nobody eligible and independent exists for the route. Nothing is approved or lost. */
 export function holdExplanation(route: ApprovalRoute, submitterName: string | null): string {
   const who = submitterName ?? "the submitter";
@@ -439,6 +450,8 @@ export interface BudgetFlowState {
   fundingRecorded: boolean;
   receipts: ReceiptStatus;
   settlementClosed: boolean;
+  /** The approved final expenses were submitted by someone with Finance access (the CEO / CTO approver confirms receipts and authorises closure). */
+  settlementByApprover?: boolean;
   blockers: string[];
 }
 export interface NextAction { who: "pm" | "finance" | "executive" | "nobody"; text: string; section: "budget" | "funds" | "actuals" | "settlement" }
@@ -462,5 +475,10 @@ export function nextAction(s: BudgetFlowState): NextAction {
   if (s.actuals === null || s.actuals === "draft" || s.actuals === "returned") return { who: "pm", text: s.actuals === "returned" ? "The Project Manager corrects the actual expenses as Finance asked and submits them again." : "The Project Manager enters the actual expenses and submits them.", section: "actuals" };
   if (s.actuals === "submitted") return s.approvalOnHold ? { who: "nobody", text: "On hold: no independent approver is available to decide the final expenses.", section: "actuals" } : { who: s.approvalRoute === "executive" ? "executive" : "finance", text: `${cap(approver)} reviews and approves (or returns) the final expenses.`, section: "actuals" };
   if (s.receipts === "not_received" || s.receipts === "partial") return { who: "finance", text: "Finance records that the physical receipts were received (or an approved exception).", section: "settlement" };
+  if (s.settlementByApprover) {
+    const money = s.blockers.filter((b) => !/independent CEO or CTO approver/.test(b));
+    if (money.length > 0) return { who: "finance", text: `Finance settles the difference: ${money[0]}`, section: "settlement" };
+    return { who: "executive", text: "The CEO or CTO approver confirms the receipts and authorises closing the settlement.", section: "settlement" };
+  }
   return s.blockers.length > 0 ? { who: "finance", text: `Finance settles the difference: ${s.blockers[0]}`, section: "settlement" } : { who: "finance", text: "Finance confirms the reconciliation and closes settlement.", section: "settlement" };
 }

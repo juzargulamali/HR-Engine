@@ -85,7 +85,10 @@ function SettlementTable({ rows }: { rows: PbxInboxSettlement[] }) {
             <TableCell className="text-right tabular-nums">{money(num(r.advance_to_return), r.currency)}</TableCell>
             <TableCell className="text-right tabular-nums">{money(num(r.reimbursement_outstanding), r.currency)}</TableCell>
             <TableCell>{RECEIPT_LABELS[r.receipts_status]}</TableCell>
-            <TableCell className="text-[13px]">{r.next}</TableCell>
+            <TableCell className="text-[13px]">
+              {r.next}
+              {r.settlement_route === "executive" ? <span className="block text-muted-foreground">{r.i_can_close || r.i_can_confirm_receipts ? "Needs you: the CEO / CTO approver confirms and authorises closure" : "Closed by the CEO or CTO approver (Finance submitted the expenses)"}</span> : null}
+            </TableCell>
           </ClickableRow>
         ))}
       </TableBody>
