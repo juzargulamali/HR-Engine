@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, SplitSquareHorizontal, Trash2 } from "lucide-react";
 import { PAID_VIA, PAID_VIA_LABELS, PAID_VIA_NEEDS_PERSON, expenseVariance, moneyText, parseDecimal, requiresVarianceNote, sumMoney, varianceLabel, type PaidVia } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
@@ -130,11 +130,8 @@ function ActualsEditor({ view, submission, claims }: { view: PbxBudgetView; subm
   const actualTotal = sumMoney(entered, currency);
   const blank = lines.filter((l, i) => entered[i] === null).length;
   const needNote = requiresVarianceNote(approvedTotal, actualTotal, currency);
-  const groupSum = useMemo(() => {
-    const m = new Map<string, number>();
-    lines.forEach((l, i) => { const v = entered[i]; if (l.budget_row_id && v !== null && v !== undefined) m.set(l.budget_row_id, sumMoney([m.get(l.budget_row_id) ?? 0, v], currency)); });
-    return m;
-  }, [lines, entered, currency]);
+  const groupSum = new Map<string, number>();
+  lines.forEach((l, i) => { const v = entered[i]; if (l.budget_row_id && v !== null && v !== undefined) groupSum.set(l.budget_row_id, sumMoney([groupSum.get(l.budget_row_id) ?? 0, v], currency)); });
 
   const split = (l: Line) => {
     const next: Line = { ...l, key: newKey(), line_no: Math.max(...lines.filter((x) => x.budget_row_id === l.budget_row_id).map((x) => x.line_no)) + 1, approved: 0, actual: "", paid_via: "", paid_by: "", claim_id: "", foreign_currency: false, foreign_note: "", note: "" };
@@ -292,7 +289,7 @@ function FinanceActualsDecision({ view, s }: { view: PbxBudgetView; s: PbxActual
   return (
     <div className="space-y-3 rounded-lg border border-border bg-secondary/30 p-3">
       <p className="text-sm font-medium">Decide these final expenses — actual {money(s.total_actual, view.budget!.currency)} against an approved {money(s.total_approved_budget, view.budget!.currency)}</p>
-      {s.variance_note ? <p className="text-sm"><span className="text-muted-foreground">Project Manager's note: </span>{s.variance_note}</p> : null}
+      {s.variance_note ? <p className="text-sm"><span className="text-muted-foreground">Project Manager&apos;s note: </span>{s.variance_note}</p> : null}
       {asking ? (
         <div className="space-y-2">
           <Field label="What should the Project Manager correct?" htmlFor="pbx-an"><Textarea id="pbx-an" rows={3} value={note} maxLength={1000} autoFocus onChange={(e) => setNote(e.target.value)} /></Field>
@@ -392,7 +389,7 @@ export function ActualsSection({ view, claims }: { view: PbxBudgetView; claims: 
         >
           <div className="space-y-3">
             {s.decision_note ? <Alert role="status" className="text-sm"><strong>Finance said:</strong> {s.decision_note}</Alert> : null}
-            {s.variance_note ? <p className="text-sm"><span className="text-muted-foreground">Project Manager's note on the difference: </span>{s.variance_note}</p> : null}
+            {s.variance_note ? <p className="text-sm"><span className="text-muted-foreground">Project Manager&apos;s note on the difference: </span>{s.variance_note}</p> : null}
             <ActualsTable rows={s.rows} currency={currency} approvedTotal={s.total_approved_budget} actualTotal={s.total_actual} />
             {s.status === "approved" && i === 0 && view.viewer.is_finance && open ? <ReturnApproved view={view} s={s} /> : null}
           </div>

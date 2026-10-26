@@ -216,7 +216,7 @@ export async function recordReceipts(input: { projectId: string; budgetId: strin
 export async function recordPayment(input: { projectId: string; budgetId: string; kind: string; person: string; amount: string; paidOn: string; method: string; reference?: string | null; note?: string | null; requestId: string }): Promise<BudgetActionResult> {
   const p = z.object({
     projectId: uuid, budgetId: uuid, kind: z.enum(PAYMENT_KINDS, { message: "Choose whether this is money returned or a reimbursement." }), person: uuid, amount: decimal, paidOn: requiredDate,
-    method: z.string().trim().min(1, "Say how it was paid.").max(60), reference: optionalText(100), note: optionalText(500), requestId: uuid,
+    method: z.enum(FUNDING_METHODS, { message: "Choose how it was paid." }), reference: optionalText(100), note: optionalText(500), requestId: uuid,
   }).safeParse(input);
   if (!p.success) return issue(p.error);
   const d = p.data;

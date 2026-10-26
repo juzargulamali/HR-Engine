@@ -140,7 +140,7 @@ export function BudgetEditor({ view, version }: { view: PbxBudgetView; version: 
               <h3 id={`cat-${cat.id}`} className="text-sm font-semibold">{cat.label}</h3>
               <div className="flex items-center gap-3">
                 <span className="text-sm tabular-nums text-muted-foreground">{mine.length > 0 ? `Subtotal ${moneyText(sub, currency)}` : "No lines"}</span>
-                <Button type="button" size="sm" variant="outline" onClick={() => addRow(cat.id)} disabled={busy} aria-label={`Add a ${cat.label} line`}><Plus className="h-4 w-4" aria-hidden />Add line</Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => addRow(cat.id)} disabled={busy}><Plus className="h-4 w-4" aria-hidden />Add line<span className="sr-only"> to {cat.label}</span></Button>
               </div>
             </header>
             {mine.length > 0 ? (

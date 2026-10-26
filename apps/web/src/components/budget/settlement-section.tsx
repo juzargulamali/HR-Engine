@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PAYMENT_KINDS, PAYMENT_KIND_LABELS, RECEIPT_LABELS, RECEIPT_STATUSES, varianceLabel, type PaymentKind, type ReceiptStatus } from "@enginious-hr/domain";
+import { FUNDING_METHODS, FUNDING_METHOD_LABELS, PAYMENT_KINDS, PAYMENT_KIND_LABELS, RECEIPT_LABELS, RECEIPT_STATUSES, varianceLabel, type FundingMethod, type PaymentKind, type ReceiptStatus } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,7 +77,7 @@ function RecordPayment({ view }: { view: PbxBudgetView }) {
   const limit = chosen ? (kind === "return" ? chosen.advance_to_return : chosen.reimbursement_outstanding) : 0;
   const [amount, setAmount] = useState("");
   const [paidOn, setPaidOn] = useState(() => todayIn(view.project.site_timezone));
-  const [method, setMethod] = useState("Bank transfer");
+  const [method, setMethod] = useState<FundingMethod>("bank_transfer");
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
   return (
@@ -106,8 +106,8 @@ function RecordPayment({ view }: { view: PbxBudgetView }) {
         </Field>
         <Field label="Date" htmlFor="pbx-pd"><Input id="pbx-pd" type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} required /></Field>
         <Field label="Method" htmlFor="pbx-pm">
-          <Select id="pbx-pm" value={method} onChange={(e) => setMethod(e.target.value)}>
-            <option>Bank transfer</option><option>Cash</option><option>Other</option>
+          <Select id="pbx-pm" value={method} onChange={(e) => setMethod(e.target.value as FundingMethod)}>
+            {FUNDING_METHODS.map((m) => <option key={m} value={m}>{FUNDING_METHOD_LABELS[m]}</option>)}
           </Select>
         </Field>
         <Field label="Reference (optional)" htmlFor="pbx-pr"><Input id="pbx-pr" value={reference} maxLength={100} onChange={(e) => setReference(e.target.value)} /></Field>
@@ -172,7 +172,7 @@ export function SettlementSection({ view }: { view: PbxBudgetView }) {
   const approvedActual = s.has_approved_actuals ? s.approved_actual_total : null;
   return (
     <div className="space-y-4">
-      <p className="text-[13px] text-muted-foreground">These figures are the project's expenses only. They are not revenue, margin or profitability.</p>
+      <p className="text-[13px] text-muted-foreground">These figures are the project&apos;s expenses only. They are not revenue, margin or profitability.</p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Figure label="Approved budget" value={money(s.approved_budget, currency)} />
         <Figure label="Approved final expenses" value={approvedActual === null ? "Not approved yet" : money(approvedActual, currency)} hint={approvedActual === null ? "Settlement starts once Finance approves the final expenses." : undefined} />
@@ -229,7 +229,7 @@ export function SettlementSection({ view }: { view: PbxBudgetView }) {
             <TableBody>
               {view.payments.map((p) => (
                 <TableRow key={p.id} className={p.status === "reversed" ? "opacity-70" : undefined}>
-                  <TableCell className="font-medium">{PAYMENT_KIND_LABELS[p.kind]}<span className="block text-[13px] font-normal text-muted-foreground">{[p.method, p.reference, p.note].filter(Boolean).join(" · ")}</span></TableCell>
+                  <TableCell className="font-medium">{PAYMENT_KIND_LABELS[p.kind]}<span className="block text-[13px] font-normal text-muted-foreground">{[FUNDING_METHOD_LABELS[p.method as FundingMethod] ?? p.method, p.reference, p.note].filter(Boolean).join(" · ")}</span></TableCell>
                   <TableCell>{p.person_name}</TableCell>
                   <TableCell>{day(p.paid_on)}</TableCell>
                   <TableCell className={`text-right tabular-nums ${p.status === "reversed" ? "line-through" : ""}`}>{money(p.amount, currency)}</TableCell>
