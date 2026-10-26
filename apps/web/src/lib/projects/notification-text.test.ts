@@ -49,4 +49,16 @@ describe("describeNotification", () => {
     expect(describeNotification("project_dates_changed", base).text).toContain("key dates");
     expect(describeNotification("project_something_new", {})).toEqual({ text: "A project update.", href: null });
   });
+  it("describes Budget & Expenses events with money-free links for the right person", () => {
+    expect(describeNotification("project_budget_submitted", { ...base, kind: "original" })).toEqual({ text: "UAE-P-2026-0001 Floor projection: a budget was submitted for Finance approval.", href: "/finance/project-budgets/p1" });
+    expect(describeNotification("project_budget_submitted", { ...base, kind: "addition" }).text).toContain("a budget addition was submitted");
+    expect(describeNotification("project_budget_decided", { ...base, kind: "original", decision: "returned" })).toMatchObject({ text: expect.stringContaining("returned for changes"), href: "/projects/p1/budget" });
+    expect(describeNotification("project_budget_decided", { ...base, kind: "addition", decision: "approved" }).text).toContain("The additional budget was approved");
+    expect(describeNotification("project_budget_decided", { ...base, kind: "original", decision: "rejected" }).text).toContain("rejected");
+    expect(describeNotification("project_funding_recorded", { ...base, amount: 500, currency: "AED" }).text).toContain("AED 500");
+    expect(describeNotification("project_actuals_submitted", base).href).toBe("/finance/project-budgets/p1");
+    expect(describeNotification("project_actuals_decided", { ...base, decision: "approved" }).text).toContain("approved");
+    expect(describeNotification("project_actuals_decided", { ...base, decision: "returned" }).text).toContain("returned for correction");
+    expect(describeNotification("project_settlement_closed", base).text).toContain("closed the settlement");
+  });
 });
