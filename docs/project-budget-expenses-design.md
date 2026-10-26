@@ -5,7 +5,7 @@ Status table (kept current; the last section says where work stopped):
 | Stage | Scope | Status |
 | --- | --- | --- |
 | A | Review existing structures, this design | Implemented |
-| B | Domain library (decimal maths, rounding, settlement helpers, permissions) | Not started |
+| B | Domain library (decimal maths, rounding, settlement helpers, next action) | Implemented |
 | C | Migrations, RLS, grants, functions, `schema.sql` mirror | Not started |
 | D | Server actions, loaders, types | Not started |
 | E | Project "Budget & Expenses" page and the Finance inbox | Not started |
@@ -86,4 +86,4 @@ No receipt upload, OCR, bank or Pluto connection, purchasing, tax, Zoho sync, pa
 
 ## Handover: where work stopped
 
-Stage A done. Next: Stage B.
+Stages A and B done (`packages/domain/src/projectBudget.ts`, 27 unit tests). Next: Stage C (migrations).
