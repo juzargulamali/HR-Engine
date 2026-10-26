@@ -8,10 +8,10 @@ boundaries, URLs, validation, workflows and audit evidence are untouched. Progre
 
 | Stage | Scope | Status |
 | --- | --- | --- |
-| 4 | Sales & CRM | In progress |
-| 5 | Inventory and My Equipment | Not started |
-| 6 | Remaining People & HR, attendance, recovery, approvals, policies, settings, account | Not started |
-| 7 | Whole-app consistency, regression checks, final review | Not started |
+| 4 | Sales & CRM | Verified |
+| 5 | Inventory and My Equipment | Verified |
+| 6 | Remaining People & HR, attendance, recovery, approvals, policies, settings, account | Verified |
+| 7 | Whole-app consistency, regression checks, final review | Verified (final review by the owner pending) |
 
 Statuses: Not started, In progress, Implemented, Verified.
 
@@ -69,3 +69,32 @@ no sideways scroll (`phone-fit.mjs`). All pages were also surveyed in both theme
 | `/` (My Day) | 3 (merged) | | | unchanged in this round |
 
 Pages that were already redirects or API routes (`/api/**`, `/os-preview/**`, which stays hidden in Production) are not part of the pass.
+
+## Verification (local stack, fictional data, real roles; the hosted preview stays read-only)
+
+One coordinated pass on the finished code, after the targeted checks made while building:
+
+| Check | Result |
+| --- | --- |
+| `npm run lint`, `npm run typecheck` (all workspaces), unit tests (105 files, 1,197 tests, including the new ones for list memory, stacked tables, status tones and the token contrast tests), production build | pass |
+| Sales: `sales-actions` (create, stages, hold, availability, proposal, contacts, Won + handover, founder reopen, reports), `sales-workspace` (follow-ups, enquiries table and board, panel, quick add, owner rules, boundaries) | pass |
+| Projects: `projects-workspace`, `projects-flow`, `row-click`, `workflow-steps` | pass |
+| Inventory: `inventory-smoke`, flows 1-5 (stock to reconcile, employee equipment, Sales connection, transfers and conflicts and time zones, access and database refusals) | pass |
+| `my-day-checks`, `nav-smoke`, `shell-checks` | pass |
+| `a11y-states`: keyboard and focus, axe (WCAG 2.1 A/AA, serious/critical) on 17 pages x desktop/phone x dark/light | pass |
+| `phone-fit` (360 and 390 px, dark and light): no sideways scroll, no clipped bottom bar, nothing under it | pass |
+| `contrast-audit`: every text node on 220 page states, dark and light, CEO desktop, CEO phone, employee desktop, manager desktop | 0 failures |
+| `rollout-checks` (new): rows and cards open their record from the empty part (enquiries, board, follow-ups, items, requests, movements, employees, policies, phone cards), controls inside a row act alone, Ctrl-click opens a new tab, status tones, back links keep filters and place, stacked-table labels, no-access and not-found cards | pass |
+| `page-survey` (new): every page loads (status 200, no console errors, no sideways scroll) as the CEO at 1440 and 390 px, dark and light | pass |
+| Database tests | not needed: no database change |
+
+Problems the checks found and this branch fixes: the light-theme teal/green badge words were too pale; a focus ring faded in over 150 ms instead of being visible at once; a dialog opened from the Projects header read dark text on a dark card in light mode; "No job title set" was 4.46:1 (needs 4.5); a sideways overflow on the enquiry page at 1440 px; the list place was not always restored after a back link; the top-bar title ran under the search button on a phone. Two existing check scripts held a stale fixed date or looked for a filter that now sits under "More filters"; both were updated.
+
+## What this round does not do
+
+- **No new data, widgets or features.** Where a screen has nothing to open (My equipment rows, "Equipment held by employees", report tables), rows are not made clickable.
+- **Filters that are date or period forms** (Attendance date, Sales reports period, Audit log, Leave status) keep their Apply button: they are forms, not live filters.
+- **Dialogs** keep the plain card surface (a layered surface read badly inside the dark header in light mode).
+- **Not exercised here:** the outage state (a data service that does not answer; needs a stop/start command), real phone camera scanning for Inventory labels (simulated camera only, as before), hosted Supabase Auth/Storage, Vercel cron and Microsoft 365 delivery. `inventory-a11y.mjs` (which stops PostgREST) was not re-run in this pass.
+- **My equipment with items** was proven by the Inventory employee flow (issue, list, return); the screenshot shows the empty state because the screenshot data has nothing assigned.
+- **Production deployment of Stage 3 (#47)** could not be confirmed from the development environment (no Vercel access); CI on `main` after the merge was green.
