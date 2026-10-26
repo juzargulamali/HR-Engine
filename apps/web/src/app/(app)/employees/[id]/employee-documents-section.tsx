@@ -38,7 +38,7 @@ export async function EmployeeDocumentsSection({
 
   return (
     <div className="space-y-4">
-      <Table>
+      <Table stack>
         <TableHeader>
           <TableRow>
             <TableHead>Type</TableHead>

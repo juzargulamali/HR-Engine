@@ -23,7 +23,8 @@ export default function AppSegmentError({ error, reset }: { error: Error & { dig
   }, [error]);
 
   return (
-    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-4 text-center">
+    <div className="flex min-h-[60vh] items-center justify-center px-4">
+    <div role="alert" className="os-card flex max-w-md flex-col items-center gap-4 p-8 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
         <TriangleAlert className="h-6 w-6" aria-hidden />
       </div>
@@ -43,6 +44,7 @@ export default function AppSegmentError({ error, reset }: { error: Error & { dig
         <RotateCcw className="h-4 w-4" aria-hidden />
         Try again
       </Button>
+    </div>
     </div>
   );
 }

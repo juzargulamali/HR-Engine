@@ -5,6 +5,7 @@ import { TaskDetailBody } from "@/components/projects/tasks/task-detail";
 import { loadTaskDetail } from "@/components/projects/tasks/task-detail-data";
 import { getProjectsContext } from "@/lib/projects/context";
 import { loadProjectView } from "@/lib/projects/data";
+import { BackLink } from "@/components/workspace/list-memory";
 
 export const metadata = { title: "Task" };
 
@@ -24,9 +25,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
 
   return (
     <div className="space-y-5">
-      <Link href={`/projects/${id}/work`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Back to the task list
-      </Link>
+      <BackLink section={`tasks-${id}`} fallback={`/projects/${id}/work`}>Back to the task list</BackLink>
       <h2 className="text-xl font-semibold">{data.task.title}</h2>
       <div className="max-w-3xl">
         <TaskDetailBody data={data} view={view} taskHref={(tid) => `/projects/${id}/work/tasks/${tid}`} />

@@ -135,7 +135,7 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
               return (
                 <li key={c.id} className="rounded-md border border-border p-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline" className={c.status === "approved" ? "border-emerald-500/40 text-emerald-800 dark:text-emerald-300" : c.status === "proposed" ? "border-amber-500/40 text-amber-800 dark:text-amber-300" : "text-muted-foreground"}>{SCOPE_STATUS[c.status] ?? c.status}</Badge>
+                    <Badge variant="outline" className={c.status === "approved" ? "border-[hsl(var(--os-green)/0.4)] text-[hsl(var(--os-green))]" : c.status === "proposed" ? "border-[hsl(var(--os-amber)/0.4)] text-[hsl(var(--os-amber))]" : "text-muted-foreground"}>{SCOPE_STATUS[c.status] ?? c.status}</Badge>
                     <h3 className="text-sm font-semibold">{c.title}</h3>
                     <span className="ml-auto flex flex-wrap gap-2">
                       {proposed && canDecide && !finished ? <DecideScopeChangeForm projectId={id} scopeChangeId={c.id} /> : null}

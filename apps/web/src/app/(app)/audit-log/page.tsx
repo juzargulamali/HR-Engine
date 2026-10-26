@@ -5,13 +5,13 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Alert } from "@/components/ui/alert";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
+import { AccessNotice } from "@/components/os/access-notice";
 
 export const metadata = { title: "Audit log" };
 
@@ -50,7 +50,7 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
   if (!session) return null;
 
   if (!canViewAuditLog(session.grants)) {
-    return <Alert variant="destructive">The audit log is restricted to HR Admin and System Administrator.</Alert>;
+    return <AccessNotice title="Audit log">The audit log is restricted to HR Admin and System Administrator.</AccessNotice>;
   }
 
   const supabase = await createClient();
@@ -180,7 +180,7 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
           <CardTitle>Recent activity{count != null ? ` (${count} total)` : ""}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>When</TableHead>

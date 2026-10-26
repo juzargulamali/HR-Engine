@@ -90,7 +90,7 @@ html[data-theme="light"]:has(.os-v2) {
   --destructive-foreground: 0 0% 100%;
   --success: 152 62% 26%;
   --success-foreground: 0 0% 100%;
-  --warning: 32 90% 30%;
+  --warning: 32 90% 27%;
   --warning-foreground: 0 0% 100%;
   --border: 195 22% 85%;
   --input: 200 14% 48%;
@@ -129,6 +129,7 @@ html:not([data-theme="light"]):has(.os-v2) body {
   --accent: 180 72% 62%;
   --ring: 184 85% 66%;
   --card: 195 32% 13%;
+  --card-foreground: 180 25% 95%;
   --destructive: 355 85% 72%;
   --warning: 40 92% 60%;
   --success: 152 55% 58%;
@@ -196,6 +197,8 @@ html[data-theme="light"] .os-card.os-cool { background: linear-gradient(180deg, 
 
 /* Keyboard focus is one clear outline on the control; a selected row is a quiet tint and an edge bar. The two never look alike. */
 .os-v2 :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; box-shadow: none; }
+/* The ring appears at once: a control that fades its own colours must not also fade its focus ring in (a keyboard user would see none for 150 ms). */
+.os-v2 :focus-visible, .os-chrome :focus-visible { transition-property: color, background-color, border-color, opacity, transform, filter, text-decoration-color; }
 
 /* ------------------------------------------------------------------ components (utilities can still override these) */
 @layer components {
@@ -209,6 +212,7 @@ html[data-theme="light"] .os-card.os-cool { background: linear-gradient(180deg, 
   .os-badge[data-tone="blue"] { background: hsl(var(--os-info) / 0.16); color: hsl(var(--os-info)); }
   .os-badge[data-tone="amber"] { background: hsl(var(--os-amber) / 0.16); color: hsl(var(--os-amber)); }
   .os-badge[data-tone="red"] { background: hsl(var(--os-red) / 0.14); color: hsl(var(--os-red)); }
+  .os-badge[data-tone="green"] { background: hsl(var(--os-green) / 0.14); color: hsl(var(--os-green)); }
   .os-badge[data-tone="quiet"] { background: transparent; color: hsl(var(--muted-foreground)); padding-left: 0; padding-right: 0; }
   .os-dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; flex: none; background: hsl(var(--subtle)); }
   .os-dot[data-tone="cyan"] { background: hsl(var(--primary)); }
@@ -227,6 +231,7 @@ html[data-theme="light"] .os-card.os-cool { background: linear-gradient(180deg, 
   .os-pill[data-tone="cyan"] { background: hsl(var(--primary) / 0.2); }
   .os-pill[data-tone="amber"] { background: hsl(var(--os-amber) / 0.2); color: hsl(var(--os-amber)); }
   .os-pill[data-tone="red"] { background: hsl(var(--os-red) / 0.2); color: hsl(var(--os-red)); }
+  .os-pill[data-tone="green"] { background: hsl(var(--os-green) / 0.18); color: hsl(var(--os-green)); }
   /* Default, hover, open, keyboard focus, saving and disabled each look different. */
   button.os-pill { cursor: pointer; transition: background-color 120ms, border-color 120ms; }
   button.os-pill:hover { border-color: hsl(var(--foreground) / 0.28); filter: brightness(1.12); }
@@ -364,7 +369,27 @@ html[data-theme="light"] .os-pill[data-tone="red"] { color: hsl(355 68% 32%); }
 html[data-theme="light"] .os-badge[data-tone="blue"] { color: hsl(213 80% 30%); }
 html[data-theme="light"] .os-badge[data-tone="amber"] { color: hsl(30 95% 19%); }
 html[data-theme="light"] .os-badge[data-tone="red"] { color: hsl(355 68% 32%); }
+html[data-theme="light"] .os-badge[data-tone="cyan"] { color: hsl(180 90% 15%); }
+html[data-theme="light"] .os-badge[data-tone="green"] { color: hsl(152 70% 18%); }
+html[data-theme="light"] .os-pill[data-tone="green"] { color: hsl(152 70% 18%); }
 
 /* Form selects sit on the darker field colour instead of relying on a bright edge; the edge stays at the 3:1 the tokens guarantee. */
 .os-v2 select:not([multiple]) { background-color: hsl(var(--field)); }
 .os-v2 select:not([multiple]):hover { border-color: hsl(var(--foreground) / 0.35); }
+
+/* Board lanes: a coloured top edge says what kind of lane it is (the heading still says which). */
+.os-v2 [data-board-col] { border-top-width: 3px; }
+.os-v2 [data-board-col="cyan"] { border-top-color: hsl(var(--fill-teal)); }
+.os-v2 [data-board-col="blue"] { border-top-color: hsl(var(--fill-blue)); }
+.os-v2 [data-board-col="amber"] { border-top-color: hsl(var(--fill-amber)); }
+.os-v2 [data-board-col="red"] { border-top-color: hsl(var(--fill-red)); }
+.os-v2 [data-board-col="green"] { border-top-color: hsl(var(--fill-green)); }
+
+/* A card or list item that opens its record (phone lists, My equipment ...): the same quiet teal hover and edge as a table row. */
+.os-v2 .os-click-card[data-clickable]:hover { background-color: hsl(var(--primary) / 0.075); }
+.os-v2 .os-click-card[data-clickable]:focus-within { background-color: hsl(var(--primary) / 0.05); }
+.os-v2 .os-click-card[data-selected="true"] { background: linear-gradient(90deg, hsl(var(--primary) / 0.2), hsl(var(--primary) / 0.07) 70%); box-shadow: inset 4px 0 0 hsl(var(--primary)); }
+
+/* The shell is dark in both themes: its badges keep the shell's own colours in the light theme too. */
+html[data-theme="light"] .os-chrome .os-badge[data-tone="cyan"] { color: hsl(var(--accent)); }
+html[data-theme="light"] .os-chrome .os-badge[data-tone="green"], html[data-theme="light"] .os-chrome .os-pill[data-tone="green"] { color: hsl(var(--os-green)); }

@@ -45,7 +45,7 @@ export async function PerformanceSection({
     <div className="space-y-6">
       <div>
         <h3 className="mb-2 text-sm font-medium text-muted-foreground">Goals</h3>
-        <Table>
+        <Table stack>
           <TableHeader>
             <TableRow>
               <TableHead>Cycle</TableHead>
@@ -83,7 +83,7 @@ export async function PerformanceSection({
 
       <div>
         <h3 className="mb-2 text-sm font-medium text-muted-foreground">Appraisals</h3>
-        <Table>
+        <Table stack>
           <TableHeader>
             <TableRow>
               <TableHead>Cycle</TableHead>

@@ -18,6 +18,7 @@ import { ActivateRecoveryWindowsForm } from "./activate-recovery-windows-form";
 import { DeactivateRecoveryWindowsForm } from "./deactivate-recovery-windows-form";
 import { AddLeaveTypeForm } from "./add-leave-type-form";
 import { EmptyState } from "@/components/ui/empty-state";
+import { BackLink } from "@/components/workspace/list-memory";
 
 export const metadata = { title: "Policy" };
 
@@ -80,9 +81,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
 
   return (
     <div className="space-y-6">
-      <Link href="/policies" className="text-sm text-muted-foreground hover:underline">
-        ← Back to policies
-      </Link>
+      <BackLink section="policies" fallback="/policies">Back to policies</BackLink>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold capitalize">{policy.policy_type.replace(/_/g, " ")}</h1>
@@ -113,7 +112,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               {windowsRules ? (
-                <Table>
+                <Table stack>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Rule</TableHead>
@@ -212,7 +211,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             <CardTitle>Leave types</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Code</TableHead>

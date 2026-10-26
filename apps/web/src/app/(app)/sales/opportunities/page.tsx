@@ -8,7 +8,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { AvailabilityBadge, DueText, StageBadge } from "@/components/sales/badges";
 import { formatDate, formatMoney } from "@/components/sales/format";
 import { QuickAddEnquiry } from "@/components/sales/quick-add-enquiry";
+import { ClickableRow } from "@/components/workspace/clickable-row";
 import { ColumnsMenu } from "@/components/workspace/columns-menu";
+import { RememberList } from "@/components/workspace/list-memory";
 import { ListToolbar, type ToolbarFilter } from "@/components/workspace/list-toolbar";
 import { MoreMenu } from "@/components/workspace/more-menu";
 import { PanelLink } from "@/components/workspace/panel-link";
@@ -26,6 +28,7 @@ import { filterOpportunities, openPipelineByStage, organisationLabel, type OppSt
 import { canEditOpportunity } from "@enginious-hr/domain";
 import { EnquirySidePanel } from "../_panel/enquiry-panel";
 import { CurrencyTotals } from "../currency-totals";
+import type { BoardColumn } from "@/components/workspace/board";
 import { EnquiryBoard, type BoardMeta } from "./enquiry-board";
 
 export const metadata = { title: "Enquiries" };
@@ -87,8 +90,8 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
   const filters: ToolbarFilter[] = [
     ...(view === "table" ? [{ name: "stage", label: "Stage", value: stage, options: [{ value: "", label: "Any stage" }, ...CRM_STAGES.map((s) => ({ value: s.id, label: s.label }))] }] : []),
     { name: "owner", label: "Owner", value: owner, options: [{ value: "", label: "Anyone" }, { value: "me", label: "Mine" }, ...ctx.people.filter((p) => p.id !== ctx.userId).map((p) => ({ value: p.id, label: p.name }))] },
-    { name: "status", label: "Show", value: status === "open" ? "" : status, options: [{ value: "", label: "Open (includes on hold)" }, { value: "closed", label: "Won and lost" }, { value: "all", label: "Everything" }] },
-    ...(multiCompany ? [{ name: "company", label: "Company", value: company, options: [{ value: "", label: "All companies" }, ...ctx.companies.map((c) => ({ value: c.id, label: c.name }))] }] : []),
+    { name: "status", label: "Show", secondary: true, value: status === "open" ? "" : status, options: [{ value: "", label: "Open (includes on hold)" }, { value: "closed", label: "Won and lost" }, { value: "all", label: "Everything" }] },
+    ...(multiCompany ? [{ name: "company", label: "Company", secondary: true, value: company, options: [{ value: "", label: "All companies" }, ...ctx.companies.map((c) => ({ value: c.id, label: c.name }))] }] : []),
   ];
 
   const toolbar = (
@@ -112,6 +115,7 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
 
   return (
     <div className="space-y-4">
+      <RememberList section="enquiries" />
       {header}
       {toolbar}
       {rows.length === 0 ? (
@@ -136,7 +140,7 @@ function BoardView({ rows, ctx, here }: { rows: OpportunityListItem[]; ctx: NonN
   const summary = openPipelineByStage(open.map((i) => ({ ...i.opp, value: i.value })));
   const columns = boardColumns().map((c) => {
     const s = summary.find((x) => x.stage === c.id);
-    return { ...c, hint: s && s.count > 0 ? <CurrencyTotals totals={s.totals} unvalued={s.unvalued} emptyText="No value yet" /> : c.id === "won" || c.id === "lost" ? <span>Entered through its form</span> : undefined };
+    return { ...c, tone: BOARD_TONE[c.id], hint: s && s.count > 0 ? <CurrencyTotals totals={s.totals} unvalued={s.unvalued} emptyText="No value yet" /> : c.id === "won" || c.id === "lost" ? <span>Entered through its form</span> : undefined };
   });
   const meta: Record<string, BoardMeta> = {};
   const items = [...rows].sort(byDue).map((i) => {
@@ -150,6 +154,8 @@ function BoardView({ rows, ctx, here }: { rows: OpportunityListItem[]; ctx: NonN
       id: i.opp.id,
       columnId: boardColumnFor(i.opp.stage),
       title: i.opp.title,
+      href: here({ open: i.opp.id }),
+      panel: true,
       ...targets,
       card: (
         <div>
@@ -165,7 +171,7 @@ function BoardView({ rows, ctx, here }: { rows: OpportunityListItem[]; ctx: NonN
             ) : i.opp.stage === "won" || i.opp.stage === "lost" ? (
               <span className="text-muted-foreground">Closed</span>
             ) : (
-              <span className="font-medium text-amber-800 dark:text-amber-300">No next action planned</span>
+              <span className="font-medium text-[hsl(var(--os-amber))]">No next action planned</span>
             )}
           </div>
         </div>
@@ -179,6 +185,7 @@ function BoardView({ rows, ctx, here }: { rows: OpportunityListItem[]; ctx: NonN
 // Table
 // ---------------------------------------------------------------------------------------------------------------
 
+const BOARD_TONE: Record<string, BoardColumn["tone"]> = { new: undefined, qualified: "cyan", proposal_prep: "blue", proposal_sent: "blue", quote_sent: "blue", negotiation: "cyan", on_hold: "amber", won: "green", lost: undefined };
 const SORTABLE: Partial<Record<EnquiryColumn, EnquirySortKey>> = { enquiry: "enquiry", party: "party", owner: "owner", stage: "stage", due: "due", dates: "dates", value: "value", created: "created" };
 
 function TableView({ rows, total, cols, sort, here, openId, filterActive }: {
@@ -209,13 +216,13 @@ function TableView({ rows, total, cols, sort, here, openId, filterActive }: {
         </TableHeader>
         <TableBody>
           {shown.map((i) => (
-            <TableRow key={i.opp.id} className={`align-top ${openId === i.opp.id ? "bg-secondary/50" : ""}`} aria-selected={openId === i.opp.id || undefined}>
+            <ClickableRow key={i.opp.id} href={here({ open: i.opp.id })} panel selected={openId === i.opp.id} className="align-top" aria-selected={openId === i.opp.id || undefined}>
               {cols.map((c) => (
                 <TableCell key={c} data-label={c === cols[0] ? undefined : label(c)} className={cellClass(c)}>
                   <Cell column={c} item={i} href={here({ open: i.opp.id })} />
                 </TableCell>
               ))}
-            </TableRow>
+            </ClickableRow>
           ))}
         </TableBody>
       </Table>

@@ -3,9 +3,9 @@ import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Alert } from "@/components/ui/alert";
 import { DraftDecisionButtons } from "./draft-decision-buttons";
 import { EmptyState } from "@/components/ui/empty-state";
+import { AccessNotice } from "@/components/os/access-notice";
 
 export const metadata = { title: "AI suggestions" };
 
@@ -14,7 +14,7 @@ export default async function AiSuggestionsPage() {
   if (!session) return null;
 
   if (!canReviewAiDrafts(session.grants)) {
-    return <Alert variant="destructive">AI Suggestions is restricted to HR Admin and Sys Admin.</Alert>;
+    return <AccessNotice title="AI suggestions">AI Suggestions is restricted to HR Admin and Sys Admin.</AccessNotice>;
   }
 
   const supabase = await createClient();
@@ -39,7 +39,7 @@ export default async function AiSuggestionsPage() {
           <CardTitle>Pending review</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Agent</TableHead>

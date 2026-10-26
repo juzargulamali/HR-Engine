@@ -1,46 +1,42 @@
 import { AVAILABILITY_LABELS, commercialApprovalLabel, crmStageLabel, daysOverdue, followUpTiming, type ApprovalPolicy, type ApprovalState, type AvailabilityDisplay } from "@enginious-hr/domain";
-import { Badge } from "@/components/ui/badge";
+import { OsBadge, type OsTone } from "@/components/os/pills";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "./format";
 
-const STAGE_TONE: Record<string, string> = {
-  won: "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300",
-  lost: "border-border bg-secondary text-muted-foreground",
-  on_hold: "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300",
+// Early stages are plain, work in progress is blue, a decision is teal, a pause is amber; won is green and lost is quiet. The words always say the stage.
+const STAGE_TONE: Record<string, OsTone> = {
+  new: "neutral", qualified: "cyan", proposal_prep: "blue", proposal_sent: "blue", quote_sent: "blue", negotiation: "cyan",
+  on_hold: "amber", won: "green", lost: "quiet",
 };
 
 export function StageBadge({ stage }: { stage: string }) {
   return (
-    <Badge variant="outline" className={cn("whitespace-nowrap", STAGE_TONE[stage])}>
+    <OsBadge tone={STAGE_TONE[stage] ?? "neutral"} dot={stage !== "lost"} className="whitespace-nowrap">
       {crmStageLabel(stage)}
-    </Badge>
+    </OsBadge>
   );
 }
 
-const AVAILABILITY_TONE: Record<AvailabilityDisplay, string> = {
-  unverified: "text-muted-foreground",
-  awaiting: "border-sky-500/40 bg-sky-500/10 text-sky-800 dark:text-sky-300",
-  confirmed: "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300",
-  unavailable: "border-destructive/40 bg-destructive/10 text-destructive",
-  needs_recheck: "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300",
+const AVAILABILITY_TONE: Record<AvailabilityDisplay, OsTone> = {
+  unverified: "quiet", awaiting: "blue", confirmed: "green", unavailable: "red", needs_recheck: "amber",
 };
 
 export function AvailabilityBadge({ state }: { state: AvailabilityDisplay }) {
   return (
-    <Badge variant="outline" className={cn("whitespace-nowrap", AVAILABILITY_TONE[state])}>
+    <OsBadge tone={AVAILABILITY_TONE[state]} dot={state !== "unverified"} className="whitespace-nowrap">
       {AVAILABILITY_LABELS[state]}
-    </Badge>
+    </OsBadge>
   );
 }
 
 /** Never reads "Approved" unless a founder recorded it under a configured policy. */
 export function ApprovalBadge({ policy, latest }: { policy: ApprovalPolicy; latest: { state: ApprovalState } | null }) {
   const { label, tone } = commercialApprovalLabel(policy, latest);
-  const cls = tone === "positive" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300" : tone === "warning" ? "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300" : "text-muted-foreground";
+  const t: OsTone = tone === "positive" ? "green" : tone === "warning" ? "amber" : "quiet";
   return (
-    <Badge variant="outline" className={cn("whitespace-nowrap", cls)}>
+    <OsBadge tone={t} dot={t !== "quiet"} className="whitespace-nowrap">
       {label}
-    </Badge>
+    </OsBadge>
   );
 }
 
@@ -49,7 +45,7 @@ export function DueText({ dueAt, className }: { dueAt: string; className?: strin
   const timing = followUpTiming(dueAt);
   const days = daysOverdue(dueAt);
   return (
-    <span className={cn("whitespace-nowrap max-sm:whitespace-normal", timing === "overdue" && "font-medium text-destructive", timing === "due_today" && "font-medium text-amber-800 dark:text-amber-300", className)}>
+    <span className={cn("whitespace-nowrap max-sm:whitespace-normal", timing === "overdue" && "font-medium text-[hsl(var(--os-red))]", timing === "due_today" && "font-medium text-[hsl(var(--os-amber))]", className)}>
       {formatDateTime(dueAt)}
       {timing === "overdue" ? ` · overdue${days > 0 ? ` ${days}d` : ""}` : timing === "due_today" ? " · due today" : ""}
     </span>

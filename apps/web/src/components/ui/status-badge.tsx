@@ -1,4 +1,4 @@
-import { Badge, type BadgeProps } from "./badge";
+import { OsBadge, type OsTone } from "@/components/os/pills";
 
 /**
  * Shared across Leave, Reimbursements and Approvals — the one place the
@@ -6,13 +6,13 @@ import { Badge, type BadgeProps } from "./badge";
  * to a badge color and a plain-English "what happens next" line, instead of
  * each page keeping its own copy of both.
  */
-const VARIANT_BY_STATUS: Record<string, NonNullable<BadgeProps["variant"]>> = {
-  draft: "outline",
-  submitted: "secondary",
-  pending_approval: "secondary",
-  approved: "default",
-  rejected: "destructive",
-  cancelled: "outline",
+const TONE_BY_STATUS: Record<string, OsTone> = {
+  draft: "neutral",
+  submitted: "blue",
+  pending_approval: "amber",
+  approved: "green",
+  rejected: "red",
+  cancelled: "quiet",
 };
 
 const NEXT_ACTION_BY_STATUS: Record<string, string> = {
@@ -25,7 +25,7 @@ const NEXT_ACTION_BY_STATUS: Record<string, string> = {
 };
 
 export function StatusBadge({ status }: { status: string }) {
-  return <Badge variant={VARIANT_BY_STATUS[status] ?? "outline"}>{status.replace(/_/g, " ")}</Badge>;
+  return <OsBadge tone={TONE_BY_STATUS[status] ?? "neutral"} dot={status !== "cancelled"}>{status.replace(/_/g, " ")}</OsBadge>;
 }
 
 /**

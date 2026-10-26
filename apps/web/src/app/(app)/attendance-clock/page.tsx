@@ -210,7 +210,7 @@ export default async function AttendanceClockPage() {
           {(recentSessions ?? []).length === 0 ? (
             <EmptyState dense icon={CalendarClock} title="No attendance sessions yet." description="Clock in above to start your first one." />
           ) : (
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Clocked in</TableHead>

@@ -124,7 +124,7 @@ export function PlanSection({ plan, items, canEdit, projectId, siteTz, milestone
         </div>
       ) : (
         <div className="space-y-4">
-          <Table>
+          <Table stack>
             <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>When</TableHead><TableHead>Status</TableHead>{canEdit ? <TableHead><span className="sr-only">Actions</span></TableHead> : null}</TableRow></TableHeader>
             <TableBody>
               {items.map((i) => {

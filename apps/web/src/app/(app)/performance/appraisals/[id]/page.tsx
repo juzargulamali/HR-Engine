@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AppraisalForm } from "./appraisal-form";
 import { AppraisalActions } from "./appraisal-actions";
+import { BackLink } from "@/components/workspace/list-memory";
 
 export const metadata = { title: "Appraisal" };
 
@@ -42,9 +43,7 @@ export default async function AppraisalDetailPage({ params }: { params: Promise<
 
   return (
     <div className="space-y-6">
-      <Link href="/performance" className="text-sm text-muted-foreground hover:underline">
-        ← Back to performance
-      </Link>
+      <BackLink section="performance" fallback="/performance">Back to performance</BackLink>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">

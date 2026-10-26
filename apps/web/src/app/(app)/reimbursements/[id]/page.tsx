@@ -9,6 +9,7 @@ import { DeleteLineButton } from "./delete-line-button";
 import { ClaimActions } from "./claim-actions";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
+import { BackLink } from "@/components/workspace/list-memory";
 
 export const metadata = { title: "Reimbursement" };
 
@@ -45,9 +46,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
 
   return (
     <div className="space-y-6">
-      <Link href="/reimbursements" className="text-sm text-muted-foreground hover:underline">
-        ← Back to reimbursements
-      </Link>
+      <BackLink section="reimbursements" fallback="/reimbursements">Back to reimbursements</BackLink>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">
@@ -66,7 +65,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
           <CardTitle>Expense lines</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>

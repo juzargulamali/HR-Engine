@@ -24,7 +24,7 @@ const purposeLabel = (id: string) => FILE_PURPOSES.find((p) => p.id === id)?.lab
 function Fact3({ label, recorded, children }: { label: string; recorded: boolean; children?: React.ReactNode }) {
   return (
     <Fact label={label}>
-      {recorded ? <><Badge variant="outline" className="border-emerald-500/40 text-emerald-800 dark:text-emerald-300">Recorded</Badge> <span className="ml-1">{children}</span></> : <span className="text-muted-foreground">Not recorded</span>}
+      {recorded ? <><Badge variant="outline" className="border-[hsl(var(--os-green)/0.4)] text-[hsl(var(--os-green))]">Recorded</Badge> <span className="ml-1">{children}</span></> : <span className="text-muted-foreground">Not recorded</span>}
     </Fact>
   );
 }
@@ -60,7 +60,7 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
         {files.length === 0 ? (
           <EmptyState dense title="No files or links yet" description="Add the documents the team needs: briefs, drawings, confirmations. Commercial documents belong in Sales & CRM, not here." />
         ) : (
-          <Table>
+          <Table stack>
             <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Kind</TableHead><TableHead>Added</TableHead><TableHead><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
             <TableBody>
               {files.map((f) => {
@@ -75,7 +75,7 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
                         <Badge variant="outline" className="whitespace-nowrap">{purposeLabel(f.purpose)}</Badge>
-                        {f.restricted ? <Badge variant="outline" className="whitespace-nowrap border-amber-500/40 text-amber-800 dark:text-amber-300">Restricted</Badge> : null}
+                        {f.restricted ? <Badge variant="outline" className="whitespace-nowrap border-[hsl(var(--os-amber)/0.4)] text-[hsl(var(--os-amber))]">Restricted</Badge> : null}
                       </div>
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground">{view.nameOf(f.uploaded_by)}<br />{formatDateTime(f.created_at)}</TableCell>
@@ -133,8 +133,8 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
                         <div className="flex flex-wrap items-center gap-2">
                           <h4 className="text-sm font-semibold">Version {p.version}</h4>
                           <Badge variant="outline" className="whitespace-nowrap">{p.client_reference}</Badge>
-                          {p.superseded_at ? <Badge variant="outline" className="text-muted-foreground">Replaced by a newer version</Badge> : <Badge variant="outline" className="border-emerald-500/40 text-emerald-800 dark:text-emerald-300">Latest</Badge>}
-                          {isLatest && outdated ? <Badge variant="outline" className="border-amber-500/40 text-amber-800 dark:text-amber-300">Outdated: the plan has changed since</Badge> : null}
+                          {p.superseded_at ? <Badge variant="outline" className="text-muted-foreground">Replaced by a newer version</Badge> : <Badge variant="outline" className="border-[hsl(var(--os-green)/0.4)] text-[hsl(var(--os-green))]">Latest</Badge>}
+                          {isLatest && outdated ? <Badge variant="outline" className="border-[hsl(var(--os-amber)/0.4)] text-[hsl(var(--os-amber))]">Outdated: the plan has changed since</Badge> : null}
                           <a className={cn(buttonVariants({ variant: "outline", size: "sm" }), "ml-auto")} href={`/projects/${id}/documents/plans/${p.id}/pdf`} target="_blank" rel="noopener noreferrer">
                             <Download className="h-3.5 w-3.5" aria-hidden /> Download PDF
                           </a>

@@ -72,7 +72,7 @@ export default async function UsersPage() {
           <CardTitle>All users</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>

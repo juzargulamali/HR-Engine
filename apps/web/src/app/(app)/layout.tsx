@@ -3,6 +3,7 @@ import type { CrmCapability, CrmGrant } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "@/components/nav/app-shell";
+import { OsScope } from "@/components/os/scope";
 import { loadInventoryNavAccess } from "@/lib/inventory/context";
 import { loadProjectsNavAccess } from "@/lib/projects/context";
 
@@ -68,7 +69,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <AppShell session={session} clockOpenSince={clockOpenSince} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants} projects={projects} inventory={inventory}>
-      {children}
+      <OsScope>{children}</OsScope>
     </AppShell>
   );
 }

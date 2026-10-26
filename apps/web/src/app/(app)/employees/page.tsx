@@ -1,4 +1,8 @@
 import Link from "next/link";
+import { EmploymentStatusBadge } from "@/components/hr/status";
+import { ClickableRow } from "@/components/workspace/clickable-row";
+import { RememberList } from "@/components/workspace/list-memory";
+import { ListToolbar } from "@/components/workspace/list-toolbar";
 import { hasRoleAnyScope, isCLevel, isFinance, isSysAdmin } from "@enginious-hr/domain";
 import type { EmploymentStatus } from "@/types/database.types";
 import { getCurrentSession } from "@/lib/auth/session";
@@ -7,9 +11,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -122,52 +123,16 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Filters</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form method="get" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {showDeleted ? <input type="hidden" name="deleted" value="1" /> : null}
-            <div className="space-y-1.5">
-              <Label htmlFor="q">Search</Label>
-              <Input id="q" name="q" placeholder="Name or email" defaultValue={q} />
-            </div>
-            {companies && companies.length > 1 ? (
-              <div className="space-y-1.5">
-                <Label htmlFor="company">Company</Label>
-                <Select id="company" name="company" defaultValue={company}>
-                  <option value="">All</option>
-                  {companies.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.legal_name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            ) : null}
-            <div className="space-y-1.5">
-              <Label htmlFor="status">Status</Label>
-              <Select id="status" name="status" defaultValue={status}>
-                <option value="">All</option>
-                {STATUS_VALUES.map((s) => (
-                  <option key={s} value={s}>
-                    {s.replace(/_/g, " ")}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="flex items-end gap-2">
-              <button type="submit" className={cn(buttonVariants({ size: "sm" }))}>
-                Apply filters
-              </button>
-              <Link href={pageHref({ q: undefined, company: undefined, status: undefined, page: "1" })} className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
-                Reset filters
-              </Link>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+      <ListToolbar
+        search={{ value: q, placeholder: "Search by name or email", label: "Search employees" }}
+        resetKeys={["page"]}
+        clearHref={pageHref({ q: undefined, company: undefined, status: undefined, page: "1" })}
+        filters={[
+          ...(companies && companies.length > 1 ? [{ name: "company", label: "Company", value: company, options: [{ value: "", label: "All" }, ...companies.map((c) => ({ value: c.id, label: c.legal_name }))] }] : []),
+          { name: "status", label: "Status", value: status, options: [{ value: "", label: "All" }, ...STATUS_VALUES.map((s) => ({ value: s, label: s.replace(/_/g, " ") }))] },
+        ]}
+      />
+      <RememberList section="employees" />
 
       <Card>
         <CardHeader>
@@ -177,7 +142,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
@@ -188,7 +153,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
             </TableHeader>
             <TableBody>
               {(employees ?? []).map((e) => (
-                <TableRow key={e.id}>
+                <ClickableRow key={e.id} href={`/employees/${e.id}`}>
                   <TableCell className="font-medium">
                     <Link href={`/employees/${e.id}`} className="hover:underline">
                       {e.first_name} {e.last_name}
@@ -202,9 +167,9 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
                   <TableCell>{e.job_title ?? "—"}</TableCell>
                   <TableCell>{companyName.get(e.company_id) ?? "—"}</TableCell>
                   <TableCell>
-                    <Badge variant="secondary">{e.employment_status}</Badge>
+                    <EmploymentStatusBadge status={e.employment_status} />
                   </TableCell>
-                </TableRow>
+                </ClickableRow>
               ))}
               {(employees ?? []).length === 0 ? (
                 <TableRow>

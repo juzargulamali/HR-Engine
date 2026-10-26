@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { CreatePhase2bDraftsButton } from "./create-phase2b-drafts-button";
 import { CreateRecoveryWindowsDraftsButton } from "./create-recovery-windows-drafts-button";
 import { PolicyVersionsTable, type PolicyVersionRow } from "./policy-versions-table";
+import { RememberList } from "@/components/workspace/list-memory";
 
 export const metadata = { title: "Policies" };
 
@@ -81,6 +82,7 @@ export default async function PoliciesPage() {
 
   return (
     <div className="space-y-6">
+      <RememberList section="policies" />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Country policies</h1>

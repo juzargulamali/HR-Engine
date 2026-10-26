@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 import { GoalForm } from "./goal-form";
 import { GoalRowControls } from "./goal-row-controls";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ClickableRow } from "@/components/workspace/clickable-row";
+import { RememberList } from "@/components/workspace/list-memory";
 
 export const metadata = { title: "Performance reviews" };
 
@@ -67,6 +69,7 @@ export default async function PerformancePage() {
 
   return (
     <div className="space-y-6">
+      <RememberList section="performance" />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">My Performance</h1>
@@ -84,7 +87,7 @@ export default async function PerformancePage() {
           <CardTitle>Goals</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Cycle</TableHead>
@@ -136,7 +139,7 @@ export default async function PerformancePage() {
           <CardTitle>Appraisals</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Cycle</TableHead>
@@ -147,7 +150,7 @@ export default async function PerformancePage() {
             </TableHeader>
             <TableBody>
               {(appraisals ?? []).map((a) => (
-                <TableRow key={a.id}>
+                <ClickableRow key={a.id} href={`/performance/appraisals/${a.id}`}>
                   <TableCell>{cycleName.get(a.cycle_id) ?? "—"}</TableCell>
                   <TableCell>{a.overall_rating ?? "—"}</TableCell>
                   <TableCell>
@@ -158,7 +161,7 @@ export default async function PerformancePage() {
                       {a.status === "submitted" ? "Review & acknowledge" : "View"}
                     </Link>
                   </TableCell>
-                </TableRow>
+                </ClickableRow>
               ))}
               {(appraisals ?? []).length === 0 ? (
                 <TableRow>

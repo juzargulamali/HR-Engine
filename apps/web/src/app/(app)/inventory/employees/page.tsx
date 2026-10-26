@@ -117,7 +117,7 @@ export default async function EmployeeEquipmentPage({ searchParams }: { searchPa
                   <TableCell className="min-w-[11rem]">
                     <div className="break-words font-medium">{g.name}</div>
                     <div className="text-sm text-muted-foreground">{g.number}</div>
-                    {g.left ? <Badge variant="outline" className="mt-1 whitespace-nowrap border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300">{leftLabel(g)}: equipment still out</Badge> : null}
+                    {g.left ? <Badge variant="outline" className="mt-1 whitespace-nowrap border-[hsl(var(--os-amber)/0.4)] bg-[hsl(var(--os-amber)/0.1)] text-[hsl(var(--os-amber))]">{leftLabel(g)}: equipment still out</Badge> : null}
                   </TableCell>
                   <TableCell data-label="Items" className="min-w-[14rem]">
                     <details>
@@ -130,7 +130,7 @@ export default async function EmployeeEquipmentPage({ searchParams }: { searchPa
                             {i.serial ? <span className="text-muted-foreground"> · serial {i.serial}</span> : null}
                             <span className="block text-muted-foreground">
                               {conditionText(i.condition)} · since {formatDate(i.issuedAt)}{i.expectedReturnAt ? ` · back by ${formatDate(i.expectedReturnAt)}` : ""}
-                              {i.overdue ? <span className="font-medium text-amber-800 dark:text-amber-300"> · overdue</span> : null}
+                              {i.overdue ? <span className="font-medium text-[hsl(var(--os-amber))]"> · overdue</span> : null}
                             </span>
                           </li>
                         ))}
@@ -139,7 +139,7 @@ export default async function EmployeeEquipmentPage({ searchParams }: { searchPa
                   </TableCell>
                   <TableCell data-label="Since" className="whitespace-nowrap">{formatDate(g.since)}</TableCell>
                   <TableCell data-label="Expected back" className="whitespace-nowrap">{g.nextReturn ? formatDate(g.nextReturn) : <span className="text-muted-foreground">No date set</span>}</TableCell>
-                  <TableCell data-label="Overdue" className="whitespace-nowrap">{g.overdueCount > 0 ? <span className="font-medium text-amber-800 dark:text-amber-300">{g.overdueCount} overdue</span> : <span className="text-muted-foreground">No</span>}</TableCell>
+                  <TableCell data-label="Overdue" className="whitespace-nowrap">{g.overdueCount > 0 ? <span className="font-medium text-[hsl(var(--os-amber))]">{g.overdueCount} overdue</span> : <span className="text-muted-foreground">No</span>}</TableCell>
                   <TableCell className="whitespace-nowrap max-md:text-left">
                     {hasInvCapability(ctx.grants, companyOf.get(g.employeeId) ?? "", "warehouse") ? (
                       <Link href={`/inventory?action=return&employee=${g.employeeId}`} className={buttonVariants({ size: "sm", variant: "outline" })}>Return equipment</Link>

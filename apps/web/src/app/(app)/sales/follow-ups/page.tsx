@@ -9,6 +9,7 @@ import { DueText } from "@/components/sales/badges";
 import { FollowUpRowActions } from "@/components/sales/follow-up-row-actions";
 import { formatDate, formatDateTime } from "@/components/sales/format";
 import { QuickAddEnquiry } from "@/components/sales/quick-add-enquiry";
+import { ClickableRow } from "@/components/workspace/clickable-row";
 import { PanelLink } from "@/components/workspace/panel-link";
 import { LoadError } from "@/components/workspace/states";
 import { firstParam, parseRecordId, withParams } from "@/components/workspace/url-state";
@@ -151,7 +152,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
               </TableHeader>
               <TableBody>
                 {doneRows.map((f) => (
-                  <TableRow key={f.followUp.id} className="align-top">
+                  <ClickableRow key={f.followUp.id} href={open(f.opportunity.id)} panel selected={openId === f.opportunity.id} className="align-top">
                     <TableCell className="min-w-[10rem] font-medium">{f.followUp.title}</TableCell>
                     <TableCell data-label="Enquiry" className="min-w-[12rem]">
                       <PanelLink href={open(f.opportunity.id)} className="underline-offset-2 hover:underline">{f.opportunity.title}</PanelLink>
@@ -159,7 +160,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                     </TableCell>
                     <TableCell data-label="Completed" className="whitespace-nowrap">{formatDateTime(f.followUp.completed_at)}<div className="text-sm text-muted-foreground">{f.assigneeName}</div></TableCell>
                     <TableCell data-label="What happened" className="text-sm">{f.followUp.outcome || <span className="text-muted-foreground">No outcome recorded</span>}</TableCell>
-                  </TableRow>
+                  </ClickableRow>
                 ))}
               </TableBody>
             </Table>
@@ -195,7 +196,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                       const isOnlyOpen = fu.status === "open" && isCrmActive(f.opportunity.stage) && (openByOpp.get(f.opportunity.id) ?? 0) === 1;
                       const canAct = canActOnFollowUp(ctx.grants, { assignedTo: fu.assigned_to }, { companyId: f.opportunity.company_id, ownerId: f.opportunity.owner_id }, ctx.userId);
                       return (
-                        <TableRow key={fu.id} className={cn("align-top", openId === f.opportunity.id && "bg-secondary/50")}>
+                        <ClickableRow key={fu.id} href={open(f.opportunity.id)} panel selected={openId === f.opportunity.id} className="align-top">
                           <TableCell className="min-w-[9rem]"><div className="break-words font-medium">{fu.title}</div><div className="text-sm text-muted-foreground">{KIND_LABEL[fu.kind] ?? fu.kind}</div></TableCell>
                           <TableCell data-label="Enquiry" className="min-w-[10rem]">
                             <PanelLink href={open(f.opportunity.id)} className="break-words underline-offset-2 hover:underline">{f.opportunity.title}</PanelLink>
@@ -211,7 +212,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                               <span className="text-sm text-muted-foreground">Only the assignee, the owner ({ctx.personName(f.opportunity.owner_id)}) or a founder can change this.</span>
                             )}
                           </TableCell>
-                        </TableRow>
+                        </ClickableRow>
                       );
                     })}
                   </TableBody>
@@ -240,7 +241,7 @@ function NeedsAttention({ items, open, who }: { items: AttentionItem[]; open: (i
                 <PanelLink href={open(a.opportunityId)} className="break-words font-medium underline-offset-2 hover:underline">{a.title}</PanelLink>
                 <span className="text-muted-foreground"> · {a.reference}</span>
               </div>
-              <span className="whitespace-nowrap font-medium text-amber-800 dark:text-amber-300">{ATTENTION_LABEL[a.kind] ?? a.detail}{a.kind === "hold_review" && a.at ? ` · ${formatDate(a.at)}` : ""}</span>
+              <span className="whitespace-nowrap font-medium text-[hsl(var(--os-amber))]">{ATTENTION_LABEL[a.kind] ?? a.detail}{a.kind === "hold_review" && a.at ? ` · ${formatDate(a.at)}` : ""}</span>
             </li>
           ))}
         </ul>

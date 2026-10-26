@@ -106,7 +106,7 @@ function LineRow({ line: l, request, can, locations }: { line: LineModel; reques
         <TableCell data-label="Reserved" className={num}>
           <span>
             {q(l.progress.reserved)}
-            {l.progress.shortage > 0 ? <span className="block text-sm font-medium text-amber-800 dark:text-amber-300">short by {q(l.progress.shortage)}</span> : null}
+            {l.progress.shortage > 0 ? <span className="block text-sm font-medium text-[hsl(var(--os-amber))]">short by {q(l.progress.shortage)}</span> : null}
           </span>
         </TableCell>
         <TableCell data-label="Dispatched" className={num}>{q(l.progress.dispatched)}</TableCell>
@@ -312,7 +312,7 @@ function ReserveDialog({ line, request, locations, onClose }: { line: LineModel;
                   <input id={`u-${u.id}`} type="checkbox" name="unitIds" value={u.id} disabled={!u.free} className="mt-1" />
                   <label htmlFor={`u-${u.id}`} className={u.free ? "" : "text-muted-foreground"}>
                     <span className="font-medium">{u.code}</span>{u.serial ? ` · serial ${u.serial}` : ""}
-                    {u.free ? <Badge variant="outline" className="ml-2 border-emerald-500/40 text-emerald-800 dark:text-emerald-300">Free for these dates</Badge> : <span className="block text-sm">{u.reason ?? "Not available for these dates"}</span>}
+                    {u.free ? <Badge variant="outline" className="ml-2 border-[hsl(var(--os-green)/0.4)] text-[hsl(var(--os-green))]">Free for these dates</Badge> : <span className="block text-sm">{u.reason ?? "Not available for these dates"}</span>}
                   </label>
                 </li>
               ))}

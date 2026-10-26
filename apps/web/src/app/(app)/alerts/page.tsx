@@ -10,6 +10,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { AutoRefresh } from "@/components/attendance/auto-refresh";
 import { ALERT_TYPE_LABELS } from "@/lib/recovery/labels";
 import { AcknowledgeAlertForm } from "./acknowledge-alert-form";
+import { ClickableRow } from "@/components/workspace/clickable-row";
+import { AccessNotice } from "@/components/os/access-notice";
 
 export const metadata = { title: "Alerts" };
 
@@ -31,7 +33,7 @@ export default async function AlertsPage() {
   if (!session) return null;
 
   if (!canViewHrAlerts(session.grants)) {
-    return <Alert variant="destructive">Alerts are restricted to HR Admin, CEO, and CTO.</Alert>;
+    return <AccessNotice title="Alerts">Alerts are restricted to HR Admin, CEO, and CTO.</AccessNotice>;
   }
 
   const supabase = await createClient();
@@ -165,7 +167,7 @@ export default async function AlertsPage() {
             <AutoRefresh generatedAt={generatedAt} timeZone={resolveCountryTimeZone(null)} intervalSeconds={60} />
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
@@ -183,7 +185,7 @@ export default async function AlertsPage() {
                 {openAlerts.map((a) => {
                   const d = a.details as { gaps?: unknown[]; still_open?: boolean; window_index?: number; threshold_hours?: number };
                   return (
-                    <TableRow key={a.id}>
+                    <ClickableRow key={a.id} href={`/employees/${a.employee_id}`}>
                       <TableCell>
                         <Link href={`/employees/${a.employee_id}`} className="hover:underline">
                           {employeeName.get(a.employee_id) ?? "—"}
@@ -203,7 +205,7 @@ export default async function AlertsPage() {
                           : `${d.threshold_hours ?? 20} recorded hours reached without a completed rest${d.still_open ? " — still clocked in" : ""}; ${(d.gaps ?? []).length} clocked-out gap(s) shorter than the rest threshold.`}
                       </TableCell>
                       <TableCell>{isHrAdmin ? <AcknowledgeAlertForm alertId={a.id} /> : null}</TableCell>
-                    </TableRow>
+                    </ClickableRow>
                   );
                 })}
               </TableBody>
@@ -231,7 +233,7 @@ export default async function AlertsPage() {
             <CardTitle>Contracts ending</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
@@ -242,7 +244,7 @@ export default async function AlertsPage() {
               </TableHeader>
               <TableBody>
                 {contractsEnding.map((c) => (
-                  <TableRow key={c.id}>
+                  <ClickableRow key={c.id} href={`/employees/${c.employee_id}`}>
                     <TableCell>
                       <Link href={`/employees/${c.employee_id}`} className="hover:underline">
                         {employeeName.get(c.employee_id) ?? "—"}
@@ -253,7 +255,7 @@ export default async function AlertsPage() {
                     <TableCell>
                       <UrgencyBadge days={c.days} />
                     </TableCell>
-                  </TableRow>
+                  </ClickableRow>
                 ))}
               </TableBody>
             </Table>
@@ -267,7 +269,7 @@ export default async function AlertsPage() {
             <CardTitle>Probation reviews due</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
@@ -277,7 +279,7 @@ export default async function AlertsPage() {
               </TableHeader>
               <TableBody>
                 {probationEnding.map((c) => (
-                  <TableRow key={c.id}>
+                  <ClickableRow key={c.id} href={`/employees/${c.employee_id}`}>
                     <TableCell>
                       <Link href={`/employees/${c.employee_id}`} className="hover:underline">
                         {employeeName.get(c.employee_id) ?? "—"}
@@ -287,7 +289,7 @@ export default async function AlertsPage() {
                     <TableCell>
                       <UrgencyBadge days={c.days} />
                     </TableCell>
-                  </TableRow>
+                  </ClickableRow>
                 ))}
               </TableBody>
             </Table>
@@ -301,7 +303,7 @@ export default async function AlertsPage() {
             <CardTitle>Documents expiring or expired</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
@@ -312,7 +314,7 @@ export default async function AlertsPage() {
               </TableHeader>
               <TableBody>
                 {docsFlagged.map((d) => (
-                  <TableRow key={d.id}>
+                  <ClickableRow key={d.id} href={`/employees/${d.employee_id}`}>
                     <TableCell>
                       <Link href={`/employees/${d.employee_id}`} className="hover:underline">
                         {employeeName.get(d.employee_id) ?? "—"}
@@ -321,7 +323,7 @@ export default async function AlertsPage() {
                     <TableCell className="capitalize">{d.document_type.replace(/_/g, " ")}</TableCell>
                     <TableCell>{d.expiry_date ?? "—"}</TableCell>
                     <TableCell>{d.days !== null ? <UrgencyBadge days={d.days} /> : <Badge variant="outline">No date</Badge>}</TableCell>
-                  </TableRow>
+                  </ClickableRow>
                 ))}
               </TableBody>
             </Table>
@@ -335,7 +337,7 @@ export default async function AlertsPage() {
             <CardTitle>Identity documents expiring soon</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>

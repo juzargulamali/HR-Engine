@@ -101,6 +101,8 @@ await step("stage, owner and status filters (and a stage the URL invents is igno
   await page.locator("#lt-stage").selectOption(""); await until(async () => (await rowTitles()).length === 4, "stage cleared");
   await page.locator("#lt-owner").selectOption("me"); await until(async () => /Nothing matches/.test(await main()), "ceo owns none");
   await page.locator("#lt-owner").selectOption({ index: 2 }); await until(async () => (await rowTitles()).length === 4, "emp owns the four open ones");
+  // "Show" is one of the less common filters: it lives under "More filters" (a chip says when one is on).
+  { const more = page.getByRole("button", { name: /more filters/i }); if ((await more.getAttribute("aria-expanded")) !== "true") await more.click(); }
   await page.locator("#lt-status").selectOption("closed"); await until(async () => (await rowTitles()).join() === "Floor projection for the Orbit launch", "won only");
   await page.locator("#lt-status").selectOption("all"); await until(async () => (await rowTitles()).length === 5, "everything");
   await goList("?stage=not_a_stage&owner=not-a-person&status=weird"); if ((await rowTitles()).length !== 4) throw new Error("invented filters were not ignored");

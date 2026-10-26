@@ -1,6 +1,6 @@
 import Link from "next/link";
+import { BackLink } from "@/components/workspace/list-memory";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { crmAllowedMoves, crmStageLabel } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
@@ -70,10 +70,9 @@ export default async function OpportunityPage({ params, searchParams }: { params
   return (
     <div className="space-y-5">
       <header className="space-y-3">
-        <Link href="/sales/opportunities" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Enquiries
-        </Link>
-        <div>
+        <BackLink section="enquiries" fallback="/sales/opportunities">Enquiries</BackLink>
+        <div className="os-card space-y-4 p-4 sm:p-5">
+          <div>
           <p className="text-sm text-muted-foreground">{opp.reference} · {item.companyName}</p>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-2">
             <h1 className="min-w-0 break-words text-2xl font-semibold">{opp.title}</h1>
@@ -90,6 +89,25 @@ export default async function OpportunityPage({ params, searchParams }: { params
               </dd>
             </div>
           </dl>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4" role="group" aria-label="Opportunity actions">
+            {canEdit && isActive ? (
+              <>
+                <MoveStageButton opportunityId={opp.id} version={opp.version} stage={opp.stage} options={moveOptions} />
+                <HoldButton opportunityId={opp.id} version={opp.version} />
+              </>
+            ) : null}
+            {canEdit && isOpen ? (
+              <>
+                {isActive ? <Link href={`/sales/opportunities/${opp.id}/close?outcome=won`} className={LINK_OUTLINE}>Close as won</Link> : null}
+                <Link href={`/sales/opportunities/${opp.id}/close?outcome=lost`} className={LINK_OUTLINE}>Close as lost</Link>
+              </>
+            ) : null}
+            {view.editMode ? <EditDetailsButton data={toEditable(view)} mode={view.editMode} availabilityWillNeedRecheck={item.availability === "confirmed" || item.availability === "unavailable"} /> : null}
+            {view.canAssign && isOpen ? <AssignOwnerButton opportunityId={opp.id} currentOwnerId={opp.owner_id} currentOwnerName={view.ownerName} people={view.people} /> : null}
+            {view.canReopen ? <ReopenButton opportunityId={opp.id} version={opp.version} outcome={isWon ? "won" : "lost"} stageBeforeClose={opp.stage_before_close} hasHandover={!!detail.handover} /> : null}
+            {isWon ? <Link href={`/sales/opportunities/${opp.id}/handover`} className={LINK_OUTLINE}>Handover package</Link> : null}
+          </div>
         </div>
 
         {isHold ? (
@@ -125,24 +143,6 @@ export default async function OpportunityPage({ params, searchParams }: { params
         ) : null}
         {isOpen && !canEdit ? <Alert role="status">Only the owner ({view.ownerName}) or a founder can change the stage, edit the details or close this opportunity. You can add notes, files and follow-ups.</Alert> : null}
 
-        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Opportunity actions">
-          {canEdit && isActive ? (
-            <>
-              <MoveStageButton opportunityId={opp.id} version={opp.version} stage={opp.stage} options={moveOptions} />
-              <HoldButton opportunityId={opp.id} version={opp.version} />
-            </>
-          ) : null}
-          {canEdit && isOpen ? (
-            <>
-              {isActive ? <Link href={`/sales/opportunities/${opp.id}/close?outcome=won`} className={LINK_OUTLINE}>Close as won</Link> : null}
-              <Link href={`/sales/opportunities/${opp.id}/close?outcome=lost`} className={LINK_OUTLINE}>Close as lost</Link>
-            </>
-          ) : null}
-          {view.editMode ? <EditDetailsButton data={toEditable(view)} mode={view.editMode} availabilityWillNeedRecheck={item.availability === "confirmed" || item.availability === "unavailable"} /> : null}
-          {view.canAssign && isOpen ? <AssignOwnerButton opportunityId={opp.id} currentOwnerId={opp.owner_id} currentOwnerName={view.ownerName} people={view.people} /> : null}
-          {view.canReopen ? <ReopenButton opportunityId={opp.id} version={opp.version} outcome={isWon ? "won" : "lost"} stageBeforeClose={opp.stage_before_close} hasHandover={!!detail.handover} /> : null}
-          {isWon ? <Link href={`/sales/opportunities/${opp.id}/handover`} className={LINK_OUTLINE}>Handover package</Link> : null}
-        </div>
       </header>
 
       <DetailTabs tabs={tabs} initial={tab ?? "overview"} />

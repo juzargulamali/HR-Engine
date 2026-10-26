@@ -65,7 +65,7 @@ export async function LeaveSection({ employeeId, canRecordOvernightRecovery = fa
         </Card>
       </div>
 
-      <Table>
+      <Table stack>
         <TableHeader>
           <TableRow>
             <TableHead>Type</TableHead>
@@ -97,7 +97,7 @@ export async function LeaveSection({ employeeId, canRecordOvernightRecovery = fa
 
       <div className="space-y-2 border-t border-border pt-4">
         <h3 className="text-sm font-medium">Recovery Leave earning (Line Manager → HR Admin approval)</h3>
-        <Table>
+        <Table stack>
           <TableHeader>
             <TableRow>
               <TableHead>Date</TableHead>

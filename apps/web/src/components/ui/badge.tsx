@@ -1,25 +1,18 @@
 import * as React from "react";
-import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
-const badgeVariants = cva("inline-flex items-center rounded-full border px-2.5 py-0.5 text-[13px] font-medium", {
-  variants: {
-    variant: {
-      default: "border-transparent bg-primary text-primary-foreground",
-      brand: "brand-gradient border-transparent text-primary-foreground",
-      secondary: "border-transparent bg-secondary text-secondary-foreground",
-      accent: "border-transparent bg-accent text-accent-foreground",
-      outline: "border-border text-foreground",
-      destructive: "border-transparent bg-destructive text-destructive-foreground",
-      success: "border-transparent bg-success text-success-foreground",
-      warning: "border-transparent bg-warning text-warning-foreground",
-    },
-  },
-  defaultVariants: { variant: "default" },
-});
+/**
+ * The one small status/label word of the application. Every variant is drawn with the shared ENGINIOUS OS badge (a soft tint of one status
+ * colour, never a solid block), so the same meaning looks the same in every module and in both themes; the words always carry the meaning.
+ * A caller's className can still tint it (for example the shared status tokens), which wins over the variant.
+ */
+type Variant = "default" | "brand" | "secondary" | "accent" | "outline" | "destructive" | "success" | "warning";
+const TONE: Record<Variant, string> = {
+  default: "cyan", brand: "cyan", accent: "cyan", secondary: "neutral", outline: "neutral", destructive: "red", success: "green", warning: "amber",
+};
 
-export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement>, VariantProps<typeof badgeVariants> {}
+export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> { variant?: Variant | null }
 
 export function Badge({ className, variant, ...props }: BadgeProps) {
-  return <span className={cn(badgeVariants({ variant }), className)} {...props} />;
+  return <span className={cn("os-badge border border-transparent", variant === "outline" && "border-border bg-transparent", className)} data-tone={TONE[variant ?? "default"]} {...props} />;
 }

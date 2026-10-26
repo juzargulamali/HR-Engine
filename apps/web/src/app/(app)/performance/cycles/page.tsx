@@ -62,7 +62,7 @@ export default async function PerformanceCyclesPage() {
           <CardTitle>All cycles</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Company</TableHead>

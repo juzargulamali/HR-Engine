@@ -12,7 +12,7 @@ export default async function LoginPage({
   const { next } = await searchParams;
 
   return (
-    <div className="brand-grid relative flex min-h-screen items-center justify-center overflow-hidden px-4">
+    <div className="os-v2 brand-grid relative flex min-h-screen items-center justify-center overflow-hidden px-4">
       <div
         className="pointer-events-none absolute inset-0"
         style={{ background: "radial-gradient(700px circle at 50% 0%, hsl(var(--brand-glow) / 0.07), transparent 65%)" }}

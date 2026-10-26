@@ -1,5 +1,5 @@
 import { hasCrmCapability, isAnyCrmFounder } from "@enginious-hr/domain";
-import { Alert } from "@/components/ui/alert";
+import { AccessNotice } from "@/components/os/access-notice";
 import { SalesTabs, type SalesTab } from "@/components/sales/sales-tabs";
 import { LoadError } from "@/components/workspace/states";
 import { getCrmContext } from "@/lib/crm/context";
@@ -20,12 +20,7 @@ export default async function SalesLayout({ children }: { children: React.ReactN
     );
   }
   if (ctx.grants.length === 0) {
-    return (
-      <div className="space-y-4">
-        <h1 className="text-2xl font-semibold">Sales &amp; CRM</h1>
-        <Alert>You do not have Sales access. Sales access is granted per company by the founders.</Alert>
-      </div>
-    );
+    return <AccessNotice title="Sales & CRM">You do not have Sales access. Sales access is granted per company by the founders.</AccessNotice>;
   }
   const manageSettings = ctx.grants.some((g) => hasCrmCapability([g], g.companyId, "manage_settings"));
   const manageAccess = ctx.grants.some((g) => hasCrmCapability([g], g.companyId, "manage_access"));

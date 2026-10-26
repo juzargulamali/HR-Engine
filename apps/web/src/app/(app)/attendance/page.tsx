@@ -69,7 +69,7 @@ export default async function AttendancePage({
         </div>
         <Card>
           <CardContent className="pt-6">
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>

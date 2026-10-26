@@ -7,6 +7,8 @@ import { NewClaimForm } from "./new-claim-form";
 import { DeleteDraftClaimButton } from "./delete-draft-claim-button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
+import { ClickableRow } from "@/components/workspace/clickable-row";
+import { RememberList } from "@/components/workspace/list-memory";
 
 export const metadata = { title: "Reimbursements" };
 
@@ -45,6 +47,7 @@ export default async function ReimbursementsPage() {
 
   return (
     <div className="space-y-6">
+      <RememberList section="reimbursements" />
       <div>
         <h1 className="text-2xl font-semibold">My Reimbursements</h1>
         <p className="text-muted-foreground">Submit an expense claim and track its approval.</p>
@@ -64,7 +67,7 @@ export default async function ReimbursementsPage() {
           <CardTitle>My claims</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table stack>
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>
@@ -75,7 +78,7 @@ export default async function ReimbursementsPage() {
             </TableHeader>
             <TableBody>
               {(claims ?? []).map((c) => (
-                <TableRow key={c.id}>
+                <ClickableRow key={c.id} href={`/reimbursements/${c.id}`}>
                   <TableCell>{c.claim_date}</TableCell>
                   <TableCell>
                     <Link href={`/reimbursements/${c.id}`} className="hover:underline">
@@ -89,7 +92,7 @@ export default async function ReimbursementsPage() {
                     </div>
                   </TableCell>
                   <TableCell>{c.status === "draft" ? <DeleteDraftClaimButton claimId={c.id} /> : null}</TableCell>
-                </TableRow>
+                </ClickableRow>
               ))}
               {(claims ?? []).length === 0 ? (
                 <TableRow>
