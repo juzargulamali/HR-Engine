@@ -172,7 +172,7 @@ export class ApprovalsPage {
    * exports) is a real <Table>/<TableRow>, not a card/list-item layout (a
    * stale doc comment here previously said otherwise). Throws rather than
    * guessing on 0 or >1 matches — same "exact-one" safety convention as
-   * src/identity.ts's findUniqueUserRow — so a decision action can never
+   * src/identity.ts's findUniquePerson — so a decision action can never
    * silently act on the wrong row or on more than one. */
   private async rowFor(needle: string) {
     const rows = this.page.getByRole("row", { name: new RegExp(escapeForRegExp(needle), "i") });

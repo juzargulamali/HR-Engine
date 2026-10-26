@@ -47,14 +47,14 @@ function parseBalanceNumber(text: string | null): number | null {
   return match ? Number(match) : null;
 }
 
-/** Reads ONLY the Employee's status cell/badge from the Users & Roles list.
- * MUST be a Sys Admin session — the whole `/admin/*` section (including
- * `/admin/users`) is gated by apps/web/src/app/(app)/admin/layout.tsx to
- * `isSysAdmin(session.grants)` only; HR Admin gets the same denial alert as
- * anyone else and never sees a row at all (confirmed live: this previously
+/** Reads ONLY the Employee's status badge from People & Access (formerly the Users & Roles list).
+ * MUST be a Sys Admin session — accounts, their addresses and the Account
+ * tab (`/people-access`, formerly `/admin/users`) are shown to a System
+ * Administrator only; an HR Admin sees employees without addresses and
+ * has no Account tab (confirmed live for the old page: this previously
  * took an `hrAdminPage` on the mistaken assumption that HR Admin could
- * still VIEW this page even though only Sys Admin can toggle status —
- * viewing requires it too). Never the whole row's text — see
+ * still VIEW the account list even though only Sys Admin can toggle
+ * status — viewing requires it too). Never the whole panel's text — see
  * src/identity.ts's getAccountStatusCellText doc comment for why that
  * produces a false "deactivated" reading on an Active account. Throws
  * (never returns null) if the row can't be found or is ambiguous — an
@@ -126,7 +126,7 @@ export async function readEmployeeReimbursementClaims(employeePage: Page): Promi
  * attendance dates (the ordinary workday and the deliberate weekend day —
  * see recordTag.ts), read via the attendance register. Needs TWO separate
  * role sessions, not one: name resolution (getEmployeeNameByAuthEmail)
- * reads `/admin/users`, which apps/web/src/app/(app)/admin/layout.tsx gates
+ * reads `/people-access` (formerly `/admin/users`), whose account list with addresses is shown
  * to Sys Admin only, while the attendance register itself
  * (canManageAttendance, packages/domain/src/permissions/attendance.ts) is
  * HR Admin only — neither role can do both. The employee's name is
@@ -238,7 +238,7 @@ export function buildReconciliationReport(runId: string, baseline: AccountSnapsh
     hasUnexplainedChange = true;
     lines.push(
       `- **PROBLEM: the Employee test account is not confirmed active and able to log in at the end of this run** (status text: "${final.employeeAccountStatusText}", fresh login succeeded: ${employeeLoginStillWorks}). ` +
-        `Manual recovery: sign in as Sys Admin (E2E_ADMIN_EMAIL) -> /admin/users -> find the Employee test account's row -> click "Reactivate" and give any non-blank reason. ` +
+        `Manual recovery: sign in as Sys Admin (E2E_ADMIN_EMAIL) -> /people-access -> find the Employee test account -> Account tab -> click "Reactivate" and give any non-blank reason. ` +
         `If that doesn't work, the Supabase fallback (schema/schema.sql's account-security migration) is to set that profile's \`account_status\` column back to \`'active'\` and clear its \`banned_until\` column directly.`,
     );
   } else if (baseline.employeeAccountStatusText === final.employeeAccountStatusText) {

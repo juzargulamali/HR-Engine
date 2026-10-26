@@ -212,8 +212,8 @@ Page objects verified directly against real component source this round:
 `new-claim-form.tsx`/`[id]/add-line-form.tsx`/`[id]/claim-actions.tsx`),
 the account-menu/sign-out selector in `tests/read-only/auth.spec.ts`
 (grounded in `user-menu.tsx`'s known lucide-react icon class, not guessed),
-`src/identity.ts`'s email-to-name lookup (grounded in `admin/users/page.tsx`'s
-actual table columns), and the automatic Recovery Leave trigger and its
+`src/identity.ts`'s email-to-name lookup (grounded in the People & Access list's
+actual markup (one link per person, name first)), and the automatic Recovery Leave trigger and its
 verification in `20-attendance.spec.ts` (grounded in
 `record_attendance_and_recovery()`'s actual SQL and
 `bulk-attendance-form.tsx`'s save-result message — not a guessed UI control,

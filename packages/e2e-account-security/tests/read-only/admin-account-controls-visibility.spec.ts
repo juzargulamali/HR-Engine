@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { createTestAdminClient, createTestUser, deleteTestUser, type TestUser } from "../../src/adminClient";
 import { loginAs } from "../../src/auth";
+import { openAccountPanel } from "../../src/peopleAccess";
 
 /**
  * Requirement 10: "unauthorized users cannot access admin account controls"
@@ -28,27 +29,30 @@ test.describe("admin account controls visibility", () => {
     await Promise.all([plainUser, hrAdminUser, sysAdminUser].map((u) => deleteTestUser(admin, u.id)));
   });
 
-  test("a plain employee cannot reach /admin/users", async ({ page }) => {
+  test("a plain employee has nothing to manage in People & Access, and the old /admin/users address leads there", async ({ page }) => {
     await loginAs(page, plainUser.email, plainUser.password);
     await page.goto("/admin/users");
-    await expect(page.getByText(/need the System Administrator role/i)).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Users & roles" })).not.toBeVisible();
+    await expect(page).toHaveURL(/\/people-access/);
+    await expect(page.getByText(/cannot manage people or access/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Deactivate" })).toHaveCount(0);
   });
 
-  test("an HR Admin — full employee-data access elsewhere — still cannot reach /admin/users", async ({ page }) => {
+  test("an HR Admin — full employee-data access elsewhere — still gets no account controls: no Account tab, no Deactivate button", async ({ page }) => {
     await loginAs(page, hrAdminUser.email, hrAdminUser.password);
-    await page.goto("/admin/users");
-    await expect(page.getByText(/need the System Administrator role/i)).toBeVisible();
+    await page.goto(`/people-access?person=u:${plainUser.id}&tab=account`);
+    await expect(page.getByRole("link", { name: "Account", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Deactivate" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Send password reset" })).toHaveCount(0);
   });
 
-  test("a Sys Admin sees account-status controls in the Users & roles table", async ({ page }) => {
+  test("a Sys Admin sees account-status controls under the person's Account tab", async ({ page }) => {
     await loginAs(page, sysAdminUser.email, sysAdminUser.password);
-    await page.goto("/admin/users");
-    await expect(page.getByRole("heading", { name: "Users & roles" })).toBeVisible();
+    await page.goto("/people-access");
+    await expect(page.getByRole("heading", { name: "People & Access" })).toBeVisible();
 
-    const row = page.getByRole("row", { name: new RegExp(plainUser.email) });
-    await expect(row.getByText("Active")).toBeVisible();
-    await expect(row.getByRole("button", { name: "Deactivate" })).toBeVisible();
-    await expect(row.getByRole("button", { name: "Send password reset" })).toBeVisible();
+    const account = await openAccountPanel(page, plainUser.email);
+    await expect(account.getByText("Active", { exact: true }).first()).toBeVisible();
+    await expect(account.getByRole("button", { name: "Deactivate" })).toBeVisible();
+    await expect(account.getByRole("button", { name: "Send password reset" })).toBeVisible();
   });
 });

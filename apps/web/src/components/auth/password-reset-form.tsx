@@ -111,7 +111,7 @@ export function PasswordResetForm({ mode }: { mode: "invite" | "reset" }) {
     return (
       <Alert variant="destructive">
         {mode === "invite"
-          ? "This link is invalid or has expired. Ask HR to send you a new invite from Admin → Users."
+          ? "This link is invalid or has expired. Ask HR to send you a new invite from People & Access."
           : "This link is invalid or has expired. Request a new one from the forgot-password page."}
       </Alert>
     );

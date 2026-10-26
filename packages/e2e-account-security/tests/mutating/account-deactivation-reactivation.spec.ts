@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { createTestAdminClient, createTestUser, deleteTestUser, type TestUser } from "../../src/adminClient";
 import { loginAs } from "../../src/auth";
+import { openAccountPanel } from "../../src/peopleAccess";
 
 /**
  * MUTATING: really deactivates and reactivates a (disposable, throwaway)
@@ -14,12 +15,11 @@ test("deactivating an account blocks its login, reactivating restores it, both a
 
   try {
     await loginAs(page, sysAdmin.email, sysAdmin.password);
-    await page.goto("/admin/users");
-    const row = page.getByRole("row", { name: new RegExp(target.email) });
+    const account = await openAccountPanel(page, target.email);
 
     page.once("dialog", (dialog) => dialog.accept("e2e test deactivation"));
-    await row.getByRole("button", { name: "Deactivate" }).click();
-    await expect(row.getByText(/Deactivated/i)).toBeVisible();
+    await account.getByRole("button", { name: "Deactivate" }).click();
+    await expect(account.getByText(/Deactivated/i).first()).toBeVisible();
 
     // A fresh, unauthenticated context — proves the block at the actual
     // sign-in boundary, not just the admin UI's own state.
@@ -43,8 +43,8 @@ test("deactivating an account blocks its login, reactivating restores it, both a
     expect(deactivatedRow![0]!.actor_id).toBe(sysAdmin.id);
 
     page.once("dialog", (dialog) => dialog.accept("e2e test reactivation"));
-    await row.getByRole("button", { name: "Reactivate" }).click();
-    await expect(row.getByText("Active")).toBeVisible();
+    await account.getByRole("button", { name: "Reactivate" }).click();
+    await expect(account.getByText("Active", { exact: true }).first()).toBeVisible();
 
     const restoredContext = await browser.newContext();
     const restoredPage = await restoredContext.newPage();

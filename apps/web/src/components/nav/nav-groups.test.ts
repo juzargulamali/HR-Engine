@@ -80,16 +80,45 @@ describe("buildNavModules", () => {
     }
   });
 
-  it("hides sys_admin-only links (Companies, Users & Roles) from an ordinary employee", () => {
+  it("hides sys_admin-only links (Companies, People & Access) from an ordinary employee", () => {
     const hrefs = hrefsOf(buildNavModules([grant("line_manager")]));
     expect(hrefs).not.toContain("/admin/companies");
+    expect(hrefs).not.toContain("/people-access");
+  });
+
+  it("shows sys_admin-only links to a sys_admin, and the old Users & Roles address is no longer offered", () => {
+    const hrefs = hrefsOf(buildNavModules([grant("sys_admin", null)]));
+    expect(hrefs).toContain("/admin/companies");
+    expect(hrefs).toContain("/people-access");
     expect(hrefs).not.toContain("/admin/users");
   });
 
-  it("shows sys_admin-only links to a sys_admin", () => {
-    const hrefs = hrefsOf(buildNavModules([grant("sys_admin", null)]));
-    expect(hrefs).toContain("/admin/companies");
-    expect(hrefs).toContain("/admin/users");
+  it("offers People & Access to anyone who can manage something in it, and to no one else", () => {
+    const has = (grants: Parameters<typeof buildNavModules>[0], o: Parameters<typeof buildNavModules>[1] = {}) => hrefsOf(buildNavModules(grants, o)).includes("/people-access");
+    expect(has([grant("sys_admin", null)])).toBe(true);
+    expect(has([grant("hr_admin")])).toBe(true);
+    expect(has([grant("employee")], { crmGrants: [{ companyId: "c1", capabilities: ["manage_access"] }] })).toBe(true);
+    expect(has([grant("employee")], { crmGrants: [{ companyId: "c1", capabilities: ["founder"] }] })).toBe(true);
+    expect(has([grant("employee")], { projects: { grants: [{ companyId: "c1", capabilities: ["manage_access"] }] } })).toBe(true);
+    expect(has([grant("employee")], { inventory: { grants: [{ companyId: "c1", capabilities: ["manage_access"] }] } })).toBe(true);
+    expect(has([grant("employee")], { budget: { any: false, manageAccess: true } })).toBe(true);
+    // a title, or any other right in a module, is not enough
+    expect(has([grant("ceo"), grant("finance"), grant("cto")])).toBe(false);
+    expect(has([grant("employee")], { crmGrants: [{ companyId: "c1", capabilities: ["manage_settings", "assign_owner"] }] })).toBe(false);
+    expect(has([grant("employee")], { projects: { grants: [{ companyId: "c1", capabilities: ["assign_pm"] }] } })).toBe(false);
+    expect(has([grant("employee")], { inventory: { grants: [{ companyId: "c1", capabilities: ["manage_catalogue", "warehouse"] }] } })).toBe(false);
+    expect(has([grant("employee")], { budget: { any: true, finance: true } })).toBe(false);
+  });
+
+  it("no longer carries any of the four old access addresses", () => {
+    const all = hrefsOf(buildNavModules([grant("sys_admin", null), grant("hr_admin")], {
+      crmGrants: [{ companyId: "c1", capabilities: ["founder"] }],
+      projects: { grants: [{ companyId: "c1", capabilities: ["founder"] }] },
+      inventory: { grants: [{ companyId: "c1", capabilities: ["founder"] }] },
+      budget: { any: true, manageAccess: true },
+    }));
+    for (const gone of ["/admin/users", "/sales/access", "/projects/access", "/inventory/access"]) expect(all).not.toContain(gone);
+    expect(all.filter((h) => h === "/people-access")).toHaveLength(1);
   });
 
   it("always includes the base links every signed-in user gets, regardless of role", () => {
@@ -126,7 +155,7 @@ describe("buildNavModules", () => {
     expect(hrefs).not.toContain("/approvals");
     // ...but its own admin-only links are untouched by this change.
     expect(hrefs).toContain("/admin/companies");
-    expect(hrefs).toContain("/admin/users");
+    expect(hrefs).toContain("/people-access");
     expect(hrefs).toContain("/audit-log");
   });
 
@@ -145,7 +174,8 @@ describe("buildNavModules", () => {
     const OLD_HREFS_BY_ROLE: Record<string, string[]> = {
       employee: ["/", "/profile", "/attendance-clock", "/employees", "/attendance", "/leave", "/reimbursements", "/performance", "/letters", "/policies", "/holidays"],
       hr_admin: ["/approvals", "/alerts", "/payroll", "/assets", "/ai-suggestions", "/audit-log"],
-      sys_admin: ["/admin/companies", "/admin/users", "/ai-suggestions", "/audit-log"],
+      // Users & Roles moved into People & Access; the other sys_admin links are unchanged.
+      sys_admin: ["/admin/companies", "/people-access", "/ai-suggestions", "/audit-log"],
     };
     expect(hrefsOf(buildNavModules([grant("employee")]))).toEqual(expect.arrayContaining(OLD_HREFS_BY_ROLE.employee!));
     expect(hrefsOf(buildNavModules([grant("hr_admin")]))).toEqual(expect.arrayContaining([...OLD_HREFS_BY_ROLE.employee!, ...OLD_HREFS_BY_ROLE.hr_admin!]));
@@ -186,23 +216,25 @@ describe("ENGINIOUS OS modules", () => {
     }
   });
 
-  it("shows Sales Settings only to people who can manage them, and Access only to those who can manage access", () => {
+  it("shows Sales Settings only to people who can manage them, and People & Access only to those who can manage access", () => {
     const plain = hrefsOf(buildNavModules([], { crmGrants: [{ companyId: "c1", capabilities: [] }] }));
     expect(plain).toEqual(expect.arrayContaining(["/sales/follow-ups", "/sales/opportunities", "/sales/reports", "/sales/clients", "/sales/proposals"]));
     expect(plain).not.toContain("/sales/settings");
-    expect(plain).not.toContain("/sales/access");
+    expect(plain).not.toContain("/people-access");
     const settingsOnly = hrefsOf(buildNavModules([], { crmGrants: [{ companyId: "c1", capabilities: ["manage_settings"] }] }));
     expect(settingsOnly).toContain("/sales/settings");
-    expect(settingsOnly).not.toContain("/sales/access");
+    expect(settingsOnly).not.toContain("/people-access");
     const founder = hrefsOf(buildNavModules([], { crmGrants: [{ companyId: "c1", capabilities: ["founder"] }] }));
-    expect(founder).toEqual(expect.arrayContaining(["/sales/settings", "/sales/access"]));
+    expect(founder).toEqual(expect.arrayContaining(["/sales/settings", "/people-access"]));
+    expect(founder).not.toContain("/sales/access");
   });
 
   it("does not let a Sales grant change any HR link", () => {
     const hr = (m: NavModuleData[]) => hrefsOf(m.filter((x) => x.id !== "sales"));
     const base = buildNavModules([grant("employee")]);
     const withCrm = buildNavModules([grant("employee")], { crmGrants: [{ companyId: "c1", capabilities: ["founder"] }] });
-    expect(hr(withCrm)).toEqual(hr(base));
+    // The one difference is the new People & Access entry, offered because a founder manages Sales access; no HR page appears or disappears.
+    expect(hr(withCrm).filter((h) => h !== "/people-access")).toEqual(hr(base));
   });
 
   it("never carries a function across the server/client boundary", () => {
@@ -258,17 +290,17 @@ describe("simplified Sales & CRM menu", () => {
   it("lists three destinations for an ordinary salesperson, and nothing for settings or access", () => {
     expect(menuLabels(plain, "sales")).toEqual(["Follow-ups", "Enquiries", "Reports"]);
   });
-  it("puts Settings and Access under their own Manage heading, only for those who may use them", () => {
-    expect(menuLabels(founder, "sales")).toEqual(["Follow-ups", "Enquiries", "Reports", "Settings", "Access"]);
+  it("puts Settings under its own Manage heading, only for those who may use it (access is under People & Access)", () => {
+    expect(menuLabels(founder, "sales")).toEqual(["Follow-ups", "Enquiries", "Reports", "Settings"]);
     const manage = founder.find((m) => m.id === "sales")?.sections.find((s) => s.label === "Manage");
-    expect(manage?.links.map((l) => l.href)).toEqual(["/sales/settings", "/sales/access"]);
+    expect(manage?.links.map((l) => l.href)).toEqual(["/sales/settings"]);
     expect(plain.find((m) => m.id === "sales")?.sections.some((s) => s.label === "Manage")).toBe(false);
   });
   it("keeps contacts, proposals, the pipeline board and the full new-enquiry form out of the menu but findable", () => {
     const secondary = founder.find((m) => m.id === "sales")!.sections.flatMap((s) => s.links.filter((l) => l.secondary).map((l) => l.href));
     expect(secondary).toEqual(expect.arrayContaining(["/sales/clients", "/sales/proposals", "/sales/pipeline", "/sales/opportunities?add=1"]));
     const palette = navGroupsFromModules(founder).find((g) => g.label === "Sales & CRM")!.links.map((l) => l.label);
-    expect(palette).toEqual(expect.arrayContaining(["Follow-ups", "Enquiries", "Reports", "Clients & contacts", "Proposals & quotes", "Pipeline board", "New enquiry", "Settings", "Access"]));
+    expect(palette).toEqual(expect.arrayContaining(["Follow-ups", "Enquiries", "Reports", "Clients & contacts", "Proposals & quotes", "Pipeline board", "New enquiry", "Settings"]));
   });
 });
 
@@ -286,8 +318,8 @@ describe("simplified Projects & Tasks menu", () => {
     expect(mk([], { managesProjects: true }).find((m) => m.id === "projects")?.href).toBe("/projects");
     expect(buildNavModules([], { projects: { grants: [], salesLinked: true } }).find((m) => m.id === "projects")?.href).toBe("/projects");
   });
-  it("puts Handovers and Access under Manage for those who may use them, and New internal project out of the menu", () => {
-    expect(menuLabels(mk(["founder"]), "projects")).toEqual(["My Work", "Projects", "Calendar", "Handovers", "Access"]);
+  it("puts Handovers under Manage for those who may use it, and New internal project out of the menu", () => {
+    expect(menuLabels(mk(["founder"]), "projects")).toEqual(["My Work", "Projects", "Calendar", "Handovers"]);
     expect(menuLabels(mk([], { pendingHandovers: true }), "projects")).toEqual(["My Work", "Projects", "Calendar", "Handovers"]);
     const secondary = mk(["assign_pm"]).find((m) => m.id === "projects")!.sections.flatMap((s) => s.links.filter((l) => l.secondary).map((l) => l.href));
     expect(secondary).toEqual(["/projects/new"]);
@@ -313,11 +345,11 @@ describe("Projects & Tasks navigation", () => {
     for (const h of ["/projects/handovers", "/projects/new", "/projects/access"]) expect(hrefs).not.toContain(h);
   });
 
-  it("shows Handovers and New internal project to people who can assign a PM, and Access to those who manage access", () => {
+  it("shows Handovers and New internal project to people who can assign a PM, and People & Access to those who manage access", () => {
     expect(hrefsOf(buildNavModules([], proj(["assign_pm"])))).toEqual(expect.arrayContaining(["/projects/handovers", "/projects/new"]));
-    expect(hrefsOf(buildNavModules([], proj(["assign_pm"])))).not.toContain("/projects/access");
-    expect(hrefsOf(buildNavModules([], proj(["manage_access"])))).toContain("/projects/access");
-    expect(hrefsOf(buildNavModules([], proj(["founder"])))).toEqual(expect.arrayContaining(["/projects/handovers", "/projects/new", "/projects/access"]));
+    expect(hrefsOf(buildNavModules([], proj(["assign_pm"])))).not.toContain("/people-access");
+    expect(hrefsOf(buildNavModules([], proj(["manage_access"])))).toContain("/people-access");
+    expect(hrefsOf(buildNavModules([], proj(["founder"])))).toEqual(expect.arrayContaining(["/projects/handovers", "/projects/new", "/people-access"]));
   });
 
   it("shows Handovers to a PM who has one waiting for acceptance", () => {
@@ -395,13 +427,15 @@ describe("Inventory navigation", () => {
     expect(sectionLinks(buildNavModules([], { inventory: inv() }))).not.toContain("Inventory:Movements");
   });
 
-  it("shows Setup and Access under Manage only to the people who can use them", () => {
+  it("shows Setup under Manage only to the people who can use it (access is under People & Access)", () => {
     expect(sectionLinks(buildNavModules([], { inventory: inv("warehouse") }))).not.toContain("Manage:Setup");
     expect(sectionLinks(buildNavModules([], { inventory: inv("manage_catalogue") }))).toContain("Manage:Setup");
-    expect(sectionLinks(buildNavModules([], { inventory: inv("manage_catalogue") }))).not.toContain("Manage:Access");
-    expect(sectionLinks(buildNavModules([], { inventory: inv("manage_access") }))).toContain("Manage:Access");
+    expect(sectionLinks(buildNavModules([], { inventory: inv("manage_access") }))).not.toContain("Manage:Access");
+    expect(hrefsOf(buildNavModules([], { inventory: inv("manage_access") }))).toContain("/people-access");
+    expect(hrefsOf(buildNavModules([], { inventory: inv("manage_catalogue") }))).not.toContain("/people-access");
     const founder = sectionLinks(buildNavModules([], { inventory: inv("founder") }));
-    expect(founder).toEqual(expect.arrayContaining(["Manage:Setup", "Manage:Access", "Inventory:Movements"]));
+    expect(founder).toEqual(expect.arrayContaining(["Manage:Setup", "Inventory:Movements"]));
+    expect(founder).not.toContain("Manage:Access");
   });
 
   it("opens the module on the page that suits the person", () => {

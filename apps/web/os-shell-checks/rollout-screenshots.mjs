@@ -30,7 +30,7 @@ const shots = [
   ["approvals-dark", "mgr@e2e.local", "/approvals", "dark", 1440, 800],
   ["attendance-clock-dark", "emp@e2e.local", "/attendance-clock", "dark", 1440, 800],
   ["policies-dark", "ceo@e2e.local", "/policies", "dark", 1440, 800],
-  ["admin-users-light", "admin@e2e.local", "/admin/users", "light", 1440, 800],
+  ["people-access-light", "admin@e2e.local", "/people-access", "light", 1440, 800],
   ["account-security-dark", "ceo@e2e.local", "/account/security", "dark", 1440, 900],
 ];
 const sessions = new Map();

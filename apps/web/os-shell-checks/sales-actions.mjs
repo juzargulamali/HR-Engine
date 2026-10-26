@@ -139,7 +139,7 @@ await step("reports count it as a later-reopened closure", async () => {
 });
 await step("Sales access page + settings keep 'Not configured' wording", async () => {
   await page.goto(`${BASE}/sales/settings`, { waitUntil: "networkidle" }); if (!/Not configured/i.test(await main())) throw new Error("settings wording");
-  await page.goto(`${BASE}/sales/access`, { waitUntil: "networkidle" }); if (!/founder/i.test(await main())) throw new Error("access page empty");
+  await page.goto(`${BASE}/people-access`, { waitUntil: "networkidle" }); if (!/Module access|People & Access/i.test(await main())) throw new Error("People & Access page empty");
 });
 console.log("client console/page errors:", page.errors.slice(0, 5));
 await browser.close(); console.log(fails === 0 ? "\nALL REAL CRM ACTIONS PASSED" : `\n${fails} FAILED`); process.exit(fails ? 1 : 0);

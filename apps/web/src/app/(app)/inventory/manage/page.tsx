@@ -294,7 +294,7 @@ export default async function InventoryManagePage({ searchParams }: { searchPara
         </Panel>
       ) : null}
 
-      <Muted>Who can use Inventory is managed under <Link href="/inventory/access" className="underline underline-offset-2">Access</Link>. Items and their exact specifications are in the <Link href="/inventory" className="underline underline-offset-2">catalogue</Link>.</Muted>
+      <Muted>Who can use Inventory is managed under <Link href="/people-access" className="underline underline-offset-2">People & Access</Link>. Items and their exact specifications are in the <Link href="/inventory" className="underline underline-offset-2">catalogue</Link>.</Muted>
       {sheet}
     </div>
   );

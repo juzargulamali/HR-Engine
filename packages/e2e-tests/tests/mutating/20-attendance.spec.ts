@@ -23,8 +23,8 @@ import { getEmployeeNameByAuthEmail } from "../../src/identity";
  * plausibly share a display name even if their auth emails don't.
  *
  * Name resolution needs a SEPARATE Sys Admin session from the attendance
- * register itself: getEmployeeNameByAuthEmail reads `/admin/users`, which
- * apps/web/src/app/(app)/admin/layout.tsx gates to Sys Admin only, while
+ * register itself: getEmployeeNameByAuthEmail reads `/people-access` (formerly `/admin/users`), whose
+ * account list with addresses is shown to Sys Admin only, while
  * the register (canManageAttendance, packages/domain/src/permissions/
  * attendance.ts) is HR Admin only — neither role can do both, so this file
  * uses `sysAdminPage` purely to resolve the name and `hrAdminPage` for
@@ -52,7 +52,7 @@ test.describe("attendance and recovery leave @mutating", () => {
   test.skip(!isMutationAuthorized(), "Mutation not authorized (E2E_MUTATION_AUTHORIZED != 'true') — skipping mutating attendance tests.");
 
   test("HR Admin bulk-fills a day's attendance across work modes", async ({ hrAdminPage, sysAdminPage, runId }) => {
-    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /admin/users.");
+    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /people-access.");
     const { email } = getCredentials("employee");
     const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, email);
     const attendance = new AttendancePage(hrAdminPage);
@@ -66,7 +66,7 @@ test.describe("attendance and recovery leave @mutating", () => {
   });
 
   test("re-saving an already-recorded day (correction) succeeds", async ({ hrAdminPage, sysAdminPage, runId }) => {
-    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /admin/users.");
+    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /people-access.");
     const { email } = getCredentials("employee");
     const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, email);
     const attendance = new AttendancePage(hrAdminPage);
@@ -78,7 +78,7 @@ test.describe("attendance and recovery leave @mutating", () => {
   });
 
   test("a weekend day recorded present automatically creates exactly one Recovery Leave credit for this employee", async ({ hrAdminPage, sysAdminPage, runId }) => {
-    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /admin/users.");
+    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /people-access.");
     const { email } = getCredentials("employee");
     const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, email);
     const attendance = new AttendancePage(hrAdminPage);
@@ -118,7 +118,7 @@ test.describe("attendance and recovery leave @mutating", () => {
     sysAdminPage,
     runId,
   }) => {
-    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /admin/users.");
+    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /people-access.");
     const { email } = getCredentials("employee");
     const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, email);
     const date = testWeekendDay(runId, 2); // distinct from the creation test above (offset 0) and the rejection test below (offset 3)
@@ -196,7 +196,7 @@ test.describe("attendance and recovery leave @mutating", () => {
     sysAdminPage,
     runId,
   }) => {
-    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /admin/users.");
+    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Employee's name via /people-access.");
     const { email } = getCredentials("employee");
     const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, email);
     const date = testWeekendDay(runId, 3); // distinct from both tests above

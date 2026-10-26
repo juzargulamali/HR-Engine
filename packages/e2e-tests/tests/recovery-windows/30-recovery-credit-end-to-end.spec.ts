@@ -79,7 +79,7 @@ test.describe("recovery credit end to end @mutating @credit", () => {
   }
 
   test("evidence -> one request -> lead then HR approve -> +0.5 posted; correction -> only the +0.5 difference -> total 1.0", async ({ employeePage, managerPage, hrAdminPage, sysAdminPage, runId }) => {
-    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve names via /admin/users.");
+    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve names via /people-access.");
     const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, getCredentials("employee").email);
     const managerName = await getEmployeeNameByAuthEmail(sysAdminPage, getCredentials("manager").email);
     const tz = targetTimezone();
@@ -161,7 +161,7 @@ test.describe("recovery credit end to end @mutating @credit", () => {
     sysAdminPage,
     runId,
   }) => {
-    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve names via /admin/users.");
+    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve names via /people-access.");
     const employeeName = await getEmployeeNameByAuthEmail(sysAdminPage, getCredentials("employee").email);
     const managerName = await getEmployeeNameByAuthEmail(sysAdminPage, getCredentials("manager").email);
     const tz = targetTimezone();

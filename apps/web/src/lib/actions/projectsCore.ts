@@ -15,31 +15,8 @@ import { checkbox, fail, firstIssue, ok, optionalDate, optionalText, optionalUui
 type S = ProjectActionState;
 
 // ---------------------------------------------------------------------------------------------------------------
-// Access (founders and access managers)
+// Company settings
 // ---------------------------------------------------------------------------------------------------------------
-const grantSchema = z.object({ companyId: uuid, userId: uuid, note: optionalText });
-
-export async function grantProjectsAccess(_prev: S, fd: FormData): Promise<S> {
-  const p = grantSchema.safeParse(Object.fromEntries(fd));
-  if (!p.success) return { error: firstIssue(p.error) };
-  const caps = fd.getAll("capabilities").map(String).filter((c) => (PROJ_CAPABILITIES as readonly string[]).includes(c));
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("proj_grant_access", { p_user_id: p.data.userId, p_company_id: p.data.companyId, p_capabilities: caps, p_note: p.data.note ?? null });
-  if (error) return fail(error.message);
-  refreshProjects();
-  return ok();
-}
-
-export async function revokeProjectsAccess(_prev: S, fd: FormData): Promise<S> {
-  const p = z.object({ companyId: uuid, userId: uuid }).safeParse(Object.fromEntries(fd));
-  if (!p.success) return { error: firstIssue(p.error) };
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("proj_revoke_access", { p_user_id: p.data.userId, p_company_id: p.data.companyId });
-  if (error) return fail(error.message);
-  refreshProjects();
-  return ok();
-}
-
 export async function setProjectReferenceCode(_prev: S, fd: FormData): Promise<S> {
   const p = z.object({ companyId: uuid, code: z.string().trim().toUpperCase() }).safeParse(Object.fromEntries(fd));
   if (!p.success) return { error: firstIssue(p.error) };

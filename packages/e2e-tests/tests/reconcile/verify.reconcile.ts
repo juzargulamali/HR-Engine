@@ -95,7 +95,7 @@ test("reconcile final state against baseline and verify the Employee account", a
     return;
   }
 
-  test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to read /admin/users for the final snapshot.");
+  test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to read /people-access for the final snapshot.");
 
   const finalSnapshot = await captureSnapshot(sysAdminPage, hrAdminPage, employeePage, email, runId);
   writeSnapshot(runId, "final", finalSnapshot);

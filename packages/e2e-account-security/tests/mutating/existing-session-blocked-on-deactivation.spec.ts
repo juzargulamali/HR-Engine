@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { createTestAdminClient, createTestUser, deleteTestUser, type TestUser } from "../../src/adminClient";
 import { loginAs } from "../../src/auth";
+import { openAccountPanel } from "../../src/peopleAccess";
 
 /**
  * MUTATING: really deactivates and reactivates a disposable test account.
@@ -36,11 +37,10 @@ test("an existing, already-authenticated session is denied on its next protected
     // 2. A separate System Administrator session deactivates the target
     // through the authorized UI flow — never a direct DB/API bypass.
     await loginAs(adminPage, sysAdmin.email, sysAdmin.password);
-    await adminPage.goto("/admin/users");
-    const row = adminPage.getByRole("row", { name: new RegExp(target.email) });
+    const account = await openAccountPanel(adminPage, target.email);
     adminPage.once("dialog", (dialog) => dialog.accept("existing-session test"));
-    await row.getByRole("button", { name: "Deactivate" }).click();
-    await expect(row.getByText(/Deactivated/i)).toBeVisible();
+    await account.getByRole("button", { name: "Deactivate" }).click();
+    await expect(account.getByText(/Deactivated/i).first()).toBeVisible();
 
     // 3. The target's ALREADY-OPEN session — no new login, same browser
     // context/cookies as step 1 — makes its next protected request. proxy.ts
@@ -60,8 +60,8 @@ test("an existing, already-authenticated session is denied on its next protected
     // dangling deactivated disposable account, and proves the account isn't
     // permanently broken by this test.
     adminPage.once("dialog", (dialog) => dialog.accept("existing-session test cleanup"));
-    await row.getByRole("button", { name: "Reactivate" }).click();
-    await expect(row.getByText("Active")).toBeVisible();
+    await account.getByRole("button", { name: "Reactivate" }).click();
+    await expect(account.getByText("Active", { exact: true }).first()).toBeVisible();
 
     const restoredContext = await browser.newContext();
     const restoredPage = await restoredContext.newPage();

@@ -187,7 +187,7 @@ test.describe("attendance clock: 4-tier routing (overnight-window) @mutating", (
     sysAdminPage,
     runId,
   }) => {
-    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Manager's display name via /admin/users.");
+    test.skip(!hasCredentials("sysAdmin"), "No Sys Admin test account configured — required to resolve the Manager's display name via /people-access.");
     const managerName = await getEmployeeNameByAuthEmail(sysAdminPage, getCredentials("manager").email);
     const tag = tagNote(runId, "att-clock-lead-then-hr");
 

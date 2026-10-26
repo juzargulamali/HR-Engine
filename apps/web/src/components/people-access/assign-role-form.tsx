@@ -14,9 +14,12 @@ const initialState: ActionState = { error: null };
 export function AssignRoleForm({
   users,
   companies,
+  defaultUserId,
 }: {
   users: { id: string; email: string; full_name: string | null }[];
   companies: { id: string; legal_name: string }[];
+  /** Opened from one person's page: that person is already chosen. */
+  defaultUserId?: string;
 }) {
   const [state, formAction, pending] = useActionState(assignRole, initialState);
 
@@ -24,7 +27,7 @@ export function AssignRoleForm({
     <form action={formAction} className="space-y-4">
       <div className="space-y-1.5">
         <Label htmlFor="userId">User</Label>
-        <Select id="userId" name="userId" defaultValue="" required>
+        <Select id="userId" name="userId" defaultValue={defaultUserId ?? ""} required>
           <option value="" disabled>
             Select…
           </option>

@@ -72,7 +72,7 @@ export async function deactivateAccount(userId: string, reason: string): Promise
     return { error: `Account is now blocked from signing in, but recording the reason failed: ${error.message}` };
   }
 
-  revalidatePath("/admin/users");
+  revalidatePath("/people-access");
   return { error: null };
 }
 
@@ -112,7 +112,7 @@ export async function reactivateAccount(userId: string, reason: string): Promise
   const banResult = await setBan(parsed.data.userId, false);
   if (!banResult.error) {
     // Both steps succeeded — consistent, safe to report success.
-    revalidatePath("/admin/users");
+    revalidatePath("/people-access");
     return { error: null };
   }
 
@@ -132,7 +132,7 @@ export async function reactivateAccount(userId: string, reason: string): Promise
     p_reason: compensationReason,
   });
 
-  revalidatePath("/admin/users");
+  revalidatePath("/people-access");
 
   if (!compensationError) {
     // (b) Compensation succeeded — consistent again (still deactivated,

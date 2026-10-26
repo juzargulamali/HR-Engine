@@ -9,14 +9,17 @@ const taskId = psql("select id from proj_tasks limit 1");
 const P = projId ? `/projects/${projId}` : "";
 const invItem = psql("select id from inv_items order by name limit 1"), invUnit = psql("select id from inv_units order by code limit 1"), invReq = psql("select id from inv_requests order by code limit 1");
 const INV = invItem ? ["/inventory", `/inventory?open=${invItem}`, ...(invUnit ? [`/inventory?unit=${invUnit}`] : []), "/inventory?action=receive", "/inventory?action=issue", "/inventory?action=dispatch", "/inventory?action=return", "/inventory?action=transfer", "/inventory?action=scan",
-  "/inventory/requests", ...(invReq ? [`/inventory/requests?open=${invReq}`] : []), "/inventory/movements", "/inventory/manage", "/inventory/access", "/inventory/scan", `/inventory/labels?item=${invItem}`, "/inventory/mine", "/inventory/employees", ...(projId ? [`${P}/equipment`] : [])] : [];
+  "/inventory/requests", ...(invReq ? [`/inventory/requests?open=${invReq}`] : []), "/inventory/movements", "/inventory/manage", "/inventory/scan", `/inventory/labels?item=${invItem}`, "/inventory/mine", "/inventory/employees", ...(projId ? [`${P}/equipment`] : [])] : [];
 const BUDGET = projId ? [`${P}/budget`, `${P}/budget?section=funds`, `${P}/budget?section=actuals`, `${P}/budget?section=settlement`, "/finance/project-budgets", `/finance/project-budgets/${projId}`, `/finance/project-budgets/${projId}?section=funds`, `/finance/project-budgets/${projId}?section=actuals`, `/finance/project-budgets/${projId}?section=settlement`] : [];
-const PAGES = process.env.AUDIT_SET === "budget" ? BUDGET : [...(projId ? ["/projects", "/projects?view=board", "/projects?show=finished", `/projects?open=${projId}`, "/projects/work", "/projects/work?view=board", `/projects/work?task=${taskId}`, "/projects/calendar", "/projects/handovers", "/projects/new", "/projects/access",
+const PA = "00000000-0000-4000-8000-0000000000a4";
+// AUDIT_SET=people audits People & Access (persona admin@ for accounts and roles, ceo@ for module access, hr1@ for jobs and budget access)
+const PEOPLE = ["/people-access", `/people-access?person=u:${PA}`, `/people-access?person=u:${PA}&tab=account`, `/people-access?person=u:${PA}&tab=job`, `/people-access?person=u:${PA}&tab=roles`, `/people-access?person=u:${PA}&tab=modules`, "/people-access?view=company", `/people-access?q=zzzz`];
+const PAGES = process.env.AUDIT_SET === "people" ? PEOPLE : process.env.AUDIT_SET === "budget" ? BUDGET : [...(projId ? ["/projects", "/projects?view=board", "/projects?show=finished", `/projects?open=${projId}`, "/projects/work", "/projects/work?view=board", `/projects/work?task=${taskId}`, "/projects/calendar", "/projects/handovers", "/projects/new",
     P, `${P}/work`, `${P}/work?view=board`, `${P}/work?task=${taskId}`, `${P}/work/tasks/${taskId}`, `${P}/plan`, `${P}/plan?plan=site`, `${P}/plan?mode=calendar`, `${P}/plan?mode=timeline`, `${P}/discussion`, `${P}/people`, `${P}/changes`, `${P}/documents`, `${P}/history`, `${P}/complete`] : []),
   ...INV,
   "/", "/sales", "/sales/follow-ups", "/sales/follow-ups?view=done&who=all", `/sales/follow-ups?open=${oppId}`, "/sales/opportunities", "/sales/opportunities?status=all", "/sales/opportunities?view=board&status=all", `/sales/opportunities?open=${oppId}`, "/sales/opportunities?add=1", `/sales/opportunities/${oppId}`,
-  "/sales/proposals", "/sales/clients", "/sales/reports", "/sales/settings", "/sales/access", "/sales/new",
-  "/attendance", "/employees", "/leave", "/leave/new", "/approvals", "/alerts", "/payroll", "/reimbursements", "/performance", "/policies", "/holidays", "/profile", "/attendance-clock", "/letters", "/admin/users", "/admin/companies", "/audit-log", "/ai-suggestions", "/account/security"];
+  "/sales/proposals", "/sales/clients", "/sales/reports", "/sales/settings", "/sales/new",
+  "/attendance", "/employees", "/leave", "/leave/new", "/approvals", "/alerts", "/payroll", "/reimbursements", "/performance", "/policies", "/holidays", "/profile", "/attendance-clock", "/letters", "/people-access", "/admin/companies", "/audit-log", "/ai-suggestions", "/account/security"];
 
 const evalFn = () => {
   const cv = document.createElement("canvas"); cv.width = cv.height = 1; const cx = cv.getContext("2d", { willReadFrequently: true });

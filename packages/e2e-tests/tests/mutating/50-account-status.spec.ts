@@ -19,7 +19,7 @@ import { LoginPage } from "../../src/pages/LoginPage";
  * Grounded directly in source: only Sys Admin can toggle account status
  * (packages/domain/src/permissions/users.ts's canManageAccountStatus), and
  * both Deactivate and Reactivate go through a native window.prompt()
- * requiring a non-blank reason (apps/web/src/app/(app)/admin/users/
+ * requiring a non-blank reason (apps/web/src/components/people-access/
  * account-status-controls.tsx). Skips cleanly if no Sys Admin test account
  * is configured — this suite never substitutes a different role for it.
  *
@@ -129,7 +129,7 @@ test.describe("account status (Employee test account only) @mutating", () => {
           originalError ? `(A separate error also occurred earlier in this test: ${String(originalError)})` : null,
           "",
           "MANUAL RECOVERY REQUIRED NOW:",
-          `1. Sign in as Sys Admin (E2E_ADMIN_EMAIL) -> /admin/users -> find the row for ${employeeEmail}.`,
+          `1. Sign in as Sys Admin (E2E_ADMIN_EMAIL) -> /people-access -> find the person, Account tab, for ${employeeEmail}.`,
           "2. If it reads 'Deactivated', click 'Reactivate' and give any non-blank reason.",
           "3. If the UI reactivation control itself is broken, the Supabase fallback (see supabase/migrations/*_account_security_controls.sql) is to set that profile's `account_status` column back to 'active' and clear its `banned_until` column directly for this account only.",
           "4. Confirm recovery by signing in as the Employee test account directly.",
