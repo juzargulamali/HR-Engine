@@ -69,7 +69,7 @@ export function normaliseCapabilities(module: AccessModule, capabilities: readon
 /**
  * Rights only a founder may give, change or remove. Sales: founder and access management (crm_grant_access). Projects: the same
  * (proj_grant_access). Inventory: those two and cost visibility (inv_grant_access). Budget has no founder: any holder of access
- * management may give any budget capability today (pbx_grant_access); a proposal to narrow that is a separate decision.
+ * management may give any budget right except the approver right, which only a CEO / CTO approver of the company may give or remove (rule R1).
  */
 export function founderOnlyCapabilities(module: AccessModule): readonly string[] {
   switch (module) {
@@ -94,10 +94,16 @@ export function grantableCapabilities(module: AccessModule, viewerCapabilities: 
   return capabilitiesOf(module).filter((c) => founder || !restricted.includes(c));
 }
 
-/** The database refuses a non-founder who changes (or withdraws) a person who holds a founder-only right; the screen says so up front. */
-export function targetLockedForViewer(module: AccessModule, viewerCapabilities: readonly string[], targetCapabilities: readonly string[]): boolean {
+/**
+ * The database refuses a non-founder who changes (or withdraws) a person who holds a founder-only right; the screen says so up front. Two details of the
+ * access grant rules: in Sales, changing or withdrawing an access manager is a founder's decision except for oneself (stepping down stays allowed), and
+ * Budget has no person that is locked as a whole: only the approver right is protected, right by right (see evaluateGrant).
+ */
+export function targetLockedForViewer(module: AccessModule, viewerCapabilities: readonly string[], targetCapabilities: readonly string[], self = false): boolean {
   if (isFounderIn(module, viewerCapabilities)) return false;
+  if (module === "budget") return false;
   const restricted = founderOnlyCapabilities(module);
+  if (module === "sales" && self) return targetCapabilities.includes("founder");
   return targetCapabilities.some((c) => restricted.includes(c));
 }
 
@@ -204,10 +210,93 @@ export function describeAccess(module: AccessModule, capabilities: readonly stri
   return { presets, extra, basic: held.size === 0 };
 }
 
-/** Why a preset cannot be added by this viewer, in plain words; null when they may. Mirrors the database refusal. */
-export function presetBlockedReason(module: AccessModule, viewerCapabilities: readonly string[], preset: AccessPreset): string | null {
-  const allowed = new Set(grantableCapabilities(module, viewerCapabilities));
-  return preset.capabilities.every((c) => allowed.has(c)) ? null : founderOnlyExplanation(module);
+// ---------------------------------------------------------------------------------------------------------------
+// The access grant rules, one function each for a grant and a revoke. They mirror the database functions (crm_/proj_/inv_/pbx_ grant_access and revoke_access)
+// rule for rule, so the screen can disable what the database would refuse and say why. The database stays the gate: packages/rls-tests/test/access_grant_rules
+// proves, for every preset of every module, that this and the database agree.
+// ---------------------------------------------------------------------------------------------------------------
+
+export interface GrantTarget {
+  /** What the person holds now in this company (empty: nothing, or basic access). */
+  capabilities: readonly string[];
+  /** The viewer is the person being changed. */
+  self: boolean;
+}
+
+export interface RuleResult { allowed: boolean; reason: string | null }
+const allow: RuleResult = { allowed: true, reason: null };
+const refuse = (reason: string): RuleResult => ({ allowed: false, reason });
+
+export const SELF_ADD_EXPLANATION = "You cannot add rights to your own access. Another access manager can do that.";
+export const APPROVER_EXPLANATION = "Only a CEO / CTO approver of this company can give or remove the approver right.";
+
+const FOUNDER_PHRASE: Record<AccessModule, string> = { sales: "a Sales founder", projects: "a Projects founder", inventory: "an Inventory founder", budget: "a founder" };
+
+/** May this viewer save exactly `desired` as the target's rights? `null` reason when allowed. */
+export function evaluateGrant(module: AccessModule, viewerCapabilities: readonly string[], target: GrantTarget, desired: readonly string[]): RuleResult {
+  if (!canManageModuleAccess(module, viewerCapabilities)) return refuse("You cannot manage this access.");
+  const founder = isFounderIn(module, viewerCapabilities);
+  const restricted = founderOnlyCapabilities(module);
+  // Only a founder may hand out the founder-only rights (the database refuses the whole save even when the person already holds one).
+  if (!founder && desired.some((c) => restricted.includes(c))) return refuse(founderOnlyExplanation(module));
+  const adds = desired.some((c) => !target.capabilities.includes(c));
+  const holds = (c: string) => target.capabilities.includes(c);
+  switch (module) {
+    case "sales":
+      // R2: nobody adds a right to their own grant (a founder already holds every right).
+      if (target.self && !founder && adds) return refuse(SELF_ADD_EXPLANATION);
+      // changing a founder, or (R3) another access manager, is a founder's decision
+      if (!founder && (holds("founder") || (holds("manage_access") && !target.self))) return refuse(`Only ${FOUNDER_PHRASE.sales} can change a founder's or access manager's rights.`);
+      return allow;
+    case "projects":
+    case "inventory":
+      if (!founder && target.capabilities.some((c) => restricted.includes(c))) return refuse(`Only ${FOUNDER_PHRASE[module]} can change a founder's, access manager's${module === "inventory" ? " or cost reader's" : ""} rights.`);
+      return allow;
+    case "budget": {
+      // R2
+      if (target.self && adds) return refuse(SELF_ADD_EXPLANATION);
+      // R1
+      if (desired.includes("executive_approver") !== holds("executive_approver") && !viewerCapabilities.includes("executive_approver")) return refuse(APPROVER_EXPLANATION);
+      return allow;
+    }
+  }
+}
+
+/** May this viewer withdraw the target's access altogether? */
+export function evaluateRevoke(module: AccessModule, viewerCapabilities: readonly string[], target: GrantTarget): RuleResult {
+  if (!canManageModuleAccess(module, viewerCapabilities)) return refuse("You cannot manage this access.");
+  const founder = isFounderIn(module, viewerCapabilities);
+  const holds = (c: string) => target.capabilities.includes(c);
+  switch (module) {
+    case "sales":
+    case "projects":
+      if (!founder && holds("founder")) return refuse(`Only ${FOUNDER_PHRASE[module]} can withdraw a founder.`);
+      if (!founder && holds("manage_access") && !target.self) return refuse(`Only ${FOUNDER_PHRASE[module]} can withdraw an access manager.`);
+      return allow;
+    case "inventory":
+      if (!founder && holds("founder")) return refuse("Only an Inventory founder can withdraw a founder.");
+      if (!founder && (holds("manage_access") || holds("view_costs")) && !target.self) return refuse("Only an Inventory founder can withdraw an access manager or a cost reader.");
+      return allow;
+    case "budget":
+      if (holds("executive_approver") && !viewerCapabilities.includes("executive_approver")) return refuse("Only a CEO / CTO approver of this company can withdraw an approver.");
+      return allow;
+  }
+}
+
+/**
+ * Why a preset cannot be added by this viewer, in plain words; null when they may. Mirrors the database refusal. With a target the person's own state
+ * counts (adding to one's own access, an approver, an access manager the viewer may not change); without one it answers for an ordinary other person.
+ */
+export function presetBlockedReason(module: AccessModule, viewerCapabilities: readonly string[], preset: AccessPreset, target?: GrantTarget, selected?: readonly string[]): string | null {
+  const t = target ?? { capabilities: [], self: false };
+  const base = selected ?? t.capabilities;
+  return evaluateGrant(module, viewerCapabilities, t, applyPreset(module, base, preset)).reason;
+}
+
+/** May this viewer tick (add) or untick (remove) one right, given what is selected now? */
+export function capabilityToggleBlockedReason(module: AccessModule, viewerCapabilities: readonly string[], target: GrantTarget, selected: readonly string[], capability: string): string | null {
+  const next = selected.includes(capability) ? selected.filter((c) => c !== capability) : [...selected, capability];
+  return evaluateGrant(module, viewerCapabilities, target, next).reason;
 }
 
 // ---------------------------------------------------------------------------------------------------------------

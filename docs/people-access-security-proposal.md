@@ -1,7 +1,7 @@
 # People & Access: security-rule changes proposed for approval
 
-**Status: proposal only. Nothing here is implemented.** The People & Access screen (see [people-access-design.md](./people-access-design.md)) changes where access is managed, not who may grant what.
-Each change below would alter a security rule in the database, so each needs your approval on its own. Until then every rule is exactly as it was.
+**Status: R1, R2 and R3 are APPROVED and implemented as a separate migration (`supabase/migrations/20261215000000_access_grant_rules.sql`), with an owner-run deployment pack: see [people-access-grant-rules-deployment.md](./people-access-grant-rules-deployment.md). Nothing has been applied to any hosted project.** The People & Access screen (see [people-access-design.md](./people-access-design.md)) changes where access is managed, not who may grant what.
+Each change below alters a security rule in the database, so each was approved on its own (R1, R2 and R3, subject to preserving existing grants, company boundaries and owner-SQL recovery, and with the last eligible Budget approver protected). Until the migration is applied on a project, every rule there is exactly as it was.
 
 ## Two different things
 
@@ -13,7 +13,7 @@ Each change below would alter a security rule in the database, so each needs you
 
 The gaps are therefore not "someone approves their own request". They are "someone chooses who will approve it", and "someone gives themselves a right nobody delegated".
 
-All findings are reproduced against a real Postgres built from every migration in `packages/rls-tests/test/people_access_findings.rls.test.ts`. That file records **today's** behaviour; where it asserts something succeeds that this proposal would refuse, it is the finding, and it flips in the same change that implements an approved fix.
+All findings were reproduced against a real Postgres built from every migration (the file `packages/rls-tests/test/people_access_findings.rls.test.ts` recorded the behaviour before the fix). That file became `packages/rls-tests/test/access_grant_rules.rls.test.ts`: each "FINDING" assertion now proves the fix (the same scenario is refused), and the unchanged rules are still asserted.
 
 ## Findings
 
@@ -68,8 +68,11 @@ An additive migration replaces only the grant and revoke functions it names (`cr
 * Idempotent re-application of the migration; no change to any non-`pbx_`/`crm_`/`proj_`/`inv_` structure (the preservation check).
 * The screen: disabled options and explanations for each refusal.
 
-## Decisions requested
+## Decisions
 
-1. **R1** (approver appointment): approve, change, or decline.
-2. **R2** (no adding rights to your own grant, Budget and Sales): approve, change, or decline.
-3. **R3** (revoke symmetry): approve, change, or decline. This one is minor and independent.
+R1, R2 and R3: **approved**, with the conditions above. Implementation notes that go beyond the proposal's text:
+
+* R1 protects the last **eligible** approver (an active person holding the right) and serialises Budget grant and revoke changes per company, so a race cannot remove the last two.
+* R2: stepping down (removing one's own right) stays allowed; a Sales founder is exempt because nothing is an addition in effect.
+* R3 also closes the matching hole in Sales' **grant** function (a non-founder replacing another access manager's rights), so the rule cannot be sidestepped through the other function. Projects and Inventory grant functions already had it.
+* Stepping down oneself by revoke stays allowed in Sales, Projects and Inventory (it only removes power).

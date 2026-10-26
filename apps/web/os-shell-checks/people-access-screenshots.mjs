@@ -24,4 +24,7 @@ await shoot("hr1", "dark", D, `/people-access?person=u:${U(5)}&tab=modules`, "05
 await shoot("ceo", "dark", M, `/people-access?person=u:${U(4)}&tab=modules`, "06-phone-module-access-dark", preset("Sales & CRM", "Sales lead"));
 await shoot("ceo", "light", D, "/people-access?view=company", "07-company-settings-light");
 await shoot("mgr", "light", D, "/people-access", "08-nothing-to-manage-light");
+const open = (heading) => async (page) => { const c = page.locator('section[aria-labelledby^="pa-"]', { has: page.getByRole("heading", { name: heading, exact: true, level: 3 }) }); await c.getByText(/Choose rights one by one/).click(); await page.waitForTimeout(400); };
+await shoot("hr1", "dark", D, `/people-access?person=u:${U(5)}&tab=modules`, "09-rule-r1-approver-right-not-available-dark", open("Project budgets"));
+await shoot("hr1", "light", D, `/people-access?person=u:${U(1)}&tab=modules`, "10-rule-r2-own-access-light", open("Project budgets"));
 await browser.close();
