@@ -35,11 +35,16 @@ export function RememberList({ section }: { section: string }) {
   // The scroll position is remembered as the person scrolls, and put back once when they return through a back link.
   useEffect(() => {
     let frame = 0;
+    const here = window.location.pathname;
     const onScroll = () => {
       if (frame) return;
-      frame = requestAnimationFrame(() => { frame = 0; write(key(section, "y"), String(Math.round(window.scrollY))); });
+      // Once the address is no longer this list, the scroll is the router resetting a new page to the top: not the place to remember.
+      frame = requestAnimationFrame(() => { frame = 0; if (window.location.pathname === here) write(key(section, "y"), String(Math.round(window.scrollY))); });
     };
     window.addEventListener("scroll", onScroll, { passive: true });
+    // The exact place is also taken at the moment of a click, before any navigation can move the page.
+    const onClick = () => write(key(section, "y"), String(Math.round(window.scrollY)));
+    document.addEventListener("click", onClick, true);
     const wanted = read(key(section, "restore")) === "1" ? Number(read(key(section, "y"))) : 0;
     write(key(section, "restore"), null);
     // The page may still be rendering, and the router scrolls to the top once the navigation has finished: keep putting the place back for
@@ -54,7 +59,7 @@ export function RememberList({ section }: { section: string }) {
       if (tries++ < 30) timer = setTimeout(restore, 80);
     };
     restore();
-    return () => { window.removeEventListener("scroll", onScroll); inputs.forEach((e) => window.removeEventListener(e, stop)); cancelled = true; if (frame) cancelAnimationFrame(frame); if (timer) clearTimeout(timer); };
+    return () => { window.removeEventListener("scroll", onScroll); document.removeEventListener("click", onClick, true); inputs.forEach((e) => window.removeEventListener(e, stop)); cancelled = true; if (frame) cancelAnimationFrame(frame); if (timer) clearTimeout(timer); };
   }, [section]);
   return null;
 }

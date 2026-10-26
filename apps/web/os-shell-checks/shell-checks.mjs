@@ -68,6 +68,7 @@ for (const [name, email] of Object.entries(PERSONAS)) {
     ok(await dlg.getByRole("link", { name: "People & HR" }).isVisible(), "drawer lists modules");
     await page.keyboard.press("Escape"); await page.waitForTimeout(350); ok(!(await dlg.isVisible()), "Escape closes the drawer");
     await page.getByRole("link", { name: /^Clock|Clocked in/ }).first().click(); await page.waitForURL(/attendance-clock/); ok(true, "Clock tab opens the real attendance clock page");
+    await page.getByRole("button", { name: /clock in|clock out/i }).first().waitFor({ timeout: 10000 }).catch(() => {});
     ok(await page.getByRole("button", { name: /clock in|clock out/i }).first().isVisible().catch(() => false), "real Clock In/Out control is visible on that page (mobile)");
   }
   await ctx.close();

@@ -90,7 +90,7 @@ html[data-theme="light"]:has(.os-v2) {
   --destructive-foreground: 0 0% 100%;
   --success: 152 62% 26%;
   --success-foreground: 0 0% 100%;
-  --warning: 32 90% 30%;
+  --warning: 32 90% 27%;
   --warning-foreground: 0 0% 100%;
   --border: 195 22% 85%;
   --input: 200 14% 48%;
@@ -129,6 +129,7 @@ html:not([data-theme="light"]):has(.os-v2) body {
   --accent: 180 72% 62%;
   --ring: 184 85% 66%;
   --card: 195 32% 13%;
+  --card-foreground: 180 25% 95%;
   --destructive: 355 85% 72%;
   --warning: 40 92% 60%;
   --success: 152 55% 58%;
@@ -196,6 +197,8 @@ html[data-theme="light"] .os-card.os-cool { background: linear-gradient(180deg, 
 
 /* Keyboard focus is one clear outline on the control; a selected row is a quiet tint and an edge bar. The two never look alike. */
 .os-v2 :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; box-shadow: none; }
+/* The ring appears at once: a control that fades its own colours must not also fade its focus ring in (a keyboard user would see none for 150 ms). */
+.os-v2 :focus-visible, .os-chrome :focus-visible { transition-property: color, background-color, border-color, opacity, transform, filter, text-decoration-color; }
 
 /* ------------------------------------------------------------------ components (utilities can still override these) */
 @layer components {
@@ -386,3 +389,7 @@ html[data-theme="light"] .os-pill[data-tone="green"] { color: hsl(152 70% 18%); 
 .os-v2 .os-click-card[data-clickable]:hover { background-color: hsl(var(--primary) / 0.075); }
 .os-v2 .os-click-card[data-clickable]:focus-within { background-color: hsl(var(--primary) / 0.05); }
 .os-v2 .os-click-card[data-selected="true"] { background: linear-gradient(90deg, hsl(var(--primary) / 0.2), hsl(var(--primary) / 0.07) 70%); box-shadow: inset 4px 0 0 hsl(var(--primary)); }
+
+/* The shell is dark in both themes: its badges keep the shell's own colours in the light theme too. */
+html[data-theme="light"] .os-chrome .os-badge[data-tone="cyan"] { color: hsl(var(--accent)); }
+html[data-theme="light"] .os-chrome .os-badge[data-tone="green"], html[data-theme="light"] .os-chrome .os-pill[data-tone="green"] { color: hsl(var(--os-green)); }
