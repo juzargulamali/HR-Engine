@@ -200,7 +200,7 @@ function ActualsEditor({ view, submission, claims }: { view: PbxBudgetView; subm
                 </div>
               </div>
               {showDetails ? (
-                <div className="mt-3 grid gap-2 border-t border-border pt-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="mt-3 grid gap-2 border-t border-border pt-3 sm:grid-cols-2 lg:grid-cols-[minmax(15rem,1.3fr)_minmax(9rem,1fr)_minmax(0,2fr)]">
                   <Field label="How was it paid?" htmlFor={`${base}-via`}>
                     <Select id={`${base}-via`} value={l.paid_via} disabled={busy} onChange={(e) => update(l.key, { paid_via: e.target.value as PaidVia | "" })}>
                       <option value="">Choose…</option>
@@ -223,8 +223,8 @@ function ActualsEditor({ view, submission, claims }: { view: PbxBudgetView; subm
                       </Select>
                     </Field>
                   ) : null}
-                  <Field label="Note (optional)" htmlFor={`${base}-note`} className="sm:col-span-2"><Input id={`${base}-note`} value={l.note} maxLength={500} disabled={busy} onChange={(e) => update(l.key, { note: e.target.value })} /></Field>
-                  <div className="space-y-1 sm:col-span-2 lg:col-span-4">
+                  <Field label="Note (optional)" htmlFor={`${base}-note`} className="sm:col-span-2 lg:col-span-1"><Input id={`${base}-note`} value={l.note} maxLength={500} disabled={busy} onChange={(e) => update(l.key, { note: e.target.value })} /></Field>
+                  <div className="space-y-1 sm:col-span-2 lg:col-span-3">
                     <label className="flex min-h-8 items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4" checked={l.foreign_currency} disabled={busy} onChange={(e) => update(l.key, { foreign_currency: e.target.checked })} />This was paid in another currency</label>
                     {l.foreign_currency ? (
                       <Field label={`Original amount, currency and rate (the line above is in ${currency})`} htmlFor={`${base}-fx`} hint="Nothing is converted for you. Write what you paid and the rate used, for example “EUR 10.00 at 4.00”.">

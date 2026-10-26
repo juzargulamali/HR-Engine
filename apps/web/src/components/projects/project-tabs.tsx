@@ -34,7 +34,7 @@ export function ProjectTabs({ tabs, base }: { tabs: ProjectTab[]; base: string }
             )}
           >
             <span>{t.label}</span>
-            {t.badge ? <span className="hidden rounded-full bg-[hsl(var(--os-info)/0.16)] px-1.5 text-[12px] font-semibold text-[hsl(var(--os-info))] sm:inline">{t.badge}</span> : null}
+            {t.badge ? <span className="hidden rounded-full bg-[hsl(var(--os-info)/0.16)] px-1.5 text-[12px] font-semibold text-foreground sm:inline">{t.badge}</span> : null}
             {t.badge ? <span className="sr-only sm:hidden">{t.badge} unread</span> : null}
             <span className="relative order-first sm:hidden" aria-hidden>
               <Icon className="h-5 w-5" />

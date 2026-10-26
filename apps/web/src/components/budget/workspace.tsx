@@ -39,16 +39,16 @@ function Summary({ view }: { view: PbxBudgetView }) {
   const b = view.budget!;
   const cur = b.currency;
   const s = view.settlement;
-  const latestActual = [...view.actuals].sort((a, c) => c.seq - a.seq)[0];
+  // Only submitted or approved final expenses are compared with the budget: a draft is unfinished and would read as "far under budget".
   const approved = view.actuals.find((a) => a.status === "approved");
-  const shown = approved ?? latestActual;
+  const shown = approved ?? [...view.actuals].sort((a, c) => c.seq - a.seq).find((a) => a.status === "submitted");
   const base = view.baseline;
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Summary">
       <Figure label="Approved budget" value={base > 0 ? money(base, cur) : "Not approved yet"} />
       <Figure
-        label={approved ? "Approved final expenses" : shown ? `Actual expenses (${shown.status === "draft" ? "draft" : shown.status})` : "Actual expenses"}
-        value={shown ? money(shown.total_actual, cur) : "Not entered"}
+        label={approved ? "Approved final expenses" : shown ? "Final expenses (waiting for Finance)" : "Final expenses"}
+        value={shown ? money(shown.total_actual, cur) : "Not submitted"}
       />
       <Figure
         label="Over / under budget"
@@ -56,7 +56,11 @@ function Summary({ view }: { view: PbxBudgetView }) {
         tone={shown && base > 0 ? (shown.total_actual > base ? "over" : shown.total_actual < base ? "under" : null) : null}
       />
       {s ? (
-        <Figure label="Still to settle" value={money(s.advance_to_return + s.reimbursement_outstanding, cur)} hint={`To return ${money(s.advance_to_return, cur)} · owed ${money(s.reimbursement_outstanding, cur)}`} />
+        s.has_approved_actuals ? (
+          <Figure label="Still to settle" value={money(s.advance_to_return + s.reimbursement_outstanding, cur)} hint={`To return ${money(s.advance_to_return, cur)} · owed ${money(s.reimbursement_outstanding, cur)}`} />
+        ) : (
+          <Figure label="Still to settle" value="—" hint="Known once Finance approves the final expenses" />
+        )
       ) : (
         <Figure label="Receipts" value={RECEIPT_LABELS[b.receipts_status]} />
       )}
@@ -131,7 +135,7 @@ export function BudgetWorkspace({ view, claims, initialTab, projectHeader = fals
         </Alert>
       ) : null}
 
-      <div role="tablist" aria-label="Budget and expenses sections" className="flex gap-1 overflow-x-auto border-b border-border">
+      <div role="tablist" aria-label="Budget and expenses sections" className="grid border-b border-border sm:flex sm:gap-1" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
         {tabs.map((t, i) => (
           <button
             key={t}
@@ -144,7 +148,7 @@ export function BudgetWorkspace({ view, claims, initialTab, projectHeader = fals
             tabIndex={tab === t ? 0 : -1}
             onClick={() => choose(t)}
             onKeyDown={(e) => onKey(e, i)}
-            className={cn("-mb-px min-h-11 whitespace-nowrap border-b-2 px-3.5 text-[0.9375rem] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4", tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}
+            className={cn("-mb-px min-h-12 border-b-2 px-1 text-center text-[13px] font-medium leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-11 sm:whitespace-nowrap sm:px-4 sm:text-[0.9375rem]", tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}
           >
             {LABELS[t]}
           </button>

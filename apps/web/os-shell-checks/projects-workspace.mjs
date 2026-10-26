@@ -442,9 +442,9 @@ await step("Discussion: Jump to task opens the task beside the Work list; Files 
   if (sql("select count(*) || ':' || coalesce(string_agg(status || due_date::text, ',' order by id::text), '') from proj_tasks") !== tasksBefore) throw new Error("sending a message changed tasks");
 });
 await as("mgr@e2e.local");
-await step("Work, Timeline, Discussion, Equipment are the four sections; the old overview address leads to Work; Manage project reaches People, Feedback & changes, Files & client plan, History and Complete for the PM", async () => {
+await step("Work, Timeline, Discussion, Equipment are the four sections (plus Budget for the Project Manager); the old overview address leads to Work; Manage project reaches People, Feedback & changes, Files & client plan, History and Complete for the PM", async () => {
   await go(`/projects/${P}`); const tabs = (await page.locator("main nav[aria-label='Project sections'] a").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").replace(/\d+\s*$/, "").trim());
-  if (tabs.join("|") !== "Work|Timeline|Discussion|Equipment") throw new Error("tabs: " + tabs.join("|"));
+  if (tabs.join("|") !== "Work|Timeline|Discussion|Equipment|Budget") throw   /* the Project Manager also gets the Budget tab (Project Budget & Expenses); members without budget access keep four */ new Error("tabs: " + tabs.join("|"));
   const items = await menuItems("Manage project"); for (const want of ["Edit details", "Change status", "People & access", "Feedback & changes", "Files & client plan", "History", "Complete project"]) if (!items.some((i) => i.startsWith(want))) throw new Error(`Manage lacks ${want}: ${items.join(" | ")}`);
   for (const [item, path] of [["People & access", "people"], ["Feedback & changes", "changes"], ["Files & client plan", "documents"], ["History", "history"], ["Complete project", "complete"]]) {
     await go(`/projects/${P}`); await page.locator("main").getByRole("button", { name: "Manage project", exact: true }).click(); await page.locator("main").getByRole("menuitem", { name: new RegExp(`^${item}`) }).click();

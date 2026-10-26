@@ -6,11 +6,11 @@ Status table (kept current; the last section says where work stopped):
 | --- | --- | --- |
 | A | Review existing structures, this design | Implemented |
 | B | Domain library (decimal maths, rounding, settlement helpers, next action) | Implemented |
-| C | Migrations, RLS, grants, functions, `schema.sql` mirror | Not started |
-| D | Server actions, loaders, types | Not started |
-| E | Project "Budget & Expenses" page and the Finance inbox | Not started |
-| F | Tests (unit, database, browser) and owner-run SQL guides | Not started |
-| G | Final verification, documentation, draft PR | Not started |
+| C | Migrations, RLS, grants, functions, `schema.sql` mirror, owner-run SQL | Implemented and tested (36 database scenarios; owner scripts rehearsed on throwaway databases) |
+| D | Server actions, loaders, types | Implemented |
+| E | Project "Budget" tab and the Finance inbox | Implemented (23-step real-browser flow passes; contrast and clipping audits clean) |
+| F | Tests (unit, database, browser) and owner-run SQL guides | Implemented |
+| G | Final verification, documentation, draft PR | Verification results are in the PR; awaiting owner review |
 
 Statuses: Not started, In progress, Implemented, Verified.
 
@@ -60,7 +60,7 @@ Statuses: Not started, In progress, Implemented, Verified.
 * `pbx_funding`: instalments (recipient, date, amount, method, `is_advance`, reference, note), reversible with a reason. Pluto/card allocations are not advances.
 * `pbx_actual_submissions` + `pbx_actual_rows`: the PM's actuals. Blank (`null`) is not zero; paid-via (advance, company card, direct company payment, personal, existing claim) and who paid; submission requires confirmation that entry is complete.
 * `pbx_payments`: money returned and reimbursements paid, per person, reversible with a reason.
-* `pbx_audit_log`.
+* `pbx_company_grants` (explicit access), `pbx_company_settings` (the on/off switch; no row means on) and `pbx_audit_log`.
 
 Per-person settlement (SQL function `pbx_settlement_summary`, the single source of the figures):
 
@@ -86,4 +86,10 @@ No receipt upload, OCR, bank or Pluto connection, purchasing, tax, Zoho sync, pa
 
 ## Handover: where work stopped
 
-Stages A and B done (`packages/domain/src/projectBudget.ts`, 27 unit tests). Next: Stage C (migrations).
+All stages are implemented. What remains is the owner's: review the draft PR, run the SQL in `supabase/manual-sql/pbx_*.sql` in the order of [project-budget-expenses-deployment.md](./project-budget-expenses-deployment.md), name the Finance people (`pbx_30_bootstrap_access.sql`), and try the acceptance checklist on one real project.
+
+Where things are: domain rules `packages/domain/src/projectBudget.ts`; migrations `supabase/migrations/20261210000000..400_pbx_*.sql` (mirrored in `schema/schema.sql` section 21); server actions `apps/web/src/lib/actions/projectBudget.ts`; loaders `apps/web/src/lib/budget/`; screens `apps/web/src/components/budget/` and the routes `/projects/[id]/budget`, `/finance/project-budgets`, `/finance/project-budgets/[projectId]`; tests `packages/rls-tests/test/project_budget.rls.test.ts`, `packages/domain/test/projectBudget.test.ts`, `apps/web/os-shell-checks/budget-flow.mjs` (seed `seed/budget.sh`, optional `STAGE=draft|submitted|approved`).
+
+Decisions worth remembering: the module has its own grants and its own decision records (not the HR approvals engine, not the HR finance role); Finance reads names from the budget's snapshot so it needs no Projects access; the claim link has no foreign key so existing claims behave exactly as before; there is no "cancelled" project status, so completed / archived projects keep their records and still settle.
+
+Not done on purpose: receipt upload, OCR, bank / Pluto connections, supplier purchasing, tax, Zoho sync, payment execution, payroll deduction, e-mail, scheduled jobs; Vendors & Purchasing is not started. Not verified live: anything on the hosted Supabase project or Vercel, and the Production deployment commit and signed-in Production smoke check after PR #48 (merged as `20d0abf`, CI on that merge passed) remain unconfirmed.
