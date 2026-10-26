@@ -555,7 +555,7 @@ describe("Project Budget & Expenses", () => {
       const saved = await actualsRows(sub);
       expect(saved).toHaveLength(5);
       expect(saved[4]).toMatchObject({ unplanned: true, budget_row_id: null, description: "Parking at the venue", paid_by_name: expect.stringContaining("pm") });
-      expect(num(saved[2].actual_amount)).toBe(0);                                                  // a confirmed zero is kept as zero, not blank
+      expect(num(saved[2]!.actual_amount)).toBe(0);                                                  // a confirmed zero is kept as zero, not blank
       // an approved row cannot be hidden: leaving it out brings it back blank
       rv = await call<number>(U.pm, `select pbx_save_actuals_draft('${sub}', ${rv}, ${j({ complete_confirmed: true })}, ${j([lines()[0], lines()[3]])})`);
       const afterHide = await actualsRows(sub);
