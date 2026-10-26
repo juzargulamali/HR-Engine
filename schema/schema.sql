@@ -25114,13 +25114,14 @@ grant execute on function inv_pending_sales_checks() to authenticated;
 -- and compensation), NOT proj_/crm_/inv_company_grants: a Finance HR role, a Projects membership or grant, a Sales grant, a founder
 -- title, an employee record or an e-mail domain confers NO access to project budgets, and a budget grant confers no HR, Sales,
 -- Projects or Inventory access. Capabilities:
---   finance        approve / return / reject budgets and final expenses, record funding, receipts, returns, reimbursements,
---                  close or reopen settlement, set company rates and categories, and read everything of that company
+--   finance        decide budgets and final expenses submitted by Project Managers WITHOUT Finance access; record funding, returns, reimbursements
+--                  and receipt delivery (declarations); close settlement for ordinary Project Managers; reopen settlement; set company rates
+--                  and categories; and read everything of that company
 --   view           read-only access to the company's budgets (an explicit grant, for example for a founder; a title confers nothing)
 --   executive_approver  the company's authorised CEO / CTO approver: decides budgets, additional budget requests and final expenses that were
 --                  SUBMITTED BY SOMEONE WHO HOLDS FINANCE ACCESS for that company (nobody approves their own work), and reads the company's
---                  budgets. Either a CEO or a CTO is enough. It records no funds, receipts, returns or settlement (that stays with Finance),
---                  and it is an explicit grant: a CEO / CTO title, role or account confers nothing
+--                  budgets, confirms the receipts of that settlement and authorises its closure. Either a CEO or a CTO is enough. It records no funds,
+--                  receipts, returns or reimbursements (that stays with Finance), and it is an explicit grant: a CEO / CTO title, role or account confers nothing
 --   manage_access  grant and revoke these capabilities for the company
 -- Nothing here reads or writes an HR, Sales, Projects (beyond the project lookups of migration 2+), Inventory or claims table.
 -- Additive: no existing object is altered. No grant is created by this migration: access is set up explicitly (see the owner's setup SQL).
