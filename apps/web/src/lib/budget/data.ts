@@ -57,17 +57,19 @@ export const loadProjectBudgetAccess = cache(async (projectId: string): Promise<
   }
 });
 
-/** Is there a Finance inbox for this person (Finance or view access in at least one company)? Drives the menu entry; quiet like the tab. */
-export const loadBudgetInboxAccess = cache(async (): Promise<{ any: boolean; finance: boolean; waiting: number }> => {
+/**
+ * Does the signed-in person hold budget access (Finance or view) in any company? Drives the "Finance" menu entry. This reads only the person's own
+ * grants, so it costs one tiny query on every page; the inbox itself is loaded only when the page is opened. Quiet like the tab: a database that
+ * does not have the module yet, or any failure, simply means no menu entry.
+ */
+export const loadBudgetNavAccess = cache(async (userId: string): Promise<{ any: boolean; finance: boolean }> => {
   try {
     const supabase = await createClient();
-    const { data, error } = await supabase.rpc("pbx_inbox");
-    if (error || !data) return { any: false, finance: false, waiting: 0 };
-    const inbox = data as unknown as PbxInbox;
-    const any = inbox.companies.length > 0;
-    const waiting = inbox.budget_approvals.filter((b) => b.i_can_decide).length + inbox.final_expense_approvals.filter((a) => a.i_can_decide).length;
-    return { any, finance: inbox.is_finance_anywhere, waiting };
+    const { data, error } = await supabase.from("pbx_company_grants").select("capabilities").eq("user_id", userId).is("revoked_at", null);
+    if (error || !data) return { any: false, finance: false };
+    const caps = data.flatMap((g) => g.capabilities as string[]);
+    return { any: caps.includes("finance") || caps.includes("view"), finance: caps.includes("finance") };
   } catch {
-    return { any: false, finance: false, waiting: 0 };
+    return { any: false, finance: false };
   }
 });

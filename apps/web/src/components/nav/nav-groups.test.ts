@@ -410,4 +410,21 @@ describe("Inventory navigation", () => {
     expect(entry({ inventory: { grants: [], managesProjects: true } })).toBe("/inventory/requests");
     expect(entry({ inventory: { grants: [], isEmployee: true } })).toBe("/inventory/mine");
   });
+
+  describe("Finance (Project Budget & Expenses)", () => {
+    it("is offered only to people holding their own budget access, never from an HR role", () => {
+      const hrRoles = [grant("hr_admin"), grant("finance"), grant("ceo"), grant("sys_admin")];
+      expect(buildNavModules(hrRoles).find((m) => m.id === "finance")).toBeUndefined();
+      expect(buildNavModules(hrRoles, { budget: { any: false } }).find((m) => m.id === "finance")).toBeUndefined();
+      const mod = buildNavModules([grant("employee")], { budget: { any: true, finance: true } }).find((m) => m.id === "finance")!;
+      expect(mod.href).toBe("/finance/project-budgets");
+      expect(mod.sections.flatMap((x) => x.links.map((l) => l.label))).toEqual(["Project budgets"]);
+    });
+    it("lights up for its own pages and appears in search", () => {
+      const mods = buildNavModules([grant("employee")], { budget: { any: true } });
+      expect(activeModuleId("/finance/project-budgets/abc", mods)).toBe("finance");
+      expect(breadcrumbFor("/finance/project-budgets", mods)).toEqual({ module: "Finance", page: null });
+      expect(navGroupsFromModules(mods).find((g) => g.label === "Finance")?.links.map((l) => l.href)).toEqual(["/finance/project-budgets"]);
+    });
+  });
 });

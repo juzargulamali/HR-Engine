@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "@/components/nav/app-shell";
 import { OsScope } from "@/components/os/scope";
 import { loadInventoryNavAccess } from "@/lib/inventory/context";
+import { loadBudgetNavAccess } from "@/lib/budget/data";
 import { loadProjectsNavAccess } from "@/lib/projects/context";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -66,9 +67,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const projects = await loadProjectsNavAccess(session.userId);
   // Inventory: its own company grants, a running project, or an employee record. Degrades to the "Coming soon" row on any failure.
   const inventory = await loadInventoryNavAccess(session.userId);
+  // Project Budget & Expenses: the person's own Finance / view grants only. Degrades to no entry on any failure, including the module not being installed yet.
+  const budget = await loadBudgetNavAccess(session.userId);
 
   return (
-    <AppShell session={session} clockOpenSince={clockOpenSince} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants} projects={projects} inventory={inventory}>
+    <AppShell session={session} clockOpenSince={clockOpenSince} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants} projects={projects} inventory={inventory} budget={budget}>
       <OsScope>{children}</OsScope>
     </AppShell>
   );

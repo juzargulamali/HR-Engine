@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Calendar, ClipboardList, MessageSquare, Package } from "lucide-react";
+import { Calendar, ClipboardList, MessageSquare, Package, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { activeTabHref, type ProjectTabData } from "@/lib/projects/workspace-nav";
 
 export type ProjectTab = ProjectTabData;
 
-const ICONS: Record<string, typeof Calendar> = { Work: ClipboardList, Timeline: Calendar, Discussion: MessageSquare, Equipment: Package };
+const ICONS: Record<string, typeof Calendar> = { Work: ClipboardList, Timeline: Calendar, Discussion: MessageSquare, Equipment: Package, Budget: Wallet };
 
 /**
  * The four primary sections of one project. The old overview address belongs to Work; the sections that were folded into the Plan page
@@ -19,7 +19,7 @@ export function ProjectTabs({ tabs, base }: { tabs: ProjectTab[]; base: string }
   const pathname = usePathname();
   const active = activeTabHref(pathname, base);
   return (
-    <nav aria-label="Project sections" className="grid grid-cols-4 border-b border-border sm:flex sm:gap-1">
+    <nav aria-label="Project sections" className={cn("grid border-b border-border sm:flex sm:gap-1", tabs.length > 4 ? "grid-cols-5" : "grid-cols-4")}>
       {tabs.map((t) => {
         const Icon = ICONS[t.label] ?? ClipboardList;
         const on = active === t.href;

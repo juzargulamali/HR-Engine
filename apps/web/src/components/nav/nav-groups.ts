@@ -57,7 +57,7 @@ export interface NavGroupData {
   links: NavLinkData[];
 }
 
-export type NavModuleId = "my-day" | "approvals" | "sales" | "people" | "projects" | "inventory" | "vendors" | "kpis";
+export type NavModuleId = "my-day" | "approvals" | "sales" | "people" | "projects" | "finance" | "inventory" | "vendors" | "kpis";
 
 export interface NavModuleData {
   id: NavModuleId;
@@ -85,6 +85,11 @@ export interface NavOptions {
    * employee with a linked record (every employee can see the equipment assigned to them). No access of any kind means "Coming soon".
    */
   inventory?: { grants: readonly InvGrant[]; managesProjects?: boolean; isEmployee?: boolean };
+  /**
+   * Project Budget & Expenses access: the person's own grants from pbx_company_grants (never HR roles, Projects, Sales or Inventory grants). Only people
+   * holding Finance or view access in some company get the Finance entry; a Project Manager reaches the budget from the project itself.
+   */
+  budget?: { any: boolean; finance?: boolean };
 }
 
 /**
@@ -273,6 +278,17 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
       iconKey: "inventory",
       href: invPlanner ? (invGrantee ? "/inventory" : "/inventory/requests") : "/inventory/mine",
       sections: [{ label: "Inventory", links: mainLinks }, ...(manage.length > 0 ? [{ label: "Manage", links: manage }] : [])],
+    });
+  }
+
+  // Finance: the Project Budgets inbox, for people with their own Budget & Expenses grant (Finance decides, a view grantee only reads).
+  if (options.budget?.any) {
+    modules.push({
+      id: "finance",
+      label: "Finance",
+      iconKey: "reimbursements",
+      href: "/finance/project-budgets",
+      sections: [{ label: "Finance", links: [{ href: "/finance/project-budgets", label: "Project budgets", iconKey: "reimbursements" }] }],
     });
   }
 

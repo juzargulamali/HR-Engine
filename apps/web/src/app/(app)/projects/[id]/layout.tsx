@@ -8,6 +8,7 @@ import { KindBadge, PriorityBadge, ProjectStatusBadge } from "@/components/proje
 import { ManageMenu } from "@/components/projects/manage-menu";
 import { ProjectTabs } from "@/components/projects/project-tabs";
 import { getProjectsContext } from "@/lib/projects/context";
+import { loadProjectBudgetAccess } from "@/lib/budget/data";
 import { loadProjectView } from "@/lib/projects/data";
 import { dateRangeText, dateText } from "@/lib/projects/format";
 import { manageItems, projectTabs } from "@/lib/projects/workspace-nav";
@@ -15,7 +16,7 @@ import { createClient } from "@/lib/supabase/server";
 import { BackLink } from "@/components/workspace/list-memory";
 
 /**
- * One project. Members and founders get a compact banner, four sections (Work, Timeline, Discussion, Equipment) and one "Manage project"
+ * One project. Members and founders get a compact banner, four sections (Work, Timeline, Discussion, Equipment), a fifth (Budget) for the people who may open it, and one "Manage project"
  * menu for the rest; a person who can only see the summary (a Projects-access holder who is not a member, or a linked Sales person) gets
  * the summary page and neither: the details, discussion, plans and files are not theirs.
  */
@@ -34,6 +35,8 @@ export default async function ProjectLayout({ children, params }: { children: Re
     const row = (data ?? []).find((r) => r.project_id === id);
     if (row && row.unread > 0) unread = row.unread > 99 ? "99+" : String(row.unread);
   }
+  // The Budget tab: only where the module's own access rules let this person in (the Project Manager, or Finance / view access in the owning company).
+  const budgetAccess = view.level === "details" ? await loadProjectBudgetAccess(id) : { can_open: false };
   const base = `/projects/${id}`;
   const live = !isFinishedProject(project.status);
   const moves = view.canManage ? allowedStatusMoves(project.kind, project.status) : [];
@@ -76,7 +79,7 @@ export default async function ProjectLayout({ children, params }: { children: Re
           Summary only. Details, tasks, discussion and files are for the people working on this project; the Project Manager can add you if you should take part.
         </Alert>
       ) : (
-        <ProjectTabs tabs={projectTabs(base, unread)} base={base} />
+        <ProjectTabs tabs={projectTabs(base, unread, budgetAccess.can_open)} base={base} />
       )}
       {children}
     </div>

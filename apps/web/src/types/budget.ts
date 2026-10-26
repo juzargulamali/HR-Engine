@@ -5,6 +5,13 @@
  */
 import type { BudgetBasis, BudgetActivity, FundingMethod, PaidVia, PaymentKind, ReceiptStatus, VersionStatus } from "@enginious-hr/domain";
 
+export type PbxReadOnlyTable<Row> = { Row: Row; Insert: Record<string, never>; Update: Record<string, never>; Relationships: [] };
+
+export type PbxCompanyGrantRow = {
+  id: string; user_id: string; company_id: string; capabilities: string[]; note: string | null;
+  granted_by: string | null; granted_at: string; revoked_at: string | null; revoked_by: string | null;
+};
+
 export type PbxJson = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
 export interface PbxProjectAccess {
@@ -252,6 +259,7 @@ export interface PbxInboxBase {
   company_name: string;
   currency: string;
   pm_name: string | null;
+  site_timezone: string | null;
 }
 export interface PbxInboxBudget extends PbxInboxBase {
   version_id: string;

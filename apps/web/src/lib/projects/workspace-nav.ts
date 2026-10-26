@@ -1,5 +1,5 @@
 /**
- * The project workspace has four primary sections (Work, Timeline, Discussion, Equipment); everything else is under "Manage project". Pure so the rule "what is offered
+ * The project workspace has four primary sections (Work, Timeline, Discussion, Equipment) and, for the people who may open it, a fifth (Budget); everything else is under "Manage project". Pure so the rule "what is offered
  * to whom" is tested. The database and the pages still enforce every one of these.
  */
 export interface ProjectTabData {
@@ -8,19 +8,21 @@ export interface ProjectTabData {
   badge?: string | null;
 }
 
-export function projectTabs(base: string, unread: string | null): ProjectTabData[] {
+export function projectTabs(base: string, unread: string | null, budget = false): ProjectTabData[] {
   return [
     { href: `${base}/work`, label: "Work" },
     { href: `${base}/plan`, label: "Timeline" },
     { href: `${base}/discussion`, label: "Discussion", badge: unread },
     { href: `${base}/equipment`, label: "Equipment" },
+    // Project Budget & Expenses: offered only to the Project Manager and to people the module's own access rules let in (never inferred from Projects access).
+    ...(budget ? [{ href: `${base}/budget`, label: "Budget" }] : []),
   ];
 }
 
 /** Which tab a path belongs to. The old overview address belongs to Work (its content lives there now); the legacy section addresses light up their new home. */
 export function activeTabHref(pathname: string, base: string): string | null {
   if (pathname === base) return `${base}/work`;
-  const map: [string, string][] = [["/work", `${base}/work`], ["/plan", `${base}/plan`], ["/timeline", `${base}/plan`], ["/calendar", `${base}/plan`], ["/discussion", `${base}/discussion`], ["/equipment", `${base}/equipment`]];
+  const map: [string, string][] = [["/work", `${base}/work`], ["/plan", `${base}/plan`], ["/timeline", `${base}/plan`], ["/calendar", `${base}/plan`], ["/discussion", `${base}/discussion`], ["/equipment", `${base}/equipment`], ["/budget", `${base}/budget`]];
   for (const [seg, href] of map) if (pathname === `${base}${seg}` || pathname.startsWith(`${base}${seg}/`)) return href;
   return null;
 }

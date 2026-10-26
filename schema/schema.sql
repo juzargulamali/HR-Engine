@@ -27466,7 +27466,7 @@ begin
 
   select coalesce(jsonb_agg(jsonb_build_object(
       'budget_id', b.id, 'project_id', b.project_id, 'reference', b.project_reference, 'name', b.project_name, 'company_id', b.company_id,
-      'company_name', c.legal_name, 'currency', b.currency, 'pm_name', b.pm_name, 'version_id', v.id, 'kind', v.kind, 'seq', v.seq, 'total', v.total,
+      'company_name', c.legal_name, 'currency', b.currency, 'pm_name', b.pm_name, 'site_timezone', b.site_timezone, 'version_id', v.id, 'kind', v.kind, 'seq', v.seq, 'total', v.total,
       'submitted_at', v.submitted_at, 'submitted_by_name', pbx_name(v.submitted_by),
       'on_hold', pbx_approval_on_hold(v.company_id, v.created_by, v.submitted_by),
       'i_can_decide', pbx_is_finance(v.company_id) and v_me <> v.created_by and v_me <> coalesce(v.submitted_by, v_me)) order by v.submitted_at), '[]'::jsonb)
@@ -27476,7 +27476,7 @@ begin
 
   select coalesce(jsonb_agg(jsonb_build_object(
       'budget_id', b.id, 'project_id', b.project_id, 'reference', b.project_reference, 'name', b.project_name, 'company_id', b.company_id,
-      'company_name', c.legal_name, 'currency', b.currency, 'pm_name', b.pm_name, 'submission_id', s.id, 'seq', s.seq, 'total_actual', s.total_actual,
+      'company_name', c.legal_name, 'currency', b.currency, 'pm_name', b.pm_name, 'site_timezone', b.site_timezone, 'submission_id', s.id, 'seq', s.seq, 'total_actual', s.total_actual,
       'total_approved_budget', s.total_approved_budget, 'submitted_at', s.submitted_at, 'submitted_by_name', pbx_name(s.submitted_by),
       'on_hold', pbx_approval_on_hold(s.company_id, s.created_by, s.submitted_by),
       'i_can_decide', pbx_is_finance(s.company_id) and v_me <> s.created_by and v_me <> coalesce(s.submitted_by, v_me)) order by s.submitted_at), '[]'::jsonb)
@@ -27486,7 +27486,7 @@ begin
 
   select coalesce(jsonb_agg(jsonb_build_object(
       'budget_id', b.id, 'project_id', b.project_id, 'reference', b.project_reference, 'name', b.project_name, 'company_id', b.company_id,
-      'company_name', c.legal_name, 'currency', b.currency, 'pm_name', b.pm_name, 'receipts_status', b.receipts_status,
+      'company_name', c.legal_name, 'currency', b.currency, 'pm_name', b.pm_name, 'site_timezone', b.site_timezone, 'receipts_status', b.receipts_status,
       'approved_budget', f->>'approved_budget', 'approved_actual_total', f->>'approved_actual_total', 'has_approved_actuals', (f->>'has_approved_actuals')::boolean,
       'advance_to_return', f->>'advance_to_return', 'reimbursement_outstanding', f->>'reimbursement_outstanding',
       'advances_provided', f->>'advances_provided',
