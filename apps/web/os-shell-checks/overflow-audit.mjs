@@ -17,7 +17,13 @@ const REQ = sql("select id from inv_requests order by created_at limit 1");
 const OPP = sql("select id from crm_opportunities order by created_at limit 1");
 const EMP = sql("select id from employees order by created_at limit 1");
 
-const PAGES = [
+const BPRJ = sql("select id from proj_projects order by created_at limit 1");
+// AUDIT_SET=budget audits the Project Budget & Expenses screens (seed with STAGE=draft|actuals|settled first; AUDIT_PERSONA picks who looks, default mgr@)
+const BUDGET_PAGES = [
+  [`/projects/${BPRJ}/budget`, "project budget"], [`/projects/${BPRJ}/budget?section=funds`, "project funds"], [`/projects/${BPRJ}/budget?section=actuals`, "project actual expenses"], [`/projects/${BPRJ}/budget?section=settlement`, "project settlement"],
+  ["/finance/project-budgets", "finance inbox"], [`/finance/project-budgets/${BPRJ}`, "finance record: budget"], [`/finance/project-budgets/${BPRJ}?section=funds`, "finance record: funds"], [`/finance/project-budgets/${BPRJ}?section=actuals`, "finance record: actuals"], [`/finance/project-budgets/${BPRJ}?section=settlement`, "finance record: settlement"],
+];
+const PAGES = process.env.AUDIT_SET === "budget" ? BUDGET_PAGES : [
   ["/inventory", "stock table"], [`/inventory?open=${ITEM}`, "item panel"], [`/inventory?unit=${UNIT}`, "unit panel"],
   ["/inventory?action=transfer", "transfer panel"], ["/inventory?action=receive", "receive panel"],
   ["/inventory/requests", "requests"], [`/inventory/requests?open=${REQ}`, "request panel"], ["/inventory/movements", "movements"],
@@ -161,7 +167,7 @@ const dialogCheck = async (page) => {
 
 let fails = 0;
 for (const [label, viewport] of [["desktop 1280", { width: 1280, height: 900 }], ["phone 390", { width: 390, height: 844 }]]) {
-  const page = await newPage(browser, viewport); await login(page, "ceo@e2e.local");
+  const page = await newPage(browser, viewport); await login(page, process.env.AUDIT_PERSONA ?? "ceo@e2e.local");
   for (const [path, name] of PAGES) {
     try {
       page.setDefaultTimeout(SHORT);

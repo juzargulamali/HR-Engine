@@ -38,6 +38,8 @@ describe("workspace tabs and the Manage project menu", () => {
   it("has exactly four primary sections", () => {
     expect(projectTabs("/projects/p1", "3").map((t) => t.label)).toEqual(["Work", "Timeline", "Discussion", "Equipment"]);
     expect(projectTabs("/projects/p1", "3")[2]?.badge).toBe("3");
+    // the Budget tab appears only when the module's own access says so
+    expect(projectTabs("/projects/p1", null, true).map((t) => t.label)).toEqual(["Work", "Timeline", "Discussion", "Equipment", "Budget"]);
   });
   it("lights up the new home of every old section and none for the secondary pages", () => {
     const b = "/projects/p1";
@@ -47,6 +49,7 @@ describe("workspace tabs and the Manage project menu", () => {
     expect(activeTabHref(`${b}/timeline`, b)).toBe(`${b}/plan`);
     expect(activeTabHref(`${b}/calendar`, b)).toBe(`${b}/plan`);
     expect(activeTabHref(`${b}/discussion`, b)).toBe(`${b}/discussion`);
+    expect(activeTabHref(`${b}/budget`, b)).toBe(`${b}/budget`);
     expect(activeTabHref(`${b}/people`, b)).toBeNull();
     expect(activeTabHref(`${b}/documents`, b)).toBeNull();
   });

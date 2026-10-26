@@ -24,3 +24,4 @@ export * from "./projectTemplates";
 export * from "./projectCalendar";
 export * from "./projectPlan";
 export * from "./inventoryCodes";
+export * from "./projectBudget";

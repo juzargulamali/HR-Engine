@@ -25098,3 +25098,2632 @@ grant execute on function inv_pending_sales_checks() to authenticated;
 
 -- ROLLBACK (only before the app depends on it):
 --   drop function if exists inv_pending_sales_checks();
+
+-- ==============================================================================
+-- 21. Project Budget & Expenses — migrations 20261210000000 .. 20261210000400, mirrored verbatim.
+-- Company-scoped access (pbx_company_grants: finance / view / manage_access — NOT user_roles, crm_, proj_ or inv_ grants), a project expense budget with
+-- versions, funding entries, manual actual expenses and Finance settlement, read-only tables, decimal server-side totals and controlled functions.
+-- Prerequisites: Projects & Tasks (section 19). Reads reimbursement_claims only to validate a claim link; never changes it.
+-- See docs/project-budget-expenses-design.md and docs/project-budget-expenses-deployment.md.
+-- ==============================================================================
+
+-- ---- 20261210000000_pbx_access_audit_settings.sql ----
+-- Project Budget & Expenses, migration 1 of 5: access, audit, categories and company rates.
+--
+-- Access is its own company-scoped grant table (pbx_company_grants), deliberately NOT user_roles (the HR Finance role also opens payroll
+-- and compensation), NOT proj_/crm_/inv_company_grants: a Finance HR role, a Projects membership or grant, a Sales grant, a founder
+-- title, an employee record or an e-mail domain confers NO access to project budgets, and a budget grant confers no HR, Sales,
+-- Projects or Inventory access. Capabilities:
+--   finance        decide budgets and final expenses submitted by Project Managers WITHOUT Finance access; record funding, returns, reimbursements
+--                  and receipt delivery (declarations); close settlement for ordinary Project Managers; reopen settlement; set company rates
+--                  and categories; and read everything of that company
+--   view           read-only access to the company's budgets (an explicit grant, for example for a founder; a title confers nothing)
+--   executive_approver  the company's authorised CEO / CTO approver: decides budgets, additional budget requests and final expenses that were
+--                  SUBMITTED BY SOMEONE WHO HOLDS FINANCE ACCESS for that company (nobody approves their own work), and reads the company's
+--                  budgets, confirms the receipts of that settlement and authorises its closure. Either a CEO or a CTO is enough. It records no funds,
+--                  receipts, returns or reimbursements (that stays with Finance), and it is an explicit grant: a CEO / CTO title, role or account confers nothing
+--   manage_access  grant and revoke these capabilities for the company
+-- Nothing here reads or writes an HR, Sales, Projects (beyond the project lookups of migration 2+), Inventory or claims table.
+-- Additive: no existing object is altered. No grant is created by this migration: access is set up explicitly (see the owner's setup SQL).
+
+-- -----------------------------------------------------------------------------
+-- Capability vocabulary and grants
+-- -----------------------------------------------------------------------------
+create or replace function pbx_capability_list()
+returns text[]
+language sql immutable
+as $$ select array['finance', 'view', 'executive_approver', 'manage_access']::text[]; $$;
+
+create table if not exists pbx_company_grants (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references auth.users(id),
+  company_id    uuid not null references companies(id),
+  capabilities  text[] not null default '{}'::text[],
+  note          text,
+  granted_by    uuid references auth.users(id),
+  granted_at    timestamptz not null default now(),
+  revoked_at    timestamptz,
+  revoked_by    uuid references auth.users(id),
+  constraint pbx_company_grants_caps check (capabilities <@ pbx_capability_list())
+);
+create unique index if not exists uq_pbx_grants_active on pbx_company_grants(user_id, company_id) where revoked_at is null;
+create index if not exists idx_pbx_grants_company on pbx_company_grants(company_id) where revoked_at is null;
+
+-- -----------------------------------------------------------------------------
+-- Helpers. SECURITY DEFINER + stable so policies can call them without recursion; every one joins to an ACTIVE profile, so a
+-- deactivated account loses access at once.
+-- -----------------------------------------------------------------------------
+create or replace function pbx_require_user()
+returns uuid
+language plpgsql stable
+as $$
+begin
+  if auth.uid() is null then raise exception 'Not signed in' using errcode = '28000'; end if;
+  return auth.uid();
+end;
+$$;
+
+create or replace function pbx_has_capability(p_company_id uuid, p_capability text)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from pbx_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid() and g.company_id = p_company_id and g.revoked_at is null
+      and p_capability = any (g.capabilities));
+$$;
+
+-- Finance: may decide and record. Nothing else implies it (not 'view', not 'manage_access', not a title).
+create or replace function pbx_is_finance(p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$ select pbx_has_capability(p_company_id, 'finance'); $$;
+
+-- May read the company's budgets: Finance, or an explicit read-only grant.
+create or replace function pbx_can_view_company(p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$ select pbx_has_capability(p_company_id, 'finance') or pbx_has_capability(p_company_id, 'view') or pbx_has_capability(p_company_id, 'executive_approver'); $$;
+
+-- The company's authorised CEO / CTO approver (explicit grant only).
+create or replace function pbx_is_executive(p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$ select pbx_has_capability(p_company_id, 'executive_approver'); $$;
+
+create or replace function pbx_has_any_access()
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from pbx_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid() and g.revoked_at is null and (g.capabilities && array['finance', 'view', 'executive_approver']::text[]));
+$$;
+
+create or replace function pbx_accessible_company_ids()
+returns setof uuid
+language sql stable security definer
+set search_path = public
+as $$
+  select g.company_id
+  from pbx_company_grants g
+  join profiles p on p.id = g.user_id and p.is_active
+  where g.user_id = auth.uid() and g.revoked_at is null and (g.capabilities && array['finance', 'view', 'executive_approver']::text[]);
+$$;
+
+create or replace function pbx_finance_company_ids()
+returns setof uuid
+language sql stable security definer
+set search_path = public
+as $$
+  select g.company_id
+  from pbx_company_grants g
+  join profiles p on p.id = g.user_id and p.is_active
+  where g.user_id = auth.uid() and g.revoked_at is null and 'finance' = any (g.capabilities);
+$$;
+
+alter table pbx_company_grants enable row level security;
+drop policy if exists pbx_company_grants_select on pbx_company_grants;
+create policy pbx_company_grants_select on pbx_company_grants for select
+  using (user_id = auth.uid() or pbx_has_capability(company_id, 'manage_access'));
+
+-- -----------------------------------------------------------------------------
+-- Audit log. Own table, readable only by Finance / view grantees of the company. Rows store the old and new row images.
+-- Every audited table carries company_id.
+-- -----------------------------------------------------------------------------
+create table if not exists pbx_audit_log (
+  id          bigint generated always as identity primary key,
+  table_name  text not null,
+  row_id      text,
+  company_id  uuid,
+  action      text not null check (action in ('insert', 'update', 'delete')),
+  actor_id    uuid,
+  old_row     jsonb,
+  new_row     jsonb,
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_pbx_audit_company_time on pbx_audit_log(company_id, created_at desc);
+create index if not exists idx_pbx_audit_row on pbx_audit_log(table_name, row_id);
+
+alter table pbx_audit_log enable row level security;
+drop policy if exists pbx_audit_log_select on pbx_audit_log;
+create policy pbx_audit_log_select on pbx_audit_log for select
+  using (company_id is not null and pbx_can_view_company(company_id));
+
+create or replace function pbx_audit_trigger()
+returns trigger
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_new jsonb := case when tg_op = 'DELETE' then null else to_jsonb(new) end;
+  v_old jsonb := case when tg_op = 'INSERT' then null else to_jsonb(old) end;
+  v_row jsonb := coalesce(v_new, v_old);
+begin
+  insert into pbx_audit_log (table_name, row_id, company_id, action, actor_id, old_row, new_row)
+  values (tg_table_name, v_row->>'id', nullif(v_row->>'company_id', '')::uuid, lower(tg_op), auth.uid(), v_old, v_new);
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists pbx_company_grants_audit on pbx_company_grants;
+create trigger pbx_company_grants_audit after insert or update or delete on pbx_company_grants
+  for each row execute function pbx_audit_trigger();
+
+-- -----------------------------------------------------------------------------
+-- Currency helpers (one expense currency per budget; amounts are never added across currencies)
+-- -----------------------------------------------------------------------------
+create or replace function pbx_currency_decimals(p_currency text)
+returns integer
+language sql immutable
+as $$
+  select case
+    when upper(p_currency) in ('BIF','CLP','DJF','GNF','ISK','JPY','KMF','KRW','PYG','RWF','UGX','UYI','VND','VUV','XAF','XOF','XPF') then 0
+    when upper(p_currency) in ('BHD','IQD','JOD','KWD','LYD','OMR','TND') then 3
+    else 2
+  end;
+$$;
+
+-- Half away from zero to the currency's own decimals (numeric round() does exactly that).
+create or replace function pbx_round(p_amount numeric, p_currency text)
+returns numeric
+language sql immutable
+as $$ select round(p_amount, pbx_currency_decimals(p_currency)); $$;
+
+-- -----------------------------------------------------------------------------
+-- Categories: the six defaults (company_id null) and company categories added by Finance (a simple controlled list).
+-- -----------------------------------------------------------------------------
+create table if not exists pbx_categories (
+  id          uuid primary key default gen_random_uuid(),
+  company_id  uuid references companies(id),
+  key         text not null check (key ~ '^[a-z0-9_]{1,40}$'),
+  label       text not null check (length(btrim(label)) between 1 and 60),
+  sort_no     integer not null default 100,
+  is_default  boolean not null default false,
+  is_active   boolean not null default true,
+  created_by  uuid references auth.users(id),
+  created_at  timestamptz not null default now(),
+  constraint pbx_categories_default_global check (not is_default or company_id is null)
+);
+create unique index if not exists uq_pbx_categories_key on pbx_categories(coalesce(company_id, '00000000-0000-0000-0000-000000000000'::uuid), key);
+
+insert into pbx_categories (company_id, key, label, sort_no, is_default) values
+  (null, 'food', 'Food', 10, true),
+  (null, 'transport', 'Transport', 20, true),
+  (null, 'badges', 'Contractor badges / access', 30, true),
+  (null, 'accommodation', 'Accommodation', 40, true),
+  (null, 'logistics', 'Truck / logistics', 50, true),
+  (null, 'other', 'Other expenses', 90, true)
+on conflict do nothing;
+
+alter table pbx_categories enable row level security;
+drop policy if exists pbx_categories_select on pbx_categories;
+create policy pbx_categories_select on pbx_categories for select
+  using (company_id is null or pbx_can_view_company(company_id));
+
+drop trigger if exists pbx_categories_audit on pbx_categories;
+create trigger pbx_categories_audit after insert or update on pbx_categories
+  for each row execute function pbx_audit_trigger();
+
+-- -----------------------------------------------------------------------------
+-- Company rates per currency: petrol per kilometre and meal per person. Entered by Finance; a number is never applied silently to
+-- another currency (the application only SUGGESTS AED 0.50 / AED 30 until Finance confirms them here).
+-- -----------------------------------------------------------------------------
+create table if not exists pbx_rates (
+  id          uuid primary key default gen_random_uuid(),
+  company_id  uuid not null references companies(id),
+  currency    text not null check (currency ~ '^[A-Z]{3}$'),
+  rate_key    text not null check (rate_key in ('petrol_per_km', 'meal_per_person')),
+  amount      numeric(14,4) not null check (amount >= 0),
+  note        text,
+  updated_by  uuid references auth.users(id),
+  updated_at  timestamptz not null default now(),
+  constraint pbx_rates_unique unique (company_id, currency, rate_key)
+);
+alter table pbx_rates enable row level security;
+drop policy if exists pbx_rates_select on pbx_rates;
+create policy pbx_rates_select on pbx_rates for select using (pbx_can_view_company(company_id));
+
+drop trigger if exists pbx_rates_audit on pbx_rates;
+create trigger pbx_rates_audit after insert or update or delete on pbx_rates
+  for each row execute function pbx_audit_trigger();
+
+-- -----------------------------------------------------------------------------
+-- Company switch: the safe way to pause the module. No row means ON. With is_enabled = false every function that changes a budget,
+-- funding, actual expense, payment or settlement refuses in plain words; reading, access management, rates and categories keep working.
+-- The owner flips it in the SQL Editor (supabase/manual-sql/pbx_80_safe_disable_and_restore.sql); nothing is deleted or reversed.
+-- -----------------------------------------------------------------------------
+create table if not exists pbx_company_settings (
+  company_id  uuid primary key references companies(id),
+  is_enabled  boolean not null default true,
+  updated_by  uuid references auth.users(id),
+  updated_at  timestamptz not null default now()
+);
+alter table pbx_company_settings enable row level security;
+drop policy if exists pbx_company_settings_select on pbx_company_settings;
+create policy pbx_company_settings_select on pbx_company_settings for select using (pbx_can_view_company(company_id));
+
+drop trigger if exists pbx_company_settings_audit on pbx_company_settings;
+create trigger pbx_company_settings_audit after insert or update or delete on pbx_company_settings
+  for each row execute function pbx_audit_trigger();
+
+create or replace function pbx_company_enabled(p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select coalesce((select is_enabled from pbx_company_settings where company_id = p_company_id), true);
+$$;
+create or replace function pbx_require_enabled(p_company_id uuid)
+returns void
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  if not pbx_company_enabled(p_company_id) then
+    raise exception 'Project budgets are switched off for this company. Nothing can be changed until the owner switches them on; everything can still be read.' using errcode = '23514';
+  end if;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Functions: access management, rates, categories
+-- -----------------------------------------------------------------------------
+create or replace function pbx_grant_access(
+  p_user_id uuid,
+  p_company_id uuid,
+  p_capabilities text[] default '{}'::text[],
+  p_note text default null
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_id uuid;
+  v_caps text[] := coalesce(p_capabilities, '{}'::text[]);
+begin
+  perform pbx_require_user();
+  if not pbx_has_capability(p_company_id, 'manage_access') then
+    raise exception 'Only someone with budget access management for this company can grant access to project budgets' using errcode = '42501';
+  end if;
+  if not (v_caps <@ pbx_capability_list()) then
+    raise exception 'Unknown capability in %', v_caps using errcode = '22023';
+  end if;
+  if not exists (select 1 from profiles where id = p_user_id and is_active) then
+    raise exception 'That user does not exist or is not active' using errcode = '22023';
+  end if;
+  if not exists (select 1 from companies where id = p_company_id and is_active and deleted_at is null) then
+    raise exception 'Unknown or inactive company' using errcode = '22023';
+  end if;
+  -- the last access manager cannot remove their own capability by replacing it
+  if exists (select 1 from pbx_company_grants where user_id = p_user_id and company_id = p_company_id and revoked_at is null and 'manage_access' = any (capabilities))
+     and not ('manage_access' = any (v_caps))
+     and (select count(*) from pbx_company_grants where company_id = p_company_id and revoked_at is null and 'manage_access' = any (capabilities)) <= 1 then
+    raise exception 'Cannot remove access management from the last person who holds it for this company' using errcode = '23514';
+  end if;
+  update pbx_company_grants set capabilities = v_caps, note = coalesce(p_note, note)
+   where user_id = p_user_id and company_id = p_company_id and revoked_at is null
+  returning id into v_id;
+  if v_id is null then
+    insert into pbx_company_grants (user_id, company_id, capabilities, granted_by, note)
+    values (p_user_id, p_company_id, v_caps, auth.uid(), p_note)
+    returning id into v_id;
+  end if;
+  return v_id;
+end;
+$$;
+
+create or replace function pbx_revoke_access(p_user_id uuid, p_company_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  perform pbx_require_user();
+  if not pbx_has_capability(p_company_id, 'manage_access') then
+    raise exception 'Only someone with budget access management for this company can revoke access to project budgets' using errcode = '42501';
+  end if;
+  if exists (select 1 from pbx_company_grants where user_id = p_user_id and company_id = p_company_id and revoked_at is null and 'manage_access' = any (capabilities))
+     and (select count(*) from pbx_company_grants where company_id = p_company_id and revoked_at is null and 'manage_access' = any (capabilities)) <= 1 then
+    raise exception 'Cannot revoke the last person who manages access to project budgets for this company' using errcode = '23514';
+  end if;
+  update pbx_company_grants set revoked_at = now(), revoked_by = auth.uid()
+   where user_id = p_user_id and company_id = p_company_id and revoked_at is null;
+end;
+$$;
+
+-- Finance sets (or changes) a company rate for one currency.
+create or replace function pbx_set_rate(p_company_id uuid, p_currency text, p_rate_key text, p_amount numeric, p_note text default null)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare v_id uuid; v_cur text := upper(btrim(coalesce(p_currency, '')));
+begin
+  perform pbx_require_user();
+  if not pbx_is_finance(p_company_id) then
+    raise exception 'Only Finance can set the company rates' using errcode = '42501';
+  end if;
+  if v_cur !~ '^[A-Z]{3}$' then raise exception 'The currency is a 3-letter code' using errcode = '22023'; end if;
+  if p_rate_key not in ('petrol_per_km', 'meal_per_person') then raise exception 'Unknown rate' using errcode = '22023'; end if;
+  if p_amount is null or p_amount < 0 or p_amount > 100000 then raise exception 'The rate must be zero or more' using errcode = '22023'; end if;
+  insert into pbx_rates (company_id, currency, rate_key, amount, note, updated_by)
+  values (p_company_id, v_cur, p_rate_key, p_amount, nullif(btrim(p_note), ''), auth.uid())
+  on conflict (company_id, currency, rate_key) do update
+    set amount = excluded.amount, note = excluded.note, updated_by = excluded.updated_by, updated_at = now()
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- Finance adds a company category (a simple controlled list; the six defaults cannot be removed).
+create or replace function pbx_add_category(p_company_id uuid, p_label text)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_label text := btrim(coalesce(p_label, ''));
+  v_key text;
+  v_id uuid;
+begin
+  perform pbx_require_user();
+  if not pbx_is_finance(p_company_id) then
+    raise exception 'Only Finance can add an expense category' using errcode = '42501';
+  end if;
+  if length(v_label) not between 1 and 60 then raise exception 'Give the category a name of up to 60 characters' using errcode = '22023'; end if;
+  v_key := regexp_replace(lower(v_label), '[^a-z0-9]+', '_', 'g');
+  v_key := btrim(v_key, '_');
+  if v_key = '' then raise exception 'Give the category a name with letters or numbers' using errcode = '22023'; end if;
+  v_key := left(v_key, 40);
+  if exists (select 1 from pbx_categories where (company_id is null or company_id = p_company_id) and (key = v_key or lower(label) = lower(v_label))) then
+    raise exception 'That category already exists' using errcode = '23505';
+  end if;
+  insert into pbx_categories (company_id, key, label, sort_no, created_by) values (p_company_id, v_key, v_label, 70, auth.uid())
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges: clients read through RLS only; every write is a function.
+-- -----------------------------------------------------------------------------
+revoke all on table pbx_company_grants, pbx_audit_log, pbx_categories, pbx_rates, pbx_company_settings from anon, authenticated, public;
+revoke all on sequence pbx_audit_log_id_seq from public, anon, authenticated;
+grant select on table pbx_company_grants, pbx_audit_log, pbx_categories, pbx_rates, pbx_company_settings to authenticated;
+
+revoke all on function
+  pbx_capability_list(), pbx_require_user(), pbx_has_capability(uuid, text), pbx_is_finance(uuid), pbx_is_executive(uuid), pbx_can_view_company(uuid),
+  pbx_has_any_access(), pbx_accessible_company_ids(), pbx_finance_company_ids(), pbx_audit_trigger(), pbx_company_enabled(uuid), pbx_require_enabled(uuid),
+  pbx_currency_decimals(text), pbx_round(numeric, text),
+  pbx_grant_access(uuid, uuid, text[], text), pbx_revoke_access(uuid, uuid),
+  pbx_set_rate(uuid, text, text, numeric, text), pbx_add_category(uuid, text)
+  from public, anon, authenticated;
+grant execute on function
+  pbx_capability_list(), pbx_has_capability(uuid, text), pbx_is_finance(uuid), pbx_is_executive(uuid), pbx_can_view_company(uuid),
+  pbx_has_any_access(), pbx_accessible_company_ids(), pbx_finance_company_ids(), pbx_currency_decimals(text), pbx_round(numeric, text),
+  pbx_grant_access(uuid, uuid, text[], text), pbx_revoke_access(uuid, uuid),
+  pbx_set_rate(uuid, text, text, numeric, text), pbx_add_category(uuid, text)
+  to authenticated;
+
+-- ROLLBACK (only before the app depends on it; see supabase/manual-sql/pbx_90_rollback.sql for the full ordered version):
+--   drop table if exists pbx_company_settings, pbx_rates, pbx_categories, pbx_audit_log, pbx_company_grants cascade;
+
+-- ---- 20261210000100_pbx_core_tables.sql ----
+-- Project Budget & Expenses, migration 2 of 5: core tables, immutability guards and row-level security.
+--
+-- Everything here is READ-ONLY to clients (SELECT policies only, no INSERT/UPDATE/DELETE policies, no DML grants). Changes go through
+-- the SECURITY DEFINER functions of migrations 3 and 4, which enforce the role, independence and state rules.
+--
+-- Who can read (all enforced here, not by hiding buttons):
+--   * Finance, 'view' and CEO-CTO approver grantees of the budget's owning company (pbx_can_view_company);
+--   * the CURRENT Project Manager or unexpired acting PM of the project (proj_is_pm);
+--   * a PRIOR submitter (a former PM) only the versions and submissions they created or submitted.
+-- Nobody gains access from project membership, the project directory, a Sales link, an HR role, a founder title or sys_admin.
+--
+-- Money: numeric(16,3) rounded to the budget currency's own decimals by pbx_round(); one currency per budget; no exchange rates.
+-- Names of the project, PM and people are copied (snapshots) so Finance can work without any Projects access.
+
+-- -----------------------------------------------------------------------------
+-- One budget record per project
+-- -----------------------------------------------------------------------------
+create table if not exists pbx_budgets (
+  id                        uuid primary key default gen_random_uuid(),
+  project_id                uuid not null references proj_projects(id),
+  company_id                uuid not null references companies(id),
+  currency                  text not null check (currency ~ '^[A-Z]{3}$'),
+  -- Display snapshot, refreshed whenever a budget or the final expenses are submitted.
+  project_reference         text not null,
+  project_name              text not null,
+  pm_user_id                uuid,
+  pm_name                   text,
+  location                  text,
+  site_timezone             text,
+  project_start             date,
+  project_end               date,
+  install_start             date,
+  event_start               date,
+  event_end                 date,
+  -- Receipts and settlement (financial settlement is separate from project completion).
+  receipts_status           text not null default 'not_received' check (receipts_status in ('not_received', 'partial', 'received', 'exception')),
+  receipts_received_on      date,
+  receipts_exception_reason text,
+  receipts_recorded_by      uuid references auth.users(id),
+  receipts_recorded_at      timestamptz,
+  -- Finance records that receipts were delivered (a declaration). Where the final expenses were submitted by someone holding Finance access, an independent
+  -- CEO / CTO approver must also CONFIRM them before settlement can close (pbx_confirm_receipts); Finance never confirms its own receipts.
+  receipts_confirmed_by     uuid references auth.users(id),
+  receipts_confirmed_at     timestamptz,
+  settlement_status         text not null default 'open' check (settlement_status in ('open', 'closed')),
+  settlement_closed_at      timestamptz,
+  settlement_closed_by      uuid references auth.users(id),
+  settlement_note           text,
+  row_version               integer not null default 1,
+  created_by                uuid not null references auth.users(id),
+  created_at                timestamptz not null default now(),
+  updated_at                timestamptz not null default now(),
+  constraint pbx_budgets_one_per_project unique (project_id),
+  constraint pbx_budgets_exception_reason check (receipts_status <> 'exception' or length(btrim(coalesce(receipts_exception_reason, ''))) > 0),
+  constraint pbx_budgets_closed_consistent check ((settlement_status = 'closed') = (settlement_closed_at is not null))
+);
+create index if not exists idx_pbx_budgets_company on pbx_budgets(company_id, settlement_status);
+
+-- -----------------------------------------------------------------------------
+-- Budget versions: the original request and each additional request. A submission is a stable version; changes after a return
+-- are a new draft (a revision) that points at the one it revises.
+-- -----------------------------------------------------------------------------
+create table if not exists pbx_budget_versions (
+  id                uuid primary key default gen_random_uuid(),
+  budget_id         uuid not null references pbx_budgets(id),
+  company_id        uuid not null references companies(id),
+  project_id        uuid not null references proj_projects(id),
+  kind              text not null check (kind in ('original', 'addition')),
+  seq               integer not null check (seq >= 1),
+  status            text not null default 'draft' check (status in ('draft', 'submitted', 'returned', 'rejected', 'approved', 'discarded')),
+  parent_version_id uuid references pbx_budget_versions(id),
+  period_start      date,
+  period_end        date,
+  people            uuid[] not null default '{}'::uuid[],
+  note              text,
+  total             numeric(16,3) not null default 0 check (total >= 0),
+  created_by        uuid not null references auth.users(id),
+  created_at        timestamptz not null default now(),
+  submitted_by      uuid references auth.users(id),
+  submitted_at      timestamptz,
+  submit_request_id uuid,
+  approval_route    text not null default 'finance' check (approval_route in ('finance', 'executive')),   -- fixed at submission: who may decide it (see pbx_approval_route)
+  decided_by        uuid references auth.users(id),
+  decided_at        timestamptz,
+  decision_note     text,
+  row_version       integer not null default 1,
+  updated_at        timestamptz not null default now(),
+  constraint pbx_versions_seq unique (budget_id, seq),
+  constraint pbx_versions_period check (period_end is null or period_start is null or period_end >= period_start),
+  constraint pbx_versions_decision_note check (status not in ('returned', 'rejected') or length(btrim(coalesce(decision_note, ''))) > 0),
+  constraint pbx_versions_decided check ((status in ('approved', 'returned', 'rejected')) = (decided_at is not null))
+);
+-- At most one open (draft or submitted) version per budget, and at most one approved original.
+create unique index if not exists uq_pbx_open_version on pbx_budget_versions(budget_id) where status in ('draft', 'submitted');
+create unique index if not exists uq_pbx_approved_original on pbx_budget_versions(budget_id) where kind = 'original' and status = 'approved';
+create unique index if not exists uq_pbx_submit_request on pbx_budget_versions(budget_id, submit_request_id) where submit_request_id is not null;
+create index if not exists idx_pbx_versions_company_status on pbx_budget_versions(company_id, status);
+
+create table if not exists pbx_budget_rows (
+  id              uuid primary key default gen_random_uuid(),
+  version_id      uuid not null references pbx_budget_versions(id) on delete cascade,
+  budget_id       uuid not null references pbx_budgets(id),
+  company_id      uuid not null references companies(id),
+  sort_no         integer not null default 0,
+  category_id     uuid not null references pbx_categories(id),
+  category_key    text not null,
+  category_label  text not null,
+  date_from       date,
+  date_to         date,
+  activity        text not null default 'other' check (activity in ('setup', 'show', 'dismantling', 'other')),
+  description     text not null check (length(btrim(description)) between 1 and 300),
+  basis           text not null check (basis in ('fixed', 'per_person', 'per_person_day', 'per_trip', 'per_km', 'qty_rate')),
+  people          numeric(12,3) check (people is null or people >= 0),
+  days            numeric(12,3) check (days is null or days >= 0),
+  qty             numeric(12,3) check (qty is null or qty >= 0),
+  rate            numeric(14,4) check (rate is null or rate >= 0),
+  fixed           numeric(16,3) check (fixed is null or fixed >= 0),
+  -- A company rate this row was based on (petrol per km, meal per person), and what Finance had configured when it was saved.
+  rate_key        text check (rate_key is null or rate_key in ('petrol_per_km', 'meal_per_person')),
+  configured_rate numeric(14,4),
+  -- Calculated by the trigger below, never taken from the client.
+  total           numeric(16,3) not null default 0 check (total >= 0),
+  constraint pbx_rows_dates check (date_to is null or date_from is null or date_to >= date_from),
+  constraint pbx_rows_rate_key_basis check (rate_key is null
+    or (rate_key = 'petrol_per_km' and basis = 'per_km')
+    or (rate_key = 'meal_per_person' and basis in ('per_person', 'per_person_day')))
+);
+create index if not exists idx_pbx_rows_version on pbx_budget_rows(version_id, sort_no);
+
+-- -----------------------------------------------------------------------------
+-- Funding: instalments Finance provides (separate entries, several recipients). Reversals are audited, never deletes.
+-- -----------------------------------------------------------------------------
+create table if not exists pbx_funding (
+  id                uuid primary key default gen_random_uuid(),
+  budget_id         uuid not null references pbx_budgets(id),
+  company_id        uuid not null references companies(id),
+  project_id        uuid not null references proj_projects(id),
+  recipient_user_id uuid not null references auth.users(id),
+  recipient_name    text not null,
+  funded_on         date not null,
+  amount            numeric(16,3) not null check (amount > 0),
+  currency          text not null check (currency ~ '^[A-Z]{3}$'),
+  method            text not null check (method in ('cash', 'bank_transfer', 'pluto', 'other')),
+  -- Cash and bank advances are held by a person and owed back if unspent; a Pluto allocation or card limit never is.
+  is_advance        boolean not null,
+  reference         text,
+  note              text,
+  status            text not null default 'recorded' check (status in ('recorded', 'reversed')),
+  reversed_by       uuid references auth.users(id),
+  reversed_at       timestamptz,
+  reversal_reason   text,
+  recorded_by       uuid not null references auth.users(id),
+  recorded_at       timestamptz not null default now(),
+  request_id        uuid not null,
+  -- Finance entries are DECLARATIONS of what was handed over, not independent verification. True when the recorder is the person receiving or returning the money.
+  self_declared     boolean not null default false,
+  constraint pbx_funding_request unique (budget_id, request_id),
+  constraint pbx_funding_advance_rule check (
+    (method in ('cash', 'bank_transfer') and is_advance) or (method = 'pluto' and not is_advance) or method = 'other'),
+  constraint pbx_funding_reversal check ((status = 'reversed') = (reversed_at is not null)
+    and (status <> 'reversed' or length(btrim(coalesce(reversal_reason, ''))) > 0))
+);
+create index if not exists idx_pbx_funding_budget on pbx_funding(budget_id);
+
+-- -----------------------------------------------------------------------------
+-- Actual expenses: the PM's own totals (never copied from estimates). A blank amount (null) is "not entered"; zero is a confirmed zero.
+-- -----------------------------------------------------------------------------
+create table if not exists pbx_actual_submissions (
+  id                    uuid primary key default gen_random_uuid(),
+  budget_id             uuid not null references pbx_budgets(id),
+  company_id            uuid not null references companies(id),
+  project_id            uuid not null references proj_projects(id),
+  seq                   integer not null check (seq >= 1),
+  status                text not null default 'draft' check (status in ('draft', 'submitted', 'returned', 'approved')),
+  parent_submission_id  uuid references pbx_actual_submissions(id),
+  complete_confirmed    boolean not null default false,
+  variance_note         text,
+  total_actual          numeric(16,3) not null default 0,
+  total_approved_budget numeric(16,3) not null default 0,
+  reopened_after_approval boolean not null default false,
+  created_by            uuid not null references auth.users(id),
+  created_at            timestamptz not null default now(),
+  submitted_by          uuid references auth.users(id),
+  submitted_at          timestamptz,
+  submit_request_id     uuid,
+  approval_route        text not null default 'finance' check (approval_route in ('finance', 'executive')),
+  decided_by            uuid references auth.users(id),
+  decided_at            timestamptz,
+  decision_note         text,
+  row_version           integer not null default 1,
+  updated_at            timestamptz not null default now(),
+  constraint pbx_actuals_seq unique (budget_id, seq),
+  constraint pbx_actuals_decided check ((status in ('approved', 'returned')) = (decided_at is not null)),
+  constraint pbx_actuals_return_note check (status <> 'returned' or length(btrim(coalesce(decision_note, ''))) > 0)
+);
+create unique index if not exists uq_pbx_open_actuals on pbx_actual_submissions(budget_id) where status in ('draft', 'submitted');
+create unique index if not exists uq_pbx_approved_actuals on pbx_actual_submissions(budget_id) where status = 'approved';
+create unique index if not exists uq_pbx_actuals_submit_request on pbx_actual_submissions(budget_id, submit_request_id) where submit_request_id is not null;
+create index if not exists idx_pbx_actuals_company_status on pbx_actual_submissions(company_id, status);
+
+create table if not exists pbx_actual_rows (
+  id               uuid primary key default gen_random_uuid(),
+  submission_id    uuid not null references pbx_actual_submissions(id) on delete cascade,
+  budget_id        uuid not null references pbx_budgets(id),
+  company_id       uuid not null references companies(id),
+  sort_no          integer not null default 0,
+  -- The approved budget row this line belongs to (null for an unplanned expense). A budget row may have several lines (split by how it was paid).
+  budget_row_id    uuid references pbx_budget_rows(id),
+  line_no          integer not null default 1,
+  category_key     text not null,
+  category_label   text not null,
+  description      text not null check (length(btrim(description)) between 1 and 300),
+  approved_amount  numeric(16,3) not null default 0 check (approved_amount >= 0),
+  actual_amount    numeric(16,3) check (actual_amount is null or actual_amount >= 0),
+  paid_via         text check (paid_via is null or paid_via in ('advance', 'company_card', 'direct_company', 'personal', 'existing_claim')),
+  paid_by_user_id  uuid references auth.users(id),
+  paid_by_name     text,
+  -- A cost that is already in an employee claim: linked, never recorded a second time as a reimbursement or advance spend.
+  -- Deliberately NOT a foreign key: this module must never block or change anything in the existing claims flow (for example deleting a draft claim).
+  claim_id         uuid,
+  foreign_currency boolean not null default false,
+  foreign_note     text,
+  note             text,
+  unplanned        boolean not null default false,
+  constraint pbx_actual_rows_paid check (actual_amount is null or paid_via is not null or actual_amount = 0),
+  constraint pbx_actual_rows_person check (actual_amount is null or actual_amount = 0 or paid_via is null or paid_via not in ('advance', 'personal') or paid_by_user_id is not null),
+  constraint pbx_actual_rows_claim check (claim_id is null or paid_via = 'existing_claim'),
+  constraint pbx_actual_rows_claim_reference check (paid_via is distinct from 'existing_claim' or claim_id is not null or length(btrim(coalesce(note, ''))) > 0),
+  constraint pbx_actual_rows_foreign check (not foreign_currency or length(btrim(coalesce(foreign_note, ''))) > 0),
+  constraint pbx_actual_rows_unplanned check (unplanned = (budget_row_id is null))
+);
+create index if not exists idx_pbx_actual_rows_submission on pbx_actual_rows(submission_id, sort_no);
+
+-- -----------------------------------------------------------------------------
+-- Payments: money returned to the company and reimbursements paid (per person; partial amounts supported; reversible).
+-- -----------------------------------------------------------------------------
+create table if not exists pbx_payments (
+  id               uuid primary key default gen_random_uuid(),
+  budget_id        uuid not null references pbx_budgets(id),
+  company_id       uuid not null references companies(id),
+  project_id       uuid not null references proj_projects(id),
+  kind             text not null check (kind in ('return', 'reimbursement')),
+  person_user_id   uuid not null references auth.users(id),
+  person_name      text not null,
+  amount           numeric(16,3) not null check (amount > 0),
+  paid_on          date not null,
+  method           text not null check (method in ('cash', 'bank_transfer', 'pluto', 'other')),
+  reference        text,
+  note             text,
+  status           text not null default 'recorded' check (status in ('recorded', 'reversed')),
+  reversed_by      uuid references auth.users(id),
+  reversed_at      timestamptz,
+  reversal_reason  text,
+  recorded_by      uuid not null references auth.users(id),
+  recorded_at      timestamptz not null default now(),
+  request_id       uuid not null,
+  self_declared    boolean not null default false,   -- see pbx_funding.self_declared
+  constraint pbx_payments_request unique (budget_id, request_id),
+  constraint pbx_payments_reversal check ((status = 'reversed') = (reversed_at is not null)
+    and (status <> 'reversed' or length(btrim(coalesce(reversal_reason, ''))) > 0))
+);
+create index if not exists idx_pbx_payments_budget on pbx_payments(budget_id);
+
+-- -----------------------------------------------------------------------------
+-- Read helpers (SECURITY DEFINER stable; the policies below never recurse)
+-- -----------------------------------------------------------------------------
+create or replace function pbx_budget_company(p_budget_id uuid)
+returns uuid language sql stable security definer set search_path = public
+as $$ select company_id from pbx_budgets where id = p_budget_id; $$;
+
+create or replace function pbx_budget_project(p_budget_id uuid)
+returns uuid language sql stable security definer set search_path = public
+as $$ select project_id from pbx_budgets where id = p_budget_id; $$;
+
+-- The current PM or unexpired acting PM of the project that owns this budget.
+create or replace function pbx_is_budget_pm(p_budget_id uuid)
+returns boolean language sql stable security definer set search_path = public
+as $$ select exists (select 1 from pbx_budgets b where b.id = p_budget_id and proj_is_pm(b.project_id)); $$;
+
+-- May read the budget record and its funding, payments and summary: Finance / view grantee of the company, or the current PM.
+create or replace function pbx_can_read_budget(p_budget_id uuid)
+returns boolean language sql stable security definer set search_path = public
+as $$
+  select exists (select 1 from pbx_budgets b
+                  where b.id = p_budget_id and (pbx_can_view_company(b.company_id) or proj_is_pm(b.project_id)));
+$$;
+
+-- May read this budget's header only (a prior submitter sees the header and their own versions, nothing else).
+create or replace function pbx_can_read_budget_header(p_budget_id uuid)
+returns boolean language sql stable security definer set search_path = public
+as $$
+  select pbx_can_read_budget(p_budget_id)
+      or exists (select 1 from pbx_budget_versions v where v.budget_id = p_budget_id and (v.created_by = auth.uid() or v.submitted_by = auth.uid()))
+      or exists (select 1 from pbx_actual_submissions a where a.budget_id = p_budget_id and (a.created_by = auth.uid() or a.submitted_by = auth.uid()));
+$$;
+
+create or replace function pbx_can_read_version(p_version_id uuid)
+returns boolean language sql stable security definer set search_path = public
+as $$
+  select exists (select 1 from pbx_budget_versions v
+                  where v.id = p_version_id and (pbx_can_read_budget(v.budget_id) or v.created_by = auth.uid() or v.submitted_by = auth.uid()));
+$$;
+
+create or replace function pbx_can_read_submission(p_submission_id uuid)
+returns boolean language sql stable security definer set search_path = public
+as $$
+  select exists (select 1 from pbx_actual_submissions a
+                  where a.id = p_submission_id and (pbx_can_read_budget(a.budget_id) or a.created_by = auth.uid() or a.submitted_by = auth.uid()));
+$$;
+
+alter table pbx_budgets enable row level security;
+alter table pbx_budget_versions enable row level security;
+alter table pbx_budget_rows enable row level security;
+alter table pbx_funding enable row level security;
+alter table pbx_actual_submissions enable row level security;
+alter table pbx_actual_rows enable row level security;
+alter table pbx_payments enable row level security;
+
+drop policy if exists pbx_budgets_select on pbx_budgets;
+create policy pbx_budgets_select on pbx_budgets for select using (pbx_can_read_budget_header(id));
+drop policy if exists pbx_versions_select on pbx_budget_versions;
+create policy pbx_versions_select on pbx_budget_versions for select using (pbx_can_read_version(id));
+drop policy if exists pbx_rows_select on pbx_budget_rows;
+create policy pbx_rows_select on pbx_budget_rows for select using (pbx_can_read_version(version_id));
+drop policy if exists pbx_funding_select on pbx_funding;
+create policy pbx_funding_select on pbx_funding for select using (pbx_can_read_budget(budget_id));
+drop policy if exists pbx_actuals_select on pbx_actual_submissions;
+create policy pbx_actuals_select on pbx_actual_submissions for select using (pbx_can_read_submission(id));
+drop policy if exists pbx_actual_rows_select on pbx_actual_rows;
+create policy pbx_actual_rows_select on pbx_actual_rows for select using (pbx_can_read_submission(submission_id));
+drop policy if exists pbx_payments_select on pbx_payments;
+create policy pbx_payments_select on pbx_payments for select using (pbx_can_read_budget(budget_id));
+
+-- -----------------------------------------------------------------------------
+-- Calculation and immutability guards (the database, not the page, keeps history honest)
+-- -----------------------------------------------------------------------------
+-- A row's total is calculated here from its basis, in decimal arithmetic, rounded once to the budget currency. Fields the basis does not use
+-- are cleared, so a "fixed total for the whole period" can never be multiplied by days left over from an earlier choice.
+create or replace function pbx_budget_row_calc()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_currency text;
+  v_raw numeric;
+begin
+  select currency into v_currency from pbx_budgets where id = new.budget_id;
+  if v_currency is null then raise exception 'Budget not found' using errcode = 'P0002'; end if;
+  if new.basis = 'fixed' then
+    if new.fixed is null then raise exception 'Enter the fixed total for "%"', new.description using errcode = '22023'; end if;
+    new.people := null; new.days := null; new.qty := null; new.rate := null;
+    v_raw := new.fixed;
+  elsif new.basis = 'per_person' then
+    if new.people is null or new.rate is null then raise exception 'Enter the number of people and the rate for "%"', new.description using errcode = '22023'; end if;
+    new.days := null; new.qty := null; new.fixed := null;
+    v_raw := new.people * new.rate;
+  elsif new.basis = 'per_person_day' then
+    if new.people is null or new.days is null or new.rate is null then raise exception 'Enter the number of people, the days and the rate for "%"', new.description using errcode = '22023'; end if;
+    new.qty := null; new.fixed := null;
+    v_raw := new.people * new.days * new.rate;
+  elsif new.basis in ('per_trip', 'per_km', 'qty_rate') then
+    if new.qty is null or new.rate is null then raise exception 'Enter the quantity and the rate for "%"', new.description using errcode = '22023'; end if;
+    new.people := null; new.days := null; new.fixed := null;
+    v_raw := new.qty * new.rate;
+  else
+    raise exception 'Choose how "%" is calculated', new.description using errcode = '22023';
+  end if;
+  new.total := pbx_round(v_raw, v_currency);
+  return new;
+end;
+$$;
+drop trigger if exists pbx_budget_rows_calc on pbx_budget_rows;
+create trigger pbx_budget_rows_calc before insert or update on pbx_budget_rows
+  for each row execute function pbx_budget_row_calc();
+
+-- Rows of a version that is no longer a draft can never change.
+create or replace function pbx_rows_frozen()
+returns trigger
+language plpgsql
+as $$
+declare v_status text; v_id uuid := coalesce(new.version_id, old.version_id);
+begin
+  select status into v_status from pbx_budget_versions where id = v_id;
+  if v_status is distinct from 'draft' then
+    raise exception 'A submitted budget version is a historical record and cannot be changed' using errcode = '23514';
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+drop trigger if exists pbx_budget_rows_frozen on pbx_budget_rows;
+create trigger pbx_budget_rows_frozen before insert or update or delete on pbx_budget_rows
+  for each row execute function pbx_rows_frozen();
+
+-- Version lifecycle: draft -> submitted | discarded; submitted -> approved | returned | rejected; nothing else, ever. Content is frozen once submitted.
+create or replace function pbx_version_guard()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'Budget versions are never deleted' using errcode = '23514'; end if;
+  if new.budget_id is distinct from old.budget_id or new.kind is distinct from old.kind or new.seq is distinct from old.seq
+     or new.created_by is distinct from old.created_by or new.company_id is distinct from old.company_id or new.project_id is distinct from old.project_id then
+    raise exception 'A budget version''s identity cannot be changed' using errcode = '23514';
+  end if;
+  if old.status <> 'draft' then
+    if new.period_start is distinct from old.period_start or new.period_end is distinct from old.period_end or new.people is distinct from old.people
+       or new.note is distinct from old.note or new.total is distinct from old.total or new.approval_route is distinct from old.approval_route then
+      raise exception 'A submitted budget version is a historical record and cannot be changed' using errcode = '23514';
+    end if;
+  end if;
+  -- Nobody decides their own work, whatever function or tool writes the row.
+  if old.status = 'submitted' and new.status is distinct from old.status and new.status in ('approved', 'returned', 'rejected')
+     and (new.decided_by is null or new.decided_by = old.created_by or new.decided_by = old.submitted_by) then
+    raise exception 'A budget version cannot be decided by the person who prepared or submitted it' using errcode = '42501';
+  end if;
+  if new.status is distinct from old.status then
+    if not ((old.status = 'draft' and new.status in ('submitted', 'discarded'))
+         or (old.status = 'submitted' and new.status in ('approved', 'returned', 'rejected'))) then
+      raise exception 'A budget version cannot move from % to %', old.status, new.status using errcode = '23514';
+    end if;
+  end if;
+  new.updated_at := now();
+  return new;
+end;
+$$;
+drop trigger if exists pbx_budget_versions_guard on pbx_budget_versions;
+create trigger pbx_budget_versions_guard before update or delete on pbx_budget_versions
+  for each row execute function pbx_version_guard();
+
+create or replace function pbx_actual_rows_frozen()
+returns trigger
+language plpgsql
+as $$
+declare v_status text; v_id uuid := coalesce(new.submission_id, old.submission_id);
+begin
+  select status into v_status from pbx_actual_submissions where id = v_id;
+  if v_status is distinct from 'draft' then
+    raise exception 'Submitted final expenses are a historical record and cannot be changed' using errcode = '23514';
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+drop trigger if exists pbx_actual_rows_frozen on pbx_actual_rows;
+create trigger pbx_actual_rows_frozen before insert or update or delete on pbx_actual_rows
+  for each row execute function pbx_actual_rows_frozen();
+
+-- Actual submissions: draft -> submitted; submitted -> approved | returned; approved -> returned (Finance sends an approved set back for an audited correction).
+create or replace function pbx_actual_submission_guard()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'Final expense submissions are never deleted' using errcode = '23514'; end if;
+  if new.budget_id is distinct from old.budget_id or new.seq is distinct from old.seq or new.created_by is distinct from old.created_by
+     or new.company_id is distinct from old.company_id or new.project_id is distinct from old.project_id then
+    raise exception 'A final expense submission''s identity cannot be changed' using errcode = '23514';
+  end if;
+  if old.status <> 'draft' then
+    if new.complete_confirmed is distinct from old.complete_confirmed or new.variance_note is distinct from old.variance_note
+       or new.total_actual is distinct from old.total_actual or new.total_approved_budget is distinct from old.total_approved_budget
+       or new.approval_route is distinct from old.approval_route then
+      raise exception 'Submitted final expenses are a historical record and cannot be changed' using errcode = '23514';
+    end if;
+  end if;
+  if old.status in ('submitted', 'approved') and new.status is distinct from old.status and new.status in ('approved', 'returned')
+     and (new.decided_by is null or new.decided_by = old.created_by or new.decided_by = old.submitted_by) then
+    raise exception 'Final expenses cannot be decided by the person who prepared or submitted them' using errcode = '42501';
+  end if;
+  if new.status is distinct from old.status then
+    if not ((old.status = 'draft' and new.status = 'submitted')
+         or (old.status = 'submitted' and new.status in ('approved', 'returned'))
+         or (old.status = 'approved' and new.status = 'returned')) then
+      raise exception 'Final expenses cannot move from % to %', old.status, new.status using errcode = '23514';
+    end if;
+  end if;
+  new.updated_at := now();
+  return new;
+end;
+$$;
+drop trigger if exists pbx_actual_submissions_guard on pbx_actual_submissions;
+create trigger pbx_actual_submissions_guard before update or delete on pbx_actual_submissions
+  for each row execute function pbx_actual_submission_guard();
+
+-- Funding and payments are recorded once; the only change ever allowed is an audited reversal.
+create or replace function pbx_money_entry_guard()
+returns trigger
+language plpgsql
+as $$
+declare v_old jsonb; v_new jsonb;
+begin
+  if tg_op = 'DELETE' then raise exception 'Recorded funding and payments are never deleted: reverse them with a reason' using errcode = '23514'; end if;
+  v_old := to_jsonb(old) - 'status' - 'reversed_by' - 'reversed_at' - 'reversal_reason';
+  v_new := to_jsonb(new) - 'status' - 'reversed_by' - 'reversed_at' - 'reversal_reason';
+  if v_old is distinct from v_new then
+    raise exception 'A recorded entry cannot be edited: reverse it with a reason and record the correct one' using errcode = '23514';
+  end if;
+  if old.status = 'reversed' and new.status is distinct from old.status then
+    raise exception 'A reversed entry cannot be changed' using errcode = '23514';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists pbx_funding_guard on pbx_funding;
+create trigger pbx_funding_guard before update or delete on pbx_funding for each row execute function pbx_money_entry_guard();
+drop trigger if exists pbx_payments_guard on pbx_payments;
+create trigger pbx_payments_guard before update or delete on pbx_payments for each row execute function pbx_money_entry_guard();
+
+create or replace function pbx_budget_header_guard()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'A project budget record is never deleted' using errcode = '23514'; end if;
+  if new.project_id is distinct from old.project_id or new.company_id is distinct from old.company_id or new.currency is distinct from old.currency
+     or new.created_by is distinct from old.created_by then
+    raise exception 'The project, company and currency of a budget cannot be changed' using errcode = '23514';
+  end if;
+  new.updated_at := now();
+  return new;
+end;
+$$;
+drop trigger if exists pbx_budgets_guard on pbx_budgets;
+create trigger pbx_budgets_guard before update or delete on pbx_budgets for each row execute function pbx_budget_header_guard();
+
+-- Audit trail on every table.
+do $$
+declare t text;
+begin
+  foreach t in array array['pbx_budgets', 'pbx_budget_versions', 'pbx_budget_rows', 'pbx_funding', 'pbx_actual_submissions', 'pbx_actual_rows', 'pbx_payments'] loop
+    execute format('drop trigger if exists %I on %I', t || '_audit', t);
+    execute format('create trigger %I after insert or update or delete on %I for each row execute function pbx_audit_trigger()', t || '_audit', t);
+  end loop;
+end $$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges
+-- -----------------------------------------------------------------------------
+revoke all on table pbx_budgets, pbx_budget_versions, pbx_budget_rows, pbx_funding, pbx_actual_submissions, pbx_actual_rows, pbx_payments
+  from anon, authenticated, public;
+grant select on table pbx_budgets, pbx_budget_versions, pbx_budget_rows, pbx_funding, pbx_actual_submissions, pbx_actual_rows, pbx_payments to authenticated;
+
+revoke all on function
+  pbx_budget_company(uuid), pbx_budget_project(uuid), pbx_is_budget_pm(uuid), pbx_can_read_budget(uuid), pbx_can_read_budget_header(uuid),
+  pbx_can_read_version(uuid), pbx_can_read_submission(uuid),
+  pbx_budget_row_calc(), pbx_rows_frozen(), pbx_version_guard(), pbx_actual_rows_frozen(), pbx_actual_submission_guard(), pbx_money_entry_guard(),
+  pbx_budget_header_guard()
+  from public, anon, authenticated;
+grant execute on function
+  pbx_is_budget_pm(uuid), pbx_can_read_budget(uuid), pbx_can_read_budget_header(uuid), pbx_can_read_version(uuid), pbx_can_read_submission(uuid)
+  to authenticated;
+
+-- ROLLBACK (only before the app depends on it; full ordered version in supabase/manual-sql/pbx_90_rollback.sql).
+
+-- ---- 20261210000200_pbx_budget_functions.sql ----
+-- Project Budget & Expenses, migration 3 of 5: the budget workflow.
+--
+-- Hard rules encoded here (the database, not the page, enforces them):
+--   * Only the CURRENT PM (or unexpired acting PM, proj_is_pm) prepares and submits; only Finance of the budget's company decides.
+--   * Nobody decides a version they created or submitted, whatever else they hold. When no independent Finance approver exists the
+--     submission stays 'submitted' and is reported as on hold; nothing is ever approved automatically.
+--   * A decision locks the version row and needs status 'submitted': two approvers can never create two decisions.
+--   * A submitted version is frozen (guards in migration 2). Returning or rejecting needs a reason; a revision is a NEW draft.
+--   * An approved budget is never overwritten. More money is a separate "addition" version showing only the increment; pending,
+--     returned and rejected additions never count towards the approved amount.
+--   * Retries are safe: a submission carries a request id, a second click returns the first result.
+--   * Stale edits are refused clearly (row_version).
+-- Error codes: 42501 not allowed, P0002 not found (also when not visible), 23514 wrong state, 22023 bad input, PB409 changed by someone else.
+-- Nothing here touches an HR, Sales, Inventory or existing claim table, and no function sends e-mail.
+
+-- -----------------------------------------------------------------------------
+-- Internal helpers (not granted to clients)
+-- -----------------------------------------------------------------------------
+create or replace function pbx_name(p_user_id uuid)
+returns text
+language sql stable security definer
+set search_path = public
+as $$ select proj_display_name(p_user_id); $$;
+
+-- A plain non-negative decimal with at most p_dec decimals (the column's own scale, so nothing is ever rounded silently on the way in).
+create or replace function pbx_num(p_text text, p_label text, p_dec integer default 3)
+returns numeric
+language plpgsql immutable
+as $$
+begin
+  if p_text is null or btrim(p_text) = '' then return null; end if;
+  if btrim(p_text) !~ ('^[0-9]{1,12}(\.[0-9]{1,' || p_dec || '})?$') then
+    raise exception 'Enter a valid number for % (at most % decimals)', p_label, p_dec using errcode = '22023';
+  end if;
+  return btrim(p_text)::numeric;
+end;
+$$;
+
+create or replace function pbx_date(p_text text, p_label text)
+returns date
+language plpgsql immutable
+as $$
+begin
+  if p_text is null or btrim(p_text) = '' then return null; end if;
+  if btrim(p_text) !~ '^\d{4}-\d{2}-\d{2}$' then raise exception 'Enter a valid date for %', p_label using errcode = '22023'; end if;
+  return btrim(p_text)::date;
+exception when others then
+  raise exception 'Enter a valid date for %', p_label using errcode = '22023';
+end;
+$$;
+
+-- In-app notification (the shared notifications table, new "project_budget_*" types): never to the actor, deduplicated while unread.
+create or replace function pbx_notify(p_user_id uuid, p_type text, p_budget pbx_budgets, p_payload jsonb, p_dedupe text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if p_user_id is null or p_user_id = auth.uid() then return; end if;
+  if not exists (select 1 from profiles where id = p_user_id and is_active) then return; end if;
+  perform pg_advisory_xact_lock(hashtextextended('pbx_notify:' || p_user_id::text || ':' || p_dedupe, 0));
+  if exists (select 1 from notifications n where n.user_id = p_user_id and n.type = p_type and n.read_at is null
+              and n.payload->>'dedupe_key' = p_dedupe) then return; end if;
+  insert into notifications (user_id, type, payload)
+  values (p_user_id, p_type, coalesce(p_payload, '{}'::jsonb)
+          || jsonb_build_object('dedupe_key', p_dedupe, 'project_id', p_budget.project_id, 'budget_id', p_budget.id,
+                                'reference', p_budget.project_reference, 'name', p_budget.project_name));
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Approval routing. Fixed when something is SUBMITTED, so a later change of access cannot re-route it, and enforced here, not in the page:
+--   * submitted by someone WITHOUT Finance access for the company  -> route 'finance':   an authorised Finance person of that company decides
+--   * submitted by someone WITH Finance access for the company (even if also the PM) -> route 'executive': the company's authorised
+--     CEO / CTO approvers decide (either one is enough; both are not required)
+--   * nobody ever decides what they prepared or submitted, and nobody outside the company's grants decides anything
+--   * when nobody eligible and independent exists for the route the request is ON HOLD (nothing is approved, nothing is lost)
+-- Applies alike to initial budgets, additional budget requests and final expenses.
+-- -----------------------------------------------------------------------------
+create or replace function pbx_user_is_finance(p_user_id uuid, p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from pbx_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = p_user_id and g.company_id = p_company_id and g.revoked_at is null and 'finance' = any (g.capabilities));
+$$;
+
+create or replace function pbx_approval_route(p_company_id uuid, p_submitter uuid)
+returns text
+language sql stable security definer
+set search_path = public
+as $$ select case when pbx_user_is_finance(p_submitter, p_company_id) then 'executive' else 'finance' end; $$;
+
+create or replace function pbx_route_capability(p_route text)
+returns text
+language sql immutable
+as $$ select case when p_route = 'executive' then 'executive_approver' else 'finance' end; $$;
+
+-- The people who may decide for a route: active grantees of the company holding the route's capability, except the people named
+-- (those who prepared or submitted the thing to decide).
+create or replace function pbx_route_approvers(p_company_id uuid, p_route text, p_exclude uuid[] default '{}'::uuid[])
+returns setof uuid
+language sql stable security definer
+set search_path = public
+as $$
+  select g.user_id
+  from pbx_company_grants g
+  join profiles p on p.id = g.user_id and p.is_active
+  where g.company_id = p_company_id and g.revoked_at is null and pbx_route_capability(p_route) = any (g.capabilities)
+    and not (g.user_id = any (coalesce(array_remove(p_exclude, null), '{}'::uuid[])));
+$$;
+
+-- True when nobody independent of the people who prepared and submitted can decide for that route.
+create or replace function pbx_approval_on_hold(p_company_id uuid, p_route text, p_created_by uuid, p_submitted_by uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$ select not exists (select 1 from pbx_route_approvers(p_company_id, p_route, array[p_created_by, p_submitted_by])); $$;
+
+-- May the CALLER decide a submission on this route? (capability of the route for that company, and not the one who prepared or submitted it)
+create or replace function pbx_can_decide(p_company_id uuid, p_route text, p_created_by uuid, p_submitted_by uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select pbx_has_capability(p_company_id, pbx_route_capability(p_route))
+     and auth.uid() is distinct from p_created_by and auth.uid() is distinct from p_submitted_by;
+$$;
+
+-- Raises in plain words unless the caller holds the capability for the route (the independence check follows, with its own message).
+create or replace function pbx_require_approver(p_company_id uuid, p_route text, p_what text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if not pbx_has_capability(p_company_id, pbx_route_capability(p_route)) then
+    if p_route = 'executive' then
+      raise exception 'This was submitted by someone with Finance access, so only the company''s authorised CEO or CTO approver can %', p_what using errcode = '42501';
+    end if;
+    raise exception 'Only Finance of this company can %', p_what using errcode = '42501';
+  end if;
+  perform pbx_require_enabled(p_company_id);
+end;
+$$;
+
+-- Lock a budget the caller may read. Not-visible and not-existing are indistinguishable.
+create or replace function pbx_lock_budget(p_budget_id uuid)
+returns pbx_budgets
+language plpgsql security definer
+set search_path = public
+as $$
+declare b pbx_budgets;
+begin
+  perform pbx_require_user();
+  select * into b from pbx_budgets where id = p_budget_id for update;
+  if not found or not pbx_can_read_budget_header(b.id) then
+    raise exception 'Budget not found' using errcode = 'P0002';
+  end if;
+  perform pbx_require_enabled(b.company_id);
+  return b;
+end;
+$$;
+
+create or replace function pbx_require_pm(p_budget pbx_budgets)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if not proj_is_pm(p_budget.project_id) then
+    raise exception 'Only the Project Manager, or someone holding temporary project leadership, can do that' using errcode = '42501';
+  end if;
+  perform pbx_require_enabled(p_budget.company_id);
+end;
+$$;
+
+create or replace function pbx_require_finance(p_budget pbx_budgets, p_what text default 'do that')
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if not pbx_is_finance(p_budget.company_id) then
+    raise exception 'Only Finance of this company can %', p_what using errcode = '42501';
+  end if;
+  perform pbx_require_enabled(p_budget.company_id);
+end;
+$$;
+
+create or replace function pbx_require_open(p_budget pbx_budgets)
+returns void
+language plpgsql immutable
+as $$
+begin
+  if p_budget.settlement_status = 'closed' then
+    raise exception 'Settlement is closed. Finance must reopen it, with a reason, before anything changes' using errcode = '23514';
+  end if;
+end;
+$$;
+
+create or replace function pbx_check_version(p_current integer, p_expected integer, p_what text default 'This')
+returns void
+language plpgsql immutable
+as $$
+begin
+  if p_expected is not null and p_expected <> p_current then
+    raise exception '% was changed by someone else. Reload and try again', p_what using errcode = 'PB409';
+  end if;
+end;
+$$;
+
+-- The PM or an active member of the project: the people a budget, an advance or a payment can name.
+create or replace function pbx_project_person_ok(p_project_id uuid, p_user_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (select 1 from profiles p where p.id = p_user_id and p.is_active)
+     and (exists (select 1 from proj_projects pr where pr.id = p_project_id and pr.pm_user_id = p_user_id)
+          or exists (select 1 from proj_project_members m where m.project_id = p_project_id and m.user_id = p_user_id and m.removed_at is null));
+$$;
+
+-- Refresh the display copy of the project (reference, name, PM, location, dates) kept for Finance, who needs no Projects access.
+create or replace function pbx_refresh_snapshot(p_budget_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  update pbx_budgets b
+     set project_reference = pr.reference, project_name = pr.name, pm_user_id = pr.pm_user_id, pm_name = proj_display_name(pr.pm_user_id),
+         location = d.location, site_timezone = d.site_timezone, project_start = pr.start_date, project_end = pr.end_date,
+         install_start = d.install_start, event_start = d.event_start, event_end = d.event_end
+    from proj_projects pr
+    left join proj_project_details d on d.project_id = pr.id
+   where b.id = p_budget_id and pr.id = b.project_id;
+end;
+$$;
+
+create or replace function pbx_baseline_total(p_budget_id uuid)
+returns numeric
+language sql stable security definer
+set search_path = public
+as $$ select coalesce(sum(total), 0) from pbx_budget_versions where budget_id = p_budget_id and status = 'approved'; $$;
+
+-- -----------------------------------------------------------------------------
+-- Create the budget (idempotent: one record per project; the currency is fixed by the first call)
+-- -----------------------------------------------------------------------------
+create or replace function pbx_create_budget(p_project_id uuid, p_currency text)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  pr proj_projects;
+  d proj_project_details;
+  b pbx_budgets;
+  v_cur text := upper(btrim(coalesce(p_currency, '')));
+  v_start date;
+  v_end date;
+  v_seq integer;
+begin
+  perform pbx_require_user();
+  select * into pr from proj_projects where id = p_project_id;
+  if not found or not proj_is_pm(p_project_id) then
+    raise exception 'Only the Project Manager, or someone holding temporary project leadership, can create the budget' using errcode = '42501';
+  end if;
+  perform pbx_require_enabled(pr.company_id);
+  select * into d from proj_project_details where project_id = p_project_id;
+  v_start := coalesce(d.install_start, pr.start_date, d.event_start);
+  v_end := coalesce(d.event_end, pr.end_date);
+  if v_end is not null and v_start is not null and v_end < v_start then v_end := null; end if;
+
+  select * into b from pbx_budgets where project_id = p_project_id for update;
+  if not found then
+    if v_cur !~ '^[A-Z]{3}$' then raise exception 'The expense currency is a 3-letter code, for example AED' using errcode = '22023'; end if;
+    insert into pbx_budgets (project_id, company_id, currency, project_reference, project_name, pm_user_id, pm_name, location, site_timezone,
+                             project_start, project_end, install_start, event_start, event_end, created_by)
+    values (pr.id, pr.company_id, v_cur, pr.reference, pr.name, pr.pm_user_id, proj_display_name(pr.pm_user_id), d.location, d.site_timezone,
+            pr.start_date, pr.end_date, d.install_start, d.event_start, d.event_end, auth.uid())
+    returning * into b;
+    insert into pbx_budget_versions (budget_id, company_id, project_id, kind, seq, period_start, period_end, created_by)
+    values (b.id, b.company_id, b.project_id, 'original', 1, v_start, v_end, auth.uid());
+    return b.id;
+  end if;
+  -- Already exists: if every original attempt was discarded and nothing is open, start a new draft original.
+  if not exists (select 1 from pbx_budget_versions where budget_id = b.id and status in ('draft', 'submitted'))
+     and not exists (select 1 from pbx_budget_versions where budget_id = b.id and kind = 'original' and status <> 'discarded') then
+    select coalesce(max(seq), 0) + 1 into v_seq from pbx_budget_versions where budget_id = b.id;
+    insert into pbx_budget_versions (budget_id, company_id, project_id, kind, seq, period_start, period_end, created_by)
+    values (b.id, b.company_id, b.project_id, 'original', v_seq, v_start, v_end, auth.uid());
+  end if;
+  return b.id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Save a draft: header plus the full set of rows, replaced atomically. Totals are calculated by the trigger, never taken from the client.
+-- p_header: {"period_start","period_end","people":[uuid],"note"}; p_rows: [{category_id, date_from, date_to, activity, description, basis,
+--            people, days, qty, rate, fixed, rate_key}]
+-- -----------------------------------------------------------------------------
+create or replace function pbx_save_budget_draft(p_version_id uuid, p_expected integer, p_header jsonb, p_rows jsonb)
+returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v pbx_budget_versions;
+  b pbx_budgets;
+  r jsonb;
+  c pbx_categories;
+  v_n integer := 0;
+  v_people uuid[] := '{}'::uuid[];
+  v_person text;
+  v_total numeric;
+  v_key text;
+  v_conf numeric;
+  v_start date;
+  v_end date;
+  v_version integer;
+begin
+  perform pbx_require_user();
+  select * into v from pbx_budget_versions where id = p_version_id for update;
+  if not found then raise exception 'Budget not found' using errcode = 'P0002'; end if;
+  select * into b from pbx_budgets where id = v.budget_id;
+  perform pbx_require_pm(b);
+  perform pbx_require_open(b);
+  if v.status <> 'draft' then raise exception 'This budget version is no longer a draft, so it cannot be edited' using errcode = '23514'; end if;
+  perform pbx_check_version(v.row_version, p_expected, 'This budget');
+  if p_rows is not null and jsonb_typeof(p_rows) <> 'array' then raise exception 'The rows are not valid' using errcode = '22023'; end if;
+  if jsonb_array_length(coalesce(p_rows, '[]'::jsonb)) > 200 then raise exception 'A budget can have up to 200 rows' using errcode = '22023'; end if;
+
+  v_start := pbx_date(p_header->>'period_start', 'the period start');
+  v_end := pbx_date(p_header->>'period_end', 'the period end');
+  if v_start is not null and v_end is not null and v_end < v_start then raise exception 'The period end is before its start' using errcode = '22023'; end if;
+  if jsonb_typeof(p_header->'people') = 'array' then
+    for v_person in select jsonb_array_elements_text(p_header->'people') loop
+      if v_person !~ '^[0-9a-fA-F-]{36}$' then raise exception 'The people list is not valid' using errcode = '22023'; end if;
+      if not pbx_project_person_ok(b.project_id, v_person::uuid) then
+        raise exception 'Only the Project Manager or a current member of the project can be listed' using errcode = '22023';
+      end if;
+      v_people := v_people || v_person::uuid;
+    end loop;
+  end if;
+
+  delete from pbx_budget_rows where version_id = v.id;
+  for r in select * from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) loop
+    v_n := v_n + 1;
+    select * into c from pbx_categories
+     where id = nullif(r->>'category_id', '')::uuid and is_active and (company_id is null or company_id = b.company_id);
+    if not found then raise exception 'Choose a category for row %', v_n using errcode = '22023'; end if;
+    v_key := nullif(btrim(coalesce(r->>'rate_key', '')), '');
+    v_conf := null;
+    if v_key is not null then
+      select amount into v_conf from pbx_rates where company_id = b.company_id and currency = b.currency and rate_key = v_key;
+    end if;
+    insert into pbx_budget_rows (version_id, budget_id, company_id, sort_no, category_id, category_key, category_label, date_from, date_to, activity,
+                                 description, basis, people, days, qty, rate, fixed, rate_key, configured_rate)
+    values (v.id, b.id, b.company_id, v_n, c.id, c.key, c.label,
+            pbx_date(r->>'date_from', 'the row date'), pbx_date(r->>'date_to', 'the row end date'),
+            coalesce(nullif(r->>'activity', ''), 'other'), btrim(coalesce(r->>'description', '')), coalesce(r->>'basis', ''),
+            pbx_num(r->>'people', 'the number of people'), pbx_num(r->>'days', 'the days'), pbx_num(r->>'qty', 'the quantity'),
+            pbx_num(r->>'rate', 'the rate', 4), pbx_num(r->>'fixed', 'the fixed total'), v_key, v_conf);
+  end loop;
+  select coalesce(sum(total), 0) into v_total from pbx_budget_rows where version_id = v.id;
+
+  update pbx_budget_versions
+     set period_start = v_start, period_end = v_end, people = v_people, note = nullif(left(btrim(coalesce(p_header->>'note', '')), 2000), ''),
+         total = v_total, row_version = row_version + 1
+   where id = v.id
+  returning row_version into v_version;
+  return v_version;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Submit to Finance (idempotent on the request id)
+-- -----------------------------------------------------------------------------
+create or replace function pbx_submit_budget(p_version_id uuid, p_expected integer, p_request_id uuid)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v pbx_budget_versions;
+  b pbx_budgets;
+  a uuid;
+  v_rows integer;
+  v_route text;
+begin
+  perform pbx_require_user();
+  if p_request_id is null then raise exception 'A request id is needed so a retry cannot submit twice' using errcode = '22023'; end if;
+  select * into v from pbx_budget_versions where id = p_version_id for update;
+  if not found then raise exception 'Budget not found' using errcode = 'P0002'; end if;
+  select * into b from pbx_budgets where id = v.budget_id for update;
+  perform pbx_require_pm(b);
+  if v.status = 'submitted' and v.submit_request_id = p_request_id then return v.id; end if;   -- a retry or double click: same result
+  perform pbx_require_open(b);
+  if v.status <> 'draft' then raise exception 'This budget version was already submitted' using errcode = '23514'; end if;
+  perform pbx_check_version(v.row_version, p_expected, 'This budget');
+  select count(*) into v_rows from pbx_budget_rows where version_id = v.id;
+  if v_rows = 0 then raise exception 'Add at least one expense row before submitting' using errcode = '22023'; end if;
+  if v.total <= 0 then raise exception 'The requested amount must be more than zero' using errcode = '22023'; end if;
+  if v.kind = 'addition' and not exists (select 1 from pbx_budget_versions where budget_id = b.id and kind = 'original' and status = 'approved') then
+    raise exception 'An additional request needs an approved budget first' using errcode = '23514';
+  end if;
+
+  perform pbx_refresh_snapshot(b.id);
+  v_route := pbx_approval_route(b.company_id, auth.uid());
+  update pbx_budget_versions set status = 'submitted', submitted_by = auth.uid(), submitted_at = now(), submit_request_id = p_request_id,
+         approval_route = v_route, row_version = row_version + 1 where id = v.id;
+  select * into b from pbx_budgets where id = b.id;
+  for a in select pbx_route_approvers(b.company_id, v_route, array[v.created_by, auth.uid()]) loop
+    perform pbx_notify(a, 'project_budget_submitted', b,
+      jsonb_build_object('version_id', v.id, 'kind', v.kind, 'total', v.total, 'currency', b.currency), 'pbx-sub-' || v.id::text);
+  end loop;
+  return v.id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Decision by the routed approver: approve, return (for changes) or reject. Independent, reasoned, and exactly once.
+-- -----------------------------------------------------------------------------
+create or replace function pbx_decide_budget(p_version_id uuid, p_decision text, p_note text default null)
+returns text
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v pbx_budget_versions;
+  b pbx_budgets;
+  v_new text;
+  v_note text := nullif(btrim(coalesce(p_note, '')), '');
+begin
+  perform pbx_require_user();
+  select * into v from pbx_budget_versions where id = p_version_id for update;     -- the second approver waits here, then finds it decided
+  if not found then raise exception 'Budget not found' using errcode = 'P0002'; end if;
+  select * into b from pbx_budgets where id = v.budget_id for update;
+  if not pbx_can_read_budget(b.id) then raise exception 'Budget not found' using errcode = 'P0002'; end if;
+  perform pbx_require_approver(b.company_id, v.approval_route, 'decide on this project budget');
+  if p_decision not in ('approve', 'return', 'reject') then raise exception 'Choose approve, return or reject' using errcode = '22023'; end if;
+  if v.status <> 'submitted' then
+    raise exception 'This budget version has already been decided (%, by %)', v.status, coalesce(pbx_name(v.decided_by), 'someone') using errcode = '23514';
+  end if;
+  if auth.uid() = v.created_by or auth.uid() = v.submitted_by then
+    raise exception 'You cannot decide a budget you prepared or submitted. Another authorised approver must decide it' using errcode = '42501';
+  end if;
+  if p_decision in ('return', 'reject') and (v_note is null or length(v_note) < 3) then
+    raise exception 'Give the reason, so the Project Manager knows what to do' using errcode = '22023';
+  end if;
+  v_new := case p_decision when 'approve' then 'approved' when 'return' then 'returned' else 'rejected' end;
+  update pbx_budget_versions set status = v_new, decided_by = auth.uid(), decided_at = now(), decision_note = v_note, row_version = row_version + 1 where id = v.id;
+  perform pbx_notify(v.submitted_by, 'project_budget_decided', b, jsonb_build_object('version_id', v.id, 'decision', v_new, 'kind', v.kind, 'note', v_note), 'pbx-dec-' || v.id::text);
+  perform pbx_notify(b.pm_user_id, 'project_budget_decided', b, jsonb_build_object('version_id', v.id, 'decision', v_new, 'kind', v.kind, 'note', v_note), 'pbx-dec-' || v.id::text);
+  return v_new;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Revisions, additional requests and discarding a draft
+-- -----------------------------------------------------------------------------
+-- A returned or rejected version is history. The PM continues from a NEW draft that copies it.
+create or replace function pbx_revise_budget(p_version_id uuid)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v pbx_budget_versions;
+  b pbx_budgets;
+  v_new uuid;
+  v_seq integer;
+begin
+  perform pbx_require_user();
+  select * into v from pbx_budget_versions where id = p_version_id;
+  if not found then raise exception 'Budget not found' using errcode = 'P0002'; end if;
+  b := pbx_lock_budget(v.budget_id);
+  perform pbx_require_pm(b);
+  perform pbx_require_open(b);
+  if v.status not in ('returned', 'rejected') then raise exception 'Only a returned or rejected version can be revised' using errcode = '23514'; end if;
+  if exists (select 1 from pbx_budget_versions where budget_id = b.id and status in ('draft', 'submitted')) then
+    raise exception 'There is already a version in progress' using errcode = '23514';
+  end if;
+  select coalesce(max(seq), 0) + 1 into v_seq from pbx_budget_versions where budget_id = b.id;
+  insert into pbx_budget_versions (budget_id, company_id, project_id, kind, seq, parent_version_id, period_start, period_end, people, note, total, created_by)
+  values (b.id, b.company_id, b.project_id, v.kind, v_seq, v.id, v.period_start, v.period_end, v.people, v.note, v.total, auth.uid())
+  returning id into v_new;
+  insert into pbx_budget_rows (version_id, budget_id, company_id, sort_no, category_id, category_key, category_label, date_from, date_to, activity, description,
+                               basis, people, days, qty, rate, fixed, rate_key, configured_rate)
+  select v_new, budget_id, company_id, sort_no, category_id, category_key, category_label, date_from, date_to, activity, description,
+         basis, people, days, qty, rate, fixed, rate_key, configured_rate
+    from pbx_budget_rows where version_id = v.id;
+  return v_new;
+end;
+$$;
+
+-- More money after the original was approved: a separate request that shows only the increment.
+create or replace function pbx_request_addition(p_budget_id uuid)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  b pbx_budgets;
+  o pbx_budget_versions;
+  v_new uuid;
+  v_seq integer;
+begin
+  b := pbx_lock_budget(p_budget_id);
+  perform pbx_require_pm(b);
+  perform pbx_require_open(b);
+  select * into o from pbx_budget_versions where budget_id = b.id and kind = 'original' and status = 'approved';
+  if not found then raise exception 'An additional request needs an approved budget first' using errcode = '23514'; end if;
+  if exists (select 1 from pbx_budget_versions where budget_id = b.id and status in ('draft', 'submitted')) then
+    raise exception 'There is already a version in progress' using errcode = '23514';
+  end if;
+  select coalesce(max(seq), 0) + 1 into v_seq from pbx_budget_versions where budget_id = b.id;
+  insert into pbx_budget_versions (budget_id, company_id, project_id, kind, seq, period_start, period_end, people, created_by)
+  values (b.id, b.company_id, b.project_id, 'addition', v_seq, o.period_start, o.period_end, o.people, auth.uid())
+  returning id into v_new;
+  return v_new;
+end;
+$$;
+
+create or replace function pbx_discard_draft(p_version_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare v pbx_budget_versions; b pbx_budgets;
+begin
+  perform pbx_require_user();
+  select * into v from pbx_budget_versions where id = p_version_id for update;
+  if not found then raise exception 'Budget not found' using errcode = 'P0002'; end if;
+  b := pbx_lock_budget(v.budget_id);
+  perform pbx_require_pm(b);
+  perform pbx_require_open(b);
+  if v.status <> 'draft' then raise exception 'Only a draft can be discarded' using errcode = '23514'; end if;
+  update pbx_budget_versions set status = 'discarded', row_version = row_version + 1 where id = v.id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges
+-- -----------------------------------------------------------------------------
+revoke all on function
+  pbx_name(uuid), pbx_num(text, text, integer), pbx_date(text, text), pbx_notify(uuid, text, pbx_budgets, jsonb, text), pbx_user_is_finance(uuid, uuid), pbx_approval_route(uuid, uuid), pbx_route_capability(text), pbx_route_approvers(uuid, text, uuid[]),
+  pbx_approval_on_hold(uuid, text, uuid, uuid), pbx_can_decide(uuid, text, uuid, uuid), pbx_require_approver(uuid, text, text), pbx_lock_budget(uuid), pbx_require_pm(pbx_budgets), pbx_require_finance(pbx_budgets, text),
+  pbx_require_open(pbx_budgets), pbx_check_version(integer, integer, text), pbx_project_person_ok(uuid, uuid), pbx_refresh_snapshot(uuid),
+  pbx_baseline_total(uuid),
+  pbx_create_budget(uuid, text), pbx_save_budget_draft(uuid, integer, jsonb, jsonb), pbx_submit_budget(uuid, integer, uuid),
+  pbx_decide_budget(uuid, text, text), pbx_revise_budget(uuid), pbx_request_addition(uuid), pbx_discard_draft(uuid)
+  from public, anon, authenticated;
+grant execute on function
+  pbx_create_budget(uuid, text), pbx_save_budget_draft(uuid, integer, jsonb, jsonb), pbx_submit_budget(uuid, integer, uuid),
+  pbx_decide_budget(uuid, text, text), pbx_revise_budget(uuid), pbx_request_addition(uuid), pbx_discard_draft(uuid)
+  to authenticated;
+
+-- ROLLBACK: see supabase/manual-sql/pbx_90_rollback.sql.
+
+-- ---- 20261210000300_pbx_funding_actuals_settlement.sql ----
+-- Project Budget & Expenses, migration 4 of 5: funding, final (actual) expenses, receipts, returns, reimbursements and settlement.
+--
+-- Budget approval, final-expense approval and recording money are DISTINCT actions with distinct functions.
+--   * Funding is recorded by Finance, one entry per instalment and recipient; a Pluto allocation / card limit is never an advance.
+--   * Actual expenses are the PM's own totals (never copied from the estimate): blank (null) is "not entered", zero is a confirmed zero.
+--     Each line says how it was paid; an expense already in an employee claim is linked, never counted a second time as an
+--     advance spend or a reimbursement.
+--   * Settlement reconciles PER SOURCE and PER PERSON (pbx_settlement_figures): it never subtracts all spending from all funding.
+--   * Independence: nobody decides, confirms receipts for, closes settlement for, funds or pays out expenses they prepared or submitted.
+--   * Corrections are audited: funding and payments are reversed with a reason (never edited or deleted); approved actuals are sent back by
+--     Finance with a reason and revised as a new version; closed settlement is reopened by Finance with a reason.
+-- No payment is executed and nothing is deducted from payroll: these are records. No e-mail, no scheduled job.
+
+-- -----------------------------------------------------------------------------
+-- Helpers
+-- -----------------------------------------------------------------------------
+create or replace function pbx_money_text(p_amount numeric, p_currency text)
+returns text
+language sql immutable
+as $$
+  select p_currency || ' ' || to_char(p_amount, 'FM999,999,999,990' || case when pbx_currency_decimals(p_currency) = 0 then '' else '.' || repeat('0', pbx_currency_decimals(p_currency)) end);
+$$;
+
+-- An amount typed by a person: a plain decimal in the budget currency's own decimals, more than zero when p_positive.
+create or replace function pbx_amount(p_amount numeric, p_currency text, p_label text, p_positive boolean default true)
+returns numeric
+language plpgsql immutable
+as $$
+begin
+  if p_amount is null then raise exception 'Enter %', p_label using errcode = '22023'; end if;
+  if p_amount < 0 or (p_positive and p_amount = 0) then raise exception '% must be more than zero', initcap(p_label) using errcode = '22023'; end if;
+  if p_amount > 1000000000 then raise exception '% is too large', initcap(p_label) using errcode = '22023'; end if;
+  if pbx_round(p_amount, p_currency) <> p_amount then
+    raise exception '% has more decimals than % allows (%)', initcap(p_label), p_currency, pbx_currency_decimals(p_currency) using errcode = '22023';
+  end if;
+  return p_amount;
+end;
+$$;
+
+-- True when this person submitted or prepared any final-expense submission of the budget (they cannot then also confirm or close it).
+create or replace function pbx_is_actuals_author(p_budget_id uuid, p_user_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (select 1 from pbx_actual_submissions s
+                  where s.budget_id = p_budget_id and s.status <> 'draft' and (s.created_by = p_user_id or s.submitted_by = p_user_id));
+$$;
+
+-- Who settles. Settlement follows the final expenses: when the approved final expenses were submitted by someone who holds (or held, at submission) Finance
+-- access, Finance may still record delivery of receipts and every payment, but the receipts must be CONFIRMED and closure AUTHORISED by an independent
+-- CEO / CTO approver; Finance never verifies its own receipts or closes its own settlement. For ordinary Project Managers Finance handles all of it.
+create or replace function pbx_settlement_route(p_budget_id uuid)
+returns text
+language sql stable security definer
+set search_path = public
+as $$
+  select case when s.id is null then 'finance'
+              when s.approval_route = 'executive' or pbx_user_is_finance(s.created_by, s.company_id) or pbx_user_is_finance(s.submitted_by, s.company_id) then 'executive'
+              else 'finance' end
+  from (select 1) one
+  left join lateral (select * from pbx_actual_submissions where budget_id = p_budget_id and status = 'approved' order by seq desc limit 1) s on true;
+$$;
+
+-- May the CALLER confirm the receipts of this settlement? (executive route only; an authorised CEO / CTO approver who neither prepared or submitted the expenses
+-- nor recorded the receipts)
+create or replace function pbx_can_confirm_receipts(p_budget_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from pbx_budgets b
+     where b.id = p_budget_id and b.settlement_status = 'open' and pbx_settlement_route(b.id) = 'executive'
+       and pbx_has_capability(b.company_id, 'executive_approver')
+       and not pbx_is_actuals_author(b.id, auth.uid())
+       and b.receipts_recorded_by is distinct from auth.uid()
+       and b.receipts_status in ('received', 'exception') and b.receipts_confirmed_at is null);
+$$;
+
+-- May the CALLER close this settlement? Finance for ordinary settlements; an independent CEO / CTO approver where Finance submitted the expenses.
+create or replace function pbx_can_close_settlement(p_budget_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from pbx_budgets b
+     where b.id = p_budget_id and b.settlement_status = 'open'
+       and (case when pbx_settlement_route(b.id) = 'executive'
+                 then pbx_has_capability(b.company_id, 'executive_approver') and not pbx_is_actuals_author(b.id, auth.uid())
+                 else pbx_has_capability(b.company_id, 'finance') end));
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Settlement figures (the single source of the numbers; the TypeScript mirror is tested against it)
+-- -----------------------------------------------------------------------------
+create or replace function pbx_settlement_figures(p_budget_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  b pbx_budgets;
+  v_per jsonb;
+  v_res jsonb;
+begin
+  select * into b from pbx_budgets where id = p_budget_id;
+  if not found then return null; end if;
+
+  with
+    a as (select r.paid_via, r.paid_by_user_id, r.actual_amount
+            from pbx_actual_rows r join pbx_actual_submissions s on s.id = r.submission_id
+           where s.budget_id = b.id and s.status = 'approved' and r.actual_amount is not null),
+    f as (select recipient_user_id, amount, is_advance from pbx_funding where budget_id = b.id and status = 'recorded'),
+    pay as (select kind, person_user_id, amount from pbx_payments where budget_id = b.id and status = 'recorded'),
+    people as (
+      select recipient_user_id as u from f where is_advance
+      union select paid_by_user_id from a where paid_via in ('advance', 'personal') and paid_by_user_id is not null
+      union select person_user_id from pay),
+    per as (
+      select u,
+        coalesce((select sum(amount) from f where is_advance and recipient_user_id = u), 0) as provided,
+        coalesce((select sum(actual_amount) from a where paid_via = 'advance' and paid_by_user_id = u), 0) as spent,
+        coalesce((select sum(actual_amount) from a where paid_via = 'personal' and paid_by_user_id = u), 0) as personal,
+        coalesce((select sum(amount) from pay where kind = 'return' and person_user_id = u), 0) as returned,
+        coalesce((select sum(amount) from pay where kind = 'reimbursement' and person_user_id = u), 0) as paid
+      from people),
+    calc as (
+      select u, provided, spent, personal, returned, paid,
+             provided - returned - spent as balance,
+             greatest(provided - returned - spent, 0) as to_return,
+             greatest(-(provided - returned - spent), 0) as overspend,
+             personal + greatest(-(provided - returned - spent), 0) as owed
+        from per)
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'user_id', u, 'name', pbx_name(u), 'advance_provided', provided, 'advance_spent', spent, 'returned', returned,
+           'advance_balance', balance, 'advance_to_return', to_return, 'advance_overspend', overspend, 'personal_spent', personal,
+           'reimbursement_owed', owed, 'reimbursement_paid', paid, 'reimbursement_outstanding', owed - paid) order by pbx_name(u)), '[]'::jsonb)
+    into v_per from calc;
+
+  select jsonb_build_object(
+    'currency', b.currency,
+    'approved_budget', pbx_baseline_total(b.id),
+    'has_approved_actuals', exists (select 1 from pbx_actual_submissions where budget_id = b.id and status = 'approved'),
+    'approved_actual_total', coalesce((select sum(r.actual_amount) from pbx_actual_rows r join pbx_actual_submissions s on s.id = r.submission_id
+                                        where s.budget_id = b.id and s.status = 'approved'), 0),
+    'advances_provided', coalesce((select sum(amount) from pbx_funding where budget_id = b.id and status = 'recorded' and is_advance), 0),
+    'card_allocations', coalesce((select sum(amount) from pbx_funding where budget_id = b.id and status = 'recorded' and not is_advance), 0),
+    'advance_spent', coalesce((select sum(r.actual_amount) from pbx_actual_rows r join pbx_actual_submissions s on s.id = r.submission_id
+                                where s.budget_id = b.id and s.status = 'approved' and r.paid_via = 'advance'), 0),
+    'company_card_spent', coalesce((select sum(r.actual_amount) from pbx_actual_rows r join pbx_actual_submissions s on s.id = r.submission_id
+                                     where s.budget_id = b.id and s.status = 'approved' and r.paid_via = 'company_card'), 0),
+    'direct_paid', coalesce((select sum(r.actual_amount) from pbx_actual_rows r join pbx_actual_submissions s on s.id = r.submission_id
+                              where s.budget_id = b.id and s.status = 'approved' and r.paid_via = 'direct_company'), 0),
+    'personal_spent', coalesce((select sum(r.actual_amount) from pbx_actual_rows r join pbx_actual_submissions s on s.id = r.submission_id
+                                 where s.budget_id = b.id and s.status = 'approved' and r.paid_via = 'personal'), 0),
+    'existing_claim_spent', coalesce((select sum(r.actual_amount) from pbx_actual_rows r join pbx_actual_submissions s on s.id = r.submission_id
+                                       where s.budget_id = b.id and s.status = 'approved' and r.paid_via = 'existing_claim'), 0),
+    'returned', coalesce((select sum((x->>'returned')::numeric) from jsonb_array_elements(v_per) x), 0),
+    'reimbursement_owed', coalesce((select sum((x->>'reimbursement_owed')::numeric) from jsonb_array_elements(v_per) x), 0),
+    'reimbursement_paid', coalesce((select sum((x->>'reimbursement_paid')::numeric) from jsonb_array_elements(v_per) x), 0),
+    'advance_to_return', coalesce((select sum((x->>'advance_to_return')::numeric) from jsonb_array_elements(v_per) x), 0),
+    'reimbursement_outstanding', coalesce((select sum(greatest((x->>'reimbursement_outstanding')::numeric, 0)) from jsonb_array_elements(v_per) x), 0),
+    'overpaid_reimbursement', coalesce((select bool_or((x->>'reimbursement_outstanding')::numeric < 0) from jsonb_array_elements(v_per) x), false),
+    'per_person', v_per
+  ) into v_res;
+  return v_res;
+end;
+$$;
+
+-- The reasons settlement cannot be closed yet (empty array when it can). Mirrors settlementBlockers() in the domain package.
+create or replace function pbx_settlement_blockers(p_budget_id uuid)
+returns text[]
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  b pbx_budgets;
+  f jsonb;
+  out text[] := '{}';
+begin
+  select * into b from pbx_budgets where id = p_budget_id;
+  if not found then return array['Budget not found']; end if;
+  if b.settlement_status = 'closed' then return array['Settlement is already closed.']; end if;
+  f := pbx_settlement_figures(b.id);
+  if not (f->>'has_approved_actuals')::boolean then out := array_append(out, 'The final expenses are not approved yet.'::text); end if;
+  if exists (select 1 from pbx_actual_submissions where budget_id = b.id and status = 'submitted') then out := array_append(out, 'Final expenses are waiting for an approval decision.'::text); end if;
+  if exists (select 1 from pbx_budget_versions where budget_id = b.id and status = 'submitted') then out := array_append(out, 'A budget request is waiting for an approval decision.'::text); end if;
+  if b.receipts_status in ('not_received', 'partial') then
+    out := array_append(out, 'Finance has not recorded that the physical receipts were received (or recorded an approved exception).'::text);
+  elsif pbx_settlement_route(b.id) = 'executive' and b.receipts_confirmed_at is null then
+    out := array_append(out, 'The receipts are recorded by Finance but still need confirmation by an independent CEO or CTO approver.'::text);
+  end if;
+  if b.receipts_status = 'exception' and length(btrim(coalesce(b.receipts_exception_reason, ''))) = 0 then out := array_append(out, 'The receipt exception needs a recorded reason.'::text); end if;
+  if (f->>'advance_to_return')::numeric > 0 then out := array_append(out, (pbx_money_text((f->>'advance_to_return')::numeric, b.currency) || ' of advance money has not been returned.')); end if;
+  if (f->>'reimbursement_outstanding')::numeric > 0 then out := array_append(out, (pbx_money_text((f->>'reimbursement_outstanding')::numeric, b.currency) || ' of reimbursement is still owed.')); end if;
+  if (f->>'overpaid_reimbursement')::boolean then out := array_append(out, 'A reimbursement was paid beyond what is owed: reverse the overpayment.'::text); end if;
+  return out;
+end;
+$$;
+
+-- The same figures for a caller who may read the budget (Finance, view grantee, current PM).
+create or replace function pbx_settlement_summary(p_budget_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  perform pbx_require_user();
+  if not pbx_can_read_budget(p_budget_id) then raise exception 'Budget not found' using errcode = 'P0002'; end if;
+  return pbx_settlement_figures(p_budget_id) || jsonb_build_object('blockers', to_jsonb(pbx_settlement_blockers(p_budget_id)));
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Funding (Finance)
+-- -----------------------------------------------------------------------------
+create or replace function pbx_record_funding(
+  p_budget_id uuid, p_recipient uuid, p_funded_on date, p_amount numeric, p_method text, p_is_advance boolean,
+  p_reference text, p_note text, p_request_id uuid
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  b pbx_budgets;
+  v_id uuid;
+  v_adv boolean;
+  v_amount numeric;
+  v_ref text;
+  v_note text;
+begin
+  b := pbx_lock_budget(p_budget_id);
+  perform pbx_require_finance(b, 'record funds');
+  if p_request_id is null then raise exception 'A request id is needed so a retry cannot record twice' using errcode = '22023'; end if;
+  select id into v_id from pbx_funding where budget_id = b.id and request_id = p_request_id;
+  if v_id is not null then return v_id; end if;                                  -- a retry or double click: same result
+  perform pbx_require_open(b);
+  if pbx_baseline_total(b.id) <= 0 then raise exception 'Approve the budget before recording funds' using errcode = '23514'; end if;
+  if p_recipient is null or not pbx_project_person_ok(b.project_id, p_recipient) then
+    raise exception 'The recipient must be the Project Manager or a current member of the project' using errcode = '22023';
+  end if;
+  if p_method not in ('cash', 'bank_transfer', 'pluto', 'other') then raise exception 'Choose how the funds were provided' using errcode = '22023'; end if;
+  if p_funded_on is null then raise exception 'Enter the date' using errcode = '22023'; end if;
+  v_amount := pbx_amount(p_amount, b.currency, 'the amount');
+  v_adv := case p_method when 'cash' then true when 'bank_transfer' then true when 'pluto' then false else p_is_advance end;
+  if v_adv is null then raise exception 'Say whether this "other" funding is an advance held by the person, or a card allocation' using errcode = '22023'; end if;
+  v_ref := nullif(left(btrim(coalesce(p_reference, '')), 120), '');
+  v_note := nullif(left(btrim(coalesce(p_note, '')), 500), '');
+  -- A different click of the same payment is not a retry (that has its own request id): an identical entry is refused so money is not recorded twice.
+  if exists (select 1 from pbx_funding where budget_id = b.id and status = 'recorded' and recipient_user_id = p_recipient and funded_on = p_funded_on and amount = v_amount
+               and method = p_method and coalesce(reference, '') = coalesce(v_ref, '') and coalesce(note, '') = coalesce(v_note, '')) then
+    raise exception 'An identical funding entry is already recorded. If this is a second equal payment, give it its own reference or note so the two can be told apart' using errcode = '23514';
+  end if;
+  -- Finance entries are declarations of what was handed over, not independent verification; one that involves the recorder is flagged as such.
+  insert into pbx_funding (budget_id, company_id, project_id, recipient_user_id, recipient_name, funded_on, amount, currency, method, is_advance, reference, note, recorded_by, request_id, self_declared)
+  values (b.id, b.company_id, b.project_id, p_recipient, pbx_name(p_recipient), p_funded_on, v_amount, b.currency, p_method, v_adv,
+          v_ref, v_note, auth.uid(), p_request_id, p_recipient = auth.uid())
+  returning id into v_id;
+  perform pbx_notify(p_recipient, 'project_funding_recorded', b, jsonb_build_object('funding_id', v_id, 'amount', v_amount, 'currency', b.currency, 'method', p_method, 'advance', v_adv), 'pbx-fund-' || v_id::text);
+  perform pbx_notify(b.pm_user_id, 'project_funding_recorded', b, jsonb_build_object('funding_id', v_id, 'amount', v_amount, 'currency', b.currency, 'method', p_method, 'advance', v_adv), 'pbx-fund-' || v_id::text);
+  return v_id;
+end;
+$$;
+
+create or replace function pbx_reverse_funding(p_funding_id uuid, p_reason text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare f pbx_funding; b pbx_budgets; v_reason text := btrim(coalesce(p_reason, ''));
+begin
+  perform pbx_require_user();
+  select * into f from pbx_funding where id = p_funding_id;
+  if not found then raise exception 'Funding entry not found' using errcode = 'P0002'; end if;
+  b := pbx_lock_budget(f.budget_id);
+  perform pbx_require_finance(b, 'reverse a funding entry');
+  perform pbx_require_open(b);
+  select * into f from pbx_funding where id = p_funding_id for update;
+  if f.status = 'reversed' then raise exception 'This entry was already reversed' using errcode = '23514'; end if;
+  if length(v_reason) < 3 then raise exception 'Give the reason for reversing this entry' using errcode = '22023'; end if;
+  update pbx_funding set status = 'reversed', reversed_by = auth.uid(), reversed_at = now(), reversal_reason = left(v_reason, 500) where id = f.id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Actual expenses (the PM)
+-- -----------------------------------------------------------------------------
+-- The rows of every approved budget version (the original and each approved addition), in order: what actuals are compared with.
+create or replace function pbx_baseline_rows(p_budget_id uuid)
+returns setof pbx_budget_rows
+language sql stable security definer
+set search_path = public
+as $$
+  select r.* from pbx_budget_rows r join pbx_budget_versions v on v.id = r.version_id
+   where v.budget_id = p_budget_id and v.status = 'approved' order by v.seq, r.sort_no;
+$$;
+
+create or replace function pbx_start_actuals(p_budget_id uuid)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  b pbx_budgets;
+  s pbx_actual_submissions;
+  v_new uuid;
+  v_seq integer;
+begin
+  b := pbx_lock_budget(p_budget_id);
+  perform pbx_require_pm(b);
+  perform pbx_require_open(b);
+  if pbx_baseline_total(b.id) <= 0 then raise exception 'The budget must be approved before the final expenses are entered' using errcode = '23514'; end if;
+  select * into s from pbx_actual_submissions where budget_id = b.id and status = 'draft';
+  if found then return s.id; end if;
+  if exists (select 1 from pbx_actual_submissions where budget_id = b.id and status = 'submitted') then raise exception 'The final expenses were already submitted' using errcode = '23514'; end if;
+  if exists (select 1 from pbx_actual_submissions where budget_id = b.id and status = 'approved') then
+    raise exception 'The final expenses are approved. Finance must send them back for correction before they can be changed' using errcode = '23514';
+  end if;
+  select coalesce(max(seq), 0) + 1 into v_seq from pbx_actual_submissions where budget_id = b.id;
+  insert into pbx_actual_submissions (budget_id, company_id, project_id, seq, total_approved_budget, created_by)
+  values (b.id, b.company_id, b.project_id, v_seq, pbx_baseline_total(b.id), auth.uid())
+  returning id into v_new;
+  insert into pbx_actual_rows (submission_id, budget_id, company_id, sort_no, budget_row_id, line_no, category_key, category_label, description, approved_amount, unplanned)
+  select v_new, b.id, b.company_id, row_number() over (order by v.seq, r.sort_no), r.id, 1, r.category_key, r.category_label, r.description, r.total, false
+    from pbx_budget_rows r join pbx_budget_versions v on v.id = r.version_id
+   where v.budget_id = b.id and v.status = 'approved';
+  return v_new;
+end;
+$$;
+
+-- Finance sent the actuals back (or they were returned at review): the PM continues from a new draft that copies the lines.
+create or replace function pbx_revise_actuals(p_submission_id uuid)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  s pbx_actual_submissions;
+  b pbx_budgets;
+  v_new uuid;
+  v_seq integer;
+begin
+  perform pbx_require_user();
+  select * into s from pbx_actual_submissions where id = p_submission_id;
+  if not found then raise exception 'Final expenses not found' using errcode = 'P0002'; end if;
+  b := pbx_lock_budget(s.budget_id);
+  perform pbx_require_pm(b);
+  perform pbx_require_open(b);
+  if s.status <> 'returned' then raise exception 'Only returned final expenses can be revised' using errcode = '23514'; end if;
+  if exists (select 1 from pbx_actual_submissions where budget_id = b.id and status in ('draft', 'submitted', 'approved')) then
+    raise exception 'There are already final expenses in progress' using errcode = '23514';
+  end if;
+  select coalesce(max(seq), 0) + 1 into v_seq from pbx_actual_submissions where budget_id = b.id;
+  insert into pbx_actual_submissions (budget_id, company_id, project_id, seq, parent_submission_id, variance_note, total_approved_budget, reopened_after_approval, created_by)
+  values (b.id, b.company_id, b.project_id, v_seq, s.id, s.variance_note, pbx_baseline_total(b.id), s.reopened_after_approval, auth.uid())
+  returning id into v_new;
+  insert into pbx_actual_rows (submission_id, budget_id, company_id, sort_no, budget_row_id, line_no, category_key, category_label, description, approved_amount,
+                               actual_amount, paid_via, paid_by_user_id, paid_by_name, claim_id, foreign_currency, foreign_note, note, unplanned)
+  select v_new, budget_id, company_id, sort_no, budget_row_id, line_no, category_key, category_label, description, approved_amount,
+         actual_amount, paid_via, paid_by_user_id, paid_by_name, claim_id, foreign_currency, foreign_note, note, unplanned
+    from pbx_actual_rows where submission_id = s.id;
+  -- anything approved since (an addition) appears as a blank line
+  insert into pbx_actual_rows (submission_id, budget_id, company_id, sort_no, budget_row_id, line_no, category_key, category_label, description, approved_amount, unplanned)
+  select v_new, b.id, b.company_id, 1000 + r.sort_no, r.id, 1, r.category_key, r.category_label, r.description, r.total, false
+    from pbx_baseline_rows(b.id) r
+   where not exists (select 1 from pbx_actual_rows x where x.submission_id = v_new and x.budget_row_id = r.id);
+  return v_new;
+end;
+$$;
+
+-- p_header: {"variance_note","complete_confirmed"}; p_rows: [{budget_row_id|null, category_id (unplanned only), description (unplanned only), actual_amount|null,
+--            paid_via, paid_by_user_id, claim_id, foreign_currency, foreign_note, note}]
+create or replace function pbx_save_actuals_draft(p_submission_id uuid, p_expected integer, p_header jsonb, p_rows jsonb)
+returns integer
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  s pbx_actual_submissions;
+  b pbx_budgets;
+  r jsonb;
+  br pbx_budget_rows;
+  c pbx_categories;
+  v_n integer := 0;
+  v_line integer;
+  v_amount numeric;
+  v_via text;
+  v_by uuid;
+  v_claim uuid;
+  v_cat_key text;
+  v_cat_label text;
+  v_desc text;
+  v_approved numeric;
+  v_foreign boolean;
+  v_fnote text;
+  v_note text;
+  v_total numeric;
+  v_version integer;
+  v_confirmed boolean := coalesce((p_header->>'complete_confirmed')::boolean, false);
+begin
+  perform pbx_require_user();
+  select * into s from pbx_actual_submissions where id = p_submission_id for update;
+  if not found then raise exception 'Final expenses not found' using errcode = 'P0002'; end if;
+  select * into b from pbx_budgets where id = s.budget_id;
+  perform pbx_require_pm(b);
+  perform pbx_require_open(b);
+  if s.status <> 'draft' then raise exception 'These final expenses are no longer a draft, so they cannot be edited' using errcode = '23514'; end if;
+  perform pbx_check_version(s.row_version, p_expected, 'These final expenses');
+  if p_rows is not null and jsonb_typeof(p_rows) <> 'array' then raise exception 'The lines are not valid' using errcode = '22023'; end if;
+  if jsonb_array_length(coalesce(p_rows, '[]'::jsonb)) > 400 then raise exception 'There can be up to 400 lines' using errcode = '22023'; end if;
+
+  delete from pbx_actual_rows where submission_id = s.id;
+  for r in select * from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) loop
+    v_n := v_n + 1;
+    v_amount := pbx_num(r->>'actual_amount', 'the actual amount');
+    if v_amount is not null and pbx_round(v_amount, b.currency) <> v_amount then
+      raise exception 'The actual amount on line % has more decimals than % allows', v_n, b.currency using errcode = '22023';
+    end if;
+    v_via := nullif(btrim(coalesce(r->>'paid_via', '')), '');
+    if v_via is not null and v_via not in ('advance', 'company_card', 'direct_company', 'personal', 'existing_claim') then
+      raise exception 'Choose how line % was paid', v_n using errcode = '22023';
+    end if;
+    if v_amount is not null and v_amount > 0 and v_via is null then
+      raise exception 'Say how line % was paid', v_n using errcode = '22023';
+    end if;
+    v_by := nullif(r->>'paid_by_user_id', '')::uuid;
+    if v_amount is not null and v_amount > 0 and v_via in ('advance', 'personal') then
+      if v_by is null or not pbx_project_person_ok(b.project_id, v_by) then
+        raise exception 'Say who paid line % (the Project Manager or a project member)', v_n using errcode = '22023';
+      end if;
+    elsif v_via not in ('advance', 'personal') then
+      v_by := null;
+    end if;
+    v_claim := nullif(r->>'claim_id', '')::uuid;
+    v_note := nullif(left(btrim(coalesce(r->>'note', '')), 500), '');
+    if v_via = 'existing_claim' then
+      if v_claim is not null and not exists (
+           select 1 from reimbursement_claims cl join employees e on e.id = cl.employee_id
+            where cl.id = v_claim and (e.user_id = auth.uid() or pbx_is_finance(b.company_id))) then
+        raise exception 'That claim is not one you can link (it must be your own claim)' using errcode = '22023';
+      end if;
+      if v_claim is null and v_note is null then
+        raise exception 'Give the reference of the employee claim for line %, or write it in the note', v_n using errcode = '22023';
+      end if;
+    else
+      v_claim := null;
+    end if;
+    v_foreign := coalesce((r->>'foreign_currency')::boolean, false);
+    v_fnote := nullif(left(btrim(coalesce(r->>'foreign_note', '')), 500), '');
+    if v_foreign and v_fnote is null then
+      raise exception 'Line % was paid in another currency: write the original amount, currency and rate in the note', v_n using errcode = '22023';
+    end if;
+
+    if nullif(r->>'budget_row_id', '') is not null then
+      select * into br from pbx_baseline_rows(b.id) x where x.id = (r->>'budget_row_id')::uuid;
+      if br.id is null then raise exception 'Line % refers to a budget row that is not part of the approved budget', v_n using errcode = '22023'; end if;
+      select coalesce(max(line_no), 0) + 1 into v_line from pbx_actual_rows where submission_id = s.id and budget_row_id = br.id;
+      v_cat_key := br.category_key; v_cat_label := br.category_label; v_desc := br.description;
+      v_approved := case when v_line = 1 then br.total else 0 end;
+      insert into pbx_actual_rows (submission_id, budget_id, company_id, sort_no, budget_row_id, line_no, category_key, category_label, description, approved_amount,
+                                   actual_amount, paid_via, paid_by_user_id, paid_by_name, claim_id, foreign_currency, foreign_note, note, unplanned)
+      values (s.id, b.id, b.company_id, v_n, br.id, v_line, v_cat_key, v_cat_label, v_desc, v_approved,
+              v_amount, v_via, v_by, case when v_by is not null then pbx_name(v_by) end, v_claim, v_foreign, case when v_foreign then v_fnote end, v_note, false);
+    else
+      select * into c from pbx_categories where id = nullif(r->>'category_id', '')::uuid and is_active and (company_id is null or company_id = b.company_id);
+      if not found then raise exception 'Choose a category for the unplanned expense on line %', v_n using errcode = '22023'; end if;
+      v_desc := btrim(coalesce(r->>'description', ''));
+      if length(v_desc) = 0 then raise exception 'Describe the unplanned expense on line %', v_n using errcode = '22023'; end if;
+      insert into pbx_actual_rows (submission_id, budget_id, company_id, sort_no, budget_row_id, line_no, category_key, category_label, description, approved_amount,
+                                   actual_amount, paid_via, paid_by_user_id, paid_by_name, claim_id, foreign_currency, foreign_note, note, unplanned)
+      values (s.id, b.id, b.company_id, v_n, null, 1, c.key, c.label, left(v_desc, 300), 0,
+              v_amount, v_via, v_by, case when v_by is not null then pbx_name(v_by) end, v_claim, v_foreign, case when v_foreign then v_fnote end, v_note, true);
+    end if;
+  end loop;
+
+  -- every approved budget row stays on the page: a missing one comes back as a blank line (it cannot be hidden)
+  insert into pbx_actual_rows (submission_id, budget_id, company_id, sort_no, budget_row_id, line_no, category_key, category_label, description, approved_amount, unplanned)
+  select s.id, b.id, b.company_id, 1000 + r.sort_no, r.id, 1, r.category_key, r.category_label, r.description, r.total, false
+    from pbx_baseline_rows(b.id) r
+   where not exists (select 1 from pbx_actual_rows x where x.submission_id = s.id and x.budget_row_id = r.id);
+
+  select coalesce(sum(actual_amount), 0) into v_total from pbx_actual_rows where submission_id = s.id;
+  update pbx_actual_submissions
+     set complete_confirmed = v_confirmed, variance_note = nullif(left(btrim(coalesce(p_header->>'variance_note', '')), 2000), ''),
+         total_actual = v_total, total_approved_budget = pbx_baseline_total(b.id), row_version = row_version + 1
+   where id = s.id
+  returning row_version into v_version;
+  return v_version;
+end;
+$$;
+
+create or replace function pbx_submit_actuals(p_submission_id uuid, p_expected integer, p_request_id uuid)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  s pbx_actual_submissions;
+  b pbx_budgets;
+  a uuid;
+  v_blank text;
+  v_base numeric;
+  v_diff numeric;
+  v_route text;
+begin
+  perform pbx_require_user();
+  if p_request_id is null then raise exception 'A request id is needed so a retry cannot submit twice' using errcode = '22023'; end if;
+  select * into s from pbx_actual_submissions where id = p_submission_id for update;
+  if not found then raise exception 'Final expenses not found' using errcode = 'P0002'; end if;
+  select * into b from pbx_budgets where id = s.budget_id for update;
+  perform pbx_require_pm(b);
+  if s.status = 'submitted' and s.submit_request_id = p_request_id then return s.id; end if;   -- a retry or double click
+  perform pbx_require_open(b);
+  if s.status <> 'draft' then raise exception 'These final expenses were already submitted' using errcode = '23514'; end if;
+  perform pbx_check_version(s.row_version, p_expected, 'These final expenses');
+  if not s.complete_confirmed then raise exception 'Confirm that the actual expenses are complete before submitting' using errcode = '22023'; end if;
+  select description into v_blank from pbx_actual_rows where submission_id = s.id and actual_amount is null order by sort_no limit 1;
+  if v_blank is not null then
+    raise exception 'No actual amount is entered for "%". Enter the amount, or 0 if nothing was spent', v_blank using errcode = '22023';
+  end if;
+  v_base := pbx_baseline_total(b.id);
+  v_diff := abs(s.total_actual - v_base);
+  if (v_base = 0 and s.total_actual > 0) or (v_base > 0 and v_diff * 100 > v_base * 10) then
+    if length(btrim(coalesce(s.variance_note, ''))) < 3 then
+      raise exception 'The total differs from the approved budget by more than 10%%: add a short note explaining why' using errcode = '22023';
+    end if;
+  end if;
+  perform pbx_refresh_snapshot(b.id);
+  v_route := pbx_approval_route(b.company_id, auth.uid());
+  update pbx_actual_submissions set status = 'submitted', submitted_by = auth.uid(), submitted_at = now(), submit_request_id = p_request_id,
+         approval_route = v_route, total_approved_budget = v_base, row_version = row_version + 1 where id = s.id;
+  select * into b from pbx_budgets where id = b.id;
+  for a in select pbx_route_approvers(b.company_id, v_route, array[s.created_by, auth.uid()]) loop
+    perform pbx_notify(a, 'project_actuals_submitted', b, jsonb_build_object('submission_id', s.id, 'total', s.total_actual, 'currency', b.currency), 'pbx-act-' || s.id::text);
+  end loop;
+  return s.id;
+end;
+$$;
+
+-- The routed approver: approve or return the final expenses. Independent, reasoned, exactly once.
+create or replace function pbx_decide_actuals(p_submission_id uuid, p_decision text, p_note text default null)
+returns text
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  s pbx_actual_submissions;
+  b pbx_budgets;
+  v_note text := nullif(btrim(coalesce(p_note, '')), '');
+  v_new text;
+begin
+  perform pbx_require_user();
+  select * into s from pbx_actual_submissions where id = p_submission_id for update;
+  if not found then raise exception 'Final expenses not found' using errcode = 'P0002'; end if;
+  select * into b from pbx_budgets where id = s.budget_id for update;
+  if not pbx_can_read_budget(b.id) then raise exception 'Final expenses not found' using errcode = 'P0002'; end if;
+  perform pbx_require_approver(b.company_id, s.approval_route, 'decide on these final expenses');
+  if p_decision not in ('approve', 'return') then raise exception 'Choose approve or return' using errcode = '22023'; end if;
+  perform pbx_require_open(b);
+  if s.status <> 'submitted' then
+    raise exception 'These final expenses have already been decided (%, by %)', s.status, coalesce(pbx_name(s.decided_by), 'someone') using errcode = '23514';
+  end if;
+  if auth.uid() = s.created_by or auth.uid() = s.submitted_by then
+    raise exception 'You cannot decide final expenses you prepared or submitted. Another authorised approver must decide them' using errcode = '42501';
+  end if;
+  if p_decision = 'return' and (v_note is null or length(v_note) < 3) then
+    raise exception 'Give the reason, so the Project Manager knows what to correct' using errcode = '22023';
+  end if;
+  v_new := case p_decision when 'approve' then 'approved' else 'returned' end;
+  update pbx_actual_submissions set status = v_new, decided_by = auth.uid(), decided_at = now(), decision_note = v_note, row_version = row_version + 1 where id = s.id;
+  perform pbx_notify(s.submitted_by, 'project_actuals_decided', b, jsonb_build_object('submission_id', s.id, 'decision', v_new, 'note', v_note), 'pbx-actdec-' || s.id::text);
+  perform pbx_notify(b.pm_user_id, 'project_actuals_decided', b, jsonb_build_object('submission_id', s.id, 'decision', v_new, 'note', v_note), 'pbx-actdec-' || s.id::text);
+  return v_new;
+end;
+$$;
+
+-- Already-approved final expenses are sent back for an audited correction (settlement must be open).
+create or replace function pbx_return_approved_actuals(p_submission_id uuid, p_reason text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  s pbx_actual_submissions;
+  b pbx_budgets;
+  v_reason text := btrim(coalesce(p_reason, ''));
+begin
+  perform pbx_require_user();
+  select * into s from pbx_actual_submissions where id = p_submission_id for update;
+  if not found then raise exception 'Final expenses not found' using errcode = 'P0002'; end if;
+  select * into b from pbx_budgets where id = s.budget_id for update;
+  -- Reopening needs a fresh decision by the routed approver afterwards, so Finance or the route's own approver may start it, never the person who prepared or submitted the expenses.
+  if not (pbx_is_finance(b.company_id) or pbx_has_capability(b.company_id, pbx_route_capability(s.approval_route))) then
+    raise exception 'Only Finance or the authorised approver of this company can send approved final expenses back' using errcode = '42501';
+  end if;
+  perform pbx_require_enabled(b.company_id);
+  if auth.uid() = s.created_by or auth.uid() = s.submitted_by then
+    raise exception 'You cannot send back final expenses you prepared or submitted. Another authorised person must do it' using errcode = '42501';
+  end if;
+  perform pbx_require_open(b);
+  if s.status <> 'approved' then raise exception 'Only approved final expenses can be sent back for correction' using errcode = '23514'; end if;
+  if length(v_reason) < 3 then raise exception 'Give the reason for the correction' using errcode = '22023'; end if;
+  update pbx_actual_submissions set status = 'returned', decided_by = auth.uid(), decided_at = now(), decision_note = left(v_reason, 500),
+         reopened_after_approval = true, row_version = row_version + 1 where id = s.id;
+  perform pbx_notify(s.submitted_by, 'project_actuals_decided', b, jsonb_build_object('submission_id', s.id, 'decision', 'returned', 'note', v_reason), 'pbx-actdec-' || s.id::text);
+  perform pbx_notify(b.pm_user_id, 'project_actuals_decided', b, jsonb_build_object('submission_id', s.id, 'decision', 'returned', 'note', v_reason), 'pbx-actdec-' || s.id::text);
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Receipts, returns, reimbursements, closing (Finance)
+-- -----------------------------------------------------------------------------
+create or replace function pbx_record_receipts(p_budget_id uuid, p_status text, p_received_on date default null, p_exception_reason text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare b pbx_budgets; v_reason text := nullif(btrim(coalesce(p_exception_reason, '')), '');
+begin
+  b := pbx_lock_budget(p_budget_id);
+  perform pbx_require_finance(b, 'record the receipt status');
+  perform pbx_require_open(b);
+  if p_status not in ('not_received', 'partial', 'received', 'exception') then raise exception 'Choose a receipt status' using errcode = '22023'; end if;
+  if p_status = 'exception' and (v_reason is null or length(v_reason) < 3) then
+    raise exception 'A receipt exception needs a recorded reason' using errcode = '22023';
+  end if;
+  -- Finance records that receipts were delivered: a declaration. Recording again always withdraws an earlier confirmation, so what was confirmed is what is on record.
+  update pbx_budgets
+     set receipts_status = p_status, receipts_received_on = case when p_status in ('partial', 'received') then coalesce(p_received_on, current_date) else null end,
+         receipts_exception_reason = case when p_status = 'exception' then left(v_reason, 500) else null end,
+         receipts_recorded_by = auth.uid(), receipts_recorded_at = now(), receipts_confirmed_by = null, receipts_confirmed_at = null, row_version = row_version + 1
+   where id = b.id;
+end;
+$$;
+
+-- An independent CEO / CTO approver confirms the receipts of a settlement whose final expenses were submitted by someone holding Finance access.
+create or replace function pbx_confirm_receipts(p_budget_id uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare b pbx_budgets;
+begin
+  b := pbx_lock_budget(p_budget_id);
+  if b.receipts_confirmed_at is not null and b.receipts_confirmed_by = auth.uid() then return; end if;      -- a retry or double click
+  perform pbx_require_open(b);
+  if pbx_settlement_route(b.id) <> 'executive' then
+    raise exception 'Finance confirms the receipts of this settlement when it records them; no separate confirmation is needed' using errcode = '23514';
+  end if;
+  if not pbx_has_capability(b.company_id, 'executive_approver') then
+    raise exception 'These final expenses were submitted by someone with Finance access, so only the company''s authorised CEO or CTO approver can confirm the receipts' using errcode = '42501';
+  end if;
+  if pbx_is_actuals_author(b.id, auth.uid()) then
+    raise exception 'You cannot confirm the receipts for expenses you prepared or submitted' using errcode = '42501';
+  end if;
+  if b.receipts_recorded_by = auth.uid() then
+    raise exception 'You recorded these receipts, so someone else must confirm them' using errcode = '42501';
+  end if;
+  if b.receipts_status not in ('received', 'exception') then
+    raise exception 'Finance has not recorded the receipts as received (or an approved exception) yet' using errcode = '23514';
+  end if;
+  if b.receipts_confirmed_at is not null then raise exception 'The receipts were already confirmed (by %)', coalesce(pbx_name(b.receipts_confirmed_by), 'someone') using errcode = '23514'; end if;
+  update pbx_budgets set receipts_confirmed_by = auth.uid(), receipts_confirmed_at = now(), row_version = row_version + 1 where id = b.id;
+end;
+$$;
+
+create or replace function pbx_record_payment(
+  p_budget_id uuid, p_kind text, p_person uuid, p_amount numeric, p_paid_on date, p_method text, p_reference text, p_note text, p_request_id uuid
+) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  b pbx_budgets;
+  v_id uuid;
+  v_amount numeric;
+  f jsonb;
+  pp jsonb;
+  v_limit numeric;
+  v_ref text;
+  v_note text;
+begin
+  b := pbx_lock_budget(p_budget_id);
+  perform pbx_require_finance(b, 'record money returned or a reimbursement');
+  if p_request_id is null then raise exception 'A request id is needed so a retry cannot record twice' using errcode = '22023'; end if;
+  select id into v_id from pbx_payments where budget_id = b.id and request_id = p_request_id;
+  if v_id is not null then return v_id; end if;                                  -- a retry or double click: same result
+  perform pbx_require_open(b);
+  if p_kind not in ('return', 'reimbursement') then raise exception 'Choose money returned or a reimbursement' using errcode = '22023'; end if;
+  if p_method not in ('cash', 'bank_transfer', 'pluto', 'other') then raise exception 'Choose how it was paid' using errcode = '22023'; end if;
+  if p_paid_on is null then raise exception 'Enter the date' using errcode = '22023'; end if;
+  f := pbx_settlement_figures(b.id);
+  if not (f->>'has_approved_actuals')::boolean then raise exception 'The final expenses must be approved before returns and reimbursements are recorded' using errcode = '23514'; end if;
+  select x into pp from jsonb_array_elements(f->'per_person') x where (x->>'user_id')::uuid = p_person;
+  if pp is null then raise exception 'That person has no advance to return and no reimbursement owed on this project' using errcode = '22023'; end if;
+  v_amount := pbx_amount(p_amount, b.currency, 'the amount');
+  v_ref := nullif(left(btrim(coalesce(p_reference, '')), 120), '');
+  v_note := nullif(left(btrim(coalesce(p_note, '')), 500), '');
+  if exists (select 1 from pbx_payments where budget_id = b.id and status = 'recorded' and kind = p_kind and person_user_id = p_person and paid_on = p_paid_on and amount = v_amount
+               and method = p_method and coalesce(reference, '') = coalesce(v_ref, '') and coalesce(note, '') = coalesce(v_note, '')) then
+    raise exception 'An identical payment is already recorded. If this is a second equal payment, give it its own reference or note so the two can be told apart' using errcode = '23514';
+  end if;
+  if p_kind = 'return' then
+    v_limit := (pp->>'advance_to_return')::numeric;
+    if v_amount > v_limit then raise exception 'That is more than the advance still held (%)', pbx_money_text(v_limit, b.currency) using errcode = '22023'; end if;
+  else
+    v_limit := greatest((pp->>'reimbursement_outstanding')::numeric, 0);
+    if v_amount > v_limit then raise exception 'That is more than the reimbursement still owed (%)', pbx_money_text(v_limit, b.currency) using errcode = '22023'; end if;
+  end if;
+  insert into pbx_payments (budget_id, company_id, project_id, kind, person_user_id, person_name, amount, paid_on, method, reference, note, recorded_by, request_id, self_declared)
+  values (b.id, b.company_id, b.project_id, p_kind, p_person, pbx_name(p_person), v_amount, p_paid_on, p_method, v_ref, v_note, auth.uid(), p_request_id, p_person = auth.uid())
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+create or replace function pbx_reverse_payment(p_payment_id uuid, p_reason text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare p pbx_payments; b pbx_budgets; v_reason text := btrim(coalesce(p_reason, ''));
+begin
+  perform pbx_require_user();
+  select * into p from pbx_payments where id = p_payment_id;
+  if not found then raise exception 'Payment not found' using errcode = 'P0002'; end if;
+  b := pbx_lock_budget(p.budget_id);
+  perform pbx_require_finance(b, 'reverse a payment entry');
+  perform pbx_require_open(b);
+  select * into p from pbx_payments where id = p_payment_id for update;
+  if p.status = 'reversed' then raise exception 'This entry was already reversed' using errcode = '23514'; end if;
+  if length(v_reason) < 3 then raise exception 'Give the reason for reversing this entry' using errcode = '22023'; end if;
+  update pbx_payments set status = 'reversed', reversed_by = auth.uid(), reversed_at = now(), reversal_reason = left(v_reason, 500) where id = p.id;
+end;
+$$;
+
+create or replace function pbx_close_settlement(p_budget_id uuid, p_note text default null)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  b pbx_budgets;
+  v_blockers text[];
+begin
+  b := pbx_lock_budget(p_budget_id);
+  if b.settlement_status = 'closed' then return; end if;                          -- a retry or a second click: already closed, nothing more happens
+  if pbx_settlement_route(b.id) = 'executive' then
+    if not pbx_has_capability(b.company_id, 'executive_approver') then
+      raise exception 'These final expenses were submitted by someone with Finance access, so only the company''s authorised CEO or CTO approver can authorise closing this settlement' using errcode = '42501';
+    end if;
+    if pbx_is_actuals_author(b.id, auth.uid()) then
+      raise exception 'You cannot close settlement for expenses you prepared or submitted' using errcode = '42501';
+    end if;
+  else
+    perform pbx_require_finance(b, 'close settlement');
+  end if;
+  v_blockers := pbx_settlement_blockers(b.id);
+  if array_length(v_blockers, 1) is not null then
+    raise exception 'Settlement cannot be closed yet: %', array_to_string(v_blockers, ' ') using errcode = '23514';
+  end if;
+  update pbx_budgets set settlement_status = 'closed', settlement_closed_at = now(), settlement_closed_by = auth.uid(),
+         settlement_note = nullif(left(btrim(coalesce(p_note, '')), 500), ''), row_version = row_version + 1 where id = b.id;
+  perform pbx_notify(b.pm_user_id, 'project_settlement_closed', b, '{}'::jsonb, 'pbx-closed-' || b.id::text);
+end;
+$$;
+
+create or replace function pbx_reopen_settlement(p_budget_id uuid, p_reason text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare b pbx_budgets; v_reason text := btrim(coalesce(p_reason, ''));
+begin
+  b := pbx_lock_budget(p_budget_id);
+  if not (pbx_is_finance(b.company_id) or pbx_has_capability(b.company_id, 'executive_approver')) then
+    raise exception 'Only Finance or the authorised CEO / CTO approver of this company can reopen settlement' using errcode = '42501';
+  end if;
+  if b.settlement_status <> 'closed' then raise exception 'Settlement is not closed' using errcode = '23514'; end if;
+  if length(v_reason) < 3 then raise exception 'Give the reason for reopening settlement' using errcode = '22023'; end if;
+  update pbx_budgets set settlement_status = 'open', settlement_closed_at = null, settlement_closed_by = null,
+         settlement_note = 'Reopened: ' || left(v_reason, 480), row_version = row_version + 1 where id = b.id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Privileges
+-- -----------------------------------------------------------------------------
+revoke all on function
+  pbx_money_text(numeric, text), pbx_amount(numeric, text, text, boolean), pbx_is_actuals_author(uuid, uuid), pbx_settlement_route(uuid), pbx_can_confirm_receipts(uuid),
+  pbx_can_close_settlement(uuid), pbx_settlement_figures(uuid),
+  pbx_settlement_blockers(uuid), pbx_baseline_rows(uuid),
+  pbx_settlement_summary(uuid),
+  pbx_record_funding(uuid, uuid, date, numeric, text, boolean, text, text, uuid), pbx_reverse_funding(uuid, text),
+  pbx_start_actuals(uuid), pbx_revise_actuals(uuid), pbx_save_actuals_draft(uuid, integer, jsonb, jsonb), pbx_submit_actuals(uuid, integer, uuid),
+  pbx_decide_actuals(uuid, text, text), pbx_return_approved_actuals(uuid, text),
+  pbx_record_receipts(uuid, text, date, text), pbx_confirm_receipts(uuid), pbx_record_payment(uuid, text, uuid, numeric, date, text, text, text, uuid), pbx_reverse_payment(uuid, text),
+  pbx_close_settlement(uuid, text), pbx_reopen_settlement(uuid, text)
+  from public, anon, authenticated;
+grant execute on function
+  pbx_settlement_summary(uuid),
+  pbx_record_funding(uuid, uuid, date, numeric, text, boolean, text, text, uuid), pbx_reverse_funding(uuid, text),
+  pbx_start_actuals(uuid), pbx_revise_actuals(uuid), pbx_save_actuals_draft(uuid, integer, jsonb, jsonb), pbx_submit_actuals(uuid, integer, uuid),
+  pbx_decide_actuals(uuid, text, text), pbx_return_approved_actuals(uuid, text),
+  pbx_record_receipts(uuid, text, date, text), pbx_confirm_receipts(uuid), pbx_record_payment(uuid, text, uuid, numeric, date, text, text, text, uuid), pbx_reverse_payment(uuid, text),
+  pbx_close_settlement(uuid, text), pbx_reopen_settlement(uuid, text)
+  to authenticated;
+
+-- ROLLBACK: see supabase/manual-sql/pbx_90_rollback.sql.
+
+-- ---- 20261210000400_pbx_views.sql ----
+-- Project Budget & Expenses, migration 5 of 5: what the pages read.
+--
+-- One read function per screen, each SECURITY DEFINER with its own access check, so the screens never join tables the caller could not
+-- read and Finance (who needs no Projects access, and gains none) sees names from the budget's own snapshot:
+--   pbx_project_access(project)  does the caller have a Budget & Expenses entry on this project?  (drives the project tab)
+--   pbx_budget_view(project)     everything one budget shows: project header, versions and rows, funding, actuals, payments,
+--                                settlement figures and blockers, categories and rates, project people
+--   pbx_inbox()                  the Finance inbox across every company the caller can read
+-- Access is the same in every one: Finance / view / CEO-CTO approver grantees of the company, the CURRENT PM, and (read-only, own versions only) a prior submitter.
+-- Nothing is returned that the tables' own RLS would hide from that caller.
+
+create or replace function pbx_project_access(p_project_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  pr proj_projects;
+  b pbx_budgets;
+  v_pm boolean;
+begin
+  perform pbx_require_user();
+  select * into pr from proj_projects where id = p_project_id;
+  if not found then return jsonb_build_object('can_open', false); end if;
+  v_pm := proj_is_pm(p_project_id);
+  select * into b from pbx_budgets where project_id = p_project_id;
+  return jsonb_build_object(
+    'can_open', v_pm or (b.id is not null and pbx_can_read_budget_header(b.id)),
+    'is_pm', v_pm,
+    'has_budget', b.id is not null,
+    'budget_id', b.id);
+end;
+$$;
+
+create or replace function pbx_budget_view(p_project_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  pr proj_projects;
+  d proj_project_details;
+  b pbx_budgets;
+  v_pm boolean;
+  v_full boolean;
+  v_fin boolean;
+  v_view boolean;
+  v_exec boolean;
+  v_company_name text;
+  v_default_currency text;
+  v_project jsonb;
+  v_versions jsonb := '[]'::jsonb;
+  v_actuals jsonb := '[]'::jsonb;
+  v_funding jsonb := '[]'::jsonb;
+  v_payments jsonb := '[]'::jsonb;
+  v_settlement jsonb := null;
+  v_people jsonb;
+  v_cats jsonb;
+  v_rates jsonb := '[]'::jsonb;
+  v_me uuid := auth.uid();
+begin
+  perform pbx_require_user();
+  select * into pr from proj_projects where id = p_project_id;
+  if not found then raise exception 'Budget not found' using errcode = 'P0002'; end if;
+  select * into d from proj_project_details where project_id = p_project_id;
+  v_pm := proj_is_pm(p_project_id);
+  select * into b from pbx_budgets where project_id = p_project_id;
+  if b.id is null and not v_pm then raise exception 'Budget not found' using errcode = 'P0002'; end if;
+  if b.id is not null and not pbx_can_read_budget_header(b.id) then raise exception 'Budget not found' using errcode = 'P0002'; end if;
+  v_full := b.id is null or pbx_can_read_budget(b.id);          -- PM, Finance or view grantee: everything; a prior submitter: own versions only
+  v_fin := pbx_is_finance(pr.company_id);
+  v_exec := pbx_is_executive(pr.company_id);
+  v_view := not v_fin and not v_exec and pbx_has_capability(pr.company_id, 'view');
+  select legal_name, default_currency into v_company_name, v_default_currency from companies where id = pr.company_id;
+
+  if b.id is null then
+    v_project := jsonb_build_object('id', pr.id, 'reference', pr.reference, 'name', pr.name, 'company_id', pr.company_id, 'company_name', v_company_name,
+      'pm_user_id', pr.pm_user_id, 'pm_name', proj_display_name(pr.pm_user_id), 'location', d.location, 'site_timezone', d.site_timezone,
+      'start', pr.start_date, 'end', pr.end_date, 'install_start', d.install_start, 'event_start', d.event_start, 'event_end', d.event_end, 'status', pr.status);
+  else
+    v_project := jsonb_build_object('id', b.project_id, 'reference', b.project_reference, 'name', b.project_name, 'company_id', b.company_id, 'company_name', v_company_name,
+      'pm_user_id', b.pm_user_id, 'pm_name', b.pm_name, 'location', b.location, 'site_timezone', b.site_timezone,
+      'start', b.project_start, 'end', b.project_end, 'install_start', b.install_start, 'event_start', b.event_start, 'event_end', b.event_end, 'status', pr.status);
+    -- the live project fields win while the PM or a Finance reader looks, so a changed date shows without waiting for the next submission
+    if v_pm then
+      v_project := v_project || jsonb_build_object('pm_user_id', pr.pm_user_id, 'pm_name', proj_display_name(pr.pm_user_id), 'location', d.location, 'site_timezone', d.site_timezone,
+        'start', pr.start_date, 'end', pr.end_date, 'install_start', d.install_start, 'event_start', d.event_start, 'event_end', d.event_end);
+    end if;
+  end if;
+
+  select coalesce(jsonb_agg(jsonb_build_object('id', c.id, 'key', c.key, 'label', c.label, 'is_default', c.is_default) order by c.sort_no, c.label), '[]'::jsonb)
+    into v_cats from pbx_categories c where c.is_active and (c.company_id is null or c.company_id = pr.company_id);
+
+  select coalesce(jsonb_agg(jsonb_build_object('id', x.user_id, 'name', proj_display_name(x.user_id), 'role', x.role) order by proj_display_name(x.user_id)), '[]'::jsonb)
+    into v_people
+    from (select pr.pm_user_id as user_id, 'pm' as role
+          union
+          select m.user_id, m.role from proj_project_members m
+           join profiles p on p.id = m.user_id and p.is_active
+           where m.project_id = pr.id and m.removed_at is null and m.user_id <> pr.pm_user_id) x;
+
+  if b.id is not null then
+    select coalesce(jsonb_agg(jsonb_build_object('rate_key', r.rate_key, 'amount', r.amount, 'currency', r.currency)), '[]'::jsonb)
+      into v_rates from pbx_rates r where r.company_id = b.company_id and r.currency = b.currency;
+
+    select coalesce(jsonb_agg(vj order by (vj->>'seq')::int), '[]'::jsonb) into v_versions from (
+      select jsonb_build_object(
+        'id', v.id, 'kind', v.kind, 'seq', v.seq, 'status', v.status, 'parent_version_id', v.parent_version_id,
+        'period_start', v.period_start, 'period_end', v.period_end, 'note', v.note, 'total', v.total, 'row_version', v.row_version,
+        'created_by', v.created_by, 'created_by_name', pbx_name(v.created_by), 'created_at', v.created_at,
+        'submitted_by', v.submitted_by, 'submitted_by_name', pbx_name(v.submitted_by), 'submitted_at', v.submitted_at,
+        'decided_by_name', pbx_name(v.decided_by), 'decided_at', v.decided_at, 'decision_note', v.decision_note,
+        'approval_route', case when v.status = 'draft' then null else v.approval_route end,
+        'on_hold', v.status = 'submitted' and pbx_approval_on_hold(v.company_id, v.approval_route, v.created_by, v.submitted_by),
+        'i_can_decide', v.status = 'submitted' and pbx_can_decide(v.company_id, v.approval_route, v.created_by, v.submitted_by),
+        'people', coalesce((select jsonb_agg(jsonb_build_object('id', u, 'name', pbx_name(u))) from unnest(v.people) u), '[]'::jsonb),
+        'rows', coalesce((select jsonb_agg(jsonb_build_object(
+            'id', r.id, 'sort_no', r.sort_no, 'category_id', r.category_id, 'category_key', r.category_key, 'category_label', r.category_label,
+            'date_from', r.date_from, 'date_to', r.date_to, 'activity', r.activity, 'description', r.description, 'basis', r.basis,
+            'people', r.people, 'days', r.days, 'qty', r.qty, 'rate', r.rate, 'fixed', r.fixed, 'rate_key', r.rate_key,
+            'configured_rate', r.configured_rate, 'total', r.total) order by r.sort_no)
+          from pbx_budget_rows r where r.version_id = v.id), '[]'::jsonb)
+      ) as vj
+      from pbx_budget_versions v
+      where v.budget_id = b.id and v.status <> 'discarded'
+        and (v_full or v.created_by = v_me or v.submitted_by = v_me)
+    ) q;
+
+    select coalesce(jsonb_agg(aj order by (aj->>'seq')::int), '[]'::jsonb) into v_actuals from (
+      select jsonb_build_object(
+        'id', s.id, 'seq', s.seq, 'status', s.status, 'parent_submission_id', s.parent_submission_id, 'complete_confirmed', s.complete_confirmed,
+        'variance_note', s.variance_note, 'total_actual', s.total_actual, 'total_approved_budget', s.total_approved_budget,
+        'reopened_after_approval', s.reopened_after_approval, 'row_version', s.row_version,
+        'created_by', s.created_by, 'created_by_name', pbx_name(s.created_by), 'submitted_by', s.submitted_by, 'submitted_by_name', pbx_name(s.submitted_by),
+        'submitted_at', s.submitted_at, 'decided_by_name', pbx_name(s.decided_by), 'decided_at', s.decided_at, 'decision_note', s.decision_note,
+        'approval_route', case when s.status = 'draft' then null else s.approval_route end,
+        'on_hold', s.status = 'submitted' and pbx_approval_on_hold(s.company_id, s.approval_route, s.created_by, s.submitted_by),
+        'i_can_decide', s.status = 'submitted' and pbx_can_decide(s.company_id, s.approval_route, s.created_by, s.submitted_by),
+        'rows', coalesce((select jsonb_agg(jsonb_build_object(
+            'id', r.id, 'sort_no', r.sort_no, 'budget_row_id', r.budget_row_id, 'line_no', r.line_no, 'category_key', r.category_key,
+            'category_label', r.category_label, 'description', r.description, 'approved_amount', r.approved_amount, 'actual_amount', r.actual_amount,
+            'paid_via', r.paid_via, 'paid_by_user_id', r.paid_by_user_id, 'paid_by_name', r.paid_by_name, 'claim_id', r.claim_id,
+            'foreign_currency', r.foreign_currency, 'foreign_note', r.foreign_note, 'note', r.note, 'unplanned', r.unplanned) order by r.sort_no)
+          from pbx_actual_rows r where r.submission_id = s.id), '[]'::jsonb)
+      ) as aj
+      from pbx_actual_submissions s
+      where s.budget_id = b.id and (v_full or s.created_by = v_me or s.submitted_by = v_me)
+    ) q;
+
+    if v_full then
+      select coalesce(jsonb_agg(jsonb_build_object(
+        'id', f.id, 'recipient_user_id', f.recipient_user_id, 'recipient_name', f.recipient_name, 'funded_on', f.funded_on, 'amount', f.amount,
+        'method', f.method, 'is_advance', f.is_advance, 'reference', f.reference, 'note', f.note, 'self_declared', f.self_declared, 'status', f.status, 'reversal_reason', f.reversal_reason,
+        'recorded_by_name', pbx_name(f.recorded_by), 'recorded_at', f.recorded_at, 'reversed_by_name', pbx_name(f.reversed_by), 'reversed_at', f.reversed_at)
+        order by f.funded_on, f.recorded_at), '[]'::jsonb) into v_funding from pbx_funding f where f.budget_id = b.id;
+      select coalesce(jsonb_agg(jsonb_build_object(
+        'id', p.id, 'kind', p.kind, 'person_user_id', p.person_user_id, 'person_name', p.person_name, 'amount', p.amount, 'paid_on', p.paid_on,
+        'method', p.method, 'reference', p.reference, 'note', p.note, 'self_declared', p.self_declared, 'status', p.status, 'reversal_reason', p.reversal_reason,
+        'recorded_by_name', pbx_name(p.recorded_by), 'recorded_at', p.recorded_at, 'reversed_by_name', pbx_name(p.reversed_by), 'reversed_at', p.reversed_at)
+        order by p.paid_on, p.recorded_at), '[]'::jsonb) into v_payments from pbx_payments p where p.budget_id = b.id;
+      v_settlement := pbx_settlement_figures(b.id) || jsonb_build_object('blockers', to_jsonb(pbx_settlement_blockers(b.id)));
+    end if;
+  end if;
+
+  return jsonb_build_object(
+    'viewer', jsonb_build_object('user_id', v_me, 'is_pm', v_pm, 'is_finance', v_fin, 'is_executive', v_exec, 'is_view_only', v_view, 'is_full_reader', v_full),
+    'project', v_project,
+    'default_currency', v_default_currency,
+    'budget', case when b.id is null then null else jsonb_build_object(
+      'id', b.id, 'currency', b.currency, 'receipts_status', b.receipts_status, 'receipts_received_on', b.receipts_received_on,
+      'receipts_confirmed_by_name', pbx_name(b.receipts_confirmed_by), 'receipts_confirmed_at', b.receipts_confirmed_at,
+      'settlement_route', case when v_full then pbx_settlement_route(b.id) end,
+      'can_confirm_receipts', pbx_can_confirm_receipts(b.id), 'can_close_settlement', pbx_can_close_settlement(b.id),
+      'receipts_exception_reason', b.receipts_exception_reason, 'receipts_recorded_by_name', pbx_name(b.receipts_recorded_by), 'receipts_recorded_at', b.receipts_recorded_at,
+      'settlement_status', b.settlement_status, 'settlement_closed_at', b.settlement_closed_at, 'settlement_closed_by_name', pbx_name(b.settlement_closed_by),
+      'settlement_note', b.settlement_note, 'row_version', b.row_version) end,
+    'baseline', case when b.id is null then 0 else pbx_baseline_total(b.id) end,
+    'versions', v_versions,
+    'actuals', v_actuals,
+    'funding', v_funding,
+    'payments', v_payments,
+    'settlement', v_settlement,
+    'categories', v_cats,
+    'rates', v_rates,
+    'people', v_people);
+end;
+$$;
+
+-- The Finance inbox: three lists across every company the caller can read (Finance decides; a view grantee only sees).
+create or replace function pbx_inbox()
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_me uuid := auth.uid();
+  v_budgets jsonb;
+  v_actuals jsonb;
+  v_settle jsonb;
+  v_companies jsonb;
+begin
+  perform pbx_require_user();
+  select coalesce(jsonb_agg(jsonb_build_object('id', c.id, 'name', c.legal_name, 'is_finance', pbx_is_finance(c.id), 'is_executive', pbx_is_executive(c.id), 'can_decide', pbx_is_finance(c.id) or pbx_is_executive(c.id)) order by c.legal_name), '[]'::jsonb)
+    into v_companies from companies c where c.id in (select pbx_accessible_company_ids());
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'budget_id', b.id, 'project_id', b.project_id, 'reference', b.project_reference, 'name', b.project_name, 'company_id', b.company_id,
+      'company_name', c.legal_name, 'currency', b.currency, 'pm_name', b.pm_name, 'site_timezone', b.site_timezone, 'version_id', v.id, 'kind', v.kind, 'seq', v.seq, 'total', v.total,
+      'submitted_at', v.submitted_at, 'submitted_by_name', pbx_name(v.submitted_by),
+      'approval_route', v.approval_route,
+      'on_hold', pbx_approval_on_hold(v.company_id, v.approval_route, v.created_by, v.submitted_by),
+      'i_can_decide', pbx_can_decide(v.company_id, v.approval_route, v.created_by, v.submitted_by)) order by v.submitted_at), '[]'::jsonb)
+    into v_budgets
+    from pbx_budget_versions v join pbx_budgets b on b.id = v.budget_id join companies c on c.id = b.company_id
+   where v.status = 'submitted' and v.company_id in (select pbx_accessible_company_ids());
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'budget_id', b.id, 'project_id', b.project_id, 'reference', b.project_reference, 'name', b.project_name, 'company_id', b.company_id,
+      'company_name', c.legal_name, 'currency', b.currency, 'pm_name', b.pm_name, 'site_timezone', b.site_timezone, 'submission_id', s.id, 'seq', s.seq, 'total_actual', s.total_actual,
+      'total_approved_budget', s.total_approved_budget, 'submitted_at', s.submitted_at, 'submitted_by_name', pbx_name(s.submitted_by),
+      'approval_route', s.approval_route,
+      'on_hold', pbx_approval_on_hold(s.company_id, s.approval_route, s.created_by, s.submitted_by),
+      'i_can_decide', pbx_can_decide(s.company_id, s.approval_route, s.created_by, s.submitted_by)) order by s.submitted_at), '[]'::jsonb)
+    into v_actuals
+    from pbx_actual_submissions s join pbx_budgets b on b.id = s.budget_id join companies c on c.id = b.company_id
+   where s.status = 'submitted' and s.company_id in (select pbx_accessible_company_ids());
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'budget_id', b.id, 'project_id', b.project_id, 'reference', b.project_reference, 'name', b.project_name, 'company_id', b.company_id,
+      'company_name', c.legal_name, 'currency', b.currency, 'pm_name', b.pm_name, 'site_timezone', b.site_timezone, 'receipts_status', b.receipts_status,
+      'settlement_route', pbx_settlement_route(b.id), 'receipts_confirmed', b.receipts_confirmed_at is not null,
+      'i_can_close', pbx_can_close_settlement(b.id), 'i_can_confirm_receipts', pbx_can_confirm_receipts(b.id),
+      'approved_budget', f->>'approved_budget', 'approved_actual_total', f->>'approved_actual_total', 'has_approved_actuals', (f->>'has_approved_actuals')::boolean,
+      'advance_to_return', f->>'advance_to_return', 'reimbursement_outstanding', f->>'reimbursement_outstanding',
+      'advances_provided', f->>'advances_provided',
+      'next', case
+        when not (f->>'has_approved_actuals')::boolean then 'Waiting for the final expenses'
+        else coalesce((pbx_settlement_blockers(b.id))[1], 'Ready to close') end) order by b.project_reference), '[]'::jsonb)
+    into v_settle
+    from pbx_budgets b join companies c on c.id = b.company_id
+    cross join lateral (select pbx_settlement_figures(b.id) as f) q
+   where b.settlement_status = 'open' and b.company_id in (select pbx_accessible_company_ids())
+     and (pbx_baseline_total(b.id) > 0 or exists (select 1 from pbx_funding fu where fu.budget_id = b.id and fu.status = 'recorded'));
+
+  return jsonb_build_object(
+    'companies', v_companies,
+    'budget_approvals', v_budgets,
+    'final_expense_approvals', v_actuals,
+    'outstanding_settlement', v_settle,
+    'is_finance_anywhere', exists (select 1 from pbx_finance_company_ids()),
+    'is_executive_anywhere', exists (select 1 from pbx_company_grants g join profiles pr on pr.id = g.user_id and pr.is_active where g.user_id = v_me and g.revoked_at is null and 'executive_approver' = any (g.capabilities)));
+end;
+$$;
+
+revoke all on function pbx_project_access(uuid), pbx_budget_view(uuid), pbx_inbox() from public, anon, authenticated;
+grant execute on function pbx_project_access(uuid), pbx_budget_view(uuid), pbx_inbox() to authenticated;
+
+-- ROLLBACK: see supabase/manual-sql/pbx_90_rollback.sql.

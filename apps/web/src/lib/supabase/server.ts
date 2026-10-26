@@ -7,13 +7,13 @@ export const RPC_TIMEOUT_MS = 20_000;
 
 /**
  * PostgREST retries a transaction that fails with SQLSTATE 40001 and, when the same check fails every time, never answers. The
- * "changed by someone else" refusals of Sales and Projects use that code, so a stale save could hang. Bound the crm_* and proj_* function
+ * "changed by someone else" refusals of Sales and Projects use that code, so a stale save could hang. Bound the crm_*, proj_* and pbx_* function
  * calls (and only those: HR functions are untouched) so that case ends in a clear message (friendlyCrmError / friendlyProjectError turn
  * the timeout into words). The message does not claim nothing was saved: a call that was merely slow may still have completed.
  */
 const boundedFetch: typeof fetch = (input, init) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  if (!/\/rest\/v1\/rpc\/(crm|proj)_/.test(url)) return fetch(input, init);
+  if (!/\/rest\/v1\/rpc\/(crm|proj|pbx)_/.test(url)) return fetch(input, init);
   const timeout = AbortSignal.timeout(RPC_TIMEOUT_MS);
   return fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout });
 };

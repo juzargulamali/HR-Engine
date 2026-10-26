@@ -18,6 +18,7 @@
  * is a full peer of ceo everywhere in this system.
  */
 
+import type { PbxCompanyGrantRow, PbxJson, PbxReadOnlyTable } from "./budget";
 import type {
   CrmActivityRow, CrmApprovalRow, CrmAuditLogRow, CrmCompanyGrantRow, CrmCompanySettingsRow, CrmContactRow,
   CrmDuplicateCandidateRow, CrmFileRow, CrmFollowUpRow, CrmHandoverRow, CrmOpportunityContactRow, CrmOpportunityEventRow,
@@ -1643,6 +1644,7 @@ export interface Database {
       };
       // Inventory (20261201000000-200): read-only to clients; every write is an inv_* function below.
       inv_company_grants: InvReadOnlyTable<InvCompanyGrantRow>;
+      pbx_company_grants: PbxReadOnlyTable<PbxCompanyGrantRow>;
       inv_audit_log: InvReadOnlyTable<InvAuditLogRow>;
       inv_company_settings: InvReadOnlyTable<InvCompanySettingsRow>;
       inv_locations: InvReadOnlyTable<InvLocationRow>;
@@ -1864,6 +1866,35 @@ export interface Database {
       inv_opportunity_availability: { Args: { p_opportunity_id: string }; Returns: InvJson };
       inv_project_equipment: { Args: { p_project_id: string }; Returns: InvJson };
       inv_import_handover_requirements: { Args: { p_project_id: string }; Returns: string };
+      pbx_project_access: { Args: { p_project_id: string }; Returns: PbxJson };
+      pbx_budget_view: { Args: { p_project_id: string }; Returns: PbxJson };
+      pbx_inbox: { Args: Record<string, never>; Returns: PbxJson };
+      pbx_create_budget: { Args: { p_project_id: string; p_currency: string }; Returns: string };
+      pbx_save_budget_draft: { Args: { p_version_id: string; p_expected: number; p_header: PbxJson; p_rows: PbxJson }; Returns: number };
+      pbx_submit_budget: { Args: { p_version_id: string; p_expected: number; p_request_id: string }; Returns: string };
+      pbx_decide_budget: { Args: { p_version_id: string; p_decision: string; p_note?: string | null }; Returns: string };
+      pbx_revise_budget: { Args: { p_version_id: string }; Returns: string };
+      pbx_request_addition: { Args: { p_budget_id: string }; Returns: string };
+      pbx_discard_draft: { Args: { p_version_id: string }; Returns: undefined };
+      pbx_record_funding: { Args: { p_budget_id: string; p_recipient: string; p_funded_on: string; p_amount: number; p_method: string; p_is_advance: boolean | null; p_reference: string | null; p_note: string | null; p_request_id: string }; Returns: string };
+      pbx_reverse_funding: { Args: { p_funding_id: string; p_reason: string }; Returns: undefined };
+      pbx_start_actuals: { Args: { p_budget_id: string }; Returns: string };
+      pbx_revise_actuals: { Args: { p_submission_id: string }; Returns: string };
+      pbx_save_actuals_draft: { Args: { p_submission_id: string; p_expected: number; p_header: PbxJson; p_rows: PbxJson }; Returns: number };
+      pbx_submit_actuals: { Args: { p_submission_id: string; p_expected: number; p_request_id: string }; Returns: string };
+      pbx_decide_actuals: { Args: { p_submission_id: string; p_decision: string; p_note?: string | null }; Returns: string };
+      pbx_return_approved_actuals: { Args: { p_submission_id: string; p_reason: string }; Returns: undefined };
+      pbx_record_receipts: { Args: { p_budget_id: string; p_status: string; p_received_on?: string | null; p_exception_reason?: string | null }; Returns: undefined };
+      pbx_record_payment: { Args: { p_budget_id: string; p_kind: string; p_person: string; p_amount: number; p_paid_on: string; p_method: string; p_reference: string | null; p_note: string | null; p_request_id: string }; Returns: string };
+      pbx_confirm_receipts: { Args: { p_budget_id: string }; Returns: undefined };
+      pbx_reverse_payment: { Args: { p_payment_id: string; p_reason: string }; Returns: undefined };
+      pbx_close_settlement: { Args: { p_budget_id: string; p_note?: string | null }; Returns: undefined };
+      pbx_reopen_settlement: { Args: { p_budget_id: string; p_reason: string }; Returns: undefined };
+      pbx_settlement_summary: { Args: { p_budget_id: string }; Returns: PbxJson };
+      pbx_set_rate: { Args: { p_company_id: string; p_currency: string; p_rate_key: string; p_amount: number; p_note?: string | null }; Returns: string };
+      pbx_add_category: { Args: { p_company_id: string; p_label: string }; Returns: string };
+      pbx_grant_access: { Args: { p_user_id: string; p_company_id: string; p_capabilities?: string[]; p_note?: string | null }; Returns: string };
+      pbx_revoke_access: { Args: { p_user_id: string; p_company_id: string }; Returns: undefined };
       inv_employee_lookup: { Args: { p_company_id: string; p_query: string }; Returns: { employee_id: string; display_name: string; employee_number: string; department_name: string | null }[] };
       inv_my_equipment: { Args: Record<string, never>; Returns: InvMyEquipmentRow[] };
       inv_pending_sales_checks: { Args: Record<string, never>; Returns: InvJson };

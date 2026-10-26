@@ -76,6 +76,23 @@ export function describeNotification(type: string, payload: Record<string, unkno
       return { text: `A scope change on ${project} was ${payload.decision === "approve" ? "approved" : "rejected"}.`, href: pid ? `/projects/${pid}/changes` : null };
     case "project_completed":
       return { text: `${project} was completed.`, href: projectLink };
+    case "project_budget_submitted":
+      return { text: `${project}: a ${payload.kind === "addition" ? "budget addition" : "budget"} was submitted for Finance approval.`, href: pid ? `/finance/project-budgets/${pid}` : null };
+    case "project_budget_decided": {
+      const what = payload.kind === "addition" ? "The additional budget" : "The budget";
+      const d = payload.decision === "approved" ? "approved" : payload.decision === "rejected" ? "rejected" : "returned for changes";
+      return { text: `${project}: ${what} was ${d} by Finance.`, href: pid ? `/projects/${pid}/budget` : null };
+    }
+    case "project_funding_recorded":
+      return { text: `${project}: Finance recorded money provided${payload.currency && payload.amount ? ` (${String(payload.currency)} ${String(payload.amount)})` : ""}.`, href: pid ? `/projects/${pid}/budget` : null };
+    case "project_actuals_submitted":
+      return { text: `${project}: final expenses were submitted for Finance approval.`, href: pid ? `/finance/project-budgets/${pid}` : null };
+    case "project_actuals_decided": {
+      const d = payload.decision === "approved" ? "approved" : "returned for correction";
+      return { text: `${project}: the final expenses were ${d} by Finance.`, href: pid ? `/projects/${pid}/budget` : null };
+    }
+    case "project_settlement_closed":
+      return { text: `${project}: Finance closed the settlement.`, href: pid ? `/projects/${pid}/budget` : null };
     case "project_reopened":
       return { text: `${project} was reopened.`, href: projectLink };
     default:
