@@ -4,7 +4,7 @@
 -- the SECURITY DEFINER functions of migrations 3 and 4, which enforce the role, independence and state rules.
 --
 -- Who can read (all enforced here, not by hiding buttons):
---   * Finance and 'view' grantees of the budget's owning company (pbx_can_view_company);
+--   * Finance, 'view' and CEO-CTO approver grantees of the budget's owning company (pbx_can_view_company);
 --   * the CURRENT Project Manager or unexpired acting PM of the project (proj_is_pm);
 --   * a PRIOR submitter (a former PM) only the versions and submissions they created or submitted.
 -- Nobody gains access from project membership, the project directory, a Sales link, an HR role, a founder title or sys_admin.
@@ -75,6 +75,7 @@ create table if not exists pbx_budget_versions (
   submitted_by      uuid references auth.users(id),
   submitted_at      timestamptz,
   submit_request_id uuid,
+  approval_route    text not null default 'finance' check (approval_route in ('finance', 'executive')),   -- fixed at submission: who may decide it (see pbx_approval_route)
   decided_by        uuid references auth.users(id),
   decided_at        timestamptz,
   decision_note     text,
@@ -176,6 +177,7 @@ create table if not exists pbx_actual_submissions (
   submitted_by          uuid references auth.users(id),
   submitted_at          timestamptz,
   submit_request_id     uuid,
+  approval_route        text not null default 'finance' check (approval_route in ('finance', 'executive')),
   decided_by            uuid references auth.users(id),
   decided_at            timestamptz,
   decision_note         text,
@@ -395,9 +397,14 @@ begin
   end if;
   if old.status <> 'draft' then
     if new.period_start is distinct from old.period_start or new.period_end is distinct from old.period_end or new.people is distinct from old.people
-       or new.note is distinct from old.note or new.total is distinct from old.total then
+       or new.note is distinct from old.note or new.total is distinct from old.total or new.approval_route is distinct from old.approval_route then
       raise exception 'A submitted budget version is a historical record and cannot be changed' using errcode = '23514';
     end if;
+  end if;
+  -- Nobody decides their own work, whatever function or tool writes the row.
+  if old.status = 'submitted' and new.status is distinct from old.status and new.status in ('approved', 'returned', 'rejected')
+     and (new.decided_by is null or new.decided_by = old.created_by or new.decided_by = old.submitted_by) then
+    raise exception 'A budget version cannot be decided by the person who prepared or submitted it' using errcode = '42501';
   end if;
   if new.status is distinct from old.status then
     if not ((old.status = 'draft' and new.status in ('submitted', 'discarded'))
@@ -443,9 +450,14 @@ begin
   end if;
   if old.status <> 'draft' then
     if new.complete_confirmed is distinct from old.complete_confirmed or new.variance_note is distinct from old.variance_note
-       or new.total_actual is distinct from old.total_actual or new.total_approved_budget is distinct from old.total_approved_budget then
+       or new.total_actual is distinct from old.total_actual or new.total_approved_budget is distinct from old.total_approved_budget
+       or new.approval_route is distinct from old.approval_route then
       raise exception 'Submitted final expenses are a historical record and cannot be changed' using errcode = '23514';
     end if;
+  end if;
+  if old.status in ('submitted', 'approved') and new.status is distinct from old.status and new.status in ('approved', 'returned')
+     and (new.decided_by is null or new.decided_by = old.created_by or new.decided_by = old.submitted_by) then
+    raise exception 'Final expenses cannot be decided by the person who prepared or submitted them' using errcode = '42501';
   end if;
   if new.status is distinct from old.status then
     if not ((old.status = 'draft' and new.status = 'submitted')

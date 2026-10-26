@@ -7,6 +7,10 @@
 --   finance        approve / return / reject budgets and final expenses, record funding, receipts, returns, reimbursements,
 --                  close or reopen settlement, set company rates and categories, and read everything of that company
 --   view           read-only access to the company's budgets (an explicit grant, for example for a founder; a title confers nothing)
+--   executive_approver  the company's authorised CEO / CTO approver: decides budgets, additional budget requests and final expenses that were
+--                  SUBMITTED BY SOMEONE WHO HOLDS FINANCE ACCESS for that company (nobody approves their own work), and reads the company's
+--                  budgets. Either a CEO or a CTO is enough. It records no funds, receipts, returns or settlement (that stays with Finance),
+--                  and it is an explicit grant: a CEO / CTO title, role or account confers nothing
 --   manage_access  grant and revoke these capabilities for the company
 -- Nothing here reads or writes an HR, Sales, Projects (beyond the project lookups of migration 2+), Inventory or claims table.
 -- Additive: no existing object is altered. No grant is created by this migration: access is set up explicitly (see the owner's setup SQL).
@@ -17,7 +21,7 @@
 create or replace function pbx_capability_list()
 returns text[]
 language sql immutable
-as $$ select array['finance', 'view', 'manage_access']::text[]; $$;
+as $$ select array['finance', 'view', 'executive_approver', 'manage_access']::text[]; $$;
 
 create table if not exists pbx_company_grants (
   id            uuid primary key default gen_random_uuid(),
@@ -72,7 +76,14 @@ create or replace function pbx_can_view_company(p_company_id uuid)
 returns boolean
 language sql stable security definer
 set search_path = public
-as $$ select pbx_has_capability(p_company_id, 'finance') or pbx_has_capability(p_company_id, 'view'); $$;
+as $$ select pbx_has_capability(p_company_id, 'finance') or pbx_has_capability(p_company_id, 'view') or pbx_has_capability(p_company_id, 'executive_approver'); $$;
+
+-- The company's authorised CEO / CTO approver (explicit grant only).
+create or replace function pbx_is_executive(p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$ select pbx_has_capability(p_company_id, 'executive_approver'); $$;
 
 create or replace function pbx_has_any_access()
 returns boolean
@@ -82,7 +93,7 @@ as $$
   select exists (
     select 1 from pbx_company_grants g
     join profiles p on p.id = g.user_id and p.is_active
-    where g.user_id = auth.uid() and g.revoked_at is null and (g.capabilities && array['finance', 'view']::text[]));
+    where g.user_id = auth.uid() and g.revoked_at is null and (g.capabilities && array['finance', 'view', 'executive_approver']::text[]));
 $$;
 
 create or replace function pbx_accessible_company_ids()
@@ -93,7 +104,7 @@ as $$
   select g.company_id
   from pbx_company_grants g
   join profiles p on p.id = g.user_id and p.is_active
-  where g.user_id = auth.uid() and g.revoked_at is null and (g.capabilities && array['finance', 'view']::text[]);
+  where g.user_id = auth.uid() and g.revoked_at is null and (g.capabilities && array['finance', 'view', 'executive_approver']::text[]);
 $$;
 
 create or replace function pbx_finance_company_ids()
@@ -398,14 +409,14 @@ revoke all on sequence pbx_audit_log_id_seq from public, anon, authenticated;
 grant select on table pbx_company_grants, pbx_audit_log, pbx_categories, pbx_rates, pbx_company_settings to authenticated;
 
 revoke all on function
-  pbx_capability_list(), pbx_require_user(), pbx_has_capability(uuid, text), pbx_is_finance(uuid), pbx_can_view_company(uuid),
+  pbx_capability_list(), pbx_require_user(), pbx_has_capability(uuid, text), pbx_is_finance(uuid), pbx_is_executive(uuid), pbx_can_view_company(uuid),
   pbx_has_any_access(), pbx_accessible_company_ids(), pbx_finance_company_ids(), pbx_audit_trigger(), pbx_company_enabled(uuid), pbx_require_enabled(uuid),
   pbx_currency_decimals(text), pbx_round(numeric, text),
   pbx_grant_access(uuid, uuid, text[], text), pbx_revoke_access(uuid, uuid),
   pbx_set_rate(uuid, text, text, numeric, text), pbx_add_category(uuid, text)
   from public, anon, authenticated;
 grant execute on function
-  pbx_capability_list(), pbx_has_capability(uuid, text), pbx_is_finance(uuid), pbx_can_view_company(uuid),
+  pbx_capability_list(), pbx_has_capability(uuid, text), pbx_is_finance(uuid), pbx_is_executive(uuid), pbx_can_view_company(uuid),
   pbx_has_any_access(), pbx_accessible_company_ids(), pbx_finance_company_ids(), pbx_currency_decimals(text), pbx_round(numeric, text),
   pbx_grant_access(uuid, uuid, text[], text), pbx_revoke_access(uuid, uuid),
   pbx_set_rate(uuid, text, text, numeric, text), pbx_add_category(uuid, text)

@@ -396,6 +396,31 @@ export function settlementBlockers(s: CloseState, currency: string): string[] {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
+// Approval routing (the database enforces it; this is the same rule in words and for tests)
+// ---------------------------------------------------------------------------------------------------------------------------------
+export type ApprovalRoute = "finance" | "executive";
+export const APPROVAL_ROUTES = ["finance", "executive"] as const;
+
+/** Fixed when something is submitted: a submitter who holds Finance access for the company (even as the PM) is approved by the company's CEO/CTO approvers; anyone else by Finance. */
+export function approvalRouteFor(submitterHoldsFinance: boolean): ApprovalRoute {
+  return submitterHoldsFinance ? "executive" : "finance";
+}
+export const APPROVER_NAME: Record<ApprovalRoute, string> = { finance: "Finance", executive: "the CEO or CTO" };
+/** Why the item goes where it goes, in one sentence for the page. */
+export function routeExplanation(route: ApprovalRoute): string {
+  return route === "executive"
+    ? "Submitted by someone with Finance access, so the company's CEO or CTO approver decides it (either one is enough)."
+    : "Decided by Finance.";
+}
+/** The hold message: nobody eligible and independent exists for the route. Nothing is approved or lost. */
+export function holdExplanation(route: ApprovalRoute, submitterName: string | null): string {
+  const who = submitterName ?? "the submitter";
+  return route === "executive"
+    ? `On hold: ${who} has Finance access, so a CEO or CTO approver of this company must decide it, and none other than ${who} is authorised yet. The owner needs to give a CEO or CTO approver access for this company.`
+    : `On hold: no Finance person other than ${who} is authorised for this company. Nothing was approved or lost; it can be decided once an authorised Finance person exists.`;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
 // The next required action (what the page puts first)
 // ---------------------------------------------------------------------------------------------------------------------------------
 export type Viewer = "pm" | "finance" | "viewer";
@@ -407,6 +432,8 @@ export interface BudgetFlowState {
   hasApprovedBaseline: boolean;
   /** An approval is waiting but nobody independent of the submitter can decide it. */
   approvalOnHold: boolean;
+  /** Who decides the submission that is waiting (defaults to Finance). */
+  approvalRoute?: ApprovalRoute;
   actuals: VersionStatus | null;
   approvedActuals: boolean;
   fundingRecorded: boolean;
@@ -414,23 +441,26 @@ export interface BudgetFlowState {
   settlementClosed: boolean;
   blockers: string[];
 }
-export interface NextAction { who: "pm" | "finance" | "nobody"; text: string; section: "budget" | "funds" | "actuals" | "settlement" }
+export interface NextAction { who: "pm" | "finance" | "executive" | "nobody"; text: string; section: "budget" | "funds" | "actuals" | "settlement" }
+
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
 /** One sentence naming who has to do what next. Pure and tested; the page highlights the matching section. */
 export function nextAction(s: BudgetFlowState): NextAction {
   if (s.settlementClosed) return { who: "nobody", text: "Settlement is closed. Nothing more is needed.", section: "settlement" };
   if (!s.hasBudget || s.latestBudget === null) return { who: "pm", text: "The Project Manager creates the budget.", section: "budget" };
   if (s.latestBudget === "draft") return { who: "pm", text: s.latestBudgetKind === "addition" ? "The Project Manager finishes the additional budget request and submits it to Finance." : "The Project Manager finishes the budget and submits it to Finance.", section: "budget" };
+  const approver = s.approvalRoute === "executive" ? "the CEO or CTO approver" : "Finance";
   if (s.latestBudget === "submitted") {
     return s.approvalOnHold
-      ? { who: "nobody", text: "On hold: no independent Finance approver is available to decide this budget.", section: "budget" }
-      : { who: "finance", text: s.latestBudgetKind === "addition" ? "Finance decides the additional budget request." : "Finance approves, returns or rejects the budget.", section: "budget" };
+      ? { who: "nobody", text: "On hold: no independent approver is available to decide this budget.", section: "budget" }
+      : { who: s.approvalRoute === "executive" ? "executive" : "finance", text: s.latestBudgetKind === "addition" ? `${cap(approver)} decides the additional budget request.` : `${cap(approver)} approves, returns or rejects the budget.`, section: "budget" };
   }
   if ((s.latestBudget === "returned" || s.latestBudget === "rejected") && !s.hasApprovedBaseline) return { who: "pm", text: s.latestBudget === "returned" ? "The Project Manager changes the budget as Finance asked and submits it again." : "The budget was rejected. The Project Manager may prepare a new version.", section: "budget" };
   if (!s.hasApprovedBaseline) return { who: "pm", text: "The Project Manager creates the budget.", section: "budget" };
   if (!s.fundingRecorded && s.actuals === null) return { who: "finance", text: "Finance records the funds provided (if any), or the Project Manager enters the actual expenses after the project.", section: "funds" };
   if (s.actuals === null || s.actuals === "draft" || s.actuals === "returned") return { who: "pm", text: s.actuals === "returned" ? "The Project Manager corrects the actual expenses as Finance asked and submits them again." : "The Project Manager enters the actual expenses and submits them.", section: "actuals" };
-  if (s.actuals === "submitted") return s.approvalOnHold ? { who: "nobody", text: "On hold: no independent Finance approver is available to decide the final expenses.", section: "actuals" } : { who: "finance", text: "Finance reviews and approves (or returns) the final expenses.", section: "actuals" };
+  if (s.actuals === "submitted") return s.approvalOnHold ? { who: "nobody", text: "On hold: no independent approver is available to decide the final expenses.", section: "actuals" } : { who: s.approvalRoute === "executive" ? "executive" : "finance", text: `${cap(approver)} reviews and approves (or returns) the final expenses.`, section: "actuals" };
   if (s.receipts === "not_received" || s.receipts === "partial") return { who: "finance", text: "Finance records that the physical receipts were received (or an approved exception).", section: "settlement" };
   return s.blockers.length > 0 ? { who: "finance", text: `Finance settles the difference: ${s.blockers[0]}`, section: "settlement" } : { who: "finance", text: "Finance confirms the reconciliation and closes settlement.", section: "settlement" };
 }

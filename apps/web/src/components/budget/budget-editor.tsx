@@ -105,7 +105,7 @@ export function BudgetEditor({ view, version }: { view: PbxBudgetView; version: 
       const v = saved.version ?? rv;
       setRv(v);
       return submitBudget({ projectId: view.project.id, versionId: version.id, expected: v, requestId: submit.getRequestId() });
-    }, () => setDirty(false), "Submitted to Finance.");
+    }, () => setDirty(false), "Submitted for approval.");
 
   const isAddition = version.kind === "addition";
   const empty = rows.length === 0;
@@ -156,7 +156,7 @@ export function BudgetEditor({ view, version }: { view: PbxBudgetView; version: 
         );
       })}
 
-      <Field label={isAddition ? "Why is more budget needed? (shown to Finance)" : "Note for Finance (optional)"} htmlFor="pbx-note">
+      <Field label={isAddition ? "Why is more budget needed? (shown to the approver)" : "Note for the approver (optional)"} htmlFor="pbx-note">
         <Textarea id="pbx-note" rows={3} maxLength={2000} value={note} onChange={(e) => { setNote(e.target.value); touch(); }} />
       </Field>
 
@@ -171,7 +171,7 @@ export function BudgetEditor({ view, version }: { view: PbxBudgetView; version: 
           <Button type="button" variant="ghost" onClick={() => { if (window.confirm("Discard this draft? Nothing here will be kept.")) discard.run(() => discardDraft({ projectId: view.project.id, versionId: version.id })); }} disabled={busy}>Discard draft</Button>
           <Button type="button" variant="outline" onClick={doSave} disabled={busy}>{save.pending ? "Saving…" : "Save draft"}</Button>
           <Button type="button" onClick={doSubmit} disabled={busy || empty || incomplete > 0} title={empty ? "Add at least one line" : incomplete > 0 ? "Finish every line first" : undefined}>
-            {submit.pending ? "Submitting…" : isAddition ? "Submit request to Finance" : "Submit to Finance"}
+            {submit.pending ? "Submitting…" : isAddition ? "Submit request for approval" : "Submit for approval"}
           </Button>
         </div>
       </div>
@@ -242,7 +242,7 @@ function RowFields({ row, currency, total, petrol, meal, disabled, onChange, onR
           <button type="button" className="font-medium underline underline-offset-2" onClick={() => onChange({ rate: String(sug.value), rate_key: sug.confirmed ? rateKey : "" })}>Use {sug.value}</button>
         </p>
       ) : null}
-      {differs ? <p className="text-[13px] text-[hsl(var(--os-amber))]">Differs from the company rate ({moneyText(configured!, currency)}). Finance will see both.</p> : null}
+      {differs ? <p className="text-[13px] text-[hsl(var(--os-amber))]">Differs from the company rate ({moneyText(configured!, currency)}). The approver will see both.</p> : null}
     </div>
   );
 }

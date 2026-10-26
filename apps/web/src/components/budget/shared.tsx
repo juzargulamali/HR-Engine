@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { moneyText, versionStatusTone, VERSION_STATUS_LABELS, type VersionStatus } from "@enginious-hr/domain";
+import { holdExplanation, moneyText, routeExplanation, versionStatusTone, VERSION_STATUS_LABELS, type ApprovalRoute, type VersionStatus } from "@enginious-hr/domain";
 import { OsBadge, type OsTone } from "@/components/os/pills";
 import { Alert } from "@/components/ui/alert";
 import { Label } from "@/components/ui/label";
@@ -107,3 +107,18 @@ export const cleanDecimal = (s: string): string => {
   const i = t.indexOf(".");
   return i < 0 ? t : t.slice(0, i + 1) + t.slice(i + 1).replace(/\./g, "");
 };
+
+/** Who decides a submission and why (fixed when it was submitted), in one sentence. */
+export function RouteLine({ route }: { route: ApprovalRoute | null }) {
+  if (!route) return null;
+  return <p className="text-sm"><span className="text-muted-foreground">Approval: </span>{routeExplanation(route)}</p>;
+}
+
+/** Shown when nobody eligible and independent exists for the route: the request waits, nothing is approved or lost. */
+export function HoldAlert({ route, submitterName }: { route: ApprovalRoute | null; submitterName: string | null }) {
+  return (
+    <Alert role="status" className="text-sm">
+      <strong>On hold.</strong> {holdExplanation(route ?? "finance", submitterName).replace(/^On hold: /, "")}
+    </Alert>
+  );
+}

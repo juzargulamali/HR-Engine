@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Panel, Muted } from "@/components/projects/parts";
 import { decideActuals, returnApprovedActuals, reviseActuals, saveActualsDraft, startActuals, submitActuals } from "@/lib/actions/projectBudget";
 import type { PbxActualRow, PbxActuals, PbxBudgetView } from "@/types/budget";
-import { ActionMessage, Field, StatusPill, cleanDecimal, money, stamp, useAction } from "./shared";
+import { ActionMessage, Field, HoldAlert, RouteLine, StatusPill, cleanDecimal, money, stamp, useAction } from "./shared";
 
 export interface ClaimOption { id: string; label: string }
 
@@ -158,7 +158,7 @@ function ActualsEditor({ view, submission, claims }: { view: PbxBudgetView; subm
       const v = saved.version ?? rv;
       setRv(v);
       return submitActuals({ projectId: view.project.id, submissionId: submission.id, expected: v, requestId: submit.getRequestId() });
-    }, () => setDirty(false), "Submitted to Finance.");
+    }, () => setDirty(false), "Submitted for approval.");
 
   const claimOptions = claims;
   return (
@@ -255,11 +255,11 @@ function ActualsEditor({ view, submission, claims }: { view: PbxBudgetView; subm
       <div className="space-y-3 rounded-lg border border-border p-3">
         <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5 h-4 w-4" checked={confirmed} disabled={busy} onChange={(e) => { setConfirmed(e.target.checked); touch(); }} /><span>I confirm these actual expenses are complete: nothing else was spent on this project.</span></label>
         {needNote ? (
-          <Field label="Why is the total more than 10% away from the approved budget?" htmlFor="pbx-vn" hint="Finance needs a short explanation for a material difference.">
+          <Field label="Why is the total more than 10% away from the approved budget?" htmlFor="pbx-vn" hint="The approver needs a short explanation for a material difference.">
             <Textarea id="pbx-vn" rows={3} value={varianceNote} maxLength={2000} disabled={busy} onChange={(e) => { setVarianceNote(e.target.value); touch(); }} />
           </Field>
         ) : (
-          <Field label="Note for Finance (optional)" htmlFor="pbx-vn"><Textarea id="pbx-vn" rows={2} value={varianceNote} maxLength={2000} disabled={busy} onChange={(e) => { setVarianceNote(e.target.value); touch(); }} /></Field>
+          <Field label="Note for the approver (optional)" htmlFor="pbx-vn"><Textarea id="pbx-vn" rows={2} value={varianceNote} maxLength={2000} disabled={busy} onChange={(e) => { setVarianceNote(e.target.value); touch(); }} /></Field>
         )}
       </div>
 
@@ -282,7 +282,7 @@ function ActualsEditor({ view, submission, claims }: { view: PbxBudgetView; subm
   );
 }
 
-function FinanceActualsDecision({ view, s }: { view: PbxBudgetView; s: PbxActuals }) {
+function ActualsDecision({ view, s }: { view: PbxBudgetView; s: PbxActuals }) {
   const a = useAction();
   const [note, setNote] = useState("");
   const [asking, setAsking] = useState(false);
@@ -304,7 +304,7 @@ function FinanceActualsDecision({ view, s }: { view: PbxBudgetView; s: PbxActual
           <Button type="button" variant="outline" disabled={a.pending} onClick={() => setAsking(true)}>Return for correction</Button>
         </div>
       )}
-      <p className="text-[13px] text-muted-foreground">Nobody can approve expenses they entered or submitted. Receipts are checked separately, on the Settlement tab.</p>
+      <p className="text-[13px] text-muted-foreground">Nobody can approve expenses they entered or submitted. Receipts are confirmed separately by Finance, on the Settlement tab.</p>
       <ActionMessage error={a.error} />
     </div>
   );
@@ -328,7 +328,7 @@ function ReturnApproved({ view, s }: { view: PbxBudgetView; s: PbxActuals }) {
   );
 }
 
-/** Actual expenses: manual totals entered by the Project Manager after the project, compared with the approved budget, decided by Finance. */
+/** Actual expenses: manual totals entered by the Project Manager after the project, compared with the approved budget, decided by the routed approver (Finance, or the CEO / CTO when the submitter holds Finance access). */
 export function ActualsSection({ view, claims }: { view: PbxBudgetView; claims: ClaimOption[] }) {
   const a = useAction();
   const budget = view.budget!;
@@ -356,14 +356,14 @@ export function ActualsSection({ view, claims }: { view: PbxBudgetView; claims: 
       {!current && !isPm ? <Muted>The Project Manager has not entered the actual expenses yet.</Muted> : null}
 
       {current && current.status === "draft" && isPm ? (
-        <Panel title="Actual expenses (draft)" description={`Compared with the approved budget of ${money(view.baseline, currency)}. Nothing is sent to Finance until you submit.`}>
+        <Panel title="Actual expenses (draft)" description={`Compared with the approved budget of ${money(view.baseline, currency)}. Nothing is sent for approval until you submit.`}>
           <ActualsEditor key={`${current.id}:${current.row_version}`} view={view} submission={current} claims={claims} />
         </Panel>
       ) : null}
 
       {current && current.status === "returned" && isPm && open ? (
         <Alert role="status" className="text-sm">
-          <strong>Finance returned these expenses.</strong> {current.decision_note}
+          <strong>{current.decided_by_name ?? "The approver"} returned these expenses.</strong> {current.decision_note}
           <div className="mt-2"><Button type="button" disabled={a.pending} onClick={() => a.run(() => reviseActuals({ projectId: view.project.id, submissionId: current.id }))}>{a.pending ? "Preparing…" : "Make a new draft to correct"}</Button></div>
           <ActionMessage error={a.error} />
         </Alert>
@@ -371,11 +371,10 @@ export function ActualsSection({ view, claims }: { view: PbxBudgetView; claims: 
 
       {current && current.status === "submitted" ? (
         <>
-          {current.on_hold ? (
-            <Alert role="status" className="text-sm"><strong>On hold.</strong> No Finance person other than {current.submitted_by_name ?? "the submitter"} can decide this, and nobody may approve their own submission. Finance needs a second person with access for this company.</Alert>
-          ) : null}
-          {current.i_can_decide ? <FinanceActualsDecision view={view} s={current} /> : null}
-          {view.viewer.is_finance && !current.i_can_decide && !current.on_hold ? <Muted>You entered or submitted these, so another Finance person has to decide them.</Muted> : null}
+          <RouteLine route={current.approval_route} />
+          {current.on_hold ? <HoldAlert route={current.approval_route} submitterName={current.submitted_by_name} /> : null}
+          {current.i_can_decide ? <ActualsDecision view={view} s={current} /> : null}
+          {!current.i_can_decide && !current.on_hold && (view.viewer.user_id === current.created_by || view.viewer.user_id === current.submitted_by) && (view.viewer.is_finance || view.viewer.is_executive) ? <Muted>You entered or submitted these, so someone else decides them.</Muted> : null}
         </>
       ) : null}
 
@@ -388,7 +387,7 @@ export function ActualsSection({ view, claims }: { view: PbxBudgetView; claims: 
           className={i === 0 && s.status === "draft" && isPm ? "hidden" : undefined}
         >
           <div className="space-y-3">
-            {s.decision_note ? <Alert role="status" className="text-sm"><strong>Finance said:</strong> {s.decision_note}</Alert> : null}
+            {s.decision_note ? <Alert role="status" className="text-sm"><strong>{s.decided_by_name ?? "The approver"} said:</strong> {s.decision_note}</Alert> : null}
             {s.variance_note ? <p className="text-sm"><span className="text-muted-foreground">Project Manager&apos;s note on the difference: </span>{s.variance_note}</p> : null}
             <ActualsTable rows={s.rows} currency={currency} approvedTotal={s.total_approved_budget} actualTotal={s.total_actual} />
             {s.status === "approved" && i === 0 && view.viewer.is_finance && open ? <ReturnApproved view={view} s={s} /> : null}

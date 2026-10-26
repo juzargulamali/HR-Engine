@@ -6,7 +6,7 @@
 --   pbx_budget_view(project)     everything one budget shows: project header, versions and rows, funding, actuals, payments,
 --                                settlement figures and blockers, categories and rates, project people
 --   pbx_inbox()                  the Finance inbox across every company the caller can read
--- Access is the same in every one: Finance / view grantees of the company, the CURRENT PM, and (read-only, own versions only) a prior submitter.
+-- Access is the same in every one: Finance / view / CEO-CTO approver grantees of the company, the CURRENT PM, and (read-only, own versions only) a prior submitter.
 -- Nothing is returned that the tables' own RLS would hide from that caller.
 
 create or replace function pbx_project_access(p_project_id uuid)
@@ -45,6 +45,7 @@ declare
   v_full boolean;
   v_fin boolean;
   v_view boolean;
+  v_exec boolean;
   v_company_name text;
   v_default_currency text;
   v_project jsonb;
@@ -68,7 +69,8 @@ begin
   if b.id is not null and not pbx_can_read_budget_header(b.id) then raise exception 'Budget not found' using errcode = 'P0002'; end if;
   v_full := b.id is null or pbx_can_read_budget(b.id);          -- PM, Finance or view grantee: everything; a prior submitter: own versions only
   v_fin := pbx_is_finance(pr.company_id);
-  v_view := not v_fin and pbx_has_capability(pr.company_id, 'view');
+  v_exec := pbx_is_executive(pr.company_id);
+  v_view := not v_fin and not v_exec and pbx_has_capability(pr.company_id, 'view');
   select legal_name, default_currency into v_company_name, v_default_currency from companies where id = pr.company_id;
 
   if b.id is null then
@@ -108,8 +110,9 @@ begin
         'created_by', v.created_by, 'created_by_name', pbx_name(v.created_by), 'created_at', v.created_at,
         'submitted_by', v.submitted_by, 'submitted_by_name', pbx_name(v.submitted_by), 'submitted_at', v.submitted_at,
         'decided_by_name', pbx_name(v.decided_by), 'decided_at', v.decided_at, 'decision_note', v.decision_note,
-        'on_hold', v.status = 'submitted' and pbx_approval_on_hold(v.company_id, v.created_by, v.submitted_by),
-        'i_can_decide', v.status = 'submitted' and v_fin and v_me <> v.created_by and v_me <> coalesce(v.submitted_by, v_me),
+        'approval_route', case when v.status = 'draft' then null else v.approval_route end,
+        'on_hold', v.status = 'submitted' and pbx_approval_on_hold(v.company_id, v.approval_route, v.created_by, v.submitted_by),
+        'i_can_decide', v.status = 'submitted' and pbx_can_decide(v.company_id, v.approval_route, v.created_by, v.submitted_by),
         'people', coalesce((select jsonb_agg(jsonb_build_object('id', u, 'name', pbx_name(u))) from unnest(v.people) u), '[]'::jsonb),
         'rows', coalesce((select jsonb_agg(jsonb_build_object(
             'id', r.id, 'sort_no', r.sort_no, 'category_id', r.category_id, 'category_key', r.category_key, 'category_label', r.category_label,
@@ -130,8 +133,9 @@ begin
         'reopened_after_approval', s.reopened_after_approval, 'row_version', s.row_version,
         'created_by', s.created_by, 'created_by_name', pbx_name(s.created_by), 'submitted_by', s.submitted_by, 'submitted_by_name', pbx_name(s.submitted_by),
         'submitted_at', s.submitted_at, 'decided_by_name', pbx_name(s.decided_by), 'decided_at', s.decided_at, 'decision_note', s.decision_note,
-        'on_hold', s.status = 'submitted' and pbx_approval_on_hold(s.company_id, s.created_by, s.submitted_by),
-        'i_can_decide', s.status = 'submitted' and v_fin and v_me <> s.created_by and v_me <> coalesce(s.submitted_by, v_me),
+        'approval_route', case when s.status = 'draft' then null else s.approval_route end,
+        'on_hold', s.status = 'submitted' and pbx_approval_on_hold(s.company_id, s.approval_route, s.created_by, s.submitted_by),
+        'i_can_decide', s.status = 'submitted' and pbx_can_decide(s.company_id, s.approval_route, s.created_by, s.submitted_by),
         'rows', coalesce((select jsonb_agg(jsonb_build_object(
             'id', r.id, 'sort_no', r.sort_no, 'budget_row_id', r.budget_row_id, 'line_no', r.line_no, 'category_key', r.category_key,
             'category_label', r.category_label, 'description', r.description, 'approved_amount', r.approved_amount, 'actual_amount', r.actual_amount,
@@ -159,7 +163,7 @@ begin
   end if;
 
   return jsonb_build_object(
-    'viewer', jsonb_build_object('user_id', v_me, 'is_pm', v_pm, 'is_finance', v_fin, 'is_view_only', v_view, 'is_full_reader', v_full),
+    'viewer', jsonb_build_object('user_id', v_me, 'is_pm', v_pm, 'is_finance', v_fin, 'is_executive', v_exec, 'is_view_only', v_view, 'is_full_reader', v_full),
     'project', v_project,
     'default_currency', v_default_currency,
     'budget', case when b.id is null then null else jsonb_build_object(
@@ -193,15 +197,16 @@ declare
   v_companies jsonb;
 begin
   perform pbx_require_user();
-  select coalesce(jsonb_agg(jsonb_build_object('id', c.id, 'name', c.legal_name, 'can_decide', pbx_is_finance(c.id)) order by c.legal_name), '[]'::jsonb)
+  select coalesce(jsonb_agg(jsonb_build_object('id', c.id, 'name', c.legal_name, 'is_finance', pbx_is_finance(c.id), 'is_executive', pbx_is_executive(c.id), 'can_decide', pbx_is_finance(c.id) or pbx_is_executive(c.id)) order by c.legal_name), '[]'::jsonb)
     into v_companies from companies c where c.id in (select pbx_accessible_company_ids());
 
   select coalesce(jsonb_agg(jsonb_build_object(
       'budget_id', b.id, 'project_id', b.project_id, 'reference', b.project_reference, 'name', b.project_name, 'company_id', b.company_id,
       'company_name', c.legal_name, 'currency', b.currency, 'pm_name', b.pm_name, 'site_timezone', b.site_timezone, 'version_id', v.id, 'kind', v.kind, 'seq', v.seq, 'total', v.total,
       'submitted_at', v.submitted_at, 'submitted_by_name', pbx_name(v.submitted_by),
-      'on_hold', pbx_approval_on_hold(v.company_id, v.created_by, v.submitted_by),
-      'i_can_decide', pbx_is_finance(v.company_id) and v_me <> v.created_by and v_me <> coalesce(v.submitted_by, v_me)) order by v.submitted_at), '[]'::jsonb)
+      'approval_route', v.approval_route,
+      'on_hold', pbx_approval_on_hold(v.company_id, v.approval_route, v.created_by, v.submitted_by),
+      'i_can_decide', pbx_can_decide(v.company_id, v.approval_route, v.created_by, v.submitted_by)) order by v.submitted_at), '[]'::jsonb)
     into v_budgets
     from pbx_budget_versions v join pbx_budgets b on b.id = v.budget_id join companies c on c.id = b.company_id
    where v.status = 'submitted' and v.company_id in (select pbx_accessible_company_ids());
@@ -210,8 +215,9 @@ begin
       'budget_id', b.id, 'project_id', b.project_id, 'reference', b.project_reference, 'name', b.project_name, 'company_id', b.company_id,
       'company_name', c.legal_name, 'currency', b.currency, 'pm_name', b.pm_name, 'site_timezone', b.site_timezone, 'submission_id', s.id, 'seq', s.seq, 'total_actual', s.total_actual,
       'total_approved_budget', s.total_approved_budget, 'submitted_at', s.submitted_at, 'submitted_by_name', pbx_name(s.submitted_by),
-      'on_hold', pbx_approval_on_hold(s.company_id, s.created_by, s.submitted_by),
-      'i_can_decide', pbx_is_finance(s.company_id) and v_me <> s.created_by and v_me <> coalesce(s.submitted_by, v_me)) order by s.submitted_at), '[]'::jsonb)
+      'approval_route', s.approval_route,
+      'on_hold', pbx_approval_on_hold(s.company_id, s.approval_route, s.created_by, s.submitted_by),
+      'i_can_decide', pbx_can_decide(s.company_id, s.approval_route, s.created_by, s.submitted_by)) order by s.submitted_at), '[]'::jsonb)
     into v_actuals
     from pbx_actual_submissions s join pbx_budgets b on b.id = s.budget_id join companies c on c.id = b.company_id
    where s.status = 'submitted' and s.company_id in (select pbx_accessible_company_ids());
@@ -236,7 +242,8 @@ begin
     'budget_approvals', v_budgets,
     'final_expense_approvals', v_actuals,
     'outstanding_settlement', v_settle,
-    'is_finance_anywhere', exists (select 1 from pbx_finance_company_ids()));
+    'is_finance_anywhere', exists (select 1 from pbx_finance_company_ids()),
+    'is_executive_anywhere', exists (select 1 from pbx_company_grants g join profiles pr on pr.id = g.user_id and pr.is_active where g.user_id = v_me and g.revoked_at is null and 'executive_approver' = any (g.capabilities)));
 end;
 $$;
 

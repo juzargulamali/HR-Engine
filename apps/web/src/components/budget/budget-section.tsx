@@ -10,7 +10,7 @@ import { Panel, Muted } from "@/components/projects/parts";
 import { createBudget, decideBudget, requestAddition, reviseBudget } from "@/lib/actions/projectBudget";
 import type { PbxBudgetRow, PbxBudgetView, PbxVersion } from "@/types/budget";
 import { BudgetEditor } from "./budget-editor";
-import { ActionMessage, Field, StatusPill, day, money, stamp, useAction } from "./shared";
+import { ActionMessage, Field, HoldAlert, RouteLine, StatusPill, day, money, stamp, useAction } from "./shared";
 
 const versionName = (v: PbxVersion, versions: PbxVersion[]) => {
   if (v.kind === "original") return `Original budget${versions.filter((x) => x.kind === "original").length > 1 ? ` (version ${v.seq})` : ""}`;
@@ -91,14 +91,14 @@ function CreateBudget({ view }: { view: PbxBudgetView }) {
   );
 }
 
-function FinanceDecision({ view, version }: { view: PbxBudgetView; version: PbxVersion }) {
+function ApproverDecision({ view, version }: { view: PbxBudgetView; version: PbxVersion }) {
   const a = useAction();
   const [note, setNote] = useState("");
   const [asking, setAsking] = useState<"return" | "reject" | null>(null);
   const decide = (decision: "approve" | "return" | "reject") => a.run(() => decideBudget({ projectId: view.project.id, versionId: version.id, decision, note }), () => { setAsking(null); setNote(""); });
   return (
     <div className="space-y-3 rounded-lg border border-border bg-secondary/30 p-3">
-      <p className="text-sm font-medium">{version.kind === "addition" ? "Decide this additional budget request" : "Decide this budget"} — total {money(version.total, view.budget!.currency)}</p>
+      <p className="text-sm font-medium">{version.kind === "addition" ? "Decide this additional budget request" : "Decide this budget"} — total {money(version.total, view.budget!.currency)}{version.approval_route === "executive" ? " (as the CEO or CTO approver)" : ""}</p>
       {asking ? (
         <div className="space-y-2">
           <Field label={asking === "return" ? "What should the Project Manager change?" : "Why is it rejected?"} htmlFor="pbx-note-d"><Textarea id="pbx-note-d" rows={3} value={note} maxLength={1000} onChange={(e) => setNote(e.target.value)} autoFocus /></Field>
@@ -117,15 +117,6 @@ function FinanceDecision({ view, version }: { view: PbxBudgetView; version: PbxV
       <p className="text-[13px] text-muted-foreground">One decision is final for this version. Nobody can approve their own submission.</p>
       <ActionMessage error={a.error} />
     </div>
-  );
-}
-
-function HoldNotice({ version, viewer }: { version: PbxVersion; viewer: PbxBudgetView["viewer"] }) {
-  if (!version.on_hold) return null;
-  return (
-    <Alert role="status" className="text-sm">
-      <strong>On hold.</strong> No Finance person other than {version.submitted_by_name ?? "the submitter"} can decide this, and nobody may approve their own submission. {viewer.is_finance ? "Ask a colleague to be given Finance access for this company, or have someone else prepare it." : "Finance needs a second person with Finance access for this company."} Nothing was approved or lost.
-    </Alert>
   );
 }
 
@@ -154,12 +145,13 @@ function VersionCard({ view, version, versions, defaultOpen }: { view: PbxBudget
             {version.decided_at ? <div><dt className="inline text-muted-foreground">Decided: </dt><dd className="inline">{stamp(version.decided_at, tz)} by {version.decided_by_name ?? "Finance"}</dd></div> : null}
           </dl>
           {version.note ? <p className="text-sm"><span className="text-muted-foreground">Note: </span>{version.note}</p> : null}
-          {version.decision_note ? <Alert role="status" className="text-sm"><strong>Finance said:</strong> {version.decision_note}</Alert> : null}
+          {version.decision_note ? <Alert role="status" className="text-sm"><strong>{version.decided_by_name ?? "The approver"} said:</strong> {version.decision_note}</Alert> : null}
           <RowsTable rows={version.rows} currency={currency} />
-          {version.status === "submitted" ? <HoldNotice version={version} viewer={view.viewer} /> : null}
-          {version.status === "submitted" && version.i_can_decide ? <FinanceDecision view={view} version={version} /> : null}
-          {version.status === "submitted" && view.viewer.is_finance && !version.i_can_decide && !version.on_hold ? (
-            <Muted>You prepared or submitted this, so another Finance person has to decide it.</Muted>
+          {version.status !== "draft" ? <RouteLine route={version.approval_route} /> : null}
+          {version.status === "submitted" && version.on_hold ? <HoldAlert route={version.approval_route} submitterName={version.submitted_by_name} /> : null}
+          {version.status === "submitted" && version.i_can_decide ? <ApproverDecision view={view} version={version} /> : null}
+          {version.status === "submitted" && !version.i_can_decide && !version.on_hold && (view.viewer.user_id === version.created_by || view.viewer.user_id === version.submitted_by) && (view.viewer.is_finance || view.viewer.is_executive) ? (
+            <Muted>You prepared or submitted this, so someone else decides it.</Muted>
           ) : null}
           {canRevise ? (
             <div className="space-y-1">
@@ -174,7 +166,7 @@ function VersionCard({ view, version, versions, defaultOpen }: { view: PbxBudget
   );
 }
 
-/** The Budget section: summary of what is approved, the draft being prepared (PM), the decision (Finance), and every version as history. */
+/** The Budget section: summary of what is approved, the draft being prepared (PM), the decision (the routed approver), and every version as history. */
 export function BudgetSection({ view }: { view: PbxBudgetView }) {
   const add = useAction();
   if (!view.budget) {
@@ -201,7 +193,7 @@ export function BudgetSection({ view }: { view: PbxBudgetView }) {
       ) : null}
 
       {draft && view.viewer.is_pm ? (
-        <Panel title={draft.kind === "addition" ? "Additional budget request (draft)" : "Draft budget"} description={draft.kind === "addition" ? "Only the extra amount is entered here. The approved budget stays as it is until Finance approves this request." : "Prepare the expenses you expect. Nothing is sent to Finance until you submit."}>
+        <Panel title={draft.kind === "addition" ? "Additional budget request (draft)" : "Draft budget"} description={draft.kind === "addition" ? "Only the extra amount is entered here. The approved budget stays as it is until the approver approves this request." : "Prepare the expenses you expect. Nothing is sent for approval until you submit."}>
           <BudgetEditor key={`${draft.id}:${draft.row_version}`} view={view} version={draft} />
         </Panel>
       ) : draft ? (
@@ -211,12 +203,12 @@ export function BudgetSection({ view }: { view: PbxBudgetView }) {
       {canAdd ? (
         <div className="space-y-1">
           <Button type="button" variant="outline" disabled={add.pending} onClick={() => add.run(() => requestAddition({ projectId: view.project.id, budgetId: view.budget!.id }))}>{add.pending ? "Starting…" : "Request additional budget"}</Button>
-          <p className="text-[13px] text-muted-foreground">The approved budget is never overwritten. You enter only the extra amount; Finance decides it separately.</p>
+          <p className="text-[13px] text-muted-foreground">The approved budget is never overwritten. You enter only the extra amount; The appropriate approver decides it separately.</p>
           <ActionMessage error={add.error} />
         </div>
       ) : null}
 
-      <Panel title="Budget history" description="Every submitted version is kept exactly as it was, with Finance's decision.">
+      <Panel title="Budget history" description="Every submitted version is kept exactly as it was, with the approver's decision.">
         {history.length === 0 ? <Muted>{draft ? "Nothing submitted yet." : "No versions yet."}</Muted> : (
           <div className="space-y-2">
             {history.map((v, i) => <VersionCard key={v.id} view={view} version={v} versions={versions} defaultOpen={i === 0 || v.status === "submitted"} />)}

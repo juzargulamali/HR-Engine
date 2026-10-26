@@ -22,10 +22,11 @@ const FIRST_PBX = "20261210000000_pbx_access_audit_settings.sql";
 const PBX_MIGRATIONS = readdirSync(MIGRATIONS_DIR).filter((f) => f >= FIRST_PBX && f.endsWith(".sql")).sort();
 
 const id = () => randomUUID();
-const CO = { uae: id(), ksa: id() };
+const CO = { uae: id(), ksa: id(), third: id() };
 const U = {
   fin1: id(), fin2: id(), ksaFin: id(), viewer: id(), pm: id(), pm2: id(), pm3: id(), pmFin: id(), member: id(), member2: id(), outsider: id(),
   founder: id(), hrFin: id(), sales: id(), admin: id(), emp: id(),
+  ceo: id(), cto: id(), ksaCeo: id(), dual: id(), ceoPm: id(), thirdPm: id(), thirdExec: id(),
 };
 const SQL_USERS = Object.entries(U).map(([k, v]) => `('${v}', '${k}@pbx-test.ae')`).join(", ");
 
@@ -102,7 +103,7 @@ describe("Project Budget & Expenses", () => {
     await db.seed(`
       insert into countries (code, name, default_currency) values ('AE', 'United Arab Emirates', 'AED'), ('SA', 'Saudi Arabia', 'SAR') on conflict do nothing;
       insert into companies (id, legal_name, country_code, default_currency) values
-        ('${CO.uae}', 'Enginious UAE', 'AE', 'AED'), ('${CO.ksa}', 'Enginious KSA', 'SA', 'SAR');
+        ('${CO.uae}', 'Enginious UAE', 'AE', 'AED'), ('${CO.ksa}', 'Enginious KSA', 'SA', 'SAR'), ('${CO.third}', 'Enginious Third', 'AE', 'AED');
       insert into auth.users (id, email) values ${SQL_USERS};
       insert into user_roles (user_id, role) values ('${U.hrFin}', 'finance'), ('${U.admin}', 'sys_admin');
     `);
@@ -121,12 +122,17 @@ describe("Project Budget & Expenses", () => {
       insert into proj_company_grants (user_id, company_id, capabilities) values
         ('${U.pm}', '${CO.uae}', '{}'), ('${U.pm2}', '${CO.uae}', '{}'), ('${U.pm3}', '${CO.uae}', '{}'), ('${U.pmFin}', '${CO.uae}', '{}'),
         ('${U.member}', '${CO.uae}', '{}'), ('${U.member2}', '${CO.uae}', '{}'), ('${U.founder}', '${CO.uae}', '{founder}'),
-        ('${U.ksaFin}', '${CO.ksa}', '{}');
+        ('${U.ksaFin}', '${CO.ksa}', '{}'), ('${U.dual}', '${CO.uae}', '{}'), ('${U.ceoPm}', '${CO.uae}', '{}'), ('${U.thirdPm}', '${CO.third}', '{}');
       insert into crm_company_grants (user_id, company_id, capabilities) values ('${U.sales}', '${CO.uae}', '{founder}');
       -- Budget access exactly as the owner's setup SQL does it: explicit, per company, nothing inferred.
       insert into pbx_company_grants (user_id, company_id, capabilities) values
         ('${U.fin1}', '${CO.uae}', '{finance,manage_access}'), ('${U.fin2}', '${CO.uae}', '{finance}'), ('${U.pmFin}', '${CO.uae}', '{finance}'),
-        ('${U.viewer}', '${CO.uae}', '{view}'), ('${U.ksaFin}', '${CO.ksa}', '{finance,manage_access}');
+        ('${U.viewer}', '${CO.uae}', '{view}'), ('${U.ksaFin}', '${CO.ksa}', '{finance,manage_access}'),
+        -- the company's authorised CEO / CTO approvers (explicit grants; a title confers nothing), and one person who is both Finance and an approver
+        ('${U.ceo}', '${CO.uae}', '{executive_approver}'), ('${U.cto}', '${CO.uae}', '{executive_approver}'), ('${U.dual}', '${CO.uae}', '{finance,executive_approver}'),
+        ('${U.ceoPm}', '${CO.uae}', '{executive_approver}'),
+        -- a company that has a CEO-type approver but nobody in Finance
+        ('${U.thirdExec}', '${CO.third}', '{executive_approver,manage_access}');
       insert into employees (id, user_id, employee_number, company_id, country_code, first_name, last_name, hire_date) values
         ('${id()}', '${U.pm}', 'E1', '${CO.uae}', 'AE', 'Pam', 'Manager', current_date - 400), ('${id()}', '${U.emp}', 'E2', '${CO.uae}', 'AE', 'Eve', 'Employee', current_date - 400);
     `);
@@ -143,7 +149,7 @@ describe("Project Budget & Expenses", () => {
     it("clients have no DML on any pbx table and cannot run internal functions", async () => {
       expect(tableGrants.filter((g) => g.privilege_type !== "SELECT" || g.grantee !== "authenticated")).toEqual([]);
       const internal = ["pbx_require_user", "pbx_audit_trigger", "pbx_notify", "pbx_lock_budget", "pbx_require_pm", "pbx_require_finance", "pbx_refresh_snapshot", "pbx_settlement_figures",
-        "pbx_settlement_blockers", "pbx_baseline_rows", "pbx_baseline_total", "pbx_name", "pbx_finance_approvers", "pbx_is_actuals_author", "pbx_budget_row_calc"];
+        "pbx_settlement_blockers", "pbx_baseline_rows", "pbx_baseline_total", "pbx_name", "pbx_route_approvers", "pbx_approval_route", "pbx_can_decide", "pbx_require_approver", "pbx_user_is_finance", "pbx_is_actuals_author", "pbx_budget_row_calc"];
       for (const fn of internal) {
         const g = functionGrants.find((x) => x.proname === fn);
         expect(g, fn).toBeDefined();
@@ -327,20 +333,23 @@ describe("Project Budget & Expenses", () => {
       await expect(admin(`update pbx_budget_versions set status = 'draft' where id = '${empty.version}'`)).rejects.toThrow(/cannot move/);
     });
 
-    it("Finance decides independently: the PM and a PM who also holds Finance cannot approve their own submission", async () => {
+    it("a Finance-holding PM's submission goes to the CEO/CTO route: nobody else decides it, and not the submitter", async () => {
       const p = await newProject(U.pmFin, []);
       const b = await makeBudget(p, U.pmFin);
       await submit(U.pmFin, b);
-      await failsCommit(U.pm, `select pbx_decide_budget('${b.version}', 'approve')`, /Only Finance/);
-      await failsCommit(U.member, `select pbx_decide_budget('${b.version}', 'approve')`, /Budget not found|Only Finance/);
-      await failsCommit(U.ksaFin, `select pbx_decide_budget('${b.version}', 'approve')`, /Budget not found|Only Finance/);
-      await failsCommit(U.viewer, `select pbx_decide_budget('${b.version}', 'approve')`, /Only Finance/);
-      await failsCommit(U.pmFin, `select pbx_decide_budget('${b.version}', 'approve')`, /cannot decide a budget you prepared or submitted/);
+      expect((await admin<Row>(`select approval_route from pbx_budget_versions where id = '${b.version}'`))[0].approval_route).toBe("executive");
+      await failsCommit(U.pm, `select pbx_decide_budget('${b.version}', 'approve')`, /CEO or CTO|Only Finance|Budget not found/);
+      await failsCommit(U.member, `select pbx_decide_budget('${b.version}', 'approve')`, /Budget not found|CEO or CTO/);
+      await failsCommit(U.ksaFin, `select pbx_decide_budget('${b.version}', 'approve')`, /Budget not found|CEO or CTO/);
+      await failsCommit(U.viewer, `select pbx_decide_budget('${b.version}', 'approve')`, /CEO or CTO/);
+      await failsCommit(U.fin1, `select pbx_decide_budget('${b.version}', 'approve')`, /only the company's authorised CEO or CTO approver can decide/);   // a Finance colleague cannot approve Finance's own submission
+      await failsCommit(U.pmFin, `select pbx_decide_budget('${b.version}', 'approve')`, /CEO or CTO/);                                               // the submitter holds no executive right
       expect(await admin(`select 1 from pbx_budget_versions where id = '${b.version}' and status = 'submitted'`)).toHaveLength(1);
-      expect(await call<string>(U.fin1, `select pbx_decide_budget('${b.version}', 'approve')`)).toBe("approved");
+      expect(await call<string>(U.ceo, `select pbx_decide_budget('${b.version}', 'approve')`)).toBe("approved");   // either CEO or CTO is enough
+      await failsCommit(U.cto, `select pbx_decide_budget('${b.version}', 'approve')`, /already been decided/);
     });
 
-    it("two Finance approvers cannot create two decisions", async () => {
+    it("two approvers cannot create two decisions (Finance route)", async () => {
       const p = await newProject(U.pm);
       const b = await makeBudget(p, U.pm);
       await submit(U.pm, b);
@@ -384,23 +393,29 @@ describe("Project Budget & Expenses", () => {
       expect((await view(U.pm, p)).versions.map((x: Row) => x.status)).toEqual(["returned", "rejected"]);
     });
 
-    it("with no independent approver the submission is held, with a clear flag; an independent approver releases it", async () => {
+    it("with no eligible independent approver the submission is held, with a clear flag; an eligible one releases it", async () => {
+      // KSA: the only Finance person is also the PM, and the company has no CEO/CTO approver yet -> held
       const p = await newProject(U.ksaFin, [], CO.ksa);
       await commit(U.ksaFin, `select pbx_create_budget('${p}', 'SAR')`);
       const d = await draftOf(p);
       const rv = await call<number>(U.ksaFin, `select pbx_save_budget_draft('${d.id}', ${d.row_version}, ${j({})}, ${j([{ category_id: cat.food, description: "Meals", basis: "per_person", people: "2", rate: "40" }])})`);
       await submit(U.ksaFin, { version: d.id, rv });
       const v = await view(U.ksaFin, p);
-      expect(v.versions[0]).toMatchObject({ status: "submitted", on_hold: true, i_can_decide: false });
-      await failsCommit(U.ksaFin, `select pbx_decide_budget('${d.id}', 'approve')`, /cannot decide a budget you prepared or submitted/);
+      expect(v.versions[0]).toMatchObject({ status: "submitted", approval_route: "executive", on_hold: true, i_can_decide: false });
+      await failsCommit(U.ksaFin, `select pbx_decide_budget('${d.id}', 'approve')`, /CEO or CTO/);
       const inbox = (await q<{ i: Row }>(U.ksaFin, `select pbx_inbox() as i`))[0].i;
-      expect(inbox.budget_approvals[0]).toMatchObject({ on_hold: true, i_can_decide: false });
-      // a second Finance grantee of that company makes it decidable; the UAE Finance people never could
-      await failsCommit(U.fin1, `select pbx_decide_budget('${d.id}', 'approve')`, /Budget not found|Only Finance/);
+      expect(inbox.budget_approvals[0]).toMatchObject({ approval_route: "executive", on_hold: true, i_can_decide: false });
+      // another Finance grantee of that company still cannot decide Finance's own submission; the UAE CEO has no say in KSA
       await commit(U.ksaFin, `select pbx_grant_access('${U.fin2}', '${CO.ksa}', '{finance}')`);
+      expect((await view(U.ksaFin, p)).versions[0].on_hold).toBe(true);
+      await failsCommit(U.fin2, `select pbx_decide_budget('${d.id}', 'approve')`, /CEO or CTO/);
+      await failsCommit(U.ceo, `select pbx_decide_budget('${d.id}', 'approve')`, /Budget not found|CEO or CTO/);
+      // an authorised CEO/CTO approver of KSA releases it
+      await commit(U.ksaFin, `select pbx_grant_access('${U.ksaCeo}', '${CO.ksa}', '{executive_approver}')`);
       expect((await view(U.ksaFin, p)).versions[0].on_hold).toBe(false);
-      expect(await call<string>(U.fin2, `select pbx_decide_budget('${d.id}', 'approve')`)).toBe("approved");
+      expect(await call<string>(U.ksaCeo, `select pbx_decide_budget('${d.id}', 'approve')`)).toBe("approved");
       await commit(U.ksaFin, `select pbx_revoke_access('${U.fin2}', '${CO.ksa}')`);
+      await commit(U.ksaFin, `select pbx_revoke_access('${U.ksaCeo}', '${CO.ksa}')`);
     });
 
     it("additional budget requests show only the increment; pending, returned and rejected ones never raise the approved amount", async () => {
@@ -446,7 +461,7 @@ describe("Project Budget & Expenses", () => {
       const b = await makeBudget(p, U.pm);
       await submit(U.pm, b);
       const forFin = await admin<Row>(`select user_id, type from notifications where type = 'project_budget_submitted' and payload->>'version_id' = '${b.version}'`);
-      expect(forFin.map((n) => n.user_id).sort()).toEqual([U.fin1, U.fin2, U.pmFin].sort());      // every Finance grantee except the submitter; never a non-grantee
+      expect(forFin.map((n) => n.user_id).sort()).toEqual([U.fin1, U.fin2, U.pmFin, U.dual].sort());   // every Finance grantee except the submitter; never a non-grantee, never the CEO/CTO route
       await call(U.fin1, `select pbx_decide_budget('${b.version}', 'approve')`);
       const back = await admin<Row>(`select user_id from notifications where type = 'project_budget_decided' and payload->>'version_id' = '${b.version}'`);
       expect(back.map((n) => n.user_id)).toEqual([U.pm]);                                           // the submitter is also the PM: one notice, not two
@@ -498,7 +513,7 @@ describe("Project Budget & Expenses", () => {
 
     it("a Finance user who is also the recipient cannot fund themselves", async () => {
       const p = await newProject(U.pmFin, [U.member]);
-      const b = await approved(p, U.pmFin, U.fin1);
+      const b = await approved(p, U.pmFin, U.ceo);
       await failsCommit(U.pmFin, `select pbx_record_funding('${b.budget}', '${U.pmFin}', current_date, 100, 'cash', null, null, null, '${id()}')`, /cannot record funds for yourself/);
       await call(U.fin1, `select pbx_record_funding('${b.budget}', '${U.pmFin}', current_date, 100, 'cash', null, null, null, '${id()}')`);
     });
@@ -589,9 +604,9 @@ describe("Project Budget & Expenses", () => {
       await call(U.pm, `select pbx_submit_actuals('${sub2}', ${rv2}, '${id()}')`);
     });
 
-    it("submission is idempotent and frozen; Finance decides independently; returned actuals are revised as a new draft", async () => {
+    it("submission is idempotent and frozen; the CEO/CTO route decides a Finance-holding PM's expenses independently; returned actuals are revised as a new draft", async () => {
       const p = await newProject(U.pmFin, [U.member]);
-      const b = await approved(p, U.pmFin, U.fin1);
+      const b = await approved(p, U.pmFin, U.ceo);
       const sub = await call<string>(U.pmFin, `select pbx_start_actuals('${b.budget}')`);
       const ids = await budgetRowIds(b.budget);
       const d = await actualDraft(b.budget);
@@ -603,10 +618,11 @@ describe("Project Budget & Expenses", () => {
       await failsCommit(U.pmFin, `select pbx_submit_actuals('${sub}', ${rv}, '${id()}')`, /already submitted/);
       await failsCommit(U.pmFin, `select pbx_save_actuals_draft('${sub}', ${rv}, ${j({})}, ${j(all)})`, /no longer a draft/);
       await expect(admin(`update pbx_actual_rows set actual_amount = 1 where submission_id = '${sub}'`)).rejects.toThrow(/historical record/);
-      await failsCommit(U.pmFin, `select pbx_decide_actuals('${sub}', 'approve')`, /cannot decide final expenses you prepared or submitted/);
-      await failsCommit(U.pm, `select pbx_decide_actuals('${sub}', 'approve')`, /Only Finance|not found/);
-      await failsCommit(U.fin1, `select pbx_decide_actuals('${sub}', 'return')`, /Give the reason/);
-      const racers = await Promise.allSettled([commit(U.fin1, `select pbx_decide_actuals('${sub}', 'approve')`), commit(U.fin2, `select pbx_decide_actuals('${sub}', 'return', 'Check')`)]);
+      await failsCommit(U.pmFin, `select pbx_decide_actuals('${sub}', 'approve')`, /CEO or CTO/);
+      await failsCommit(U.pm, `select pbx_decide_actuals('${sub}', 'approve')`, /CEO or CTO|not found/);
+      await failsCommit(U.fin1, `select pbx_decide_actuals('${sub}', 'approve')`, /CEO or CTO/);                // a Finance-submitted claim of expenses is not decided by Finance
+      await failsCommit(U.ceo, `select pbx_decide_actuals('${sub}', 'return')`, /Give the reason/);
+      const racers = await Promise.allSettled([commit(U.ceo, `select pbx_decide_actuals('${sub}', 'approve')`), commit(U.cto, `select pbx_decide_actuals('${sub}', 'return', 'Check')`)]);
       expect(racers.filter((r) => r.status === "fulfilled")).toHaveLength(1);
       const status = (await admin<Row>(`select status from pbx_actual_submissions where id = '${sub}'`))[0].status;
       if (status === "returned") {
@@ -757,14 +773,14 @@ describe("Project Budget & Expenses", () => {
 
     it("a PM who also holds Finance cannot confirm receipts, close, or be paid on their own expenses", async () => {
       const project = await newProject(U.pmFin, [U.member]);
-      const b = await approved(project, U.pmFin, U.fin1);
+      const b = await approved(project, U.pmFin, U.ceo);
       const sub = await call<string>(U.pmFin, `select pbx_start_actuals('${b.budget}')`);
       const ids = await budgetRowIds(b.budget);
       const d = await actualDraft(b.budget);
       const lines = ids.map((rid, i) => ({ budget_row_id: rid, actual_amount: String([360, 30, 30, 1050][i]), paid_via: i === 0 ? "personal" : "company_card", paid_by_user_id: i === 0 ? U.pmFin : undefined }));
       const rv = await call<number>(U.pmFin, `select pbx_save_actuals_draft('${sub}', ${d.row_version}, ${j({ complete_confirmed: true })}, ${j(lines)})`);
       await call(U.pmFin, `select pbx_submit_actuals('${sub}', ${rv}, '${id()}')`);
-      await call(U.fin1, `select pbx_decide_actuals('${sub}', 'approve')`);
+      await call(U.ceo, `select pbx_decide_actuals('${sub}', 'approve')`);
       await failsCommit(U.pmFin, `select pbx_record_receipts('${b.budget}', 'received')`, /cannot record the receipt status/);
       await commit(U.fin1, `select pbx_record_receipts('${b.budget}', 'received')`);
       await failsCommit(U.pmFin, `select pbx_record_payment('${b.budget}', 'reimbursement', '${U.pmFin}', 100, current_date, 'cash', null, null, '${id()}')`, /cannot record a payment to or from yourself/);
@@ -775,6 +791,183 @@ describe("Project Budget & Expenses", () => {
   });
 
   // ---------------------------------------------------------------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------------------------------------------------------------
+  describe("approval routing: Finance for ordinary PMs, the company's CEO/CTO for Finance submitters", () => {
+    const oneProject = async (pm: string, company = CO.uae, currency = "AED") => {
+      const p = await newProject(pm, [], company);
+      const b = await makeBudget(p, pm, currency, [{ category_id: cat.food, description: "Meals", basis: "per_person_day", people: "2", days: "2", rate: "50" }]);
+      return { p, b };
+    };
+    const routeOf = async (version: string) => (await admin<Row>(`select approval_route from pbx_budget_versions where id = '${version}'`))[0].approval_route;
+    const inboxRow = async (user: string, version: string) => ((await q<{ i: Row }>(user, `select pbx_inbox() as i`))[0].i.budget_approvals as Row[]).find((r) => r.version_id === version);
+
+    it("ordinary PM -> an authorised Finance person decides; the CEO/CTO cannot, and nobody outside the company can", async () => {
+      const { p, b } = await oneProject(U.pm);
+      await submit(U.pm, b);
+      expect(await routeOf(b.version)).toBe("finance");
+      expect(await view(U.pm, p)).toMatchObject({ versions: [expect.objectContaining({ approval_route: "finance", on_hold: false, i_can_decide: false })] });
+      expect(await inboxRow(U.fin1, b.version)).toMatchObject({ approval_route: "finance", i_can_decide: true, on_hold: false });
+      expect(await inboxRow(U.ceo, b.version)).toMatchObject({ approval_route: "finance", i_can_decide: false });          // the CEO/CTO can see it, not decide it
+      await failsCommit(U.ceo, `select pbx_decide_budget('${b.version}', 'approve')`, /Only Finance of this company/);
+      await failsCommit(U.cto, `select pbx_decide_budget('${b.version}', 'reject', 'no')`, /Only Finance of this company/);
+      await failsCommit(U.ksaFin, `select pbx_decide_budget('${b.version}', 'approve')`, /Budget not found|Only Finance/);
+      await failsCommit(U.ksaCeo, `select pbx_decide_budget('${b.version}', 'approve')`, /Budget not found|Only Finance/);
+      expect(await call<string>(U.fin1, `select pbx_decide_budget('${b.version}', 'approve')`)).toBe("approved");
+    });
+
+    it("a submitter holding Finance access -> the CEO/CTO route, whether or not they are also the PM; one single approver is enough", async () => {
+      // a Finance person who is NOT the PM of the project but prepared nothing: the PM (no Finance) submits -> Finance route (above).
+      // a Finance person submits as PM (pmFin) -> executive route
+      const { b } = await oneProject(U.pmFin);
+      await submit(U.pmFin, b);
+      expect(await routeOf(b.version)).toBe("executive");
+      expect(await inboxRow(U.fin1, b.version)).toMatchObject({ approval_route: "executive", i_can_decide: false, on_hold: false });
+      expect(await inboxRow(U.cto, b.version)).toMatchObject({ approval_route: "executive", i_can_decide: true });
+      expect(await call<string>(U.cto, `select pbx_decide_budget('${b.version}', 'approve')`)).toBe("approved");     // the CTO alone is sufficient
+      await failsCommit(U.ceo, `select pbx_decide_budget('${b.version}', 'approve')`, /already been decided/);          // and the CEO is not also required
+    });
+
+    it("dual roles: someone with both Finance and CEO/CTO rights decides others' work on the right route and never their own", async () => {
+      // dual is a PM with Finance + executive rights: their own submission is routed to the executive queue and they are excluded from it
+      const mine = await oneProject(U.dual);
+      await submit(U.dual, mine.b);
+      expect(await routeOf(mine.b.version)).toBe("executive");
+      await failsCommit(U.dual, `select pbx_decide_budget('${mine.b.version}', 'approve')`, /cannot decide a budget you prepared or submitted/);
+      await failsCommit(U.fin1, `select pbx_decide_budget('${mine.b.version}', 'approve')`, /CEO or CTO/);
+      expect((await view(U.dual, mine.p)).versions[0]).toMatchObject({ approval_route: "executive", i_can_decide: false, on_hold: false });
+      expect(await call<string>(U.ceo, `select pbx_decide_budget('${mine.b.version}', 'approve')`)).toBe("approved");
+      // an ordinary PM's submission: dual may decide it as Finance
+      const theirs = await oneProject(U.pm2);
+      await submit(U.pm2, theirs.b);
+      expect(await inboxRow(U.dual, theirs.b.version)).toMatchObject({ approval_route: "finance", i_can_decide: true });
+      expect(await call<string>(U.dual, `select pbx_decide_budget('${theirs.b.version}', 'return', 'Please add the permit fee')`)).toBe("returned");
+      // a Finance PM's submission: dual (a different person) may decide it as CEO/CTO approver
+      const other = await oneProject(U.pmFin);
+      await submit(U.pmFin, other.b);
+      expect(await inboxRow(U.dual, other.b.version)).toMatchObject({ approval_route: "executive", i_can_decide: true });
+      expect(await call<string>(U.dual, `select pbx_decide_budget('${other.b.version}', 'approve')`)).toBe("approved");
+    });
+
+    it("an approver who is also a PM without Finance access cannot decide their own submission; Finance does", async () => {
+      const { p, b } = await oneProject(U.ceoPm);
+      await submit(U.ceoPm, b);
+      expect(await routeOf(b.version)).toBe("finance");                                                  // submitter holds no Finance right
+      await failsCommit(U.ceoPm, `select pbx_decide_budget('${b.version}', 'approve')`, /Only Finance of this company/);
+      expect((await view(U.ceoPm, p)).versions[0]).toMatchObject({ i_can_decide: false });
+      expect(await call<string>(U.fin2, `select pbx_decide_budget('${b.version}', 'approve')`)).toBe("approved");
+    });
+
+    it("the route is fixed at submission: a later change of the submitter's access cannot re-route or self-approve it", async () => {
+      const { b } = await oneProject(U.pm3);
+      await submit(U.pm3, b);
+      await admin(`insert into pbx_company_grants (user_id, company_id, capabilities) values ('${U.pm3}', '${CO.uae}', '{finance,executive_approver}')`);
+      try {
+        expect(await routeOf(b.version)).toBe("finance");
+        await failsCommit(U.pm3, `select pbx_decide_budget('${b.version}', 'approve')`, /cannot decide a budget you prepared or submitted/);   // newly gained rights do not let them approve their own
+        await expect(admin(`update pbx_budget_versions set approval_route = 'executive' where id = '${b.version}'`)).rejects.toThrow(/historical record/);
+        expect(await call<string>(U.fin1, `select pbx_decide_budget('${b.version}', 'approve')`)).toBe("approved");
+      } finally {
+        await admin(`update pbx_company_grants set revoked_at = now() where user_id = '${U.pm3}' and company_id = '${CO.uae}' and revoked_at is null`);
+      }
+    });
+
+    it("the database itself refuses a decision by the person who prepared or submitted, whatever writes the row", async () => {
+      const { b } = await oneProject(U.pm);
+      await submit(U.pm, b);
+      await expect(admin(`update pbx_budget_versions set status = 'approved', decided_by = '${U.pm}', decided_at = now() where id = '${b.version}'`)).rejects.toThrow(/cannot be decided by the person who prepared or submitted/);
+      await expect(admin(`update pbx_budget_versions set status = 'approved', decided_at = now() where id = '${b.version}'`)).rejects.toThrow(/cannot be decided by the person who prepared or submitted/);
+    });
+
+    it("additional budget requests follow the same routes as the original", async () => {
+      // PM without Finance: original -> Finance, addition -> Finance
+      const a = await oneProject(U.pm);
+      await submit(U.pm, a.b);
+      await call(U.fin1, `select pbx_decide_budget('${a.b.version}', 'approve')`);
+      const addA = await call<string>(U.pm, `select pbx_request_addition('${a.b.budget}')`);
+      const dA = await draftOf(a.p);
+      const rvA = await call<number>(U.pm, `select pbx_save_budget_draft('${addA}', ${dA.row_version}, ${j({ note: "More meals" })}, ${j([{ category_id: cat.food, description: "Extra meals", basis: "fixed", fixed: "75" }])})`);
+      await submit(U.pm, { version: addA, rv: rvA });
+      expect(await routeOf(addA)).toBe("finance");
+      await failsCommit(U.ceo, `select pbx_decide_budget('${addA}', 'approve')`, /Only Finance/);
+      // PM with Finance access: original -> CEO/CTO, addition -> CEO/CTO (Finance colleagues cannot decide it)
+      const f = await oneProject(U.pmFin);
+      await submit(U.pmFin, f.b);
+      await call(U.ceo, `select pbx_decide_budget('${f.b.version}', 'approve')`);
+      const addF = await call<string>(U.pmFin, `select pbx_request_addition('${f.b.budget}')`);
+      const dF = await draftOf(f.p);
+      const rvF = await call<number>(U.pmFin, `select pbx_save_budget_draft('${addF}', ${dF.row_version}, ${j({ note: "More meals" })}, ${j([{ category_id: cat.food, description: "Extra meals", basis: "fixed", fixed: "75" }])})`);
+      await submit(U.pmFin, { version: addF, rv: rvF });
+      expect(await routeOf(addF)).toBe("executive");
+      await failsCommit(U.fin1, `select pbx_decide_budget('${addF}', 'approve')`, /CEO or CTO/);
+      expect(await call<string>(U.cto, `select pbx_decide_budget('${addF}', 'approve')`)).toBe("approved");
+      expect(num((await view(U.pmFin, f.p)).baseline)).toBe(275);                                          // 200 + 75: the original is preserved and the approved addition counts
+    });
+
+    it("missing approvers hold the request on either route, with the reason visible, until an eligible person exists", async () => {
+      // third company: a CEO/CTO approver exists but nobody in Finance -> an ordinary PM's submission is held (the executive cannot decide the Finance route)
+      const t = await oneProject(U.thirdPm, CO.third);
+      await submit(U.thirdPm, t.b);
+      expect(await routeOf(t.b.version)).toBe("finance");
+      expect(await inboxRow(U.thirdExec, t.b.version)).toMatchObject({ approval_route: "finance", on_hold: true, i_can_decide: false });
+      await failsCommit(U.thirdExec, `select pbx_decide_budget('${t.b.version}', 'approve')`, /Only Finance of this company/);
+      expect((await view(U.thirdPm, t.p)).versions[0]).toMatchObject({ status: "submitted", on_hold: true });
+      // nothing was approved or lost; a Finance grant releases it
+      await commit(U.thirdExec, `select pbx_grant_access('${U.fin1}', '${CO.third}', '{finance}')`);
+      expect((await view(U.thirdPm, t.p)).versions[0].on_hold).toBe(false);
+      expect(await call<string>(U.fin1, `select pbx_decide_budget('${t.b.version}', 'approve')`)).toBe("approved");
+      await commit(U.thirdExec, `select pbx_revoke_access('${U.fin1}', '${CO.third}')`);
+    });
+
+    it("final expenses are routed the same way, and Finance keeps funding, receipts and settlement while the CEO/CTO only decides", async () => {
+      const a = await oneProject(U.pm);
+      await submit(U.pm, a.b);
+      await call(U.fin1, `select pbx_decide_budget('${a.b.version}', 'approve')`);
+      const sub = await call<string>(U.pm, `select pbx_start_actuals('${a.b.budget}')`);
+      const ids = await budgetRowIds(a.b.budget);
+      const d = await actualDraft(a.b.budget);
+      const rv = await call<number>(U.pm, `select pbx_save_actuals_draft('${sub}', ${d.row_version}, ${j({ complete_confirmed: true })}, ${j(ids.map((rid) => ({ budget_row_id: rid, actual_amount: "200", paid_via: "company_card" })))})`);
+      await call(U.pm, `select pbx_submit_actuals('${sub}', ${rv}, '${id()}')`);
+      expect((await admin<Row>(`select approval_route from pbx_actual_submissions where id = '${sub}'`))[0].approval_route).toBe("finance");
+      await failsCommit(U.ceo, `select pbx_decide_actuals('${sub}', 'approve')`, /Only Finance of this company/);
+      await call(U.fin1, `select pbx_decide_actuals('${sub}', 'approve')`);
+      // the CEO/CTO approver reads everything of the company but records nothing
+      expect((await view(U.ceo, a.p)).viewer).toMatchObject({ is_executive: true, is_finance: false, is_full_reader: true });
+      await failsCommit(U.ceo, `select pbx_record_funding('${a.b.budget}', '${U.pm}', current_date, 10, 'cash', null, null, null, '${id()}')`, /Only Finance/);
+      await failsCommit(U.ceo, `select pbx_record_receipts('${a.b.budget}', 'received')`, /Only Finance/);
+      await failsCommit(U.ceo, `select pbx_close_settlement('${a.b.budget}', null)`, /Only Finance/);
+      await failsCommit(U.ceo, `select pbx_set_rate('${CO.uae}', 'AED', 'petrol_per_km', 0.5)`, /Only Finance/);
+      await commit(U.fin2, `select pbx_record_receipts('${a.b.budget}', 'received')`);
+      await commit(U.fin2, `select pbx_close_settlement('${a.b.budget}', null)`);
+    });
+
+    it("company isolation: a CEO/CTO approver of one company sees and decides nothing of another", async () => {
+      const k = await oneProject(U.pm, CO.uae);
+      await submit(U.pm, k.b);
+      expect(await q(U.ksaCeo, `select 1 from pbx_budgets where id = '${k.b.budget}'`)).toHaveLength(0);
+      await fails(U.ksaCeo, `select pbx_budget_view('${k.p}')`, /Budget not found/);
+      expect(((await q<{ i: Row }>(U.thirdExec, `select pbx_inbox() as i`))[0].i.budget_approvals as Row[]).some((r) => r.version_id === k.b.version)).toBe(false);
+      await failsCommit(U.thirdExec, `select pbx_decide_budget('${k.b.version}', 'approve')`, /Budget not found/);
+      expect(await q(U.thirdExec, `select 1 from pbx_audit_log where company_id = '${CO.uae}'`)).toHaveLength(0);
+    });
+
+    it("simultaneous decisions on the CEO/CTO route produce exactly one outcome", async () => {
+      const { b } = await oneProject(U.pmFin);
+      await submit(U.pmFin, b);
+      const results = await Promise.allSettled([
+        commit(U.ceo, `select pbx_decide_budget('${b.version}', 'approve')`),
+        commit(U.cto, `select pbx_decide_budget('${b.version}', 'return', 'Please check the meals')`),
+        commit(U.dual, `select pbx_decide_budget('${b.version}', 'reject', 'Not needed')`),
+        commit(U.ceo, `select pbx_decide_budget('${b.version}', 'approve')`),
+      ]);
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      for (const r of results.filter((x) => x.status === "rejected")) expect(String((r as PromiseRejectedResult).reason)).toMatch(/already been decided/);
+      const row = (await admin<Row>(`select status, decided_by from pbx_budget_versions where id = '${b.version}'`))[0];
+      expect(["approved", "returned", "rejected"]).toContain(row.status);
+      expect([U.ceo, U.cto, U.dual]).toContain(row.decided_by);
+      expect(await admin(`select 1 from pbx_audit_log where row_id = '${b.version}' and table_name = 'pbx_budget_versions' and new_row->>'status' in ('approved', 'returned', 'rejected')`)).toHaveLength(1);
+    });
+  });
+
   describe("isolation, reassignment, cancelled projects and existing data", () => {
     it("company and project isolation: another company's Finance, another project's PM and a viewer see or do only what they should", async () => {
       const p = await newProject(U.pm, [U.member]);

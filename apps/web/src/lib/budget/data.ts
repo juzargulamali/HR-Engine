@@ -58,7 +58,7 @@ export const loadProjectBudgetAccess = cache(async (projectId: string): Promise<
 });
 
 /**
- * Does the signed-in person hold budget access (Finance or view) in any company? Drives the "Finance" menu entry. This reads only the person's own
+ * Does the signed-in person hold budget access (Finance, CEO / CTO approver or view) in any company? Drives the "Finance" menu entry. This reads only the person's own
  * grants, so it costs one tiny query on every page; the inbox itself is loaded only when the page is opened. Quiet like the tab: a database that
  * does not have the module yet, or any failure, simply means no menu entry.
  */
@@ -68,7 +68,7 @@ export const loadBudgetNavAccess = cache(async (userId: string): Promise<{ any: 
     const { data, error } = await supabase.from("pbx_company_grants").select("capabilities").eq("user_id", userId).is("revoked_at", null);
     if (error || !data) return { any: false, finance: false };
     const caps = data.flatMap((g) => g.capabilities as string[]);
-    return { any: caps.includes("finance") || caps.includes("view"), finance: caps.includes("finance") };
+    return { any: caps.includes("finance") || caps.includes("view") || caps.includes("executive_approver"), finance: caps.includes("finance") };
   } catch {
     return { any: false, finance: false };
   }

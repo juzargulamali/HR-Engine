@@ -26,6 +26,7 @@ function flowState(view: PbxBudgetView): BudgetFlowState {
     latestBudgetKind: latest?.kind ?? null,
     hasApprovedBaseline: view.baseline > 0 || versions.some((v) => v.kind === "original" && v.status === "approved"),
     approvalOnHold: (latest?.status === "submitted" && latest.on_hold) || (actual?.status === "submitted" && actual.on_hold) || false,
+    approvalRoute: (latest?.status === "submitted" ? latest.approval_route : actual?.status === "submitted" ? actual.approval_route : null) ?? undefined,
     actuals: (actual?.status as VersionStatus | undefined) ?? null,
     approvedActuals: view.actuals.some((a) => a.status === "approved"),
     fundingRecorded: view.funding.some((f) => f.status === "recorded"),
@@ -47,7 +48,7 @@ function Summary({ view }: { view: PbxBudgetView }) {
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Summary">
       <Figure label="Approved budget" value={base > 0 ? money(base, cur) : "Not approved yet"} />
       <Figure
-        label={approved ? "Approved final expenses" : shown ? "Final expenses (waiting for Finance)" : "Final expenses"}
+        label={approved ? "Approved final expenses" : shown ? "Final expenses (waiting for approval)" : "Final expenses"}
         value={shown ? money(shown.total_actual, cur) : "Not submitted"}
       />
       <Figure
@@ -59,7 +60,7 @@ function Summary({ view }: { view: PbxBudgetView }) {
         s.has_approved_actuals ? (
           <Figure label="Still to settle" value={money(s.advance_to_return + s.reimbursement_outstanding, cur)} hint={`To return ${money(s.advance_to_return, cur)} · owed ${money(s.reimbursement_outstanding, cur)}`} />
         ) : (
-          <Figure label="Still to settle" value="—" hint="Known once Finance approves the final expenses" />
+          <Figure label="Still to settle" value="—" hint="Known once the final expenses are approved" />
         )
       ) : (
         <Figure label="Receipts" value={RECEIPT_LABELS[b.receipts_status]} />

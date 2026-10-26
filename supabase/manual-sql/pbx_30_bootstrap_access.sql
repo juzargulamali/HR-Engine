@@ -8,19 +8,29 @@
 -- BEFORE RUNNING: in v_grants below, replace the placeholder with one line per grant, written as
 --       'real login email  =>  company legal name (exactly as in the preflight list, section D) or the company id  =>  capabilities'
 -- capabilities is a comma separated list of:
---       finance        approve / return / reject budgets and final expenses, record funding, receipts, returns and reimbursements, close settlement,
---                      set petrol and meal rates, add categories, and read everything of that company
---       view           read only (for example a founder you have decided should see budgets); a founder title alone confers nothing
---       manage_access  grant and revoke these rights later from the database function pbx_grant_access (give it to at least one person per company)
+--       finance             records funds, physical-receipt status, returns and reimbursements, closes settlement, sets petrol and meal rates, adds
+--                           categories, reads everything of that company, and DECIDES budgets / additional requests / final expenses submitted by
+--                           Project Managers who do NOT hold Finance access
+--       executive_approver  the company's authorised CEO or CTO approver: DECIDES budgets / additional requests / final expenses submitted by someone
+--                           who DOES hold Finance access for that company (even when that person is also the Project Manager), and reads the company's
+--                           budgets. Either a CEO or a CTO is enough. It records no funds, receipts or settlement. A CEO / CTO title alone gives nothing:
+--                           name the people here
+--       view                read only (for example a founder you have decided should see budgets); a founder title alone confers nothing
+--       manage_access       grant and revoke these rights later from the database function pbx_grant_access (give it to at least one person per company)
 -- Example (do not copy; type your own):
 --       'jane.doe@yourcompany.com => Enginious FZ-LLC => finance, manage_access',
---       'omar.ali@yourcompany.com => Enginious FZ-LLC => finance',
--- IMPORTANT: nobody may approve their own submission, and a Project Manager who also holds Finance cannot approve a budget they prepared. Give each
--- company that approves budgets AT LEAST TWO Finance people; with only one, a budget the single Finance person prepared (or a project they manage) is
--- held with a clear message until a second Finance person exists. The script warns you at the end when a company has fewer than two.
+--       'sam.cto@yourcompany.com => Enginious FZ-LLC => executive_approver',
+-- HOW APPROVAL IS ROUTED (enforced in the database, fixed when something is submitted):
+--       a Project Manager WITHOUT Finance access submits   -> an authorised Finance person of that company decides
+--       a submitter WITH Finance access submits            -> the company's CEO / CTO approver decides (either one; both are not required)
+--       nobody ever decides what they prepared or submitted; nobody outside the company's grants decides anything
+--       no eligible independent approver for the route     -> the request is HELD with a clear explanation (nothing is approved or lost)
+-- So ONE Finance person is enough for budgets submitted by other Project Managers. A budget prepared by a Finance person needs a CEO / CTO approver for
+-- that company, and recording funds to oneself, or confirming receipts for expenses one entered, needs a different Finance person. The script reports,
+-- at the end, which of these routes a company can not serve yet; it never grants anything you did not type.
 -- There is no "all companies" and no "everybody" shortcut. While a placeholder (REPLACE-WITH-...) or an address ending in .example is still there, the
 -- script STOPS with a clear message and changes nothing. It also stops, changing nothing, if an email is not an active user, a company is unknown,
--- inactive or ambiguous (use the company id then), or a capability is not one of the three above.
+-- inactive or ambiguous (use the company id then), or a capability is not one of the four above.
 --
 -- WHAT IT DOES NOT DO: no HR role is created or changed, no Projects, Sales or Inventory grant is touched, no petrol or meal rate is set (Finance enters
 -- them in the app), no budget is created. Running it twice is harmless (an existing active grant gets the listed capabilities added; nothing is removed).
@@ -71,7 +81,7 @@ begin
       raise exception 'No active user has the email %. Check the spelling against the preflight list.', v_email;
     end if;
     if coalesce(array_length(v_caps, 1), 0) = 0 or not (v_caps <@ pbx_capability_list()) then
-      raise exception 'Capabilities must be a list of finance, view, manage_access (found: %).', v_parts[3];
+      raise exception 'Capabilities must be a list of finance, executive_approver, view, manage_access (found: %).', v_parts[3];
     end if;
     if v_company_ref ~ v_uuid then
       select count(*) into v_matches from companies c where c.id = v_company_ref::uuid and c.is_active and c.deleted_at is null;
@@ -111,14 +121,19 @@ begin
     end if;
   end loop;
 
-  -- 3. WARNINGS (nothing is changed here)
+  -- 3. WHAT EACH COMPANY CAN AND CANNOT DO YET (information only; nothing is changed here)
   for r in
-    select c.legal_name, count(*) filter (where 'finance' = any (g.capabilities)) as n_fin
+    select c.legal_name,
+           count(*) filter (where 'finance' = any (g.capabilities)) as n_fin,
+           count(*) filter (where 'executive_approver' = any (g.capabilities)) as n_exec
     from companies c join pbx_company_grants g on g.company_id = c.id and g.revoked_at is null
     group by c.id, c.legal_name
   loop
-    if r.n_fin < 2 then
-      raise notice 'WARNING: % has % Finance person(s). With fewer than two, a budget prepared by the only Finance person cannot be approved by anyone else and is held.', r.legal_name, r.n_fin;
+    if r.n_fin = 0 then
+      raise notice 'NOTE: % has no Finance person yet: funds, receipts and settlement cannot be recorded, and budgets submitted by ordinary Project Managers are held until one exists.', r.legal_name;
+    end if;
+    if r.n_exec = 0 then
+      raise notice 'NOTE: % has no CEO / CTO approver yet: a budget submitted by someone who holds Finance access (also as Project Manager) is held until one is authorised.', r.legal_name;
     end if;
   end loop;
   raise notice 'grants created: %; already existing (capabilities added): %', v_created, v_extended;

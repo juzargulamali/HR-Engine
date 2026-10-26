@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { RECEIPT_LABELS, varianceLabel } from "@enginious-hr/domain";
+import { RECEIPT_LABELS, varianceLabel, type ApprovalRoute } from "@enginious-hr/domain";
 import { OsBadge } from "@/components/os/pills";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Select } from "@/components/ui/select";
@@ -25,9 +25,10 @@ function Project({ r, section }: { r: PbxInboxBase; section: string }) {
   );
 }
 
-function Decision({ canDecide, onHold }: { canDecide: boolean; onHold: boolean }) {
-  if (onHold) return <OsBadge tone="amber" dot>On hold: no independent approver</OsBadge>;
-  return canDecide ? <OsBadge tone="blue" dot>Ready for you to decide</OsBadge> : <OsBadge tone="neutral" dot>Waiting for another Finance person</OsBadge>;
+function Decision({ canDecide, onHold, route }: { canDecide: boolean; onHold: boolean; route: ApprovalRoute }) {
+  if (onHold) return <OsBadge tone="amber" dot>On hold: no eligible approver</OsBadge>;
+  if (canDecide) return <OsBadge tone="blue" dot>Ready for you to decide</OsBadge>;
+  return <OsBadge tone="neutral" dot>{route === "executive" ? "Waiting for the CEO or CTO" : "Waiting for Finance"}</OsBadge>;
 }
 
 function BudgetTable({ rows }: { rows: PbxInboxBudget[] }) {
@@ -42,7 +43,7 @@ function BudgetTable({ rows }: { rows: PbxInboxBudget[] }) {
             <TableCell>{r.kind === "addition" ? "Additional budget" : "Budget"}</TableCell>
             <TableCell className="text-right tabular-nums">{money(r.total, r.currency)}</TableCell>
             <TableCell className="text-[13px]">{stamp(r.submitted_at, r.site_timezone)}<span className="block text-muted-foreground">by {r.submitted_by_name ?? "—"}</span></TableCell>
-            <TableCell><Decision canDecide={r.i_can_decide} onHold={r.on_hold} /></TableCell>
+            <TableCell><Decision canDecide={r.i_can_decide} onHold={r.on_hold} route={r.approval_route} /></TableCell>
           </ClickableRow>
         ))}
       </TableBody>
@@ -63,7 +64,7 @@ function ActualsTable({ rows }: { rows: PbxInboxActuals[] }) {
             <TableCell className="text-right tabular-nums">{money(r.total_actual, r.currency)}</TableCell>
             <TableCell className="text-[13px]">{varianceLabel(r.total_actual, r.total_approved_budget, r.currency)}</TableCell>
             <TableCell className="text-[13px]">{stamp(r.submitted_at, r.site_timezone)}<span className="block text-muted-foreground">by {r.submitted_by_name ?? "—"}</span></TableCell>
-            <TableCell><Decision canDecide={r.i_can_decide} onHold={r.on_hold} /></TableCell>
+            <TableCell><Decision canDecide={r.i_can_decide} onHold={r.on_hold} route={r.approval_route} /></TableCell>
           </ClickableRow>
         ))}
       </TableBody>

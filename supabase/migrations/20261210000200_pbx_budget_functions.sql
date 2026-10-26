@@ -68,8 +68,40 @@ begin
 end;
 $$;
 
--- Active Finance grantees of a company, except the people named (the people who prepared or submitted the thing to decide).
-create or replace function pbx_finance_approvers(p_company_id uuid, p_exclude uuid[] default '{}'::uuid[])
+-- -----------------------------------------------------------------------------
+-- Approval routing. Fixed when something is SUBMITTED, so a later change of access cannot re-route it, and enforced here, not in the page:
+--   * submitted by someone WITHOUT Finance access for the company  -> route 'finance':   an authorised Finance person of that company decides
+--   * submitted by someone WITH Finance access for the company (even if also the PM) -> route 'executive': the company's authorised
+--     CEO / CTO approvers decide (either one is enough; both are not required)
+--   * nobody ever decides what they prepared or submitted, and nobody outside the company's grants decides anything
+--   * when nobody eligible and independent exists for the route the request is ON HOLD (nothing is approved, nothing is lost)
+-- Applies alike to initial budgets, additional budget requests and final expenses.
+-- -----------------------------------------------------------------------------
+create or replace function pbx_user_is_finance(p_user_id uuid, p_company_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from pbx_company_grants g
+    join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = p_user_id and g.company_id = p_company_id and g.revoked_at is null and 'finance' = any (g.capabilities));
+$$;
+
+create or replace function pbx_approval_route(p_company_id uuid, p_submitter uuid)
+returns text
+language sql stable security definer
+set search_path = public
+as $$ select case when pbx_user_is_finance(p_submitter, p_company_id) then 'executive' else 'finance' end; $$;
+
+create or replace function pbx_route_capability(p_route text)
+returns text
+language sql immutable
+as $$ select case when p_route = 'executive' then 'executive_approver' else 'finance' end; $$;
+
+-- The people who may decide for a route: active grantees of the company holding the route's capability, except the people named
+-- (those who prepared or submitted the thing to decide).
+create or replace function pbx_route_approvers(p_company_id uuid, p_route text, p_exclude uuid[] default '{}'::uuid[])
 returns setof uuid
 language sql stable security definer
 set search_path = public
@@ -77,16 +109,43 @@ as $$
   select g.user_id
   from pbx_company_grants g
   join profiles p on p.id = g.user_id and p.is_active
-  where g.company_id = p_company_id and g.revoked_at is null and 'finance' = any (g.capabilities)
+  where g.company_id = p_company_id and g.revoked_at is null and pbx_route_capability(p_route) = any (g.capabilities)
     and not (g.user_id = any (coalesce(array_remove(p_exclude, null), '{}'::uuid[])));
 $$;
 
--- True when nobody independent of the people who prepared and submitted can decide.
-create or replace function pbx_approval_on_hold(p_company_id uuid, p_created_by uuid, p_submitted_by uuid)
+-- True when nobody independent of the people who prepared and submitted can decide for that route.
+create or replace function pbx_approval_on_hold(p_company_id uuid, p_route text, p_created_by uuid, p_submitted_by uuid)
 returns boolean
 language sql stable security definer
 set search_path = public
-as $$ select not exists (select 1 from pbx_finance_approvers(p_company_id, array[p_created_by, p_submitted_by])); $$;
+as $$ select not exists (select 1 from pbx_route_approvers(p_company_id, p_route, array[p_created_by, p_submitted_by])); $$;
+
+-- May the CALLER decide a submission on this route? (capability of the route for that company, and not the one who prepared or submitted it)
+create or replace function pbx_can_decide(p_company_id uuid, p_route text, p_created_by uuid, p_submitted_by uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select pbx_has_capability(p_company_id, pbx_route_capability(p_route))
+     and auth.uid() is distinct from p_created_by and auth.uid() is distinct from p_submitted_by;
+$$;
+
+-- Raises in plain words unless the caller holds the capability for the route (the independence check follows, with its own message).
+create or replace function pbx_require_approver(p_company_id uuid, p_route text, p_what text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if not pbx_has_capability(p_company_id, pbx_route_capability(p_route)) then
+    if p_route = 'executive' then
+      raise exception 'This was submitted by someone with Finance access, so only the company''s authorised CEO or CTO approver can %', p_what using errcode = '42501';
+    end if;
+    raise exception 'Only Finance of this company can %', p_what using errcode = '42501';
+  end if;
+  perform pbx_require_enabled(p_company_id);
+end;
+$$;
 
 -- Lock a budget the caller may read. Not-visible and not-existing are indistinguishable.
 create or replace function pbx_lock_budget(p_budget_id uuid)
@@ -331,6 +390,7 @@ declare
   b pbx_budgets;
   a uuid;
   v_rows integer;
+  v_route text;
 begin
   perform pbx_require_user();
   if p_request_id is null then raise exception 'A request id is needed so a retry cannot submit twice' using errcode = '22023'; end if;
@@ -350,10 +410,11 @@ begin
   end if;
 
   perform pbx_refresh_snapshot(b.id);
+  v_route := pbx_approval_route(b.company_id, auth.uid());
   update pbx_budget_versions set status = 'submitted', submitted_by = auth.uid(), submitted_at = now(), submit_request_id = p_request_id,
-         row_version = row_version + 1 where id = v.id;
+         approval_route = v_route, row_version = row_version + 1 where id = v.id;
   select * into b from pbx_budgets where id = b.id;
-  for a in select pbx_finance_approvers(b.company_id, array[v.created_by, auth.uid()]) loop
+  for a in select pbx_route_approvers(b.company_id, v_route, array[v.created_by, auth.uid()]) loop
     perform pbx_notify(a, 'project_budget_submitted', b,
       jsonb_build_object('version_id', v.id, 'kind', v.kind, 'total', v.total, 'currency', b.currency), 'pbx-sub-' || v.id::text);
   end loop;
@@ -362,7 +423,7 @@ end;
 $$;
 
 -- -----------------------------------------------------------------------------
--- Finance decision: approve, return (for changes) or reject. Independent, reasoned, and exactly once.
+-- Decision by the routed approver: approve, return (for changes) or reject. Independent, reasoned, and exactly once.
 -- -----------------------------------------------------------------------------
 create or replace function pbx_decide_budget(p_version_id uuid, p_decision text, p_note text default null)
 returns text
@@ -379,13 +440,14 @@ begin
   select * into v from pbx_budget_versions where id = p_version_id for update;     -- the second approver waits here, then finds it decided
   if not found then raise exception 'Budget not found' using errcode = 'P0002'; end if;
   select * into b from pbx_budgets where id = v.budget_id for update;
-  perform pbx_require_finance(b, 'decide on a project budget');
+  if not pbx_can_read_budget(b.id) then raise exception 'Budget not found' using errcode = 'P0002'; end if;
+  perform pbx_require_approver(b.company_id, v.approval_route, 'decide on this project budget');
   if p_decision not in ('approve', 'return', 'reject') then raise exception 'Choose approve, return or reject' using errcode = '22023'; end if;
   if v.status <> 'submitted' then
     raise exception 'This budget version has already been decided (%, by %)', v.status, coalesce(pbx_name(v.decided_by), 'someone') using errcode = '23514';
   end if;
   if auth.uid() = v.created_by or auth.uid() = v.submitted_by then
-    raise exception 'You cannot decide a budget you prepared or submitted. Another Finance approver must decide it' using errcode = '42501';
+    raise exception 'You cannot decide a budget you prepared or submitted. Another authorised approver must decide it' using errcode = '42501';
   end if;
   if p_decision in ('return', 'reject') and (v_note is null or length(v_note) < 3) then
     raise exception 'Give the reason, so the Project Manager knows what to do' using errcode = '22023';
@@ -486,8 +548,8 @@ $$;
 -- Privileges
 -- -----------------------------------------------------------------------------
 revoke all on function
-  pbx_name(uuid), pbx_num(text, text, integer), pbx_date(text, text), pbx_notify(uuid, text, pbx_budgets, jsonb, text), pbx_finance_approvers(uuid, uuid[]),
-  pbx_approval_on_hold(uuid, uuid, uuid), pbx_lock_budget(uuid), pbx_require_pm(pbx_budgets), pbx_require_finance(pbx_budgets, text),
+  pbx_name(uuid), pbx_num(text, text, integer), pbx_date(text, text), pbx_notify(uuid, text, pbx_budgets, jsonb, text), pbx_user_is_finance(uuid, uuid), pbx_approval_route(uuid, uuid), pbx_route_capability(text), pbx_route_approvers(uuid, text, uuid[]),
+  pbx_approval_on_hold(uuid, text, uuid, uuid), pbx_can_decide(uuid, text, uuid, uuid), pbx_require_approver(uuid, text, text), pbx_lock_budget(uuid), pbx_require_pm(pbx_budgets), pbx_require_finance(pbx_budgets, text),
   pbx_require_open(pbx_budgets), pbx_check_version(integer, integer, text), pbx_project_person_ok(uuid, uuid), pbx_refresh_snapshot(uuid),
   pbx_baseline_total(uuid),
   pbx_create_budget(uuid, text), pbx_save_budget_draft(uuid, integer, jsonb, jsonb), pbx_submit_budget(uuid, integer, uuid),

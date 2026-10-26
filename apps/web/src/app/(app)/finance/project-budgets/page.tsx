@@ -24,10 +24,14 @@ export default async function ProjectBudgetsInboxPage({ searchParams }: { search
       <div>
         <h1 className="text-2xl font-semibold">Project budgets</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Budgets and final expenses waiting for a decision, and projects that still have money to settle. Opening a row shows the same record the Project Manager works on; there is no second form.
+          Budgets and final expenses waiting for a decision (by Finance, or by the company&apos;s CEO / CTO approver when the submitter has Finance access), and projects that still have money to settle. Opening a row shows the same record the Project Manager works on; there is no second form.
         </p>
       </div>
-      {!inbox.is_finance_anywhere ? <Alert role="status" className="text-sm">You can read these records but not decide or record anything: that needs Finance access.</Alert> : null}
+      {!inbox.is_finance_anywhere && inbox.is_executive_anywhere ? (
+        <Alert role="status" className="text-sm">You are an authorised CEO / CTO approver: you decide budgets and final expenses that were submitted by people who hold Finance access. Funds, receipts and settlement are recorded by Finance. Either a CEO or a CTO is enough to decide.</Alert>
+      ) : !inbox.is_finance_anywhere ? (
+        <Alert role="status" className="text-sm">You can read these records but not decide or record anything: that needs Finance or CEO / CTO approver access.</Alert>
+      ) : null}
       <InboxList inbox={inbox} initialFilter={initial} />
     </div>
   );

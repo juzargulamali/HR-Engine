@@ -3,7 +3,7 @@
  * Money arrives as JSON numbers already rounded by the database to the budget currency; the page only formats it (see moneyText in
  * @enginious-hr/domain) and never recalculates a stored figure.
  */
-import type { BudgetBasis, BudgetActivity, FundingMethod, PaidVia, PaymentKind, ReceiptStatus, VersionStatus } from "@enginious-hr/domain";
+import type { ApprovalRoute, BudgetBasis, BudgetActivity, FundingMethod, PaidVia, PaymentKind, ReceiptStatus, VersionStatus } from "@enginious-hr/domain";
 
 export type PbxReadOnlyTable<Row> = { Row: Row; Insert: Record<string, never>; Update: Record<string, never>; Relationships: [] };
 
@@ -25,6 +25,8 @@ export interface PbxViewer {
   user_id: string;
   is_pm: boolean;
   is_finance: boolean;
+  /** The company's authorised CEO / CTO approver (explicit grant). */
+  is_executive: boolean;
   is_view_only: boolean;
   /** PM, Finance or a view grantee: everything. False for a former PM who only sees what they submitted. */
   is_full_reader: boolean;
@@ -95,6 +97,8 @@ export interface PbxVersion {
   note: string | null;
   total: number;
   row_version: number;
+  /** Who decides it, fixed when it was submitted (null while a draft). */
+  approval_route: ApprovalRoute | null;
   created_by: string | null;
   created_by_name: string | null;
   created_at: string;
@@ -142,6 +146,7 @@ export interface PbxActuals {
   total_approved_budget: number;
   reopened_after_approval: boolean;
   row_version: number;
+  approval_route: ApprovalRoute | null;
   created_by: string | null;
   created_by_name: string | null;
   submitted_by: string | null;
@@ -268,6 +273,7 @@ export interface PbxInboxBudget extends PbxInboxBase {
   total: number;
   submitted_at: string | null;
   submitted_by_name: string | null;
+  approval_route: ApprovalRoute;
   on_hold: boolean;
   i_can_decide: boolean;
 }
@@ -278,6 +284,7 @@ export interface PbxInboxActuals extends PbxInboxBase {
   total_approved_budget: number;
   submitted_at: string | null;
   submitted_by_name: string | null;
+  approval_route: ApprovalRoute;
   on_hold: boolean;
   i_can_decide: boolean;
 }
@@ -292,9 +299,10 @@ export interface PbxInboxSettlement extends PbxInboxBase {
   next: string;
 }
 export interface PbxInbox {
-  companies: { id: string; name: string; can_decide: boolean }[];
+  companies: { id: string; name: string; is_finance: boolean; is_executive: boolean; can_decide: boolean }[];
   budget_approvals: PbxInboxBudget[];
   final_expense_approvals: PbxInboxActuals[];
   outstanding_settlement: PbxInboxSettlement[];
   is_finance_anywhere: boolean;
+  is_executive_anywhere: boolean;
 }

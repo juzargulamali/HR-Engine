@@ -40,14 +40,16 @@ Statuses: Not started, In progress, Implemented, Verified.
 
 | Capability | Meaning |
 | --- | --- |
-| `finance` | Approve, return or reject budgets and actuals; record funding, receipts, returns, reimbursements; close or reopen settlement; manage rates and categories; read everything of that company. |
+| `finance` | Approve, return or reject budgets and actuals **submitted by Project Managers without Finance access**; record funding, receipts, returns, reimbursements; close or reopen settlement; manage rates and categories; read everything of that company. |
+| `executive_approver` | The company's authorised CEO / CTO approver (explicit; a title confers nothing). Decides budgets, additional requests and final expenses **submitted by someone who holds Finance access** for that company; reads the company's budgets; records nothing. Either a CEO or a CTO is enough. |
 | `view` | Read-only access to the company's budgets (explicit, for example for a founder; a title confers nothing). |
 | `manage_access` | Grant and revoke these capabilities for the company. |
 
 * **PM (current PM or unexpired acting PM, via `proj_is_pm`)**: creates and edits drafts, submits, requests additions, enters actuals, submits them. Reads the project's budget, funding and settlement summary.
 * **Prior submitter** (a former PM): read-only on the versions and submissions they created or submitted; nothing else.
 * **Everyone else** (members, directory-only, Sales, founders without a grant, HR roles, sys admin): nothing, by RLS, by function checks and by the page.
-* **Independence**: a Finance decision is refused when the decider created or submitted that version, whatever else they hold. If no other Finance grantee exists, the submission shows "No independent Finance approver is available" and stays in the inbox on hold; nothing is auto-approved.
+* **Approval routing** (`approval_route` on every submitted version and final-expense submission, fixed at submission): a submitter without Finance access for the company → `finance` route (any authorised Finance person of that company decides; one is enough); a submitter with Finance access (even as the PM) → `executive` route (an authorised CEO / CTO approver of that company; either is enough). Same for initial budgets, additional requests and final expenses.
+* **Independence**: a decision is refused when the decider created or submitted that version, whatever else they hold (and by a database guard, whatever writes the row). If no eligible independent approver exists for the route, the submission shows **On hold** with the reason and stays in the inbox; nothing is auto-approved.
 * **Concurrency**: a decision takes a row lock and requires `status = 'submitted'`; the second approver gets "already decided by ...", never a duplicate decision.
 
 ## 3. Data model (all `pbx_`, read-only to clients, written by functions)

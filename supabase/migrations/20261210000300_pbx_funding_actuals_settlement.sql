@@ -447,6 +447,7 @@ declare
   v_blank text;
   v_base numeric;
   v_diff numeric;
+  v_route text;
 begin
   perform pbx_require_user();
   if p_request_id is null then raise exception 'A request id is needed so a retry cannot submit twice' using errcode = '22023'; end if;
@@ -471,17 +472,18 @@ begin
     end if;
   end if;
   perform pbx_refresh_snapshot(b.id);
+  v_route := pbx_approval_route(b.company_id, auth.uid());
   update pbx_actual_submissions set status = 'submitted', submitted_by = auth.uid(), submitted_at = now(), submit_request_id = p_request_id,
-         total_approved_budget = v_base, row_version = row_version + 1 where id = s.id;
+         approval_route = v_route, total_approved_budget = v_base, row_version = row_version + 1 where id = s.id;
   select * into b from pbx_budgets where id = b.id;
-  for a in select pbx_finance_approvers(b.company_id, array[s.created_by, auth.uid()]) loop
+  for a in select pbx_route_approvers(b.company_id, v_route, array[s.created_by, auth.uid()]) loop
     perform pbx_notify(a, 'project_actuals_submitted', b, jsonb_build_object('submission_id', s.id, 'total', s.total_actual, 'currency', b.currency), 'pbx-act-' || s.id::text);
   end loop;
   return s.id;
 end;
 $$;
 
--- Finance: approve or return the final expenses. Independent, reasoned, exactly once.
+-- The routed approver: approve or return the final expenses. Independent, reasoned, exactly once.
 create or replace function pbx_decide_actuals(p_submission_id uuid, p_decision text, p_note text default null)
 returns text
 language plpgsql security definer
@@ -497,14 +499,15 @@ begin
   select * into s from pbx_actual_submissions where id = p_submission_id for update;
   if not found then raise exception 'Final expenses not found' using errcode = 'P0002'; end if;
   select * into b from pbx_budgets where id = s.budget_id for update;
-  perform pbx_require_finance(b, 'decide on final expenses');
+  if not pbx_can_read_budget(b.id) then raise exception 'Final expenses not found' using errcode = 'P0002'; end if;
+  perform pbx_require_approver(b.company_id, s.approval_route, 'decide on these final expenses');
   if p_decision not in ('approve', 'return') then raise exception 'Choose approve or return' using errcode = '22023'; end if;
   perform pbx_require_open(b);
   if s.status <> 'submitted' then
     raise exception 'These final expenses have already been decided (%, by %)', s.status, coalesce(pbx_name(s.decided_by), 'someone') using errcode = '23514';
   end if;
   if auth.uid() = s.created_by or auth.uid() = s.submitted_by then
-    raise exception 'You cannot decide final expenses you prepared or submitted. Another Finance approver must decide them' using errcode = '42501';
+    raise exception 'You cannot decide final expenses you prepared or submitted. Another authorised approver must decide them' using errcode = '42501';
   end if;
   if p_decision = 'return' and (v_note is null or length(v_note) < 3) then
     raise exception 'Give the reason, so the Project Manager knows what to correct' using errcode = '22023';
@@ -517,7 +520,7 @@ begin
 end;
 $$;
 
--- Finance sends already-approved final expenses back for an audited correction (settlement must be open).
+-- Already-approved final expenses are sent back for an audited correction (settlement must be open).
 create or replace function pbx_return_approved_actuals(p_submission_id uuid, p_reason text)
 returns void
 language plpgsql security definer
@@ -532,7 +535,14 @@ begin
   select * into s from pbx_actual_submissions where id = p_submission_id for update;
   if not found then raise exception 'Final expenses not found' using errcode = 'P0002'; end if;
   select * into b from pbx_budgets where id = s.budget_id for update;
-  perform pbx_require_finance(b, 'send approved final expenses back');
+  -- Reopening needs a fresh decision by the routed approver afterwards, so Finance or the route's own approver may start it, never the person who prepared or submitted the expenses.
+  if not (pbx_is_finance(b.company_id) or pbx_has_capability(b.company_id, pbx_route_capability(s.approval_route))) then
+    raise exception 'Only Finance or the authorised approver of this company can send approved final expenses back' using errcode = '42501';
+  end if;
+  perform pbx_require_enabled(b.company_id);
+  if auth.uid() = s.created_by or auth.uid() = s.submitted_by then
+    raise exception 'You cannot send back final expenses you prepared or submitted. Another authorised person must do it' using errcode = '42501';
+  end if;
   perform pbx_require_open(b);
   if s.status <> 'approved' then raise exception 'Only approved final expenses can be sent back for correction' using errcode = '23514'; end if;
   if length(v_reason) < 3 then raise exception 'Give the reason for the correction' using errcode = '22023'; end if;
@@ -558,7 +568,7 @@ begin
   perform pbx_require_open(b);
   if p_status not in ('not_received', 'partial', 'received', 'exception') then raise exception 'Choose a receipt status' using errcode = '22023'; end if;
   if pbx_is_actuals_author(b.id, auth.uid()) then
-    raise exception 'You cannot record the receipt status for expenses you prepared or submitted' using errcode = '42501';
+    raise exception 'You cannot record the receipt status for expenses you prepared or submitted. Another Finance person must record it' using errcode = '42501';
   end if;
   if p_status = 'exception' and (v_reason is null or length(v_reason) < 3) then
     raise exception 'A receipt exception needs a recorded reason' using errcode = '22023';
@@ -648,7 +658,7 @@ begin
   perform pbx_require_finance(b, 'close settlement');
   if b.settlement_status = 'closed' then return; end if;                          -- a retry: already closed
   if pbx_is_actuals_author(b.id, auth.uid()) then
-    raise exception 'You cannot close settlement for expenses you prepared or submitted' using errcode = '42501';
+    raise exception 'You cannot close settlement for expenses you prepared or submitted. Another Finance person must close it' using errcode = '42501';
   end if;
   v_blockers := pbx_settlement_blockers(b.id);
   if array_length(v_blockers, 1) is not null then

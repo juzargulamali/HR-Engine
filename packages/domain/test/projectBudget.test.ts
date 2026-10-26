@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  categorySubtotals, currencyDecimals, expenseVariance, fundingIsAdvance, inclusiveDays, moneyText, nextAction, parseDecimal, requiresVarianceNote, roundMoney,
+  approvalRouteFor, holdExplanation, routeExplanation, categorySubtotals, currencyDecimals, expenseVariance, fundingIsAdvance, inclusiveDays, moneyText, nextAction, parseDecimal, requiresVarianceNote, roundMoney,
   rowTotal, settlementBlockers, settlementFigures, subMoney, sumMoney, suggestedRate, varianceLabel, versionStatusTone, type BudgetFlowState,
 } from "../src";
 
@@ -214,5 +214,21 @@ describe("closing settlement and the next action", () => {
     expect(versionStatusTone("submitted")).toBe("blue");
     expect(versionStatusTone("returned")).toBe("amber");
     expect(versionStatusTone("rejected")).toBe("red");
+  });
+
+  it("routes a submission by whether the submitter holds Finance access, and says why in words", () => {
+    expect(approvalRouteFor(false)).toBe("finance");
+    expect(approvalRouteFor(true)).toBe("executive");
+    expect(routeExplanation("executive")).toMatch(/CEO or CTO approver decides it \(either one is enough\)/);
+    expect(routeExplanation("finance")).toBe("Decided by Finance.");
+    expect(holdExplanation("executive", "Sam")).toMatch(/Sam has Finance access, so a CEO or CTO approver/);
+    expect(holdExplanation("finance", null)).toMatch(/no Finance person other than the submitter/);
+  });
+  it("names the CEO/CTO route in the next required action", () => {
+    const base = { hasBudget: true, latestBudget: "submitted" as const, latestBudgetKind: "original" as const, hasApprovedBaseline: false, approvalOnHold: false, actuals: null, approvedActuals: false, fundingRecorded: false, receipts: "not_received" as const, settlementClosed: false, blockers: [] };
+    expect(nextAction({ ...base, approvalRoute: "executive" })).toMatchObject({ who: "executive", text: "The CEO or CTO approver approves, returns or rejects the budget." });
+    expect(nextAction({ ...base, latestBudgetKind: "addition", approvalRoute: "executive" }).text).toMatch(/CEO or CTO approver decides the additional budget request/);
+    expect(nextAction({ ...base, latestBudget: "approved", hasApprovedBaseline: true, actuals: "submitted", approvalRoute: "executive" }).text).toMatch(/CEO or CTO approver reviews/);
+    expect(nextAction({ ...base, approvalOnHold: true, approvalRoute: "executive" })).toMatchObject({ who: "nobody" });
   });
 });

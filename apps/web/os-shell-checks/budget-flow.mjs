@@ -121,13 +121,13 @@ await step("the database total equals the page total (no float drift) and the bu
   if (Number(total) !== 1470) throw new Error("stored total " + total);
   const li = await fillLine("Other expenses", { description: "Incomplete line", basis: "Quantity × rate", fields: { Quantity: "2" } });
   await li.waitFor();
-  const submit = page.getByRole("button", { name: /Submit to Finance/ });
+  const submit = page.getByRole("button", { name: /Submit for approval/ });
   if (!(await submit.isDisabled())) throw new Error("submit enabled with an incomplete line");
   await li.getByRole("button", { name: /^Remove the line/ }).click();
   if (await submit.isDisabled()) throw new Error("submit still disabled after removing the incomplete line");
 });
 await step("submitting sends it to Finance once, even on a double click, and the draft becomes history", async () => {
-  await page.getByRole("button", { name: /Submit to Finance/ }).dblclick();
+  await page.getByRole("button", { name: /Submit for approval/ }).dblclick();
   await untilDb("select count(*) from pbx_budget_versions where status = 'submitted'", "1");
   await gone(/Draft budget/);
   await seen(/Budget history/);
@@ -167,7 +167,7 @@ await step("the Project Manager sees Finance's reason, makes a new draft from th
   await seen(/Total budget\s*AED 1,470\.00/);
   const li = await fillLine("Transport", { description: "Parking", basis: "Fixed total for the whole period", fields: { "Total amount (AED)": "10" } });
   if (!/AED 10\.00/.test(await lineTotal(li))) throw new Error("parking total");
-  await page.getByRole("button", { name: /Submit to Finance/ }).click();
+  await page.getByRole("button", { name: /Submit for approval/ }).click();
   await untilDb("select count(*) from pbx_budget_versions where status in ('returned','submitted')", "2");   // the returned version stays on record next to the new submission
   await gone(/Draft budget/);
 });
@@ -271,6 +271,41 @@ await step("closing is refused until receipts and the returned advance are recor
   await page.getByRole("button", { name: /Confirm reconciliation and close/ }).click();
   await untilDb("select settlement_status from pbx_budgets", "closed");
   await seen(/Settlement is closed/);
+});
+
+// ---- a Finance person who is the Project Manager: the CEO/CTO approver decides -----------------------------------------------------
+const P2 = db("select gen_random_uuid()");
+await step("a Finance-holding PM's budget is routed to the CEO/CTO approver: Finance colleagues cannot decide it, the approver can", async () => {
+  const co = db("select company_id from proj_projects limit 1");
+  db(`insert into proj_projects (id, company_id, reference, name, kind, pm_user_id, created_by, start_date, end_date) values ('${P2}', '${co}', 'UAE-P-2026-0099', 'Finance-led pop-up', 'internal', '00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a3', current_date, current_date + 10); insert into proj_project_details (project_id, location, site_timezone) values ('${P2}', 'Mall atrium', 'Asia/Dubai'); insert into proj_project_members (project_id, user_id, role) values ('${P2}', '00000000-0000-4000-8000-0000000000a1', 'pm')`);
+  await as("hr1");
+  await go(`/projects/${P2}/budget`);
+  await seen(/Create the project budget/);
+  await page.getByLabel("Expense currency").fill("AED");
+  await page.getByRole("button", { name: "Create budget" }).click();
+  await seen(/Draft budget/);
+  await page.waitForTimeout(1500);
+  await fillLine("Food", { description: "Pop-up crew lunch", basis: "Fixed total for the whole period", fields: { "Total amount (AED)": "500" } });
+  await page.getByRole("button", { name: /Submit for approval/ }).click();
+  await untilDb("select count(*) from pbx_budget_versions where status = 'submitted' and approval_route = 'executive'", "1");
+  await as("pol.exec");                                   // another Finance person: sees it, cannot decide it
+  await go(`/finance/project-budgets/${P2}?section=budget`);
+  await seen(/CEO or CTO approver decides it/);
+  await expectNoText(/Decide this budget/);
+  await go("/finance/project-budgets?filter=budget");
+  await expectText(/Waiting for the CEO or CTO/);
+  await as("admin");                                      // the authorised CEO/CTO approver decides it
+  await go("/finance/project-budgets?filter=budget");
+  await expectText(/Ready for you to decide/);
+  await expectText(/You are an authorised CEO \/ CTO approver/);
+  await go(`/finance/project-budgets/${P2}?section=budget`);
+  await seen(/Decide this budget/);
+  await shot("approver-ceo-cto-desktop-dark");
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await untilDb("select count(*) from pbx_budget_versions where status = 'approved' and approval_route = 'executive' and decided_by = '00000000-0000-4000-8000-0000000000a6'", "1");
+  // the approver reads everything but records nothing: no funding form, no receipts, no close
+  await go(`/finance/project-budgets/${P2}?section=funds`);
+  await expectNoText(/Record funding/);
 });
 
 // ---- views, themes, phone ------------------------------------------------------------------------------------------------

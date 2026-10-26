@@ -3,8 +3,9 @@
 # Sales and Projects grants, the client project "Floor projection delivery" with mgr@ as Project Manager and hr@ / lead@ as members), then sets up
 # budget access (fictional people, through the same table the owner's SQL writes to):
 #   hr1@  Finance (and manages access)   - not a member of the project, no Projects access to the Enginious UAE company projects beyond directory
-#   pol.exec@  Finance (a second, independent Finance person for the same company)
+#   pol.exec@  Finance (a second Finance person; one is enough for budgets submitted by ordinary Project Managers)
 #   ceo@  view only (an explicit read-only grant; a founder title alone gives nothing)
+#   admin@  the company's authorised CEO / CTO approver (explicit; decides what Finance people submit)
 #   mgr@  Project Manager (needs no grant)    hr@ / lead@  project members (no budget access)    emp@, admin@, none@  no access
 # No budget exists yet: the browser check creates it through the screens. Usage: seed/budget.sh
 set -euo pipefail
@@ -15,7 +16,8 @@ CO=00000000-0000-4000-8000-00000000a001; U=00000000-0000-4000-8000
 $P -c "insert into pbx_company_grants (user_id, company_id, capabilities, note) values
   ('$U-0000000000a1','$CO','{finance,manage_access}','local seed: Finance 1'),
   ('$U-0000000000a8','$CO','{finance}','local seed: Finance 2'),
-  ('$U-0000000000a3','$CO','{view}','local seed: read-only')"
+  ('$U-0000000000a3','$CO','{view}','local seed: read-only'),
+  ('$U-0000000000a6','$CO','{executive_approver}','local seed: CEO/CTO approver')"
 
 # STAGE=draft | submitted | approved (budget approved, funding recorded, actual expenses started) builds the scenario up to that point through the REAL functions as the real people (default: nothing, the browser flow starts from here).
 STAGE="${STAGE:-}"

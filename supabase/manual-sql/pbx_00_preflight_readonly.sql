@@ -6,7 +6,8 @@
 --   B  prerequisites the migrations rely on (tables, columns, functions, roles, the Projects & Tasks install) - every row must say OK
 --   C  existing Project Budget & Expenses objects (there must be none: this is a first install)
 --   D  your companies and how many projects, reimbursement claims and project members they have (information only)
---   E  people who could be the first Finance approvers: holders of the HR "finance" role and of Projects founder access. INFORMATION ONLY.
+--   E  people who could be named Finance people or CEO / CTO approvers: holders of the HR "finance", "ceo" and "cto" roles and of Projects founder access.
+--      INFORMATION ONLY.
 --      Nobody is ever chosen for you: budget access is a separate grant that you name in pbx_30_bootstrap_access.sql
 --   F  default privileges on public tables
 --   G  public tables WITHOUT row-level security (information only)
@@ -91,6 +92,13 @@ select section, item, detail from (
   where ur.revoked_at is null and ur.role::text = 'finance'
   group by p.id, p.full_name, p.email, p.is_active
   union all
+  select 'E CEO / CTO by HR role today', 1150 + row_number() over (order by p.email),
+         coalesce(p.full_name, '(no name)') || ' <' || p.email || '>',
+         'HR role ' || string_agg(distinct ur.role::text, ', ') || '; active=' || p.is_active::text || ' (a title is NOT used for budget approval: an explicit executive_approver grant is)'
+  from user_roles ur join profiles p on p.id = ur.user_id
+  where ur.revoked_at is null and ur.role::text in ('ceo', 'cto')
+  group by p.id, p.full_name, p.email, p.is_active
+  union all
   select 'E Projects founders today', 1200 + row_number() over (order by p.email),
          coalesce(p.full_name, '(no name)') || ' <' || p.email || '>',
          'Projects founder for ' || string_agg(distinct c.legal_name, ', ') || '; active=' || p.is_active::text
@@ -99,7 +107,7 @@ select section, item, detail from (
   group by p.id, p.full_name, p.email, p.is_active
   union all
   select 'E candidates', 1399, '(note)',
-         'INFORMATION ONLY. Budget access is separate from HR roles, Projects access, Sales and Inventory, and nobody receives it automatically (no CEO, CTO, HR Admin, System Admin, HR finance role or test account). You name the people yourself in pbx_30_bootstrap_access.sql. Finance needs at least TWO people per company that approves budgets, because nobody may approve their own submission.'
+         'INFORMATION ONLY. Budget access is separate from HR roles, Projects access, Sales and Inventory, and nobody receives it automatically (no CEO, CTO, HR Admin, System Admin, HR finance role or test account). You name the people yourself in pbx_30_bootstrap_access.sql: Finance people (one is enough for budgets submitted by ordinary Project Managers) and, per company, the authorised CEO / CTO approver(s) who decide what Finance people submit.'
 
   -- F default privileges -------------------------------------------------------------------------------------------
   union all
