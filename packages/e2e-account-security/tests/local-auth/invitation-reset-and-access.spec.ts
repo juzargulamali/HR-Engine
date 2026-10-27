@@ -187,6 +187,35 @@ test.describe("invitation, reset and access to the account controls @local-auth"
     await expect(account.getByText("Active", { exact: true }).first()).toBeVisible();
   });
 
+  test("if marking the account Active fails, the person is told and can retry; it never silently stays Invited", async ({ browser }) => {
+    const email = `activation-${suffix}@example.invalid`;
+    const page = await signedInAdmin(browser);
+    const { link } = await invite(page, email, "Activation Check");
+    created.push(await idOf(email));
+
+    const person = await (await browser.newContext()).newPage();
+    let failing = true;
+    // The write that marks the account Active is made to fail, as a network or service error would.
+    await person.route("**/rest/v1/profiles*", (route) => (failing && route.request().method() === "PATCH" ? route.abort() : route.continue()));
+    await person.goto(link);
+    await person.getByLabel("New password").fill(FIRST_PASSWORD);
+    await person.getByLabel("Confirm password").fill(FIRST_PASSWORD);
+    await person.getByRole("button", { name: /continue/i }).click();
+
+    await expect(person.getByText(/couldn.t finish activating your account/i)).toBeVisible({ timeout: 15000 });
+    await expect(person).toHaveURL(/set-password/);
+    expect(await statusOf(email), "nothing claims success while the account is still Invited").toBe("invited");
+
+    failing = false;
+    await person.getByRole("button", { name: "Try again" }).click();
+    await person.waitForURL((u) => !/set-password/.test(u.pathname));
+    expect(await statusOf(email)).toBe("active");
+
+    const fresh = await (await browser.newContext()).newPage();
+    await loginAs(fresh, email, FIRST_PASSWORD);
+    await expect(fresh).not.toHaveURL(/\/login/);
+  });
+
   test("deleting a login removes it and its sign-in; an administrator cannot delete or deactivate their own account", async ({ browser }) => {
     const email = `delete-me-${suffix}@example.invalid`;
     const page = await signedInAdmin(browser);

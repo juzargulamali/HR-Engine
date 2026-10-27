@@ -25,6 +25,8 @@ export function PasswordResetForm({ mode }: { mode: "invite" | "reset" }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // The password is saved but the account could not be marked Active (see markActive): the person is told and can retry without setting the password again.
+  const [userIdToActivate, setUserIdToActivate] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,12 +84,35 @@ export function PasswordResetForm({ mode }: { mode: "invite" | "reset" }) {
     }
 
     const userId = updateData.user?.id;
-    if (userId) {
-      // No-op (0 rows matched) unless this account is still 'invited' —
-      // profiles_self_activate is the only policy that allows this specific
-      // transition, so this is safe to call unconditionally from either flow.
-      await supabase.from("profiles").update({ account_status: "active" }).eq("id", userId);
+    if (userId && !(await markActive(userId))) {
+      setPending(false);
+      setUserIdToActivate(userId);
+      return;
     }
+
+    await finish();
+  }
+
+  /**
+   * Marks the account Active once the first password exists. The database allows exactly this one change to one's own row
+   * (profiles_self_activate: invited to active) and it matches nothing for an account that is already Active, which is the normal case
+   * for a password reset. So the write is read back: a write that failed, or that matched nothing for someone still Invited, is retried,
+   * and only then reported. Ignoring the result left a person who could sign in shown as Invited to the administrator.
+   */
+  async function markActive(userId: string): Promise<boolean> {
+    const supabase = createClient();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+      const { error: updateError } = await supabase.from("profiles").update({ account_status: "active" }).eq("id", userId);
+      if (updateError) continue;
+      const { data } = await supabase.from("profiles").select("account_status").eq("id", userId).maybeSingle();
+      if (data && data.account_status !== "invited") return true;
+    }
+    return false;
+  }
+
+  async function finish() {
+    const supabase = createClient();
 
     // "Where supported" — Supabase's signOut(scope: 'others') invalidates
     // every OTHER session for this user server-side, leaving the one that
@@ -103,6 +128,16 @@ export function PasswordResetForm({ mode }: { mode: "invite" | "reset" }) {
     window.location.href = "/";
   }
 
+  async function retryActivation() {
+    if (!userIdToActivate) return;
+    setPending(true);
+    if (await markActive(userIdToActivate)) {
+      await finish();
+      return;
+    }
+    setPending(false);
+  }
+
   if (status === "checking") {
     return <p className="text-sm text-muted-foreground">Verifying your link…</p>;
   }
@@ -114,6 +149,22 @@ export function PasswordResetForm({ mode }: { mode: "invite" | "reset" }) {
           ? "This link is invalid or has expired. Ask HR to send you a new invite from People & Access."
           : "This link is invalid or has expired. Request a new one from the forgot-password page."}
       </Alert>
+    );
+  }
+
+  if (userIdToActivate) {
+    return (
+      <div className="space-y-4">
+        <Alert variant="destructive" role="alert" aria-live="assertive">
+          Your password is saved, but we couldn&apos;t finish activating your account. Try again. If it keeps failing you can continue, and your administrator may still see you as invited.
+        </Alert>
+        <Button type="button" className="w-full" disabled={pending} onClick={retryActivation}>
+          {pending ? "Trying…" : "Try again"}
+        </Button>
+        <Button type="button" variant="outline" className="w-full" disabled={pending} onClick={() => finish()}>
+          Continue to the app
+        </Button>
+      </div>
     );
   }
 
