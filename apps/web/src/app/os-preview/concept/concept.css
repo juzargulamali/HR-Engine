@@ -1,0 +1,267 @@
+/*
+ * ENGINIOUS OS: Projects & Tasks redesign concept. Scoped to .cx-root and layered on the app's own tokens (globals.css), so the shared
+ * components it reuses (Board, Select, Modal, Button, SidePanel, DropdownMenu…) take the same look without a copy of them.
+ *
+ * Direction (from the approved dark and light renders): layered petrol surfaces with clearly separated cards; white text with a readable
+ * secondary; cyan/teal only for the primary action, selection and key highlights; restrained blue and amber as supporting tones; a
+ * compact header graphic that stays away from anything people read. The sidebar and top bar stay dark in both themes (as in the light
+ * render); the content area follows the theme.
+ * There is no brand guide or company profile in the repository (only the logo files), so these colours and the app fonts are an
+ * interpretation of the logo's teal and cyan, not an official palette.
+ */
+.cx-root {
+  --cx-info: 213 80% 40%;
+  --cx-amber: 30 95% 24%;
+  --cx-red: 355 68% 40%;
+  --cx-green: 152 62% 26%;
+    --cx-card-bg: hsl(var(--card));
+  --cx-card-shadow: 0 1px 2px hsl(200 40% 20% / 0.06), 0 6px 18px -10px hsl(200 40% 20% / 0.18);
+  --cx-warm: 38 92% 94%;
+  --cx-cool: 168 50% 93%;
+  position: relative;
+  isolation: isolate;
+  /* Closed menus are kept in the page (hidden) so they can be measured; they must never widen it. clip, not hidden: sticky still works. */
+  overflow-x: clip;
+  min-height: 100vh;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+:root[data-theme="light"] .cx-root {
+  --background: 195 26% 92%;
+  --card: 0 0% 100%;
+  --raised: 0 0% 100%;
+  --field: 195 30% 98%;
+  --foreground: 200 45% 12%;
+  --card-foreground: 200 45% 12%;
+  --muted-foreground: 200 22% 32%;
+  --subtle: 200 16% 38%;
+  --primary: 175 82% 26%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 195 26% 92%;
+  --muted: 195 26% 92%;
+  --accent: 178 86% 21%;
+  --border: 195 22% 85%;
+  --input: 200 14% 48%;
+  --ring: 184 85% 24%;
+  --brand-deep: 175 82% 24%;
+  --brand-glow: 175 82% 30%;
+}
+:root:not([data-theme="light"]) .cx-root {
+  --background: 195 38% 9.5%;
+  --chrome: 195 44% 6.5%;
+  --card: 195 32% 13%;
+  --raised: 195 30% 17%;
+  --field: 195 40% 10.5%;
+  --foreground: 180 25% 95%;
+  --card-foreground: 180 25% 95%;
+  --muted-foreground: 190 18% 77%;
+  --subtle: 190 14% 65%;
+  --primary: 176 68% 46%;
+  --primary-foreground: 195 60% 6%;
+  --secondary: 195 26% 19%;
+  --muted: 195 26% 17%;
+  --accent: 180 72% 62%;
+  --border: 195 28% 20%;
+  --input: 192 18% 50%;
+  --ring: 184 85% 66%;
+  --brand-deep: 176 66% 42%;
+  --brand-glow: 178 70% 50%;
+  --cx-info: 213 92% 72%;
+  --cx-amber: 38 94% 62%;
+  --cx-red: 6 88% 72%;
+  --cx-green: 152 55% 58%;
+  --cx-card-bg: linear-gradient(180deg, hsl(195 32% 14.5%), hsl(195 34% 12%));
+  --cx-card-shadow: inset 0 1px 0 hsl(180 50% 90% / 0.05), 0 8px 24px -14px hsl(195 80% 2% / 0.8);
+  --cx-warm: 34 36% 13.5%;
+  --cx-cool: 178 36% 13%;
+}
+:root:not([data-theme="light"]) .cx-root::before {
+  content: "";
+  position: absolute; inset: 0 0 auto 0; height: 420px; z-index: -1; pointer-events: none;
+  background: radial-gradient(60% 100% at 70% 0%, hsl(183 70% 30% / 0.16), transparent 70%);
+}
+
+/* The sidebar and the top bar are dark in both themes, so text and borders inside them use the dark values. */
+.cx-chrome {
+  --foreground: 180 25% 95%;
+  --muted-foreground: 190 18% 78%;
+  --subtle: 190 14% 66%;
+  --border: 195 28% 20%;
+  --secondary: 195 26% 19%;
+  --raised: 195 30% 17%;
+  --field: 195 40% 10.5%;
+  --input: 192 18% 52%;
+  --primary: 176 68% 46%;
+  --primary-foreground: 195 60% 6%;
+  --accent: 180 72% 62%;
+  --ring: 184 85% 66%;
+  --card: 195 32% 13%;
+  --cx-info: 213 92% 72%;
+  --cx-amber: 38 94% 62%;
+  --cx-red: 6 88% 72%;
+  --cx-green: 152 55% 58%;
+  --brand-deep: 176 66% 42%;
+  --brand-glow: 178 70% 50%;
+  background: linear-gradient(180deg, hsl(195 46% 8.5%), hsl(195 46% 6.5%));
+  color: hsl(var(--foreground));
+}
+.cx-topbar { background: hsl(195 46% 8%); border-bottom: 1px solid hsl(195 30% 17%); }
+.cx-sidebar { border-right: 1px solid hsl(195 30% 15%); }
+
+/* Cards: layered surfaces with a fine gradient edge, a faint top highlight and a restrained shadow. No flat fills. */
+.cx-card { background: var(--cx-card-bg); border: 1px solid hsl(var(--border)); border-radius: 14px; box-shadow: var(--cx-card-shadow); }
+:root[data-theme="light"] .cx-card { border-color: hsl(195 22% 88%); }
+:root:not([data-theme="light"]) .cx-card {
+  border-color: transparent;
+  background:
+    linear-gradient(180deg, hsl(194 30% 14.5%), hsl(195 34% 11.5%)) padding-box,
+    linear-gradient(180deg, hsl(178 50% 60% / 0.34), hsl(190 28% 32% / 0.26) 38%, hsl(195 26% 22% / 0.4)) border-box;
+}
+/* The warm card (a decision is needed) and the cool card (the next site visit): a soft glow in one corner on the same layered surface. */
+:root:not([data-theme="light"]) .cx-card.cx-warm {
+  background:
+    radial-gradient(90% 130% at 0% 0%, hsl(36 85% 48% / 0.2), transparent 62%) padding-box,
+    linear-gradient(180deg, hsl(30 22% 14.5%), hsl(24 22% 11.5%)) padding-box,
+    linear-gradient(150deg, hsl(38 92% 58% / 0.85), hsl(34 60% 36% / 0.3) 55%, hsl(30 40% 28% / 0.35)) border-box;
+}
+:root:not([data-theme="light"]) .cx-card.cx-cool {
+  background:
+    radial-gradient(110% 100% at 100% 100%, hsl(178 65% 36% / 0.3), transparent 62%) padding-box,
+    linear-gradient(180deg, hsl(194 32% 14.5%), hsl(195 36% 11.5%)) padding-box,
+    linear-gradient(200deg, hsl(178 55% 55% / 0.5), hsl(190 28% 30% / 0.25) 50%, hsl(195 26% 22% / 0.4)) border-box;
+}
+:root[data-theme="light"] .cx-card.cx-warm { background: linear-gradient(180deg, hsl(38 100% 96.5%), hsl(36 92% 93%)); border-color: hsl(var(--cx-amber) / 0.45); }
+:root[data-theme="light"] .cx-card.cx-cool { background: linear-gradient(180deg, hsl(168 55% 96%), hsl(172 45% 92%)); border-color: hsl(176 40% 70% / 0.6); }
+
+/* The compact header: a dark, deep gradient with the artwork (a prepared SVG, public/os-preview/concept-header.svg) fading in from
+   the right. Words and controls are HTML on top; the title column is capped so it never reaches the drawing. */
+.cx-hero {
+  position: relative; border-radius: 16px; color: #eaf7f8; border: 1px solid transparent;
+  background:
+    linear-gradient(100deg, hsl(192 52% 11.5%) 0%, hsl(193 50% 9.5%) 48%, hsl(190 54% 12.5%) 100%) padding-box,
+    linear-gradient(180deg, hsl(178 50% 60% / 0.42), hsl(190 30% 30% / 0.3) 50%, hsl(195 30% 22% / 0.4)) border-box;
+  box-shadow: 0 14px 30px -20px hsl(195 80% 3% / 0.9);
+}
+.cx-hero::before {
+  content: ""; position: absolute; inset: 0 0 0 38%; pointer-events: none; border-radius: 0 15px 15px 0;
+  background: url("/os-preview/concept-header.svg") right center / auto 100% no-repeat; filter: brightness(1.3) saturate(1.1);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 38%); mask-image: linear-gradient(90deg, transparent, #000 38%);
+}
+.cx-hero > * { position: relative; }
+.cx-hero .cx-hero-sub { color: #a9cdd1; }
+.cx-hero .cx-pill { background: rgb(255 255 255 / 0.08); color: #fff; border-color: rgb(255 255 255 / 0.2); }
+.cx-hero .cx-avatar { box-shadow: 0 0 0 2px hsl(193 50% 10%); }
+/* Controls sit on a quiet backing so no line of the drawing runs behind a label or a button. */
+.cx-hero-actions { background: hsl(195 60% 6% / 0.3); border-radius: 12px; padding: 0.45rem 0.7rem; }
+/* On a phone the drawing is a small corner mark beside the reference line; the title starts below it and never crosses it. */
+@media (max-width: 639px) {
+  .cx-hero::before { inset: 0 0 auto 45%; height: 40px; background-position: right top; border-radius: 0 15px 0 0; -webkit-mask-image: linear-gradient(90deg, transparent, #000 45%); mask-image: linear-gradient(90deg, transparent, #000 45%); }
+  .cx-hero .cx-avatar[data-size="lg"] { width: 1.5rem; height: 1.5rem; font-size: 0.625rem; }
+  .cx-hero-actions { padding: 0; background: none; }
+}
+
+/* Keyboard focus is one clear outline on the control; a selected row is a quiet tint and an edge bar. The two never look alike. */
+.cx-root :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; box-shadow: none; }
+
+/* Component rules sit in the components layer so Tailwind's utility classes (hidden, text-left…) can still override them. */
+@layer components {
+  .cx-badge {
+    display: inline-flex; align-items: center; gap: 0.4rem; max-width: 100%;
+    min-height: 1.5rem; padding: 0.1rem 0.65rem; border-radius: 999px;
+    font-size: 0.8125rem; font-weight: 600; line-height: 1.2; white-space: nowrap;
+    background: hsl(var(--foreground) / 0.09); color: hsl(var(--foreground));
+  }
+  .cx-badge[data-tone="cyan"] { background: hsl(var(--accent) / 0.16); color: hsl(var(--accent)); }
+  .cx-badge[data-tone="blue"] { background: hsl(var(--cx-info) / 0.16); color: hsl(var(--cx-info)); }
+  .cx-badge[data-tone="amber"] { background: hsl(var(--cx-amber) / 0.16); color: hsl(var(--cx-amber)); }
+  .cx-badge[data-tone="red"] { background: hsl(var(--cx-red) / 0.14); color: hsl(var(--cx-red)); }
+  .cx-badge[data-tone="quiet"] { background: transparent; color: hsl(var(--muted-foreground)); padding-left: 0; padding-right: 0; }
+  .cx-dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; flex: none; background: hsl(var(--subtle)); }
+  .cx-dot[data-tone="cyan"] { background: hsl(var(--cx-green)); }
+  .cx-dot[data-tone="blue"] { background: hsl(var(--cx-info)); }
+  .cx-dot[data-tone="amber"] { background: hsl(var(--cx-amber)); }
+  .cx-dot[data-tone="red"] { background: hsl(var(--cx-red)); }
+  .cx-dot[data-tone="green"] { background: hsl(var(--cx-green)); }
+
+  /* Status pill that is also a button (click to change). */
+  .cx-pill {
+    display: inline-flex; align-items: center; gap: 0.45rem; min-height: 1.75rem; padding: 0.15rem 0.7rem; border-radius: 999px; border: 1px solid transparent;
+    font-size: 0.8125rem; font-weight: 600; white-space: nowrap; max-width: 100%;
+    background: hsl(var(--secondary)); color: hsl(var(--foreground));
+  }
+  .cx-pill[data-tone="blue"] { background: hsl(var(--cx-info) / 0.16); }
+  .cx-pill[data-tone="cyan"] { background: hsl(var(--cx-green) / 0.14); }
+  .cx-pill[data-tone="red"] { background: hsl(var(--cx-red) / 0.14); }
+  .cx-pill[data-tone="quiet"] { background: hsl(var(--secondary)); }
+  button.cx-pill:hover, button.cx-pill[aria-expanded="true"] { border-color: hsl(var(--input)); }
+
+  .cx-avatar {
+    display: inline-flex; align-items: center; justify-content: center; flex: none; width: 1.75rem; height: 1.75rem; border-radius: 999px;
+    font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.02em; background: hsl(197 22% 32%); color: #f2fbfc;
+  }
+  .cx-avatar[data-tone="teal"] { background: hsl(176 62% 30%); }
+  .cx-avatar[data-tone="blue"] { background: hsl(212 62% 40%); }
+  .cx-avatar[data-size="lg"] { width: 2.25rem; height: 2.25rem; font-size: 0.8125rem; }
+  .cx-avatar[data-size="sm"] { width: 1.5rem; height: 1.5rem; font-size: 0.625rem; }
+
+  .cx-nav-link {
+    position: relative; display: flex; align-items: center; gap: 0.75rem; min-height: 3rem; padding: 0 0.9rem; border-radius: 10px; border: 1px solid transparent;
+    font-size: 0.9375rem; font-weight: 500; color: hsl(var(--muted-foreground));
+  }
+  .cx-nav-link:hover { background: hsl(195 26% 15%); color: hsl(var(--foreground)); }
+  .cx-nav-link[aria-current="page"] { background: linear-gradient(90deg, hsl(176 60% 28% / 0.55), hsl(176 60% 28% / 0.28)); border-color: hsl(176 55% 40% / 0.7); color: #fff; font-weight: 600; }
+
+  /* Small summary cards: a coloured edge, an icon, a number. */
+  .cx-stat { position: relative; display: flex; align-items: center; gap: 0.9rem; padding: 0.95rem 1rem 0.95rem 1.15rem; text-align: left; width: 100%; }
+  .cx-stat::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; border-radius: 14px 0 0 14px; background: var(--edge, hsl(var(--primary))); }
+  .cx-stat[data-edge="amber"] { --edge: hsl(var(--cx-amber)); }
+  .cx-stat[data-edge="blue"] { --edge: hsl(var(--cx-info)); }
+  .cx-stat[data-edge="muted"] { --edge: hsl(var(--subtle)); }
+  .cx-stat[aria-pressed="true"], .cx-stat[aria-current="true"] { outline: 2px solid hsl(var(--primary) / 0.7); outline-offset: -1px; }
+  a.cx-stat:hover, button.cx-stat:hover { filter: brightness(1.06); }
+
+
+  .cx-table { table-layout: fixed; width: 100%; border-collapse: separate; border-spacing: 0; }
+  .cx-table th {
+    text-align: left; font-size: 0.8125rem; font-weight: 600; color: hsl(var(--muted-foreground)); padding: 0.55rem 0.75rem;
+    background: hsl(var(--secondary) / 0.6); border-bottom: 1px solid hsl(var(--border));
+  }
+  .cx-table th:first-child { border-top-left-radius: 10px; }
+  .cx-table th:last-child { border-top-right-radius: 10px; }
+  .cx-table td { padding: 0.6rem 0.75rem; vertical-align: middle; border-bottom: 1px solid hsl(var(--border) / 0.7); }
+  .cx-table tbody tr { transition: background-color 120ms; }
+  .cx-table tbody tr:hover { background: hsl(var(--secondary) / 0.5); }
+  .cx-table tbody tr:has([aria-expanded="true"]),
+  .cx-table tbody tr[data-selected="true"] { background: linear-gradient(90deg, hsl(var(--primary) / 0.17), hsl(var(--primary) / 0.06) 70%); box-shadow: inset 4px 0 0 hsl(var(--primary)); }
+  .cx-table tbody tr:last-child td { border-bottom: 0; }
+  .cx-trunc { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Milestone strip */
+  .cx-step { position: relative; flex: 1 1 0; min-width: 0; }
+  .cx-node { width: 1.65rem; height: 1.65rem; border-radius: 999px; border: 2px solid hsl(var(--subtle)); background: hsl(var(--card)); display: inline-flex; align-items: center; justify-content: center; }
+  .cx-node[data-state="done"] { background: hsl(var(--primary)); border-color: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
+  .cx-node[data-state="next"] { border-color: hsl(var(--primary)); box-shadow: 0 0 0 4px hsl(var(--primary) / 0.16); }
+  .cx-node[data-state="late"] { border-color: hsl(var(--cx-amber)); box-shadow: 0 0 0 4px hsl(var(--cx-amber) / 0.16); }
+  .cx-rail { height: 2px; flex: 1; background: hsl(var(--border)); }
+  .cx-rail[data-done="true"] { background: hsl(var(--primary)); }
+  .cx-rail[data-done="false"] { background: repeating-linear-gradient(90deg, hsl(var(--subtle)) 0 3px, transparent 3px 7px); opacity: 0.7; }
+
+  /* Comfortable tap targets on a phone and a narrow window. */
+  @media (max-width: 1023px) {
+    .cx-root select, .cx-root input:not([type="checkbox"]):not([type="radio"]), .cx-root button { min-height: 44px; }
+    .cx-root .cx-badge { min-height: 1.75rem; }
+    .cx-pill { min-height: 2.25rem; }
+  }
+}
+
+/* The side panel slides in briefly; reduced motion removes it (globals.css shortens every animation for that setting). */
+@keyframes cx-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+.cx-root aside[role="dialog"] { animation: cx-in 160ms ease-out; }
+@media (min-width: 1024px) { .cx-root aside[role="dialog"] { top: 64px; } }
+@keyframes cx-toast { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.cx-toast { animation: cx-toast 140ms ease-out; }
+@keyframes cx-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.cx-saving-dot { animation: cx-pulse 900ms ease-in-out infinite; }
+
+/* A mention reads as part of the sentence, with a quiet cyan. */
+.cx-mention { color: hsl(var(--accent)); font-weight: 600; }
