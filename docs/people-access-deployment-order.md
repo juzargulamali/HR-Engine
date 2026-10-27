@@ -12,7 +12,7 @@ Two stacked pull requests and one security migration. **Nothing below has been r
 ## Gates before step 1
 
 1. CI is green on #50 (`lint-typecheck-test`, `rls-policies`, `e2e-read-only`) and on #51 (`lint-typecheck-test`, `rls-policies`).
-2. The hosted account-control test has been run on V2 with disposable accounts and **its results are recorded** in [people-access-account-controls-verification.md](./people-access-account-controls-verification.md) (runbook: [people-access-hosted-test-runbook.md](./people-access-hosted-test-runbook.md)). #50 is the change that moved the account controls and the first-password page, so it is tested on the #50 preview first. Until the results are recorded, **both PRs stay unmerged**.
+2. **Decided 2026-10-27:** #50 is merged first and the focused hosted account checks are run immediately afterwards on Production (runbook: [people-access-hosted-test-runbook.md](./people-access-hosted-test-runbook.md)); their results are recorded in [people-access-account-controls-verification.md](./people-access-account-controls-verification.md), where they are marked **PENDING** until done. **Step 1 below is therefore done before those results; steps 2 to 7 (the security migration and #51) wait until the account checks are recorded.**
 
 ## The order
 
