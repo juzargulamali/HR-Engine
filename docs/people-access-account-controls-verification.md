@@ -42,7 +42,7 @@ Deactivation bans the login at the auth service first and only then marks the pr
 
 ## Hosted test plan
 
-Now a runbook for **V2 with disposable `e2e-test-` accounts only, no new project and no setting changed**: [people-access-hosted-test-runbook.md](./people-access-hosted-test-runbook.md). It gives the minimum setup (one account made by hand, two made by the invitations), three owner-run SQL scripts (before, one guarded change, after, with a hash proving no real account changed), H1 to H7 step by step, the token-window measurement, and the result sheet. H8 (the automated specs) is deliberately not run on V2. Nothing in it has been run yet.
+Now a runbook for **V2, using your existing `hrtest.admin@enginious.ae` as the test administrator (preserved: never changed, and fingerprinted before and after) and only two new disposable `e2e-test-` invitees, with no new project and no setting changed**: [people-access-hosted-test-runbook.md](./people-access-hosted-test-runbook.md). It gives the minimum setup (nothing created by hand), two **read-only** SQL checks (before, with a fingerprint of the administrator's account and every role it holds; after, which must match it, show the invitees gone and a hash over every real account unchanged), H1 to H7 step by step, the token-window measurement, and the result sheet. H8 (the automated specs) is deliberately not run on V2. Nothing in it has been run yet.
 
 ## Still not verified until H1 to H8 run
 
