@@ -43,8 +43,8 @@ describe("sortRolesByPriority", () => {
 });
 
 describe("roleLabelsFor", () => {
-  it("shows both labels for a user holding Employee and Line Manager, most senior first", () => {
-    expect(roleLabelsFor([{ role: "employee" }, { role: "line_manager" }])).toEqual(["Line Manager", "Employee"]);
+  it("shows both labels for a user holding Employee and Reporting Manager, most senior first", () => {
+    expect(roleLabelsFor([{ role: "employee" }, { role: "line_manager" }])).toEqual(["Reporting Manager", "Employee"]);
   });
 
   it("shows exactly one label for a single-role user", () => {
@@ -55,6 +55,6 @@ describe("roleLabelsFor", () => {
     const grants = [{ role: "employee" as const }, { role: "line_manager" as const }];
     // Same roles either way: this is a presentation concern only, never an
     // authorization one — nothing here can grant or revoke access.
-    expect(new Set(roleLabelsFor(grants))).toEqual(new Set(["Employee", "Line Manager"]));
+    expect(new Set(roleLabelsFor(grants))).toEqual(new Set(["Employee", "Reporting Manager"]));
   });
 });

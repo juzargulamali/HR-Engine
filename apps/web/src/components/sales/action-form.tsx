@@ -14,7 +14,7 @@ type S = ActionState & { id?: string };
  * `onDone` (e.g. close a dialog) after a success. Hidden inputs (opportunity id, version…) are passed as `children`.
  */
 export function ActionForm({
-  action, children, submitLabel, pendingLabel = "Saving…", onDone, resetOnSuccess = false, className, secondary, variant = "default",
+  action, children, submitLabel, pendingLabel = "Saving…", onDone, resetOnSuccess = false, className, secondary, variant = "default", disabled = false,
 }: {
   action: Action;
   children: React.ReactNode;
@@ -25,6 +25,8 @@ export function ActionForm({
   className?: string;
   secondary?: React.ReactNode;
   variant?: "default" | "destructive" | "outline" | "secondary";
+  /** Keeps the submit button off (for example while there is nothing to save). Never used to hide a refusal: the database still decides. */
+  disabled?: boolean;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   // Edits that are not saved yet are registered, so closing the side panel or opening another record asks first.
@@ -76,7 +78,7 @@ export function ActionForm({
       {saved && !state.error && !state.warning ? <p role="status" className="flex items-center gap-1.5 text-sm font-medium text-[hsl(var(--os-green))]"><span className="os-dot" data-tone="green" aria-hidden />Saved</p> : null}
       <div className="flex flex-wrap items-center justify-end gap-2">
         {secondary}
-        <Button type="submit" variant={variant} disabled={pending}>{pending ? pendingLabel : submitLabel}</Button>
+        <Button type="submit" variant={variant} disabled={pending || disabled}>{pending ? pendingLabel : submitLabel}</Button>
       </div>
     </form>
   );

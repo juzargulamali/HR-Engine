@@ -43,7 +43,7 @@ export function OvernightRecoveryForm({ employeeId }: { employeeId: string }) {
       </div>
       <p className="text-sm text-muted-foreground">
         Attendance for this day must already be recorded. Up to and including 4 active hours after midnight credits 0.5
-        day; more than 4 credits 1 day — pending Line Manager then HR Admin approval.
+        day; more than 4 credits 1 day — pending Reporting Manager then HR Admin approval.
       </p>
       {state.error ? <Alert variant="destructive">{state.error}</Alert> : null}
       <Button type="submit" size="sm" disabled={pending}>

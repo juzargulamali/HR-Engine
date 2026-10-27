@@ -313,39 +313,8 @@ export async function importInventoryLegacyAssets(_prev: S, fd: FormData): Promi
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Access and sharing
+// Sharing between companies
 // ---------------------------------------------------------------------------------------------------------------
-const grantSchema = z.object({ companyId: uuid, userId: uuid, note: optionalText });
-
-export async function grantInventoryAccess(_prev: S, fd: FormData): Promise<S> {
-  const p = grantSchema.safeParse(Object.fromEntries(fd));
-  if (!p.success) return { error: firstIssue(p.error) };
-  const caps = [...new Set(fd.getAll("capabilities").map(String))].filter((c) => (INV_CAPABILITIES as readonly string[]).includes(c));
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("inv_grant_access", { p_user_id: p.data.userId, p_company_id: p.data.companyId, p_capabilities: caps, p_note: p.data.note ?? null });
-  if (error) return fail(error.message);
-  // Locations are sent only when the form carried the location list (someone who works in the warehouse).
-  if (fd.get("withLocations") === "1") {
-    const ids = fd.getAll("locationIds").map(String).filter((x) => uuid.safeParse(x).success);
-    const { error: locError } = await supabase.rpc("inv_set_operator_locations", { p_company_id: p.data.companyId, p_user_id: p.data.userId, p_location_ids: ids });
-    refreshInventory();
-    if (locError) return { error: `Access was saved, but the locations were not: ${fail(locError.message).error}` };
-    return ok();
-  }
-  refreshInventory();
-  return ok();
-}
-
-export async function revokeInventoryAccess(_prev: S, fd: FormData): Promise<S> {
-  const p = z.object({ companyId: uuid, userId: uuid }).safeParse(Object.fromEntries(fd));
-  if (!p.success) return { error: firstIssue(p.error) };
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("inv_revoke_access", { p_user_id: p.data.userId, p_company_id: p.data.companyId });
-  if (error) return fail(error.message);
-  refreshInventory();
-  return ok();
-}
-
 export async function setInventoryCompanySharing(_prev: S, fd: FormData): Promise<S> {
   const p = z.object({ ownerCompanyId: uuid, useCompanyId: uuid, enabled: z.enum(["true", "false"]), note: optionalText }).safeParse(Object.fromEntries(fd));
   if (!p.success) return { error: firstIssue(p.error) };

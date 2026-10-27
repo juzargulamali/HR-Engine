@@ -1,5 +1,5 @@
-import { canViewHrAlerts, canViewStock, hasCrmCapability, hasInvCapability, hasProjCapability, hasRoleAnyScope, isAnyCrmFounder, isSysAdmin } from "@enginious-hr/domain";
-import type { CrmGrant, InvGrant, ProjGrant, RoleGrant } from "@enginious-hr/domain";
+import { canUsePeopleAccess, canViewHrAlerts, canViewStock, hasCrmCapability, hasInvCapability, hasProjCapability, hasRoleAnyScope, isAnyCrmFounder, isSysAdmin } from "@enginious-hr/domain";
+import type { CrmGrant, InvGrant, ModuleGrantRef, ProjGrant, RoleGrant } from "@enginious-hr/domain";
 
 /**
  * String keys only — never a component reference. This data crosses from
@@ -89,7 +89,7 @@ export interface NavOptions {
    * Project Budget & Expenses access: the person's own grants from pbx_company_grants (never HR roles, Projects, Sales or Inventory grants). Only people
    * holding Finance or view access in some company get the Finance entry; a Project Manager reaches the budget from the project itself.
    */
-  budget?: { any: boolean; finance?: boolean };
+  budget?: { any: boolean; finance?: boolean; manageAccess?: boolean };
 }
 
 /**
@@ -133,10 +133,8 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
   // granted it. Settings and Access appear only to those who can use them (the same rule the Sales pages apply).
   if (hasCrmAccess) {
     const manageSettings = crmGrants.some((g) => hasCrmCapability([g], g.companyId, "manage_settings"));
-    const manageAccess = crmGrants.some((g) => hasCrmCapability([g], g.companyId, "manage_access"));
     const manage: NavLinkData[] = [
       ...(manageSettings || isAnyCrmFounder(crmGrants) ? [{ href: "/sales/settings", label: "Settings", iconKey: "sales" as const }] : []),
-      ...(manageAccess ? [{ href: "/sales/access", label: "Access", iconKey: "sales" as const }] : []),
     ];
     modules.push({
       id: "sales",
@@ -207,8 +205,16 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
       ],
     });
   }
-  if (showAdminLink) {
-    peopleSections.push({ label: "System", links: [{ href: "/admin/users", label: "Users & Roles", iconKey: "users" }] });
+  // People & Access replaces the scattered account, role and per-module Access screens. It is offered to anyone who can manage something in it
+  // (System Administrator, HR Admin, or an access manager of Sales, Projects, Inventory or project budgets); the page and the database check again.
+  const accessRefs: ModuleGrantRef[] = [
+    ...crmGrants.map((g) => ({ module: "sales" as const, companyId: g.companyId, capabilities: g.capabilities as readonly string[] })),
+    ...(options.projects?.grants ?? []).map((g) => ({ module: "projects" as const, companyId: g.companyId, capabilities: g.capabilities as readonly string[] })),
+    ...(options.inventory?.grants ?? []).map((g) => ({ module: "inventory" as const, companyId: g.companyId, capabilities: g.capabilities as readonly string[] })),
+    ...(options.budget?.manageAccess ? [{ module: "budget" as const, companyId: "any", capabilities: ["manage_access"] as readonly string[] }] : []),
+  ];
+  if (canUsePeopleAccess(grants, accessRefs)) {
+    peopleSections.push({ label: "Access", links: [{ href: "/people-access", label: "People & Access", iconKey: "users" }] });
   }
   modules.push({ id: "people", label: "People & HR", iconKey: "people", href: "/employees", sections: peopleSections });
 
@@ -235,7 +241,6 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
     const manage: NavLinkData[] = [];
     if (projGrants.length > 0) {
       if (anyCap("assign_pm") || proj?.pendingHandovers) manage.push({ href: "/projects/handovers", label: "Handovers", iconKey: "projects" });
-      if (anyCap("manage_access")) manage.push({ href: "/projects/access", label: "Access", iconKey: "projects" });
     }
     modules.push({
       id: "projects",
@@ -271,7 +276,6 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
       : [{ href: "/inventory/mine", label: "My equipment", iconKey: "inventory" }];
     const manage: NavLinkData[] = [];
     if (invAnyCap("manage_catalogue") || invAnyCap("founder")) manage.push({ href: "/inventory/manage", label: "Setup", iconKey: "inventory" });
-    if (invAnyCap("manage_access")) manage.push({ href: "/inventory/access", label: "Access", iconKey: "inventory" });
     modules.push({
       id: "inventory",
       label: "Inventory",

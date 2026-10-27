@@ -32,6 +32,11 @@ node os-shell-checks/rollout-checks.mjs                     # Stage 4-7 interact
                                                              # place in the list, stacked phone tables carry their column names, and the no-access / not-found cards
 node os-shell-checks/page-survey.mjs                        # visits every signed-in page as one person (PERSONA, THEME, WIDTH, OUT env vars), records status, console errors, sideways scroll and a screenshot of each
 node os-shell-checks/rollout-screenshots.mjs                # the representative screenshots of the Stage 4-7 pull request (docs/os-rollout-screenshots)
+node os-shell-checks/people-access-flow.mjs                  # People & Access (seed with `seed/budget.sh`, reseed before each run): the System Administrator sees accounts and HR roles but no Module access tab; a Sales and Projects founder gives presets
+                                                             # on top of what a person has (shown first, nothing removed), a stale form is stopped, the database's own refusal is shown, removal asks first; a budget
+                                                             # access manager gives and adds budget rights and meets the last-manager protection; an HR Admin edits job title, department and reporting line (audited,
+                                                             # reporting circles refused) and sees no addresses, accounts or roles; everyone else has no menu entry and is told there is nothing to manage; old addresses redirect
+node os-shell-checks/people-access-screenshots.mjs out-dir   # the representative screenshots of People & Access (docs/people-access-screenshots)
 node os-shell-checks/nav-smoke.mjs                          # small navigation smoke check of the shared shell (read-only): every module is reachable by clicking, every link the shell offers renders (founder, employee, Sales manager; desktop and phone)
 node os-shell-checks/a11y-states.mjs                         # keyboard and focus (Tab reach, focus ring, dialog focus and Escape, panel focus and return, Board Move to, My Work status),
                                                              # axe (WCAG 2.1 A/AA + best practice, serious/critical) on 13 pages x desktop/phone x dark/light, and "an error is not an empty list":

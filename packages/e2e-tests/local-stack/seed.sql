@@ -32,6 +32,12 @@ insert into employees (id, user_id, employee_number, company_id, country_code, f
   ('00000000-0000-4000-8000-0000000000e8', '00000000-0000-4000-8000-0000000000a8', 'L-8', '00000000-0000-4000-8000-00000000a002', 'PL', 'Piotr', 'Prezes',   '2024-01-01', null),
   ('00000000-0000-4000-8000-0000000000e9', '00000000-0000-4000-8000-0000000000a9', 'L-9', '00000000-0000-4000-8000-00000000a002', 'PL', 'Pola',  'Pracownik','2024-01-01', '00000000-0000-4000-8000-0000000000e8');
 
+-- fictional departments (local only): two in the UAE company, one in the Poland company (used to prove a department of another company is refused)
+insert into departments (id, company_id, name) values
+  ('00000000-0000-4000-8000-0000000000d2', '00000000-0000-4000-8000-00000000a001', 'Production Studio'),
+  ('00000000-0000-4000-8000-0000000000d3', '00000000-0000-4000-8000-00000000a001', 'Field Operations'),
+  ('00000000-0000-4000-8000-0000000000d4', '00000000-0000-4000-8000-00000000a002', 'Warsaw Workshop');
+
 insert into user_roles (user_id, role) values
   ('00000000-0000-4000-8000-0000000000a1', 'hr_admin'),
   ('00000000-0000-4000-8000-0000000000a2', 'hr_admin'),

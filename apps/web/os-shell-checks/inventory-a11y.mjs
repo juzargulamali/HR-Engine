@@ -109,7 +109,7 @@ const pages = [
   ["ceo@e2e.local", "/inventory"], ["ceo@e2e.local", `/inventory?open=${ITEM}`], ["ceo@e2e.local", `/inventory?unit=${UNIT}`], ["ceo@e2e.local", "/inventory?action=receive"],
   ["ceo@e2e.local", "/inventory?action=issue"], ["ceo@e2e.local", "/inventory?action=dispatch"], ["ceo@e2e.local", "/inventory?action=return"], ["ceo@e2e.local", "/inventory?action=transfer"],
   ["ceo@e2e.local", "/inventory?action=scan"], ["ceo@e2e.local", "/inventory/requests"], ["ceo@e2e.local", `/inventory/requests?open=${REQ}`], ["ceo@e2e.local", "/inventory/movements"],
-  ["ceo@e2e.local", "/inventory/manage"], ["ceo@e2e.local", "/inventory/access"], ["ceo@e2e.local", "/inventory/scan"], ["ceo@e2e.local", `/inventory/labels?item=${ITEM}`],
+  ["ceo@e2e.local", "/inventory/manage"], ["ceo@e2e.local", "/people-access"], ["ceo@e2e.local", "/inventory/scan"], ["ceo@e2e.local", `/inventory/labels?item=${ITEM}`],
   ["emp@e2e.local", "/inventory/mine"], ["hr@e2e.local", "/inventory/employees"], ["mgr@e2e.local", `/projects/${PRJ}/equipment`], ["mgr@e2e.local", `/projects/${PRJ}/equipment?request=${REQ}`],
   ["emp@e2e.local", `/sales/opportunities?open=${OPP}`], ["admin@e2e.local", "/inventory"],
 ];
@@ -141,7 +141,7 @@ const startData = () => execSync(
   `nohup "\${POSTGREST_BIN:-/home/user/tools/postgrest}" >"${LOGDIR}/postgrest.log" 2>&1 & echo $! > "${LOGDIR}/postgrest.pid"; sleep 2`, { shell: "/bin/bash", stdio: "ignore" });
 {
   const targets = [["ceo@e2e.local", "/inventory"], ["ceo@e2e.local", `/inventory?open=${ITEM}`], ["ceo@e2e.local", "/inventory/requests"], ["ceo@e2e.local", "/inventory/movements"], ["ceo@e2e.local", "/inventory/manage"],
-    ["ceo@e2e.local", "/inventory/access"], ["hr@e2e.local", "/inventory/employees"], ["emp@e2e.local", "/inventory/mine"], ["mgr@e2e.local", `/projects/${PRJ}/equipment`], ["emp@e2e.local", `/sales/opportunities?open=${OPP}`]];
+    ["ceo@e2e.local", "/people-access"], ["hr@e2e.local", "/inventory/employees"], ["emp@e2e.local", "/inventory/mine"], ["mgr@e2e.local", `/projects/${PRJ}/equipment`], ["emp@e2e.local", `/sales/opportunities?open=${OPP}`]];
   const sessions = new Map();
   for (const [email] of targets) if (!sessions.has(email)) { const page = await newPage(browser); await login(page, email); sessions.set(email, page); }
   stopData();

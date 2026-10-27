@@ -371,7 +371,7 @@ export async function linkEmployeeToUser(_prevState: ActionState, formData: Form
   if (d.email) {
     const { data: profile } = await supabase.from("profiles").select("id").ilike("email", d.email).maybeSingle();
     if (!profile) {
-      return { error: `No account found for ${d.email} — invite them from Admin → Users first, then link them here.` };
+      return { error: `No account found for ${d.email} — invite them from People & Access first, then link them here.` };
     }
     userId = profile.id;
   }

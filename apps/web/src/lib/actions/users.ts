@@ -56,7 +56,7 @@ export async function inviteUser(_prevState: ActionState, formData: FormData): P
     };
   }
 
-  revalidatePath("/admin/users");
+  revalidatePath("/people-access");
   return { error: null };
 }
 
@@ -133,7 +133,7 @@ export async function assignRole(_prevState: ActionState, formData: FormData): P
     return { error: error.message };
   }
 
-  revalidatePath("/admin/users");
+  revalidatePath("/people-access");
   return { error: null };
 }
 
@@ -148,7 +148,7 @@ export async function assignRole(_prevState: ActionState, formData: FormData): P
 export async function revokeRole(roleGrantId: string): Promise<{ error: string | null }> {
   const supabase = await createClient();
   const { error } = await supabase.rpc("revoke_role_grant", { p_role_grant_id: roleGrantId });
-  revalidatePath("/admin/users");
+  revalidatePath("/people-access");
   return { error: error?.message ?? null };
 }
 
@@ -187,6 +187,6 @@ export async function deleteUserAccount(userId: string): Promise<{ error: string
     };
   }
 
-  revalidatePath("/admin/users");
+  revalidatePath("/people-access");
   return { error: null };
 }

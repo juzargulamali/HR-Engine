@@ -20,7 +20,7 @@ export type AppRole = (typeof ROLES)[number];
 
 export const ROLE_LABELS: Record<AppRole, string> = {
   employee: "Employee",
-  line_manager: "Line Manager",
+  line_manager: "Reporting Manager",
   hr_admin: "HR Admin",
   finance: "Finance",
   ceo: "CEO",

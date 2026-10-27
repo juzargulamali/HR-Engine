@@ -2,11 +2,11 @@
 //   B1  which Inventory menu entries each person sees
 //   B2  which pages each person can use, and that people without stock access get no stock (also not in the page HTML)
 //   B3  direct calls to the data service with each person's REAL token: wrong-role functions are refused, tables are read-only and empty for the wrong person
-//   B4  purchase costs: founder only (or an explicit view_costs grant made on the Access page), never in the HTML for anyone else
+//   B4  purchase costs: founder only (or an explicit view_costs grant made in People & Access), never in the HTML for anyone else
 //   B5  locations: the Dubai operator can operate Dubai and not Riyadh
-//   B6  another company: a Poznan founder sees no AE stock; cross-company use needs an explicit sharing row made on the Access page, then revoked
+//   B6  another company: a Poznan founder sees no AE stock; cross-company use needs an explicit sharing row made in People & Access (Company settings), then revoked
 //   B7  access revoked while a page is open: the next action fails with the access message and the page then shows no access
-//   B8  direct addresses (/inventory/manage, /inventory/access) and the signed-out scan address (sign-in returns to the record)
+//   B8  direct addresses (/inventory/manage, and the old /inventory/access, which now leads to People & Access) and the signed-out scan address (sign-in returns to the record)
 //   B9  no automatic grants: only the seeded ones exist
 // NEEDS: the Inventory seed. RESEED=1 reseeds first.  ONLY=B3,B8 runs some sections.   Usage: RESEED=1 node os-shell-checks/inventory-flow-5-access.mjs
 import { makeRunner, maybeReseed, sql, sqlRows, asDb, until, sleep, rpc, rest, refusal, tokenFor, U, PERSONA, BASE } from "./inventory-flow-lib.mjs";
@@ -41,8 +41,9 @@ const MENU = {   // the sidebar shows the main pages only: My equipment, Scan an
   lead: ["/inventory", "/inventory/requests"],
   hr: ["/inventory", "/inventory/requests"],
   hr1: ["/inventory", "/inventory/requests", "/inventory/movements"],
-  ceo: ["/inventory", "/inventory/requests", "/inventory/movements", "/inventory/manage", "/inventory/access"],
-  pol: ["/inventory", "/inventory/requests", "/inventory/movements", "/inventory/manage", "/inventory/access"],
+  // access is managed in People & Access now, not from the Inventory menu
+  ceo: ["/inventory", "/inventory/requests", "/inventory/movements", "/inventory/manage"],
+  pol: ["/inventory", "/inventory/requests", "/inventory/movements", "/inventory/manage"],
 };
 const menuOf = async (page) => page.evaluate(() => [...new Set([...document.querySelectorAll("a[href^='/inventory']")].filter((a) => a.closest("nav, aside, header")).map((a) => new URL(a.href).pathname))].sort());
 if (run("B1")) {
@@ -107,14 +108,14 @@ if (run("B2")) {
       console.log("   " + seen.slice(0, 10).map((x) => x.slice(0, 110)).join("\n   "));
     });
   }
-  await step("B2 hr1@ (warehouse at Dubai): sees stock, but Setup and Access are closed to the role and say who can open them", async () => {
+  await step("B2 hr1@ (warehouse at Dubai): sees stock, but Setup is closed to the role, and People & Access offers no Inventory access management and no one's address", async () => {
     await R.as("hr1");
     await R.go("/inventory");
     check(/Laptop 14 inch/.test(await R.mainText()), "stock table is there");
-    await R.go("/inventory/access");
+    await R.go(`/people-access?person=u:${U(5)}&tab=modules`);
     let t = await R.mainText();
-    check(/Only a founder, or someone a founder gave access management to/.test(t), "Access: " + t.slice(0, 200));
-    check(!/ceo@e2e\.local|pol\.exec@/.test(await R.page.content()), "no other person's e-mail in the Access page HTML");
+    check(!/Module access/.test(t) && (await R.page.locator("main section[aria-labelledby^='pa-']").count()) === 0, "no module access cards for an operator: " + t.slice(0, 200));
+    check(!/ceo@e2e\.local|pol\.exec@/.test(await R.page.content()), "no other person's e-mail in the People & Access page HTML");
     await R.go("/inventory/manage");
     t = await R.mainText();
     eq(await R.page.getByRole("button", { name: "Add a category" }).count(), 0, "no Add a category button for the operator");
@@ -284,17 +285,15 @@ if (run("B4")) {
     await R.panel().waitFor();
     check(!/cost|price|currency/i.test(await R.panel().innerText()), "no cost wording in the receive form: " + (await R.panel().innerText()).replace(/\s+/g, " ").slice(0, 200));
   });
-  await step("B4 a founder gives hr1@ the separate 'see purchase costs' right on the Access page: the unit now shows its cost to hr1@ and the table returns it; revoking it hides it again", async () => {
+  await step("B4 a founder gives hr1@ the separate 'see purchase costs' right in People & Access: the unit now shows its cost to hr1@ and the table returns it; revoking it hides it again", async () => {
     await R.as("ceo");
     const tick = async (on) => {
-      await R.go("/inventory/access");
-      const row = R.page.locator("main li").filter({ hasText: "hr1@e2e.local" }).first();
-      await row.getByRole("button", { name: /^Change/ }).click();
-      await R.dialog().waitFor();
-      const box = R.dialog().getByLabel(/See purchase costs/i);
+      await R.go(`/people-access?person=u:${U(1)}&tab=modules`);
+      const card = R.page.locator("section[aria-labelledby^='pa-']", { has: R.page.getByRole("heading", { name: "Inventory", exact: true, level: 3 }) });
+      await card.getByText(/Choose rights one by one/).click();
+      const box = card.getByRole("checkbox", { name: /See purchase costs/i });
       if (on) await box.check(); else await box.uncheck();
-      await R.dialog().getByRole("button", { name: "Save changes" }).click();
-      await R.closedDialog();
+      await card.getByRole("button", { name: "Save changes" }).click();
     };
     await tick(true);
     await until(() => /view_costs/.test(s1(`select capabilities::text from inv_company_grants where user_id='${U(1)}' and revoked_at is null`)), 15000, "grant ");
@@ -372,9 +371,9 @@ if (run("B6")) {
     eq(s1("select count(*) from inv_movements"), before, "no movement");
     eq(s1(`select custody_kind from inv_units where code='${UNIT_CODE}'`), "warehouse", "unit stays");
   });
-  await step("B6 the AE founder makes the sharing row on the Access page (UI): then the same dispatch works; revoking it on the page stops the next one", async () => {
+  await step("B6 the AE founder makes the sharing row in People & Access, Company settings (UI): then the same dispatch works; revoking it there stops the next one", async () => {
     await R.as("ceo");
-    await R.go("/inventory/access");
+    await R.go("/people-access?view=company");
     await R.page.getByLabel(/^Allow this company to use/).selectOption({ label: "Enginious Local PL" });
     await R.page.getByRole("button", { name: "Allow this company" }).click();
     await until(() => s1(`select count(*) from inv_company_sharing where company_id='${AE}' and use_company_id='${PL}' and revoked_at is null`) === "1", 15000, "sharing row ");
@@ -387,7 +386,7 @@ if (run("B6")) {
     // bring it back (the founder's own route), then withdraw the permission
     const back = await rpc("hr1", "inv_return_from_project", { p_company_id: AE, p_location_id: DXB, p_project_id: PL_PROJECT, p_key: `b6r-${Date.now()}`, p_lines: [{ unit_id: UNIT_ID, condition: "good" }] });
     check(back.status < 300, "returned: " + JSON.stringify(back.body).slice(0, 160));
-    await R.go("/inventory/access");
+    await R.go("/people-access?view=company");
     await R.page.getByRole("button", { name: /Stop allowing/ }).first().click();
     await R.dialog().waitFor();
     await R.dialog().getByRole("button", { name: "Stop allowing" }).click();
@@ -441,14 +440,14 @@ if (run("B7")) {
       eq(countRows(await rest("hr1", "GET", "/inv_units?select=id")), 0, "and the data service returns nothing");
     } finally { await hr1.context().close(); }
   });
-  await step("B7 a founder gives hr1@ the warehouse right back at Dubai (Access page); the operator can work again", async () => {
+  await step("B7 a founder gives hr1@ the warehouse right back at Dubai (People & Access); the operator can work again", async () => {
     await R.as("ceo");
-    await R.go("/inventory/access");
-    await R.page.getByLabel("Find a colleague").fill("hr1");
-    await R.page.getByLabel("Person", { exact: true }).selectOption({ index: 1 });
-    await R.page.getByLabel(/Warehouse operator|Receive, issue/i).first().check().catch(async () => { await R.page.locator("input[name=capabilities][value=warehouse]").check(); });
-    await R.page.getByLabel("Dubai").check();
-    await R.page.getByRole("button", { name: "Give access" }).click();
+    await R.go(`/people-access?person=u:${U(1)}&tab=modules`);
+    const card = R.page.locator("section[aria-labelledby^='pa-']", { has: R.page.getByRole("heading", { name: "Inventory", exact: true, level: 3 }) });
+    await card.locator("select").first().selectOption({ label: "Storekeeper" });
+    await card.getByRole("button", { name: "Add preset" }).click();
+    await card.getByLabel("Dubai").check();
+    await card.getByRole("button", { name: "Give access" }).click();
     await until(() => s1(`select count(*) from inv_company_grants where user_id='${U(1)}' and revoked_at is null`) === "1", 15000, "regranted ");
     const ok = await rpc("hr1", "inv_receive_stock", { p_company_id: AE, p_location_id: DXB, p_key: `b7-${Date.now()}`, p_lines: [{ item_id: HDMI, qty: 1 }] });
     check(ok.status < 300, "Dubai works again: " + JSON.stringify(ok.body).slice(0, 200));
@@ -459,7 +458,7 @@ if (run("B7")) {
 // B8. Direct addresses and the signed-out scan address
 // =====================================================================================================================
 if (run("B8")) {
-  await step("B8 /inventory/manage and /inventory/access typed straight into the address bar: hr1@ and emp@ get a plain message, never an error page or data", async () => {
+  await step("B8 /inventory/manage and the old /inventory/access typed straight into the address bar: nobody gets an error page or data; people with nothing to manage are told so", async () => {
     for (const who of ["hr1", "emp", "admin", "mgr"]) {
       await R.as(who);
       for (const p of ["/inventory/manage", "/inventory/access"]) {
@@ -467,7 +466,10 @@ if (run("B8")) {
         check(res.status() < 400, `${who} ${p}: HTTP ${res.status()}`);
         const t = (await R.page.locator("main").innerText()).replace(/\s+/g, " ");
         check(!/Application error|Something went wrong|Internal Server/i.test(t), `${who} ${p} shows an error page`);
-        if (p === "/inventory/access") check(/Only a founder|do not have|not have access|no access/i.test(t), `${who} ${p}: ${t.slice(0, 160)}`);
+        if (p === "/inventory/access") {
+          check(new URL(R.page.url()).pathname === "/people-access", `${who} ${p} leads to People & Access: ${R.page.url()}`);
+          if (who === "emp" || who === "mgr") check(/cannot manage people or access/i.test(t), `${who} ${p}: ${t.slice(0, 160)}`);
+        }
         // an operator may START a count at their own location; nobody here may change access, categories, locations or settings
         eq(await R.page.locator("main").getByRole("button", { name: /Give access|Add a category|Add a location|Add a template|Revoke|Change|Save settings/ }).count(), 0, `${who} ${p}: nothing to change`);
         if (who !== "hr1") eq(await R.page.locator("main").getByRole("button", { name: /Start a count/ }).count(), 0, `${who} ${p}: cannot start a count`);

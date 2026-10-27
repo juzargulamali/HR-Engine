@@ -23,14 +23,12 @@ export default async function SalesLayout({ children }: { children: React.ReactN
     return <AccessNotice title="Sales & CRM">You do not have Sales access. Sales access is granted per company by the founders.</AccessNotice>;
   }
   const manageSettings = ctx.grants.some((g) => hasCrmCapability([g], g.companyId, "manage_settings"));
-  const manageAccess = ctx.grants.some((g) => hasCrmCapability([g], g.companyId, "manage_access"));
-  // The same short list as the sidebar: contacts and proposals are reached from Enquiries, settings and access from Manage.
+  // The same short list as the sidebar: contacts and proposals are reached from Enquiries, settings from Manage (access is under People & Access).
   const tabs: SalesTab[] = [
     { href: "/sales/follow-ups", label: "Follow-ups" },
     { href: "/sales/opportunities", label: "Enquiries" },
     { href: "/sales/reports", label: "Reports" },
     ...(manageSettings || isAnyCrmFounder(ctx.grants) ? [{ href: "/sales/settings", label: "Settings" }] : []),
-    ...(manageAccess ? [{ href: "/sales/access", label: "Access" }] : []),
   ];
   return (
     <div className="space-y-6">

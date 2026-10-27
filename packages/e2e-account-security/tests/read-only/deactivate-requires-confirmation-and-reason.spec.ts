@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { createTestAdminClient, createTestUser, deleteTestUser, type TestUser } from "../../src/adminClient";
 import { loginAs } from "../../src/auth";
+import { openAccountPanel } from "../../src/peopleAccess";
 
 /**
  * Proves the confirmation+reason requirement WITHOUT actually deactivating
@@ -16,16 +17,15 @@ test("dismissing the reason prompt aborts the deactivation — no state change",
 
   try {
     await loginAs(page, sysAdmin.email, sysAdmin.password);
-    await page.goto("/admin/users");
+    const account = await openAccountPanel(page, target.email);
 
     page.once("dialog", (dialog) => dialog.dismiss());
-    const row = page.getByRole("row", { name: new RegExp(target.email) });
-    await row.getByRole("button", { name: "Deactivate" }).click();
+    await account.getByRole("button", { name: "Deactivate" }).click();
 
     // No network round-trip should have happened — the badge stays Active.
     await page.waitForTimeout(500);
-    await expect(row.getByText("Active")).toBeVisible();
-    await expect(row.getByText(/Deactivated/i)).not.toBeVisible();
+    await expect(account.getByText("Active", { exact: true }).first()).toBeVisible();
+    await expect(account.getByText(/Deactivated/i)).not.toBeVisible();
   } finally {
     await deleteTestUser(admin, target.id);
     await deleteTestUser(admin, sysAdmin.id);
@@ -39,14 +39,13 @@ test("submitting a blank reason also aborts the deactivation", async ({ page }) 
 
   try {
     await loginAs(page, sysAdmin.email, sysAdmin.password);
-    await page.goto("/admin/users");
+    const account = await openAccountPanel(page, target.email);
 
     page.once("dialog", (dialog) => dialog.accept("   "));
-    const row = page.getByRole("row", { name: new RegExp(target.email) });
-    await row.getByRole("button", { name: "Deactivate" }).click();
+    await account.getByRole("button", { name: "Deactivate" }).click();
 
     await page.waitForTimeout(500);
-    await expect(row.getByText("Active")).toBeVisible();
+    await expect(account.getByText("Active", { exact: true }).first()).toBeVisible();
   } finally {
     await deleteTestUser(admin, target.id);
     await deleteTestUser(admin, sysAdmin.id);

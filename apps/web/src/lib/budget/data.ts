@@ -62,14 +62,14 @@ export const loadProjectBudgetAccess = cache(async (projectId: string): Promise<
  * grants, so it costs one tiny query on every page; the inbox itself is loaded only when the page is opened. Quiet like the tab: a database that
  * does not have the module yet, or any failure, simply means no menu entry.
  */
-export const loadBudgetNavAccess = cache(async (userId: string): Promise<{ any: boolean; finance: boolean }> => {
+export const loadBudgetNavAccess = cache(async (userId: string): Promise<{ any: boolean; finance: boolean; manageAccess: boolean }> => {
   try {
     const supabase = await createClient();
     const { data, error } = await supabase.from("pbx_company_grants").select("capabilities").eq("user_id", userId).is("revoked_at", null);
-    if (error || !data) return { any: false, finance: false };
+    if (error || !data) return { any: false, finance: false, manageAccess: false };
     const caps = data.flatMap((g) => g.capabilities as string[]);
-    return { any: caps.includes("finance") || caps.includes("view") || caps.includes("executive_approver"), finance: caps.includes("finance") };
+    return { any: caps.includes("finance") || caps.includes("view") || caps.includes("executive_approver"), finance: caps.includes("finance"), manageAccess: caps.includes("manage_access") };
   } catch {
-    return { any: false, finance: false };
+    return { any: false, finance: false, manageAccess: false };
   }
 });

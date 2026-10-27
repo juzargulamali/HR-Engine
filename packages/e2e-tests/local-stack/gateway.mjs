@@ -1,15 +1,16 @@
 // LOCAL-ONLY stand-in for the two Supabase services the app talks to, so the REAL Next.js app can be driven by a REAL
 // browser against a REAL Postgres without any hosted project:
 //   /rest/v1/*  -> PostgREST (the same component Supabase uses), enforcing the real RLS policies
-//   /auth/v1/*  -> a minimal password-grant token service (sign-in, refresh, user, logout) that signs HS256 JWTs with the
-//                  same secret PostgREST verifies. It accepts one fixed local password for users that exist in the throwaway
-//                  database's auth.users table. It is NOT Supabase Auth and never touches a real account or credential.
+//   /auth/v1/*  -> a minimal token service (sign-in, refresh, user, logout, plus the invite / recover / admin endpoints the account
+//                  controls use: see local-auth.mjs) that signs HS256 JWTs with the same secret PostgREST verifies. A user without a
+//                  password of their own accepts one fixed local password. It is NOT Supabase Auth and never touches a real account.
 // Usage: node gateway.mjs   (env: GATEWAY_PORT=54321 POSTGREST_PORT=3001 LOCAL_DB_URL=... LOCAL_JWT_SECRET=...)
 import http from "node:http";
 import crypto from "node:crypto";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { Pool } = require("pg");
+import { createLocalAuth } from "./local-auth.mjs";
 
 const PORT = Number(process.env.GATEWAY_PORT ?? 54321);
 const PGRST = Number(process.env.POSTGREST_PORT ?? 3001);
@@ -32,18 +33,10 @@ function verify(token) {
   const claims = JSON.parse(Buffer.from(p, "base64url").toString());
   return claims.exp && claims.exp * 1000 < Date.now() ? null : claims;
 }
-const user = (row) => ({
-  id: row.id, aud: "authenticated", role: "authenticated", email: row.email, email_confirmed_at: row.created_at,
-  phone: "", app_metadata: { provider: "email", providers: ["email"] }, user_metadata: row.raw_user_meta_data ?? {},
-  identities: [], created_at: row.created_at, updated_at: row.created_at, is_anonymous: false,
-});
-function session(row) {
-  const now = Math.floor(Date.now() / 1000);
-  const claims = { aud: "authenticated", role: "authenticated", sub: row.id, email: row.email, iat: now, exp: now + 3600, session_id: row.id, app_metadata: { provider: "email" }, user_metadata: {}, is_anonymous: false };
-  return { access_token: sign(claims), token_type: "bearer", expires_in: 3600, expires_at: claims.exp, refresh_token: sign({ sub: row.id, kind: "refresh", exp: now + 86400 }), user: user(row) };
-}
 const send = (res, code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(obj === undefined ? "" : JSON.stringify(obj)); };
 const readBody = (req) => new Promise((ok) => { const c = []; req.on("data", (d) => c.push(d)); req.on("end", () => ok(Buffer.concat(c))); });
+
+const localAuth = createLocalAuth({ pool, sign, verify, fixedPassword: PASSWORD, send, readBody });
 
 // Print the anon/service keys the app needs and exit: node gateway.mjs --keys
 if (process.argv.includes("--keys")) {
@@ -54,6 +47,11 @@ if (process.argv.includes("--keys")) {
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
+  // Hosted Supabase answers browser calls from the app's origin (the set-password page signs in from the browser): so does this stand-in.
+  res.setHeader("access-control-allow-origin", req.headers.origin ?? "*");
+  res.setHeader("access-control-allow-headers", req.headers["access-control-request-headers"] ?? "authorization, apikey, content-type");
+  res.setHeader("access-control-allow-methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
   try {
     if (url.pathname.startsWith("/rest/v1/")) {
       const upstream = http.request({ host: "127.0.0.1", port: PGRST, method: req.method, path: url.pathname.replace("/rest/v1", "") + url.search, headers: { ...req.headers, host: `127.0.0.1:${PGRST}` } }, (r) => { res.writeHead(r.statusCode ?? 502, r.headers); r.pipe(res); });
@@ -61,29 +59,7 @@ http.createServer(async (req, res) => {
       req.pipe(upstream);
       return;
     }
-    if (url.pathname === "/auth/v1/token" && req.method === "POST") {
-      const body = JSON.parse((await readBody(req)).toString() || "{}");
-      const grant = url.searchParams.get("grant_type");
-      let row;
-      if (grant === "password") {
-        if (body.password !== PASSWORD) return send(res, 400, { code: 400, error_code: "invalid_credentials", msg: "Invalid login credentials" });
-        row = (await pool.query("select id, email, raw_user_meta_data, created_at from auth.users where lower(email) = lower($1)", [body.email])).rows[0];
-        if (!row) return send(res, 400, { code: 400, error_code: "invalid_credentials", msg: "Invalid login credentials" });
-      } else if (grant === "refresh_token") {
-        const claims = verify(body.refresh_token);
-        if (!claims) return send(res, 400, { code: 400, error_code: "refresh_token_not_found", msg: "Invalid Refresh Token" });
-        row = (await pool.query("select id, email, raw_user_meta_data, created_at from auth.users where id = $1", [claims.sub])).rows[0];
-        if (!row) return send(res, 400, { code: 400, msg: "user not found" });
-      } else return send(res, 400, { msg: "unsupported grant" });
-      return send(res, 200, session(row));
-    }
-    if (url.pathname === "/auth/v1/user" && req.method === "GET") {
-      const claims = verify((req.headers.authorization ?? "").replace(/^Bearer /i, ""));
-      if (!claims?.sub) return send(res, 401, { code: 401, msg: "invalid JWT" });
-      const row = (await pool.query("select id, email, raw_user_meta_data, created_at from auth.users where id = $1", [claims.sub])).rows[0];
-      return row ? send(res, 200, user(row)) : send(res, 401, { code: 401, msg: "user not found" });
-    }
-    if (url.pathname === "/auth/v1/logout") return send(res, 204);
+    if (await localAuth(req, res, url)) return;
     send(res, 404, { msg: `local stack: ${req.method} ${url.pathname} is not implemented` });
   } catch (e) {
     send(res, 500, { msg: String(e?.message ?? e) });

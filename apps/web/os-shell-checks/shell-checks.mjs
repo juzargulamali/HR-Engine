@@ -20,7 +20,7 @@ for (const [name, email] of Object.entries(PERSONAS)) {
   ok(name === "nosales" ? !hasSales : hasSales, `Sales & CRM in nav is ${hasSales} (expected ${name !== "nosales"})`);
   if (name === "nosales") { ok(/You do not have Sales access/i.test(await page.locator("main").innerText()), "direct /sales shows the no-access message, no data"); }
   if (name === "sales") ok(!links.includes("Settings") && !links.includes("Access"), "Sales user without capabilities sees neither Settings nor Access");
-  if (name === "founder") ok(links.includes("Settings") && links.includes("Access"), "founder sees Settings and Access");
+  if (name === "founder") ok(links.includes("Settings") && !links.includes("Access"), "founder sees Settings, and no Sales-specific Access link (access is under People & Access)");
   // Inventory is a working module now (its own grants; a Project Manager sees it; every employee at least "My equipment"): every persona here is an employee, so it is never "Coming soon" for them.
   // (Changed on purpose when Inventory shipped. Per-person Inventory menus are covered by inventory-flow-5-access.mjs.) Vendors & Purchasing is still planned.
   ok(links.includes("Inventory") && !/Inventory\s*\n?\s*Coming soon/.test(t), "Inventory is a working module (not Coming soon) for an employee");
@@ -84,7 +84,7 @@ console.log("\n=== simplified Sales menu: Follow-ups, Enquiries, Reports; Manage
     await page.goto(`${BASE}/sales/follow-ups`, { waitUntil: "networkidle" }); const links = await sidebarLinks(page); const t = await sideText(page);
     ok(hasAll(links, ["Follow-ups", "Enquiries", "Reports"]), `${name}: Sales menu lists Follow-ups, Enquiries, Reports`);
     ok(none(links, SECONDARY), `${name}: secondary pages (${SECONDARY.join(", ")}) are not menu items`);
-    ok(manage ? hasAll(links, ["Settings", "Access"]) && /Manage/i.test(t) : none(links, ["Settings", "Access"]) && !/Manage/i.test(t.split("People & HR")[0]), `${name}: Manage menu (Settings, Access) ${manage ? "shown" : "absent"}`);
+    ok(manage ? hasAll(links, ["Settings"]) && none(links, ["Access"]) && /Manage/i.test(t) : none(links, ["Settings", "Access"]) && !/Manage/i.test(t.split("People & HR")[0]), `${name}: Manage menu (Settings) ${manage ? "shown" : "absent"}`);
     ok((await sidebarLinks(page)).filter((l) => l === "Follow-ups").length === 1, `${name}: Follow-ups is marked once`);
     { const cur = await page.locator("aside[aria-label='ENGINIOUS OS modules'] a[aria-current='page']").allInnerTexts(); ok(cur.length === 1 && /Follow-ups/.test(cur[0]), `${name}: exactly one menu link is marked as the current page (${cur.map((c) => c.trim()).join(" | ")})`); }
     await page.goto(`${BASE}/sales`, { waitUntil: "networkidle" }); ok(/\/sales\/follow-ups$/.test(page.url()), `${name}: /sales opens Follow-ups (${new URL(page.url()).pathname})`);

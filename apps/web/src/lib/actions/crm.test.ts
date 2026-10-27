@@ -12,7 +12,7 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc, from
 
 import { friendlyCrmError } from "@/lib/crm/errors";
 import {
-  addLink, checkDuplicates, completeFollowUp, createAndLinkContact, createOpportunity, grantCrmAccess, linkContact, markWon, moveStage, reopenOpportunity,
+  addLink, checkDuplicates, completeFollowUp, createAndLinkContact, createOpportunity, linkContact, markWon, moveStage, reopenOpportunity,
   saveCrmSettings, unlinkContact, updateContact, updateOpportunity,
 } from "./crm";
 
@@ -115,10 +115,6 @@ describe("links, access and settings", () => {
   it("accepts https links only", async () => {
     expect((await addLink({ error: null }, fd({ id: O, url: "http://insecure.example" }))).error).toMatch(/https/);
     expect((await addLink({ error: null }, fd({ id: O, url: "https://www.canva.com/design/x", purpose: "proposal" }))).error).toBeNull();
-  });
-  it("drops unknown capabilities before granting access", async () => {
-    await grantCrmAccess({ error: null }, fd({ userId: U, companyId: C, capabilities: ["assign_owner", "superuser"] }));
-    expect(rpc).toHaveBeenCalledWith("crm_grant_access", expect.objectContaining({ p_capabilities: ["assign_owner"] }));
   });
   it("stores a working calendar only when complete; otherwise leaves it not configured", async () => {
     const common = { companyId: C, referenceCode: "uae", currency: "aed" };

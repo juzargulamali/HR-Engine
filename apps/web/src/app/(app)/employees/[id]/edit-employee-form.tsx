@@ -172,7 +172,7 @@ export function EditEmployeeForm({
             <Label htmlFor="email">Account email</Label>
             <Input id="email" name="email" type="email" placeholder="name@enginious.ae" defaultValue={linkedEmail ?? ""} />
             <p className="text-sm text-muted-foreground">
-              Must already be invited from Admin → Users. Clear this field and save to unlink.
+              Must already be invited from People & Access. Clear this field and save to unlink.
             </p>
           </div>
           {linkState.error ? <Alert variant="destructive">{linkState.error}</Alert> : null}

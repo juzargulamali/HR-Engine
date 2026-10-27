@@ -67,6 +67,11 @@ export async function expectRedirectedToLogin(page: Page, route: string): Promis
   expect(finalUrl, `Expected an unauthenticated visit to ${route} to redirect to /login`).toMatch(/\/login(\?|$)/);
 }
 
+/** The denial notice is a calm `role="status"` card (AccessNotice); older screens used `role="alert"`. Either counts. */
+function denialNotice(page: Page, pattern: RegExp) {
+  return page.locator('[role="status"], [role="alert"]').filter({ hasText: pattern });
+}
+
 /**
  * For the six explicitly role-gated routes in ROLE_DENIED_ALERT only. Denial
  * here means: same URL (no redirect), 200, and the specific destructive
@@ -78,7 +83,7 @@ export async function expectRoleDenied(page: Page, route: keyof typeof ROLE_DENI
   if (!pattern) throw new Error(`${route} has no known role-denial alert text — see ROLE_DENIED_ALERT.`);
   const { finalUrl } = await visitDirectly(page, route);
   expect(finalUrl.endsWith(route), `Expected to stay on ${route} (role denial renders in place), was redirected to ${finalUrl}`).toBe(true);
-  await expect(page.getByRole("alert").filter({ hasText: pattern })).toBeVisible();
+  await expect(denialNotice(page, pattern).first()).toBeVisible();
 }
 
 /** For the six explicitly role-gated routes: the alert must be ABSENT for a
@@ -89,7 +94,7 @@ export async function expectRoleAllowed(page: Page, route: keyof typeof ROLE_DEN
   if (!pattern) throw new Error(`${route} has no known role-denial alert text — see ROLE_DENIED_ALERT.`);
   const { finalUrl, bodyText } = await visitDirectly(page, route);
   expect(finalUrl.endsWith(route), `Expected to stay on ${route}, was redirected to ${finalUrl}`).toBe(true);
-  await expect(page.getByRole("alert").filter({ hasText: pattern })).toHaveCount(0);
+  await expect(denialNotice(page, pattern)).toHaveCount(0);
   expect(bodyText.length, `Expected ${route} to render real content`).toBeGreaterThan(20);
 }
 
@@ -119,6 +124,6 @@ export async function expectProfileRenders(page: Page): Promise<void> {
   expect(finalUrl, `Expected /profile to render in place or redirect to /employees/<id>, was redirected to ${finalUrl}`).not.toMatch(/\/login(\?|$)/);
   const landedOnProfileOrOwnEmployeeRecord = finalUrl.endsWith("/profile") || /\/employees\/[0-9a-f-]{36}$/i.test(finalUrl);
   expect(landedOnProfileOrOwnEmployeeRecord, `Expected /profile to render in place or redirect to /employees/<id>, was redirected to ${finalUrl}`).toBe(true);
-  await expect(page.getByRole("alert").filter({ hasText: /restricted to|you need an hr admin grant/i })).toHaveCount(0);
+  await expect(denialNotice(page, /restricted to|you need an hr admin grant/i)).toHaveCount(0);
   expect(bodyText.length, "Expected /profile's rendered destination to have real content").toBeGreaterThan(20);
 }

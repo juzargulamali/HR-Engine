@@ -35,7 +35,8 @@ test.describe("change password validation", () => {
     await page.getByLabel("New password", { exact: true }).fill("short1A");
     await page.getByLabel("Confirm new password").fill("short1A");
     await page.getByRole("button", { name: "Change password" }).click();
-    await expect(page.getByText(/at least 10 characters|mix in at least 3/i)).toBeVisible();
+    // The requirements hint below the field says the same words, so match the error that is announced, not the hint.
+    await expect(page.getByRole("alert").filter({ hasText: /at least 10 characters|mix in at least 3/i })).toBeVisible();
   });
 
   test("rejects mismatched new-password confirmation", async ({ page }) => {

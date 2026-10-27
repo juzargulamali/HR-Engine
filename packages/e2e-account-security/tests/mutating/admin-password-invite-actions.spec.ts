@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { createTestAdminClient, createTestUser, deleteTestUser, type TestUser } from "../../src/adminClient";
 import { loginAs } from "../../src/auth";
+import { openAccountPanel } from "../../src/peopleAccess";
 
 /**
  * MUTATING: really sends real emails via Supabase (a password-reset email
@@ -23,9 +24,8 @@ test.describe("admin-triggered password reset and invite resend", () => {
 
   test("admin 'Send password reset' logs password_reset_sent_by_admin against the target", async ({ page }) => {
     await loginAs(page, sysAdmin.email, sysAdmin.password);
-    await page.goto("/admin/users");
-    const row = page.getByRole("row", { name: new RegExp(target.email) });
-    await row.getByRole("button", { name: "Send password reset" }).click();
+    const account = await openAccountPanel(page, target.email);
+    await account.getByRole("button", { name: "Send password reset" }).click();
 
     await expect
       .poll(async () => {

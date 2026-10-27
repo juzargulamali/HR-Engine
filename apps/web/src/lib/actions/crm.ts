@@ -581,29 +581,6 @@ export async function updateHandover(_prev: ActionState, formData: FormData): Pr
 // Access, settings, reminders
 // ---------------------------------------------------------------------------------------------------------------
 
-const grantSchema = z.object({ userId: uuid, companyId: uuid, note: optionalText });
-export async function grantCrmAccess(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const p = grantSchema.safeParse(Object.fromEntries(formData));
-  if (!p.success) return { error: "Choose a person and a company." };
-  const caps = formData.getAll("capabilities").map(String).filter((c): c is (typeof CRM_CAPABILITIES)[number] => (CRM_CAPABILITIES as readonly string[]).includes(c));
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("crm_grant_access", { p_user_id: p.data.userId, p_company_id: p.data.companyId, p_capabilities: caps, p_note: p.data.note ?? null });
-  if (error) return fail(error.message);
-  revalidatePath("/sales/access");
-  revalidatePath("/sales", "layout");
-  return { error: null };
-}
-
-export async function revokeCrmAccess(userId: string, companyId: string): Promise<ActionState> {
-  if (!uuid.safeParse(userId).success || !uuid.safeParse(companyId).success) return { error: "Missing details." };
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("crm_revoke_access", { p_user_id: userId, p_company_id: companyId });
-  if (error) return fail(error.message);
-  revalidatePath("/sales/access");
-  revalidatePath("/sales", "layout");
-  return { error: null };
-}
-
 const settingsSchema = z.object({
   companyId: uuid, referenceCode: z.string().trim().toUpperCase().regex(/^[A-Z]{2,5}$/, "Reference code: 2 to 5 capital letters"),
   currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "Currency: a 3-letter code such as AED"),

@@ -23,11 +23,16 @@ const BUDGET_PAGES = [
   [`/projects/${BPRJ}/budget`, "project budget"], [`/projects/${BPRJ}/budget?section=funds`, "project funds"], [`/projects/${BPRJ}/budget?section=actuals`, "project actual expenses"], [`/projects/${BPRJ}/budget?section=settlement`, "project settlement"],
   ["/finance/project-budgets", "finance inbox"], [`/finance/project-budgets/${BPRJ}`, "finance record: budget"], [`/finance/project-budgets/${BPRJ}?section=funds`, "finance record: funds"], [`/finance/project-budgets/${BPRJ}?section=actuals`, "finance record: actuals"], [`/finance/project-budgets/${BPRJ}?section=settlement`, "finance record: settlement"],
 ];
-const PAGES = process.env.AUDIT_SET === "budget" ? BUDGET_PAGES : [
+const PA = "00000000-0000-4000-8000-0000000000a4";
+const PEOPLE_PAGES = [
+  ["/people-access", "people list"], [`/people-access?person=u:${PA}&tab=account`, "account"], [`/people-access?person=u:${PA}&tab=job`, "job & department"], [`/people-access?person=u:${PA}&tab=roles`, "HR roles"],
+  [`/people-access?person=u:${PA}&tab=modules`, "module access"], ["/people-access?view=company", "company settings"],
+];
+const PAGES = process.env.AUDIT_SET === "people" ? PEOPLE_PAGES : process.env.AUDIT_SET === "budget" ? BUDGET_PAGES : [
   ["/inventory", "stock table"], [`/inventory?open=${ITEM}`, "item panel"], [`/inventory?unit=${UNIT}`, "unit panel"],
   ["/inventory?action=transfer", "transfer panel"], ["/inventory?action=receive", "receive panel"],
   ["/inventory/requests", "requests"], [`/inventory/requests?open=${REQ}`, "request panel"], ["/inventory/movements", "movements"],
-  ["/inventory/manage", "setup"], ["/inventory/access", "access"], ["/inventory/employees", "employees' equipment"],
+  ["/inventory/manage", "setup"], ["/inventory/employees", "employees' equipment"],
   [`/projects/${PRJ}/equipment`, "project equipment"], [`/sales/opportunities?open=${OPP}`, "enquiry panel"], [`/employees/${EMP}?tab=assets`, "HR assets tab"],
 ].filter(([p]) => !/undefined|=\s*$|\/$/.test(p));
 

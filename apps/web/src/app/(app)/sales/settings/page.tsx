@@ -126,7 +126,7 @@ export default async function SalesSettingsPage() {
       })}
 
       {ctx.companies.some((c) => canManageCrmAccess(ctx.grants, c.id)) ? (
-        <p className="text-sm text-muted-foreground">Who can use Sales is managed under <Link href="/sales/access" className="underline underline-offset-2">Access</Link>.</p>
+        <p className="text-sm text-muted-foreground">Who can use Sales is managed under <Link href="/people-access" className="underline underline-offset-2">People & Access</Link>.</p>
       ) : null}
     </div>
   );
