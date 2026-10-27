@@ -4,6 +4,8 @@
 
 The rules, their reasons and the findings behind them: [people-access-security-proposal.md](./people-access-security-proposal.md) (you approved R1, R2 and R3, subject to preserving existing grants, company boundaries and owner-SQL recovery, and with the last eligible Budget approver protected).
 
+**Where this fits:** the order of the two pull requests and these steps is in [people-access-deployment-order.md](./people-access-deployment-order.md); apply the migration after PR #50 is live and before PR #51 is merged.
+
 ## What it changes, in one paragraph
 
 `supabase/migrations/20261215000000_access_grant_rules.sql` replaces **six functions** in place (`create or replace`): `pbx_grant_access`, `pbx_revoke_access`, `crm_grant_access`, `crm_revoke_access`, `proj_revoke_access`, `inv_revoke_access`. It adds no table, column, trigger, policy or privilege, and it does not touch a single grant row. **Nobody gains or loses any access by applying it.** What changes is who may *change* access afterwards:
