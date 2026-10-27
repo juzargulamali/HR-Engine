@@ -106,6 +106,7 @@ export function PersonDetail({ data, tab, params }: { data: PeopleAccessData; ta
                             grant={g ? { capabilities: g.capabilities, grantedAt: g.grantedAt, grantedByName: g.grantedByName, note: g.note } : null}
                             accessManagerCount={m.holders.filter((h) => h.capabilities.includes("manage_access")).length}
                             founderCount={m.holders.filter((h) => h.capabilities.includes("founder")).length}
+                            approverCount={m.holders.filter((h) => h.capabilities.includes("executive_approver")).length}
                             locations={m.locations} assignedLocationIds={assigned}
                           />
                         );

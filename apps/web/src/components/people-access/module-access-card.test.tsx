@@ -81,7 +81,7 @@ describe("who may give what (exactly the old screens' rules)", () => {
     fireEvent.click(screen.getByText(/choose rights one by one/i));
     expect((screen.getByLabelText(/see purchase costs/i) as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByLabelText(/warehouse operator/i) as HTMLInputElement).disabled).toBe(false);
-    expect(screen.getByText(/only an inventory founder can give founder, access-management or cost rights/i)).toBeTruthy();
+    expect(screen.getAllByText(/only an inventory founder can give founder, access-management or cost rights/i).length).toBeGreaterThan(0);
   });
 
   it("a founder can pick everything", () => {
@@ -97,10 +97,60 @@ describe("who may give what (exactly the old screens' rules)", () => {
     expect(screen.queryByRole("button", { name: /remove access/i })).toBeNull();
   });
 
-  it("Budget has no founder tier: a budget access manager may give any budget right", () => {
+  it("Budget has no founder tier: a budget access manager may give any budget right except the approver right (rule R1)", () => {
     render(<ModuleAccessCard {...props({ module: "budget", viewerCapabilities: ["manage_access"] })} />);
     const select = screen.getByLabelText(/give access/i);
-    for (const name of [/finance/i, /ceo \/ cto approver/i, /read only/i, /budget access manager/i]) expect((within(select).getByRole("option", { name }) as HTMLOptionElement).disabled).toBe(false);
+    for (const name of [/finance/i, /read only/i, /budget access manager/i]) expect((within(select).getByRole("option", { name }) as HTMLOptionElement).disabled).toBe(false);
+    expect((within(select).getByRole("option", { name: /ceo \/ cto approver/i }) as HTMLOptionElement).disabled).toBe(true);
+    expect(screen.getAllByText(/only a ceo \/ cto approver of this company can give or remove the approver right/i).length).toBeGreaterThan(0);
+  });
+
+  it("R1: a CEO / CTO approver may give the approver right", () => {
+    render(<ModuleAccessCard {...props({ module: "budget", viewerCapabilities: ["manage_access", "executive_approver"] })} />);
+    const select = screen.getByLabelText(/give access/i);
+    expect((within(select).getByRole("option", { name: /ceo \/ cto approver/i }) as HTMLOptionElement).disabled).toBe(false);
+  });
+
+  it("R1: a Finance access manager cannot remove an approver's right, or the approver's access, and is told why", () => {
+    render(<ModuleAccessCard {...props({ module: "budget", viewerCapabilities: ["manage_access", "finance"], grant: held(["executive_approver", "view"]) })} />);
+    fireEvent.click(screen.getByText(/choose rights one by one/i));
+    expect((screen.getByRole("checkbox", { name: /^ceo \/ cto approver/i }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("checkbox", { name: /^read only/i }) as HTMLInputElement).disabled).toBe(false); // other rights of an approver can still be changed
+    expect(screen.queryByRole("button", { name: /remove access/i })).toBeNull();
+    expect(screen.getByText(/access cannot be removed here\. only a ceo \/ cto approver of this company can withdraw an approver/i)).toBeTruthy();
+  });
+
+  it("R2: nobody can add a right to their own access: presets and ticks that would add are disabled, removing is allowed", () => {
+    render(<ModuleAccessCard {...props({ module: "budget", viewerCapabilities: ["manage_access", "finance"], person: { userId: "me", name: "Me", isSelf: true }, grant: held(["manage_access", "finance"]) })} />);
+    const select = screen.getByLabelText(/add to their access/i);
+    expect((within(select).getByRole("option", { name: /read only/i }) as HTMLOptionElement).disabled).toBe(true);
+    expect(screen.getAllByText(/you cannot add rights to your own access/i).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByText(/choose rights one by one/i));
+    expect((screen.getByRole("checkbox", { name: /^read only/i }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("checkbox", { name: /^finance/i }) as HTMLInputElement).disabled).toBe(false); // already held: it may be unticked
+  });
+
+  it("R2 in Sales: a founder may still tick anything on their own row (they already hold every right)", () => {
+    render(<ModuleAccessCard {...props({ module: "sales", viewerCapabilities: ["founder"], person: { userId: "me", name: "Me", isSelf: true }, grant: held(["founder"]) })} />);
+    const select = screen.getByLabelText(/add to their access/i);
+    expect((within(select).getByRole("option", { name: /sales lead/i }) as HTMLOptionElement).disabled).toBe(false);
+  });
+
+  it("R3 in Sales: an access manager cannot change or withdraw another access manager, but can step down themselves", () => {
+    const { unmount } = render(<ModuleAccessCard {...props({ module: "sales", viewerCapabilities: ["manage_access"], grant: held(["manage_access", "assign_owner"]) })} />);
+    expect(screen.getByText(/only a founder can change this person's access/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /remove access/i })).toBeNull();
+    unmount();
+    render(<ModuleAccessCard {...props({ module: "sales", viewerCapabilities: ["manage_access"], person: { userId: "me", name: "Me", isSelf: true }, grant: held(["manage_access", "assign_owner"]) })} />);
+    expect(screen.queryByText(/only a founder can change this person's access/i)).toBeNull();
+    expect(screen.getByRole("button", { name: /remove access/i })).toBeTruthy();
+  });
+
+  it("warns before the last eligible approver would be removed", () => {
+    render(<ModuleAccessCard {...props({ module: "budget", viewerCapabilities: ["manage_access", "executive_approver"], person: { userId: "me", name: "Me", isSelf: true }, grant: held(["manage_access", "executive_approver"]), approverCount: 1, accessManagerCount: 2 })} />);
+    fireEvent.click(screen.getByText(/choose rights one by one/i));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^ceo \/ cto approver/i }));
+    expect(screen.getByText(/only ceo \/ cto approver of/i)).toBeTruthy();
   });
 
   it("Budget cannot be given with nothing chosen", () => {

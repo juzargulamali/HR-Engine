@@ -320,6 +320,82 @@ await step("HR Admin: sees employees but no addresses, no accounts, no roles, no
   await expectText(/no company settings for you to see/);
 });
 
+// ---- the access grant rules R1 to R3, as the screen shows them (the database proves them; see packages/rls-tests/test/access_grant_rules.rls.test.ts) --------------------------
+const presetOption = (c, label) => c.locator("select").first().locator("option", { hasText: label });
+const budgetCard = () => card("Project budgets");
+await as("hr1", { width: 1280, height: 900 }, "dark");
+await step("R1 on screen: a Finance access manager who is not an approver sees the approver preset greyed out, with the reason, and can still give other rights", async () => {
+  db(`delete from pbx_company_grants where user_id='${U(5)}'`);
+  await go(personUrl(5, "modules"));
+  const c = budgetCard();
+  if (!(await presetOption(c, "CEO / CTO approver").isDisabled())) throw new Error("the approver preset is offered to someone who is not an approver");
+  if (await presetOption(c, "Finance").isDisabled()) throw new Error("an ordinary preset is greyed out");
+  await c.getByText(/Only a CEO \/ CTO approver of this company can give or remove the approver right/).first().waitFor();
+});
+await step("R2 on screen: on one's own card, presets and ticks that would add a right are greyed out; the reason is shown", async () => {
+  await go(personUrl(1, "modules"));
+  const c = budgetCard();
+  if (!(await presetOption(c, "Read only").isDisabled())) throw new Error("a preset that adds to one's own access is offered");
+  await c.getByText(/You cannot add rights to your own access/).first().waitFor();
+  await c.getByText(/Choose rights one by one/).click();
+  if (!(await c.getByRole("checkbox", { name: /^Read only/ }).isDisabled())) throw new Error("a right that would be added to oneself can be ticked");
+});
+await as("ceo", { width: 1280, height: 900 }, "dark");
+db(`insert into pbx_company_grants (user_id, company_id, capabilities, note) values ('${U(3)}', '${CO}', '{executive_approver,manage_access}', 'owner-run for the test') on conflict (user_id, company_id) where revoked_at is null do update set capabilities = excluded.capabilities`);
+await step("R1 on screen: a CEO / CTO approver (named by the owner) can give the approver right, and it is saved", async () => {
+  await go(personUrl(5, "modules"));
+  const c = budgetCard();
+  if (await presetOption(c, "CEO / CTO approver").isDisabled()) throw new Error("an approver cannot give the approver right");
+  await choosePreset(c, "CEO / CTO approver");
+  await c.getByRole("button", { name: "Give access" }).click();
+  await untilDb(`select array_to_string(array(select unnest(capabilities) order by 1), ',') from pbx_company_grants where user_id='${U(5)}' and revoked_at is null`, "executive_approver");
+});
+await as("hr1", { width: 1280, height: 900 }, "dark");
+await step("R1 on screen: a Finance access manager cannot remove an approver: the right is greyed out, there is no Remove access, and the reason is shown; other rights can still be changed", async () => {
+  await go(personUrl(5, "modules"));
+  const c = budgetCard();
+  await c.getByText(/Choose rights one by one/).click();
+  if (!(await c.getByRole("checkbox", { name: /^CEO \/ CTO approver/ }).isDisabled())) throw new Error("the approver right can be unticked by a non-approver");
+  if (await c.getByRole("checkbox", { name: /^Read only/ }).isDisabled()) throw new Error("another right of an approver is greyed out");
+  if ((await c.getByRole("button", { name: /Remove access/ }).count()) !== 0) throw new Error("Remove access is offered for an approver");
+  await c.getByText(/Access cannot be removed here\. Only a CEO \/ CTO approver of this company can withdraw an approver/).waitFor();
+  // and the database says the same when the request is forged: a withdrawal by revoke
+  const { rpc } = await import("./inventory-flow-lib.mjs");
+  const r = await rpc("hr1", "pbx_revoke_access", { p_user_id: U(5), p_company_id: CO });
+  if (r.status < 400 || !/Only a CEO \/ CTO approver of this company can withdraw an approver/.test(JSON.stringify(r.body))) throw new Error(`the database did not refuse: ${r.status} ${JSON.stringify(r.body)}`);
+});
+await as("ceo", { width: 1280, height: 900 }, "dark");
+await step("R1 on screen: the last eligible approver is warned about and the database refuses to remove them; they stay an approver", async () => {
+  db(`update pbx_company_grants set revoked_at = now() where user_id in ('${U(5)}', '${U(6)}') and company_id='${CO}' and revoked_at is null and 'executive_approver' = any (capabilities)`);
+  await go(personUrl(3, "modules"));
+  const c = budgetCard();
+  await c.getByText(/Choose rights one by one/).click();
+  await c.getByRole("checkbox", { name: /^CEO \/ CTO approver/ }).uncheck();
+  await c.getByText(/only CEO \/ CTO approver of/i).waitFor();
+  await c.getByRole("button", { name: "Save changes" }).click();
+  await seen(/last eligible CEO \/ CTO approver/);
+  if (!/executive_approver/.test(db(`select capabilities from pbx_company_grants where user_id='${U(3)}' and revoked_at is null`))) throw new Error("the last approver was removed");
+});
+await step("R3 on screen (Sales): an access manager who is not a founder cannot change or withdraw another access manager, can step down themselves, and a founder can do both", async () => {
+  db(`delete from crm_company_grants where user_id in ('${U(4)}', '${U(5)}')`);
+  db(`insert into crm_company_grants (user_id, company_id, capabilities) values ('${U(4)}', '${CO}', '{manage_access}'), ('${U(5)}', '${CO}', '{manage_access,assign_owner}')`);
+  await as("mgr", { width: 1280, height: 900 }, "dark");
+  await go(personUrl(5, "modules"));
+  const other = card("Sales & CRM");
+  await other.getByText(/Only a founder can change this person's access/).waitFor();
+  if ((await other.getByRole("button", { name: /Remove access/ }).count()) !== 0) throw new Error("Remove access is offered for another access manager");
+  await go(personUrl(4, "modules"));
+  await card("Sales & CRM").getByRole("button", { name: /Remove access/ }).waitFor();     // stepping down oneself
+  await card("Sales & CRM").getByText(/Choose rights one by one/).click();
+  if (!(await card("Sales & CRM").getByRole("checkbox", { name: /^Reopen closed/ }).isDisabled())) throw new Error("an access manager can tick a right onto their own access");
+  await as("ceo", { width: 1280, height: 900 }, "dark");
+  await go(personUrl(5, "modules"));
+  await card("Sales & CRM").getByRole("button", { name: /Remove access/ }).waitFor();     // a founder may withdraw an access manager
+  // put the sample scenario's Sales grants back (mgr and emp are ordinary Sales people there)
+  db(`delete from crm_company_grants where user_id in ('${U(4)}', '${U(5)}')`);
+  db(`insert into crm_company_grants (user_id, company_id, capabilities) values ('${U(4)}', '${CO}', '{}'), ('${U(5)}', '${CO}', '{}')`);
+});
+
 // ---- changing a job without the right ------------------------------------------------------------------------------------------------------------
 const patch = (key, id, body) => import("./inventory-flow-lib.mjs").then(({ rest }) => rest(key, "PATCH", `/employees?id=eq.${id}`, body, { prefer: "return=representation" }));
 await as("admin", { width: 1280, height: 900 }, "light");
@@ -409,14 +485,14 @@ for (const who of ["admin", "ceo", "hr1", "hr", "mgr", "emp"]) {
 // A person who held access before still has exactly that access afterwards: the screen offers each person the management they had on the old screens.
 await step("existing management rights carry over: founder (Sales, Projects) manages those two; budget manager manages Budget; HR Admin edits jobs; nobody else gets anything", async () => {
   const seen = {};
-  for (const [who, expected] of [["admin", "accounts"], ["ceo", "modules:Projects & Tasks,Sales & CRM"], ["hr1", "modules:Project budgets+job"], ["hr", "job"], ["mgr", "none"], ["emp", "none"], ["lead", "none"]]) {
+  for (const [who, expected] of [["admin", "accounts"], ["ceo", "modules:Project budgets,Projects & Tasks,Sales & CRM"], ["hr1", "modules:Project budgets+job"], ["hr", "job"], ["mgr", "none"], ["emp", "none"], ["lead", "none"]]) {
     await as(who, { width: 1280, height: 900 }, "dark");
     await go(personUrl(5));
     const t = await tabs();
     const got = t.includes("Module access") ? await (async () => { await go(personUrl(5, "modules")); const heads = (await page.locator('section[aria-labelledby^="pa-"] h3').allInnerTexts()).sort(); return `modules:${heads.join(",")}${t.includes("Job & department") ? "+job" : ""}`; })()
       : t.includes("Account") ? "accounts" : t.includes("Job & department") ? "job" : "none";
     seen[who] = got;
-    const ok = expected.startsWith("modules:Project budgets") ? got.startsWith("modules:Project budgets") && got.endsWith("+job") : got === expected;
+    const ok = who === "hr1" ? got.startsWith("modules:Project budgets") && got.endsWith("+job") : got === expected;
     if (!ok) throw new Error(`${who}: expected ${expected}, saw ${got}`);
   }
 });

@@ -43,6 +43,12 @@ describe("Project Budget & Expenses", () => {
   const failsCommit = (user: string, sql: string, re: RegExp) => expect(commit(user, sql)).rejects.toThrow(re);
   const call = async <T = unknown>(user: string, sql: string): Promise<T> => (Object.values((await commit<Row>(user, sql))[0])[0] as T);
 
+  // The company's CEO / CTO approver is named by the owner (pbx_30_bootstrap_access.sql writes the table as the database owner), and a Finance access manager can no
+  // longer appoint or withdraw one (access grant rules R1). These two helpers do what the owner-run script and an owner-run correction do.
+  const appointApprover = (user: string, company: string) => admin(`insert into pbx_company_grants (user_id, company_id, capabilities, note) values ('${user}', '${company}', '{executive_approver}', 'owner-run setup')
+    on conflict (user_id, company_id) where revoked_at is null do update set capabilities = excluded.capabilities`);
+  const withdrawApprover = (user: string, company: string) => admin(`update pbx_company_grants set revoked_at = now() where user_id = '${user}' and company_id = '${company}' and revoked_at is null`);
+
   let tableGrants: Row[] = [];
   let functionGrants: Row[] = [];
   let hrBefore = "";
@@ -411,11 +417,11 @@ describe("Project Budget & Expenses", () => {
       await failsCommit(U.fin2, `select pbx_decide_budget('${d.id}', 'approve')`, /CEO or CTO/);
       await failsCommit(U.ceo, `select pbx_decide_budget('${d.id}', 'approve')`, /Budget not found|CEO or CTO/);
       // an authorised CEO/CTO approver of KSA releases it
-      await commit(U.ksaFin, `select pbx_grant_access('${U.ksaCeo}', '${CO.ksa}', '{executive_approver}')`);
+      await appointApprover(U.ksaCeo, CO.ksa);
       expect((await view(U.ksaFin, p)).versions[0].on_hold).toBe(false);
       expect(await call<string>(U.ksaCeo, `select pbx_decide_budget('${d.id}', 'approve')`)).toBe("approved");
       await commit(U.ksaFin, `select pbx_revoke_access('${U.fin2}', '${CO.ksa}')`);
-      await commit(U.ksaFin, `select pbx_revoke_access('${U.ksaCeo}', '${CO.ksa}')`);
+      await withdrawApprover(U.ksaCeo, CO.ksa);
     });
 
     it("additional budget requests show only the increment; pending, returned and rejected ones never raise the approved amount", async () => {
@@ -887,22 +893,22 @@ describe("Project Budget & Expenses", () => {
 
     it("without an eligible CEO/CTO approver the closure is held; Finance can still reopen, but cannot re-close", async () => {
       // KSA: Finance PM; a CEO approver exists only while the expenses are decided, then is removed
-      await commit(U.ksaFin, `select pbx_grant_access('${U.ksaCeo}', '${CO.ksa}', '{executive_approver}')`);
+      await appointApprover(U.ksaCeo, CO.ksa);
       const s = await settleSetup(U.ksaFin, U.ksaCeo, U.ksaCeo, CO.ksa);
-      await commit(U.ksaFin, `select pbx_revoke_access('${U.ksaCeo}', '${CO.ksa}')`);
+      await withdrawApprover(U.ksaCeo, CO.ksa);
       await commit(U.ksaFin, `select pbx_record_receipts('${s.b.budget}', 'received')`);
       await call(U.ksaFin, pay(s.b.budget, U.ksaFin, 360));
       expect((await view(U.ksaFin, s.project)).budget).toMatchObject({ settlement_route: "executive", can_close_settlement: false, can_confirm_receipts: false });
       await failsCommit(U.ksaFin, `select pbx_close_settlement('${s.b.budget}', null)`, /CEO or CTO/);
       await failsCommit(U.ceo, `select pbx_close_settlement('${s.b.budget}', null)`, /Budget not found|CEO or CTO/);            // the UAE approver has no say in KSA
-      await commit(U.ksaFin, `select pbx_grant_access('${U.ksaCeo}', '${CO.ksa}', '{executive_approver}')`);
+      await appointApprover(U.ksaCeo, CO.ksa);
       await commit(U.ksaCeo, `select pbx_confirm_receipts('${s.b.budget}')`);
       await commit(U.ksaCeo, `select pbx_close_settlement('${s.b.budget}', null)`);
       await commit(U.ksaFin, `select pbx_reopen_settlement('${s.b.budget}', 'A late bank fee')`);                               // Finance may reopen, with a reason
       expect((await settlementOf(s.b.budget)).settlement_status).toBe("open");
       await failsCommit(U.ksaFin, `select pbx_close_settlement('${s.b.budget}', null)`, /CEO or CTO/);                           // but not close again
       await commit(U.ksaCeo, `select pbx_close_settlement('${s.b.budget}', 'Reclosed')`);
-      await commit(U.ksaFin, `select pbx_revoke_access('${U.ksaCeo}', '${CO.ksa}')`);
+      await withdrawApprover(U.ksaCeo, CO.ksa);
     });
   });
 

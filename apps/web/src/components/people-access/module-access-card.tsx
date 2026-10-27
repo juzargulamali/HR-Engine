@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  ACCESS_MODULE_LABELS, ACCESS_PRESETS, applyPreset, capabilitiesOf, capabilityInfo, describeAccess, diffCapabilities, founderOnlyExplanation, grantableCapabilities,
+  ACCESS_MODULE_LABELS, ACCESS_PRESETS, applyPreset, capabilitiesOf, capabilityInfo, describeAccess, diffCapabilities, capabilityToggleBlockedReason, evaluateRevoke,
   isNoChange, normaliseCapabilities, presetBlockedReason, presetById, targetLockedForViewer, type AccessModule,
 } from "@enginious-hr/domain";
 import { applyModuleAccess, revokeModuleAccess } from "@/lib/actions/peopleAccess";
@@ -25,6 +25,8 @@ export interface ModuleAccessCardProps {
   /** Holders of the access-management and founder rights of this company, for the "last one" warnings (the database refuses those too). */
   accessManagerCount: number;
   founderCount: number;
+  /** Holders of the CEO / CTO approver right (Budget); the database counts only active ones, so this can overstate. */
+  approverCount?: number;
   locations: { id: string; name: string; isActive: boolean }[];
   assignedLocationIds: string[];
 }
@@ -54,15 +56,19 @@ function Chips({ module, caps, tone }: { module: AccessModule; caps: readonly st
 }
 
 export function ModuleAccessCard(props: ModuleAccessCardProps) {
-  const { module, company, viewerCapabilities, person, grant, accessManagerCount, founderCount, locations, assignedLocationIds } = props;
+  const { module, company, viewerCapabilities, person, grant, accessManagerCount, founderCount, approverCount = 0, locations, assignedLocationIds } = props;
   const original = grant?.capabilities ?? [];
   const [caps, setCaps] = useState<string[]>(original);
   const [presetId, setPresetId] = useState("");
   const [locIds, setLocIds] = useState<string[]>(assignedLocationIds);
   const [removing, setRemoving] = useState(false);
 
-  const allowed = new Set(grantableCapabilities(module, viewerCapabilities));
-  const locked = grant !== null && targetLockedForViewer(module, viewerCapabilities, grant.capabilities);
+  // The access grant rules, as the database applies them: the screen disables what would be refused and says why.
+  const target = { capabilities: original, self: person.isSelf };
+  const locked = grant !== null && targetLockedForViewer(module, viewerCapabilities, original, person.isSelf);
+  const revokeBlocked = grant ? evaluateRevoke(module, viewerCapabilities, target).reason : null;
+  const presetReasons = new Map(ACCESS_PRESETS[module].map((p) => [p.id, presetBlockedReason(module, viewerCapabilities, p, target, caps)] as const));
+  const distinctReasons = [...new Set([...presetReasons.values()].filter((r): r is string => r !== null))];
   const diff = diffCapabilities(module, original, caps);
   const locationsChanged = [...locIds].sort().join(",") !== [...assignedLocationIds].sort().join(",");
   const needsLocations = module === "inventory" && caps.includes("warehouse") && !caps.includes("cross_location") && !caps.includes("founder");
@@ -71,6 +77,8 @@ export function ModuleAccessCard(props: ModuleAccessCardProps) {
   const losesLastFounder = grant?.capabilities.includes("founder") && !caps.includes("founder") && founderCount <= 1;
   const removesLastManager = grant?.capabilities.includes("manage_access") && accessManagerCount <= 1;
   const removesLastFounder = grant?.capabilities.includes("founder") && founderCount <= 1;
+  const losesLastApprover = module === "budget" && original.includes("executive_approver") && !caps.includes("executive_approver") && approverCount <= 1;
+  const removesLastApprover = module === "budget" && original.includes("executive_approver") && approverCount <= 1;
   const idPrefix = `pa-${module}-${company.id}`;
   const before = grant === null ? "" : original.length === 0 ? "-" : original.join(",");
 
@@ -100,7 +108,7 @@ export function ModuleAccessCard(props: ModuleAccessCardProps) {
         <p className="text-sm text-muted-foreground">Only a founder can change this person&apos;s access, because they hold a founder, access-management{module === "inventory" ? " or cost" : ""} right.</p>
       ) : (
         <ActionForm action={applyModuleAccess} submitLabel={grant ? "Save changes" : "Give access"} pendingLabel="Saving…" className="space-y-3" disabled={!changed}
-          secondary={grant ? <Button type="button" variant="ghost" className="text-destructive" onClick={() => setRemoving(true)}>Remove access{" "}<span className="sr-only">to {ACCESS_MODULE_LABELS[module]} for {person.name}</span></Button> : undefined}>
+          secondary={grant && revokeBlocked === null ? <Button type="button" variant="ghost" className="text-destructive" onClick={() => setRemoving(true)}>Remove access{" "}<span className="sr-only">to {ACCESS_MODULE_LABELS[module]} for {person.name}</span></Button> : undefined}>
           <input type="hidden" name="module" value={module} />
           <input type="hidden" name="userId" value={person.userId} />
           <input type="hidden" name="companyId" value={company.id} />
@@ -115,27 +123,29 @@ export function ModuleAccessCard(props: ModuleAccessCardProps) {
               <Select id={`${idPrefix}-preset`} value={presetId} onChange={(e) => setPresetId(e.target.value)}>
                 <option value="">Choose a preset…</option>
                 {ACCESS_PRESETS[module].map((p) => {
-                  const blocked = presetBlockedReason(module, viewerCapabilities, p);
-                  return <option key={p.id} value={p.id} disabled={blocked !== null}>{p.label}{blocked ? " (founders only)" : ""}</option>;
+                  const blocked = presetReasons.get(p.id) ?? null;
+                  return <option key={p.id} value={p.id} disabled={blocked !== null} title={blocked ?? undefined}>{p.label}{blocked ? " (not available)" : ""}</option>;
                 })}
               </Select>
             </div>
             <Button type="button" variant="outline" disabled={presetId === ""} onClick={addPreset}>Add preset</Button>
           </div>
           {presetId ? <p className="text-sm text-muted-foreground">{presetById(module, presetId)?.summary}{presetById(module, presetId)?.note ? ` ${presetById(module, presetId)?.note}` : ""}</p> : null}
-          {module !== "budget" && ACCESS_PRESETS[module].some((p) => presetBlockedReason(module, viewerCapabilities, p)) ? <p className="text-sm text-muted-foreground">{founderOnlyExplanation(module)}</p> : null}
+          {distinctReasons.map((r) => <p key={r} className="text-sm text-muted-foreground">{r}</p>)}
+          {grant && revokeBlocked ? <p className="text-sm text-muted-foreground">Access cannot be removed here. {revokeBlocked}</p> : null}
 
           <details className="rounded-md border border-border px-3 py-2">
             <summary className="cursor-pointer text-sm font-medium">Choose rights one by one</summary>
             <ul className="mt-2 space-y-2">
               {capabilitiesOf(module).map((c) => {
-                const canTick = allowed.has(c);
+                const reason = capabilityToggleBlockedReason(module, viewerCapabilities, target, caps, c);
+                const canTick = reason === null;
                 const info = capabilityInfo(module, c);
                 return (
                   <li key={c}>
-                    <label className={`flex items-start gap-2 text-sm ${canTick ? "" : "opacity-60"}`} htmlFor={`${idPrefix}-${c}`}>
+                    <label className="flex items-start gap-2 text-sm" htmlFor={`${idPrefix}-${c}`}>
                       <input id={`${idPrefix}-${c}`} type="checkbox" className="mt-0.5 h-4 w-4" checked={caps.includes(c)} disabled={!canTick} onChange={(e) => toggle(c, e.target.checked)} />
-                      <span className="min-w-0"><span className="font-medium">{info.label}</span>{!canTick ? <span className="text-muted-foreground"> (founders only)</span> : null}<span className="block text-muted-foreground">{info.description}</span></span>
+                      <span className="min-w-0"><span className="font-medium">{info.label}</span>{!canTick ? <span className="text-muted-foreground"> (not available)</span> : null}<span className="block text-muted-foreground">{info.description}</span>{reason ? <span className="block text-muted-foreground">{reason}</span> : null}</span>
                     </label>
                   </li>
                 );
@@ -174,6 +184,7 @@ export function ModuleAccessCard(props: ModuleAccessCardProps) {
             )}
           </div>
           {losesLastManager ? <Alert variant="warning" role="status">{person.name} is the last person who manages this access for {company.name}. The database will refuse this until someone else holds that right.</Alert> : null}
+          {losesLastApprover ? <Alert variant="warning" role="status">{person.name} is the only CEO / CTO approver of {company.name}. The database will refuse this while no other active approver exists.</Alert> : null}
           {losesLastFounder ? <Alert variant="warning" role="status">{person.name} is the only founder of {company.name}. The database will refuse this until another founder exists.</Alert> : null}
           {person.isSelf && diff.removed.length > 0 ? <Alert role="status">You are changing your own access.</Alert> : null}
 
@@ -191,6 +202,7 @@ export function ModuleAccessCard(props: ModuleAccessCardProps) {
           <input type="hidden" name="companyId" value={company.id} />
           <p className="text-sm">{person.isSelf ? "You are about to remove your own access. " : ""}{person.name} will lose access to {ACCESS_MODULE_LABELS[module]} for {company.name} straight away. Records they created stay: history is never deleted. Their HR roles and other modules are not affected.</p>
           {removesLastManager ? <Alert variant="warning" role="status">This is the last person who manages this access. The database will refuse this until someone else holds that right.</Alert> : null}
+          {removesLastApprover ? <Alert variant="warning" role="status">This is the only CEO / CTO approver of this company. The database will refuse this while no other active approver exists.</Alert> : null}
           {removesLastFounder ? <Alert variant="warning" role="status">This is the company&apos;s only founder. The database will refuse this until another founder exists.</Alert> : null}
         </ActionForm>
       </Modal>

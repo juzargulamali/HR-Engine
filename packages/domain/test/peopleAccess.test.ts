@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ACCESS_MODULES, ACCESS_PRESETS, applyPreset, canEditJobDetails, canManageAccountsAndRoles, canManageModuleAccess, canUsePeopleAccess, capabilitiesOf, capabilityInfo,
+  evaluateGrant, evaluateRevoke, capabilityToggleBlockedReason, ACCESS_MODULES, ACCESS_PRESETS, applyPreset, canEditJobDetails, canManageAccountsAndRoles, canManageModuleAccess, canUsePeopleAccess, capabilitiesOf, capabilityInfo,
   describeAccess, diffCapabilities, founderOnlyCapabilities, grantableCapabilities, managedAccess, normaliseCapabilities, presetBlockedReason, presetById, targetLockedForViewer,
   type AccessModule, type RoleGrant,
 } from "../src";
@@ -82,7 +82,10 @@ describe("who may give what is exactly today's rule", () => {
     expect(presetBlockedReason("inventory", ["manage_access"], presetById("inventory", "inventory-storekeeper")!)).toBeNull();
     expect(presetBlockedReason("inventory", ["founder"], presetById("inventory", "inventory-costs")!)).toBeNull();
     expect(presetBlockedReason("sales", ["manage_access"], presetById("sales", "sales-founder")!)).toMatch(/Sales founder/);
-    expect(presetBlockedReason("budget", ["manage_access"], presetById("budget", "budget-approver")!)).toBeNull();
+    // rule R1: only a CEO / CTO approver gives the approver right
+    expect(presetBlockedReason("budget", ["manage_access"], presetById("budget", "budget-approver")!)).toMatch(/CEO \/ CTO approver of this company/);
+    expect(presetBlockedReason("budget", ["manage_access", "executive_approver"], presetById("budget", "budget-approver")!)).toBeNull();
+    expect(presetBlockedReason("budget", ["manage_access"], presetById("budget", "budget-finance")!)).toBeNull();
   });
 });
 
@@ -148,5 +151,77 @@ describe("who sees what", () => {
     expect(canUsePeopleAccess([role("employee")], [{ module: "budget", companyId: "a", capabilities: ["manage_access"] }])).toBe(true);
     expect(canUsePeopleAccess([role("ceo"), role("finance")], [{ module: "budget", companyId: "a", capabilities: ["finance", "executive_approver"] }])).toBe(false);
     expect(canUsePeopleAccess([role("employee")], [])).toBe(false);
+  });
+});
+
+describe("access grant rules R1 to R3 (mirrors of the database functions)", () => {
+  const other = { capabilities: [] as string[], self: false };
+
+  it("R1: only a CEO / CTO approver of the company adds or removes the approver right", () => {
+    const manager = ["finance", "manage_access"];
+    expect(evaluateGrant("budget", manager, other, ["executive_approver"]).allowed).toBe(false);
+    expect(evaluateGrant("budget", manager, { capabilities: ["executive_approver"], self: false }, []).allowed).toBe(false);
+    expect(evaluateRevoke("budget", manager, { capabilities: ["executive_approver"], self: false }).allowed).toBe(false);
+    const approver = ["manage_access", "executive_approver"];
+    expect(evaluateGrant("budget", approver, other, ["executive_approver"]).allowed).toBe(true);
+    expect(evaluateGrant("budget", approver, { capabilities: ["executive_approver"], self: false }, []).allowed).toBe(true);
+    expect(evaluateRevoke("budget", approver, { capabilities: ["executive_approver"], self: false }).allowed).toBe(true);
+  });
+
+  it("R1 leaves everything else about an approver alone: another right can still be added or removed without touching the approver right", () => {
+    const manager = ["manage_access"];
+    expect(evaluateGrant("budget", manager, { capabilities: ["executive_approver"], self: false }, ["executive_approver", "view"]).allowed).toBe(true);
+    expect(evaluateGrant("budget", manager, { capabilities: ["executive_approver", "view"], self: false }, ["executive_approver"]).allowed).toBe(true);
+  });
+
+  it("R2: nobody adds a right to their own grant (Budget and Sales); removing one's own right stays allowed", () => {
+    expect(evaluateGrant("budget", ["manage_access"], { capabilities: ["manage_access"], self: true }, ["manage_access", "finance"]).allowed).toBe(false);
+    expect(evaluateGrant("budget", ["manage_access", "finance"], { capabilities: ["manage_access", "finance"], self: true }, ["manage_access"]).allowed).toBe(true);
+    expect(evaluateGrant("budget", ["manage_access", "executive_approver"], { capabilities: ["manage_access", "executive_approver"], self: true }, ["manage_access", "executive_approver", "finance"]).reason).toMatch(/own access/);
+    expect(evaluateGrant("sales", ["manage_access"], { capabilities: ["manage_access"], self: true }, ["manage_settings"]).allowed).toBe(false);
+    expect(evaluateGrant("sales", ["manage_access"], { capabilities: ["manage_access", "assign_owner"], self: true }, ["manage_access", "assign_owner"]).allowed).toBe(false); // a non-founder cannot send access management at all
+    expect(evaluateGrant("sales", ["manage_access", "assign_owner"], { capabilities: ["manage_access", "assign_owner"], self: true }, ["assign_owner"]).allowed).toBe(true);
+    // a Sales founder already holds every right: nothing they could type is an addition in effect
+    expect(evaluateGrant("sales", ["founder"], { capabilities: ["founder"], self: true }, ["founder", "view_audit"]).allowed).toBe(true);
+  });
+
+  it("R3: a non-founder cannot withdraw another access manager (Sales, Projects, Inventory) or cost reader (Inventory); stepping down oneself stays allowed", () => {
+    for (const module of ["sales", "projects", "inventory"] as const) {
+      expect(evaluateRevoke(module, ["manage_access"], { capabilities: ["manage_access"], self: false }).allowed, module).toBe(false);
+      expect(evaluateRevoke(module, ["manage_access"], { capabilities: ["manage_access"], self: true }).allowed, `${module} self`).toBe(true);
+      expect(evaluateRevoke(module, ["founder"], { capabilities: ["manage_access"], self: false }).allowed, `${module} founder`).toBe(true);
+      expect(evaluateRevoke(module, ["manage_access"], { capabilities: ["founder"], self: false }).allowed, `${module} founder target`).toBe(false);
+      expect(evaluateRevoke(module, ["manage_access"], { capabilities: ["assign_owner"], self: false }).allowed || module !== "sales", module).toBe(true);
+    }
+    expect(evaluateRevoke("inventory", ["manage_access"], { capabilities: ["view_costs"], self: false }).allowed).toBe(false);
+    expect(evaluateRevoke("inventory", ["manage_access"], { capabilities: ["warehouse"], self: false }).allowed).toBe(true);
+  });
+
+  it("R3 in Sales also covers replacing another access manager's rights through the grant function", () => {
+    expect(evaluateGrant("sales", ["manage_access"], { capabilities: ["manage_access", "assign_owner"], self: false }, ["assign_owner"]).allowed).toBe(false);
+    expect(evaluateGrant("sales", ["founder"], { capabilities: ["manage_access", "assign_owner"], self: false }, ["assign_owner"]).allowed).toBe(true);
+  });
+
+  it("unchanged rules still hold: only a founder hands out founder-only rights; Projects and Inventory protect their access managers entirely", () => {
+    expect(evaluateGrant("projects", ["manage_access"], other, ["manage_access"]).reason).toMatch(/Projects founder/);
+    expect(evaluateGrant("inventory", ["manage_access"], other, ["view_costs"]).reason).toMatch(/Inventory founder/);
+    expect(evaluateGrant("projects", ["manage_access"], { capabilities: ["manage_access"], self: true }, []).allowed).toBe(false);
+    expect(evaluateGrant("inventory", ["founder"], { capabilities: ["view_costs"], self: false }, ["view_stock"]).allowed).toBe(true);
+    expect(evaluateGrant("sales", [], other, ["assign_owner"]).allowed).toBe(false);
+  });
+
+  it("a toggle is blocked exactly when the resulting set would be refused, with the reason", () => {
+    const self = { capabilities: ["manage_access"], self: true };
+    expect(capabilityToggleBlockedReason("budget", ["manage_access"], self, ["manage_access"], "finance")).toMatch(/own access/);
+    expect(capabilityToggleBlockedReason("budget", ["manage_access"], self, ["manage_access", "finance"], "finance")).toBeNull();
+    expect(capabilityToggleBlockedReason("budget", ["manage_access"], other, [], "executive_approver")).toMatch(/CEO \/ CTO approver/);
+    expect(capabilityToggleBlockedReason("budget", ["manage_access"], other, [], "view")).toBeNull();
+  });
+
+  it("budget has no person that is locked as a whole; Sales access managers can step down but not be changed by a non-founder", () => {
+    expect(targetLockedForViewer("budget", ["manage_access"], ["executive_approver", "manage_access"])).toBe(false);
+    expect(targetLockedForViewer("sales", ["manage_access"], ["manage_access"], false)).toBe(true);
+    expect(targetLockedForViewer("sales", ["manage_access"], ["manage_access"], true)).toBe(false);
+    expect(targetLockedForViewer("projects", ["manage_access"], ["manage_access"], true)).toBe(true);
   });
 });
