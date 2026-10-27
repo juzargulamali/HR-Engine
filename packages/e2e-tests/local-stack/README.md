@@ -11,7 +11,7 @@ Chromium  ->  Next.js app (apps/web, built + started locally)
               throwaway Postgres database  (stubs + every migration + grants + seed.sql)
 ```
 
-`gateway.mjs` accepts one fixed local password for users that exist in the throwaway database and signs HS256 tokens PostgREST
+`gateway.mjs` accepts one fixed local password for users that exist in the throwaway database (or the password a test set for them) and signs HS256 tokens PostgREST
 verifies. It exists only so the app can sign in locally. **It never talks to Supabase and no credential from any real
 environment is used or needed.** `env.sh` refuses to continue unless the base URL is local and drops every role it does not seed.
 
@@ -54,3 +54,12 @@ earn credit. The Poland draft stays a draft so the real activation function is e
 
 Everything here is in `packages/e2e-tests/tests/local-stack/` or the `preview-recovery-windows-*` projects. No workflow runs the
 `local-stack` project, and CI fails if any Production project can match it.
+
+## Account controls (invite, reset, deactivate, delete)
+
+`local-auth.mjs` extends the gateway with a stand-in for the auth endpoints those controls call (sign-in with per-user passwords, sessions, ban, invite and recover
+recorded in `local_auth.outbox` instead of being e-mailed, admin create / update / delete, CORS for the browser). It is not Supabase Auth; what it proves and what it
+cannot is in `docs/people-access-account-controls-verification.md`. With the stack running and the keys from `node local-stack/gateway.mjs --keys`
+(`SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321`, `E2E_BASE_URL=http://127.0.0.1:3000`, `LOCAL_DB_URL`), run
+`packages/e2e-account-security` (`tests/read-only`, `tests/mutating`, `tests/local-auth`).
+

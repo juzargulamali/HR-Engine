@@ -20,5 +20,13 @@ do $$ begin
   end if;
 end $$;
 grant anon, authenticated, service_role to authenticator;
+-- The Supabase platform gives service_role every privilege on public tables, sequences and functions (it bypasses RLS, not grants).
+-- The application's admin client and the account-security specs' setup rely on that, so the throwaway database has it too.
+grant all on all tables in schema public to service_role;
+grant all on all sequences in schema public to service_role;
+grant all on all functions in schema public to service_role;
+alter default privileges in schema public grant all on tables to service_role;
+alter default privileges in schema public grant all on sequences to service_role;
+alter default privileges in schema public grant all on functions to service_role;
 SQL
 echo "built ${DB}"
