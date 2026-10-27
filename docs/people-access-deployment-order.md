@@ -1,6 +1,6 @@
 # People & Access: exact deployment order
 
-Two stacked pull requests and one security migration. **Nothing below has been run or merged.** Merging a pull request never touches the database: no workflow in this repository applies a migration, so every SQL step is yours, one at a time, in the SQL Editor of **Enginious HR Engine_V2**.
+Two stacked pull requests and one security migration. **Status (2026-10-27):** #50 is merged; the migration has been applied on V2 by the owner and verified (steps 2 to 6 below, results in "Deployment record"); **#51 is not merged yet** (step 7). Merging a pull request never touches the database: no workflow in this repository applies a migration, so every SQL step is yours, one at a time, in the SQL Editor of **Enginious HR Engine_V2**.
 
 | | What | SQL? | Changes who may grant what? |
 |---|---|---|---|
@@ -39,6 +39,33 @@ Two stacked pull requests and one security migration. **Nothing below has been r
    *Look at it:* open a colleague's *Module access* tab for Project budgets: *CEO / CTO approver* is available to you; on your own person, presets that would add rights to you are greyed out with the reason. *If wrong:* revert the merge commit; the database rules stay as applied.
 
 **8. Record it.** Tell me the results; I will mark both pull requests done and note the dates in the deployment document.
+
+## Deployment record (V2, 2026-10-27, run by the owner)
+
+Every step was run by the owner in the V2 SQL Editor, one at a time; no SQL was applied from this session. Values are as reported.
+
+| Step | Result |
+|---|---|
+| 2 Preflight (read-only) | passed: section B all `OK`, rules "not applied yet" |
+| 3 Snapshot (read-only) | taken: 9 structure fingerprints, 4 grant-row fingerprints, 6 function fingerprints, 6 function privilege sets |
+| 4 Apply migration | applied without error (the owner first suspected a partial run; step 5 shows the whole file ran) |
+| 5 Verify (read-only) | **73 checks OK, 0 failing**; Budget approvers: Enginious LLC FZ, 1 eligible of 1; active grants Sales 3, Projects 3, Inventory 3, Budget 1 |
+| 6 Preservation compare (read-only) | **PASS**: every existing grant identical (4 of 4 tables), nothing else in the schema changed (9 fingerprints identical), the six functions carry the new rules and keep the same privileges |
+
+Function fingerprints (md5 of the definition), before and after:
+
+| Function | Before | After |
+|---|---|---|
+| `crm_grant_access` | `115d73c225a464709e7b3ef3a3873680` | `141f4c2536da75d68df1fd9edf1de939` |
+| `crm_revoke_access` | `d39669a14c1e108abb823621b5b777b4` | `1764a71a45e2d7af7a7dad755d811640` |
+| `inv_revoke_access` | `361d66b1308d151ecb4522e39fb27ef1` | `5cc5180e16f21cbc8b94e6b36a6ca86e` |
+| `pbx_grant_access` | `05bc5b6368d8e202e3748618f5c3762e` | `1fa02eca42478bc1be0aa2ca1c70e31e` |
+| `pbx_revoke_access` | `c771e7efe73a89065c2c83a4b321d80b` | `ff44ae79f5911a91b95aa9c880488f82` |
+| `proj_revoke_access` | `ff44752d1e0eb7acde49eaf4ad3aeac9` | `09f1ce11e4bc6336fe807e53e06d0761` |
+
+Unchanged by the migration (same before and after): the six function privilege sets, the grant rows (`rows:budget` `1:7415b8f0…`, `rows:inventory` `3:81d1ab3d…`, `rows:projects` `3:43f4b86b…`, `rows:sales` `3:69acb3a8…`), and the nine structure fingerprints (columns `09a01efe…`, constraints `5f74bb54…`, indexes `345c1ecf…`, other-function privileges `6f73ab50…`, other functions `020a0951…`, policies `16fd38fa…`, table privileges `fe897630…`, triggers `7ad79d39…`, views `eefb27f0…`).
+
+**Not done:** step 7 (merge #51) and the post-merge look at the screen. **Not verified:** the hosted items listed in [people-access-account-controls-verification.md](./people-access-account-controls-verification.md) ("Still not verified") are unchanged by this deployment. The rollback script was not used.
 
 ## Things that are never part of this
 
