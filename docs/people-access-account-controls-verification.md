@@ -1,6 +1,6 @@
 # People & Access: account controls, what was verified and what is left
 
-> **Hosted verification: PENDING.** Decision (2026-10-27): #50 is merged first and the focused account checks (invitation, first password, reset, deactivate and reactivate, an existing session after deactivation, unauthorised access, the token window) are run immediately afterwards on **Production** with the existing `hrtest.admin@enginious.ae` (preserved, never changed) and disposable `e2e-test-` invitees only, following [people-access-hosted-test-runbook.md](./people-access-hosted-test-runbook.md). Until the result sheet is filled in below, everything under "Results" was verified against the local stand-in only. No hosted SQL is applied for this or for PR #51.
+> **Hosted verification: PARTIALLY DONE (2026-10-27).** The focused account checks were run on **Production (V2)** after #50 was merged, with the existing `hrtest.admin@enginious.ae` (preserved, never changed) and one disposable invitee `e2e-test-employee@enginious.ae`. What was observed is recorded under "Hosted results (Production)" below, as reported by the owner. **Everything not listed there as verified remains unverified**, in particular the direct-data token window, resend invitation, the unauthorised-view check and a password reset ending another session. No hosted SQL has been applied for PR #51.
 
 The account controls (invite, resend, password reset, deactivate, reactivate, delete) moved from *Admin → Users & roles* to **People & Access → Account**. Moving them could break them without a button ever disappearing, so they were exercised for what they **do**, not for whether they are shown.
 
@@ -38,14 +38,49 @@ Two things the local stack needed, both about the stack and not the application:
 
 **First-password "mark Active" (found, assessed, fixed).** The set-password and reset-password page ignored the result of the write that marks the account *Active*. Reproduced locally by failing that one request: the person landed signed in on the home page with no message while the database still said *Invited*. Nothing in the application or the database gates access on that status, so it was an inconsistency and not a lock-out; its effect was that an administrator saw an accepted invitation as pending (*Resend invite* offered, *Send password reset* hidden). Fixed in `a5a2b30`: the write is read back (it matches nothing for someone already Active, the normal case for a reset), retried twice, and only then reported; the person is told the password is saved and can *Try again* without setting it a second time, or *Continue to the app*. Covered by 8 component tests and a browser spec that fails the write on purpose.
 
-## What a ban does and does not do (to confirm on the hosted project)
+## Hosted results (Production, 2026-10-27)
+
+Run on Production (V2) by the owner after #50 merged (merge commit `217e566`), with the existing administrator `hrtest.admin@enginious.ae` and one disposable invitee `e2e-test-employee@enginious.ae`, following [people-access-hosted-test-runbook.md](./people-access-hosted-test-runbook.md). Recorded exactly as reported; nothing here is inferred.
+
+**Observed and verified on Production**
+
+| Check | Observation |
+|---|---|
+| Invitation | the invitation e-mail arrived |
+| First password / password reset | password setup/reset worked, and the account showed **Active** (the success path of the first-password page; its failure path was not exercised on Production and is covered only by the local tests) |
+| Deactivation, an existing session | the already signed-in session was sent to sign-in on its **next navigation** (application level) |
+| Deactivation, a fresh sign-in | refused while the account was deactivated |
+| Reactivation | worked; a sign-in then succeeded |
+| Cleanup | the disposable account was deleted |
+| Cleanup SQL (`hosted_account_test_95_after_readonly.sql`) | 0 disposable accounts, 0 role grants held by them; the administrator remains **Active** and a **global System Administrator** |
+
+**Before and after fingerprints (identical, so the administrator and every real account were unchanged)**
+
+| Fingerprint | Value (before = after) |
+|---|---|
+| Administrator role fingerprint (account and every role row) | `f38365f4d996116b4e805050c6b5694b` |
+| Real-account status hash (every non-test account, including the administrator) | `35b49676063a66398eb6256e0cef5e3f` |
+| Real accounts | 12, all Active |
+
+**Not verified. Do not read any of these as passed.**
+
+* **Direct-data token access after deactivation (H4 measurement):** not performed. Whether a deactivated account's already-issued token can still read data through the data API, and for how long, is **unknown**. No token or Auth setting was changed on an assumption. The question stays open (see the next section).
+* **Resend invitation** (H2, optional): not performed.
+* **Unauthorised-view check as a plain account** (H6): not separately verified on Production (proved locally and by unit tests only).
+* **A password reset ending another session of the same person** (the other-session part of H3): not separately verified.
+* **E-mail and link detail beyond "arrived":** link expiry, link content and where each link landed were not recorded.
+* **The administrator-triggered *Send password reset* e-mail as a separate step, the consistency check button, and the automated specs (H8, not run on V2 by design):** not recorded as performed.
+
+## What a ban does and does not do (still to confirm on the hosted project)
 
 Deactivation bans the login at the auth service first and only then marks the profile. The application checks the session with the auth service on **every page and action** (`proxy.ts` and `getCurrentSession` call `getUser()`), so a deactivated person is turned away immediately, as the specs show. A ban does not revoke an **access token already issued**: until it expires, that token is still accepted by the *data API* (row-level security still limits it to what that person could already read and change). So the real exposure window is the project's access-token lifetime (the hosted default is one hour). Step H4 of the runbook measures it; if it is longer than you want, shortening it is a project setting, not a code change.
 
 ## Hosted test plan
 
-Now a runbook, **run on Production after #50 is merged**, for **V2, using your existing `hrtest.admin@enginious.ae` as the test administrator (preserved: never changed, and fingerprinted before and after) and only two new disposable `e2e-test-` invitees, with no new project and no setting changed**: [people-access-hosted-test-runbook.md](./people-access-hosted-test-runbook.md). It gives the minimum setup (nothing created by hand), two **read-only** SQL checks (before, with a fingerprint of the administrator's account and every role it holds; after, which must match it, show the invitees gone and a hash over every real account unchanged), H1 to H7 step by step, the token-window measurement, and the result sheet. H8 (the automated specs) is deliberately not run on V2. Nothing in it has been run yet.
+Now a runbook, **run on Production after #50 is merged**, for **V2, using your existing `hrtest.admin@enginious.ae` as the test administrator (preserved: never changed, and fingerprinted before and after) and only two new disposable `e2e-test-` invitees, with no new project and no setting changed**: [people-access-hosted-test-runbook.md](./people-access-hosted-test-runbook.md). It gives the minimum setup (nothing created by hand), two **read-only** SQL checks (before, with a fingerprint of the administrator's account and every role it holds; after, which must match it, show the invitees gone and a hash over every real account unchanged), H1 to H7 step by step, the token-window measurement, and the result sheet. H8 (the automated specs) is deliberately not run on V2. It was run in part on 2026-10-27: see "Hosted results" above for what was and was not verified.
 
-## Still not verified until H1 to H8 run
+## Still not verified
 
-Real e-mail delivery and the content and expiry of the links; Supabase's own ban and session revocation; the access-token window; the hosted redirect from an e-mail link to `/set-password` and `/reset-password` (the stand-in produces the link shape the page expects, it does not prove the hosted template produces it).
+* The **access-token window**: whether a deactivated account's already-issued token still reads data through the data API, and until when (the measurement in step H4 of the runbook was not run).
+* Resend invitation; the plain-account unauthorised view on Production; a password reset ending another session; link expiry and content; the failure path of the first-password page on Production.
+* How the hosted service itself behaves beyond what was observed above: Supabase's own session revocation timing and the e-mail templates (the local stand-in produces the shapes the pages expect; it does not prove the hosted ones).

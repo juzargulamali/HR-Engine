@@ -12,7 +12,7 @@ Two stacked pull requests and one security migration. **Nothing below has been r
 ## Gates before step 1
 
 1. CI is green on #50 (`lint-typecheck-test`, `rls-policies`, `e2e-read-only`) and on #51 (`lint-typecheck-test`, `rls-policies`).
-2. **Decided 2026-10-27:** #50 is merged first and the focused hosted account checks are run immediately afterwards on Production (runbook: [people-access-hosted-test-runbook.md](./people-access-hosted-test-runbook.md)); their results are recorded in [people-access-account-controls-verification.md](./people-access-account-controls-verification.md), where they are marked **PENDING** until done. **Step 1 below is therefore done before those results; steps 2 to 7 (the security migration and #51) wait until the account checks are recorded.**
+2. **Done 2026-10-27:** #50 was merged first (merge commit `217e566`) and the focused hosted account checks were run immediately afterwards on Production. Their results are recorded in [people-access-account-controls-verification.md](./people-access-account-controls-verification.md) as **partially verified**: the token window, resend invitation, the plain-account unauthorised view and a reset ending another session are **not verified**. The owner decided to proceed to the migration preparation with those items open. **Step 1 below is therefore done; steps 2 to 7 (the security migration and #51) proceed one SQL step at a time.**
 
 ## The order
 
