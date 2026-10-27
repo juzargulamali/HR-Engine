@@ -34,30 +34,15 @@ It is **not Supabase Auth**. It proves the application: its screens, its server 
 
 Two things the local stack needed, both about the stack and not the application: the service role had no table privileges (hosted Supabase gives them by default; added to `build-db.sh`), and the gateway did not answer browser calls cross-origin (the set-password page calls the auth server from the browser; CORS added).
 
-**Observation, not changed.** The set-password page goes on to the home page even if its write that marks the account *Active* fails (it ignores that result). On the hosted service that write has no reason to fail, but a failure would leave a person who can sign in shown as *Invited*. Worth a small follow-up; it is not part of this change.
+**First-password "mark Active" (found, assessed, fixed).** The set-password and reset-password page ignored the result of the write that marks the account *Active*. Reproduced locally by failing that one request: the person landed signed in on the home page with no message while the database still said *Invited*. Nothing in the application or the database gates access on that status, so it was an inconsistency and not a lock-out; its effect was that an administrator saw an accepted invitation as pending (*Resend invite* offered, *Send password reset* hidden). Fixed in `a5a2b30`: the write is read back (it matches nothing for someone already Active, the normal case for a reset), retried twice, and only then reported; the person is told the password is saved and can *Try again* without setting it a second time, or *Continue to the app*. Covered by 8 component tests and a browser spec that fails the write on purpose.
 
 ## What a ban does and does not do (to confirm on the hosted project)
 
-Deactivation bans the login at the auth service first and only then marks the profile. The application checks the session with the auth service on **every page and action** (`proxy.ts` and `getCurrentSession` call `getUser()`), so a deactivated person is turned away immediately, as the specs show. A ban does not revoke an **access token already issued**: until it expires, that token is still accepted by the *data API* (row-level security still limits it to what that person could already read and change). So the real exposure window is the project's access-token lifetime (the hosted default is one hour). Step H4 below measures it; if it is longer than you want, shortening it is a project setting, not a code change.
+Deactivation bans the login at the auth service first and only then marks the profile. The application checks the session with the auth service on **every page and action** (`proxy.ts` and `getCurrentSession` call `getUser()`), so a deactivated person is turned away immediately, as the specs show. A ban does not revoke an **access token already issued**: until it expires, that token is still accepted by the *data API* (row-level security still limits it to what that person could already read and change). So the real exposure window is the project's access-token lifetime (the hosted default is one hour). Step H4 of the runbook measures it; if it is longer than you want, shortening it is a project setting, not a code change.
 
-## Hosted test plan (for your approval; nothing has been run)
+## Hosted test plan
 
-**Where.** Preferably a disposable Supabase project built from the migrations (not V2), because the specs create and delete accounts with the service-role key and the repository's own README forbids running them against Production. If you prefer V2, only accounts created for this test (below) are ever touched. **No real staff account is deactivated, deleted, reset or invited.**
-
-**You provide:** (1) the project; (2) a mailbox you control that can receive plus-addressed mail (for example `qa+invitee1@…`), because the specs' `…@example.invalid` addresses are deliberately undeliverable; (3) three accounts named `e2e-test-…`: a System Administrator **S**, an HR Admin **H** and a plain employee **P**, created by you in the dashboard. I need nothing else from you, and the service-role key is entered by you into a local environment variable, never into chat or a file.
-
-| Step | Do | Expected |
-|---|---|---|
-| H1 | As **S**: invite `qa+invitee1@…` from People & Access. Open the e-mail. | A real e-mail arrives; its link opens *Set password*; a weak password is refused; a good one signs them in; the person shows *Active*. |
-| H2 | As **S**: invite `qa+invitee2@…`, do not accept; press *Resend invite*. | A second e-mail arrives; its link works exactly as H1; the first link, if still unused, is noted (works or not) in the result. |
-| H3 | As **S**: *Send password reset* for **P** while **P** is signed in on a second browser. | E-mail arrives; link sets a new password; the old one is refused; **P**'s other browser is signed out on its next click. |
-| H4 | As **S**: *Deactivate* **P** (reason typed). With **P**'s session already open, click any page and perform one action; then try a new sign-in. Then note the time and, with **P**'s old access token from the browser, call the data API once and again after the token lifetime. | **P**'s open session is sent to the sign-in page on its next click; a new sign-in is refused; whether the old token still reads data, and until when, is **written down** (this is the window described above). |
-| H5 | As **S**: *Reactivate* **P**; use *Check consistency* on **P** before and after. | **P** signs in again; the check says consistent in both states. |
-| H6 | As **H** and as a plain employee: open People & Access and `/admin/users`. | No invitation panel, no Account tab, no Deactivate, Delete or Reset; the old address redirects. |
-| H7 | As **S**: delete `qa+invitee1@…` and `qa+invitee2@…`. | Their sign-in stops working; they leave the list. |
-| H8 | Automated: `npm run test:e2e:read-only` then `test:e2e:mutating` in `packages/e2e-account-security`, pointed at the disposable project (`E2E_BASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, anon and service-role keys in your environment). | The same 21 specs as above pass against the real service. The `tests/local-auth` spec skips itself there (it needs the local outbox). |
-
-Stop at the first step that touches an account that is not named `e2e-test-…` or `qa+…`. Clean-up: delete the test accounts. Result goes back into this document.
+Now a runbook for **V2 with disposable `e2e-test-` accounts only, no new project and no setting changed**: [people-access-hosted-test-runbook.md](./people-access-hosted-test-runbook.md). It gives the minimum setup (one account made by hand, two made by the invitations), three owner-run SQL scripts (before, one guarded change, after, with a hash proving no real account changed), H1 to H7 step by step, the token-window measurement, and the result sheet. H8 (the automated specs) is deliberately not run on V2. Nothing in it has been run yet.
 
 ## Still not verified until H1 to H8 run
 
