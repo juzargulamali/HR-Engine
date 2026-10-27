@@ -83,16 +83,8 @@ The grant functions refuse to remove or demote the last holder (Projects, Invent
 
 The HR role stored as `line_manager` is shown as **Reporting Manager** everywhere in the interface, and the job field is **Reporting manager**. Only the label changed; the stored value, the permissions and the approval routing are unchanged.
 
-## Not tested here (invitation and authentication flows)
+## Account controls: what was verified and what is left
 
-The local stack has no authentication admin service, so these were **not exercised**, before or after this change. The Playwright suites that cover most of them were moved to the new screen and typecheck, but need a hosted-style test project and were **not run**:
+The controls were moved, so they were exercised for what they do, against the app and an in-repository stand-in for the auth service: invitation, resend, administrator's reset and its link, deactivate and reactivate, an already signed-in session cut off after deactivation, delete, and who is offered any of it (21 existing account-security specs plus 7 new ones, and 15 new unit tests of the server-side refusals). The full table, what the stand-in can and cannot prove, and the **hosted test plan awaiting your approval** (real e-mail, the real ban and the access-token window) are in [people-access-account-controls-verification.md](./people-access-account-controls-verification.md).
 
-* Inviting a person (`inviteUser`, the invitation e-mail) and resending an invitation.
-* Opening an invitation link and setting a first password.
-* Deactivating and reactivating an account (the sign-in ban), and the check that an already signed-in session is cut off.
-* An administrator sending a password reset, and the reset link itself.
-* Deleting an account.
-* The account-status consistency check.
-* `e2e-account-security` and `e2e-tests` specs against a real project: `account-deactivation-reactivation`, `existing-session-blocked-on-deactivation`, `admin-password-invite-actions`, `admin-account-controls-visibility`, `deactivate-requires-confirmation-and-reason`, `50-account-status`, and the specs that read names and statuses through `src/identity.ts`.
-
-What the browser flow does confirm for these: the controls appear only for the System Administrator, only under the person's Account tab, and the Invite panel is present.
+Not verified until that hosted plan runs: real e-mail delivery and link expiry, Supabase's own ban and session revocation, and the hosted redirect from an e-mail link to the set-password and reset-password pages.
