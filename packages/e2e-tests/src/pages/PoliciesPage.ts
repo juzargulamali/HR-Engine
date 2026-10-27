@@ -53,4 +53,40 @@ export class PoliciesPage {
       await expect(deleteButton).toBeDisabled();
     }
   }
+
+  /** The status badge of every version row currently shown (lower case), in table order. */
+  async visibleStatuses(): Promise<string[]> {
+    const cells = this.page.locator("table tbody tr td:nth-child(5)");
+    return (await cells.allInnerTexts()).map((t) => t.trim().toLowerCase()).filter(Boolean);
+  }
+
+  /** Status and address of every version row currently shown. */
+  async visibleVersions(): Promise<{ status: string; href: string }[]> {
+    return this.page.locator("table tbody tr").evaluateAll((rows) =>
+      rows
+        .map((row) => ({
+          status: (row.querySelector("td:nth-child(5)")?.textContent ?? "").trim().toLowerCase(),
+          href: row.querySelector('a[href^="/policies/"]')?.getAttribute("href") ?? "",
+        }))
+        .filter((r) => r.status && r.href),
+    );
+  }
+
+  /** Reveals the older versions when the toggle is offered; returns how many it announced (0 when there is no toggle). */
+  async revealOlderVersions(): Promise<number> {
+    const toggle = this.page.getByRole("button", { name: /show older versions/i });
+    if ((await toggle.count()) === 0) return 0;
+    const announced = Number(/\((\d+)\)/.exec((await toggle.innerText()) ?? "")?.[1] ?? "0");
+    await toggle.click();
+    await expect(this.page.getByRole("button", { name: /hide older versions/i })).toBeVisible();
+    return announced;
+  }
+
+  /** What only someone who may draft or decide a policy is given: none of it may appear for anyone else. */
+  async expectNoManagementControls(): Promise<void> {
+    await expect(this.page.getByRole("button", { name: /^activate$/i })).toHaveCount(0);
+    await expect(this.page.getByRole("button", { name: /^delete$/i })).toHaveCount(0);
+    await expect(this.page.getByRole("link", { name: /^draft a policy$/i })).toHaveCount(0);
+    await expect(this.page.getByText(/awaiting a different approver|has configured leave types|review & activate/i)).toHaveCount(0);
+  }
 }
