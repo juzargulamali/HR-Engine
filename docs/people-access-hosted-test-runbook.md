@@ -1,8 +1,12 @@
-# Hosted account-control test on V2: runbook (existing test administrator, disposable invitees only)
+# Hosted account-control test on V2 / Production: runbook (existing test administrator, disposable invitees only)
 
-Tests, against the **#50 preview** and **Enginious HR Engine_V2**: invitations, first-password setup, password reset, deactivate and reactivate, an already signed-in session after deactivation, unauthorised access, and **how long a deactivated account's old token still works against the data**. This is step H1 to H8 of [people-access-account-controls-verification.md](./people-access-account-controls-verification.md), made mechanical.
+> **STATUS: PENDING.** Hosted account verification has **not** been done. Decision (2026-10-27): **PR #50 is merged first and these checks are run immediately afterwards on Production** (the deployed app, bound to V2), with `hrtest.admin@enginious.ae` and disposable invitees only. Until the results are recorded in [people-access-account-controls-verification.md](./people-access-account-controls-verification.md), the account controls are verified only against the local auth stand-in. PR #51 (the security migration) is separate and is handled after these checks; **no hosted SQL is applied here or for #51 in the meantime** (the two SQL scripts below are read-only).
 
-**Nothing here has been run.** The environment I work in cannot reach V2 or the preview, so **you** run each step and send me the results. Everything below is built so that a slip cannot touch a real person.
+Tests, against **Production (V2)**: invitations, first-password setup, password reset, deactivate and reactivate, an already signed-in session after deactivation, unauthorised access, and **how long a deactivated account's old token still works against the data**. This is step H1 to H8 of [people-access-account-controls-verification.md](./people-access-account-controls-verification.md), made mechanical.
+
+**It is a real production system.** The only things the test creates or acts on are the disposable invitees; the only real account it signs in with is your own test administrator, which is not changed. Production already served the old account screens before the merge; the first thing the test proves is that the moved controls work there.
+
+**Short path** (about 20 minutes of your time plus one waiting period): pre-flight, H1, H3, H4, H5, H6, H7. **H2 (resend invite) is optional**: do it if time allows; it needs the second invitee Q and two more e-mails.
 
 **The test administrator is your existing account `hrtest.admin@enginious.ae` ("S").** It is used to sign in and to perform the invitations; it is **never created, granted anything, reset, deactivated, deleted or otherwise changed**. Only the two new disposable invitees (P and Q) are ever invited, reset, deactivated, reactivated or deleted.
 
@@ -33,9 +37,9 @@ That is the whole set: **nothing is created by hand, and no SQL changes anything
 
 ## 1. Pre-flight
 
-1. **Find the preview.** PR #50 on GitHub → the Vercel comment → **Preview**. It must include commit `a5a2b30` ("First-password setup…") or later; the comment shows the commit. If Vercel asks you to sign in, do.
+1. **Confirm Production serves the merge.** Vercel → the project → Deployments: the latest **Production** deployment must be on the merge commit of #50 (I give you its hash after the merge) and *Ready*. The proof inside the app is step 3: *People & Access* exists only in the merged version.
 2. **SQL step 1 (read-only).** V2 SQL Editor → `supabase/manual-sql/hosted_account_test_00_before_readonly.sql`. Send me the result and **keep two values**: the **role fingerprint** (section C) and the **hash** (section E). Check: section B shows no disposable accounts; section C says *exactly one account*, status *active*, lists the roles `hrtest.admin@enginious.ae` holds, and says **OK** on *holds the System Administrator role*. Any **STOP**: do not continue.
-3. **Sign in to the preview as S** (`hrtest.admin@enginious.ae`, in a private window). If it works, the preview is bound to V2. *People & Access* appears in the menu. If sign-in fails, stop: the preview is not on V2 (or the password differs).
+3. **Sign in to Production as S** (`hrtest.admin@enginious.ae`, in a private window). *People & Access* appears in the menu: that is the merged version. If it does not, stop: the deployment is not the merge yet.
 
 ## 2. The steps
 
@@ -44,18 +48,18 @@ Record each result in the sheet at the end.
 **H1: invitation and first password (account P)**
 1. As **S**: People & Access → *Invite a person* → name `E2E Test P`, address P → *Send invite*. Search `e2e-test`: P is listed as **Invited**. Open P → *Account*: *Resend invite* is offered and *Send password reset* is not.
 2. The e-mail arrives (note: how long, sender, subject). **Do not click it.** Right-click the button → *Copy link address*.
-3. In a checkout of this repository: `node packages/e2e-account-security/scripts/aim-auth-link-at-preview.mjs "<link>" https://<preview>`. It asks Supabase where the link leads, and prints the same destination on the preview. **Record where the e-mail link pointed** (the preview, or the production address): if it pointed at production, the e-mail was built from production's site address and only this script tests the preview's page.
-4. Open the printed address in a **private window**. You see the *Welcome* page with a password form (not "invalid or has expired"). Try `short` first: refused with a reason. Then a good password: you land on the home page, signed in.
+3. **Click the button in the e-mail** (it goes to Supabase, then to the Production site's set-password page). **Record where it landed.** If it lands anywhere other than the Production address's `/set-password`, stop and tell me; the fallback helper `scripts/aim-auth-link-at-preview.mjs` re-aims a link, but it should not be needed on Production.
+4. Do this in a **private window**. You see the *Welcome* page with a password form (not "invalid or has expired"). Try `short` first: refused with a reason. Then a good password: you land on the home page, signed in.
 5. As **S**, reload P's *Account* tab: it must say **Active**. *(This is the "mark Active" fix: before it, a failed write there left P shown as Invited.)*
 6. In a new private window sign in as P with that password: works.
 
-**H2: resend invite (account Q)**
+**H2 (optional): resend invite (account Q)**
 1. As S: invite Q. Do not accept. Open Q → *Account* → **Resend invite**. A second e-mail arrives.
-2. Use the newer e-mail with the script and complete the form: Q becomes **Active**. If you kept the older e-mail's link, run it through the script too: record whether it still works.
+2. Click the newer e-mail's button and complete the form: Q becomes **Active**. If you kept the older e-mail, try its button too: record whether it still works.
 
 **H3: administrator's password reset (account P)**
 1. In a private window (browser **B**) sign in as P and stay on *Account & security*.
-2. As S: P → *Account* → **Send password reset**. E-mail arrives; use the script on its link; set a **new** password.
+2. As S: P → *Account* → **Send password reset**. E-mail arrives; click its button (private window); set a **new** password.
 3. Expect: the old password is refused at sign-in; the new one works; in browser B the next click goes to the sign-in page (other sessions are ended).
 
 **H4: deactivate, an already signed-in session, and the token window (account P)**
@@ -79,7 +83,7 @@ Record each result in the sheet at the end.
 Signed in as P (Active, no role): there is **no** People & Access entry in the menu; `/people-access` says there is nothing to manage; `/admin/users` leads there; no *Invite a person* panel; no account control anywhere.
 
 **H7: delete the two disposable accounts, and prove nothing else changed**
-1. As **S**: delete **Q**, then **P** (*Account* → **Delete**, confirm). Each disappears from the list and cannot sign in. **Do not delete or change S**: it stays exactly as it was.
+1. As **S**: delete **Q** (if you made it), then **P** (*Account* → **Delete**, confirm). Each disappears from the list and cannot sign in. **Do not delete or change S**: it stays exactly as it was.
 2. **SQL step 2 (read-only):** `supabase/manual-sql/hosted_account_test_95_after_readonly.sql`. Send me the result. It must show: **0 disposable accounts and 0 of their role grants; S still found, still Active, still a System Administrator; the role fingerprint equal to the one you kept; the same other System Administrators; and the same hash** as pre-flight step 2.
 
 **H8: the automated specs.** **Not run on V2, by design.** They create accounts with the **service-role key** and give throwaway accounts the System Administrator role in whichever project they point at, and the package's own README forbids that against production. You asked for V2 with only the invitees as disposable accounts and no new project, and that would put a service-role key on your machine and grant roles to throwaway accounts: H1 to H7 cover the same behaviours by hand, and all 29 account-security specs pass against the local stack. If you want them run anyway, say so and I will give the exact, narrowed command.
@@ -88,10 +92,10 @@ Signed in as P (Active, no role): there is **no** People & Access entry in the m
 
 | Step | Result | Notes |
 |---|---|---|
-| Pre-flight: preview on commit ≥ `a5a2b30`; S (`hrtest.admin@enginious.ae`) holds System Administrator (OK); S signs in (bound to V2) | | |
-| H1: e-mail arrived (minutes) / link pointed at (preview or production) | | |
+| Pre-flight: Production on the merge commit; S (`hrtest.admin@enginious.ae`) holds System Administrator (OK); S signs in and sees People & Access | | |
+| H1: e-mail arrived (minutes) / link landed on the Production set-password page | | |
 | H1: weak password refused; good password signs in; P shows **Active** | | |
-| H2: resend arrives; Q becomes Active; older link works or not | | |
+| H2 (optional): resend arrives; Q becomes Active; older link works or not | | |
 | H3: old password refused, new works, browser B signed out | | |
 | H4: browser B sent to sign-in after deactivation (seconds); new sign-in refused (message) | | |
 | H4: **RESULT block** (token lifetime; auth service; data API; refresh) | | |
