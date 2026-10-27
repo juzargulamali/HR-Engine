@@ -12,7 +12,7 @@ Two stacked pull requests and one security migration. **Nothing below has been r
 ## Gates before step 1
 
 1. CI is green on #50 (`lint-typecheck-test`, `rls-policies`, `e2e-read-only`) and on #51 (`lint-typecheck-test`, `rls-policies`).
-2. You have decided about the hosted account-control test (steps H1 to H8 in [people-access-account-controls-verification.md](./people-access-account-controls-verification.md)). #50 is the change that moved the account controls, so run it against the #50 preview first, or accept in writing that invitations and the real ban were verified only against the local stand-in.
+2. The hosted account-control test has been run on V2 with disposable accounts and **its results are recorded** in [people-access-account-controls-verification.md](./people-access-account-controls-verification.md) (runbook: [people-access-hosted-test-runbook.md](./people-access-hosted-test-runbook.md)). #50 is the change that moved the account controls and the first-password page, so it is tested on the #50 preview first. Until the results are recorded, **both PRs stay unmerged**.
 
 ## The order
 
