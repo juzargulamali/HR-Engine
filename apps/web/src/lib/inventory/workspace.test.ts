@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RequestModel } from "./planning-data";
-import { heldTotals, requestItemTotals, returnOutcome, sendFlags, sendItemsOf, unitHolder } from "./workspace";
+import { countedHeldFromEquipment, heldTotals, outstandingView, requestItemTotals, returnOutcome, sendFlags, sendItemsOf, unitHolder, withCountedZeros } from "./workspace";
 
 type Res = { id: string; unit_id: string | null; unit_code?: string | null; qty: number; dispatched_qty: number; returned_qty: number; status: "active" | "completed" | "released" };
 const line = (id: string, itemId: string, name: string, tracking: string, reservations: Res[], status = "open") => ({
@@ -132,5 +132,72 @@ describe("what a return does to availability", () => {
   it("counted stock is available again only when good", () => {
     expect(returnOutcome("good", false)).toBe("available");
     expect(returnOutcome("needs_inspection", false)).toBe("held");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// The existing request panel and Project → Equipment use the same rules
+// ---------------------------------------------------------------------------------------------------------------
+const withRequest = (id: string, code: string, lines: ReturnType<typeof line>[]): RequestModel => ({ request: { id, code }, lines } as unknown as RequestModel);
+const out = (lineId: string, name: string, qty: number, over: Record<string, unknown> = {}) => ({ request_code: "R", line_id: lineId, item_name: name, unit_code: null, qty_outstanding: qty, expected_return_at: null, overdue: false, ...over });
+
+describe("what the project holds, read from the project equipment answer (no stock access needed)", () => {
+  const m1 = withRequest("r1", "UAE-R-1", [line("l1", "cable", "Cable", "quantity", [{ id: "a", unit_id: null, qty: 10, dispatched_qty: 10, returned_qty: 4, status: "active" }]), line("lp", "proj", "Projector", "individual", [])]);
+  it("sums the counted quantity out on request lines and adds stock held without a request; units are not counted here", () => {
+    const eq = { outstanding: [out("l1", "Cable", 6), out("lp", "Projector", 1, { unit_code: "PJ-1" })], unlinked: [{ item_name: "Cable", qty_outstanding: 3, unit_code: null }, { item_name: "Tripod", qty_outstanding: 2, unit_code: null }] };
+    const { held, unclear } = countedHeldFromEquipment(eq, [m1]);
+    expect(held.get("cable")).toBe(9);
+    expect(held.has("proj")).toBe(false);
+    expect(held.has("tripod")).toBe(false);
+    expect(unclear.size).toBe(0);
+  });
+  it("an item the project holds none of is 0, not unknown", () => {
+    expect(countedHeldFromEquipment({ outstanding: [], unlinked: [] }, [m1]).held.get("cable")).toBe(0);
+    expect(withCountedZeros(new Map(), [m1]).get("cable")).toBe(0);
+  });
+  it("unnamed stock under a name two catalogue items share is not attributed to either", () => {
+    const m = withRequest("r1", "R1", [line("l1", "c1", "Cable", "quantity", [{ id: "a", unit_id: null, qty: 5, dispatched_qty: 5, returned_qty: 0, status: "active" }]), line("l2", "c2", "Cable", "quantity", [{ id: "b", unit_id: null, qty: 5, dispatched_qty: 5, returned_qty: 0, status: "active" }])]);
+    const { unclear } = countedHeldFromEquipment({ outstanding: [out("l1", "Cable", 5), out("l2", "Cable", 5)], unlinked: [{ item_name: "Cable", qty_outstanding: 2, unit_code: null }] }, [m]);
+    expect([...unclear].sort()).toEqual(["c1", "c2"]);
+    const t = requestItemTotals(m, [m], new Map([["c1", 5], ["c2", 5]]), unclear);
+    expect(t.every((x) => x.level === "project" && x.stillOut === null && x.returned === null)).toBe(true);
+    expect(t[0]!.note).toContain("matches more than one catalogue item");
+  });
+});
+
+describe("Project → Equipment: counted stock is merged to one project row only where a request cannot be named", () => {
+  const cable = (id: string, code: string, lineId: string, sent: number, ret: number) => withRequest(id, code, [line(lineId, "cable", "Cable", "quantity", [{ id: `x${id}`, unit_id: null, qty: sent, dispatched_qty: sent, returned_qty: ret, status: "active" }]), line(`${lineId}u`, "proj", "Projector", "individual", [{ id: `p${id}`, unit_id: "u1", unit_code: "PJ-1", qty: 1, dispatched_qty: 1, returned_qty: 0, status: "active" }])]);
+  it("two requests sent the same cable: the per-line rows become one row for the project, with where it was sent for; the unit row is untouched", () => {
+    const a = cable("r1", "R-1", "la", 10, 4); const b = cable("r2", "R-2", "lb", 5, 0);
+    const eq = { outstanding: [out("la", "Cable", 6, { expected_return_at: "2030-04-03T06:00:00Z" }), out("lb", "Cable", 5, { expected_return_at: "2030-04-01T06:00:00Z", overdue: true }), out("lau", "Projector", 1, { unit_code: "PJ-1" })], unlinked: [] };
+    const { held, unclear } = countedHeldFromEquipment(eq, [a, b]);
+    const totals = new Map([[a.request.id, requestItemTotals(a, [a, b], held, unclear)], [b.request.id, requestItemTotals(b, [a, b], held, unclear)]]);
+    const v = outstandingView(eq, [a, b], totals);
+    expect(v.outstanding.map((o) => o.unit_code)).toEqual(["PJ-1"]);
+    expect(v.projectLevel).toHaveLength(1);
+    expect(v.projectLevel[0]).toMatchObject({ name: "Cable", qty: 11, overdue: true, expectedReturnAt: "2030-04-01T06:00:00Z", requestCodes: ["R-1", "R-2"] });
+  });
+  it("a single request that can be named keeps the database's own rows (no merge, nothing hidden)", () => {
+    const a = cable("r1", "R-1", "la", 10, 4);
+    const eq = { outstanding: [out("la", "Cable", 6)], unlinked: [] };
+    const { held, unclear } = countedHeldFromEquipment(eq, [a]);
+    const v = outstandingView(eq, [a], new Map([["r1", requestItemTotals(a, [a], held, unclear)]]));
+    expect(v.projectLevel).toEqual([]);
+    expect(v.outstanding).toHaveLength(1);
+  });
+  it("unnamed stock of the same item (sent without a request) is folded into the project row instead of listed twice", () => {
+    const a = cable("r1", "R-1", "la", 10, 0);
+    const eq = { outstanding: [out("la", "Cable", 10)], unlinked: [{ item_name: "Cable", unit_code: null, qty_outstanding: 3, expected_return_at: null, overdue: false }] };
+    const { held, unclear } = countedHeldFromEquipment(eq, [a]);
+    const v = outstandingView(eq, [a], new Map([["r1", requestItemTotals(a, [a], held, unclear)]]));
+    expect(v.unlinked).toEqual([]);
+    expect(v.projectLevel[0]).toMatchObject({ name: "Cable", qty: 13 });
+  });
+  it("when everything is back at project level nothing is listed as out", () => {
+    const a = cable("r1", "R-1", "la", 10, 10); const b = cable("r2", "R-2", "lb", 5, 5);
+    const eq = { outstanding: [], unlinked: [] };
+    const { held, unclear } = countedHeldFromEquipment(eq, [a, b]);
+    const v = outstandingView(eq, [a, b], new Map([["r1", requestItemTotals(a, [a, b], held, unclear)], ["r2", requestItemTotals(b, [a, b], held, unclear)]]));
+    expect(v.projectLevel).toEqual([]);
   });
 });

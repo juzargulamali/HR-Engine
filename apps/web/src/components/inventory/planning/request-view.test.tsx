@@ -85,4 +85,53 @@ describe("one request, as the panel and the project page show it", () => {
     render(<RequestEditor model={model(request({ source: "sales_handover" }))} can={can()} locations={locations} technologies={[]} />);
     expect(screen.getByText("Imported from the Sales handover")).toBeTruthy();
   });
+
+  describe("returns, at the level the data supports (the same rules as the request workspace)", () => {
+    const res = { id: "x1", unit_id: null, unit_code: null, serial_number: null, location_id: "loc1", qty: 10, dispatched_qty: 10, returned_qty: 4, status: "active" as const, from: "2030-03-30T08:00:00.000Z", until: "2030-04-03T06:00:00.000Z" };
+    const withCounted = (req: InvRequestRow) => {
+      const m = model(req, [base]);
+      const l = m.lines[0]!;
+      l.reservations = [res] as never;
+      l.progress = lineProgress(base, req, l.reservations);
+      return m;
+    };
+    const live = request({ status: "in_progress" });
+
+    it("shows what the request can be trusted with: a single request that can be named keeps its Returned and Outstanding", () => {
+      const totals = [{ itemId: "i1", name: "LED panel", individual: false, sent: 10, returned: 4, stillOut: 6, level: "request" as const, note: null }];
+      render(<RequestEditor model={withCounted(live)} can={can({ edit: false })} locations={locations} technologies={[]} returns={totals} />);
+      expect(screen.getByRole("region", { name: "Sent, returned and still out" })).toBeTruthy();
+      expect(screen.queryByText("Project level")).toBeNull();
+      expect(screen.getByText(/Equipment sent for this request is still out: 6 × LED panel/)).toBeTruthy();
+      expect(screen.getByText("Returned", { selector: "th" })).toBeTruthy();
+    });
+
+    it("counted stock that cannot be told apart is shown for the project: no per-line Returned or Outstanding, a plain label and the reason", () => {
+      const note = "This item was sent for more than one request or line. Counted stock comes back to the project, not to a request line, so only what was sent and what the project holds now are shown.";
+      const totals = [{ itemId: "i1", name: "LED panel", individual: false, sent: 10, returned: null, stillOut: 11, level: "project" as const, note }];
+      render(<RequestEditor model={withCounted(live)} can={can({ edit: false })} locations={locations} technologies={[]} returns={totals} />);
+      expect(screen.getAllByText("Project level").length).toBeGreaterThan(0);
+      expect(screen.getByText(note)).toBeTruthy();
+      // The lines table does not print the database's per-line split (4 returned, 6 outstanding).
+      const row = screen.getByRole("table").querySelector("tbody tr")!;
+      expect(row.textContent).not.toMatch(/\b6\b/);
+      expect(row.querySelectorAll('[aria-label="Shown for the project, not for this line"]').length).toBe(2);
+      // The reservation detail does not repeat the per-reservation returned figure for counted stock either.
+      expect(document.body.textContent).not.toContain("returned 4");
+      expect(screen.getAllByText(/counted stock comes back to the project, not to a request line/i).length).toBeGreaterThan(0);
+    });
+
+    it("when what the project holds could not be read it says so and claims nothing still out", () => {
+      const totals = [{ itemId: "i1", name: "LED panel", individual: false, sent: 10, returned: null, stillOut: null, level: "project" as const, note: "What the project holds could not be loaded, so only what was sent is shown." }];
+      render(<RequestEditor model={withCounted(live)} can={can({ edit: false })} locations={locations} technologies={[]} returns={totals} />);
+      expect(screen.getByText("What the project holds could not be loaded, so only what was sent is shown.")).toBeTruthy();
+      expect(screen.queryByText(/is still out:/)).toBeNull();
+    });
+
+    it("an employee request has no project totals and keeps its own wording", () => {
+      render(<RequestEditor model={model(request({ kind: "employee", project_id: null, employee_id: "e1", status: "cancelled" }), [base], 1)} can={can({ edit: false })} locations={locations} technologies={[]} />);
+      expect(screen.getByText(/Cancelling did not bring it back/)).toBeTruthy();
+      expect(screen.queryByRole("region", { name: "Sent, returned and still out" })).toBeNull();
+    });
+  });
 });

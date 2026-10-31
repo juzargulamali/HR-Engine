@@ -1,5 +1,6 @@
 import type { Candidate } from "./stock-candidates";
 import type { RequestModel } from "./planning-data";
+import { asArray, asRecord, num as dbNum, str as dbStr } from "./planning";
 
 /**
  * Pure rules for the project equipment workspace (Prepare, Send out, Receive back). Nothing here decides what is allowed: the database does
@@ -114,7 +115,49 @@ export function heldTotals(held: readonly Pick<Candidate, "itemId" | "type" | "q
   return m;
 }
 
-export function requestItemTotals(model: RequestModel, projectModels: readonly RequestModel[], held: ReadonlyMap<string, number> | null): ItemTotals[] {
+/**
+ * What the project holds, per COUNTED item, read from the same `inv_project_equipment` answer the project page already uses (so people who cannot read stock,
+ * such as a Project Manager, get honest totals too): the outstanding quantity on the request lines, plus the stock held by the project that no request
+ * accounts for. That second list names items, not ids, so a name that matches two different catalogue items on this project cannot be told apart: those
+ * items are returned in `unclear` and are shown at project level without a figure, never guessed.
+ */
+export function countedHeldFromEquipment(equipment: unknown, models: readonly RequestModel[]): { held: Map<string, number>; unclear: Set<string> } {
+  const eq = asRecord(equipment);
+  const itemOfLine = new Map<string, string>();
+  const names = new Map<string, string>();
+  const idsByName = new Map<string, Set<string>>();
+  for (const m of models) {
+    for (const l of m.lines) {
+      itemOfLine.set(l.id, l.itemId);
+      if (isIndividual(l.tracking)) continue;
+      names.set(l.itemId, l.itemName);
+      idsByName.set(l.itemName, (idsByName.get(l.itemName) ?? new Set<string>()).add(l.itemId));
+    }
+  }
+  const held = new Map<string, number>([...names.keys()].map((id) => [id, 0] as const));
+  const unclear = new Set<string>();
+  for (const o of asArray(eq.outstanding).map(asRecord)) {
+    if (dbStr(o.unit_code)) continue; // a unit: exact, not counted
+    const item = itemOfLine.get(String(o.line_id));
+    if (item && held.has(item)) held.set(item, (held.get(item) ?? 0) + dbNum(o.qty_outstanding));
+  }
+  for (const u of asArray(eq.unlinked).map(asRecord)) {
+    if (dbStr(u.unit_code)) continue;
+    const ids = idsByName.get(dbStr(u.item_name) ?? "");
+    if (!ids) continue; // not an item of any request line here
+    if (ids.size === 1) { const id = [...ids][0]!; held.set(id, (held.get(id) ?? 0) + dbNum(u.qty_outstanding)); } else for (const id of ids) unclear.add(id);
+  }
+  return { held, unclear };
+}
+
+/** Makes sure every counted item of the project's requests has a figure: an item the project holds none of is 0, not "unknown". */
+export function withCountedZeros(held: ReadonlyMap<string, number>, models: readonly RequestModel[]): Map<string, number> {
+  const out = new Map(held);
+  for (const m of models) for (const l of m.lines) if (!isIndividual(l.tracking) && !out.has(l.itemId)) out.set(l.itemId, 0);
+  return out;
+}
+
+export function requestItemTotals(model: RequestModel, projectModels: readonly RequestModel[], held: ReadonlyMap<string, number> | null, unclear: ReadonlySet<string> = new Set()): ItemTotals[] {
   const lineCount = new Map<string, number>();
   const sent = new Map<string, number>();
   const returned = new Map<string, number>();
@@ -144,13 +187,15 @@ export function requestItemTotals(model: RequestModel, projectModels: readonly R
       out.push({ itemId, name: info.name, individual: true, sent: sentQty, returned: ret, stillOut: Math.max(0, sentQty - ret), level: "request", note: null });
       continue;
     }
-    const heldNow = held?.get(itemId) ?? null;
+    const heldNow = unclear.has(itemId) ? null : (held?.get(itemId) ?? null);
     const single = (lineCount.get(itemId) ?? 0) === 1 && (otherSent.get(itemId) ?? 0) === 0;
     const consistent = heldNow !== null && Math.abs(heldNow - (sentQty - ret)) < 1e-9;
     if (single && consistent) {
       out.push({ itemId, name: info.name, individual: false, sent: sentQty, returned: ret, stillOut: sentQty - ret, level: "request", note: null });
     } else {
-      const why = heldNow === null
+      const why = unclear.has(itemId)
+        ? "Some of this item is held by the project without a request, under a name that matches more than one catalogue item, so what is still out cannot be told apart. Only what was sent is shown."
+        : heldNow === null
         ? "What the project holds could not be loaded, so only what was sent is shown."
         : (otherSent.get(itemId) ?? 0) > 0 || (lineCount.get(itemId) ?? 0) > 1
           ? "This item was sent for more than one request or line. Counted stock comes back to the project, not to a request line, so only what was sent and what the project holds now are shown."
@@ -176,4 +221,79 @@ export function returnOutcome(condition: string, individual: boolean): "availabl
   if (!condition) return "unset";
   if (individual) return condition === "good" || condition === "fair" ? "available" : "held";
   return condition === "good" ? "available" : "held";
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The project's "Equipment still out" list, with counted stock shown at the level the data supports
+// ---------------------------------------------------------------------------------------------------------------
+
+type Rec = Record<string, unknown>;
+export interface ProjectLevelRow {
+  itemId: string;
+  name: string;
+  uom: string;
+  /** What the project holds of this item, or null when that cannot be told apart or could not be read. */
+  qty: number | null;
+  /** Earliest date any part of it is due back, and whether any part is overdue (from the rows that were merged). */
+  expectedReturnAt: string | null;
+  overdue: boolean;
+  /** The requests this item was sent for (so the row can say where the quantity came from without splitting it). */
+  requestCodes: string[];
+  note: string | null;
+}
+export interface OutstandingView { outstanding: Rec[]; unlinked: Rec[]; projectLevel: ProjectLevelRow[] }
+
+/**
+ * `inv_project_equipment` lists counted stock still out per request line: a return is matched to the oldest reservation of the project and item, so that
+ * split is the database's bookkeeping, not what was physically returned for which request. Wherever any request's figure is at project level
+ * (`totalsByRequest`), this replaces those per-line rows (and the project's unnamed stock of the same item) with ONE row for the project. Units, and counted
+ * stock whose request can be named, are left exactly as the database gave them.
+ */
+export function outstandingView(equipment: unknown, models: readonly RequestModel[], totalsByRequest: ReadonlyMap<string, readonly ItemTotals[]>): OutstandingView {
+  const eq = asRecord(equipment);
+  const outstanding = asArray(eq.outstanding).map(asRecord);
+  const unlinked = asArray(eq.unlinked).map(asRecord);
+  const itemOfLine = new Map<string, string>();
+  const meta = new Map<string, { name: string; uom: string }>();
+  for (const m of models) for (const l of m.lines) { itemOfLine.set(l.id, l.itemId); meta.set(l.itemId, { name: l.itemName, uom: l.unit }); }
+  const projectItems = new Map<string, ItemTotals>();
+  const codesOf = new Map<string, Set<string>>();
+  for (const m of models) {
+    for (const t of totalsByRequest.get(m.request.id) ?? []) {
+      if (t.level !== "project") continue;
+      if (!projectItems.has(t.itemId)) projectItems.set(t.itemId, t);
+      codesOf.set(t.itemId, (codesOf.get(t.itemId) ?? new Set<string>()).add(m.request.code));
+    }
+  }
+  if (projectItems.size === 0) return { outstanding, unlinked, projectLevel: [] };
+  const idsByName = new Map<string, string[]>();
+  for (const id of projectItems.keys()) { const nm = meta.get(id)?.name ?? ""; idsByName.set(nm, [...(idsByName.get(nm) ?? []), id]); }
+  const due = new Map<string, { at: string | null; overdue: boolean }>();
+  const fold = (id: string, o: Rec) => {
+    const cur = due.get(id) ?? { at: null, overdue: false };
+    const at = dbStr(o.expected_return_at);
+    due.set(id, { at: at && (!cur.at || new Date(at) < new Date(cur.at)) ? at : cur.at, overdue: cur.overdue || o.overdue === true });
+  };
+  const keepOutstanding = outstanding.filter((o) => {
+    if (dbStr(o.unit_code)) return true;
+    const id = itemOfLine.get(String(o.line_id));
+    if (!id || !projectItems.has(id)) return true;
+    fold(id, o);
+    return false;
+  });
+  const keepUnlinked = unlinked.filter((o) => {
+    if (dbStr(o.unit_code)) return true;
+    const ids = idsByName.get(dbStr(o.item_name) ?? "");
+    if (!ids) return true;
+    for (const id of ids) fold(id, o);
+    return false;
+  });
+  const projectLevel: ProjectLevelRow[] = [];
+  for (const [itemId, t] of projectItems) {
+    if (t.stillOut === 0) continue; // everything is back: nothing to list
+    const m = meta.get(itemId)!;
+    const d = due.get(itemId) ?? { at: null, overdue: false };
+    projectLevel.push({ itemId, name: m.name, uom: m.uom, qty: t.stillOut, expectedReturnAt: d.at, overdue: d.overdue, requestCodes: [...(codesOf.get(itemId) ?? [])], note: t.note });
+  }
+  return { outstanding: keepOutstanding, unlinked: keepUnlinked, projectLevel: projectLevel.sort((a, b) => a.name.localeCompare(b.name)) };
 }

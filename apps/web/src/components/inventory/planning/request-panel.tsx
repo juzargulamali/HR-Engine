@@ -5,6 +5,7 @@ import { parseRecordId } from "@/components/workspace/url-state";
 import { getInventoryContext } from "@/lib/inventory/context";
 import { isRequestEditable } from "@/lib/inventory/planning";
 import { canManageProjectEquipment, loadRequestModels, loadTechnologies, loadVisibleLocations } from "@/lib/inventory/planning-data";
+import { loadRequestReturns } from "@/lib/inventory/project-returns";
 import { RequestEditor, requestCapabilities } from "./request-view";
 import { RequestStatusBadge } from "./status";
 
@@ -33,12 +34,15 @@ export async function RequestSidePanel({ openId, closeHref, retryHref }: { openI
   const r = model.request;
   const manage = r.kind === "project" && r.project_id ? await canManageProjectEquipment(r.project_id) : false;
   const can = requestCapabilities(model, ctx, locations, manage);
-  const technologies = can.edit && isRequestEditable(r.status) ? await loadTechnologies(r.company_id).catch(() => []) : [];
+  const [technologies, returns] = await Promise.all([
+    can.edit && isRequestEditable(r.status) ? loadTechnologies(r.company_id).catch(() => []) : Promise.resolve([]),
+    loadRequestReturns(ctx, model),
+  ]);
   return shell(
     r.title ?? `Request ${r.code}`,
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 text-sm"><RequestStatusBadge status={r.status} /><span className="font-mono text-muted-foreground">{r.code}</span>{r.source === "sales_handover" ? <span className="rounded-full border border-border px-2.5 py-0.5 text-[13px] font-medium">Imported from the Sales handover</span> : null}</div>
-      <RequestEditor model={model} can={can} locations={locations} technologies={technologies} hideHeading />
+      <RequestEditor model={model} can={can} locations={locations} technologies={technologies} hideHeading returns={returns} />
     </div>,
     `${r.code} · ${model.forLabel}`,
     r.kind === "project" && r.project_id ? `/projects/${r.project_id}/equipment?request=${r.id}` : undefined,

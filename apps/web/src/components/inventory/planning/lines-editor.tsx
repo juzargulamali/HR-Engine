@@ -38,7 +38,13 @@ type Dialog = "edit" | "cancel" | "substitute" | "decide" | "shortage" | "reserv
 const LIVE = new Set(["submitted", "in_progress"]);
 
 /** The lines of one request, with progress in numbers and every line action that is allowed. A cancelled line stays visible, with what is still out. */
-export function LinesEditor({ request, lines, can, locations, showProgress = true }: { request: EditorRequest; lines: LineModel[]; can: EditorCan; locations: LocationOption[]; /** The request workspace shows what was sent and returned in its own steps, at the level the data supports, so Prepare leaves these columns out. */ showProgress?: boolean }) {
+export function LinesEditor({ request, lines, can, locations, showProgress = true, projectLevelItems }: {
+  request: EditorRequest; lines: LineModel[]; can: EditorCan; locations: LocationOption[];
+  /** The request workspace shows what was sent and returned in its own steps, at the level the data supports, so Prepare leaves these columns out. */
+  showProgress?: boolean;
+  /** Counted items whose returns cannot be told apart between requests or lines: their Returned and Outstanding are shown for the project (above the lines), not per line. */
+  projectLevelItems?: ReadonlySet<string>;
+}) {
   if (lines.length === 0) return <p className="text-sm text-muted-foreground">No lines yet. Add an item, or add everything a technology needs from its template.</p>;
   const operable = locations.filter((l) => can.operableLocationIds.includes(l.id));
   return (
@@ -57,7 +63,8 @@ export function LinesEditor({ request, lines, can, locations, showProgress = tru
         </TableRow>
       </TableHeader>
       <TableBody>
-        {lines.map((l) => <LineRow key={l.id} line={l} request={request} can={can} locations={operable} showProgress={showProgress} />)}
+        {lines.map((l) => <LineRow key={l.id} line={l} request={request} can={can} locations={operable} showProgress={showProgress}
+          projectLevel={!!projectLevelItems?.has(l.itemId)} sharedItem={lines.filter((x) => x.itemId === l.itemId && x.status !== "cancelled").length > 1} />)}
       </TableBody>
     </Table>
     </div>
@@ -66,7 +73,12 @@ export function LinesEditor({ request, lines, can, locations, showProgress = tru
 
 const num = "whitespace-nowrap text-right tabular-nums";
 
-function LineRow({ line: l, request, can, locations, showProgress }: { line: LineModel; request: EditorRequest; can: EditorCan; locations: LocationOption[]; showProgress: boolean }) {
+/** "—" with its reason for a screen reader and on hover: counted stock is returned to the project, so this request or line cannot be given a figure. */
+function ProjectLevelDash() {
+  return <span title="Counted stock comes back to the project, not to a request line: see Sent, returned and still out" aria-label="Shown for the project, not for this line">—</span>;
+}
+
+function LineRow({ line: l, request, can, locations, showProgress, projectLevel, sharedItem }: { line: LineModel; request: EditorRequest; can: EditorCan; locations: LocationOption[]; showProgress: boolean; projectLevel: boolean; sharedItem: boolean }) {
   const [dialog, setDialog] = useState<Dialog>(null);
   const close = () => setDialog(null);
   const editable = request.status === "draft" || LIVE.has(request.status);
@@ -109,9 +121,11 @@ function LineRow({ line: l, request, can, locations, showProgress }: { line: Lin
             {l.progress.shortage > 0 ? <span className="block text-sm font-medium text-[hsl(var(--os-amber))]">short by {q(l.progress.shortage)}</span> : null}
           </span>
         </TableCell>
-        {showProgress ? <TableCell data-label="Dispatched" className={num}>{q(l.progress.dispatched)}</TableCell> : null}
-        {showProgress ? <TableCell data-label="Returned" className={num}>{q(l.progress.returned)}</TableCell> : null}
-        {showProgress ? <TableCell data-label="Outstanding" className={`${num} ${l.progress.outstanding > 0 ? "font-semibold" : ""}`}>{q(l.progress.outstanding)}</TableCell> : null}
+        {/* Counted stock is recorded as coming back to the project, not to a request line. Where more than one request or line could have been returned in its place, the
+            figures are not split per line: Sent / Returned / Still out above show them for the project, with the reason. Dispatch names the request, so it stays exact unless two lines share the item. */}
+        {showProgress ? <TableCell data-label="Dispatched" className={num}>{projectLevel && sharedItem ? <ProjectLevelDash /> : q(l.progress.dispatched)}</TableCell> : null}
+        {showProgress ? <TableCell data-label="Returned" className={num}>{projectLevel ? <ProjectLevelDash /> : q(l.progress.returned)}</TableCell> : null}
+        {showProgress ? <TableCell data-label="Outstanding" className={`${num} ${!projectLevel && l.progress.outstanding > 0 ? "font-semibold" : ""}`}>{projectLevel ? <ProjectLevelDash /> : q(l.progress.outstanding)}</TableCell> : null}
         <TableCell className="whitespace-nowrap @max-3xl:text-left">
           <div className="flex flex-wrap items-center justify-end gap-2 @max-3xl:justify-start">
             {showReserve ? <Button type="button" size="sm" onClick={() => setDialog("reserve")}>Reserve</Button> : null}
@@ -129,7 +143,7 @@ function LineRow({ line: l, request, can, locations, showProgress }: { line: Lin
       {l.reservations.length > 0 ? (
         <TableRow className="border-b-0 @max-3xl:block">
           <TableCell colSpan={showProgress ? 7 : 4} className="pt-0 @max-3xl:block @max-3xl:text-left">
-            <ReservationList line={l} request={request} canRelease={can.edit || can.warehouse} />
+            <ReservationList line={l} request={request} canRelease={can.edit || can.warehouse} hideReturned={projectLevel} />
           </TableCell>
         </TableRow>
       ) : null}
@@ -139,7 +153,7 @@ function LineRow({ line: l, request, can, locations, showProgress }: { line: Lin
 
 const hidden = (request: EditorRequest) => request.projectId ? <input type="hidden" name="projectId" value={request.projectId} /> : null;
 
-function ReservationList({ line, request, canRelease }: { line: LineModel; request: EditorRequest; canRelease: boolean }) {
+function ReservationList({ line, request, canRelease, hideReturned }: { line: LineModel; request: EditorRequest; canRelease: boolean; hideReturned: boolean }) {
   const [releasing, setReleasing] = useState<ReservationLite | null>(null);
   return (
     <details className="text-sm">
@@ -153,7 +167,7 @@ function ReservationList({ line, request, canRelease }: { line: LineModel; reque
               <span className="text-muted-foreground"> · {formatInZone(r.from ?? null, request.timezone)} to {formatInZone(r.until ?? null, request.timezone)}</span>
             </span>
             <span className="text-muted-foreground">
-              {r.status === "released" ? `Released${r.released_reason ? `: ${r.released_reason}` : ""}` : `${r.status === "completed" ? "Completed" : "Active"} · dispatched ${formatQtyPlain(Number(r.dispatched_qty))}, returned ${formatQtyPlain(Number(r.returned_qty))}`}
+              {r.status === "released" ? `Released${r.released_reason ? `: ${r.released_reason}` : ""}` : hideReturned && !r.unit_id ? `Dispatched ${formatQtyPlain(Number(r.dispatched_qty))}` : `${r.status === "completed" ? "Completed" : "Active"} · dispatched ${formatQtyPlain(Number(r.dispatched_qty))}, returned ${formatQtyPlain(Number(r.returned_qty))}`}
               {canRelease && r.status === "active" && Number(r.dispatched_qty) < Number(r.qty) ? <> · <button type="button" className="font-medium underline underline-offset-2 hover:text-foreground" onClick={() => setReleasing(r)}>Release</button></> : null}
             </span>
           </li>

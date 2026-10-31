@@ -499,7 +499,7 @@ await step("the project's Equipment page and the request show what is still outs
   eq(sensor[1], "4", "needed"); eq(sensor[3], "4", "dispatched"); eq(sensor[4], "2", "returned"); eq(sensor[5], "2", "outstanding");
   const cable = await cells("Power cable");
   eq(cable[5], "15.25 m", "metres outstanding on the request line");
-  check(/equipment still out on 4 lines/.test(await R.mainText()), "the request header says on how many lines equipment is still out (never a sum of unlike units)");
+  check(/equipment still out \(4 items\)/.test(await R.mainText()), "the request header says how many ITEMS are still out (a count of items, never a sum of unlike units; counted items that cannot be named for the request would say 'held at project level' instead)");
   await row(SENSOR).scrollIntoViewIfNeeded();
   await R.shot("flow1-request-outstanding");
 });
