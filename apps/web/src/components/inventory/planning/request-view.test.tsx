@@ -53,18 +53,18 @@ describe("one request, as the panel and the project page show it", () => {
     expect(screen.queryByRole("button", { name: "Submit to the warehouse" })).toBeNull();
   });
 
-  it("gives warehouse people Dispatch for a project request and the date change for a submitted one", () => {
+  it("gives warehouse people the request workspace for a project request and the date change for a submitted one", () => {
     render(<RequestEditor model={model(request({ status: "submitted" }))} can={can({ warehouse: true, operableLocationIds: ["loc1"] })} locations={locations} technologies={[]} />);
-    expect(screen.getByRole("link", { name: "Dispatch" }).getAttribute("href")).toBe("/inventory?action=dispatch&request=r1&project=p1");
+    expect(screen.getByRole("link", { name: "Open the workspace" }).getAttribute("href")).toBe("/inventory/requests/r1?step=send");
     expect(screen.getByRole("button", { name: "Change the dates" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reserve" })).toBeTruthy();
   });
 
-  it("links an employee request to Issue with the employee, and shows no Dispatch", () => {
+  it("links an employee request to Issue with the employee, and shows no workspace link", () => {
     render(<RequestEditor model={model(request({ kind: "employee", project_id: null, employee_id: "e1", status: "submitted" }))} can={can({ warehouse: true, operableLocationIds: ["loc1"] })} locations={locations} technologies={[]} />);
-    expect(screen.getByRole("link", { name: "Issue to the employee" }).getAttribute("href")).toBe("/inventory?action=issue&request=r1&employee=e1");
-    expect(screen.queryByRole("link", { name: "Dispatch" })).toBeNull();
-    expect(screen.getByRole("link", { name: "What this employee holds" }).getAttribute("href")).toBe("/inventory/employees?employee=e1");
+    expect(screen.getByRole("link", { name: "Issue to the employee" }).getAttribute("href")).toBe("/inventory/stock?action=issue&request=r1&employee=e1");
+    expect(screen.queryByRole("link", { name: "Open the workspace" })).toBeNull();
+    expect(screen.getByRole("link", { name: "What this employee holds" }).getAttribute("href")).toBe("/inventory/stock?view=people&employee=e1");
   });
 
   it("is read-only for someone who cannot change it, and the dates are listed rather than editable", () => {

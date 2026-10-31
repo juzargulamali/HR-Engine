@@ -53,7 +53,7 @@ export async function resolveScan(db: Db, raw: string): Promise<ScanResolution> 
     const [itemName, loc] = await Promise.all([itemLabel(db, data.item_id), placeName(db, "inv_locations", data.location_id, "name")]);
     const facts = [LIFECYCLE_WORDS[data.lifecycle] ?? data.lifecycle, CUSTODY_WORDS[data.custody_kind] ?? data.custody_kind];
     if (loc && data.custody_kind === "warehouse") facts.push(loc);
-    return { status: "found", kind: "unit", code: data.code, id: data.id, itemId: data.item_id, itemName, openHref: `/inventory?unit=${data.id}`, facts };
+    return { status: "found", kind: "unit", code: data.code, id: data.id, itemId: data.item_id, itemName, openHref: `/inventory/stock?unit=${data.id}`, facts };
   }
 
   const { data, error } = await db.from("inv_balances").select("id, label_code, item_id, location_id, bin_id").eq("label_code", parsed.code).maybeSingle();
@@ -63,5 +63,5 @@ export async function resolveScan(db: Db, raw: string): Promise<ScanResolution> 
   const facts = ["Item in a bin"];
   if (bin) facts.push(`Bin ${bin}`);
   if (loc) facts.push(loc);
-  return { status: "found", kind: "stock", code: parsed.code, id: data.id, itemId: data.item_id, itemName, openHref: `/inventory?open=${data.item_id}`, facts };
+  return { status: "found", kind: "stock", code: parsed.code, id: data.id, itemId: data.item_id, itemName, openHref: `/inventory/stock?open=${data.item_id}`, facts };
 }

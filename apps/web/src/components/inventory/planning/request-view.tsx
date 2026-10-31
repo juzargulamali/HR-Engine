@@ -85,9 +85,9 @@ export function RequestEditor({ model, can, locations, technologies, hideHeading
 
       <div className="flex flex-wrap items-center gap-2">
         {r.status === "draft" && can.edit ? <div className="min-w-0 flex-1"><SubmitRequest requestId={r.id} version={r.version} projectId={projectId} missing={missing} /></div> : null}
-        {can.warehouse && live && r.kind === "project" && r.project_id ? <Link href={`/inventory?action=dispatch&request=${r.id}&project=${r.project_id}`} className={buttonVariants({ size: "sm" })}>Dispatch</Link> : null}
-        {can.warehouse && live && r.kind === "employee" && r.employee_id ? <Link href={`/inventory?action=issue&request=${r.id}&employee=${r.employee_id}`} className={buttonVariants({ size: "sm" })}>Issue to the employee</Link> : null}
-        {can.warehouse && r.kind === "employee" && r.employee_id ? <Link href={`/inventory/employees?employee=${r.employee_id}`} className={buttonVariants({ size: "sm", variant: "outline" })}>What this employee holds</Link> : null}
+        {can.warehouse && live && r.kind === "project" && r.project_id ? <Link href={`/inventory/requests/${r.id}?step=send`} className={buttonVariants({ size: "sm" })}>Open the workspace</Link> : null}
+        {can.warehouse && live && r.kind === "employee" && r.employee_id ? <Link href={`/inventory/stock?action=issue&request=${r.id}&employee=${r.employee_id}`} className={buttonVariants({ size: "sm" })}>Issue to the employee</Link> : null}
+        {can.warehouse && r.kind === "employee" && r.employee_id ? <Link href={`/inventory/stock?view=people&employee=${r.employee_id}`} className={buttonVariants({ size: "sm", variant: "outline" })}>What this employee holds</Link> : null}
         {can.edit && editable ? <RequestMoreMenu requestId={r.id} status={r.status} projectId={projectId} outstanding={model.outstandingLines} /> : null}
       </div>
       {live && !can.warehouse ? <p className="text-sm text-muted-foreground">The warehouse reserves and dispatches. You will see reserved, dispatched and returned numbers here as they happen.</p> : null}
@@ -107,7 +107,24 @@ export function RequestEditor({ model, can, locations, technologies, hideHeading
       )}
 
       <Section title="Equipment lines">
+        <RequestLines model={model} can={can} locations={locations} technologies={technologies} />
+      </Section>
+    </div>
+  );
+}
+
+/**
+ * The lines of a request with everything that can be done to them (reserve, release, substitute, buy or rent, add an item or a template). Used by
+ * the request panel and the project page, and by the Prepare step of the request workspace (which leaves the sent/returned columns to its own steps).
+ */
+export function RequestLines({ model, can, locations, technologies, showProgress = true }: { model: RequestModel; can: EditorCan; locations: readonly InvLocationRow[]; technologies: TechnologyOption[]; showProgress?: boolean }) {
+  const r = model.request;
+  const editable = isRequestEditable(r.status);
+  const projectId = r.project_id;
+  return (
+    <>
         <LinesEditor
+          showProgress={showProgress}
           request={{ id: r.id, status: r.status, kind: r.kind, projectId: projectId, timezone: r.timezone, neededFrom: r.needed_from, neededUntil: r.needed_until, pickupLocationId: r.pickup_location_id }}
           lines={model.lines}
           can={can}
@@ -125,7 +142,6 @@ export function RequestEditor({ model, can, locations, technologies, hideHeading
             </details>
           </div>
         ) : null}
-      </Section>
-    </div>
+    </>
   );
 }

@@ -102,7 +102,7 @@ describe("checkTransaction", () => {
 describe("saveItem", () => {
   it("adds an item as in use, sends unit and decimals only for counted stock, then lands on the new item", async () => {
     outcome = { data: "new-item", error: null };
-    await expect(saveItem({ error: null }, fd({ companyId: C, name: " XLR cable ", tracking: "quantity", unitOfMeasure: "m", quantityScale: "2", specification: "5 m", after: "panel", status: "active" }))).rejects.toThrow("redirect:/inventory?open=new-item");
+    await expect(saveItem({ error: null }, fd({ companyId: C, name: " XLR cable ", tracking: "quantity", unitOfMeasure: "m", quantityScale: "2", specification: "5 m", after: "panel", status: "active" }))).rejects.toThrow("redirect:/inventory/stock?open=new-item");
     expect(calls[0]).toMatchObject({ fn: "inv_save_item", args: { p_company_id: C, p_item_id: null, p_fields: { name: "XLR cable", tracking: "quantity", status: "active", unit_of_measure: "m", quantity_scale: 2, specification: "5 m" } } });
     calls.length = 0;
     await expect(saveItem({ error: null }, fd({ companyId: C, name: "Laptop", tracking: "individual", unitOfMeasure: "box", quantityScale: "3", after: "panel" }))).rejects.toThrow(/redirect/);

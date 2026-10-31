@@ -44,7 +44,7 @@ export function CategoriesSection({ companyId, categories, itemCounts, canEdit }
   const rows = categoryRows(categories);
   return (
     <div className="space-y-4">
-      <p className="max-w-3xl text-sm text-muted-foreground">Categories group the catalogue. Nothing is built in: add the groups you really use, and nest them as deep as you need. Items, their models and exact specifications are added and edited in the <Link href="/inventory" className="underline underline-offset-2">catalogue</Link>.</p>
+      <p className="max-w-3xl text-sm text-muted-foreground">Categories group the catalogue. Nothing is built in: add the groups you really use, and nest them as deep as you need. Items, their models and exact specifications are added and edited in the <Link href="/inventory/stock" className="underline underline-offset-2">catalogue</Link>.</p>
       {canEdit ? <Button type="button" size="sm" onClick={() => setDraft({ id: null, parentId: "", name: "", sortOrder: 0, isActive: true })}>Add a category</Button> : <p className="text-sm text-muted-foreground">Catalogue rights are needed to change categories.</p>}
       {rows.length === 0 ? <EmptyState dense title="No categories yet." description={canEdit ? "Add the first category, for example Computers, Cables or Motors." : "Someone with catalogue rights needs to add them."} /> : (
         <ul className="divide-y divide-border rounded-md border border-border" aria-label="Categories">

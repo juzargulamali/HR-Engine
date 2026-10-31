@@ -63,7 +63,7 @@ export function DonePanel({ flow, onAnother, onClose }: { flow: Flow; onAnother:
       </Alert>
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="outline" onClick={onAnother}>Record another</Button>
-        <Link href="/inventory/movements" className="inline-flex h-9 items-center rounded-md px-3 text-sm font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">See it in Movements</Link>
+        <Link href="/inventory/history" className="inline-flex h-9 items-center rounded-md px-3 text-sm font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">See it in History</Link>
         {onClose ? <Button type="button" onClick={onClose}>Done</Button> : null}
       </div>
     </div>

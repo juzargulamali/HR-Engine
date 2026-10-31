@@ -72,6 +72,17 @@ export async function ItemSidePanel({ openId, closeHref, here, binCode }: { open
         specs.push({ key: "consume", label: "Use up", hint: "Record consumables that were used", movement: { kind: "consume", initial: search, title: `Use up ${item.name}` } });
         specs.push({ key: "return-unused", label: "Return unused", hint: "Unused consumables back on the shelf", movement: { kind: "return_unused", initial: search, title: `Return unused ${item.name}` } });
       }
+      if (item.tracking !== "consumable" && item.status === "active") {
+        specs.push({ key: "give", label: "Give to a person", hint: "Issue it to an employee", movement: { kind: "issue", initial: search, title: `Give ${item.name} to a person` } });
+        specs.push({ key: "transfer", label: "Move to another warehouse", hint: "It is in transit until the other warehouse confirms it arrived", movement: { kind: "transfer", initial: search, title: `Move ${item.name} to another warehouse` } });
+        specs.push({
+          key: "send-project", label: "Send to a project (not from a request)", hint: "An exception: it does not fulfil any request",
+          movement: {
+            kind: "dispatch", initial: search, title: `Send ${item.name} to a project`,
+            description: "This does not fulfil a request. It is recorded without one, so it shows as “not part of a request” and never counts towards a request's progress. Equipment that any request has reserved cannot be sent this way. For planned equipment, open the request from Today.",
+          },
+        });
+      }
       specs.push({ key: "check", label: "Check condition", hint: "Release held stock or hold it back", separatorBefore: true, movement: { kind: "check", initial: search, title: `Check ${item.name}` } });
       specs.push({ key: "repair-out", label: "Send for repair", movement: { kind: "repair_out", initial: search, title: `Send ${item.name} for repair` } });
       if (individual) specs.push({ key: "repair-in", label: "Back from repair", movement: { kind: "repair_in", initial: search, title: `${item.name} back from repair` } });
@@ -189,7 +200,7 @@ export async function ItemSidePanel({ openId, closeHref, here, binCode }: { open
       ) : null}
 
       {d.detail && hasStock ? (
-        <Section title="Recent movements" aside={<Link href={`/inventory/movements?item=${item.id}`} className="text-sm font-medium underline-offset-2 hover:underline">All movements of this item</Link>}>
+        <Section title="Recent movements" aside={<Link href={`/inventory/history?item=${item.id}`} className="text-sm font-medium underline-offset-2 hover:underline">All movements of this item</Link>}>
           <HistoryList rows={d.movements} names={d.names} resolver={resolver} itemName={() => item.name} locations={d.locations} fallbackZone={d.locations[0]?.timezone ?? "Asia/Dubai"} emptyText="Nothing has been recorded for this item yet." linkToLedger />
         </Section>
       ) : null}

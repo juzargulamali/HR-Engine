@@ -211,7 +211,7 @@ export async function saveItem(_prev: InvActionState, formData: FormData): Promi
   const { data, error } = await db.rpc("inv_save_item", { p_company_id: d.companyId, p_item_id: d.itemId ?? null, p_fields: fields as never });
   if (error) return fail(error.message);
   refreshInventory();
-  if (!d.itemId && d.after === "panel") redirect(`/inventory?open=${data}`);
+  if (!d.itemId && d.after === "panel") redirect(`/inventory/stock?open=${data}`);
   return ok({ id: data ?? d.itemId });
 }
 
@@ -299,7 +299,7 @@ export async function replaceItem(_prev: InvActionState, formData: FormData): Pr
   const { data, error } = await db.rpc("inv_replace_item", { p_item_id: d.itemId, p_fields: fields as never, p_reason: d.reason });
   if (error) return fail(error.message);
   refreshInventory();
-  redirect(`/inventory?open=${data}`);
+  redirect(`/inventory/stock?open=${data}`);
 }
 
 const correctSchema = z.object({

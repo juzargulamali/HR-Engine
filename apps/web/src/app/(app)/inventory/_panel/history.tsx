@@ -41,7 +41,7 @@ export function HistoryList({ rows, names, resolver, itemName, locations, fallba
               {m.employee_id ? ` · ${names.employee(m.employee_id)}` : ""}
               {m.request_id ? ` · request ${names.request(m.request_id)}` : ""}
               {m.note ? ` · “${m.note}”` : m.reason ? ` · “${m.reason}”` : ""}
-              {linkToLedger ? <>{" · "}<Link href={`/inventory/movements?open=${m.id}`} className="underline underline-offset-2">{m.code}</Link></> : ` · ${m.code}`}
+              {linkToLedger ? <>{" · "}<Link href={`/inventory/history?open=${m.id}`} className="underline underline-offset-2">{m.code}</Link></> : ` · ${m.code}`}
             </p>
           </li>
         );

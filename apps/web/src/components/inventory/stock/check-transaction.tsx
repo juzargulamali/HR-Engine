@@ -47,7 +47,7 @@ export function CheckTransaction({ companies }: { companies: { id: string; name:
       </div>
       <div role="status" aria-live="polite" className="text-sm">
         {res?.error ? <p className="text-destructive">{res.error}</p> : null}
-        {res && !res.error ? <p>{res.text}{res.movementId ? <> <Link href={`/inventory/movements?open=${res.movementId}`} className="font-medium underline underline-offset-2">Open the entry</Link></> : null}</p> : null}
+        {res && !res.error ? <p>{res.text}{res.movementId ? <> <Link href={`/inventory/history?open=${res.movementId}`} className="font-medium underline underline-offset-2">Open the entry</Link></> : null}</p> : null}
       </div>
     </form>
   );

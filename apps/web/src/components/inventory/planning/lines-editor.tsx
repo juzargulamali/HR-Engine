@@ -38,7 +38,7 @@ type Dialog = "edit" | "cancel" | "substitute" | "decide" | "shortage" | "reserv
 const LIVE = new Set(["submitted", "in_progress"]);
 
 /** The lines of one request, with progress in numbers and every line action that is allowed. A cancelled line stays visible, with what is still out. */
-export function LinesEditor({ request, lines, can, locations }: { request: EditorRequest; lines: LineModel[]; can: EditorCan; locations: LocationOption[] }) {
+export function LinesEditor({ request, lines, can, locations, showProgress = true }: { request: EditorRequest; lines: LineModel[]; can: EditorCan; locations: LocationOption[]; /** The request workspace shows what was sent and returned in its own steps, at the level the data supports, so Prepare leaves these columns out. */ showProgress?: boolean }) {
   if (lines.length === 0) return <p className="text-sm text-muted-foreground">No lines yet. Add an item, or add everything a technology needs from its template.</p>;
   const operable = locations.filter((l) => can.operableLocationIds.includes(l.id));
   return (
@@ -50,14 +50,14 @@ export function LinesEditor({ request, lines, can, locations }: { request: Edito
           <TableHead scope="col">Item</TableHead>
           <TableHead scope="col" className="text-right">Needed</TableHead>
           <TableHead scope="col" className="text-right">Reserved</TableHead>
-          <TableHead scope="col" className="text-right">Dispatched</TableHead>
-          <TableHead scope="col" className="text-right">Returned</TableHead>
-          <TableHead scope="col" className="text-right">Outstanding</TableHead>
+          {showProgress ? <TableHead scope="col" className="text-right">Dispatched</TableHead> : null}
+          {showProgress ? <TableHead scope="col" className="text-right">Returned</TableHead> : null}
+          {showProgress ? <TableHead scope="col" className="text-right">Outstanding</TableHead> : null}
           <TableHead scope="col"><span className="sr-only">Actions</span></TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {lines.map((l) => <LineRow key={l.id} line={l} request={request} can={can} locations={operable} />)}
+        {lines.map((l) => <LineRow key={l.id} line={l} request={request} can={can} locations={operable} showProgress={showProgress} />)}
       </TableBody>
     </Table>
     </div>
@@ -66,7 +66,7 @@ export function LinesEditor({ request, lines, can, locations }: { request: Edito
 
 const num = "whitespace-nowrap text-right tabular-nums";
 
-function LineRow({ line: l, request, can, locations }: { line: LineModel; request: EditorRequest; can: EditorCan; locations: LocationOption[] }) {
+function LineRow({ line: l, request, can, locations, showProgress }: { line: LineModel; request: EditorRequest; can: EditorCan; locations: LocationOption[]; showProgress: boolean }) {
   const [dialog, setDialog] = useState<Dialog>(null);
   const close = () => setDialog(null);
   const editable = request.status === "draft" || LIVE.has(request.status);
@@ -109,9 +109,9 @@ function LineRow({ line: l, request, can, locations }: { line: LineModel; reques
             {l.progress.shortage > 0 ? <span className="block text-sm font-medium text-[hsl(var(--os-amber))]">short by {q(l.progress.shortage)}</span> : null}
           </span>
         </TableCell>
-        <TableCell data-label="Dispatched" className={num}>{q(l.progress.dispatched)}</TableCell>
-        <TableCell data-label="Returned" className={num}>{q(l.progress.returned)}</TableCell>
-        <TableCell data-label="Outstanding" className={`${num} ${l.progress.outstanding > 0 ? "font-semibold" : ""}`}>{q(l.progress.outstanding)}</TableCell>
+        {showProgress ? <TableCell data-label="Dispatched" className={num}>{q(l.progress.dispatched)}</TableCell> : null}
+        {showProgress ? <TableCell data-label="Returned" className={num}>{q(l.progress.returned)}</TableCell> : null}
+        {showProgress ? <TableCell data-label="Outstanding" className={`${num} ${l.progress.outstanding > 0 ? "font-semibold" : ""}`}>{q(l.progress.outstanding)}</TableCell> : null}
         <TableCell className="whitespace-nowrap @max-3xl:text-left">
           <div className="flex flex-wrap items-center justify-end gap-2 @max-3xl:justify-start">
             {showReserve ? <Button type="button" size="sm" onClick={() => setDialog("reserve")}>Reserve</Button> : null}
@@ -128,7 +128,7 @@ function LineRow({ line: l, request, can, locations }: { line: LineModel; reques
       </TableRow>
       {l.reservations.length > 0 ? (
         <TableRow className="border-b-0 @max-3xl:block">
-          <TableCell colSpan={7} className="pt-0 @max-3xl:block @max-3xl:text-left">
+          <TableCell colSpan={showProgress ? 7 : 4} className="pt-0 @max-3xl:block @max-3xl:text-left">
             <ReservationList line={l} request={request} canRelease={can.edit || can.warehouse} />
           </TableCell>
         </TableRow>

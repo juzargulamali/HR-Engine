@@ -397,16 +397,16 @@ describe("Inventory navigation", () => {
     expect(mods.find((m) => m.id === "inventory")?.href).toBe("/inventory/mine");
   });
 
-  it("shows Inventory, Requests and Movements to a warehouse operator, with My equipment and Scan kept out of the menu", () => {
+  it("shows Today, Stock and History to a warehouse operator, with Requests, My equipment, Scan and who holds what kept out of the menu", () => {
     const links = sectionLinks(buildNavModules([grant("employee")], { inventory: inv("warehouse") }));
-    expect(links).toEqual(["Inventory:Inventory", "Inventory:Requests", "Inventory:Movements", "Inventory:My equipment*", "Inventory:Scan a label*", "Inventory:Equipment held by employees*"]);
+    expect(links).toEqual(["Inventory:Today", "Inventory:Stock", "Inventory:History", "Inventory:Requests*", "Inventory:My equipment*", "Inventory:Scan a label*", "Inventory:Equipment held by people*"]);
   });
 
-  it("offers 'Equipment held by employees' (kept out of the menu) only to HR custody access, founders and warehouse operators", () => {
-    const held = (mods: ReturnType<typeof buildNavModules>) => sectionLinks(mods).filter((l) => l.includes("Equipment held by employees"));
-    expect(held(buildNavModules([], { inventory: inv("view_employee_custody") }))).toEqual(["Inventory:Equipment held by employees*"]);
-    expect(held(buildNavModules([], { inventory: inv("founder") }))).toEqual(["Inventory:Equipment held by employees*"]);
-    expect(held(buildNavModules([], { inventory: inv("warehouse") }))).toEqual(["Inventory:Equipment held by employees*"]);
+  it("offers 'Equipment held by people' (kept out of the menu, inside Stock) only to HR custody access, founders and warehouse operators", () => {
+    const held = (mods: ReturnType<typeof buildNavModules>) => sectionLinks(mods).filter((l) => l.includes("Equipment held by"));
+    expect(held(buildNavModules([], { inventory: inv("view_employee_custody") }))).toEqual(["Inventory:Equipment held by people*"]);
+    expect(held(buildNavModules([], { inventory: inv("founder") }))).toEqual(["Inventory:Equipment held by people*"]);
+    expect(held(buildNavModules([], { inventory: inv("warehouse") }))).toEqual(["Inventory:Equipment held by people*"]);
     // Nothing for stock readers, catalogue managers, department heads, project managers or plain employees: whatever their HR roles.
     for (const caps of [["view_stock"], ["manage_catalogue"], ["request_for_employees"], ["view_costs"], []]) {
       expect(held(buildNavModules([grant("hr_admin")], { inventory: inv(...caps) }))).toEqual([]);
@@ -415,16 +415,16 @@ describe("Inventory navigation", () => {
     expect(held(buildNavModules([grant("ceo")], { inventory: { grants: [], isEmployee: true } }))).toEqual([]);
     // It is a real destination: found by search and it lights up Inventory, but it is not a menu row.
     const mods = buildNavModules([], { inventory: inv("view_employee_custody") });
-    const link = mods.find((m) => m.id === "inventory")!.sections.flatMap((s) => s.links).find((l) => l.href === "/inventory/employees");
+    const link = mods.find((m) => m.id === "inventory")!.sections.flatMap((s) => s.links).find((l) => l.href === "/inventory/stock?view=people");
     expect(link?.secondary).toBe(true);
-    expect(activeModuleId("/inventory/employees", mods)).toBe("inventory");
+    expect(activeModuleId("/inventory/stock", mods)).toBe("inventory");
   });
 
-  it("gives a Project Manager the catalogue and requests but not Movements, and a plain Inventory grant the same", () => {
+  it("gives a Project Manager Stock (the catalogue) and Requests but neither Today nor History, and a plain Inventory grant no History", () => {
     expect(sectionLinks(buildNavModules([], { inventory: { grants: [], managesProjects: true, isEmployee: true } }))).toEqual([
-      "Inventory:Inventory", "Inventory:Requests", "Inventory:My equipment*", "Inventory:Scan a label*",
+      "Inventory:Stock", "Inventory:Requests", "Inventory:My equipment*", "Inventory:Scan a label*",
     ]);
-    expect(sectionLinks(buildNavModules([], { inventory: inv() }))).not.toContain("Inventory:Movements");
+    expect(sectionLinks(buildNavModules([], { inventory: inv() }))).not.toContain("Inventory:History");
   });
 
   it("shows Setup under Manage only to the people who can use it (access is under People & Access)", () => {
@@ -434,7 +434,7 @@ describe("Inventory navigation", () => {
     expect(hrefsOf(buildNavModules([], { inventory: inv("manage_access") }))).toContain("/people-access");
     expect(hrefsOf(buildNavModules([], { inventory: inv("manage_catalogue") }))).not.toContain("/people-access");
     const founder = sectionLinks(buildNavModules([], { inventory: inv("founder") }));
-    expect(founder).toEqual(expect.arrayContaining(["Manage:Setup", "Inventory:Movements"]));
+    expect(founder).toEqual(expect.arrayContaining(["Manage:Setup", "Inventory:History"]));
     expect(founder).not.toContain("Manage:Access");
   });
 

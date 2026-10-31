@@ -1,6 +1,6 @@
-# Inventory for everyday warehouse use: review, screen map and concept (Stage A)
+# Inventory for everyday warehouse use: review, screen map, concept (Stage A) and the live screens (Stage B)
 
-> **STATUS: Stage A, an interactive concept with fictional data. Nothing here is connected to real records.** No database change, no migration, no hosted SQL, no change to any existing Inventory page. The concept lives in the design preview (`/os-preview/inventory`), which is hidden in Production by the existing preview gate. **Stage B (connecting the approved interface to the existing actions) starts only after the owner approves this.**
+> **STATUS: Stage B is implemented on the existing backend.** The Stage A concept (fictional data, `/os-preview/inventory`, hidden in Production by the existing preview gate) was approved with conditions; Stage B connects the approved interface to the existing actions. **No database migration, no new function, no hosted SQL, no change to any permission, to the stock ledger, to reservation or availability rules, or to recovery scripts.** Section 11 says what was built, what was verified and what the backend cannot do. Sections 1 to 10 are the Stage A review and concept as they were approved; where Stage B differs, section 11 wins.
 
 The aim: a warehouse manager can receive stock, prepare a project, dispatch equipment and record a partial return without understanding the database or searching through several unrelated screens. Nothing is rebuilt: the redesign calls the same server actions and database functions that already work.
 
@@ -83,23 +83,75 @@ Run the app with the preview enabled (`OS_PREVIEW_ENABLED=1`, or any Vercel **pr
 
 Checks: `apps/web/os-shell-checks/inventory-concept-checks.mjs` (browser: 128 checks across desktop and phone in dark and light, including axe, no sideways scroll and console errors) and `os-preview/_lib/inventory-concept.test.ts` (20 unit tests for the concept's rules and for the sample data matching the Today rows). Screenshots: `docs/inventory-simplification-screenshots/` (desktop and phone, dark and light).
 
-## 9. Questions for the approval
+## 9. Questions for the approval (answered by the owner; see section 11)
 
 1. **Employee equipment:** the concept leaves it on its current pages. The proposal is a *Give equipment* action in Stock (person → equipment → review → confirm) and *With people* as a list in Stock. Agree?
 2. **Reserve all:** leave it out for now (recommended), or propose the single-transaction function as a separate change?
 3. **Stock rows:** one visible *Receive* per row, other actions under *More*. Acceptable, or would you rather have *Send* when nothing is available?
 
-## 10. Progress
+## 10. Stage A progress (as approved)
+
+Steps 1 to 5 were completed and approved. Stage B is section 11.
+
+## 11. Stage B: the live screens
+
+### What changed for the people using it
+
+| Before | Now |
+|---|---|
+| `/inventory` was the stock list | `/inventory` is **Today** (one row per job). The list is **Stock** at `/inventory/stock`. |
+| Requests, Movements, Scan, Equipment held by employees, five movement buttons in the header | **Today / Stock / History** in the menu; **Setup** under Manage. Scanning is the **Scan a label** button in the warehouse bar; who holds what is **With people** inside Stock; sending, returning and transferring happen where they belong (below). |
+| No default warehouse, no switcher | The warehouse bar says **You are working in …** on Today and Stock. It starts at the person's own warehouse (or all warehouses for people who cannot operate anywhere), offers a switcher only when there is a choice, and remembers the choice. |
+| Dispatch and return were forms on another page that started empty | One **request workspace** (`/inventory/requests/<id>`): **1 Prepare, 2 Send out, 3 Receive back**, with the request, warehouse, booking window, dispatch date and expected return carried through. |
+| "Rented, not owned?" was a collapsed checkbox at the bottom of the receive form | **Owned or Rented** is a visible, explicit choice at the top (neither is pre-selected: rented stock never adds to what the company owns, so it is never assumed). |
+
+### The screens
+
+* **Today** (`/inventory`): rows for requests to prepare or send, equipment due back (projects and people), transfers on their way here, and Sales checks, grouped Late / Today / Next 7 days / Later / Waiting, using each record's own date. A request is **one** row whichever step it is at (Send equipment when something reserved is unsent and its dispatch date has come, otherwise Prepare equipment). Each source loads on its own: if one fails, a red banner names it and its filter shows "?", never an empty queue. Sales checks reuse the existing record-the-check dialog (labelled **Check availability**), show only the reference, dates and equipment, and are separate from reservations. Equipment out on a project or with a person is listed only when it has a recorded expected return date; counted stock out has no warehouse, so with one warehouse chosen it is not listed (it appears under All warehouses).
+* **Stock** (`/inventory/stock`): **Receive stock** and **Give equipment** above the list; a compact default list (Item, Available, Out, Reserved); a row opens the item's details, where the actions for that item live (Receive stock, Give to a person, Move to another warehouse, **Send to a project (not from a request)** with its explanation, check condition, repair, missing, retire). Counted stock that is out shows **"—"** with its reason, never a guess. **With people** is the existing equipment-held-by-employees list with **Give equipment** and **Receive returns** per person. Old `/inventory/employees` links land there.
+* **History** (`/inventory/history`): the same ledger, renamed; `/inventory/movements` redirects with its parameters.
+* **Request workspace**:
+  * **Prepare**: the existing lines editor (reserve with automatic or named units, partial results accepted, buy or rent, substitutes decided by the Project Manager), without the sent/returned columns. There is **no "Reserve all"** (not built, not shown disabled).
+  * **Send out**: reserved equipment is listed and **nothing is ticked**; scan or type a code, tick units, count counted stock, send part. Flags **before** confirmation: a code not reserved for the request, or more than reserved, blocks (the database would refuse it); sending part warns. It uses the existing dispatch function with the request, the existing review and confirm, one key per entry, single flight and "check whether it went through". **Unplanned dispatch** is a separate boxed section that says it does **not** fulfil the request, shows as "not part of a request" and cannot use reserved equipment.
+  * **Receive back**: starts from what the **project** is recorded as holding; nothing is ticked; a **condition is required** for everything received; good (or fair, for units) becomes available again, damaged or "needs checking" is held; what is not listed stays out. Uses the existing return function.
+
+### What the backend cannot do, and what the screens therefore say (no workaround)
+
+1. **A return carries no request or request line.** `inv_return_from_project` takes a project and lines; `inv_reservation_return` matches by project, item and unit. A **unit** return is exact (the unit is named). A **counted** return is exact only for the project and the item. So Receive back shows **Sent** (exact, the dispatch names the request) and **Still out** (exact, what the project holds), and shows **Returned for this request only when nothing else could have been returned in its place** (one line, no other request sent the item, and the project holds exactly what this request sent minus what it got back). Otherwise the row is marked **Project level**, Returned shows "—", and the screen says why. Nothing is guessed. *Not changed:* the request panel and the project's Equipment page still show their per-line Returned and Outstanding columns for counted stock, as before; they read the same reservation counters. A fix would need a migration (a line reference on movement lines and on the return function); it is not proposed here.
+2. **Reserve all** would be a loop over `inv_reserve`, which is not atomic; left out as agreed.
+3. **An unplanned dispatch recorded against the request, with a reason** needs a migration; the screen offers only today's exception (no request).
+4. **How many are "short" on Today** needs an availability call per line; Today says "still to reserve", not "short" (the Prepare step shows the database's own shortage per line).
+5. **Counted stock held by projects or people has no warehouse** (`inv_bal_ensure` sets a location only for warehouse holders), so a per-warehouse Out is unknown for it and says so.
+
+### Permissions and protections (unchanged, re-checked)
+
+The database still checks every movement (`inv_loc` on the location, `inv_can_operate`), RLS decides what each person sees, and the screen only decides what to offer: Project Managers see Prepare but no send or receive controls, plain employees are sent to My equipment and cannot open the workspace, custody readers see With people but no stock-changing button, and people with no Inventory access are told so. Reservations never dispatch anything; availability and the preparation and inspection buffers (the booking window runs from the earliest to the latest planning date) are untouched. Recovery scripts are untouched.
+
+### Where the old addresses go
+
+`/inventory?action|open|unit|codes|bin|…` (printed QR labels, bookmarks, links from requests) → `/inventory/stock?…` with every parameter kept; `/inventory/movements` → `/inventory/history`; `/inventory/employees` → `/inventory/stock?view=people`; `/inventory/scan?c=CODE` is unchanged; `/inventory/requests` stays (Project Managers' list, and the way to browse every request); a request panel offers **Open the workspace**.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit`, `eslint` (apps/web) | clean |
+| Unit and component tests (apps/web, whole suite) | 1,386 passed. New or changed: working-location rules, legacy redirects, Today rules and page, the workspace's send flags / Sent-Returned-Still-out attribution / return outcomes, Send out and Receive back components, the owned-or-rented choice, the Stock page, the item panel, navigation |
+| `inventory-workspace-flow.mjs` (real browser, real screens, throwaway PostgREST + Postgres built from the migrations) | 23 of 23: Today, the warehouse named, Prepare, reserving sends nothing, Send out (unreserved code blocks, partial warns, recorded against the request, one dispatch), Receive back (project-level counted totals, condition required, good available again, damaged held), owned and rented receipts, the item panel's actions, redirects, the switcher kept across screens, Project Manager, employee, custody reader and no-access people, and the database refusing an unreserved dispatch |
+| Earlier browser flows (`inventory-flow-1…5`), pointed at the new addresses and button names (their steps and assertions are otherwise unchanged) | flow 1 (stock to reconcile) 26 of 26; flow 2 (employee equipment) 13 of 13; flow 3 (Sales checks) 16 of 16; flow 4 (transfers and conflicts) 31 of 31; flow 5 (access) 57 of 57 |
+| `inventory-a11y.mjs` (axe, keyboard, outage) with Today and the workspace's three steps added | axe finds no serious or critical issue on 26 Inventory pages in desktop and phone, dark and light; the keyboard dispatch check passes; while the data service is down every Inventory page checked (Stock, With people, Requests, History, Manage, My equipment, Today, the workspace) says it could not load rather than showing an empty list. **One check still fails and is outside Inventory:** `/people-access` has no outage wording (the page was not changed here) |
+| Real-screen screenshots | `docs/inventory-simplification-screenshots/live/` (Today, the three workspace steps, Stock, Receive stock with the owned/rented choice, With people; desktop and phone, dark and light) |
+| Not run | the hosted (Production) checks: no hosted SQL was run and nothing was deployed from here |
+
+### Progress
 
 | # | Step | State |
 |---|---|---|
-| 1 | Current-flow review | **Verified** (traced from the code; section 1) |
-| 2 | Simplified screen map | **Verified** (section 2; reviewed against the current navigation and permissions) |
-| 3 | Interactive concept | **Verified** (built; 20 unit tests and 128 browser checks pass) |
-| 4 | Visual and usability checks | **Verified** (desktop and phone, dark and light, screenshots inspected; axe clean) |
-| 5 | Owner approval | **Waiting for you** |
-| 6 | Live implementation | Not started (after approval) |
-| 7 | Targeted verification | Not started |
-| 8 | Draft PR and deployment instructions | Not started |
-
-**4 of 8 verified. Current task: step 5, waiting for your approval. No blocker.**
+| 1 | Current-flow review | Verified |
+| 2 | Simplified screen map | Verified |
+| 3 | Interactive concept | Verified |
+| 4 | Visual and usability checks | Verified (concept) |
+| 5 | Owner approval | Done: approved with conditions |
+| 6 | Live implementation | Implemented |
+| 7 | Targeted verification | Verified as in the table above |
+| 8 | Draft PR and deployment instructions | See the pull request |

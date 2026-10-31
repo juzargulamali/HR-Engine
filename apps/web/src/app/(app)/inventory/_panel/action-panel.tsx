@@ -15,7 +15,7 @@ export const PANEL_ACTIONS = ["receive", "issue", "dispatch", "return", "transfe
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
 export const parseAction = (raw: string): PanelAction | null => ((PANEL_ACTIONS as readonly string[]).includes(raw) ? (raw as PanelAction) : null);
 
-export interface ActionParams { employee: string; project: string; request: string; codes: string; transfer: string; mode: string }
+export interface ActionParams { employee: string; project: string; request: string; codes: string; transfer: string; mode: string; /** The warehouse the person is working in (prefilled when they may operate there). */ location?: string }
 
 const TITLES: Record<PanelAction, string> = { receive: "Receive stock", issue: "Issue to a person", dispatch: "Dispatch to a project", return: "Return", transfer: "Transfer between locations", scan: "Scan a label" };
 
@@ -37,13 +37,14 @@ export async function ActionSidePanel({ action, params, closeHref }: { action: P
     context = await loadFormContext(ctx, { projects: action === "dispatch" || action === "return", requests: action === "dispatch" || action === "issue", transfers: action === "transfer" });
   } catch (e) {
     console.error("[inventory] action panel load failed", e);
-    return shell(<LoadError what="what this form needs" retryHref={`/inventory?action=${action}`} />);
+    return shell(<LoadError what="what this form needs" retryHref={`/inventory/stock?action=${action}`} />);
   }
   if (context.locations.length === 0) {
     return shell(<Alert role="status">You are not set up to work at any location, so you cannot {TITLES[action].toLowerCase()}. Ask an Inventory founder to add a location to your access.</Alert>);
   }
 
   const initial: MovementInitial = {};
+  if (params.location && context.locations.some((l) => l.id === params.location)) initial.locationId = params.location;
   const projectId = parseRecordId(params.project);
   const employeeId = parseRecordId(params.employee);
   const requestId = parseRecordId(params.request);

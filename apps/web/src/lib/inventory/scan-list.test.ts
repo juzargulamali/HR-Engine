@@ -30,8 +30,8 @@ describe("pending list of scanned codes", () => {
   });
   it("continues to the matching form with the codes in the address", () => {
     const list = [{ code: "UAE-E-00042", kind: "unit" as const }, { code: "UAE-S-00007", kind: "stock" as const }];
-    expect(pendingActionHref("issue", list)).toBe("/inventory?action=issue&codes=UAE-E-00042,UAE-S-00007");
-    expect(pendingActionHref("return", list)).toBe("/inventory?action=return&codes=UAE-E-00042,UAE-S-00007");
+    expect(pendingActionHref("issue", list)).toBe("/inventory/stock?action=issue&codes=UAE-E-00042,UAE-S-00007");
+    expect(pendingActionHref("return", list)).toBe("/inventory/stock?action=return&codes=UAE-E-00042,UAE-S-00007");
     expect(pendingActionHref("transfer", list)).toContain("action=transfer");
   });
   it("has one safe message that does not confirm existence", () => {

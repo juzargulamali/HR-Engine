@@ -44,7 +44,7 @@ describe("Scan page address (the QR on a label)", () => {
   it("opens the record when the person may see it, and calls no function", async () => {
     state.unit = { id: "unit-9", code: "UAE-E-00042", item_id: "i1", lifecycle: "active", custody_kind: "warehouse", location_id: null, bin_id: null };
     expect(await run({ c: "UAE-E-00042" })).toBeNull();
-    expect(state.redirected).toBe("/inventory?unit=unit-9");
+    expect(state.redirected).toBe("/inventory/stock?unit=unit-9");
     expect(state.rpc).toBe(0);
   });
 

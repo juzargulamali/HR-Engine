@@ -51,7 +51,7 @@ vi.mock("@/lib/inventory/stock", () => ({
 
 import { ItemSidePanel } from "./item-panel";
 import { UnitSidePanel } from "./unit-panel";
-import { MovementSidePanel } from "../movements/_panel/movement-panel";
+import { MovementSidePanel } from "../history/_panel/movement-panel";
 
 const render = async (el: Promise<React.ReactElement | null>) => renderToStaticMarkup((await el) as React.ReactElement);
 const here = (p: Record<string, string | null> = {}) => `/inventory?${new URLSearchParams(Object.fromEntries(Object.entries(p).filter(([, v]) => v) as [string, string][])).toString()}`;

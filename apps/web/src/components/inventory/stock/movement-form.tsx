@@ -91,7 +91,9 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
   const [reason, setReason] = useState("");
   const [adjustAction, setAdjustAction] = useState<AdjustAction>(initial?.adjustAction ?? "missing");
   const [note, setNote] = useState("");
-  const [isRental, setIsRental] = useState(false);
+  // Owned or rented is a choice the person makes every time (never assumed): rented stock never adds to what the company owns.
+  const [ownership, setOwnership] = useState<"" | "owned" | "rented">("");
+  const isRental = ownership === "rented";
   const [rentalSupplier, setRentalSupplier] = useState("");
   const [rentalRef, setRentalRef] = useState("");
   const [rentalDeadline, setRentalDeadline] = useState("");
@@ -182,6 +184,7 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
   const toIso = (local: string): string | undefined => (local ? (localToUtcIso(local, tz) ?? undefined) : undefined);
 
   function prepare(key: string): { input: MovementInput } | { error: string; lineId?: string } {
+    if (kind === "receive" && !ownership) return { error: "Say whether this stock is owned or rented." };
     const needsLines = source !== "kit";
     const isEverything = (kind === "receive_transfer" && receiveAll) || kind === "unpack_kit";
     const parsed = needsLines && !isEverything ? parseLines(kind, drafts, { canSeeCosts: !!context.canSeeCostsByCompany[companyId], currency }) : ({ ok: true as const, lines: [] as MovementInput["lines"], units: 0, quantities: 0 });
@@ -226,6 +229,7 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
     returnFrom: returnFrom || undefined, expectedReturn: expectedReturn ? formatInZone(toIso(expectedReturn), tz) : chosenRequest?.expectedReturnAt && kind === "dispatch" ? `${formatInZone(chosenRequest.expectedReturnAt, tz)} (from the request)` : undefined,
     expectedArrival: expectedArrival ? formatInZone(toIso(expectedArrival), tz) : undefined, repairReference: repairReference.trim() || undefined, transferCode: transfer?.code,
     adjustAction: kind === "adjust" ? adjustAction : undefined, rentalSupplier: kind === "receive" && isRental ? rentalSupplier.trim() : kind === "return_rental" ? context.rentals.find((r) => r.id === rentalId)?.supplier : undefined,
+    ownership: kind === "receive" && ownership ? ownership : undefined,
     kit: initial?.kitLabel, note: note.trim() || undefined, reason: kind === "adjust" ? reason.trim() || undefined : undefined,
     everything: (kind === "receive_transfer" && receiveAll) || kind === "unpack_kit" || (cfg.linesOptional && drafts.length === 0),
     stillOutstanding: kind === "return" && heldLoaded ? countStillOutstanding(heldLoaded.candidates, drafts) : undefined,
@@ -267,7 +271,7 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
 
   // ---- the three steps -------------------------------------------------------------------------------------------
   if (flow.phase === "done") {
-    return <DonePanel flow={flow} onAnother={() => { setDrafts([]); setNote(""); setReason(""); setExpectedReturn(""); flow.startNew(); }} onClose={onClose} />;
+    return <DonePanel flow={flow} onAnother={() => { setDrafts([]); setNote(""); setReason(""); setExpectedReturn(""); setOwnership(""); flow.startNew(); }} onClose={onClose} />;
   }
   if (flow.phase === "reviewing" || flow.phase === "sending") {
     return <ReviewPanel flow={flow} rows={summaryRows(summary)} confirmLabel={confirmLabel} onConfirm={onConfirm} />;
@@ -301,6 +305,28 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
             {context.locations.map((l) => <option key={l.id} value={l.id}>{l.name}{multiCompany ? ` · ${l.companyName}` : ""}</option>)}
           </Select>
         </div>
+      ) : null}
+
+      {kind === "receive" ? (
+        <fieldset className="space-y-2" disabled={locked}>
+          <legend className="text-sm font-medium">Is this stock owned or rented?</legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {([["owned", "Owned", "It is ours. It adds to what the company owns."], ["rented", "Rented", "It has to go back to its supplier. It never adds to what the company owns."]] as const).map(([value, title, text]) => (
+              <label key={value} className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm transition-colors focus-within:ring-2 focus-within:ring-ring ${ownership === value ? "border-accent bg-accent/10" : "border-border hover:bg-secondary/50"}`}>
+                <input type="radio" name={`${uid}-own`} value={value} checked={ownership === value} onChange={() => setOwnership(value)} className="mt-1 h-4 w-4 accent-[hsl(var(--accent))]" />
+                <span><span className="block font-semibold">{title}</span><span className="text-muted-foreground">{text}</span></span>
+              </label>
+            ))}
+          </div>
+          {isRental ? (
+            <div className="grid gap-3 rounded-md border border-border p-3 sm:grid-cols-2">
+              <div className="space-y-1.5"><label htmlFor={`${uid}-rs`} className="text-sm font-medium leading-none">Supplier</label><Input id={`${uid}-rs`} value={rentalSupplier} onChange={(e) => setRentalSupplier(e.target.value)} maxLength={160} /></div>
+              <div className="space-y-1.5"><label htmlFor={`${uid}-rr`} className="text-sm font-medium leading-none">Supplier&rsquo;s reference</label><Input id={`${uid}-rr`} value={rentalRef} onChange={(e) => setRentalRef(e.target.value)} maxLength={160} /></div>
+              <div className="space-y-1.5"><label htmlFor={`${uid}-rd`} className="text-sm font-medium leading-none">Has to go back by</label><Input id={`${uid}-rd`} type="datetime-local" value={rentalDeadline} min={nowLocalInput(tz)} onChange={(e) => setRentalDeadline(e.target.value)} /></div>
+              <ProjectSelect label="For project (optional)" projects={context.projects.filter((p) => p.companyId === companyId)} value={rentalProjectId} onChange={setRentalProjectId} />
+            </div>
+          ) : null}
+        </fieldset>
       ) : null}
 
       {kind === "adjust" ? (
@@ -447,22 +473,6 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
         </div>
       ) : null}
 
-      {kind === "receive" ? (
-        <fieldset className="space-y-3 rounded-md border border-border p-3" disabled={locked}>
-          <legend className="px-1 text-sm font-medium">Rented, not owned?</legend>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={isRental} onChange={(e) => setIsRental(e.target.checked)} /> This equipment is rented and has to go back to its supplier</label>
-          {isRental ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5"><label htmlFor={`${uid}-rs`} className="text-sm font-medium leading-none">Supplier</label><Input id={`${uid}-rs`} value={rentalSupplier} onChange={(e) => setRentalSupplier(e.target.value)} maxLength={160} /></div>
-              <div className="space-y-1.5"><label htmlFor={`${uid}-rr`} className="text-sm font-medium leading-none">Supplier&rsquo;s reference</label><Input id={`${uid}-rr`} value={rentalRef} onChange={(e) => setRentalRef(e.target.value)} maxLength={160} /></div>
-              <div className="space-y-1.5"><label htmlFor={`${uid}-rd`} className="text-sm font-medium leading-none">Has to go back by</label><Input id={`${uid}-rd`} type="datetime-local" value={rentalDeadline} min={nowLocalInput(tz)} onChange={(e) => setRentalDeadline(e.target.value)} /></div>
-              <ProjectSelect label="For project (optional)" projects={context.projects.filter((p) => p.companyId === companyId)} value={rentalProjectId} onChange={setRentalProjectId} />
-            </div>
-          ) : null}
-          <p className="text-sm text-muted-foreground">Rented equipment never adds to what the company owns.</p>
-        </fieldset>
-      ) : null}
-
       {cfg.reason === "required" ? (
         <div className="space-y-1.5">
           <label htmlFor={`${uid}-why`} className="text-sm font-medium leading-none">Reason</label>
@@ -470,10 +480,13 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
         </div>
       ) : null}
 
-      <div className="space-y-1.5">
-        <label htmlFor={`${uid}-note`} className="text-sm font-medium leading-none">Note (optional)</label>
-        <Textarea id={`${uid}-note`} rows={2} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} disabled={locked} />
-      </div>
+      <details className="rounded-md border border-border/70 px-3 py-2" open={note.trim() !== ""}>
+        <summary className="cursor-pointer select-none text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Add a note (optional)</summary>
+        <div className="mt-2 space-y-1.5">
+          <label htmlFor={`${uid}-note`} className="sr-only">Note</label>
+          <Textarea id={`${uid}-note`} rows={2} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} disabled={locked} />
+        </div>
+      </details>
 
       {problem ? <Alert variant="destructive" role="alert">{problem}</Alert> : null}
       <div className="flex flex-wrap items-center justify-end gap-2">

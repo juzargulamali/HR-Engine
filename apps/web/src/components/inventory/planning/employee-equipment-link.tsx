@@ -28,7 +28,7 @@ const conditionText = (c: string) => CONDITION_WORDS[c as InvCondition] ?? BALAN
 
 export async function EmployeeEquipmentLink({ employeeId, companyId }: { employeeId: string; companyId: string }) {
   if (!(await mayShow(companyId))) return null;
-  const href = `/inventory/employees?employee=${employeeId}`;
+  const href = `/inventory/stock?view=people&employee=${employeeId}`;
   let rows: OutstandingLike[] | null = null;
   try {
     const db = await createClient();

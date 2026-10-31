@@ -74,9 +74,9 @@ describe("scan page", () => {
     await look("UAE-S-00007");
     fireEvent.click(await screen.findByRole("button", { name: /add to a list/i }));
     const href = (label: string) => (screen.getByRole("link", { name: label }) as HTMLAnchorElement).getAttribute("href");
-    expect(href("Issue / Dispatch")).toBe("/inventory?action=issue&codes=UAE-E-00042,UAE-S-00007");
-    expect(href("Return")).toBe("/inventory?action=return&codes=UAE-E-00042,UAE-S-00007");
-    expect(href("Transfer")).toBe("/inventory?action=transfer&codes=UAE-E-00042,UAE-S-00007");
+    expect(href("Issue / Dispatch")).toBe("/inventory/stock?action=issue&codes=UAE-E-00042,UAE-S-00007");
+    expect(href("Return")).toBe("/inventory/stock?action=return&codes=UAE-E-00042,UAE-S-00007");
+    expect(href("Transfer")).toBe("/inventory/stock?action=transfer&codes=UAE-E-00042,UAE-S-00007");
   });
 
   it("removes a line and clears the list", async () => {
