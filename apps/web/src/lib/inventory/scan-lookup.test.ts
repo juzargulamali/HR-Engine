@@ -21,14 +21,14 @@ describe("resolveScan", () => {
   it("finds a unit the person may see and opens its record", async () => {
     const { db, rpc } = fakeDb({ inv_units: unit, inv_items: item, inv_locations: { name: "Dubai" } });
     const r = await resolveScan(db, "https://os.example.com/inventory/scan?c=UAE-E-00042");
-    expect(r).toMatchObject({ status: "found", kind: "unit", id: "u1", itemName: "Laptop · X1", openHref: "/inventory?unit=u1" });
+    expect(r).toMatchObject({ status: "found", kind: "unit", id: "u1", itemName: "Laptop · X1", openHref: "/inventory/stock?unit=u1" });
     expect(r.status === "found" && r.facts).toEqual(["Not counted yet", "In the warehouse", "Dubai"]);
     expect(rpc).not.toHaveBeenCalled();
   });
   it("opens the item for a bin label", async () => {
     const { db, rpc } = fakeDb({ inv_balances: { id: "b1", label_code: "UAE-S-00007", item_id: "i9", location_id: "l1", bin_id: "bin1" }, inv_items: item, inv_locations: { name: "Dubai" }, inv_bins: { code: "A-12" } });
     const r = await resolveScan(db, "UAE-S-00007");
-    expect(r).toMatchObject({ status: "found", kind: "stock", openHref: "/inventory?open=i9" });
+    expect(r).toMatchObject({ status: "found", kind: "stock", openHref: "/inventory/stock?open=i9" });
     expect(r.status === "found" && r.facts).toEqual(["Item in a bin", "Bin A-12", "Dubai"]);
     expect(rpc).not.toHaveBeenCalled();
   });

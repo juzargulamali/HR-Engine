@@ -254,7 +254,7 @@ await step("Sales screens (list, panel, full page, handover) carry no cost, no u
   check(!/4321|LAP-SN|ENG-E|Max Manager|unit_code|employee/i.test(r.out), "and the summary has no cost, unit or person in it: " + r.out.slice(0, 200));
   // the control: a founder DOES see cost and holder where they belong
   await R.as("ceo");
-  await R.go(`/inventory?unit=${s1("select code from inv_units where serial_number='LAP-SN-001'")}`);
+  await R.go(`/inventory/stock?unit=${s1("select code from inv_units where serial_number='LAP-SN-001'")}`);
   check(/4,321|4321/.test(await R.page.locator("aside[role=dialog]").innerText()), "control: the founder sees the cost on the unit page");
 });
 

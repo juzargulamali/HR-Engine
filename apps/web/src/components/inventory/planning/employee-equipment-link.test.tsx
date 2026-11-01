@@ -44,7 +44,7 @@ describe("EmployeeEquipmentLink (HR Assets tab)", () => {
     expect(html).toContain("UAE-E-00005");
     expect(html).toContain("serial SN-1");
     expect(html).toContain("overdue");
-    expect(html).toContain("/inventory/employees?employee=e1");
+    expect(html).toContain("/inventory/stock?view=people&amp;employee=e1");
     expect(html).not.toMatch(/salary|cost|AED/i);
     expect(rpc).toHaveBeenCalledWith("inv_employee_outstanding", { p_company_id: "c1", p_employee_id: "e1", p_include_inactive: true });
   });

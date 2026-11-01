@@ -27,7 +27,7 @@ export async function MovementSidePanel({ openId, closeHref, locations }: { open
     d = await loadMovementDetail(ctx, id);
   } catch (e) {
     console.error("[inventory] movement panel load failed", e);
-    return shell("Movement", <LoadError what="this entry" retryHref={`/inventory/movements?open=${id}`} />);
+    return shell("Movement", <LoadError what="this entry" retryHref={`/inventory/history?open=${id}`} />);
   }
   if (!d) return shell("Entry not found", <Alert role="status">This entry does not exist, or you do not have access to it.</Alert>);
 
@@ -52,8 +52,8 @@ export async function MovementSidePanel({ openId, closeHref, locations }: { open
     ...(m.expected_return_at ? [["Expected back", movementWhen(m.expected_return_at, zone)] as [string, React.ReactNode]] : []),
     ...(m.note ? [["Note", m.note] as [string, React.ReactNode]] : []),
     ...(m.reason ? [["Reason", m.reason] as [string, React.ReactNode]] : []),
-    ...(d.corrects ? [["Corrects", <Link key="c" href={`/inventory/movements?open=${d.corrects.id}`} className="font-mono underline underline-offset-2">{d.corrects.code}</Link>] as [string, React.ReactNode]] : []),
-    ...(d.correctedBy.length > 0 ? [["Corrected by", <span key="b" className="space-x-2">{d.correctedBy.map((c) => <Link key={c.id} href={`/inventory/movements?open=${c.id}`} className="font-mono underline underline-offset-2">{c.code}</Link>)}</span>] as [string, React.ReactNode]] : []),
+    ...(d.corrects ? [["Corrects", <Link key="c" href={`/inventory/history?open=${d.corrects.id}`} className="font-mono underline underline-offset-2">{d.corrects.code}</Link>] as [string, React.ReactNode]] : []),
+    ...(d.correctedBy.length > 0 ? [["Corrected by", <span key="b" className="space-x-2">{d.correctedBy.map((c) => <Link key={c.id} href={`/inventory/history?open=${c.id}`} className="font-mono underline underline-offset-2">{c.code}</Link>)}</span>] as [string, React.ReactNode]] : []),
   ];
 
   return shell(

@@ -161,12 +161,12 @@ await step("Eve sees the laptop under My equipment and nothing else", async () =
   await noPrivate("employee: my equipment");
   await R.shot("flow2-my-equipment");
   // the rest of Inventory is closed to her
-  await R.go("/inventory");
+  await R.go("/inventory/stock");
   check(/You do not have Inventory access/.test(await R.mainText()), "no stock list for an ordinary employee");
   check(!/Laptop 14 inch|Holofan|Motor/.test(await R.mainText()), "no catalogue either");
-  await R.go("/inventory/employees");
-  check(/This list is for founders, warehouse operators/.test(await R.mainText()), "not the employees' list");
-  await R.go("/inventory/movements");
+  await R.go("/inventory/stock?view=people");
+  check(/You do not have Inventory access/.test(await R.mainText()) && !/With people/.test(await R.mainText()), "not the employees' list");
+  await R.go("/inventory/history");
   check(!/ENG-M-0000/.test(await R.mainText()), "no movements");
   // and the database says the same (her own rows only)
   eq(asDb(5, "select count(*) from inv_my_equipment()"), 1, "inv_my_equipment returns her one item");
@@ -174,14 +174,14 @@ await step("Eve sees the laptop under My equipment and nothing else", async () =
 });
 await step("HR sees Eve's laptop under Equipment held by employees, with only her name and number", async () => {
   await R.as("hr");
-  await R.go("/inventory/employees");
+  await R.go("/inventory/stock?view=people");
   const t = await R.mainText();
   check(/Eve Employee/.test(t) && /L-5/.test(t), "Eve is listed with her number");
   await R.page.locator("main summary", { hasText: "1 item" }).first().click();
   check((await R.mainText()).includes(LAP1()), "the laptop's ID is shown");
   await noPrivate("HR: equipment held by employees");
   await R.shot("flow2-employees-held");
-  check(!/Return equipment/.test(t), "HR (read-only access) has no Return button");
+  check(!/Receive returns/.test(t), "HR (read-only access) has no Return button");
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------
@@ -246,7 +246,7 @@ await step("the laptop with Eve is not offered for the project: 2 are free, the 
 // 5. The operator returns it with a condition
 // ---------------------------------------------------------------------------------------------------------------------------
 await step("operator takes the laptop back from Eve with the condition 'Needs checking': held back, not available, off Eve's list", async () => {
-  await R.go("/inventory?action=return");
+  await R.go("/inventory/stock?action=return");
   await mv().getByLabel("Back into").selectOption({ label: "Dubai" });
   await mv().getByRole("radio", { name: "An employee" }).check();
   await pickEmployee("Which employee?", "Eve");
@@ -267,7 +267,7 @@ await step("operator takes the laptop back from Eve with the condition 'Needs ch
   await R.go("/inventory/mine");
   check(/Nothing is assigned to you/.test(await R.mainText()), "Eve's list is empty again");
   await R.as("hr");
-  await R.go("/inventory/employees");
+  await R.go("/inventory/stock?view=people");
   check(/No employee holds company equipment/.test(await R.mainText()), "HR's list is empty again");
 });
 
@@ -275,7 +275,7 @@ await step("operator takes the laptop back from Eve with the condition 'Needs ch
 // 6. The founder moves a unit back to the pool with a reason
 // ---------------------------------------------------------------------------------------------------------------------------
 const issueDirect = async (code, who) => {
-  await R.go("/inventory?action=issue");
+  await R.go("/inventory/stock?action=issue");
   await mv().getByLabel("Take from").selectOption({ label: "Dubai" });
   await pickEmployee("Who receives it?", who);
   await mv().getByLabel("Search for an item or unit to add").fill(code);
@@ -291,7 +291,7 @@ await step("a headset is issued to Eve without a request, then the founder moves
   const code = unitCode("VR-SN-001");
   eq(s1(`select custody_kind from inv_units where code='${code}'`), "employee", "with Eve");
   await R.as("ceo");
-  await R.go(`/inventory?unit=${code}`);
+  await R.go(`/inventory/stock?unit=${code}`);
   await R.page.getByRole("button", { name: "More actions" }).click();
   await R.page.getByRole("menuitem", { name: /Change who holds it/ }).click();
   await R.dialog().waitFor();
@@ -308,7 +308,7 @@ await step("a headset is issued to Eve without a request, then the founder moves
   eq(s1(`select custody_kind || '/' || coalesce(employee_id::text,'-') from inv_units where code='${code}'`), "warehouse/-", "back in the pool, no holder");
   eq(s1("select reason from inv_movements where kind='pool_change'").length > 20, true, "the reason is kept");
   await R.dialog().getByRole("button", { name: "Close", exact: true }).first().click().catch(() => {});
-  await R.go(`/inventory?unit=${code}`);
+  await R.go(`/inventory/stock?unit=${code}`);
   const hist = (await R.panel().innerText()).replace(/\s+/g, " ");
   console.log("   history:", hist.slice(hist.indexOf("HISTORY"), hist.indexOf("HISTORY") + 360));
   check(/Moved to the project pool/.test(hist) && /Issued to/i.test(hist) || /Moved to the project pool/.test(hist), "the history shows the move");
@@ -331,26 +331,26 @@ await step("an employee who leaves while holding equipment stays on HR's list wi
   // the owner marks Sam as having left (HR does this in the HR system; Inventory only reads it)
   sql(`update employees set employment_status='terminated', termination_date=current_date - 1 where id='${SAM}'`);
   await R.as("hr");
-  await R.go("/inventory/employees");
+  await R.go("/inventory/stock?view=people");
   const t = await R.mainText();
   console.log("   HR sees:", t.slice(t.indexOf("people") - 20, t.indexOf("people") + 260));
   check(/Sam Sysadmin/.test(t) && /L-6/.test(t), "Sam is still listed");
   check(/equipment still out/i.test(t), "with the flag that equipment is still out");
   await noPrivate("HR: a person who has left");
   await R.shot("flow2-left-employee");
-  await R.go("/inventory/employees?show=left");
+  await R.go("/inventory/stock?view=people&show=left");
   check(/Sam Sysadmin/.test(await R.mainText()), "the 'only people who have left' filter finds him");
   // the employee lookup (used to issue equipment) no longer offers him
   await R.as("hr1");
-  await R.go("/inventory?action=issue");
+  await R.go("/inventory/stock?action=issue");
   await mv().getByLabel("Take from").selectOption({ label: "Dubai" });
   await mv().getByLabel("Who receives it?", { exact: true }).fill("Sam");
   await R.page.waitForTimeout(1500);
   check(/No active employee matches/.test(await mv().innerText()), "an employee who has left cannot be chosen for new equipment");
   check(!(await mv().getByRole("list", { name: "Who receives it? results" }).count()), "no one to pick");
   // the operator can still take it back from the person who left
-  await R.go("/inventory/employees");
-  check(/Return equipment/.test(await R.mainText()), "the operator still has the Return button for him");
+  await R.go("/inventory/stock?view=people");
+  check(/Receive returns/.test(await R.mainText()), "the operator still has the Return button for him");
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------
@@ -360,12 +360,12 @@ await step("no screen of Inventory shows pay, bank, leave, birth date, nationali
   check(privateWasSet(), "the private data is still in the database");
   const laptop = LAP1(); const vr = unitCode("VR-SN-002");
   const pages = [
-    ["hr1", "/inventory"], ["hr1", "/inventory/requests"], ["hr1", `/inventory/requests?open=${REQ}`], ["hr1", "/inventory/employees"], ["hr1", "/inventory/movements"],
-    ["hr1", `/inventory?unit=${laptop}`], ["hr1", `/inventory?unit=${vr}`], ["hr1", "/inventory?action=issue"], ["hr1", "/inventory?action=return"], ["hr1", "/inventory/manage"],
+    ["hr1", "/inventory/stock"], ["hr1", "/inventory/requests"], ["hr1", `/inventory/requests?open=${REQ}`], ["hr1", "/inventory/stock?view=people"], ["hr1", "/inventory/history"],
+    ["hr1", `/inventory/stock?unit=${laptop}`], ["hr1", `/inventory/stock?unit=${vr}`], ["hr1", "/inventory/stock?action=issue"], ["hr1", "/inventory/stock?action=return"], ["hr1", "/inventory/manage"],
     ["lead", "/inventory/requests"], ["lead", `/inventory/requests?open=${REQ}`], ["lead", "/inventory/mine"],
-    ["hr", "/inventory/employees"], ["hr", "/inventory/mine"], ["hr", "/inventory/employees?employee=" + EVE],
-    ["emp", "/inventory/mine"], ["emp", "/inventory"],
-    ["ceo", "/inventory/employees"], ["ceo", `/inventory?unit=${vr}`], ["ceo", "/inventory/movements"], ["ceo", "/inventory/access"],
+    ["hr", "/inventory/stock?view=people"], ["hr", "/inventory/mine"], ["hr", "/inventory/stock?view=people&employee=" + EVE],
+    ["emp", "/inventory/mine"], ["emp", "/inventory/stock"],
+    ["ceo", "/inventory/stock?view=people"], ["ceo", `/inventory/stock?unit=${vr}`], ["ceo", "/inventory/history"], ["ceo", "/inventory/access"],
     ["mgr", "/inventory/requests"],
   ];
   const cur = { key: "" };

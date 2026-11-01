@@ -4,165 +4,206 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { InvCapability } from "@enginious-hr/domain";
-import type { InvItemRow, InvLocationRow } from "@/types/inventory";
-import { buildStockRows } from "@/lib/inventory/stock-list";
+import type { InvLocationRow } from "@/types/inventory";
+import { requestRow, returnRows, salesRows, transferRows, type QueueRow, type SourceKey } from "@/lib/inventory/today";
+import type { TodayData } from "@/lib/inventory/today-data";
 
 vi.mock("server-only", () => ({}));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }), usePathname: () => "/inventory", useSearchParams: () => new URLSearchParams() }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }), usePathname: () => "/inventory", useSearchParams: () => new URLSearchParams(),
+  redirect: (to: string) => { throw new Error(`REDIRECT:${to}`); },
+}));
+let cookieValue = "";
+vi.mock("next/headers", () => ({ cookies: async () => ({ get: (k: string) => (k === "inv_warehouse" && cookieValue ? { value: cookieValue } : undefined) }) }));
+vi.mock("@/lib/actions/inventoryPlanning", () => ({ recordOpportunityCheck: vi.fn() }));
+
 const C1 = "11111111-1111-4111-8111-111111111111";
 const L1 = "22222222-2222-4222-8222-222222222222";
+const L2 = "33333333-3333-4333-8333-333333333333";
 let grants: { companyId: string; capabilities: InvCapability[] }[] = [];
 let managesProjects = false;
-let list: Awaited<ReturnType<typeof import("@/lib/inventory/stock").loadStockList>>;
-const loadStockList = vi.fn(async () => list);
-const fillSummaryUsable = vi.fn(async (rows: readonly unknown[]) => rows.map((r) => ({ ...(r as object), usable: 7 })));
-vi.mock("@/lib/inventory/stock", () => ({ loadStockList: (...a: unknown[]) => (loadStockList as (...x: unknown[]) => unknown)(...a), fillSummaryUsable: (...a: unknown[]) => (fillSummaryUsable as (...x: unknown[]) => unknown)(...a) }));
+let locations: InvLocationRow[] = [];
+let assigned: string[] = [];
+const loc = (id: string, name: string): InvLocationRow => ({ id, company_id: C1, code: name, name, kind: "warehouse", timezone: "Asia/Dubai", address: null, is_active: true, created_by: null, created_at: "", updated_at: "" });
 vi.mock("@/lib/inventory/context", () => ({
   getInventoryContext: async () => ({
     userId: "u", fullName: "Test", installed: true, grants, companies: grants.map((g) => ({ id: g.companyId, name: "Enginious", referenceCode: "UAE", isEnabled: true })),
-    locations: grants.length ? [{ id: L1, company_id: C1, name: "Dubai warehouse", timezone: "Asia/Dubai", is_active: true } as InvLocationRow] : [], assignedLocationIds: [L1], employeeId: null, managesProjects,
-    companyName: () => "Enginious", locationName: () => "Dubai warehouse",
+    locations, assignedLocationIds: assigned, employeeId: null, managesProjects,
+    companyName: () => "Enginious", locationName: (id: string | null) => locations.find((l) => l.id === id)?.name ?? "Unknown",
   }),
 }));
-vi.mock("./_panel/action-panel", () => ({ ActionSidePanel: () => null, parseAction: (r: string) => (["receive", "issue", "dispatch", "return", "transfer", "scan"].includes(r) ? r : null) }));
-let quickAddCompanies: { id: string; name: string; categories: { id: string; label: string }[] }[] = [];
-vi.mock("@/components/inventory/stock/quick-add-item", () => ({ QuickAddItem: (p: { companies: typeof quickAddCompanies }) => { quickAddCompanies = p.companies; return <button type="button">Add item</button>; } }));
-vi.mock("./_panel/item-panel", () => ({ ItemSidePanel: () => null }));
-vi.mock("./_panel/unit-panel", () => ({ UnitSidePanel: () => null }));
 
-import InventoryPage from "./page";
+let data: TodayData;
+const loadToday = vi.fn(async (..._a: unknown[]) => data);
+vi.mock("@/lib/inventory/today-data", () => ({ loadToday: (...a: unknown[]) => loadToday(...a) }));
 
-const item = (over: Partial<InvItemRow>): InvItemRow => ({
-  id: "33333333-3333-4333-8333-333333333333", company_id: C1, name: "Laptop X1", category_id: null, tracking: "individual", unit_of_measure: "each", quantity_scale: 0, manufacturer: null, model: "X1",
-  specification: null, status: "active", replaced_by_item_id: null, notes: null, version: 1, created_by: null, created_at: "", updated_at: "", ...over,
+import TodayPage from "./page";
+
+const NOW = new Date("2026-10-19T09:30:00+04:00");
+const ctx = { now: NOW };
+const line = (over: Partial<{ reserved: number; dispatched: number; toReserve: number }> = {}) => ({ status: "open" as const, reserved: 0, dispatched: 0, toReserve: 0, ...over });
+const req = (over: Record<string, unknown>) => ({ id: "r1", code: "REQ-0049", kind: "project" as const, forLabel: "Al Khail Roadshow", timezone: "Asia/Dubai", plan: { dispatch: "2026-10-19T14:00" }, neededFrom: null, lines: [line({ reserved: 16, dispatched: 6 })], ...over });
+
+const sendRow = requestRow(req({}), ctx)!;
+const prepareRow = requestRow(req({ id: "r2", code: "REQ-0047", forLabel: "Gulf Bank Summit", plan: { dispatch: "2026-10-22T08:00" }, lines: [line({ reserved: 10 }), line({ toReserve: 4 })] }), ctx)!;
+const [returnsRow] = returnRows([{ holderKind: "project", holderId: "p1", dueAt: "2026-10-16T18:00:00+04:00", zone: "Asia/Dubai", key: "unit:1" }], { project: new Map([["p1", "Dubai Expo Pavilion"]]), employee: new Map() }, new Map(), ctx);
+const [transferRow] = transferRows([{ id: "t1", code: "TRF-0112", fromName: "Abu Dhabi", toName: "Dubai", expectedAt: "2026-10-20T12:00:00+04:00", zone: "Asia/Dubai", items: 6 }], ctx, { here: true });
+const [salesRow] = salesRows([{ checkId: "c1", opportunityId: "o1", companyId: C1, reference: "ENQ-0188", requestedAt: "2026-10-17T11:20:00+04:00", locationId: L1, locationName: "Dubai warehouse", installStart: null, eventStart: "2026-11-12", eventEnd: "2026-11-14", technologies: [{ name: "LED wall panel", qty: 24 }], zone: "Asia/Dubai" }], ctx);
+const allRows: QueueRow[] = [sendRow, prepareRow, returnsRow!, transferRow!, salesRow!];
+const today = (rows: QueueRow[], failed: SourceKey[] = [], notes: string[] = []): TodayData => ({ rows, failed, notes, nowIso: NOW.toISOString() });
+
+const render = async (sp: Record<string, string> = {}) => renderToStaticMarkup(await TodayPage({ searchParams: Promise.resolve(sp) }));
+const redirectOf = async (sp: Record<string, string> = {}) => { try { await render(sp); return null; } catch (e) { const m = /^REDIRECT:(.*)$/.exec((e as Error).message); if (m) return m[1]; throw e; } };
+
+beforeEach(() => {
+  loadToday.mockClear();
+  grants = [{ companyId: C1, capabilities: ["warehouse"] }];
+  managesProjects = false;
+  locations = [loc(L1, "Dubai warehouse"), loc(L2, "Abu Dhabi warehouse")];
+  assigned = [L1];
+  cookieValue = "";
+  data = today(allRows);
 });
-const listFor = (detail: boolean, withCost: boolean) => ({
-  rows: buildStockRows({
-    items: [item({})], categories: [],
-    units: detail ? [{ id: "unit-1", item_id: "33333333-3333-4333-8333-333333333333", code: "UAE-E-00001", serial_number: "SN-SECRET", lifecycle: "active", condition: "good", custody_kind: "employee", location_id: L1, in_kit_id: null, ownership: "owned" }] : [],
-    balances: [], reservations: [], detailCompanyIds: new Set(detail ? [C1] : []), locationId: "", now: new Date(),
-    costs: withCost ? new Map([["33333333-3333-4333-8333-333333333333", { amount: 4200, currency: "AED" }]]) : undefined,
-  }),
-  categories: [], locations: [{ id: L1, company_id: C1, name: "Dubai warehouse", timezone: "Asia/Dubai", is_active: true } as InvLocationRow], companies: [{ id: C1, name: "Enginious" }],
-  detailCompanyIds: new Set(detail ? [C1] : []), costCompanyIds: new Set(withCost ? [C1] : []), truncated: false,
-}) as typeof list;
 
-const render = async (sp: Record<string, string> = {}) => renderToStaticMarkup(await InventoryPage({ searchParams: Promise.resolve(sp) }));
-
-beforeEach(() => { loadStockList.mockClear(); fillSummaryUsable.mockClear(); managesProjects = false; });
-
-describe("Inventory page", () => {
-  it("a founder sees every column choice, the header actions and the cost column when chosen", async () => {
-    grants = [{ companyId: C1, capabilities: ["founder"] }];
-    list = listFor(true, true);
-    const html = await render({ cols: "item,usable,warehouse,out,cost" });
-    expect(html).toContain("Add item");
-    for (const a of ["Scan", "Receive stock", "Issue / Dispatch", "Return", "Transfer"]) expect(html).toContain(a);
-    expect(html).toContain("Latest cost");
-    expect(html).toContain("AED 4,200");
-    expect(html).toContain("1 with employees");
-    expect(loadStockList).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ withCosts: true }));
-  });
-
-  it("a warehouse operator without view_costs never gets cost markup or a cost query, even if the address asks for it", async () => {
-    grants = [{ companyId: C1, capabilities: ["warehouse"] }];
-    list = listFor(true, false);
-    const html = await render({ cols: "item,cost" });
-    expect(html).not.toContain("Latest cost");
-    expect(html).not.toContain("AED 4,200");
-    expect(html).not.toContain("4,200");
-    expect(loadStockList).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ withCosts: false }));
-    expect(html).toContain("Receive stock");
-    expect(html).not.toContain("Add item"); // no catalogue rights
-  });
-
-  it("a person who can view stock but not operate it gets Scan only, and no stock-moving buttons", async () => {
-    grants = [{ companyId: C1, capabilities: ["view_stock"] }];
-    list = listFor(true, false);
+describe("Today page", () => {
+  it("renders one row per job, in groups by their own date, each with what, for whom, when and one button", async () => {
     const html = await render();
-    expect(html).toContain("Scan");
-    expect(html).not.toContain("Receive stock");
-    expect(html).not.toContain("Issue / Dispatch");
+    expect(html).toContain("Work waiting at Dubai warehouse");
+    for (const g of ["Late", "Next 7 days", "Waiting, no date set"]) expect(html).toContain(g);
+    expect(html).toContain("Al Khail Roadshow still has equipment to send");
+    expect(html).toContain("Project Al Khail Roadshow · request REQ-0049");
+    expect(html).toContain("Dispatch today, 14:00");
+    expect(html).toContain("1 line ready to send");
+    expect(html).toContain("Gulf Bank Summit needs its equipment prepared");
+    expect(html).toContain("1 of 2 lines fully reserved · 1 still to reserve");
+    expect(html).toContain("1 item is overdue from Dubai Expo Pavilion");
+    expect(html).toContain("Transfer TRF-0112 is on its way here");
+    expect(html).toContain("Sales asks whether equipment is free for enquiry ENQ-0188");
+    expect(html).toContain("Nothing is reserved by a check");
+    for (const b of ["Send equipment", "Prepare equipment", "Receive returns", "Receive transfer", "Check availability"]) expect(html).toContain(b);
+    expect(html).toContain('href="/inventory/requests/r1?step=send"');
+    expect(html).toContain('href="/inventory/stock?action=transfer&amp;mode=receive&amp;transfer=t1"');
+    // counts on the filters
+    for (const f of ["Everything", "Prepare", "Send out", "Receive back", "Transfers", "Sales checks"]) expect(html).toContain(f);
+    expect(html).not.toContain('role="alert"');
+    expect(loadToday).toHaveBeenCalledWith(expect.anything(), { locationId: L1 });
   });
 
-  it("a Project Manager without a grant sees the catalogue summary only: usable now from the database's availability, nothing about custody", async () => {
+  it("a Sales row shows only what the Sales checks list shows: no client, value or notes", async () => {
+    const html = await render({ show: "sales" });
+    const li = /<li[^>]*data-kind="sales"[\s\S]*?<\/li>/.exec(html)?.[0] ?? "";
+    expect(li).toContain("ENQ-0188");
+    expect(li).toContain("LED wall panel × 24");
+    for (const word of ["client", "value", "notes", "title", "amount"]) expect(li.toLowerCase().includes(word), word).toBe(false);
+    expect(html).not.toContain("Al Khail Roadshow");
+  });
+
+  it("names the source that failed in a red alert, never shows its count as zero, and is not an empty queue", async () => {
+    data = today(allRows.filter((r) => r.kind !== "transfer"), ["transfers"]);
+    const html = await render();
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("Incoming transfers could not be loaded.");
+    expect(html).toContain("it is not an empty queue");
+    expect(html).toContain("Try again");
+    expect(html).toContain("(could not be loaded)");
+    expect(html).not.toContain("Nothing waiting");
+    // the other sources still show
+    expect(html).toContain("Al Khail Roadshow still has equipment to send");
+    expect(html).toContain("Dubai Expo Pavilion");
+  });
+
+  it("when every source failed it says so and does not offer 'Nothing waiting'", async () => {
+    data = today([], ["requests", "returns", "transfers", "sales"]);
+    const html = await render();
+    for (const n of ["Equipment requests", "Equipment due back", "Incoming transfers", "Sales checks"]) expect(html).toContain(`${n} could not be loaded.`);
+    expect(html).not.toContain("Nothing waiting at");
+    expect(html).not.toContain("Go to Stock");
+  });
+
+  it("a friendly empty state with a way to Stock when every source answered and nothing is waiting", async () => {
+    data = today([]);
+    const html = await render();
+    expect(html).toContain("Nothing waiting at Dubai warehouse");
+    expect(html).toContain("Go to Stock");
+    expect(html).toContain('href="/inventory/stock"');
+  });
+
+  it("filters by ?show= and says when nothing is under a filter", async () => {
+    const html = await render({ show: "transfer" });
+    expect(html).toContain("Transfer TRF-0112");
+    expect(html).not.toContain("Al Khail Roadshow still has");
+    data = today([sendRow]);
+    expect(await render({ show: "sales" })).toContain("Nothing waiting under Sales checks");
+  });
+
+  it("works in the warehouse from the address, then the remembered one; All warehouses is its own choice", async () => {
+    assigned = [L1, L2];
+    await render({ location: L2 });
+    expect(loadToday).toHaveBeenLastCalledWith(expect.anything(), { locationId: L2 });
+    cookieValue = L2;
+    await render();
+    expect(loadToday).toHaveBeenLastCalledWith(expect.anything(), { locationId: L2 });
+    const all = await render({ location: "all" });
+    expect(loadToday).toHaveBeenLastCalledWith(expect.anything(), { locationId: null });
+    expect(all).toContain("Work waiting across all warehouses");
+  });
+
+  it("offers the switcher and Scan", async () => {
+    const html = await render();
+    expect(html).toContain("You are working in");
+    expect(html).toContain("All warehouses");
+    expect(html).toContain("Scan a label");
+    expect(html).toContain('href="/inventory/stock?action=scan"');
+  });
+
+  it("says plainly when there is no warehouse at all", async () => {
+    locations = [];
+    const html = await render();
+    expect(html).toContain("No warehouse or location has been set up");
+    expect(loadToday).not.toHaveBeenCalled();
+  });
+
+  it("sends an old stock link to the stock list with every parameter kept, before anything is read", async () => {
+    expect(await redirectOf({ action: "receive", location: L1 })).toBe(`/inventory/stock?action=receive&location=${L1}`);
+    expect(await redirectOf({ open: "abc" })).toBe("/inventory/stock?open=abc");
+    expect(await redirectOf({ unit: "UAE-E-00001" })).toBe("/inventory/stock?unit=UAE-E-00001");
+    expect(loadToday).not.toHaveBeenCalled();
+  });
+
+  it("a ?location or ?show alone is Today, not a legacy link", async () => {
+    expect(await redirectOf({ location: L1, show: "send" })).toBeNull();
+  });
+
+  it("people with no Inventory grant never see Today: a Project Manager goes to Requests, everyone else to My equipment", async () => {
     grants = [];
     managesProjects = true;
-    list = listFor(false, false);
-    const html = await render({ cols: "item,usable,warehouse,out,reserved,draft" });
-    expect(fillSummaryUsable).toHaveBeenCalledTimes(1);
-    expect(html).toContain("Laptop X1");
-    expect(html).toContain("Usable now");
-    expect(html).toContain(">7<");
-    for (const hidden of ["In the warehouse", "Reserved (future)", "with employees", "on projects", "SN-SECRET", "Latest cost", 'data-label="Not counted yet"', "Not counted yet</a>"]) expect(html.includes(hidden), hidden).toBe(false);
-    expect(html).toContain("You can see the catalogue and how many of each item are usable now");
-    expect(html).not.toContain("Receive stock");
-    expect(html).not.toContain("Add item");
-  });
-
-  it("a person with no Inventory access and no project is told so", async () => {
-    grants = [];
+    expect(await redirectOf()).toBe("/inventory/requests");
     managesProjects = false;
+    expect(await redirectOf()).toBe("/inventory/mine");
+    expect(loadToday).not.toHaveBeenCalled();
+  });
+
+  it("a person who may not operate stock gets links to the records, no Send / Receive buttons, and still Prepare and the Sales check", async () => {
+    grants = [{ companyId: C1, capabilities: ["view_stock"] }];
     const html = await render();
-    expect(html).toContain("You do not have Inventory access");
-    expect(loadStockList).not.toHaveBeenCalled();
+    for (const hidden of ["Send equipment", "Receive returns", "Receive transfer"]) expect(html.includes(hidden), hidden).toBe(false);
+    // the rows are still reachable from their titles
+    expect(html).toContain('href="/inventory/requests/r1?step=send"');
+    expect(html).toContain("Al Khail Roadshow still has equipment to send");
+    expect(html).toContain("Transfer TRF-0112 is on its way here");
+    expect(html).toContain("Prepare equipment");
+    expect(html).toContain("Check availability");
   });
 
-  it("says it could not load, never 'no items', when the read fails", async () => {
-    grants = [{ companyId: C1, capabilities: ["founder"] }];
-    loadStockList.mockRejectedValueOnce(new Error("database down"));
+  it("a warehouse operator is offered the buttons that move stock", async () => {
     const html = await render();
-    expect(html).toContain("Could not load the inventory");
-    expect(html).toContain("not an empty list");
-    expect(html).not.toContain("No items yet");
+    expect(html.match(/Send equipment/g)?.length).toBe(1);
+    expect(html).toContain("Receive returns");
+    expect(html).toContain("Receive transfer");
   });
 
-  it("says there are no items when there really are none, and offers Add", async () => {
-    grants = [{ companyId: C1, capabilities: ["founder"] }];
-    list = { ...listFor(true, false), rows: [] };
-    const html = await render();
-    expect(html).toContain("No items yet");
-    expect(html).toContain("Add item");
-  });
-
-  it("offers Add item with the company and its categories even before any item exists", async () => {
-    grants = [{ companyId: C1, capabilities: ["founder"] }];
-    list = { ...listFor(true, false), rows: [], companies: [], categories: [{ id: "cat-1", company_id: C1, name: "Laptops", parent_id: null, sort_order: 0, is_active: true, created_at: "" }] };
-    quickAddCompanies = [];
-    await render();
-    expect(quickAddCompanies.map((c) => c.id)).toEqual([C1]);
-    expect(quickAddCompanies[0]!.categories.map((c) => c.label)).toEqual(["Laptops"]);
-  });
-
-  it("says nothing matches (with a way to clear) when a search finds nothing", async () => {
-    grants = [{ companyId: C1, capabilities: ["founder"] }];
-    list = listFor(true, false);
-    const html = await render({ q: "zzzz" });
-    expect(html).toContain("Nothing matches");
-    expect(html).toContain("Clear filters");
-  });
-
-  it("finds an item by a unit's serial number for people who can view stock", async () => {
-    grants = [{ companyId: C1, capabilities: ["founder"] }];
-    list = listFor(true, false);
-    const html = await render({ q: "sn-secret" });
-    expect(html).toContain("Laptop X1");
-    expect(html).not.toContain("SN-SECRET");
-  });
-
-  it("stacks rows on a phone (every cell but the first has its label) and sorts by an address choice", async () => {
-    grants = [{ companyId: C1, capabilities: ["founder"] }];
-    list = listFor(true, false);
-    const html = await render({ sort: "usable:desc" });
-    expect(html).toContain('data-label="Usable now"');
-    expect(html).toContain('aria-sort="descending"');
-    expect(html).toContain("max-md:");
-  });
-
-  it("ignores values in the address it does not know", async () => {
-    grants = [{ companyId: C1, capabilities: ["founder"] }];
-    list = listFor(true, false);
-    const html = await render({ tracking: "nonsense", status: "evil", sort: "x:desc", location: "nope", category: "nope", cols: "hacked" });
-    expect(html).toContain("Laptop X1");
+  it("says out loud when a cap was hit", async () => {
+    data = today([sendRow], [], ["Only the first 400 live requests were checked (the earliest by date). Open Requests to see the rest."]);
+    expect(await render()).toContain("Only the first 400 live requests were checked");
   });
 });

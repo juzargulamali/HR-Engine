@@ -449,6 +449,8 @@ export interface SummaryRow { label: string; value: string }
 export interface SummaryInput {
   kind: MovementKind;
   drafts: readonly LineDraft[];
+  /** Receiving only: the explicit owned-or-rented choice. */
+  ownership?: "owned" | "rented";
   /** Names, not ids. */
   location: string;
   toLocation?: string;
@@ -538,6 +540,7 @@ export function summaryRows(s: SummaryInput): SummaryRow[] {
   rows.push({ label: "How much", value: totalHow(s.drafts) });
   rows.push({ label: "From", value: from });
   rows.push({ label: "To", value: to });
+  if (s.kind === "receive" && s.ownership) rows.push({ label: "Owned or rented", value: s.ownership === "owned" ? "Owned. It adds to what the company owns." : `Rented${s.rentalSupplier ? ` from ${s.rentalSupplier}` : ""}. It goes back to its supplier and never adds to what the company owns.` });
   const who = s.employee ?? (s.project ? `Project ${s.project}` : null);
   if (who && (s.kind === "issue" || s.kind === "dispatch" || s.kind === "return" || s.kind === "consume" || s.kind === "return_unused" || s.kind === "project_transfer")) rows.push({ label: "Who", value: s.kind === "dispatch" || s.kind === "project_transfer" ? `Project ${s.project ?? "—"}` : who });
   if (s.request) rows.push({ label: "Request", value: s.request });

@@ -50,7 +50,7 @@ await step("founder adds a category in Setup", async () => {
 });
 
 const quickAdd = async (name, tracking, extra = async () => {}) => {
-  await R.go("/inventory");
+  await R.go("/inventory/stock");
   await R.page.getByRole("button", { name: "Add item", exact: true }).first().click();
   await R.dialog().waitFor();
   await dlgFill("Item name", name);
@@ -76,7 +76,7 @@ await step("Quick Add: Mounting bracket (counted stock, whole numbers) is catalo
 
 
 await step("founder registers four Floor sensor units (they start as Not counted yet)", async () => {
-  await R.go(`/inventory?open=${itemId(SENSOR)}`);
+  await R.go(`/inventory/stock?open=${itemId(SENSOR)}`);
   await R.page.getByRole("button", { name: "More actions" }).click();
   await R.page.getByRole("menuitem", { name: /Add unit/ }).click();
   await R.dialog().waitFor();
@@ -164,7 +164,7 @@ await step("operator opens the labels of the new units from the item and the QR 
   const unit1 = SENSOR_CODES()[0];
   sql(`insert into inv_costs (company_id, item_id, unit_id, purchase_date, unit_cost, currency, entered_by) select company_id, item_id, id, current_date, 1250.00, 'AED', '00000000-0000-4000-8000-0000000000a3' from inv_units where code='${unit1}'`);
   await R.as("hr1");
-  await R.go(`/inventory?open=${itemId(SENSOR)}`);
+  await R.go(`/inventory/stock?open=${itemId(SENSOR)}`);
   await R.page.getByRole("button", { name: "More actions" }).click();
   await R.page.getByRole("menuitem", { name: /Print labels for all units/ }).click();
   await R.page.waitForURL(/\/inventory\/labels/);
@@ -313,9 +313,8 @@ const qtyOf = (label) => mvPanel().getByLabel(`Quantity of ${label}`, { exact: t
 const reviewText = async () => (await mvPanel().innerText()).replace(/\s+/g, " ");
 const movementsOf = (kind) => Number(s1(`select count(*) from inv_movements where kind='${kind}'`));
 const openDispatchFromRequest = async () => {
-  await R.go(`/inventory/requests?open=${REQ}`);
-  await R.page.locator("aside[role=dialog]").getByRole("link", { name: "Dispatch", exact: true }).click();
-  await R.page.waitForURL(/action=dispatch/);
+  // The request's Dispatch link became "Open the workspace" (Send out); the dispatch form this flow exercises is still the Stock panel, reached by its address.
+  await R.go(`/inventory/stock?action=dispatch&request=${REQ}&project=${s1(`select project_id from inv_requests where id='${REQ}'`)}`);
   await mvPanel().getByText("Dispatch to a project").first().waitFor();
 };
 
@@ -429,7 +428,7 @@ await step("lost connection: the answer is lost after the server recorded the di
 // ---------------------------------------------------------------------------------------------------------------------------
 const [S1, S2, S3, S4] = SENSOR_CODES();
 const openReturnFromProject = async () => {
-  await R.go("/inventory?action=return");
+  await R.go("/inventory/stock?action=return");
   await mvPanel().getByLabel("Back into").selectOption({ label: "Dubai" });
   await mvPanel().getByRole("radio", { name: "A project" }).check();
   await mvPanel().getByLabel("Which project?").selectOption({ index: 1 });
@@ -471,7 +470,7 @@ await step("project returns part: sensor 1 good, sensor 2 damaged, 3 HDMI, 5.25 
   eq(s1(`select status from inv_requests where id='${REQ}'`), "fulfilled", "not closed: equipment is still out");
 });
 await step("the usable stock counts the good sensor and not the damaged one", async () => {
-  await R.go(`/inventory?open=${itemId(SENSOR)}`);
+  await R.go(`/inventory/stock?open=${itemId(SENSOR)}`);
   const t = (await R.panel().innerText()).replace(/\s+/g, " ");
   const usable = Number(t.match(/Usable now\s*(\d+)/)?.[1]);
   eq(usable, 1, "usable sensors shown (only the good one is back and free)");
@@ -500,7 +499,7 @@ await step("the project's Equipment page and the request show what is still outs
   eq(sensor[1], "4", "needed"); eq(sensor[3], "4", "dispatched"); eq(sensor[4], "2", "returned"); eq(sensor[5], "2", "outstanding");
   const cable = await cells("Power cable");
   eq(cable[5], "15.25 m", "metres outstanding on the request line");
-  check(/equipment still out on 4 lines/.test(await R.mainText()), "the request header says on how many lines equipment is still out (never a sum of unlike units)");
+  check(/equipment still out \(4 items\)/.test(await R.mainText()), "the request header says how many ITEMS are still out (a count of items, never a sum of unlike units; counted items that cannot be named for the request would say 'held at project level' instead)");
   await row(SENSOR).scrollIntoViewIfNeeded();
   await R.shot("flow1-request-outstanding");
 });
@@ -542,7 +541,7 @@ await step("final return: sensor 3, the other 3 HDMI, the other 15.25 m and the 
 
 
 const itemAction = async (item, menuItem) => {
-  await R.go(`/inventory?open=${itemId(item)}`);
+  await R.go(`/inventory/stock?open=${itemId(item)}`);
   await R.page.getByRole("button", { name: "More actions" }).click();
   await R.page.getByRole("menuitem", { name: menuItem }).click();
   await R.dialog().waitFor();
@@ -555,7 +554,7 @@ const dlgSearchAdd = async (query, addName) => {
   await list.getByRole("button", { name: addName }).first().click();
 };
 await step("sensor 4 never came back: the operator marks it missing with a reason, from the unit's own page", async () => {
-  await R.go(`/inventory?unit=${S4}`);
+  await R.go(`/inventory/stock?unit=${S4}`);
   await R.page.getByRole("button", { name: "More actions" }).click();
   await R.page.getByRole("menuitem", { name: /Mark missing/ }).click();
   await R.dialog().waitFor();
@@ -584,7 +583,7 @@ await step("a missing unit is shown as missing (not as a normal outstanding item
 const REPAIR_REF = "JOB-REPAIR-0042";
 await step("the damaged sensor 2 is sent for repair (not available) and comes back good (available)", async () => {
   await R.as("hr1");
-  await R.go(`/inventory?unit=${S2}`);
+  await R.go(`/inventory/stock?unit=${S2}`);
   await R.page.getByRole("button", { name: "More actions" }).click();
   await R.page.getByRole("menuitem", { name: /Send for repair/ }).click();
   await R.dialog().waitFor();
@@ -595,7 +594,7 @@ await step("the damaged sensor 2 is sent for repair (not available) and comes ba
   await R.dialog().getByText("Recorded").first().waitFor({ timeout: 20000 });
   eq(s1(`select custody_kind from inv_units where code='${S2}'`), "repair", "out for repair");
   eq(usableNow(S2), "f", "not available while at the repairer");
-  await R.go(`/inventory?unit=${S2}`);
+  await R.go(`/inventory/stock?unit=${S2}`);
   await R.page.getByRole("button", { name: "More actions" }).click();
   await R.page.getByRole("menuitem", { name: /Back from repair/ }).click();
   await R.dialog().waitFor();
@@ -610,11 +609,12 @@ await step("the damaged sensor 2 is sent for repair (not available) and comes ba
 });
 
 await step("operator receives a delivery of 20 more brackets (review step, one movement on a double click, the bin kept)", async () => {
-  await R.go("/inventory?action=receive");
+  await R.go("/inventory/stock?action=receive");
   await mvPanel().getByLabel("Receive into").selectOption({ label: "Dubai" });
   await searchAdd("Mounting", /^Add Mounting bracket/);
   await qtyOf("Mounting bracket").fill("20");
   await mvPanel().getByRole("listitem", { name: "Mounting bracket", exact: true }).getByLabel("Put into bin").selectOption({ label: "A-01 (Shelf A1)" });
+  await mvPanel().getByLabel(/^Owned/).check();    // owned or rented is an explicit choice now
   await mvPanel().getByRole("button", { name: "Review", exact: true }).click();
   await mvPanel().getByText("Check before you confirm").waitFor();
   await R.shot("flow1-receive-review");

@@ -17,7 +17,7 @@ export const STOCK_COLUMNS: readonly { id: StockColumn; label: string; required?
   { id: "item", label: "Item", required: true },
   { id: "category", label: "Category" },
   { id: "tracking", label: "How it is tracked" },
-  { id: "usable", label: "Usable now" },
+  { id: "usable", label: "Available" },
   { id: "warehouse", label: "In the warehouse" },
   { id: "out", label: "Out" },
   { id: "reserved", label: "Reserved (future)" },
@@ -26,7 +26,7 @@ export const STOCK_COLUMNS: readonly { id: StockColumn; label: string; required?
   { id: "cost", label: "Latest cost" },
 ];
 export const STOCK_ALL_COLUMNS: readonly StockColumn[] = STOCK_COLUMNS.map((c) => c.id);
-export const STOCK_DEFAULT_COLUMNS: readonly StockColumn[] = ["item", "category", "tracking", "usable", "warehouse", "out", "reserved"];
+export const STOCK_DEFAULT_COLUMNS: readonly StockColumn[] = ["item", "usable", "out", "reserved"];
 /** Columns that show where equipment is or who holds it: never offered (and never rendered) to someone who cannot view stock. */
 export const STOCK_ONLY_COLUMNS: readonly StockColumn[] = ["warehouse", "out", "reserved", "draft"];
 

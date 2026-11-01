@@ -13,14 +13,14 @@ import { Field, InvForm } from "./inv-form";
  * "Record the check" for one waiting Sales request, from the warehouse's own list. It works out the result from stock for the
  * enquiry's dates and saves it with the person's name and the time, exactly as on the enquiry itself. Nothing is reserved.
  */
-export function RecordCheckButton({ opportunityId, reference, locations, defaultLocationId }: {
-  opportunityId: string; reference: string; locations: { id: string; name: string }[]; defaultLocationId: string | null;
+export function RecordCheckButton({ opportunityId, reference, locations, defaultLocationId, label = "Record the check" }: {
+  opportunityId: string; reference: string; locations: { id: string; name: string }[]; defaultLocationId: string | null; label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const id = `rcw-${opportunityId}`;
   return (
     <>
-      <Button type="button" size="sm" onClick={() => setOpen(true)}>Record the check<span className="sr-only">{` for ${reference}`}</span></Button>
+      <Button type="button" size="sm" onClick={() => setOpen(true)}>{label}<span className="sr-only">{` for ${reference}`}</span></Button>
       {open ? (
         <Modal open onClose={() => setOpen(false)} title={`Record the check for ${reference}`} description="Works out the result from stock for this enquiry's dates and saves it with your name and the time. Nothing is reserved.">
           <InvForm action={recordOpportunityCheck} submitLabel="Record the check" pendingLabel="Checking…" onDone={() => setOpen(false)}>

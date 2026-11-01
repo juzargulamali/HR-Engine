@@ -56,6 +56,7 @@ export const PEOPLE = {
   sofia: { id: "sofia", name: "Sofia Marin", title: "Head of Content" },
   karim: { id: "karim", name: "Karim Saleh", title: "Head of Engineering" },
   tariq: { id: "tariq", name: "Tariq Aziz", title: "Content Designer" },
+  hind: { id: "hind", name: "Hind Saleh", title: "Warehouse operator" },
 } as const;
 export type PersonId = keyof typeof PEOPLE;
 export const personName = (id: string) => PEOPLE[id as PersonId]?.name ?? id;

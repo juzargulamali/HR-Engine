@@ -27,7 +27,7 @@ export const removeFromPending = (list: readonly PendingScanLine[], code: string
 /** Where a pending list continues: the matching form with the codes in the address (read there as `codes`). */
 export function pendingActionHref(action: PendingAction, list: readonly PendingScanLine[]): string {
   const codes = list.map((l) => encodeURIComponent(l.code)).join(",");
-  return `/inventory?action=${action}&codes=${codes}`;
+  return `/inventory/stock?action=${action}&codes=${codes}`;
 }
 
 export function scanProblemMessage(problem: "empty" | "too_long" | "not_inventory"): string {

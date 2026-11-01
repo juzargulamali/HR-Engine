@@ -34,16 +34,16 @@ const countRows = (n) => (Array.isArray(n.body) ? n.body.length : -1);
 // =====================================================================================================================
 // B1. Menu entries
 // =====================================================================================================================
-const MENU = {   // the sidebar shows the main pages only: My equipment, Scan and Equipment held by employees are reached from the page headers and the command palette
+const MENU = {   // the sidebar shows the main pages only: My equipment, Scan and Equipment held by people are reached from the page headers and the command palette
   admin: ["/inventory/mine"],
   emp: ["/inventory/mine"],
-  mgr: ["/inventory", "/inventory/requests"],
-  lead: ["/inventory", "/inventory/requests"],
-  hr: ["/inventory", "/inventory/requests"],
-  hr1: ["/inventory", "/inventory/requests", "/inventory/movements"],
+  mgr: ["/inventory/requests", "/inventory/stock"],
+  lead: ["/inventory", "/inventory/stock"],
+  hr: ["/inventory", "/inventory/stock"],
+  hr1: ["/inventory", "/inventory/history", "/inventory/stock"],
   // access is managed in People & Access now, not from the Inventory menu
-  ceo: ["/inventory", "/inventory/requests", "/inventory/movements", "/inventory/manage"],
-  pol: ["/inventory", "/inventory/requests", "/inventory/movements", "/inventory/manage"],
+  ceo: ["/inventory", "/inventory/history", "/inventory/manage", "/inventory/stock"],
+  pol: ["/inventory", "/inventory/history", "/inventory/manage", "/inventory/stock"],
 };
 const menuOf = async (page) => page.evaluate(() => [...new Set([...document.querySelectorAll("a[href^='/inventory']")].filter((a) => a.closest("nav, aside, header")).map((a) => new URL(a.href).pathname))].sort());
 if (run("B1")) {
@@ -61,7 +61,7 @@ if (run("B1")) {
 
 if (run("B1")) {
   // The pages kept out of the sidebar are reached from the command palette (Ctrl+K): each person finds exactly the ones they may use.
-  const PALETTE = { admin: ["My equipment"], emp: ["My equipment"], mgr: ["My equipment", "Scan a label"], lead: ["My equipment", "Scan a label"], hr: ["My equipment", "Scan a label", "Equipment held by employees"], hr1: ["My equipment", "Scan a label", "Equipment held by employees"], ceo: ["My equipment", "Scan a label", "Equipment held by employees"], pol: ["My equipment", "Scan a label", "Equipment held by employees"] };
+  const PALETTE = { admin: ["My equipment"], emp: ["My equipment"], mgr: ["My equipment", "Scan a label"], lead: ["My equipment", "Scan a label"], hr: ["My equipment", "Scan a label", "Equipment held by people"], hr1: ["My equipment", "Scan a label", "Equipment held by people"], ceo: ["My equipment", "Scan a label", "Equipment held by people"], pol: ["My equipment", "Scan a label", "Equipment held by people"] };
   for (const who of WHO) {
     await step(`B1 command palette: ${who}@ finds ${PALETTE[who].join(", ")}`, async () => {
       await R.as(who);
@@ -74,7 +74,7 @@ if (run("B1")) {
       await R.page.keyboard.press("Control+a"); await R.page.keyboard.type("scan");
       await sleep(400);
       const t2 = (await R.page.getByRole("dialog").first().innerText()).replace(/\s+/g, " ");
-      for (const label of ["My equipment", "Equipment held by employees"]) check(PALETTE[who].includes(label) === t1.includes(label), `${who}@ palette "equip": ${label} should ${PALETTE[who].includes(label) ? "" : "not "}be offered: ${t1.slice(0, 200)}`);
+      for (const label of ["My equipment", "Equipment held by people"]) check(PALETTE[who].includes(label) === t1.includes(label), `${who}@ palette "equip": ${label} should ${PALETTE[who].includes(label) ? "" : "not "}be offered: ${t1.slice(0, 200)}`);
       check(PALETTE[who].includes("Scan a label") === t2.includes("Scan a label"), `${who}@ palette "scan": ${t2.slice(0, 200)}`);
     });
   }
@@ -85,7 +85,7 @@ if (run("B1")) {
 // =====================================================================================================================
 const STOCK_SECRETS = /ENG-E-\d{3,}|-SN-\d+|Showroom refresh|Orbit/;       // unit codes, serial numbers, project names
 if (run("B2")) {
-  const PAGES = ["/inventory", "/inventory/requests", "/inventory/movements", "/inventory/manage", "/inventory/access", "/inventory/employees", "/inventory/mine", "/inventory/scan", `/inventory?unit=${UNIT_ID}`, `/inventory/labels?codes=${UNIT_CODE}`];
+  const PAGES = ["/inventory", "/inventory/requests", "/inventory/history", "/inventory/manage", "/inventory/access", "/inventory/stock?view=people", "/inventory/mine", "/inventory/scan", `/inventory/stock?unit=${UNIT_ID}`, `/inventory/labels?codes=${UNIT_CODE}`];
   for (const who of ["admin", "emp", "mgr", "lead", "hr", "pol"]) {
     await step(`B2 ${who}@ (no stock rights in the AE company): no unit, serial or project secrets on any Inventory page, in the text or the HTML`, async () => {
       await R.as(who);
@@ -110,7 +110,7 @@ if (run("B2")) {
   }
   await step("B2 hr1@ (warehouse at Dubai): sees stock, but Setup is closed to the role, and People & Access offers no Inventory access management and no one's address", async () => {
     await R.as("hr1");
-    await R.go("/inventory");
+    await R.go("/inventory/stock");
     check(/Laptop 14 inch/.test(await R.mainText()), "stock table is there");
     await R.go(`/people-access?person=u:${U(5)}&tab=modules`);
     let t = await R.mainText();
@@ -123,7 +123,7 @@ if (run("B2")) {
   });
   await step("B2 emp@ (ordinary employee): Inventory, requests, movements, Setup and Access show nothing to act on; My equipment is the only thing", async () => {
     await R.as("emp");
-    for (const p of ["/inventory/manage", "/inventory/access", "/inventory/movements", "/inventory/employees"]) {
+    for (const p of ["/inventory/manage", "/inventory/access", "/inventory/history", "/inventory/stock?view=people"]) {
       await R.go(p);
       const t = await R.mainText();
       eq(await R.page.locator("main button, main [role=button]").filter({ hasText: /Add a category|Give access|Start a count|Add item|Receive stock/ }).count(), 0, `${p}: no action buttons`);
@@ -263,7 +263,7 @@ if (run("B3")) {
 // =====================================================================================================================
 // B4. Purchase costs in the HTML, and an explicit view_costs grant made on the Access page
 // =====================================================================================================================
-const unitPanelText = async (page, id = UNIT_ID) => { await page.goto(`${BASE}/inventory?unit=${id}`, { waitUntil: "networkidle" }); return { text: (await page.locator("body").innerText()).replace(/\s+/g, " "), html: await page.content() }; };
+const unitPanelText = async (page, id = UNIT_ID) => { await page.goto(`${BASE}/inventory/stock?unit=${id}`, { waitUntil: "networkidle" }); return { text: (await page.locator("body").innerText()).replace(/\s+/g, " "), html: await page.content() }; };
 if (run("B4")) {
   await step("B4 the founder sees the purchase cost of a unit (AED 1,250.00); warehouse, HR custody, Project Manager, department head, employee and admin never do, not in the text and not in the HTML", async () => {
     await R.as("ceo");
@@ -272,7 +272,7 @@ if (run("B4")) {
     await R.shot("flow5-founder-sees-cost");
     for (const who of ["hr1", "hr", "mgr", "lead", "emp", "admin", "pol"]) {
       await R.as(who);
-      for (const p of [`/inventory?unit=${UNIT_ID}`, "/inventory", `/inventory?open=${LAP}`, "/inventory/movements", "/inventory/requests", `/projects/${PRJ_A}/equipment`, "/inventory?action=receive"]) {
+      for (const p of [`/inventory/stock?unit=${UNIT_ID}`, "/inventory", `/inventory/stock?open=${LAP}`, "/inventory/history", "/inventory/requests", `/projects/${PRJ_A}/equipment`, "/inventory/stock?action=receive"]) {
         await R.page.goto(`${BASE}${p}`, { waitUntil: "networkidle" });
         const html = await R.page.content();
         check(!/Purchase cost|1,?250\.00|unit_cost|purchase_date/i.test(html), `${who}@ ${p} shows a cost`);
@@ -281,7 +281,7 @@ if (run("B4")) {
   });
   await step("B4 the warehouse operator receive form offers no cost field", async () => {
     await R.as("hr1");
-    await R.go("/inventory?action=receive");
+    await R.go("/inventory/stock?action=receive");
     await R.panel().waitFor();
     check(!/cost|price|currency/i.test(await R.panel().innerText()), "no cost wording in the receive form: " + (await R.panel().innerText()).replace(/\s+/g, " ").slice(0, 200));
   });
@@ -319,7 +319,7 @@ if (run("B4")) {
 if (run("B5")) {
   await step("B5 hr1@ (Dubai only): the receive form offers Dubai and not Riyadh; the database refuses Riyadh for receive, issue and transfer-out, and allows Dubai", async () => {
     await R.as("hr1");
-    await R.go("/inventory?action=receive");
+    await R.go("/inventory/stock?action=receive");
     await R.panel().waitFor();
     const opts = await R.panel().getByLabel("Receive into", { exact: true }).locator("option").allTextContents();
     console.log("   locations offered:", opts.join(" | "));
@@ -349,12 +349,12 @@ if (run("B6")) {
   const dispatchToPl = (key) => rpc("hr1", "inv_dispatch_to_project", { p_company_id: AE, p_location_id: DXB, p_project_id: PL_PROJECT, p_key: key, p_lines: [{ unit_id: s1(`select id from inv_units where code='${UNIT_CODE}'`) }], p_expected_return_at: new Date(Date.now() + 5 * 86400000).toISOString() });
   await step("B6 the Poznan founder sees none of the AE stock: not on the pages, not in the HTML, not through the data service", async () => {
     await R.as("pol");
-    for (const p of ["/inventory", "/inventory/movements", `/inventory?unit=${UNIT_ID}`, `/inventory?open=${LAP}`, "/inventory/employees"]) {
+    for (const p of ["/inventory", "/inventory/history", `/inventory/stock?unit=${UNIT_ID}`, `/inventory/stock?open=${LAP}`, "/inventory/stock?view=people"]) {
       await R.page.goto(`${BASE}${p}`, { waitUntil: "networkidle" });
       const html = await R.page.content();
       check(!/ENG-E-|Laptop 14 inch|HDMI cable|Dubai|Riyadh|Showroom refresh/.test(html), `${p} leaks AE data`);
     }
-    await R.go("/inventory");
+    await R.go("/inventory/stock");
     await R.shot("flow5-poznan-founder-inventory");
     for (const t of ["inv_units", "inv_items", "inv_locations", "inv_balances", "inv_categories"]) {
       const r = await rest("pol", "GET", `/${t}?select=id&company_id=eq.${AE}`);
@@ -412,7 +412,7 @@ if (run("B7")) {
   await step("B7 hr1@ has the Inventory page open; a founder revokes the grant; hr1@'s next action in that page fails with the access message and the page then shows no access", async () => {
     const hr1 = await R.extra("hr1");
     try {
-      await hr1.goto(`${BASE}/inventory?action=receive`, { waitUntil: "networkidle" });
+      await hr1.goto(`${BASE}/inventory/stock?action=receive`, { waitUntil: "networkidle" });
       const panel = hr1.locator("aside[role=dialog]"); await panel.waitFor();
       await panel.getByLabel("Receive into", { exact: true }).selectOption({ label: "Dubai" });
       const box = panel.getByLabel("Search for an item or unit to add");
@@ -420,6 +420,7 @@ if (run("B7")) {
       const results = panel.getByRole("list", { name: "Search results" }); await results.waitFor();
       await results.getByRole("button", { name: /^Add HDMI cable/ }).first().click();
       await panel.getByLabel("Quantity of HDMI cable", { exact: true }).fill("2");
+      await panel.getByLabel(/^Owned/).check();    // owned or rented is an explicit choice now
       await panel.getByRole("button", { name: "Review", exact: true }).click();
       await panel.getByText("Check before you confirm").waitFor();
       const cables = s1(`select coalesce(sum(qty),0) from inv_balances where item_id='${HDMI}' and holder_kind='warehouse'`);

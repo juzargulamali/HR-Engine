@@ -29,7 +29,15 @@ export const MODULES: ModuleDef[] = [
   },
   { id: "projects", label: "Projects & Tasks", icon: "projects", href: `${BASE}/projects`, status: "coming", blurb: "Projects, PM, department heads, milestones, tasks, site reservations." },
   { id: "people", label: "People & HR", icon: "people", href: `${BASE}/people`, status: "existing", blurb: "Attendance, leave, expenses, payroll, appraisals: the existing HR app." },
-  { id: "inventory", label: "Inventory", icon: "inventory", href: `${BASE}/inventory`, status: "coming", blurb: "Technology stock, components, dispatch, return, condition." },
+  {
+    id: "inventory", label: "Inventory", icon: "inventory", href: `${BASE}/inventory`, status: "designed", blurb: "Technology stock, components, dispatch, return, condition.",
+    sub: [
+      { label: "Today", href: `${BASE}/inventory` },
+      { label: "Stock", href: `${BASE}/inventory/stock` },
+      { label: "History", href: `${BASE}/inventory/history` },
+      { label: "Manage", href: `${BASE}/inventory/manage` },
+    ],
+  },
   { id: "vendors", label: "Vendors & Purchasing", icon: "vendors", href: `${BASE}/vendors`, status: "coming", blurb: "Vendors, purchase and rental requests." },
   { id: "performance", label: "Performance & KPIs", icon: "performance", href: `${BASE}/performance`, status: "coming", blurb: "Appraisals (existing) and KPIs." },
   { id: "approvals", label: "Approvals", icon: "approvals", href: `${BASE}/approvals`, status: "designed", blurb: "One inbox of decisions." },
@@ -37,7 +45,7 @@ export const MODULES: ModuleDef[] = [
   { id: "admin", label: "Administration", icon: "admin", href: `${BASE}/admin`, status: "designed", blurb: "Users, roles, module access, settings, audit." },
 ];
 
-export type RoleId = "founder" | "sales" | "pm" | "head" | "employee";
+export type RoleId = "founder" | "sales" | "pm" | "head" | "employee" | "warehouse";
 export interface RoleDef {
   id: RoleId; label: string; short: string; person: PersonId; personLabel: string; modules: ModuleId[];
   salesAccess: boolean; canAssignOwner: boolean;
@@ -71,6 +79,12 @@ export const ROLES: Record<RoleId, RoleDef> = {
     modules: ["my-day", "projects", "inventory", "people", "approvals", "performance"],
     salesAccess: false, canAssignOwner: false, canConfigureSales: false, canConfigureFollowups: false, crossCompany: false,
     description: "Your team's week, deadlines and blockers.",
+  },
+  warehouse: {
+    id: "warehouse", label: "Warehouse operator", short: "Warehouse", person: "hind", personLabel: "Hind Saleh (Warehouse operator)",
+    modules: ["my-day", "inventory", "people", "performance"],
+    salesAccess: false, canAssignOwner: false, canConfigureSales: false, canConfigureFollowups: false, crossCompany: false,
+    description: "The warehouse's work for today.",
   },
   employee: {
     id: "employee", label: "Employee", short: "Employee", person: "tariq", personLabel: "Tariq Aziz (Content Designer)",

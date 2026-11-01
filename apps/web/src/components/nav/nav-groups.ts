@@ -251,9 +251,10 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
     });
   }
 
-  // Inventory has its own company-scoped access (inv_company_grants), independent of HR roles, Sales and Projects grants. Three working
-  // sections (Inventory, Requests, Movements) for people with a grant; Project Managers and department heads see the catalogue and their
-  // requests; every employee sees the equipment assigned to them. Setup and Access appear only to those who can use them.
+  // Inventory has its own company-scoped access (inv_company_grants), independent of HR roles, Sales and Projects grants. People with a grant get
+  // three working sections: Today (the work waiting for their warehouse), Stock (search, scan, receive, give equipment, who holds what) and History (the
+  // ledger, for people who may view stock). Project Managers and department heads see Stock (the catalogue) and their Requests; every employee sees the
+  // equipment assigned to them. Scanning, "held by employees" and the movement forms live inside Stock; Setup appears only to those who can use it.
   const inv = options.inventory;
   const invGrants = inv?.grants ?? [];
   const invGrantee = invGrants.length > 0;
@@ -263,14 +264,15 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
   if (invPlanner || inv?.isEmployee === true) {
     const mainLinks: NavLinkData[] = invPlanner
       ? [
-          { href: "/inventory", label: "Inventory", iconKey: "inventory" },
-          { href: "/inventory/requests", label: "Requests", iconKey: "inventory" },
-          ...(invStock || invAnyCap("founder") ? [{ href: "/inventory/movements", label: "Movements", iconKey: "inventory" as const }] : []),
+          ...(invGrantee ? [{ href: "/inventory", label: "Today", iconKey: "inventory" as const }] : []),
+          { href: "/inventory/stock", label: "Stock", iconKey: "inventory" },
+          ...(invStock || invAnyCap("founder") ? [{ href: "/inventory/history", label: "History", iconKey: "inventory" as const }] : []),
+          { href: "/inventory/requests", label: "Requests", iconKey: "inventory", secondary: invGrantee },
           { href: "/inventory/mine", label: "My equipment", iconKey: "inventory", secondary: true },
-          { href: "/inventory/scan", label: "Scan a label", iconKey: "inventory", secondary: true },
-          // Which company equipment each employee holds: for HR custody access, founders and warehouse operators (the page and the database check again).
+          // Real destinations that are not menu rows (found by search): scanning and who holds what now live inside Stock.
+          { href: "/inventory/stock?action=scan", label: "Scan a label", iconKey: "inventory", secondary: true },
           ...(invAnyCap("view_employee_custody") || invAnyCap("founder") || invAnyCap("warehouse")
-            ? [{ href: "/inventory/employees", label: "Equipment held by employees", iconKey: "inventory" as const, secondary: true }]
+            ? [{ href: "/inventory/stock?view=people", label: "Equipment held by people", iconKey: "inventory" as const, secondary: true }]
             : []),
         ]
       : [{ href: "/inventory/mine", label: "My equipment", iconKey: "inventory" }];

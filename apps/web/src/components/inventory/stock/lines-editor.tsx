@@ -260,6 +260,27 @@ function DraftRow({ d, kind, bins, canSeeCosts, error, patch, remove, taking }: 
   const conditions = isUnit || receivingUnits ? Object.entries(CONDITION_WORDS) : Object.entries(BALANCE_CONDITION_WORDS);
   const releasing = kind === "return" || kind === "repair_in" || kind === "receive_transfer" || kind === "receive";
   const condLabel = (value: string, word: string) => (releasing ? (value === "good" ? `${word}: available now` : value === "fair" ? `${word}: available now` : `${word}: held back`) : word);
+  const advanced = kind === "receive";
+  const conditionField = wantsCondition ? (
+    <div className="space-y-1.5">
+      <label htmlFor={`${uid}-c`} className="text-sm font-medium leading-none">{kind === "check" ? "Condition after the check" : "Condition"}</label>
+      <Select id={`${uid}-c`} value={d.condition} onChange={(e) => patch(d.id, { condition: e.target.value })}>
+        {conditions.map(([value, word]) => <option key={value} value={value}>{condLabel(value, word)}</option>)}
+      </Select>
+    </div>
+  ) : null;
+  const costField = kind === "receive" && canSeeCosts && (receivingUnits || !isUnit) ? (
+    <div className="space-y-1.5">
+      <label htmlFor={`${uid}-m`} className="text-sm font-medium leading-none">Cost of each (optional)</label>
+      <Input id={`${uid}-m`} inputMode="decimal" value={d.cost} onChange={(e) => patch(d.id, { cost: e.target.value })} />
+    </div>
+  ) : null;
+  const serialField = receivingUnits ? (
+    <div className="space-y-1.5">
+      <label htmlFor={`${uid}-s`} className="text-sm font-medium leading-none">Serial numbers (optional)</label>
+      <Textarea id={`${uid}-s`} rows={2} value={d.serials} onChange={(e) => patch(d.id, { serials: e.target.value })} placeholder="One per line, in the same count as above" />
+    </div>
+  ) : null;
   return (
     <li className="space-y-2 rounded-md border border-border p-3" aria-label={label}>
       <div className="flex items-start justify-between gap-2">
@@ -286,33 +307,17 @@ function DraftRow({ d, kind, bins, canSeeCosts, error, patch, remove, taking }: 
             </Select>
           </div>
         ) : null}
-        {wantsCondition ? (
-          <div className="space-y-1.5">
-            <label htmlFor={`${uid}-c`} className="text-sm font-medium leading-none">{kind === "check" ? "Condition after the check" : releasing ? "Condition" : "Condition"}</label>
-            <Select id={`${uid}-c`} value={d.condition} onChange={(e) => patch(d.id, { condition: e.target.value })}>
-              {conditions.map(([value, word]) => <option key={value} value={value}>{condLabel(value, word)}</option>)}
-            </Select>
-          </div>
-        ) : null}
-        {receivingUnits && canSeeCosts ? (
-          <div className="space-y-1.5">
-            <label htmlFor={`${uid}-m`} className="text-sm font-medium leading-none">Cost of each (optional)</label>
-            <Input id={`${uid}-m`} inputMode="decimal" value={d.cost} onChange={(e) => patch(d.id, { cost: e.target.value })} />
-          </div>
-        ) : null}
-        {!isUnit && !receivingUnits && kind === "receive" && canSeeCosts ? (
-          <div className="space-y-1.5">
-            <label htmlFor={`${uid}-m`} className="text-sm font-medium leading-none">Cost of each (optional)</label>
-            <Input id={`${uid}-m`} inputMode="decimal" value={d.cost} onChange={(e) => patch(d.id, { cost: e.target.value })} />
-          </div>
-        ) : null}
+        {!advanced ? <>{conditionField}{costField}</> : null}
       </div>
-      {receivingUnits ? (
-        <div className="space-y-1.5">
-          <label htmlFor={`${uid}-s`} className="text-sm font-medium leading-none">Serial numbers (optional)</label>
-          <Textarea id={`${uid}-s`} rows={2} value={d.serials} onChange={(e) => patch(d.id, { serials: e.target.value })} placeholder="One per line, in the same count as above" />
-        </div>
-      ) : null}
+      {advanced ? (
+        <details className="rounded-md border border-border/70 px-3 py-2" open={!!error}>
+          <summary className="cursor-pointer select-none text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">More details <span className="font-normal">(condition{receivingUnits ? ", serial numbers" : ""}{canSeeCosts ? ", cost" : ""})</span></summary>
+          <div className="mt-3 space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">{conditionField}{costField}</div>
+            {serialField}
+          </div>
+        </details>
+      ) : serialField}
       {isUnit && (kind === "return" || kind === "check" || kind === "repair_in" || kind === "receive_transfer") ? (
         <div className="space-y-1.5">
           <label htmlFor={`${uid}-n`} className="text-sm font-medium leading-none">Note (optional)</label>

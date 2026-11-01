@@ -183,7 +183,7 @@ export async function UnitSidePanel({ unitRef, closeHref, here }: { unitRef: str
         </Section>
       ) : null}
 
-      <Section title="History" aside={<Link href={`/inventory/movements?item=${item.id}`} className="text-sm font-medium underline-offset-2 hover:underline">All movements of this item</Link>}>
+      <Section title="History" aside={<Link href={`/inventory/history?item=${item.id}`} className="text-sm font-medium underline-offset-2 hover:underline">All movements of this item</Link>}>
         <HistoryList rows={d.history} names={d.names} resolver={resolver} itemName={() => item.name} locations={d.locations} fallbackZone={d.locations[0]?.timezone ?? "Asia/Dubai"} emptyText="Nothing has been recorded for this unit yet." linkToLedger />
         {d.historyTruncated ? <p className="text-sm text-muted-foreground">Showing the latest 200 entries.</p> : null}
       </Section>

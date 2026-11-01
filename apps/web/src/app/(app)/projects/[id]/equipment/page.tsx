@@ -16,6 +16,8 @@ import { formatDateTime } from "@/lib/projects/format";
 import { getInventoryContext } from "@/lib/inventory/context";
 import { asArray, asRecord, formatInZone, num, progressFromDb, shortageLabel, str, windowLabel } from "@/lib/inventory/planning";
 import { canManageProjectEquipment, loadRequestModels, loadTechnologies, loadVisibleLocations } from "@/lib/inventory/planning-data";
+import { resolveProjectHeld } from "@/lib/inventory/project-returns";
+import { outstandingView, requestItemTotals } from "@/lib/inventory/workspace";
 import { formatQty } from "@/lib/inventory/words";
 import { isNotInstalled } from "@/lib/projects/errors";
 import { getProjectsContext } from "@/lib/projects/context";
@@ -25,6 +27,13 @@ import { createClient } from "@/lib/supabase/server";
 export const metadata = { title: "Project equipment" };
 
 type SearchParams = Record<string, string | string[] | undefined>;
+
+/** The request's one-line summary: only what can be said about THIS request (project-level counted stock is not attributed to it). */
+function stillOutSummary(totals: readonly { level: string; stillOut: number | null }[]): string {
+  const own = totals.filter((t) => t.level === "request" && (t.stillOut ?? 0) > 0).length;
+  const project = totals.filter((t) => t.level === "project" && t.stillOut !== 0).length;
+  return `${own > 0 ? ` · equipment still out (${own === 1 ? "1 item" : `${own} items`})` : ""}${project > 0 ? ` · ${project === 1 ? "1 item" : `${project} items`} held at project level` : ""}`;
+}
 
 /**
  * The equipment side of one project: what is still out, what is short, and the requirement list (requests with their lines). The
@@ -86,10 +95,13 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
   const warehouse = !finished && inv.grants.some((g) => g.companyId === project.company_id && (g.capabilities.includes("founder") || g.capabilities.includes("warehouse")));
   const canEditList = (manage || warehouse) && !off;
   const technologies = canEditList ? await loadTechnologies(project.company_id).catch(() => []) : [];
-  const outstanding = asArray(equipment.outstanding).map(asRecord);
+  // Sent / Returned / Still out per request at the level the data supports: units are exact; counted stock that could have been returned for another request,
+  // another line, or without a request is shown for the PROJECT (the same rules as the request workspace).
+  const heldInfo = await resolveProjectHeld(inv, { companyId: project.company_id, projectId: id, equipment: raw, models });
+  const returnsByRequest = new Map(models.map((m) => [m.request.id, requestItemTotals(m, models, heldInfo.held, heldInfo.unclear)] as const));
   // Held by the project but not named on any request (the warehouse may dispatch without naming one): still out, so listed too.
-  const unlinked = asArray(equipment.unlinked).map(asRecord);
-  const stillOut = outstanding.length + unlinked.length;
+  const { outstanding, unlinked, projectLevel } = outstandingView(equipment, models, returnsByRequest);
+  const stillOut = outstanding.length + unlinked.length + projectLevel.length;
   // A due date is written in the local time of the request it belongs to (equipment with no request: the project's first request, or Dubai).
   const tzOfRequest = new Map(requestsJson.map((r) => [String(r.code), str(r.timezone) ?? "Asia/Dubai"] as const));
   const fallbackTz = str(requestsJson[0]?.timezone) ?? "Asia/Dubai";
@@ -128,7 +140,7 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
       <Panel
         title="Equipment still out"
         description="Dispatched to this project and not yet returned."
-        actions={warehouse && stillOut > 0 ? <Link href={`/inventory?action=return&project=${id}`} className={buttonVariants({ size: "sm", variant: "outline" })}>Record a return</Link> : undefined}
+        actions={warehouse && stillOut > 0 ? <Link href={`/inventory/stock?action=return&project=${id}`} className={buttonVariants({ size: "sm", variant: "outline" })}>Record a return</Link> : undefined}
         className={stillOut > 0 ? "border-[hsl(var(--os-amber)/0.5)]" : undefined}
       >
         {stillOut === 0 ? (
@@ -147,6 +159,15 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
                 <li key={`unlinked-${i}`} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2">
                   <span className="min-w-0 break-words font-medium">{str(o.item_name) ?? "Item"}{str(o.unit_code) ? <span className="font-mono font-normal text-muted-foreground"> · {str(o.unit_code)}</span> : null}{str(o.serial_number) ? <span className="font-normal text-muted-foreground"> · serial {str(o.serial_number)}</span> : null}</span>
                   <span className="text-muted-foreground">{str(o.unit_lifecycle) === "missing" ? <Badge variant="warning" className="mr-2">Recorded as missing</Badge> : null}{o.overdue === true ? <Badge variant="warning" className="mr-2">Overdue</Badge> : null}{formatQty(num(o.qty_outstanding), str(o.unit_of_measure))} {str(o.unit_lifecycle) === "missing" ? "not returned" : "out"} · not part of a request{dueBack(str(o.expected_return_at), fallbackTz)}</span>
+                </li>
+              ))}
+              {projectLevel.map((o) => (
+                <li key={`project-${o.itemId}`} className="py-2">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
+                    <span className="min-w-0 break-words font-medium">{o.name}<Badge variant="outline" className="ml-2 align-middle">Project level</Badge></span>
+                    <span className="text-muted-foreground">{o.overdue ? <Badge variant="warning" className="mr-2">Overdue</Badge> : null}{o.qty === null ? "Quantity not shown" : `${formatQty(o.qty, o.uom)} out`} · held by the project{o.requestCodes.length > 0 ? `, sent for ${o.requestCodes.length === 1 ? "request" : "requests"} ${o.requestCodes.join(", ")}` : ""}{dueBack(o.expectedReturnAt, fallbackTz)}</span>
+                  </div>
+                  {o.note ? <p className="mt-0.5 text-xs text-muted-foreground">{o.note}</p> : null}
                 </li>
               ))}
             </ul>
@@ -199,10 +220,10 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
                   {r.source === "sales_handover" ? <Badge variant="outline">Imported from the Sales handover</Badge> : null}
                   <span className="min-w-0 break-words font-medium">{r.title ?? ""}</span>
                   <span className="text-muted-foreground">{windowLabel(r)}</span>
-                  <span className="text-muted-foreground">{total === 0 ? "No lines" : `${total} ${total === 1 ? "line" : "lines"}`}{m.outstandingLines > 0 ? ` · equipment still out on ${m.outstandingLines === 1 ? "1 line" : `${m.outstandingLines} lines`}` : ""}</span>
+                  <span className="text-muted-foreground">{total === 0 ? "No lines" : `${total} ${total === 1 ? "line" : "lines"}`}{stillOutSummary(returnsByRequest.get(r.id) ?? [])}</span>
                 </summary>
                 <div className="border-t border-border p-4">
-                  <RequestEditor model={m} can={can} locations={locations} technologies={technologies} hideHeading />
+                  <RequestEditor model={m} can={can} locations={locations} technologies={technologies} hideHeading returns={returnsByRequest.get(r.id)} />
                 </div>
               </details>
             );

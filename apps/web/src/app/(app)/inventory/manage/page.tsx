@@ -294,7 +294,10 @@ export default async function InventoryManagePage({ searchParams }: { searchPara
         </Panel>
       ) : null}
 
-      <Muted>Who can use Inventory is managed under <Link href="/people-access" className="underline underline-offset-2">People & Access</Link>. Items and their exact specifications are in the <Link href="/inventory" className="underline underline-offset-2">catalogue</Link>.</Muted>
+      <Muted>
+        Repairs, missing or found equipment and write-offs are done from the item itself (<Link href="/inventory/stock" className="underline underline-offset-2">Stock</Link>, then the item&apos;s actions). A counted quantity recorded by mistake is corrected from its entry in <Link href="/inventory/history" className="underline underline-offset-2">History</Link>; the original is kept and a new entry names it.
+      </Muted>
+      <Muted>Who can use Inventory is managed under <Link href="/people-access" className="underline underline-offset-2">People & Access</Link>. Items and their exact specifications are in the <Link href="/inventory/stock" className="underline underline-offset-2">catalogue</Link>.</Muted>
       {sheet}
     </div>
   );

@@ -61,8 +61,7 @@ if (run("A1")) {
     await R.closedDialog();
     UNITS = sqlRows(`select u.code from inv_reservations r join inv_units u on u.id=r.unit_id join inv_request_lines l on l.id=r.request_line_id where l.request_id='${REQ_A}' and r.status='active' order by u.code`);
     eq(UNITS.length, 3, "three laptops reserved for A");
-    await R.page.locator("aside[role=dialog]").getByRole("link", { name: "Dispatch", exact: true }).click();
-    await R.page.waitForURL(/action=dispatch/);
+    await R.go(`/inventory/stock?action=dispatch&request=${REQ_A}&project=${s1(`select project_id from inv_requests where id='${REQ_A}'`)}`);   // the request's Dispatch link became "Open the workspace"
     await H.mv().getByText("Dispatch to a project").first().waitFor();
     for (const c of UNITS) await H.searchAdd(c, new RegExp(`^Add Laptop 14 inch ${c}`));
     await H.review();
@@ -81,7 +80,7 @@ if (run("A1")) {
   });
 
   const openMove = async (code) => {
-    await R.go(`/inventory?unit=${s1(`select id from inv_units where code='${code}'`)}`);
+    await R.go(`/inventory/stock?unit=${s1(`select id from inv_units where code='${code}'`)}`);
     await R.page.getByRole("button", { name: "More actions" }).click();
     await R.page.getByRole("menuitem", { name: /Move to another project/ }).click();
     await H.mv().getByText(/Move between projects/).first().waitFor({ timeout: 10000 }).catch(async () => { await R.dialog().waitFor(); });
@@ -146,7 +145,7 @@ if (run("A1")) {
     check(outB.includes(U2) && !outB.includes(U1) && !outB.includes(U3), "B lists " + U2 + " only: " + outB.slice(0, 300));
     await R.shot("flow4-project-b-equipment");
     await R.as("hr1");
-    await R.go(`/inventory?unit=${s1(`select id from inv_units where code='${U2}'`)}`);
+    await R.go(`/inventory/stock?unit=${s1(`select id from inv_units where code='${U2}'`)}`);
     const h = (await R.panel().innerText()).replace(/\s+/g, " ");
     check(/Moved between projects/.test(h), "the unit's history names the move: " + h.slice(0, 300));
   });
@@ -340,7 +339,7 @@ if (run("A3")) {
   };
   await step("A3 the warehouse operator sends 2 motors and 5 HDMI cables Dubai to Riyadh (UI): review, then confirm; one movement", async () => {
     await R.as("hr1");
-    await R.go("/inventory?action=transfer");
+    await R.go("/inventory/stock?action=transfer");
     const mv = H.mv();
     await mv.getByLabel("Send from", { exact: true }).selectOption({ label: "Dubai" });
     await mv.getByLabel("Send to", { exact: true }).selectOption({ label: "Riyadh" });
@@ -365,7 +364,7 @@ if (run("A3")) {
     eq(s1("select count(*) from inv_transfers where status='in_transit'"), 1, "one transfer in transit");
   });
   await step("A3 in transit: the motors are 'In transit' on their record and not usable at Riyadh; the availability check says 0 usable now at Riyadh and none free for the next days", async () => {
-    await R.go(`/inventory?unit=${s1(`select id from inv_units where code='${M1}'`)}`);
+    await R.go(`/inventory/stock?unit=${s1(`select id from inv_units where code='${M1}'`)}`);
     const t = (await R.panel().innerText()).replace(/\s+/g, " ");
     check(/In transit/.test(t), "unit says In transit: " + t.slice(0, 300));
     await R.shot("flow4-unit-in-transit");
@@ -391,7 +390,7 @@ if (run("A3")) {
   });
   await step("A3 the Dubai-only operator cannot receive at Riyadh: the screen offers no transfer to receive and the database refuses", async () => {
     await R.as("hr1");
-    await R.go("/inventory?action=transfer&mode=receive");
+    await R.go("/inventory/stock?action=transfer&mode=receive");
     const t = await H.text();
     check(/No transfer is on its way to you|no transfer/i.test(t) || !(await H.mv().getByRole("option", { name: new RegExp(transferCode()) }).count()), "the Riyadh transfer is not offered to a Dubai operator: " + t.slice(0, 260));
     const tr = s1("select id from inv_transfers where status='in_transit'");
@@ -401,7 +400,7 @@ if (run("A3")) {
   });
   await step("A3 Riyadh receives part of it (UI, as the founder): one motor and 3 of the 5 cables; the rest stays in transit", async () => {
     await R.as("ceo");
-    await R.go("/inventory?action=transfer&mode=receive");
+    await R.go("/inventory/stock?action=transfer&mode=receive");
     const mv = H.mv();
     await mv.getByLabel("Which transfer arrived?").selectOption({ index: 1 });
     await mv.getByLabel(/Only some of it/).check();
@@ -425,7 +424,7 @@ if (run("A3")) {
     eq(riy.usable, 1, "one motor usable now at Riyadh after receipt"); eq(riy.inTransit, 1, "one still in transit");
   });
   await step("A3 the rest is received; the transfer closes; all stock accounted for", async () => {
-    await R.go("/inventory?action=transfer&mode=receive");
+    await R.go("/inventory/stock?action=transfer&mode=receive");
     const mv = H.mv();
     await mv.getByLabel("Which transfer arrived?").selectOption({ index: 1 });
     await H.review();
@@ -445,7 +444,7 @@ if (run("A3")) {
     sql(`update inv_transfers set expected_at = now() - interval '2 days' where status='in_transit'`);
     const upd = asDbTry(3, "select 1");
     sql(`update inv_units set expected_return_at = now() - interval '2 days' where code='${M2}'`);
-    await R.go(`/inventory?unit=${s1(`select id from inv_units where code='${M2}'`)}`);
+    await R.go(`/inventory/stock?unit=${s1(`select id from inv_units where code='${M2}'`)}`);
     const t = (await R.panel().innerText()).replace(/\s+/g, " ");
     check(/Overdue/.test(t) && /\(overdue\)/.test(t), "the unit panel flags it overdue: " + t.slice(0, 400));
     await R.shot("flow4-unit-overdue");
@@ -461,7 +460,7 @@ if (run("A3")) {
     const out = await rpc("hr1", "inv_dispatch_to_project", { p_company_id: AE, p_location_id: DXB, p_project_id: PRJ_A, p_key: "hr1-late-" + Date.now(), p_lines: [{ unit_id: s1(`select id from inv_units where code='${L1}'`) }], p_request_id: null, p_expected_return_at: new Date(Date.now() + 86400000).toISOString(), p_note: null });
     check(out.status < 300, "dispatched: " + JSON.stringify(out.body).slice(0, 200));
     sql(`update inv_units set expected_return_at = now() - interval '1 day' where code='${L1}'`);
-    await R.go(`/inventory?unit=${s1(`select id from inv_units where code='${L1}'`)}`);
+    await R.go(`/inventory/stock?unit=${s1(`select id from inv_units where code='${L1}'`)}`);
     const t = (await R.panel().innerText()).replace(/\s+/g, " ");
     check(/Overdue/.test(t), "flagged overdue: " + t.slice(0, 300));
     const a = await checkAvail(R.page, "VR headset", "Dubai", 3, 4);

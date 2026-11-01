@@ -11,6 +11,8 @@ import { LinesEditor, type EditorCan } from "./lines-editor";
 import { PlanForm } from "./plan-form";
 import { RequestMoreMenu, SubmitRequest } from "./request-actions";
 import { RequestStatusBadge } from "./status";
+import { SentReturned } from "../workspace/sent-returned";
+import type { ItemTotals } from "@/lib/inventory/workspace";
 
 function Section({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
@@ -41,8 +43,10 @@ export function requestCapabilities(model: RequestModel, ctx: InventoryContext, 
  * One equipment request: header and status, the planning dates, the lines with their progress, and everything that can be done with
  * them. Used beside the Requests list (a side panel) and inside a project's Equipment page, so both behave the same.
  */
-export function RequestEditor({ model, can, locations, technologies, hideHeading = false }: {
+export function RequestEditor({ model, can, locations, technologies, hideHeading = false, returns }: {
   model: RequestModel; can: EditorCan; locations: readonly InvLocationRow[]; technologies: TechnologyOption[]; hideHeading?: boolean;
+  /** Sent / Returned / Still out at the level the data supports (see lib/inventory/workspace.ts), for a project request. Absent for an employee request. */
+  returns?: ItemTotals[];
 }) {
   const r = model.request;
   const editable = isRequestEditable(r.status);
@@ -76,7 +80,7 @@ export function RequestEditor({ model, can, locations, technologies, hideHeading
       {r.note ? <p className="whitespace-pre-line break-words rounded-md border border-border bg-secondary/30 px-3 py-2 text-sm">{r.note}</p> : null}
 
       {r.status === "cancelled" ? <Alert role="status">Cancelled{r.cancel_reason ? `: ${r.cancel_reason}` : ""}. Reservations that were not used were released.</Alert> : null}
-      {model.outstandingLines > 0 ? (
+      {returns ? <StillOutNotice returns={returns} cancelled={r.status === "cancelled"} /> : model.outstandingLines > 0 ? (
         <Alert variant="warning" role="status">
           Equipment from this request is still out ({model.outstandingLines === 1 ? "1 line" : `${model.outstandingLines} lines`}: see Outstanding below). {r.status === "cancelled" ? "Cancelling did not bring it back. " : ""}It stays outstanding until the warehouse records its return.
         </Alert>
@@ -85,9 +89,9 @@ export function RequestEditor({ model, can, locations, technologies, hideHeading
 
       <div className="flex flex-wrap items-center gap-2">
         {r.status === "draft" && can.edit ? <div className="min-w-0 flex-1"><SubmitRequest requestId={r.id} version={r.version} projectId={projectId} missing={missing} /></div> : null}
-        {can.warehouse && live && r.kind === "project" && r.project_id ? <Link href={`/inventory?action=dispatch&request=${r.id}&project=${r.project_id}`} className={buttonVariants({ size: "sm" })}>Dispatch</Link> : null}
-        {can.warehouse && live && r.kind === "employee" && r.employee_id ? <Link href={`/inventory?action=issue&request=${r.id}&employee=${r.employee_id}`} className={buttonVariants({ size: "sm" })}>Issue to the employee</Link> : null}
-        {can.warehouse && r.kind === "employee" && r.employee_id ? <Link href={`/inventory/employees?employee=${r.employee_id}`} className={buttonVariants({ size: "sm", variant: "outline" })}>What this employee holds</Link> : null}
+        {can.warehouse && live && r.kind === "project" && r.project_id ? <Link href={`/inventory/requests/${r.id}?step=send`} className={buttonVariants({ size: "sm" })}>Open the workspace</Link> : null}
+        {can.warehouse && live && r.kind === "employee" && r.employee_id ? <Link href={`/inventory/stock?action=issue&request=${r.id}&employee=${r.employee_id}`} className={buttonVariants({ size: "sm" })}>Issue to the employee</Link> : null}
+        {can.warehouse && r.kind === "employee" && r.employee_id ? <Link href={`/inventory/stock?view=people&employee=${r.employee_id}`} className={buttonVariants({ size: "sm", variant: "outline" })}>What this employee holds</Link> : null}
         {can.edit && editable ? <RequestMoreMenu requestId={r.id} status={r.status} projectId={projectId} outstanding={model.outstandingLines} /> : null}
       </div>
       {live && !can.warehouse ? <p className="text-sm text-muted-foreground">The warehouse reserves and dispatches. You will see reserved, dispatched and returned numbers here as they happen.</p> : null}
@@ -106,8 +110,28 @@ export function RequestEditor({ model, can, locations, technologies, hideHeading
         </details>
       )}
 
+      {returns && returns.length > 0 ? <Section title="Sent and returned" description="Counted stock comes back to the project, not to a request line, so it is shown for this request only where nothing else could have been returned in its place."><SentReturned totals={returns} heading={`Equipment sent for ${r.code}`} /></Section> : null}
+
       <Section title="Equipment lines">
+        <RequestLines model={model} can={can} locations={locations} technologies={technologies} returns={returns} />
+      </Section>
+    </div>
+  );
+}
+
+/**
+ * The lines of a request with everything that can be done to them (reserve, release, substitute, buy or rent, add an item or a template). Used by
+ * the request panel and the project page, and by the Prepare step of the request workspace (which leaves the sent/returned columns to its own steps).
+ */
+export function RequestLines({ model, can, locations, technologies, showProgress = true, returns }: { model: RequestModel; can: EditorCan; locations: readonly InvLocationRow[]; technologies: TechnologyOption[]; showProgress?: boolean; returns?: ItemTotals[] }) {
+  const r = model.request;
+  const editable = isRequestEditable(r.status);
+  const projectId = r.project_id;
+  return (
+    <>
         <LinesEditor
+          showProgress={showProgress}
+          projectLevelItems={returns ? new Set(returns.filter((t) => t.level === "project").map((t) => t.itemId)) : undefined}
           request={{ id: r.id, status: r.status, kind: r.kind, projectId: projectId, timezone: r.timezone, neededFrom: r.needed_from, neededUntil: r.needed_until, pickupLocationId: r.pickup_location_id }}
           lines={model.lines}
           can={can}
@@ -125,7 +149,22 @@ export function RequestEditor({ model, can, locations, technologies, hideHeading
             </details>
           </div>
         ) : null}
-      </Section>
-    </div>
+    </>
+  );
+}
+
+/**
+ * "Still out" for a project request, in the same terms as the Sent / Returned table: units are named; counted stock is named for this request only where
+ * the data can say so, and otherwise is said to be held by the project (it may have been sent for another request, or sent without one).
+ */
+export function StillOutNotice({ returns, cancelled }: { returns: ItemTotals[]; cancelled: boolean }) {
+  const forRequest = returns.filter((t) => t.level === "request" && (t.stillOut ?? 0) > 0);
+  const atProject = returns.filter((t) => t.level === "project" && t.stillOut !== 0);
+  if (forRequest.length === 0 && atProject.length === 0) return null;
+  return (
+    <Alert variant="warning" role="status">
+      {forRequest.length > 0 ? <span className="block">Equipment sent for this request is still out: {forRequest.map((t) => `${t.stillOut} × ${t.name}`).join(", ")}. {cancelled ? "Cancelling did not bring it back. " : ""}It stays outstanding until the warehouse records its return.</span> : null}
+      {atProject.length > 0 ? <span className="block">{atProject.map((t) => t.name).join(", ")} {atProject.length === 1 ? "was" : "were"} sent for this request, but counted stock comes back to the project, not to a request line. {atProject.length === 1 ? "Its" : "Their"} figures are shown for the project: see Sent and returned.</span> : null}
+    </Alert>
   );
 }

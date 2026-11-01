@@ -42,7 +42,7 @@ const tabTo = async (page, test, max = 80) => {
 {
   const page = await newPage(browser); await login(page, "ceo@e2e.local");
   await step("Inventory: Add item is reachable by Tab and every stop on the way shows a focus ring", async () => {
-    await page.goto(`${BASE}/inventory`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE}/inventory/stock`, { waitUntil: "networkidle" });
     const { seen } = await tabTo(page, (f) => /^Add item$/i.test(f.name));
     const bad = seen.filter((s) => !s.ring); if (bad.length) throw new Error("no visible focus on: " + bad.map((b) => b.name || b.tag).join(", "));
   });
@@ -54,7 +54,7 @@ const tabTo = async (page, test, max = 80) => {
     const f1 = await focusInfo(page); if (!/^Add item$/i.test(f1?.name ?? "")) throw new Error("focus did not return to Add item, it is on: " + JSON.stringify(f1));
   });
   await step("Receive stock: reachable by Tab, Enter opens the side panel with focus inside it, Escape closes it and focus returns to Receive stock", async () => {
-    await page.goto(`${BASE}/inventory`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE}/inventory/stock`, { waitUntil: "networkidle" });
     const { f } = await tabTo(page, (x) => /^Receive stock$/i.test(x.name));
     if (!f.ring) throw new Error("no focus ring on Receive stock");
     await page.keyboard.press("Enter"); await page.waitForURL(/action=receive/); await page.locator("aside[role=dialog]").waitFor();
@@ -63,7 +63,7 @@ const tabTo = async (page, test, max = 80) => {
     await page.waitForFunction(() => /^Receive stock$/i.test((document.activeElement?.innerText ?? "").trim()), null, { timeout: 5000 });
   });
   await step("A stock row opens its item panel from the keyboard, focus moves into the panel, Escape closes it and focus returns to the row link", async () => {
-    await page.goto(`${BASE}/inventory`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE}/inventory/stock`, { waitUntil: "networkidle" });
     const link = page.locator('main a[href*="open="]').first(); await link.focus(); await page.keyboard.press("Enter");
     await page.waitForURL(/open=/); await page.locator('aside[role="dialog"]').waitFor();
     await page.waitForFunction(() => document.activeElement && document.activeElement.closest('aside[role="dialog"]'), null, { timeout: 5000 });
@@ -71,18 +71,19 @@ const tabTo = async (page, test, max = 80) => {
     await page.waitForFunction(() => document.activeElement && document.activeElement.tagName === "A" && document.activeElement.getAttribute("href")?.includes("open="), null, { timeout: 5000 });
   });
   await step("A unit panel: the panel heading shows no stray box when it takes focus", async () => {
-    await page.goto(`${BASE}/inventory?unit=${UNIT}`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE}/inventory/stock?unit=${UNIT}`, { waitUntil: "networkidle" });
     const style = await page.evaluate(() => { const h = document.activeElement; if (!h || h.tagName !== "H2") return "focus is not on the heading: " + (h && h.tagName); const cs = getComputedStyle(h); return cs.outlineStyle === "none" ? "ok" : "outline " + cs.outlineStyle; });
     if (style !== "ok") throw new Error(style);
   });
   await step("Dispatch form, keyboard only: choose the project with the arrow keys, type a search, add a result with Enter, type a quantity, reach Review and open the review step (nothing is recorded)", async () => {
     const before = s1("select count(*) from inv_movements");
-    await page.goto(`${BASE}/inventory?action=dispatch`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE}/inventory/stock?action=dispatch`, { waitUntil: "networkidle" });
     const panel = page.locator("aside[role=dialog]"); await panel.waitFor();
     // location (first select), then project: reach each select by Tab and pick with the keyboard
     const sel = await tabTo(page, (f) => f.tag === "SELECT" && /Take from/i.test(f.name));
     if (!sel.f.ring) throw new Error("no focus ring on the location select");
-    await page.keyboard.press("ArrowDown");
+    // the warehouse the person works in is already chosen for them; only pick one by keyboard when nothing is
+    if (!(await page.evaluate(() => document.activeElement && document.activeElement.value))) await page.keyboard.press("ArrowDown");
     await tabTo(page, (f) => f.tag === "SELECT" && /project/i.test(f.name)); if (!(await focusInfo(page))?.ring) throw new Error("no focus ring on the project select");
     await page.keyboard.press("ArrowDown");
     // a dispatch needs a return date: name the request (its return date is used), again with the keyboard only
@@ -106,12 +107,14 @@ const tabTo = async (page, test, max = 80) => {
 
 // ---- B. axe ------------------------------------------------------------------------------------------------------------------------
 const pages = [
-  ["ceo@e2e.local", "/inventory"], ["ceo@e2e.local", `/inventory?open=${ITEM}`], ["ceo@e2e.local", `/inventory?unit=${UNIT}`], ["ceo@e2e.local", "/inventory?action=receive"],
-  ["ceo@e2e.local", "/inventory?action=issue"], ["ceo@e2e.local", "/inventory?action=dispatch"], ["ceo@e2e.local", "/inventory?action=return"], ["ceo@e2e.local", "/inventory?action=transfer"],
-  ["ceo@e2e.local", "/inventory?action=scan"], ["ceo@e2e.local", "/inventory/requests"], ["ceo@e2e.local", `/inventory/requests?open=${REQ}`], ["ceo@e2e.local", "/inventory/movements"],
+  ["ceo@e2e.local", "/inventory/stock"], ["ceo@e2e.local", `/inventory/stock?open=${ITEM}`], ["ceo@e2e.local", `/inventory/stock?unit=${UNIT}`], ["ceo@e2e.local", "/inventory/stock?action=receive"],
+  ["ceo@e2e.local", "/inventory/stock?action=issue"], ["ceo@e2e.local", "/inventory/stock?action=dispatch"], ["ceo@e2e.local", "/inventory/stock?action=return"], ["ceo@e2e.local", "/inventory/stock?action=transfer"],
+  ["ceo@e2e.local", "/inventory/stock?action=scan"], ["ceo@e2e.local", "/inventory/requests"], ["ceo@e2e.local", `/inventory/requests?open=${REQ}`], ["ceo@e2e.local", "/inventory/history"],
   ["ceo@e2e.local", "/inventory/manage"], ["ceo@e2e.local", "/people-access"], ["ceo@e2e.local", "/inventory/scan"], ["ceo@e2e.local", `/inventory/labels?item=${ITEM}`],
-  ["emp@e2e.local", "/inventory/mine"], ["hr@e2e.local", "/inventory/employees"], ["mgr@e2e.local", `/projects/${PRJ}/equipment`], ["mgr@e2e.local", `/projects/${PRJ}/equipment?request=${REQ}`],
-  ["emp@e2e.local", `/sales/opportunities?open=${OPP}`], ["admin@e2e.local", "/inventory"],
+  ["emp@e2e.local", "/inventory/mine"], ["hr@e2e.local", "/inventory/stock?view=people"], ["mgr@e2e.local", `/projects/${PRJ}/equipment`], ["mgr@e2e.local", `/projects/${PRJ}/equipment?request=${REQ}`],
+  ["emp@e2e.local", `/sales/opportunities?open=${OPP}`], ["admin@e2e.local", "/inventory/stock"],
+  // the simplified screens: Today and the request workspace's three steps
+  ["ceo@e2e.local", "/inventory"], ["ceo@e2e.local", `/inventory/requests/${REQ}?step=prepare`], ["ceo@e2e.local", `/inventory/requests/${REQ}?step=send`], ["ceo@e2e.local", `/inventory/requests/${REQ}?step=back`],
 ];
 for (const [vp, size] of [["desktop", { width: 1280, height: 900 }], ["phone", { width: 390, height: 844 }]]) {
   for (const theme of ["dark", "light"]) {
@@ -140,8 +143,8 @@ const startData = () => execSync(
   `PGRST_DB_URI="postgres://authenticator:authenticator@127.0.0.1:5432/${DB}" PGRST_DB_SCHEMAS=public PGRST_DB_ANON_ROLE=anon PGRST_JWT_SECRET="\${LOCAL_JWT_SECRET:-local-stack-only-secret-0123456789abcdef}" PGRST_SERVER_PORT=3001 PGRST_SERVER_HOST=127.0.0.1 ` +
   `nohup "\${POSTGREST_BIN:-/home/user/tools/postgrest}" >"${LOGDIR}/postgrest.log" 2>&1 & echo $! > "${LOGDIR}/postgrest.pid"; sleep 2`, { shell: "/bin/bash", stdio: "ignore" });
 {
-  const targets = [["ceo@e2e.local", "/inventory"], ["ceo@e2e.local", `/inventory?open=${ITEM}`], ["ceo@e2e.local", "/inventory/requests"], ["ceo@e2e.local", "/inventory/movements"], ["ceo@e2e.local", "/inventory/manage"],
-    ["ceo@e2e.local", "/people-access"], ["hr@e2e.local", "/inventory/employees"], ["emp@e2e.local", "/inventory/mine"], ["mgr@e2e.local", `/projects/${PRJ}/equipment`], ["emp@e2e.local", `/sales/opportunities?open=${OPP}`]];
+  const targets = [["ceo@e2e.local", "/inventory/stock"], ["ceo@e2e.local", `/inventory/stock?open=${ITEM}`], ["ceo@e2e.local", "/inventory/requests"], ["ceo@e2e.local", "/inventory/history"], ["ceo@e2e.local", "/inventory/manage"],
+    ["ceo@e2e.local", "/inventory"], ["ceo@e2e.local", `/inventory/requests/${REQ}?step=back`], ["ceo@e2e.local", "/people-access"], ["hr@e2e.local", "/inventory/stock?view=people"], ["emp@e2e.local", "/inventory/mine"], ["mgr@e2e.local", `/projects/${PRJ}/equipment`], ["emp@e2e.local", `/sales/opportunities?open=${OPP}`]];
   const sessions = new Map();
   for (const [email] of targets) if (!sessions.has(email)) { const page = await newPage(browser); await login(page, email); sessions.set(email, page); }
   stopData();
@@ -152,8 +155,8 @@ const startData = () => execSync(
         await page.goto(`${BASE}${path}`, { waitUntil: "domcontentloaded", timeout: 45000 });
         await page.waitForTimeout(1500);
         const body = (await page.locator("body").innerText({ timeout: 20000 })).replace(/\s+/g, " ");
-        if (/Application error|Something went wrong|This page couldn.t load/i.test(body) && !/Could not load/i.test(body)) throw new Error("generic crash page: " + body.slice(0, 140));
-        if (!/Could not load/i.test(body)) throw new Error("no 'Could not load' message: " + body.replace(/^.*?Inventory/, "Inventory").slice(0, 260));
+        if (/Application error|Something went wrong|This page couldn.t load/i.test(body) && !/Could not load|could not be loaded/i.test(body)) throw new Error("generic crash page: " + body.slice(0, 140));
+        if (!/Could not load|could not be loaded/i.test(body)) throw new Error("no 'Could not load' message: " + body.replace(/^.*?Inventory/, "Inventory").slice(0, 260));
         if (/No items|no equipment|Nothing matches|Only a founder|do not have access|not have access|ask a founder|Inventory is not installed/i.test(body.replace(/This is a problem loading the information, not an empty list\./, ""))) throw new Error("an outage looks like an empty list or a missing right: " + body.slice(0, 260));
       });
     }
@@ -164,7 +167,7 @@ const startData = () => execSync(
     if (!/^\d+$/.test(pid)) throw new Error("pid file: " + pid);
     execSync(`kill -0 ${pid}`);
     const page = await newPage(browser); await login(page, "ceo@e2e.local");
-    await page.goto(`${BASE}/inventory`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE}/inventory/stock`, { waitUntil: "networkidle" });
     const t = (await page.locator("main").innerText()).replace(/\s+/g, " ");
     if (/Could not load/.test(t) || !/Laptop 14 inch/.test(t)) throw new Error("not back: " + t.slice(0, 200));
     await page.context().close();
