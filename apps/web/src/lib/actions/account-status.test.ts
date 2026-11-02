@@ -17,7 +17,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { reactivateAccount, deactivateAccount, checkAccountStatusConsistency } from "./account-status";
+import { reactivateAccount, deactivateAccount, getAccountHoldings, checkAccountStatusConsistency } from "./account-status";
 
 const SYS_ADMIN_SESSION = {
   userId: "11111111-1111-1111-1111-111111111111",
@@ -135,11 +135,16 @@ describe("reactivateAccount", () => {
   });
 });
 
+const HOLDINGS_OK = { data: { blockers: [], pending_approvals: [], projects_managed: [], projects_acting: [], teams_headed: [], roles: [], module_access: [], equipment_held: 0 }, error: null };
+
 describe("deactivateAccount", () => {
   it("never exposes the raw Admin API error when the ban call fails", async () => {
     vi.mocked(getCurrentSession).mockResolvedValue(SYS_ADMIN_SESSION);
-    const rpc = vi.fn();
-    vi.mocked(createClient).mockResolvedValue(fakeSupabaseClient(rpc) as unknown as Awaited<ReturnType<typeof createClient>>);
+    const rpc = vi.fn(async (fn: string) => {
+      if (fn === "account_holdings") return HOLDINGS_OK;
+      throw new Error(`unexpected rpc ${fn}`);
+    });
+    vi.mocked(createClient).mockResolvedValue({ rpc } as unknown as Awaited<ReturnType<typeof createClient>>);
     vi.mocked(createAdminClient).mockReturnValue(
       fakeAdminClient(async () => ({ error: { message: "internal GoTrue failure XYZ" } })) as unknown as ReturnType<
         typeof createAdminClient
@@ -149,7 +154,65 @@ describe("deactivateAccount", () => {
     const result = await deactivateAccount(TARGET_USER_ID, REASON);
 
     expect(result.error).not.toContain("GoTrue");
-    expect(rpc).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).not.toHaveBeenCalledWith("set_account_status", expect.anything());
+  });
+
+  it("refuses BEFORE blocking sign-in when the account is one the database will not deactivate (A12)", async () => {
+    vi.mocked(getCurrentSession).mockResolvedValue(SYS_ADMIN_SESSION);
+    const rpc = vi.fn(async () => ({ data: { ...HOLDINGS_OK.data, blockers: ["Can't deactivate the only CEO or CTO of Enginious KSA — give another active person that role first"] }, error: null }));
+    vi.mocked(createClient).mockResolvedValue({ rpc } as unknown as Awaited<ReturnType<typeof createClient>>);
+    const updateUserById = vi.fn();
+    vi.mocked(createAdminClient).mockReturnValue({ auth: { admin: { updateUserById } } } as unknown as ReturnType<typeof createAdminClient>);
+
+    const result = await deactivateAccount(TARGET_USER_ID, REASON);
+
+    expect(result.error).toMatch(/only CEO or CTO of Enginious KSA/);
+    expect(updateUserById).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalledWith("set_account_status", expect.anything());
+  });
+
+  it("does not block sign-in when it could not check what the account holds (a failed read is not 'nothing held')", async () => {
+    vi.mocked(getCurrentSession).mockResolvedValue(SYS_ADMIN_SESSION);
+    const rpc = vi.fn(async () => ({ data: null, error: { message: "timeout" } }));
+    vi.mocked(createClient).mockResolvedValue({ rpc } as unknown as Awaited<ReturnType<typeof createClient>>);
+    const updateUserById = vi.fn();
+    vi.mocked(createAdminClient).mockReturnValue({ auth: { admin: { updateUserById } } } as unknown as ReturnType<typeof createAdminClient>);
+
+    const result = await deactivateAccount(TARGET_USER_ID, REASON);
+
+    expect(result.error).toMatch(/Couldn't check what this account still holds/);
+    expect(updateUserById).not.toHaveBeenCalled();
+  });
+
+  it("blocks sign-in then records the status when nothing stops it", async () => {
+    vi.mocked(getCurrentSession).mockResolvedValue(SYS_ADMIN_SESSION);
+    const calls: string[] = [];
+    const rpc = vi.fn(async (fn: string) => { calls.push(fn); return fn === "account_holdings" ? HOLDINGS_OK : { data: null, error: null }; });
+    vi.mocked(createClient).mockResolvedValue({ rpc } as unknown as Awaited<ReturnType<typeof createClient>>);
+    const updateUserById = vi.fn(async () => ({ error: null }));
+    vi.mocked(createAdminClient).mockReturnValue({ auth: { admin: { updateUserById } } } as unknown as ReturnType<typeof createAdminClient>);
+
+    expect(await deactivateAccount(TARGET_USER_ID, REASON)).toEqual({ error: null });
+    expect(calls).toEqual(["account_holdings", "set_account_status"]);
+    expect(updateUserById).toHaveBeenCalledWith(TARGET_USER_ID, { ban_duration: "876600h" });
+  });
+});
+
+describe("getAccountHoldings", () => {
+  it("is for a System Administrator only", async () => {
+    vi.mocked(getCurrentSession).mockResolvedValue({ ...SYS_ADMIN_SESSION, grants: [] });
+    expect((await getAccountHoldings(TARGET_USER_ID)).error).toMatch(/Only a System Administrator/);
+  });
+
+  it("returns what the account holds, and an error (not an empty answer) when the read fails", async () => {
+    vi.mocked(getCurrentSession).mockResolvedValue(SYS_ADMIN_SESSION);
+    vi.mocked(createClient).mockResolvedValue({ rpc: vi.fn(async () => ({ data: { ...HOLDINGS_OK.data, equipment_held: 2 }, error: null })) } as unknown as Awaited<ReturnType<typeof createClient>>);
+    expect((await getAccountHoldings(TARGET_USER_ID)).holdings?.equipmentHeld).toBe(2);
+    vi.mocked(createClient).mockResolvedValue({ rpc: vi.fn(async () => ({ data: null, error: { message: "x" } })) } as unknown as Awaited<ReturnType<typeof createClient>>);
+    const failed = await getAccountHoldings(TARGET_USER_ID);
+    expect(failed.holdings).toBeNull();
+    expect(failed.error).toMatch(/Couldn't check/);
   });
 });
 

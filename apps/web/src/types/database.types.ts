@@ -267,7 +267,9 @@ export interface Database {
         // status_reason/status_changed_by/status_changed_at are never set
         // directly by application code — only set_account_status() (a
         // SECURITY DEFINER RPC) writes them, same reasoning as audit_log's
-        // Insert type below.
+        // Insert type below. They are not readable directly either (column
+        // privileges, migration 20261216000400): a System Administrator reads
+        // them through account_status_details(). Never `select *` on profiles.
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
         Relationships: [];
       };
@@ -2053,6 +2055,47 @@ export interface Database {
       get_employee_manager_name: {
         Args: { p_employee_id: string };
         Returns: string | null;
+      };
+      attendance_lead_candidates: {
+        Args: Record<string, never>;
+        Returns: { employee_id: string; display_name: string }[];
+      };
+      recovery_decider_inbox: {
+        Args: { p_request_ids?: string[] | null };
+        Returns: {
+          approval_id: string;
+          step_order: number;
+          workflow_id: string | null;
+          approver_id: string | null;
+          queue_roles: string[] | null;
+          approval_created_at: string;
+          id: string;
+          employee_id: string;
+          employee_name: string;
+          company_id: string;
+          country_code: string;
+          work_date: string;
+          event_type: string;
+          proposed_days: number;
+          attendance_record_id: string | null;
+          corrected_at: string | null;
+          work_mode: string | null;
+          project_name: string | null;
+          project_lead_employee_id: string | null;
+          applicant_route: string | null;
+          needs_policy_review: boolean;
+          routing_issue: string | null;
+          recovery_window_id: string | null;
+          consumption_ack_at: string | null;
+        }[];
+      };
+      account_holdings: {
+        Args: { p_user_id: string };
+        Returns: Record<string, unknown>;
+      };
+      account_status_details: {
+        Args: { p_user_id: string };
+        Returns: Record<string, unknown> | null;
       };
       i_am_c_level: {
         Args: { p_company_id: string };

@@ -83,6 +83,9 @@ export interface PaCompanySettings {
 
 export type PaTab = "account" | "job" | "roles" | "modules";
 
+/** What a System Administrator may read about why and when an account was deactivated (never a plain employee: the columns are not readable directly). */
+export type PaAccountDetails = { kind: "ok"; reason: string | null; changedAt: string | null; changedByName: string | null } | { kind: "error" } | null;
+
 export interface PeopleAccessData {
   userId: string;
   isSysAdmin: boolean;
@@ -99,6 +102,8 @@ export interface PeopleAccessData {
   moduleContexts: PaModuleContext[];
   operatorLocations: Record<string, string[]>;
   companySettings: PaCompanySettings;
+  /** Only for a System Administrator looking at a deactivated account. */
+  accountDetails: PaAccountDetails;
 }
 
 export type PeopleAccessResult = { kind: "signed-out" } | { kind: "denied" } | { kind: "ok"; data: PeopleAccessData };
@@ -265,6 +270,14 @@ export const loadPeopleAccess = cache(async (query: PeopleAccessQuery): Promise<
   }
   const canEditJob = !!employee && canEditJobDetails(roles as RoleGrant[], employee.companyId);
 
+  // Why and when a deactivated account was deactivated: through the System Administrator-only function (the columns are not readable directly).
+  let accountDetails: PaAccountDetails = null;
+  if (sysAdmin && selected?.userId && selected.accountStatus === "deactivated") {
+    const { data, error } = await supabase.rpc("account_status_details", { p_user_id: selected.userId });
+    if (error || !data) accountDetails = { kind: "error" };
+    else accountDetails = { kind: "ok", reason: (data.status_reason as string | null) ?? null, changedAt: (data.status_changed_at as string | null) ?? null, changedByName: (data.status_changed_by_name as string | null) ?? null };
+  }
+
   let jobView: PaJobView | null = null;
   if (employee) {
     const { data: deps } = await supabase.from("departments").select("id, name").eq("company_id", employee.companyId).is("deleted_at", null).order("name");
@@ -328,7 +341,7 @@ export const loadPeopleAccess = cache(async (query: PeopleAccessQuery): Promise<
     kind: "ok",
     data: {
       userId: session.userId, isSysAdmin: sysAdmin, isHrAdmin: hrAdmin, companies, managed, people, totalPeople, selected, tabs, employee, canEditJob, jobView,
-      moduleContexts, operatorLocations, companySettings,
+      moduleContexts, operatorLocations, companySettings, accountDetails,
     },
   };
 });

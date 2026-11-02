@@ -4,7 +4,8 @@ vi.mock("server-only", () => ({}));
 
 type Row = Record<string, unknown>;
 let tables: Record<string, Row[]> = {};
-let rpcs: Record<string, Row[]> = {};
+let rpcs: Record<string, unknown> = {};
+let rpcErrors: Record<string, boolean> = {};
 let calls: string[] = [];
 let session: { userId: string; email: string | null; fullName: string | null; grants: { role: string; companyId: string | null; countryCode: string | null }[]; employeeId: string | null } | null = null;
 
@@ -26,7 +27,7 @@ function from(table: string) {
   };
   return q;
 }
-const rpc = (name: string) => { calls.push(`rpc:${name}`); return Promise.resolve({ data: rpcs[name] ?? [], error: null }); };
+const rpc = (name: string) => { calls.push(`rpc:${name}`); return Promise.resolve(rpcErrors[name] ? { data: null, error: { message: "down" } } : { data: rpcs[name] ?? [], error: null }); };
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ from, rpc }) }));
 vi.mock("@/lib/auth/session", () => ({ getCurrentSession: async () => session }));
 
@@ -48,6 +49,7 @@ beforeEach(() => {
   calls = [];
   session = { userId: ME, email: null, fullName: "Me", grants: [], employeeId: null };
   rpcs = {};
+  rpcErrors = {};
   tables = {
     companies: [{ id: CA, legal_name: "Enginious A", is_active: true, deleted_at: null }, { id: CB, legal_name: "Enginious B", is_active: true, deleted_at: null }],
     profiles: [
@@ -104,6 +106,24 @@ describe("System Administrator (option A: accounts and HR roles, no module power
     expect(d.moduleContexts).toEqual([]);
     // it never asked for any module's staff directory or grants beyond its own grants
     expect(calls.filter((c) => c.startsWith("rpc:"))).toEqual([]);
+  });
+
+  it("reads why and when a DEACTIVATED account was deactivated through the System Administrator function, and only for that account (A13)", async () => {
+    tables.profiles = [...tables.profiles!, { id: "00000000-0000-4000-8000-000000000009", email: "lena@x.ae", full_name: "Lena", account_status: "deactivated", is_active: false }];
+    rpcs.account_status_details = { status_reason: "Left the company", status_changed_at: "2026-10-30T09:00:00Z", status_changed_by_name: "Admin" };
+    const deactivated = await ok({ person: "u:00000000-0000-4000-8000-000000000009" });
+    expect(deactivated.accountDetails).toEqual({ kind: "ok", reason: "Left the company", changedAt: "2026-10-30T09:00:00Z", changedByName: "Admin" });
+    expect(calls).toContain("rpc:account_status_details");
+    calls = [];
+    const active = await ok({ person: `u:${AMINA}` });
+    expect(active.accountDetails).toBeNull();
+    expect(calls).not.toContain("rpc:account_status_details");
+  });
+
+  it("a failed read of the deactivation reason says so; it is not shown as 'no reason recorded'", async () => {
+    tables.profiles = [...tables.profiles!, { id: "00000000-0000-4000-8000-000000000009", email: "lena@x.ae", full_name: "Lena", account_status: "deactivated", is_active: false }];
+    rpcErrors.account_status_details = true;
+    expect((await ok({ person: "u:00000000-0000-4000-8000-000000000009" })).accountDetails).toEqual({ kind: "error" });
   });
 
   it("can read but not edit a job: only an HR Admin of the company can", async () => {
