@@ -12,7 +12,7 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc, from
 
 import { friendlyCrmError } from "@/lib/crm/errors";
 import {
-  addLink, checkDuplicates, completeFollowUp, createAndLinkContact, createOpportunity, linkContact, markWon, moveStage, reopenOpportunity,
+  addActivity, addLink, checkDuplicates, completeFollowUp, createAndLinkContact, createOpportunity, linkContact, markWon, moveStage, reopenOpportunity,
   saveCrmSettings, unlinkContact, updateContact, updateOpportunity,
 } from "./crm";
 
@@ -108,6 +108,42 @@ describe("stage, won and follow-up actions", () => {
     expect(rpc).not.toHaveBeenCalled();
     await completeFollowUp({ error: null }, fd({ followUpId: F, outcome: "Spoke", next: "follow_up", nextTitle: "Send options", nextDate: "2026-10-21", nextTime: "10:00" }));
     expect(rpc).toHaveBeenCalledWith("crm_complete_follow_up", expect.objectContaining({ p_next_title: "Send options", p_next_due: "2026-10-21T06:00:00.000Z", p_hold_reason: null }));
+  });
+});
+
+describe("log an update and plan the next step in one step", () => {
+  const F = "44444444-4444-4444-8444-444444444444";
+  const upd = { id: O, kind: "call", body: "Spoke to Hana" };
+  const next = { planNext: "on", nextTitle: "Send options", nextDate: "2026-10-21", nextTime: "10:00", nextKind: "proposal" };
+  it("an update alone behaves as before", async () => {
+    expect((await addActivity({ error: null }, fd(upd))).error).toBeNull();
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_add_activity"]);
+  });
+  it("checks the next step before writing anything", async () => {
+    expect((await addActivity({ error: null }, fd({ ...upd, planNext: "on" }))).error).toMatch(/what the next step is and when/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("logs the update, then creates the next follow-up", async () => {
+    expect((await addActivity({ error: null }, fd({ ...upd, ...next }))).error).toBeNull();
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_add_activity", "crm_create_follow_up"]);
+    expect(rpc).toHaveBeenLastCalledWith("crm_create_follow_up", expect.objectContaining({ p_title: "Send options", p_due_at: "2026-10-21T06:00:00.000Z", p_kind: "proposal" }));
+  });
+  it("completes the chosen follow-up with the update as its outcome and the next step in the same call", async () => {
+    expect((await addActivity({ error: null }, fd({ ...upd, ...next, completeFollowUpId: F }))).error).toBeNull();
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_complete_follow_up", "crm_add_activity"]);
+    expect(rpc.mock.calls[0]![1]).toMatchObject({ p_follow_up_id: F, p_outcome: "Spoke to Hana", p_next_title: "Send options", p_next_kind: "proposal" });
+  });
+  it("logs nothing when completing the only follow-up is refused for lack of a next step", async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: { message: "Add a next action or put the opportunity on hold before completing the last follow-up" } });
+    const r = await addActivity({ error: null }, fd({ ...upd, completeFollowUpId: F }));
+    expect(r.error).toBeTruthy();
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+  it("says which part was not saved when the next step is refused after the update was logged", async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: null }).mockResolvedValueOnce({ data: null, error: { message: "Follow-ups cannot be added to a closed opportunity" } });
+    const r = await addActivity({ error: null }, fd({ ...upd, ...next }));
+    expect(r.error).toBeNull();
+    expect(r.warning).toMatch(/update is on the timeline, but the next step was not saved/);
   });
 });
 
