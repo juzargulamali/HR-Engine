@@ -1,5 +1,7 @@
 import type { LucideIcon } from "lucide-react";
-import { CalendarClock, ClipboardCheck, FileClock, IdCard, ShieldCheck } from "lucide-react";
+import { CalendarClock, ClipboardCheck, FileCheck2, FileClock, IdCard, ShieldCheck } from "lucide-react";
+import { HANDOVER_KIND_LABEL, type HandoverRowKind } from "@/lib/crm/handover-attention";
+import type { HandoverCheck } from "@/lib/crm/handover-attention-data";
 
 export type ActionItem = {
   key: string;
@@ -61,4 +63,19 @@ export function attentionSentence(items: readonly ActionItem[]): string {
   const incomplete = failed.length > 0 ? ` ${failed.map((i) => i.label).join("; ")}, so this list may be incomplete.` : "";
   if (total === 0) return failed.length > 0 ? `Some items could not be loaded.${incomplete}` : "Nothing needs your attention right now.";
   return `Your updates for today: ${total} ${total === 1 ? "item needs" : "items need"} your attention.${incomplete}`;
+}
+
+/**
+ * My Day rows for the Sales-to-Projects handover: one row per kind with a count. A single enquiry links straight to its handover page, several to Follow-ups
+ * (where each is listed). A failed read is an error row ("Could not check handovers"), never a missing row.
+ */
+export function handoverItems(check: HandoverCheck): ActionItem[] {
+  if (check.status === "none") return [];
+  if (check.status === "error") return [{ key: "handover-check", icon: FileCheck2, label: "Could not check handovers", count: 0, href: "/sales/follow-ups", error: true }];
+  const KEYS: Record<HandoverRowKind, string> = { handover_question: "handover-question", won_no_handover: "handover-won", handover_accepted: "handover-accepted" };
+  return (Object.keys(KEYS) as HandoverRowKind[]).flatMap((kind) => {
+    const rows = check.rows.filter((r) => r.kind === kind);
+    if (rows.length === 0) return [];
+    return [{ key: KEYS[kind], icon: FileCheck2, label: HANDOVER_KIND_LABEL[kind], count: rows.length, href: rows.length === 1 ? `/sales/opportunities/${rows[0]!.opportunityId}/handover` : "/sales/follow-ups" }];
+  });
 }

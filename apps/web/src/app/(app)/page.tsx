@@ -38,7 +38,7 @@ import { BirthdaysSection } from "./birthdays-section";
 import { getCompanySnapshot } from "./dashboard-data";
 import { CompanyComparisonTable } from "./company-comparison-table";
 import { attendanceSentence, CALENDAR_NOTE } from "./attendance-summary";
-import { attentionSentence, buildActionItems, type ActionItem } from "./action-centre";
+import { attentionSentence, buildActionItems, handoverItems, type ActionItem } from "./action-centre";
 import { AttendanceClockCard } from "./attendance-clock-card";
 import { AttendanceCompletionBar } from "./attendance-completion-bar";
 import { UpcomingSection } from "./upcoming-section";
@@ -291,6 +291,9 @@ export default async function DashboardPage() {
         ]
       : [];
 
+  // The Sales-to-Projects handover family for the owner and preparer (and Sales founders): from the Sales side only, no Projects access needed.
+  const handoverActionItems = salesToday.status === "ok" ? handoverItems(salesToday.data.handover) : [];
+
   // Projects & Tasks for people with Projects access (null for everyone else, and when it is not installed). Real counts only.
   let projectRows: ReturnType<typeof projectDayRows> | "error" | null = null;
   let projectsCtx: ProjectsContext | null = null;
@@ -355,7 +358,7 @@ export default async function DashboardPage() {
   const actionItems = buildActionItems({
     myPendingApprovals,
     ...(showHrView ? { contractsEndingCount, probationDueCount, docsExpiringCount, identityExpiringCount } : {}),
-    extraItems: [...salesActionItems, ...projectActionItems, ...budgetActionItems],
+    extraItems: [...salesActionItems, ...handoverActionItems, ...projectActionItems, ...budgetActionItems],
   });
 
   const summarySentence = hrSectionError ? "Workforce data couldn't be loaded right now — the numbers below may be incomplete." : attentionSentence(actionItems);

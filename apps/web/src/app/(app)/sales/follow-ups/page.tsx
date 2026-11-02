@@ -15,6 +15,8 @@ import { LoadError } from "@/components/workspace/states";
 import { firstParam, parseRecordId, withParams } from "@/components/workspace/url-state";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadFollowUps, loadMyReminders, loadOpportunities, type FollowUpListItem, type OpportunityListItem } from "@/lib/crm/data";
+import { loadHandoverRows } from "@/lib/crm/handover-attention-data";
+import { HandoverAttention } from "@/components/sales/handover-attention";
 import { groupOpenFollowUps } from "@/lib/crm/follow-up-groups";
 import { generateRemindersThrottled } from "@/lib/crm/reminders";
 import { attentionItems, type AttentionItem } from "@/lib/crm/reports";
@@ -72,6 +74,9 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
       </div>
     );
   }
+
+  // The handover rows (won without a submitted handover, the PM's question, accepted). Never throws: a failed read is its own message on the card.
+  const handover = await loadHandoverRows(ctx, opportunities);
 
   // "Only open" must be judged on every open follow-up the person can see, not just the filtered ones.
   const openByOpp = new Map<string, number>();
@@ -132,6 +137,8 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
           </CardContent>
         </Card>
       ) : null}
+
+      {!showDone ? <HandoverAttention check={handover} /> : null}
 
       {!showDone && needs.length > 0 ? <NeedsAttention items={needs} open={open} who={who} /> : null}
 

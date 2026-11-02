@@ -14,7 +14,8 @@ let rpcs: Record<string, FakeResult | (() => FakeResult)> = {};
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeSupabase(tables, rpcs) }));
 let grants: { role: string; companyId: string | null; countryCode: string | null }[] = [];
 vi.mock("@/lib/auth/session", () => ({ getCurrentSession: async () => ({ userId: "u1", employeeId: "e1", email: null, fullName: "Aisha Khan", grants }) }));
-vi.mock("@/lib/crm/my-day", () => ({ loadSalesToday: async () => ({ status: "none" }) }));
+let salesToday: Record<string, unknown> = { status: "none" };
+vi.mock("@/lib/crm/my-day", () => ({ loadSalesToday: async () => salesToday }));
 let projectsCtx: Record<string, unknown> | null = null;
 vi.mock("@/lib/projects/context", () => ({ getProjectsContext: async () => projectsCtx }));
 vi.mock("@/lib/projects/my-work", () => ({ loadProjectsAttention: async () => { throw new Error("Work could not be loaded"); } }));
@@ -39,6 +40,7 @@ beforeEach(() => {
   projectsCtx = null;
   tables = { companies: rows([]), approvals: PENDING_NAMED, employees: rows([]) };
   rpcs = { pbx_inbox: EMPTY_INBOX };
+  salesToday = { status: "none" };
 });
 
 describe("My Day approvals", () => {
@@ -135,5 +137,31 @@ describe("My Day approvals", () => {
     rpcs = { pbx_inbox: { data: null, error: { message: "Could not find the function public.pbx_inbox in the schema cache", code: "PGRST202" } } };
     const html = await render();
     expect(html).not.toContain("Project budgets");
+  });
+
+  const salesOk = (handover: unknown) => ({ status: "ok", data: { attention: [], overdue: 0, dueToday: 0, noFirstResponse: 0, openCount: 1, opportunityCount: 1, pipeline: [], handover } });
+  const hrow = (kind: string, id: string) => ({ kind, opportunityId: id, reference: `R-${id}`, title: `Job ${id}`, detail: "", scope: "mine", at: null });
+
+  it("the Sales owner sees the handover rows on My Day without any Projects access", async () => {
+    salesToday = salesOk({ status: "ok", rows: [hrow("handover_question", "a"), hrow("won_no_handover", "b"), hrow("won_no_handover", "c")] });
+    tables = { ...tables, approvals: { data: [], error: null, count: 0 } };
+    const html = await render();
+    expect(html).toContain("Handover: the PM asked a question");
+    expect(html).toContain("Won, handover not submitted");
+    expect(html).toContain("/sales/opportunities/a/handover");
+    expect(html).toContain("Your updates for today: 3 items need your attention.");
+  });
+
+  it("a failed handover read is an error row, 'Could not check handovers', not a missing row", async () => {
+    salesToday = salesOk({ status: "error" });
+    tables = { ...tables, approvals: { data: [], error: null, count: 0 } };
+    const html = await render();
+    expect(html).toContain("Could not check handovers");
+    expect(html).not.toContain("Nothing needs your attention right now.");
+  });
+
+  it("no handover rows: nothing about handovers", async () => {
+    salesToday = salesOk({ status: "ok", rows: [] });
+    expect(await render()).not.toContain("handover");
   });
 });

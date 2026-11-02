@@ -1,6 +1,7 @@
 import "server-only";
 import { crmStageLabel, isCrmOpen } from "@enginious-hr/domain";
 import { getCrmContext } from "./context";
+import { loadHandoverRows, type HandoverCheck } from "./handover-attention-data";
 import { loadFollowUps, loadOpportunities } from "./data";
 import { attentionItems, openPipelineByStage, type AttentionItem } from "./reports";
 
@@ -15,6 +16,8 @@ export interface SalesToday {
   opportunityCount: number;
   /** Open opportunities by stage, as on the Enquiries board (the six working stages, then On hold). Counts only: no values are read here. */
   pipeline: { stage: string; label: string; count: number }[];
+  /** The Sales-to-Projects handover rows (won without a submitted handover, the PM's question, accepted). A failed read is its own status, never an empty list. */
+  handover: HandoverCheck;
 }
 
 export type SalesTodayResult = { status: "none" } | { status: "error" } | { status: "ok"; data: SalesToday };
@@ -33,6 +36,7 @@ export async function loadSalesToday(): Promise<SalesTodayResult> {
     const [opportunities, followUps] = await Promise.all([loadOpportunities(ctx), loadFollowUps(ctx)]);
     const attention = attentionItems({ opportunities, followUps: followUps.open, userId: ctx.userId, scope: "mine" });
     const count = (kind: AttentionItem["kind"]) => attention.filter((a) => a.kind === kind).length;
+    const handover = await loadHandoverRows(ctx, opportunities);
     return {
       status: "ok",
       data: {
@@ -43,6 +47,7 @@ export async function loadSalesToday(): Promise<SalesTodayResult> {
         openCount: opportunities.filter((o) => isCrmOpen(o.opp.stage)).length,
         opportunityCount: opportunities.length,
         pipeline: openPipelineByStage(opportunities.map((i) => ({ ...i.opp, value: i.value }))).map((b) => ({ stage: b.stage, label: crmStageLabel(b.stage), count: b.count })),
+        handover,
       },
     };
   } catch (e) {
