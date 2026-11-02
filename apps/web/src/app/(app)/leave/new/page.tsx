@@ -1,3 +1,4 @@
+import { LoadError } from "@/components/workspace/states";
 import { resolvePolicyVersionAsOf, getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
@@ -11,6 +12,9 @@ export default async function NewLeaveRequestPage() {
   const session = await getCurrentSession();
   if (!session) return null;
 
+  // A failed role / employee read is not "no employee record": say it could not load.
+  if (session.loadFailed) return <LoadError what="your account" />;
+
   if (!session.employeeId) {
     return (
       <Alert variant="destructive">No employee record is linked to your account — you can&apos;t submit a leave request.</Alert>
@@ -18,11 +22,23 @@ export default async function NewLeaveRequestPage() {
   }
 
   const supabase = await createClient();
-  const { data: employee } = await supabase
+  const { data: employee, error: employeeError } = await supabase
     .from("employees")
     .select("country_code")
     .eq("id", session.employeeId)
     .single();
+  // A failed read must never read as "HR hasn't activated a leave policy": that message is only for a read that succeeded with no active policy.
+  const loadFailed = (
+    <Card className="max-w-2xl">
+      <CardHeader>
+        <CardTitle>Request leave</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <LoadError what="your leave policy" retryHref="/leave/new" note="This is a problem loading the information, not a missing policy. You can try again in a moment." />
+      </CardContent>
+    </Card>
+  );
+  if (employeeError) return loadFailed;
 
   // This employee's own business-local date — which leave policy is "in
   // effect today" must resolve against their own country's calendar day,
@@ -42,11 +58,12 @@ export default async function NewLeaveRequestPage() {
   let versions: { id: string; effectiveFrom: string; effectiveTo: string | null; versionNo: number; status: "draft" | "active" | "superseded" }[] = [];
   let leaveTypesByVersion: Record<string, { code: string; name: string }[]> = {};
   if (employee) {
-    const { data: versionRows } = await supabase
+    const { data: versionRows, error: versionsError } = await supabase
       .from("policy_versions")
       .select("id, status, effective_from, effective_to, version_no")
       .eq("country_code", employee.country_code)
       .eq("policy_type", "leave_rules");
+    if (versionsError) return loadFailed;
     versions = (versionRows ?? []).map((v) => ({
       id: v.id,
       effectiveFrom: v.effective_from,
@@ -57,10 +74,11 @@ export default async function NewLeaveRequestPage() {
 
     const versionIds = versions.map((v) => v.id);
     if (versionIds.length > 0) {
-      const { data: leaveTypeRows } = await supabase
+      const { data: leaveTypeRows, error: leaveTypesError } = await supabase
         .from("policy_leave_types")
         .select("policy_version_id, leave_type_code, name")
         .in("policy_version_id", versionIds);
+      if (leaveTypesError) return loadFailed;
       leaveTypesByVersion = {};
       for (const row of leaveTypeRows ?? []) {
         (leaveTypesByVersion[row.policy_version_id] ??= []).push({ code: row.leave_type_code, name: row.name });

@@ -33,12 +33,13 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in." };
 
-  const { data: employee } = await supabase
+  const { data: employee, error: employeeError } = await supabase
     .from("employees")
     .select("id, company_id, country_code, manager_id, first_name, last_name")
     .eq("user_id", user.id)
     .is("deleted_at", null)
     .maybeSingle();
+  if (employeeError) return { error: "Could not check your employee record. Please try again." };
   if (!employee) return { error: "No employee record is linked to your account." };
 
   const { data: country } = await supabase.from("countries").select("week_start_day, working_weekdays").eq("code", employee.country_code).single();
@@ -54,11 +55,13 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
   // covers the start date, submission is blocked outright with a clear
   // HR-configuration message rather than silently accepting whatever leave
   // type code was posted.
-  const { data: policyVersions } = await supabase
+  const { data: policyVersions, error: policyError } = await supabase
     .from("policy_versions")
     .select("id, status, effective_from, effective_to, version_no, payload")
     .eq("country_code", employee.country_code)
     .eq("policy_type", "leave_rules");
+  // A failed read is not "HR has not activated a policy": say it could not be checked.
+  if (policyError) return { error: "Could not check your leave policy, try again." };
   const activePolicy = resolvePolicyVersionAsOf(
     (policyVersions ?? []).map((v) => ({
       id: v.id,
@@ -74,10 +77,11 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
     return { error: "No active leave policy covers this start date for your country yet — pick a different date or ask HR Admin to activate one." };
   }
 
-  const { data: leaveTypeRows } = await supabase
+  const { data: leaveTypeRows, error: leaveTypesError } = await supabase
     .from("policy_leave_types")
     .select("leave_type_code")
     .eq("policy_version_id", activePolicy.id);
+  if (leaveTypesError) return { error: "Could not check your leave policy, try again." };
   const validLeaveTypeCodes = new Set((leaveTypeRows ?? []).map((r) => r.leave_type_code));
   if (!validLeaveTypeCodes.has(d.leaveTypeCode)) {
     return { error: "That isn't a valid leave type under your country's active leave policy." };
@@ -88,7 +92,7 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
   // system already lets an approver knowingly approve past a warning) —
   // block it outright rather than letting it through for the approver to
   // notice.
-  const { data: overlapping } = await supabase
+  const { data: overlapping, error: overlapError } = await supabase
     .from("leave_requests")
     .select("id")
     .eq("employee_id", employee.id)
@@ -96,16 +100,19 @@ export async function submitLeaveRequest(_prevState: ActionState, formData: Form
     .lte("start_date", d.endDate)
     .gte("end_date", d.startDate)
     .limit(1);
+  if (overlapError) return { error: "Could not check your existing leave requests, try again." };
   if (overlapping && overlapping.length > 0) {
     return { error: "You already have a leave request that overlaps these dates." };
   }
 
-  const { data: holidayRows } = await supabase
+  const { data: holidayRows, error: holidaysError } = await supabase
     .from("public_holidays")
     .select("holiday_date")
     .eq("country_code", employee.country_code)
     .gte("holiday_date", d.startDate)
     .lte("holiday_date", d.endDate);
+  // Without the holidays the day count could be wrong: stop rather than submit a different number.
+  if (holidaysError) return { error: "Could not check the public holidays for these dates, try again." };
 
   // The resolved policy's deduction_mode/extend_for_holidays (set by the
   // regional Annual Leave rules — UAE/Saudi calendar-day deduction, Saudi's

@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/workspace/states";
 import { OvernightRecoveryForm } from "./overnight-recovery-form";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
@@ -23,7 +24,7 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
  */
 export async function LeaveSection({ employeeId, canRecordOvernightRecovery = false }: { employeeId: string; canRecordOvernightRecovery?: boolean }) {
   const supabase = await createClient();
-  const [{ data: leaveBalances }, { data: compBalance }, { data: requests }, { data: recoveryCreditRequests }] = await Promise.all([
+  const [{ data: leaveBalances, error: balancesError }, { data: compBalance, error: compError }, { data: requests, error: requestsError }, { data: recoveryCreditRequests, error: recoveryError }] = await Promise.all([
     supabase.from("leave_balances").select("leave_type_code, balance_days").eq("employee_id", employeeId),
     supabase.from("comp_day_balances").select("balance_days").eq("employee_id", employeeId).maybeSingle(),
     supabase
@@ -44,8 +45,13 @@ export async function LeaveSection({ employeeId, canRecordOvernightRecovery = fa
       .limit(20),
   ]);
 
+  // Each part stands alone: a failed read says so (never "0 days" or "No ... yet") and the other parts still show.
+  const balancesFailed = !!(balancesError || compError);
+  const here = `/employees/${employeeId}`;
+
   return (
     <div className="space-y-4">
+      {balancesFailed ? <LoadError what="the leave balances" retryHref={here} note="This is a problem loading the information, not zero days." /> : (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {(leaveBalances ?? []).map((b) => (
           <Card key={b.leave_type_code}>
@@ -64,7 +70,9 @@ export async function LeaveSection({ employeeId, canRecordOvernightRecovery = fa
           <CardContent className="text-2xl font-semibold">{compBalance?.balance_days ?? 0} days</CardContent>
         </Card>
       </div>
+      )}
 
+      {requestsError ? <LoadError what="the leave requests" retryHref={here} /> : (
       <Table stack>
         <TableHeader>
           <TableRow>
@@ -94,9 +102,11 @@ export async function LeaveSection({ employeeId, canRecordOvernightRecovery = fa
           ) : null}
         </TableBody>
       </Table>
+      )}
 
       <div className="space-y-2 border-t border-border pt-4">
         <h3 className="text-sm font-medium">Recovery Leave earning (Reporting Manager → HR Admin approval)</h3>
+        {recoveryError ? <LoadError what="the recovery credit requests" retryHref={here} /> : (
         <Table stack>
           <TableHeader>
             <TableRow>
@@ -126,6 +136,7 @@ export async function LeaveSection({ employeeId, canRecordOvernightRecovery = fa
             ) : null}
           </TableBody>
         </Table>
+        )}
       </div>
 
       {canRecordOvernightRecovery ? <OvernightRecoveryForm employeeId={employeeId} /> : null}
