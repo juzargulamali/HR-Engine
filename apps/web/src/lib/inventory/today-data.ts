@@ -4,8 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { loadEmployeeNames, loadRequestModels, type RequestModel } from "@/lib/inventory/planning-data";
 import type { PendingSalesCheck } from "@/lib/inventory/planning";
 import {
-  requestRows, returnRows, safeZone, salesCheckInScope, salesRows, settleSources, transferRows,
-  type HeldEntry, type ProjectRequestLink, type QueueRow, type RequestInput, type SalesInput, type SourceKey, type TransferInput,
+  heldRows, requestRows, returnRows, safeZone, salesCheckInScope, salesRows, settleSources, transferRows,
+  type HeldEntry, type HeldUnitInput, type ProjectRequestLink, type QueueRow, type RequestInput, type SalesInput, type SourceKey, type TransferInput,
 } from "@/lib/inventory/today";
 
 /**
@@ -56,16 +56,17 @@ export async function loadToday(ctx: InventoryContext, scope: { locationId: stri
   const zone = (id: string | null | undefined) => (id ? zoneOf.get(id) : undefined) ?? fallbackZone;
   const build = { now };
 
-  const [requests, returns, transfers, sales] = await Promise.allSettled([
+  const [requests, returns, transfers, sales, held] = await Promise.allSettled([
     loadRequestRows(ctx, scope.locationId, build, notes),
     loadReturnRows(scope.locationId, build, zone, fallbackZone),
     loadTransferRows(ctx, scope.locationId, build, zone),
     loadSalesRows(scope.locationId, build, zone),
+    loadHeldRows(ctx, scope.locationId, notes),
   ]);
-  for (const [name, r] of [["requests", requests], ["returns", returns], ["transfers", transfers], ["sales", sales]] as const) {
+  for (const [name, r] of [["requests", requests], ["returns", returns], ["transfers", transfers], ["sales", sales], ["held", held]] as const) {
     if (r.status === "rejected") console.error(`[inventory] today: ${name} could not be loaded`, r.reason instanceof Error ? r.reason.message : r.reason);
   }
-  const { rows, failed } = settleSources({ requests, returns, transfers, sales });
+  const { rows, failed } = settleSources({ requests, returns, transfers, sales, held });
   return { rows, failed, notes, nowIso: now.toISOString() };
 }
 
@@ -75,7 +76,10 @@ function toRequestInput(m: RequestModel): RequestInput {
   const r = m.request;
   return {
     id: r.id, code: r.code, kind: r.kind, forLabel: m.forLabel, timezone: r.timezone, plan: r.plan, neededFrom: r.needed_from,
-    lines: m.lines.map((l) => ({ status: l.status, reserved: l.progress.reserved, dispatched: l.progress.dispatched, toReserve: l.progress.toReserve })),
+    lines: m.lines.map((l) => ({
+      status: l.status, reserved: l.progress.reserved, dispatched: l.progress.dispatched, toReserve: l.progress.toReserve,
+      shortageAction: l.shortageAction, itemName: l.itemName, qty: l.qty, rentalReference: l.rentalReference,
+    })),
   };
 }
 
@@ -220,4 +224,75 @@ async function loadSalesRows(locationId: string | null, build: { now: Date }, zo
     technologies: (c.technologies ?? []).map((t) => ({ name: t.name, qty: t.qty })), zone: zone(c.location_id ?? locationId),
   }));
   return salesRows(inputs, build);
+}
+
+/* ---------- units held for checking ---------- */
+
+/** How many held units are listed at most. More than this is said, not silently cut. */
+export const MAX_HELD_UNITS = 100;
+
+async function loadHeldRows(ctx: InventoryContext, locationId: string | null, notes: string[]): Promise<QueueRow[]> {
+  const db = await createClient();
+  let q = db.from("inv_units").select("id, code, item_id, condition, location_id")
+    .eq("custody_kind", "warehouse").eq("lifecycle", "active").in("condition", ["needs_inspection", "damaged"]);
+  if (locationId) q = q.eq("location_id", locationId);
+  const { data, error } = await q.order("code").order("id").limit(MAX_HELD_UNITS + 1);
+  if (error) throw new Error(error.message);
+  const all = data ?? [];
+  if (all.length > MAX_HELD_UNITS) notes.push(`Only the first ${MAX_HELD_UNITS} held units are listed. Open Stock to see the rest.`);
+  const units = all.slice(0, MAX_HELD_UNITS);
+  if (units.length === 0) return [];
+
+  // Names make a row friendlier: if they cannot be read the row still shows. Which request still holds a reservation on the unit is read separately and
+  // said as unknown when it fails, never as "none".
+  const itemIds = [...new Set(units.map((u) => u.item_id))];
+  const names = new Map<string, string>();
+  for (const part of chunk(itemIds, 100)) {
+    const { data: items } = await db.from("inv_items").select("id, name").in("id", part);
+    for (const i of items ?? []) names.set(i.id, i.name);
+  }
+  let reservedBy: Map<string, { requestId: string; code: string }[]> | null = new Map();
+  try {
+    reservedBy = await liveReservationsOf(db, units.map((u) => u.id));
+  } catch (e) {
+    console.error("[inventory] today: reservations on held units could not be read", e instanceof Error ? e.message : e);
+    reservedBy = null;
+  }
+  const inputs: HeldUnitInput[] = units.map((u) => ({
+    id: u.id, code: u.code, itemName: names.get(u.item_id) ?? "Equipment", condition: u.condition,
+    locationName: u.location_id ? ctx.locationName(u.location_id) : null, reservedFor: reservedBy === null ? null : (reservedBy.get(u.id) ?? []),
+  }));
+  return heldRows(inputs);
+}
+
+/** For each unit: the live requests (submitted or in progress) that still hold an active reservation on it. */
+async function liveReservationsOf(db: Db, unitIds: string[]): Promise<Map<string, { requestId: string; code: string }[]>> {
+  const out = new Map<string, { requestId: string; code: string }[]>();
+  const res: { request_line_id: string; unit_id: string }[] = [];
+  for (const part of chunk(unitIds, 100)) {
+    const { data, error } = await db.from("inv_reservations").select("request_line_id, unit_id").in("unit_id", part).eq("status", "active");
+    if (error) throw new Error(error.message);
+    for (const r of data ?? []) if (r.unit_id) res.push({ request_line_id: r.request_line_id, unit_id: r.unit_id });
+  }
+  if (res.length === 0) return out;
+  const lines = new Map<string, string>();
+  for (const part of chunk([...new Set(res.map((r) => r.request_line_id))], 100)) {
+    const { data, error } = await db.from("inv_request_lines").select("id, request_id").in("id", part);
+    if (error) throw new Error(error.message);
+    for (const l of data ?? []) lines.set(l.id, l.request_id);
+  }
+  const requests = new Map<string, { id: string; code: string }>();
+  for (const part of chunk([...new Set(lines.values())], 100)) {
+    const { data, error } = await db.from("inv_requests").select("id, code, status").in("id", part).in("status", ["submitted", "in_progress"]);
+    if (error) throw new Error(error.message);
+    for (const r of data ?? []) requests.set(r.id, { id: r.id, code: r.code });
+  }
+  for (const r of res) {
+    const req = requests.get(lines.get(r.request_line_id) ?? "");
+    if (!req) continue;
+    const list = out.get(r.unit_id) ?? [];
+    if (!list.some((x) => x.requestId === req.id)) list.push({ requestId: req.id, code: req.code });
+    out.set(r.unit_id, list);
+  }
+  return out;
 }

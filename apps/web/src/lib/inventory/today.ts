@@ -12,16 +12,17 @@ import { pendingDates, pendingTechnologies, zonedLocalToUtcIso } from "./plannin
 
 /* ---------- kinds, filters, sources ---------- */
 
-export type QueueKind = "prepare" | "send" | "returns" | "transfer" | "sales";
-export type SourceKey = "requests" | "returns" | "transfers" | "sales";
-export const SOURCE_OF: Record<QueueKind, SourceKey> = { prepare: "requests", send: "requests", returns: "returns", transfer: "transfers", sales: "sales" };
+/** "waiting" is stock that has to be bought or rented before a request line can be finished; "held" is a unit held back for checking. Both stay visible. */
+export type QueueKind = "prepare" | "send" | "returns" | "transfer" | "sales" | "waiting" | "held";
+export type SourceKey = "requests" | "returns" | "transfers" | "sales" | "held";
+export const SOURCE_OF: Record<QueueKind, SourceKey> = { prepare: "requests", send: "requests", returns: "returns", transfer: "transfers", sales: "sales", waiting: "requests", held: "held" };
 /** What a failed source is called in the red banner. */
-export const SOURCE_NOUN: Record<SourceKey, string> = { requests: "Equipment requests", returns: "Equipment due back", transfers: "Incoming transfers", sales: "Sales checks" };
-export const SOURCE_KEYS: readonly SourceKey[] = ["requests", "returns", "transfers", "sales"];
+export const SOURCE_NOUN: Record<SourceKey, string> = { requests: "Equipment requests", returns: "Equipment due back", transfers: "Incoming transfers", sales: "Sales checks", held: "Equipment held for checking" };
+export const SOURCE_KEYS: readonly SourceKey[] = ["requests", "returns", "transfers", "sales", "held"];
 
 export type ShowFilter = "all" | QueueKind;
-export const SHOW_FILTERS: readonly ShowFilter[] = ["all", "prepare", "send", "returns", "transfer", "sales"];
-export const FILTER_LABEL: Record<ShowFilter, string> = { all: "Everything", prepare: "Prepare", send: "Send out", returns: "Receive back", transfer: "Transfers", sales: "Sales checks" };
+export const SHOW_FILTERS: readonly ShowFilter[] = ["all", "prepare", "send", "returns", "transfer", "sales", "waiting", "held"];
+export const FILTER_LABEL: Record<ShowFilter, string> = { all: "Everything", prepare: "Prepare", send: "Send out", returns: "Receive back", transfer: "Transfers", sales: "Sales checks", waiting: "Waiting / Shortages", held: "Held for checking" };
 
 /** Anything that is not a known value is ignored rather than trusted from the address. */
 export const parseShow = (raw: string): ShowFilter => ((SHOW_FILTERS as readonly string[]).includes(raw) ? (raw as ShowFilter) : "all");
@@ -119,13 +120,22 @@ export interface QueueRow {
   operates: boolean;
   /** Present only on a Sales row: what the existing "Record the check" button needs. */
   check?: SalesCheckRef;
+  /** Who must act (said in words, never a person's name made up), and what the next action is. Present on Waiting / Shortages and Held rows. */
+  responsible?: string;
+  next?: string;
 }
 
 export interface BuildContext { now: Date }
 
 /* ---------- requests: prepare / send ---------- */
 
-export interface RequestLineInput { status: "open" | "cancelled" | "closed"; reserved: number; dispatched: number; toReserve: number }
+export interface RequestLineInput {
+  status: "open" | "cancelled" | "closed"; reserved: number; dispatched: number; toReserve: number;
+  /** The line's shortage mark ("need_to_buy" / "need_to_rent" / "none") and what it is for, so a line waiting on a purchase or rental is said by name. */
+  shortageAction?: string; itemName?: string; qty?: number; rentalReference?: string | null;
+}
+/** A line marked to buy or rent that still has something to reserve: it cannot be finished by preparing, so it waits (and stays visible) instead. */
+const isWaitingLine = (l: RequestLineInput) => l.status === "open" && l.toReserve > 0.0005 && (l.shortageAction === "need_to_buy" || l.shortageAction === "need_to_rent");
 export interface RequestInput {
   id: string; code: string; kind: "project" | "employee";
   /** The project's name, or who the equipment is for. */
@@ -153,7 +163,8 @@ export function dispatchInstant(r: Pick<RequestInput, "plan" | "timezone" | "nee
 export function requestRow(r: RequestInput, ctx: BuildContext): QueueRow | null {
   const open = r.lines.filter((l) => l.status === "open");
   const unsent = open.filter((l) => l.reserved - l.dispatched > EPS);
-  const toReserve = open.filter((l) => l.toReserve > EPS);
+  // A line marked to buy or rent cannot be finished by preparing: it is shown under Waiting / Shortages (see `waitingRow`), not as work to prepare.
+  const toReserve = open.filter((l) => l.toReserve > EPS && !isWaitingLine(l));
   const sent = open.filter((l) => l.dispatched > EPS && l.reserved - l.dispatched <= EPS);
   const when = dispatchInstant(r);
   const zone = safeZone(r.timezone);
@@ -184,7 +195,66 @@ export function requestRow(r: RequestInput, ctx: BuildContext): QueueRow | null 
   };
 }
 
-export const requestRows = (rs: readonly RequestInput[], ctx: BuildContext): QueueRow[] => rs.map((r) => requestRow(r, ctx)).filter((x): x is QueueRow => x !== null);
+/**
+ * ONE Waiting / Shortages row per request that has lines marked to buy or rent and still short: what is waited for, who must act and the next action. It
+ * is never hidden (an unresolved shortage stays visible until the stock is received and reserved) and never counted as work the warehouse can do now.
+ */
+export function waitingRow(r: RequestInput, ctx: BuildContext): QueueRow | null {
+  const waiting = r.lines.filter(isWaitingLine);
+  if (waiting.length === 0) return null;
+  const zone = safeZone(r.timezone);
+  const when = dispatchInstant(r);
+  const words = when ? whenWords(when, zone, ctx.now, { upcoming: "Dispatch", was: "Dispatch was", today: "Dispatch today", time: true }) : { label: "No dispatch date set", late: false };
+  const buy = waiting.filter((l) => l.shortageAction === "need_to_buy");
+  const rent = waiting.filter((l) => l.shortageAction === "need_to_rent");
+  const what = (l: RequestLineInput) => `${l.itemName ?? "An item"}${l.qty ? ` × ${l.qty}` : ""}: ${l.shortageAction === "need_to_buy" ? "to buy" : "to rent"}${l.rentalReference ? ` (rental ${l.rentalReference})` : ""}`;
+  const shown = waiting.slice(0, 3).map(what);
+  const forWhom = `${r.kind === "project" ? "Project" : "Employee"} ${r.forLabel} · request ${r.code}`;
+  const responsible = [
+    buy.length > 0 ? "To buy: the buyer (purchasing) buys it; the warehouse receives it into stock." : null,
+    rent.length > 0 ? "To rent: whoever arranges the rental (the Project Manager or the buyer); the warehouse receives it as rented stock." : null,
+  ].filter((x): x is string => x !== null).join(" ");
+  return {
+    id: `waiting:${r.id}`, kind: "waiting",
+    title: `${plural(waiting.length, "line")} of ${r.forLabel} ${waiting.length === 1 ? "is" : "are"} waiting for stock to be bought or rented`,
+    forWhom, when, zone, whenLabel: words.label, late: words.late,
+    facts: [...shown.map((text) => ({ text })), ...(waiting.length > 3 ? [{ text: `and ${waiting.length - 3} more` }] : [])].map((f, i) => ({ ...f, tone: i === 0 && words.late ? ("bad" as const) : undefined })),
+    responsible, next: "Receive the stock when it arrives (Stock, Receive stock), then reserve it for this request.",
+    href: `/inventory/requests/${r.id}?step=prepare`, actionLabel: "Open the request", operates: false,
+  };
+}
+
+export const requestRows = (rs: readonly RequestInput[], ctx: BuildContext): QueueRow[] => rs.flatMap((r) => [requestRow(r, ctx), waitingRow(r, ctx)]).filter((x): x is QueueRow => x !== null);
+
+/* ---------- units held for checking ---------- */
+
+export interface HeldUnitInput {
+  id: string; code: string; itemName: string; condition: string; locationName: string | null;
+  /** Live requests that still hold a reservation on this unit (it became held after it was reserved), or null when that could not be read. */
+  reservedFor: { requestId: string; code: string }[] | null;
+}
+const HELD_WORDS: Record<string, string> = { needs_inspection: "Needs checking", damaged: "Damaged" };
+
+/**
+ * One row per unit that is held back for checking (damaged, or needs checking) and sitting in a warehouse. It has no date (nothing is due), so it sits in its own group. If a live request still has a
+ * reservation on it, the row says that request needs a replacement before it can be sent: the reservation itself is not changed here.
+ */
+export function heldRows(units: readonly HeldUnitInput[]): QueueRow[] {
+  return units.map((u): QueueRow => {
+    const reserved = u.reservedFor ?? [];
+    return {
+      id: `held:${u.id}`, kind: "held", title: `${u.itemName} ${u.code} is held for checking`,
+      forWhom: `${HELD_WORDS[u.condition] ?? u.condition} · ${u.locationName ?? "in a warehouse"} · not available until it is checked`,
+      when: null, zone: "UTC", whenLabel: "No date: waiting for a check", late: false,
+      facts: reserved.length > 0
+        ? [{ text: `Reserved for request ${reserved.map((r) => r.code).join(", ")}: it needs a replacement before it can be sent`, tone: "warn" as const }]
+        : u.reservedFor === null ? [{ text: "Whether a request still holds a reservation on it could not be read" }] : [],
+      responsible: "The warehouse checks it, then releases it or sends it for repair.",
+      next: reserved.length > 0 ? "Check it, or reserve another unit for the request." : "Open the unit and record the check.",
+      href: `/inventory/stock?unit=${u.id}`, actionLabel: "Check it", operates: true,
+    };
+  });
+}
 
 /* ---------- returns: equipment out, with a recorded return date ---------- */
 
@@ -317,9 +387,15 @@ const byDate = (a: QueueRow, b: QueueRow) => {
   return x === y ? a.title.localeCompare(b.title) || a.id.localeCompare(b.id) : x - y;
 };
 
-export function groupRows(rows: readonly QueueRow[], now: Date): { bucket: Bucket; rows: QueueRow[] }[] {
-  return BUCKET_ORDER
-    .map((bucket) => ({ bucket, rows: rows.filter((r) => bucketOf(r.when, r.zone, now) === bucket).sort(byDate) }))
+/** Rows that wait on something other than a date: each has its own group after the dated ones, so an unresolved shortage or a held unit is never lost among dates. */
+export type GroupKey = Bucket | "waiting" | "held";
+export const GROUP_LABEL: Record<GroupKey, string> = { ...BUCKET_LABEL, waiting: "Waiting / Shortages", held: "Held for checking" };
+export const GROUP_ORDER: readonly GroupKey[] = [...BUCKET_ORDER, "waiting", "held"];
+const groupOf = (r: QueueRow, now: Date): GroupKey => (r.kind === "waiting" ? "waiting" : r.kind === "held" ? "held" : bucketOf(r.when, r.zone, now));
+
+export function groupRows(rows: readonly QueueRow[], now: Date): { bucket: GroupKey; rows: QueueRow[] }[] {
+  return GROUP_ORDER
+    .map((bucket) => ({ bucket, rows: rows.filter((r) => groupOf(r, now) === bucket).sort(byDate) }))
     .filter((g) => g.rows.length > 0);
 }
 

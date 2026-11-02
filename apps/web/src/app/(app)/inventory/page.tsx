@@ -12,7 +12,7 @@ import { firstParam, withParams } from "@/components/workspace/url-state";
 import { getInventoryContext } from "@/lib/inventory/context";
 import { legacyStockTarget } from "@/lib/inventory/legacy-redirect";
 import {
-  BUCKET_LABEL, FAILURE_TAIL, FILTER_LABEL, SHOW_FILTERS, SOURCE_NOUN, filterCounts, filterRows, groupRows, isQueueEmpty, parseShow,
+  FAILURE_TAIL, FILTER_LABEL, GROUP_LABEL, SHOW_FILTERS, SOURCE_NOUN, filterCounts, filterRows, groupRows, isQueueEmpty, parseShow,
 } from "@/lib/inventory/today";
 import { loadToday } from "@/lib/inventory/today-data";
 import { WAREHOUSE_COOKIE, pickWorkingLocation, warehouseOptions } from "@/lib/inventory/working-location";
@@ -109,7 +109,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
         <div className="flex flex-col items-center gap-2 rounded-lg border border-border bg-card px-6 py-12 text-center">
           <PackageOpen className="h-8 w-8 text-muted-foreground" aria-hidden />
           <h2 className="font-heading text-lg font-semibold">Nothing waiting{working.id ? ` at ${where}` : ""}</h2>
-          <p className="max-w-md text-sm text-muted-foreground">No requests to prepare, dispatches due, returns, incoming transfers or Sales checks. Open Stock to receive new stock or look something up.</p>
+          <p className="max-w-md text-sm text-muted-foreground">No requests to prepare, dispatches due, returns, incoming transfers, shortages, held equipment or Sales checks. Open Stock to receive new stock or look something up.</p>
           <Link href="/inventory/stock" className={cn(buttonVariants({ size: "sm" }), "mt-2 h-11 w-full sm:h-9 sm:w-auto")}>Go to Stock</Link>
         </div>
       ) : groups.length === 0 ? (
@@ -121,7 +121,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
           {groups.map((g) => (
             <section key={g.bucket} aria-labelledby={`today-${g.bucket}`} className="overflow-hidden rounded-lg border border-border bg-card">
               <h2 id={`today-${g.bucket}`} className={cn("flex items-center gap-2 border-b border-border/70 px-4 py-2 text-sm font-semibold", g.bucket === "late" && "text-destructive")}>
-                {BUCKET_LABEL[g.bucket]}<span className="rounded-full bg-secondary px-1.5 text-xs font-normal tabular-nums text-foreground">{g.rows.length}</span>
+                {GROUP_LABEL[g.bucket]}<span className="rounded-full bg-secondary px-1.5 text-xs font-normal tabular-nums text-foreground">{g.rows.length}</span>
               </h2>
               <ul className="divide-y divide-border/70">{g.rows.map((r) => <TodayRow key={r.id} row={r} canOperate={canOperate} checkLocations={checkLocations} />)}</ul>
             </section>
@@ -129,7 +129,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
         </div>
       )}
       <p className="text-xs text-muted-foreground">
-        Dates come from each record. A Sales check has no deadline, so it sits under “Waiting”. A check is not a reservation.
+        Dates come from each record. A Sales check has no deadline, so it sits under “Waiting, no date set”. Lines waiting to be bought or rented stay under “Waiting / Shortages” until the stock is received and reserved. A check is not a reservation.
         {working.id ? " Counted items (cables, consumables) that are out with people or on projects are not split by warehouse, so they are listed only when you choose All warehouses." : ""}
       </p>
     </div>

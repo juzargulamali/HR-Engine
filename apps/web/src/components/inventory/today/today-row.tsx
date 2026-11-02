@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { ArrowLeftRight, ClipboardList, PackageCheck, Send, Undo2 } from "lucide-react";
+import { ArrowLeftRight, ClipboardList, Hourglass, PackageCheck, SearchCheck, Send, Undo2 } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { RecordCheckButton } from "@/components/inventory/planning/record-check-button";
 import type { QueueKind, QueueRow } from "@/lib/inventory/today";
 import { cn } from "@/lib/utils";
 
-const ICON: Record<QueueKind, React.ComponentType<{ className?: string }>> = { prepare: ClipboardList, send: Send, returns: Undo2, transfer: ArrowLeftRight, sales: PackageCheck };
+const ICON: Record<QueueKind, React.ComponentType<{ className?: string }>> = { prepare: ClipboardList, send: Send, returns: Undo2, transfer: ArrowLeftRight, sales: PackageCheck, waiting: Hourglass, held: SearchCheck };
 
 /**
  * One job. Its title is a real link stretched over the whole row (so the empty part of the row opens the record, and keyboard and "open in a
@@ -27,6 +27,8 @@ export function TodayRow({ row, canOperate, checkLocations }: { row: QueueRow; c
             <span className={cn(row.late && "font-medium text-destructive")}>{row.whenLabel}</span>
             {row.facts.map((f) => <span key={f.text} className={cn("break-words text-muted-foreground", f.tone === "warn" && "font-medium text-[hsl(var(--os-amber))]", f.tone === "bad" && "font-medium text-destructive")}>{f.text}</span>)}
           </p>
+          {row.responsible ? <p className="mt-1 break-words text-sm"><span className="font-medium">Who acts:</span> <span className="text-muted-foreground">{row.responsible}</span></p> : null}
+          {row.next ? <p className="break-words text-sm"><span className="font-medium">Next:</span> <span className="text-muted-foreground">{row.next}</span></p> : null}
         </div>
       </div>
       <div className={cn("relative z-10 sm:justify-self-end", row.check && "[&>button]:h-11 [&>button]:w-full sm:[&>button]:h-8 sm:[&>button]:w-auto")}>

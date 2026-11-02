@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  bucketOf, daysFromToday, filterCounts, filterRows, fmtDay, groupRows, isQueueEmpty, parseShow, requestRow, requestRows, returnRows, salesCheckInScope, salesRows,
+  bucketOf, daysFromToday, filterCounts, filterRows, fmtDay, groupRows, heldRows, isQueueEmpty, parseShow, requestRow, requestRows, waitingRow, returnRows, salesCheckInScope, salesRows,
   settleSources, transferRows, type HeldEntry, type QueueRow, type RequestInput, type RequestLineInput, type SalesInput, type SourceKey,
 } from "./today";
 
@@ -284,16 +284,16 @@ describe("sources that fail", () => {
 
   it("all sources answered: counts are numbers and Everything is the total", () => {
     const counts = filterCounts([prepare, send, returns], []);
-    expect(counts).toEqual({ all: 3, prepare: 1, send: 1, returns: 1, transfer: 0, sales: 0 });
+    expect(counts).toEqual({ all: 3, prepare: 1, send: 1, returns: 1, transfer: 0, sales: 0, waiting: 0, held: 0 });
   });
 
   it("an empty queue is 'nothing waiting' only when every source answered", () => {
     expect(isQueueEmpty([], [])).toBe(true);
     expect(isQueueEmpty([], ["transfers"])).toBe(false);
     expect(isQueueEmpty([prepare], [])).toBe(false);
-    const all = settleSources({ requests: bad, returns: bad, transfers: bad, sales: bad });
+    const all = settleSources({ requests: bad, returns: bad, transfers: bad, sales: bad, held: bad });
     expect(all.rows).toEqual([]);
-    expect(all.failed).toEqual(["requests", "returns", "transfers", "sales"]);
+    expect(all.failed).toEqual(["requests", "returns", "transfers", "sales", "held"]);
     expect(isQueueEmpty(all.rows, all.failed)).toBe(false);
   });
 });
@@ -313,5 +313,77 @@ describe("groups and filters", () => {
     expect(parseShow("sales")).toBe("sales");
     expect(parseShow("<script>")).toBe("all");
     expect(parseShow("")).toBe("all");
+  });
+});
+
+
+describe("Waiting / Shortages: unresolved shortages stay visible, with who acts and the next action", () => {
+  const buy = line({ toReserve: 2, shortageAction: "need_to_buy", itemName: "Truss 3 m", qty: 2 });
+  const rent = line({ toReserve: 4, shortageAction: "need_to_rent", itemName: "LED wall panel", qty: 4, rentalReference: "RNT-9" });
+
+  it("a line marked to buy or rent is no longer work to prepare, but it is not hidden: it becomes a Waiting / Shortages row", () => {
+    const req = request({ lines: [buy, rent] });
+    expect(requestRow(req, ctx)).toBeNull(); // nothing the warehouse can finish by preparing
+    const w = waitingRow(req, ctx)!;
+    expect(w.kind).toBe("waiting");
+    expect(w.title).toBe("2 lines of Gulf Bank Summit are waiting for stock to be bought or rented");
+    expect(w.facts.map((f) => f.text)).toEqual(["Truss 3 m × 2: to buy", "LED wall panel × 4: to rent (rental RNT-9)"]);
+    expect(w.responsible).toMatch(/To buy: the buyer .* To rent: whoever arranges the rental/);
+    expect(w.next).toMatch(/Receive the stock when it arrives/);
+    expect(w.href).toBe("/inventory/requests/r1?step=prepare");
+    expect(w.operates).toBe(false);
+    expect(groupRows([w], NOW).map((g) => g.bucket)).toEqual(["waiting"]);
+  });
+
+  it("a request with a shortage mark and something else to reserve gets both: a Prepare row (without the waiting line) and a Waiting row", () => {
+    const req = request({ lines: [buy, line({ toReserve: 3 })] });
+    const prep = requestRow(req, ctx)!;
+    expect(prep.kind).toBe("prepare");
+    expect(prep.facts[0]!.text).toBe("1 of 2 lines fully reserved · 1 still to reserve");
+    expect(waitingRow(req, ctx)!.facts).toHaveLength(1);
+    expect(requestRows([req], ctx).map((r) => r.kind)).toEqual(["prepare", "waiting"]);
+  });
+
+  it("a marked line that is already fully reserved, cancelled or unmarked adds no Waiting row", () => {
+    expect(waitingRow(request({ lines: [{ ...buy, toReserve: 0 }, { ...rent, status: "cancelled" }, line({ toReserve: 2, shortageAction: "none" })] }), ctx)).toBeNull();
+  });
+
+  it("an overdue dispatch is said on the waiting row too", () => {
+    const w = waitingRow(request({ plan: { dispatch: "2026-10-16T08:00" }, lines: [buy] }), ctx)!;
+    expect(w.late).toBe(true);
+    expect(w.facts[0]!.tone).toBe("bad");
+  });
+
+  it("each kind has its own filter and counts, and a failed requests source makes the waiting count unknown, never zero", () => {
+    const w = waitingRow(request({ lines: [buy] }), ctx)!;
+    expect(filterCounts([w], []).waiting).toBe(1);
+    expect(filterCounts([w], ["requests"]).waiting).toBeNull();
+    expect(filterCounts([w], ["held"]).waiting).toBe(1);
+    expect(filterCounts([w], ["held"]).held).toBeNull();
+    expect(parseShow("waiting")).toBe("waiting");
+    expect(parseShow("held")).toBe("held");
+  });
+});
+
+describe("units held for checking", () => {
+  it("a held unit appears as a row with who acts and the next action, in its own group, with no invented date", () => {
+    const [r] = heldRows([{ id: "u1", code: "UAE-E-00012", itemName: "Projector", condition: "damaged", locationName: "Dubai warehouse", reservedFor: [] }]);
+    expect(r!.kind).toBe("held");
+    expect(r!.title).toBe("Projector UAE-E-00012 is held for checking");
+    expect(r!.forWhom).toContain("Damaged");
+    expect(r!.when).toBeNull();
+    expect(r!.responsible).toMatch(/warehouse checks it/);
+    expect(r!.next).toBe("Open the unit and record the check.");
+    expect(r!.href).toBe("/inventory/stock?unit=u1");
+    expect(groupRows([r!], NOW).map((g) => g.bucket)).toEqual(["held"]);
+  });
+  it("flags a unit that became held while a live request still holds a reservation on it", () => {
+    const [r] = heldRows([{ id: "u1", code: "UAE-E-00012", itemName: "Projector", condition: "needs_inspection", locationName: null, reservedFor: [{ requestId: "r2", code: "REQ-0051" }] }]);
+    expect(r!.facts[0]).toEqual({ text: "Reserved for request REQ-0051: it needs a replacement before it can be sent", tone: "warn" });
+    expect(r!.next).toMatch(/reserve another unit/);
+  });
+  it("says it could not tell about reservations rather than saying there are none", () => {
+    const [r] = heldRows([{ id: "u1", code: "X-1", itemName: "Cable", condition: "damaged", locationName: null, reservedFor: null }]);
+    expect(r!.facts[0]!.text).toMatch(/could not be read/);
   });
 });
