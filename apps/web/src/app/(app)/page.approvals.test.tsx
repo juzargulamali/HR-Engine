@@ -139,7 +139,7 @@ describe("My Day approvals", () => {
     expect(html).not.toContain("Project budgets");
   });
 
-  const salesOk = (handover: unknown) => ({ status: "ok", data: { attention: [], overdue: 0, dueToday: 0, noFirstResponse: 0, openCount: 1, opportunityCount: 1, pipeline: [], handover } });
+  const salesOk = (handover: unknown) => ({ status: "ok", data: { attention: [], overdue: 0, dueToday: 0, noFirstResponse: 0, openCount: 1, opportunityCount: 1, pipeline: [], handover, approvals: { status: "none" } } });
   const hrow = (kind: string, id: string) => ({ kind, opportunityId: id, reference: `R-${id}`, title: `Job ${id}`, detail: "", scope: "mine", at: null });
 
   it("the Sales owner sees the handover rows on My Day without any Projects access", async () => {
@@ -158,6 +158,18 @@ describe("My Day approvals", () => {
     const html = await render();
     expect(html).toContain("Could not check handovers");
     expect(html).not.toContain("Nothing needs your attention right now.");
+  });
+
+  it("a Sales founder sees the commercial approvals waiting for them; a failed read is an error row", async () => {
+    tables = { ...tables, approvals: { data: [], error: null, count: 0 } };
+    salesToday = salesOk({ status: "ok", rows: [] });
+    (salesToday.data as Record<string, unknown>).approvals = { status: "ok", count: 2, oldestOpportunityId: "o1" };
+    let html = await render();
+    expect(html).toContain("Commercial approvals waiting for your decision");
+    expect(html).toContain("/sales/opportunities/o1?tab=commercial");
+    (salesToday.data as Record<string, unknown>).approvals = { status: "error" };
+    html = await render();
+    expect(html).toContain("Commercial approvals could not be loaded");
   });
 
   it("no handover rows: nothing about handovers", async () => {

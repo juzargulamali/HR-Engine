@@ -1,7 +1,8 @@
 import type { LucideIcon } from "lucide-react";
-import { CalendarClock, ClipboardCheck, FileCheck2, FileClock, IdCard, ShieldCheck } from "lucide-react";
+import { BadgeCheck, CalendarClock, ClipboardCheck, FileCheck2, FileClock, IdCard, ShieldCheck } from "lucide-react";
 import { HANDOVER_KIND_LABEL, type HandoverRowKind } from "@/lib/crm/handover-attention";
 import type { HandoverCheck } from "@/lib/crm/handover-attention-data";
+import type { ApprovalsWaiting } from "@/lib/crm/my-day";
 
 export type ActionItem = {
   key: string;
@@ -78,4 +79,12 @@ export function handoverItems(check: HandoverCheck): ActionItem[] {
     if (rows.length === 0) return [];
     return [{ key: KEYS[kind], icon: FileCheck2, label: HANDOVER_KIND_LABEL[kind], count: rows.length, href: rows.length === 1 ? `/sales/opportunities/${rows[0]!.opportunityId}/handover` : "/sales/follow-ups" }];
   });
+}
+
+/** The My Day row for a Sales founder: commercial approval requests waiting for them. Opens the enquiry's Commercial tab (the oldest request). A failed read is an error row. */
+export function commercialApprovalItems(a: ApprovalsWaiting): ActionItem[] {
+  if (a.status === "none") return [];
+  if (a.status === "error") return [{ key: "approval-commercial", icon: BadgeCheck, label: "Commercial approvals could not be loaded", count: 0, href: "/sales/opportunities", error: true }];
+  if (a.count === 0) return [];
+  return [{ key: "approval-commercial", icon: BadgeCheck, label: a.count === 1 ? "Commercial approval waiting for your decision" : "Commercial approvals waiting for your decision", count: a.count, href: `/sales/opportunities/${a.oldestOpportunityId}?tab=commercial` }];
 }

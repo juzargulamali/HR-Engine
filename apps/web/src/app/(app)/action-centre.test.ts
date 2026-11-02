@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attentionSentence, buildActionItems, handoverItems } from "./action-centre";
+import { attentionSentence, buildActionItems, commercialApprovalItems, handoverItems } from "./action-centre";
 import { splitActions } from "@/lib/my-day/groups";
 import type { HandoverRow } from "@/lib/crm/handover-attention";
 
@@ -49,5 +49,21 @@ describe("My Day handover rows (A9, A10)", () => {
   it("nothing to show when there are no rows or Projects is not installed", () => {
     expect(handoverItems({ status: "ok", rows: [] })).toEqual([]);
     expect(handoverItems({ status: "none" })).toEqual([]);
+  });
+});
+
+describe("My Day commercial approval row (U-01)", () => {
+  it("one request links to that enquiry's Commercial tab; several say so and link to the oldest", () => {
+    expect(commercialApprovalItems({ status: "ok", count: 1, oldestOpportunityId: "o1" })).toEqual([expect.objectContaining({ key: "approval-commercial", count: 1, label: "Commercial approval waiting for your decision", href: "/sales/opportunities/o1?tab=commercial" })]);
+    expect(commercialApprovalItems({ status: "ok", count: 3, oldestOpportunityId: "o1" })[0]).toMatchObject({ count: 3, label: "Commercial approvals waiting for your decision" });
+  });
+  it("belongs with the decisions", () => {
+    expect(splitActions(commercialApprovalItems({ status: "ok", count: 1, oldestOpportunityId: "o1" })).decision).toHaveLength(1);
+    expect(splitActions([{ key: "proj-scope", count: 1 }]).decision).toHaveLength(1);
+  });
+  it("a failed read is an error row; a person who does not decide, or no requests, shows nothing", () => {
+    expect(commercialApprovalItems({ status: "error" })).toEqual([expect.objectContaining({ error: true, label: "Commercial approvals could not be loaded" })]);
+    expect(commercialApprovalItems({ status: "none" })).toEqual([]);
+    expect(commercialApprovalItems({ status: "ok", count: 0, oldestOpportunityId: "" })).toEqual([]);
   });
 });

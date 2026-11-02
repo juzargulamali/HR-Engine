@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { projectDayRows } from "./my-day";
 
-const none = { overdueTasks: 0, dueSoonTasks: 0, reviewsWaiting: 0, handoversWaiting: 0, unreadMessages: 0, unreadProjects: 0 };
+const none = { overdueTasks: 0, dueSoonTasks: 0, reviewsWaiting: 0, handoversWaiting: 0, scopeChangesWaiting: 0, scopeChangeProjectId: null, unreadMessages: 0, unreadProjects: 0 };
 
 describe("projectDayRows", () => {
   it("is empty when nothing is waiting: no invented rows", () => {
@@ -17,5 +17,11 @@ describe("projectDayRows", () => {
     expect(one).toMatchObject({ label: "Project task overdue", href: "/projects/work" });
     expect(projectDayRows({ ...none, overdueTasks: 3 })[0]!.label).toBe("Project tasks overdue");
     expect(projectDayRows({ ...none, reviewsWaiting: 2 })[0]!.href).toBe("/projects/work#reviews");
+  });
+  it("scope changes waiting for the person's decision come after handovers, need them, and open the changes page of the oldest one", () => {
+    const rows = projectDayRows({ ...none, handoversWaiting: 1, reviewsWaiting: 1, scopeChangesWaiting: 2, scopeChangeProjectId: "p9" });
+    expect(rows.map((r) => r.key)).toEqual(["proj-handovers", "proj-scope", "proj-reviews"]);
+    expect(rows[1]).toMatchObject({ label: "Scope changes waiting for your decision", href: "/projects/p9/changes", needsYou: true });
+    expect(projectDayRows({ ...none, scopeChangesWaiting: 1, scopeChangeProjectId: "p9" })[0]!.label).toBe("Scope change waiting for your decision");
   });
 });
