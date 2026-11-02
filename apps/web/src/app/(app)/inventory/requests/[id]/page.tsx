@@ -49,7 +49,13 @@ export default async function RequestWorkspacePage({ params, searchParams }: { p
   if (!model) return <div className="space-y-4">{back}<Alert role="status">This request does not exist, or you do not have access to it.</Alert></div>;
 
   const r = model.request;
-  const manage = r.kind === "project" && r.project_id ? await canManageProjectEquipment(r.project_id) : false;
+  let manage = false;
+  try {
+    manage = r.kind === "project" && r.project_id ? await canManageProjectEquipment(r.project_id) : false;
+  } catch (e) {
+    console.error("[inventory] project standing load failed", e);
+    return <div className="space-y-4">{back}<LoadError what="this request" retryHref={`/inventory/requests/${id}`} /></div>;
+  }
   const can = requestCapabilities(model, ctx, locations, manage);
   const live = r.status === "submitted" || r.status === "in_progress";
   const project = r.kind === "project" && !!r.project_id;

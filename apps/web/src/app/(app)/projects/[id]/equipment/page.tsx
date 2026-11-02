@@ -89,7 +89,14 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
 
   const project = view.project;
   const finished = isFinishedProject(project.status);
-  const manage = (await canManageProjectEquipment(id)) && !finished;
+  let canManage = false;
+  try {
+    canManage = await canManageProjectEquipment(id);
+  } catch (e) {
+    console.error("[inventory] project standing load failed", e);
+    return <div className="space-y-4">{heading}<LoadError what="the equipment of this project" retryHref={`/projects/${id}/equipment`} /></div>;
+  }
+  const manage = canManage && !finished;
   const company = inv.companies.find((c) => c.id === project.company_id);
   const off = company ? !company.isEnabled : false;
   const warehouse = !finished && inv.grants.some((g) => g.companyId === project.company_id && (g.capabilities.includes("founder") || g.capabilities.includes("warehouse")));

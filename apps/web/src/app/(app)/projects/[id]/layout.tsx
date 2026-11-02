@@ -14,6 +14,7 @@ import { dateRangeText, dateText } from "@/lib/projects/format";
 import { manageItems, projectTabs } from "@/lib/projects/workspace-nav";
 import { createClient } from "@/lib/supabase/server";
 import { BackLink } from "@/components/workspace/list-memory";
+import { LoadError } from "@/components/workspace/states";
 
 /**
  * One project. Members and founders get a compact banner, four sections (Work, Timeline, Discussion, Equipment), a fifth (Budget) for the people who may open it, and one "Manage project"
@@ -24,7 +25,19 @@ export default async function ProjectLayout({ children, params }: { children: Re
   const { id } = await params;
   const ctx = await getProjectsContext();
   if (!ctx) return null;
-  const view = await loadProjectView(ctx, id);
+  // A failed read is "could not load", never "not found" (that is only for a project that is absent or not visible).
+  let view: Awaited<ReturnType<typeof loadProjectView>>;
+  try {
+    view = await loadProjectView(ctx, id);
+  } catch (e) {
+    console.error("[projects] project could not be loaded", e);
+    return (
+      <div className="space-y-4">
+        <BackLink section="projects" fallback="/projects">All projects</BackLink>
+        <LoadError what="this project" retryHref={`/projects/${id}`} />
+      </div>
+    );
+  }
   if (!view) notFound();
   const { project, details } = view;
 
@@ -79,7 +92,10 @@ export default async function ProjectLayout({ children, params }: { children: Re
           Summary only. Details, tasks, discussion and files are for the people working on this project; the Project Manager can add you if you should take part.
         </Alert>
       ) : (
-        <ProjectTabs tabs={projectTabs(base, unread, budgetAccess.can_open)} base={base} />
+        <>
+          <ProjectTabs tabs={projectTabs(base, unread, budgetAccess.can_open)} base={base} />
+          {"loadFailed" in budgetAccess && budgetAccess.loadFailed ? <Alert variant="warning" role="status">Could not check budget access, so the Budget tab may be missing. Reload to try again.</Alert> : null}
+        </>
       )}
       {children}
     </div>

@@ -249,17 +249,14 @@ export async function loadRequestModels(
 
 /**
  * May the person manage this project (the project manager, an acting project manager or a Projects founder)? Mirrors proj_can_manage
- * for what the page offers; the database makes the real decision. A failed lookup means "no": nothing extra is shown.
+ * for what the page offers; the database makes the real decision. A project that is absent or not visible means "no"; a FAILED lookup
+ * throws, so the page says it could not load instead of quietly taking the edit controls away from the Project Manager.
  */
 export async function canManageProjectEquipment(projectId: string): Promise<boolean> {
-  try {
-    const ctx = await getProjectsContext();
-    if (!ctx) return false;
-    const view = await loadProjectView(ctx, projectId);
-    return !!view && view.canManage;
-  } catch {
-    return false;
-  }
+  const ctx = await getProjectsContext();
+  if (!ctx) return false;
+  const view = await loadProjectView(ctx, projectId);
+  return !!view && view.canManage;
 }
 
 /** Names of the complete technology templates the person may browse (for the Availability dialog's picker). */

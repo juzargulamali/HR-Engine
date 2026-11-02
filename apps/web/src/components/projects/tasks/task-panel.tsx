@@ -1,4 +1,5 @@
 import { SidePanel } from "@/components/workspace/side-panel";
+import { LoadError } from "@/components/workspace/states";
 import { parseRecordId, withParams } from "@/components/workspace/url-state";
 import { getProjectsContext } from "@/lib/projects/context";
 import { loadProjectView } from "@/lib/projects/data";
@@ -19,18 +20,36 @@ export async function TaskPanel({ rawTaskId, projectId, basePath, current, panel
   let pid = projectId;
   if (!pid) {
     const supabase = await createClient();
-    const { data } = await supabase.from("proj_tasks").select("project_id").eq("id", taskId).maybeSingle();
+    const { data, error } = await supabase.from("proj_tasks").select("project_id").eq("id", taskId).maybeSingle();
+    if (error) return <TaskLoadError closeHref={withParams(basePath, current, { [panelParam]: null })} />;
     pid = data?.project_id;
   }
   if (!pid) return <MissingTask closeHref={withParams(basePath, current, { [panelParam]: null })} />;
-  const view = await loadProjectView(ctx, pid);
-  if (!view || view.level !== "details") return <MissingTask closeHref={withParams(basePath, current, { [panelParam]: null })} />;
-  const data = await loadTaskDetail(view, ctx, taskId);
   const closeHref = withParams(basePath, current, { [panelParam]: null });
-  if (!data) return <MissingTask closeHref={closeHref} />;
+  // A failed read is "could not load", not "Task not available" (which says the task is gone or private).
+  let view: Awaited<ReturnType<typeof loadProjectView>> = null;
+  let data: Awaited<ReturnType<typeof loadTaskDetail>> = null;
+  let failed = false;
+  try {
+    view = await loadProjectView(ctx, pid);
+    if (view && view.level === "details") data = await loadTaskDetail(view, ctx, taskId);
+  } catch (e) {
+    console.error("[projects] task panel load failed", e);
+    failed = true;
+  }
+  if (failed) return <TaskLoadError closeHref={closeHref} />;
+  if (!view || view.level !== "details" || !data) return <MissingTask closeHref={closeHref} />;
   return (
     <SidePanel title={data.task.title} subtitle={`${view.project.reference} · ${view.project.name}`} closeHref={closeHref} fullPageHref={`/projects/${pid}/work/tasks/${taskId}`}>
       <TaskDetailBody data={data} view={view} taskHref={(id) => withParams(basePath, current, { [panelParam]: id })} />
+    </SidePanel>
+  );
+}
+
+function TaskLoadError({ closeHref }: { closeHref: string }) {
+  return (
+    <SidePanel title="Task could not be loaded" closeHref={closeHref}>
+      <LoadError what="this task" />
     </SidePanel>
   );
 }

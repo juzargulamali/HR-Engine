@@ -39,7 +39,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
   const ctx = await getProjectsContext();
   if (!ctx) return null;
 
-  const [{ rows: directory, error }, attention] = await Promise.all([loadDirectoryResult(), loadProjectsAttention(ctx)]);
+  const [{ rows: directory, error }, attention] = await Promise.all([loadDirectoryResult(), loadProjectsAttention(ctx).catch((e) => { console.error("[projects] needs-you load failed", e); return null; })]);
   if (error) return <div className="space-y-4"><PageHeader title="Projects" /><LoadError what="the projects" retryHref="/projects" /></div>;
 
   const salesOnly = ctx.grants.length === 0;
@@ -84,7 +84,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
     .filter((c) => hasProjCapability(ctx.grants, c.id, "assign_pm"))
     .map((c) => ({ id: c.id, name: c.name, referenceCode: c.referenceCode, isFounder: isProjFounder(ctx.grants, c.id), people: ctx.people.filter((p) => p.companyIds.includes(c.id)).map((p) => ({ id: p.id, name: p.name })) }));
 
-  const needs = [
+  const needs = !attention ? [] : [
     attention.handoversWaiting > 0 ? { label: `${attention.handoversWaiting} handover${attention.handoversWaiting === 1 ? "" : "s"} waiting on you`, href: "/projects/handovers" } : null,
     attention.reviewsWaiting > 0 ? { label: `${attention.reviewsWaiting} waiting for your review`, href: "/projects/work" } : null,
     attention.overdueTasks > 0 ? { label: `${attention.overdueTasks} overdue task${attention.overdueTasks === 1 ? "" : "s"} of yours`, href: "/projects/work" } : null,
@@ -122,6 +122,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
         {!salesOnly && addCompanies.length > 0 ? <QuickNewProject companies={addCompanies} /> : null}
       </OsHero>
 
+      {!attention ? <LoadError what="what needs you" retryHref="/projects" /> : null}
       {!salesOnly && needs.length > 0 ? (
         <section aria-label="Needs you" className="os-card os-warm flex flex-wrap items-center gap-x-5 gap-y-1.5 px-4 py-3 text-sm">
           <span className="font-semibold">Needs you</span>

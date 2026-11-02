@@ -8,6 +8,7 @@ import { HandoverBrief } from "@/components/projects/handover-brief";
 import { HandoverProcess } from "@/components/projects/handover-process";
 import { HandoverStatusBadge } from "@/components/projects/badges";
 import { Muted, PageHeader, Panel } from "@/components/projects/parts";
+import { LoadError } from "@/components/workspace/states";
 import { formatDateTime } from "@/components/sales/format";
 import { getProjectsContext } from "@/lib/projects/context";
 import { createClient } from "@/lib/supabase/server";
@@ -22,7 +23,17 @@ export default async function HandoversPage() {
   const ctx = await getProjectsContext();
   if (!ctx) return null;
   const supabase = await createClient();
-  const { data } = await supabase.from("proj_handovers").select("*").neq("status", "draft").order("updated_at", { ascending: false }).limit(200);
+  const { data, error: handoversError } = await supabase.from("proj_handovers").select("*").neq("status", "draft").order("updated_at", { ascending: false }).limit(200);
+  // A failed read is not "No handovers to show": a handover may be waiting.
+  if (handoversError) {
+    console.error("[projects] handovers load failed", handoversError);
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Handovers" />
+        <LoadError what="the handovers" retryHref="/projects/handovers" />
+      </div>
+    );
+  }
   const handovers = (data ?? []) as ProjHandoverRow[];
   const canAssign = (companyId: string) => hasProjCapability(ctx.grants, companyId, "assign_pm");
 

@@ -68,7 +68,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
       </div>
     );
   }
-  const attention = await loadProjectsAttention(ctx);
+  const attention = await loadProjectsAttention(ctx).catch((e) => { console.error("[projects] handover count failed", e); return null; });
 
   const current = paramsToRecord(sp);
   const show = parseMyWorkShow(firstParam(sp, "show"), work.canSeeTeam);
@@ -123,7 +123,8 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
         {work.canSeeTeam ? <li><OsStatCard href={withParams(BASE, current, { show: "team" })} label="My team's open tasks" value={counts.team} icon={Users} edge="muted" active={show === "team"} /></li> : null}
       </ul>
 
-      {attention.handoversWaiting > 0 ? (
+      {!attention ? <LoadError what="your waiting handovers" retryHref={BASE} /> : null}
+      {attention && attention.handoversWaiting > 0 ? (
         <Alert role="status" className="flex flex-wrap items-center justify-between gap-2">
           <span><strong>{attention.handoversWaiting} handover{attention.handoversWaiting === 1 ? "" : "s"} waiting on you.</strong> A Sales handover needs a Project Manager or your acceptance.</span>
           <Link href="/projects/handovers" className={buttonVariants({ variant: "outline", size: "sm" })}>Open handovers</Link>
