@@ -78,14 +78,15 @@ await as("emp@e2e.local");
 await step("Sales: prefilled delivery brief, saved without any commercial value", async () => {
   await go(`/sales/opportunities/${OPP}/handover`);
   await page.getByLabel("Scope of work").fill("LED floor and sensors, 6x4 m, with interactive shader content.");
-  await page.getByRole("button", { name: /save the delivery brief/i }).click();
-  await page.waitForFunction(() => /Save changes|Submit the handover/.test(document.body.innerText), null, { timeout: 12000 });
+  await page.getByRole("button", { name: /^save draft$/i }).click();
+  await page.waitForFunction(() => /Not submitted yet/.test(document.body.innerText), null, { timeout: 12000 });
   HANDOVER = db("select id from proj_handovers limit 1"); if (!HANDOVER) throw new Error("no handover row");
+  if (db("select status from proj_handovers") !== "draft") throw new Error("Save draft submitted the handover");
   const row = db("select row_to_json(h)::text from proj_handovers h");
   for (const secret of ["PO-SECRET-123", "BUDGET-SECRET", "TERMS-SECRET", "250000"]) if (row.includes(secret)) throw new Error(`commercial value ${secret} copied into the handover`);
 });
 await step("Sales: submit the handover; it waits for a Project Manager", async () => {
-  await page.getByRole("button", { name: /submit the handover/i }).click();
+  await page.getByRole("button", { name: /^save and submit$/i }).click();
   await page.waitForFunction(() => /Waiting for a Project Manager/i.test(document.body.innerText), null, { timeout: 12000 });
   if (db("select status from proj_handovers") !== "submitted") throw new Error("not submitted");
 });
@@ -117,8 +118,7 @@ await as("emp@e2e.local");
 await step("Sales: sees the question, adds the answer, resubmits", async () => {
   await go(`/sales/opportunities/${OPP}/handover`); await expectText(/Which hours can we access the hall\?/);
   await page.getByLabel("Notes for the Project Manager").last().fill("Hall access 08:00 to 22:00 daily.");
-  await page.getByRole("button", { name: /save changes/i }).click(); await page.waitForTimeout(800);
-  await page.getByRole("button", { name: /resubmit to the project manager/i }).click();
+  await page.getByRole("button", { name: /save and resubmit to the project manager/i }).click();
   await page.waitForFunction(() => /Waiting for the PM to accept/i.test(document.body.innerText), null, { timeout: 12000 });
 });
 await as("mgr@e2e.local");

@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { PROJ_CAPABILITIES } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
-import { checkbox, fail, firstIssue, ok, optionalDate, optionalText, optionalUuid, patchOf, refreshProjects, staleMessage, textPatch, uuid, type ProjectActionState } from "@/lib/projects/action-utils";
+import { friendlyProjectError } from "@/lib/projects/errors";
+import { checkbox, fail, firstIssue, linesOf, ok, optionalDate, optionalText, optionalUuid, patchOf, refreshProjects, staleMessage, textPatch, uuid, type ProjectActionState } from "@/lib/projects/action-utils";
 
 /**
  * Projects & Tasks server actions: access, Sales handover, project creation and lifecycle, people and departments. Each is a
@@ -38,13 +39,13 @@ const technologiesSchema = z.preprocess(
   z.array(z.object({ name: z.string().trim().min(1, "Each technology needs a name"), qty: z.coerce.number().int().min(1, "Quantity must be at least 1") })).optional(),
 );
 
-/** Sales prepares (or edits) the member-safe delivery brief. Nothing commercial is read or copied. */
-export async function saveHandover(_prev: S, fd: FormData): Promise<S> {
+/** Saves the delivery brief and returns its id, or the plain-language failure. Shared by "Save draft" and "Save and submit". */
+async function saveHandoverCore(fd: FormData): Promise<{ id: string; opportunityId: string } | { state: S }> {
   const p = z.object({
     opportunityId: uuid, expectedVersion: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.coerce.number().int().optional()),
     technologies: technologiesSchema,
   }).safeParse({ opportunityId: fd.get("opportunityId"), expectedVersion: fd.get("expectedVersion"), technologies: fd.get("technologies") });
-  if (!p.success) return { error: firstIssue(p.error) };
+  if (!p.success) return { state: { error: firstIssue(p.error) } };
   const tz = String(fd.get("siteTimezone") ?? "").trim();
   const fields = patchOf({
     title: String(fd.get("title") ?? "").trim() || undefined,
@@ -57,14 +58,38 @@ export async function saveHandover(_prev: S, fd: FormData): Promise<S> {
     scope: textPatch(fd, "scope"),
     exclusions: textPatch(fd, "exclusions"),
     notes: textPatch(fd, "notes"),
+    risks: fd.has("risks") ? linesOf(String(fd.get("risks") ?? "")) : undefined,
     technologies: p.data.technologies,
   });
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("proj_save_handover", { p_opportunity_id: p.data.opportunityId, p_fields: fields, p_expected_version: p.data.expectedVersion ?? null });
-  if (error) return fail(error.message);
+  if (error) return { state: fail(error.message) };
   refreshProjects();
   revalidateOpportunity(p.data.opportunityId);
-  return ok(data);
+  return { id: data as string, opportunityId: p.data.opportunityId };
+}
+
+/** Sales prepares (or edits) the member-safe delivery brief. Nothing commercial is read or copied. */
+export async function saveHandover(_prev: S, fd: FormData): Promise<S> {
+  const saved = await saveHandoverCore(fd);
+  return "state" in saved ? saved.state : ok(saved.id);
+}
+
+/**
+ * "Save and submit" in one step: the brief is saved exactly as "Save draft" would, then submitted with the same function and the same checks as
+ * "Submit the handover" (the scope is still required). The form's `intent` is "draft" to stop after saving. If the submission is refused the brief
+ * stays saved as a draft and the message says so; nothing about the handover process itself changes.
+ */
+export async function saveAndSubmitHandover(_prev: S, fd: FormData): Promise<S> {
+  const saved = await saveHandoverCore(fd);
+  if ("state" in saved) return saved.state;
+  if (fd.get("intent") === "draft") return ok(saved.id);
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("proj_submit_handover", { p_handover_id: saved.id });
+  if (error) return { error: `Your changes are saved as a draft, but it was not submitted: ${friendlyProjectError(error.message)}` };
+  refreshProjects();
+  revalidateOpportunity(saved.opportunityId);
+  return ok(saved.id);
 }
 
 function revalidateOpportunity(id: string) {

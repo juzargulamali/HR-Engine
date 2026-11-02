@@ -19,6 +19,9 @@ export const fail = (message: string): ProjectActionState => ({ error: friendlyP
 export const ok = (id?: string): ProjectActionState => ({ error: null, ...(id ? { id } : {}) });
 export const firstIssue = (e: z.ZodError) => e.issues[0]?.message ?? "Invalid input.";
 
+/** "One per line" text to a list of non-empty lines. */
+export const linesOf = (text: string): string[] => text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== "");
+
 /** Revalidates the Projects pages (every one of them reads through RLS, so a change can affect several). */
 export function refreshProjects(projectId?: string) {
   revalidatePath("/projects", "layout");

@@ -163,7 +163,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
         personName={(id) => (id ? ctx.personName(id) : "Unknown")}
         defaults={{
           title: opp.title, clientName: "", location: opp.location ?? "", siteTimezone: suggestion.zone, siteTimezoneNote: suggestion.because, installStart: opp.install_start ?? "", eventStart: opp.event_start ?? "",
-          eventEnd: opp.event_end ?? "", scope: opp.scope ?? "", exclusions: opp.exclusions ?? "", notes: "", technologies: opp.technologies,
+          eventEnd: opp.event_end ?? "", scope: opp.scope ?? "", exclusions: opp.exclusions ?? "", notes: "", technologies: opp.technologies, risks: opp.risks,
         }}
       />
 

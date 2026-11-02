@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { saveHandover, submitHandover, withdrawHandover } from "@/lib/actions/projectsCore";
+import { saveAndSubmitHandover, saveHandover, withdrawHandover } from "@/lib/actions/projectsCore";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,8 @@ export interface BriefValues {
   exclusions: string;
   notes: string;
   technologies: { name: string; qty: number }[];
+  /** Unresolved risks, one per line when edited. Carried over from the enquiry on a new brief. */
+  risks?: string[];
 }
 
 interface Row { key: number; name: string; qty: string }
@@ -55,10 +57,20 @@ function Technologies({ initial }: { initial: { name: string; qty: number }[] })
   );
 }
 
-/** The delivery brief. Everything written here is visible to the project's members: it must not hold prices, budgets or purchase-order details. */
-export function ProjectHandoverForm({ opportunityId, version, values, existing }: { opportunityId: string; version: number | null; values: BriefValues; existing: boolean }) {
+/**
+ * The delivery brief. Everything written here is visible to the project's members: it must not hold prices, budgets, margins, payment terms or
+ * purchase-order details. `submitMode` says what the main button does: "submit" saves and submits in one step (a first brief), "resubmit" saves and sends
+ * it back to the Project Manager after a question; with neither (already submitted, or the Project Manager has it) it only saves, as before. "Save draft"
+ * is always there beside it and never submits.
+ */
+export function ProjectHandoverForm({ opportunityId, version, values, existing, submitMode = null }: { opportunityId: string; version: number | null; values: BriefValues; existing: boolean; submitMode?: "submit" | "resubmit" | null }) {
+  const combined = submitMode !== null;
   return (
-    <ActionForm action={saveHandover} submitLabel={existing ? "Save changes" : "Save the delivery brief"}>
+    <ActionForm
+      action={combined ? saveAndSubmitHandover : saveHandover}
+      submitLabel={combined ? (submitMode === "resubmit" ? "Save and resubmit to the Project Manager" : "Save and submit") : existing ? "Save changes" : "Save the delivery brief"}
+      pendingLabel={combined ? "Submitting…" : "Saving…"}
+      secondary={combined ? <Button type="submit" name="intent" value="draft" variant="outline">Save draft</Button> : undefined}>
       <input type="hidden" name="opportunityId" value={opportunityId} />
       <input type="hidden" name="expectedVersion" value={version ?? ""} />
       <Alert variant="warning" role="note">
@@ -84,21 +96,13 @@ export function ProjectHandoverForm({ opportunityId, version, values, existing }
       </Field>
       <Field label="Exclusions" htmlFor="ph-excl"><Textarea id="ph-excl" name="exclusions" rows={3} defaultValue={values.exclusions} /></Field>
       <Technologies initial={values.technologies} />
+      <Field label="Risks" htmlFor="ph-risks" hint="One per line. Carried over from the enquiry; the Project Manager sees what you leave here.">
+        <Textarea id="ph-risks" name="risks" rows={3} defaultValue={(values.risks ?? []).filter((r): r is string => typeof r === "string").join("\n")} />
+      </Field>
       <Field label="Notes for the Project Manager" htmlFor="ph-notes" hint="Site access, client preferences, open questions.">
         <Textarea id="ph-notes" name="notes" rows={3} defaultValue={values.notes} />
       </Field>
-    </ActionForm>
-  );
-}
-
-export function SubmitProjectHandoverForm({ handoverId, opportunityId, resubmit }: { handoverId: string; opportunityId: string; resubmit: boolean }) {
-  return (
-    <ActionForm action={submitHandover} submitLabel={resubmit ? "Resubmit to the Project Manager" : "Submit the handover"} pendingLabel="Submitting…">
-      <input type="hidden" name="handoverId" value={handoverId} />
-      <input type="hidden" name="opportunityId" value={opportunityId} />
-      <p className="text-sm text-muted-foreground">
-        {resubmit ? "The Project Manager is told you have answered. Save any changes above first." : "A founder is told it is ready and names the Project Manager. Save any changes above first; you can keep editing until the Project Manager accepts it."}
-      </p>
+      {combined ? <p className="text-sm text-muted-foreground">{submitMode === "resubmit" ? "The Project Manager is told you have answered." : "A founder is told it is ready and names the Project Manager. You can keep editing until the Project Manager accepts it."} If something required is missing, your changes are still saved as a draft.</p> : null}
     </ActionForm>
   );
 }

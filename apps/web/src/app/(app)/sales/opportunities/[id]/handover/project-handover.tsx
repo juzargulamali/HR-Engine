@@ -10,7 +10,7 @@ import { isNotInstalled } from "@/lib/projects/errors";
 import { createClient } from "@/lib/supabase/server";
 import type { ProjHandoverRow, ProjHandoverStatusRow } from "@/types/projects";
 import { Panel } from "../parts";
-import { ProjectHandoverForm, SubmitProjectHandoverForm, WithdrawProjectHandoverForm, type BriefValues } from "./project-handover-forms";
+import { ProjectHandoverForm, WithdrawProjectHandoverForm, type BriefValues } from "./project-handover-forms";
 
 export interface ProjectHandoverState {
   installed: boolean;
@@ -57,7 +57,7 @@ export function ProjectHandoverPanel({
   const values: BriefValues = row
     ? {
         title: row.title, clientName: row.client_name ?? "", location: row.location ?? "", siteTimezone: row.site_timezone, installStart: row.install_start ?? "",
-        eventStart: row.event_start ?? "", eventEnd: row.event_end ?? "", scope: row.scope ?? "", exclusions: row.exclusions ?? "", notes: row.notes ?? "", technologies: row.technologies,
+        eventStart: row.event_start ?? "", eventEnd: row.event_end ?? "", scope: row.scope ?? "", exclusions: row.exclusions ?? "", notes: row.notes ?? "", technologies: row.technologies, risks: (row.risks ?? []).filter((r): r is string => typeof r === "string"),
       }
     : defaults;
 
@@ -75,7 +75,7 @@ export function ProjectHandoverPanel({
             {row?.submitted_at ? <p className="text-muted-foreground">Submitted {formatDateTime(row.submitted_at)} by {personName(row.prepared_by)}.</p> : null}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">No project handover has been prepared yet.{canEdit ? " Review the brief below (taken from this opportunity's non-commercial facts), save it, then submit it." : ""}</p>
+          <p className="text-sm text-muted-foreground">No project handover has been prepared yet.{canEdit ? " Review the brief below (taken from this opportunity's non-commercial facts), then save and submit it." : ""}</p>
         )}
         {status?.clarification_note && st === "clarification_requested" ? <Alert variant="warning" role="status">The Project Manager asked: “{status.clarification_note}”</Alert> : null}
         {st === "accepted" && status?.project_id ? (
@@ -86,8 +86,7 @@ export function ProjectHandoverPanel({
 
         {editable ? (
           <>
-            <ProjectHandoverForm key={row ? `${row.id}-${row.version}` : "new"} opportunityId={opportunityId} version={row?.version ?? null} values={values} existing={Boolean(row)} />
-            {row && (st === "draft" || st === "clarification_requested") ? <div className="border-t border-border pt-4"><SubmitProjectHandoverForm handoverId={row.id} opportunityId={opportunityId} resubmit={st === "clarification_requested"} /></div> : null}
+            <ProjectHandoverForm key={row ? `${row.id}-${row.version}` : "new"} opportunityId={opportunityId} version={row?.version ?? null} values={values} existing={Boolean(row)} submitMode={!st || st === "draft" ? "submit" : st === "clarification_requested" ? "resubmit" : null} />
             {row && st === "submitted" ? <Muted>It is submitted and waiting. Changes you save are seen by whoever picks it up.</Muted> : null}
             {row ? <WithdrawProjectHandoverForm handoverId={row.id} opportunityId={opportunityId} /> : null}
           </>

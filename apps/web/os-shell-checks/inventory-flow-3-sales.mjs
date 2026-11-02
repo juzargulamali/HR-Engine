@@ -288,14 +288,12 @@ let HANDOVER = ""; let PRJ = "";
 await step("Sales prepares and submits the handover of the Won opportunity (no commercial value is copied)", async () => {
   await R.go(`/sales/opportunities/${WON}/handover`);
   await R.page.getByLabel("Scope of work").fill("LED floor and sensors, 6x4 m, with interactive shader content.");
-  await R.page.getByRole("button", { name: /save the delivery brief/i }).click();
-  await R.page.waitForFunction(() => /Save changes|Submit the handover/.test(document.body.innerText), null, { timeout: 12000 });
+  await R.page.getByRole("button", { name: /^save and submit$/i }).click();
+  await R.page.waitForFunction(() => /Waiting for a Project Manager/i.test(document.body.innerText), null, { timeout: 12000 });
   HANDOVER = s1("select id from proj_handovers limit 1");
   check(HANDOVER, "a handover row exists");
   const row = s1("select row_to_json(h)::text from proj_handovers h");
   for (const secret of ["PO-LOCAL-1", "250000"]) check(!row.includes(secret), `commercial value ${secret} copied into the handover`);
-  await R.page.getByRole("button", { name: /submit the handover/i }).click();
-  await R.page.waitForFunction(() => /Waiting for a Project Manager/i.test(document.body.innerText), null, { timeout: 12000 });
   eq(s1("select status from proj_handovers"), "submitted", "submitted");
   eq(s1("select count(*) from inv_requests"), 0, "submitting the handover made no equipment request");
 });

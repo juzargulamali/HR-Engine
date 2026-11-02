@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
-vi.mock("@/lib/actions/projectsCore", () => ({ saveHandover: vi.fn(), submitHandover: vi.fn(), withdrawHandover: vi.fn() }));
+vi.mock("@/lib/actions/projectsCore", () => ({ saveHandover: vi.fn(), saveAndSubmitHandover: vi.fn(), submitHandover: vi.fn(), withdrawHandover: vi.fn() }));
 
 import { ProjectHandoverForm, type BriefValues } from "./project-handover-forms";
 
@@ -42,5 +42,23 @@ describe("the site time zone on a handover brief", () => {
   it("still offers a saved zone that is not in the common list", () => {
     render(<ProjectHandoverForm opportunityId="o1" version={1} existing values={values({ siteTimezone: "Asia/Muscat" })} />);
     expect(zone().value).toBe("Asia/Muscat");
+  });
+});
+
+describe("Save and submit in one step", () => {
+  it("is offered for a first or answered brief, with Save draft beside it and the risks editable", () => {
+    render(<ProjectHandoverForm opportunityId="o1" version={null} existing={false} submitMode="submit" values={values({ risks: ["Venue power unconfirmed", "Tight load-in"] })} />);
+    expect(screen.getByRole("button", { name: "Save and submit" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Save draft" }) as HTMLButtonElement).value).toBe("draft");
+    expect((screen.getByLabelText("Risks") as HTMLTextAreaElement).value).toBe("Venue power unconfirmed\nTight load-in");
+  });
+  it("says resubmit after the Project Manager asked a question", () => {
+    render(<ProjectHandoverForm opportunityId="o1" version={2} existing submitMode="resubmit" values={values()} />);
+    expect(screen.getByRole("button", { name: "Save and resubmit to the Project Manager" })).toBeTruthy();
+  });
+  it("only saves once it is already submitted (no submit button, no Save draft)", () => {
+    render(<ProjectHandoverForm opportunityId="o1" version={2} existing values={values()} />);
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Save draft" })).toBeNull();
   });
 });

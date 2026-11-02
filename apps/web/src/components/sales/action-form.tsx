@@ -67,8 +67,11 @@ export function ActionForm({
       // person never loses what they typed; a successful save resets or closes it explicitly (resetOnSuccess / onDone).
       onSubmit={(e) => {
         e.preventDefault();
+        if (pending) return;
         setSaved(false);
-        const data = new FormData(e.currentTarget);
+        // A secondary submit button (name + value, e.g. "Save draft") is part of the data, as it would be in a plain form.
+        const submitter = (e.nativeEvent as SubmitEvent).submitter;
+        const data = new FormData(e.currentTarget, submitter instanceof HTMLButtonElement ? submitter : undefined);
         startTransition(() => formAction(data));
       }}
       className={className ?? "space-y-4"}>

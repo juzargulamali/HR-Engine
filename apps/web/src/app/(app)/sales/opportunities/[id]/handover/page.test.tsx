@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("notFound"); }, useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/lib/actions/crm", () => ({ updateHandover: vi.fn() }));
-vi.mock("@/lib/actions/projectsCore", () => ({ saveHandover: vi.fn(), submitHandover: vi.fn(), withdrawHandover: vi.fn() }));
+vi.mock("@/lib/actions/projectsCore", () => ({ saveHandover: vi.fn(), saveAndSubmitHandover: vi.fn(), submitHandover: vi.fn(), withdrawHandover: vi.fn() }));
 const rpc = vi.fn(async () => ({ data: [{ user_id: "u9", full_name: "Pia Manager", email: "pia@x.test", company_ids: ["c1"] }], error: null }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc }) }));
 
