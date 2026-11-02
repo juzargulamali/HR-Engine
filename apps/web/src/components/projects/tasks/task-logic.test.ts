@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ProjectStanding } from "@enginious-hr/domain";
 import type { ProjTaskRow } from "@/types/projects";
 import {
-  boardColumnOf, boardTargets, buildTaskRow, groupTaskRows, moveFor, moveMode, parseGroupBy, parseTaskSort, sortTaskRows, taskMoveSpecs,
+  boardColumnOf, boardTargets, buildTaskRow, defaultUnblocker, groupTaskRows, moveFor, moveMode, parseGroupBy, parseTaskSort, sortTaskRows, taskMoveSpecs,
   type ProjectLookup, type RowContext, type TaskRowData,
 } from "./task-logic";
 
@@ -172,5 +172,17 @@ describe("grouping", () => {
     expect(groupTaskRows(rows, "none")).toHaveLength(1);
     expect(parseGroupBy("milestone")).toBe("milestone");
     expect(parseGroupBy("everything")).toBe("none");
+  });
+});
+
+describe("who is pre-filled as responsible for unblocking", () => {
+  const members = ["pm", "head", "me", "other"];
+  it("is the project head (Project Manager), then the team head, never the person reporting it when someone else fits", () => {
+    expect(defaultUnblocker({ viewerId: "me", pmId: "pm", teamHeadId: "head", memberIds: members })).toBe("pm");
+    expect(defaultUnblocker({ viewerId: "pm", pmId: "pm", teamHeadId: "head", memberIds: members })).toBe("head");
+  });
+  it("falls back to the Project Manager when the reporter is the only head, and to nobody when nobody is a member", () => {
+    expect(defaultUnblocker({ viewerId: "pm", pmId: "pm", teamHeadId: null, memberIds: members })).toBe("pm");
+    expect(defaultUnblocker({ viewerId: "me", pmId: "gone", teamHeadId: "gone2", memberIds: members })).toBe("");
   });
 });

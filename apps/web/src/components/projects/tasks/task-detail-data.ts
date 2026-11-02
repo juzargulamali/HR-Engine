@@ -29,7 +29,7 @@ export interface TaskDetailData {
   milestones: PickOption[];
   events: ProjTaskEventRow[];
   comments: ProjTaskCommentRow[];
-  team: { name: string; head: string } | null;
+  team: { name: string; head: string; headId: string } | null;
   deliverable: string | null;
   milestone: string | null;
 }
@@ -89,7 +89,7 @@ export async function loadTaskDetail(view: ProjectView, ctx: ProjectsContext, ta
     milestones: (milestones ?? []).map((m) => ({ id: m.id, name: m.title })),
     events: events ?? [],
     comments: comments ?? [],
-    team: team ? { name: team.name, head: view.nameOf(team.head_user_id) } : null,
+    team: team ? { name: team.name, head: view.nameOf(team.head_user_id), headId: team.head_user_id } : null,
     deliverable: (deliverables ?? []).find((d) => d.id === task.deliverable_id)?.title ?? null,
     milestone: (milestones ?? []).find((m) => m.id === task.milestone_id)?.title ?? null,
   };

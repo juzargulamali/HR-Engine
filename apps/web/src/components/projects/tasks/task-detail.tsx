@@ -13,6 +13,7 @@ import { TaskAssigneeControl, TaskDueControl, TaskStatusControl } from "./task-c
 import { CommentForm } from "./task-forms";
 import type { TaskDetailData } from "./task-detail-data";
 import { toControlRow } from "./task-table";
+import { defaultUnblocker } from "./task-logic";
 
 /**
  * One task, shown the same way in the side panel and on its own page: the status, who and when at a glance (each editable only by
@@ -63,6 +64,7 @@ export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData;
           canBlock={data.role !== null && row.open && !task.blocked_at}
           canUnblock={data.canUnblock}
           members={data.members}
+          defaultUnblocker={defaultUnblocker({ viewerId: data.viewerId, pmId: view.project.pm_user_id, teamHeadId: data.team?.headId ?? null, memberIds: data.members.map((m) => m.id) })}
           reassignOptions={data.reassignOptions}
           otherTasks={data.otherTasks}
           teams={data.teams}

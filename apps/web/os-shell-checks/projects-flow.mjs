@@ -252,11 +252,13 @@ await step("Member: adds a task for themself only (one click, no duplicate); rou
   if (db("select count(*) from proj_tasks where title='Prepare test rig'") !== "1") throw new Error("double click created " + db("select count(*) from proj_tasks where title='Prepare test rig'") + " tasks");
   T2 = db("select id from proj_tasks where title='Prepare test rig'");
   await go(`/projects/${P}/work/tasks/${T2}`);
-  await pick("More", /Block task/);
-  await dialog().getByRole("button", { name: /mark as blocked/i }).click(); await page.waitForTimeout(800);
+  await page.getByRole("button", { name: /^Report a blocker$/ }).click();
+  await dialog().getByRole("button", { name: /report blocker/i }).click(); await page.waitForTimeout(800);
   if (db(`select blocked_at is null from proj_tasks where id='${T2}'`) !== "t") throw new Error("blocked without a reason");
-  await dialog().getByLabel("What is blocking it").fill("Truss not delivered"); await dialog().getByLabel(/Or what action/).fill("Standbuilder delivers the truss");
-  await dialog().getByRole("button", { name: /mark as blocked/i }).click(); await closed(); await until(() => db(`select blocked_at is not null from proj_tasks where id='${T2}'`) === "t");
+  await dialog().getByLabel("What is blocking it").fill("Truss not delivered");
+  if (!(await dialog().getByLabel("Who is responsible for unblocking it").inputValue())) throw new Error("the person responsible is not pre-filled");
+  await dialog().getByRole("button", { name: /report blocker/i }).click(); await closed(); await until(() => db(`select blocked_at is not null from proj_tasks where id='${T2}'`) === "t");
+  if (!db(`select unblock_owner_id from proj_tasks where id='${T2}'`)) throw new Error("a blocker was recorded without the person responsible for unblocking it");
   await seen(/Truss not delivered/);
   const blockedOpts = await optionTexts(page.getByLabel(/^Status of Prepare test rig/));
   if (blockedOpts.some((x) => /Mark done/.test(x))) throw new Error("Mark done offered while blocked: " + blockedOpts.join(" | "));
