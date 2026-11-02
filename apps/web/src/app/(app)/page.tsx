@@ -14,6 +14,7 @@ import {
   DASHBOARD_TIMEZONE,
 } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
+import { loadMyPendingApprovalCount } from "@/lib/approvals/pending";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentWeather } from "@/lib/weather";
 import { Alert } from "@/components/ui/alert";
@@ -87,12 +88,14 @@ export default async function DashboardPage() {
   const showHrView = canViewHrAlerts(session.grants);
 
   let allCompanies: { id: string; legal_name: string; country_code: string }[] = [];
+  let companiesFailed = false;
   try {
     const { data: companies, error } = await supabase.from("companies").select("id, legal_name, country_code");
     if (error) throw error;
     allCompanies = companies ?? [];
   } catch (error) {
     logServerError({ route: ROUTE, operation: "list companies" }, error);
+    companiesFailed = true;
   }
   const overviewCompanies = allCompanies.filter((c) => canViewCompanyOverview(session.grants, c.id));
   const canAddEmployee = allCompanies.some((c) => canCreateEmployee(session.grants, c.id));
@@ -100,17 +103,14 @@ export default async function DashboardPage() {
   // Always computed, for anyone — approving isn't an HR/CEO-only capability
   // (a line manager or Finance approver needs this too), unlike the
   // company-wide sections below which stay gated to canViewHrAlerts.
-  let myPendingApprovals = 0;
+  // Steps routed to this person by name AND the Recovery Leave queue steps they may decide (the same rule as the Approvals page). A failed
+  // read is "error", never 0: the tile shows "—" and the greeting says the approvals could not be loaded.
+  let myPendingApprovals: number | "error" = 0;
   try {
-    const { count, error } = await supabase
-      .from("approvals")
-      .select("id", { count: "exact", head: true })
-      .eq("approver_id", session.userId)
-      .eq("decision", "pending");
-    if (error) throw error;
-    myPendingApprovals = count ?? 0;
+    myPendingApprovals = await loadMyPendingApprovalCount(supabase, session);
   } catch (error) {
     logServerError({ route: ROUTE, operation: "count my pending approvals" }, error);
+    myPendingApprovals = "error";
   }
 
   let isMyBirthdayToday = false;
@@ -146,7 +146,8 @@ export default async function DashboardPage() {
   // this only covers the OTHER company-wide queries in this section. Lets
   // the page render everything else (workforce snapshot, action centre for
   // the viewer's own approvals, etc.) instead of crashing the whole page.
-  let hrSectionError = false;
+  // A failed list of companies means the workforce numbers below cannot be trusted either: say so instead of showing 0 employees.
+  let hrSectionError = showHrView && companiesFailed;
 
   if (showHrView) {
     try {
@@ -263,7 +264,9 @@ export default async function DashboardPage() {
   // someone else's work; HR's own creation flow comes next; a plain
   // employee's most common next step is requesting time off.
   const primaryAction: { href: string; label: string; icon: LucideIcon } =
-    myPendingApprovals > 0
+    myPendingApprovals === "error"
+      ? { href: "/approvals", label: "Review approvals", icon: ClipboardCheck }
+      : myPendingApprovals > 0
       ? { href: "/approvals", label: `Review approvals (${myPendingApprovals})`, icon: ClipboardCheck }
       : canAddEmployee
         ? { href: "/employees/new", label: "Add employee", icon: UserPlus }
@@ -292,14 +295,18 @@ export default async function DashboardPage() {
   let projectsCtx: ProjectsContext | null = null;
   try {
     projectsCtx = await getProjectsContext();
-    if (projectsCtx?.installed && projectsCtx.grants.length > 0) projectRows = projectDayRows(await loadProjectsAttention(projectsCtx));
+    // The access lookup itself failed: the Projects card says so, it does not simply disappear.
+    if (projectsCtx?.loadFailed) projectRows = "error";
+    else if (projectsCtx?.installed && projectsCtx.grants.length > 0) projectRows = projectDayRows(await loadProjectsAttention(projectsCtx));
   } catch (e) {
     console.error("[projects] my day load failed", e);
     projectRows = "error";
   }
-  const hasProjects = projectRows !== null && !!projectsCtx?.installed && projectsCtx.grants.length > 0;
+  const hasProjects = projectRows !== null && !!projectsCtx?.installed && (projectsCtx.grants.length > 0 || !!projectsCtx.loadFailed);
   let portfolio: Portfolio | "error" | null = null;
-  if (hasProjects && projectsCtx) {
+  if (hasProjects && projectsCtx?.loadFailed) {
+    portfolio = "error";
+  } else if (hasProjects && projectsCtx) {
     try {
       portfolio = await loadPortfolio(projectsCtx, today);
     } catch (e) {
@@ -320,7 +327,9 @@ export default async function DashboardPage() {
     : [];
   const projectActionItems: ActionItem[] = Array.isArray(projectRows)
     ? projectRows.filter((r) => r.needsYou).map((r) => ({ key: r.key, icon: FolderKanban, label: r.label, count: r.count, href: r.href }))
-    : [];
+    : projectRows === "error"
+      ? [{ key: "proj-error", icon: FolderKanban, label: "Project items could not be loaded", count: 0, href: "/projects/work", error: true }]
+      : [];
 
   // ONE list of what needs attention, from the same authorised data the card shows; the sentence under the greeting is derived
   // from it, so the two can never disagree (Sales follow-ups are in the list, so they count in the sentence too).
@@ -359,7 +368,8 @@ export default async function DashboardPage() {
   } else if (salesToday.status === "error") {
     stats.push(<OsStatCard key="sales" href="/sales/opportunities" label="Open enquiries" value="—" icon={ShoppingBag} edge="cyan" hint="Could not be loaded" />);
   }
-  stats.push(<OsStatCard key="decisions" href="#decisions" label="Decisions waiting" value={decisionsWaiting} icon={ClipboardCheck} edge="amber" />);
+  const approvalsUnknown = myPendingApprovals === "error";
+  stats.push(<OsStatCard key="decisions" href="#decisions" label="Decisions waiting" value={approvalsUnknown ? "—" : decisionsWaiting} icon={ClipboardCheck} edge="amber" hint={approvalsUnknown ? "Could not be loaded" : undefined} />);
   if (equipment && equipment !== "error") {
     stats.push(<OsStatCard key="equipment" href="/inventory/requests" label="Live equipment requests" value={equipment.summary.live} icon={PackageCheck} edge="cyan" hint={equipment.summary.withShortage > 0 ? `${equipment.summary.withShortage} with a shortage` : undefined} />);
   } else if (equipment === "error") {

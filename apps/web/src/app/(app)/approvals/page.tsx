@@ -12,6 +12,9 @@ import { RecoveryWindowEvidence, type WindowEvidenceData } from "./recovery-wind
 import { getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { CLASSIFICATION_LABELS, ROUTE_LABELS, formatHoursMinutes } from "@/lib/recovery/labels";
 import { ClickableRow } from "@/components/workspace/clickable-row";
+import { LoadError } from "@/components/workspace/states";
+import { isQueueDecisionEligible } from "@/lib/approvals/pending";
+import { logServerError } from "@/lib/log";
 
 export const metadata = { title: "Approvals" };
 
@@ -20,6 +23,14 @@ export default async function ApprovalsPage() {
   if (!session) return null;
 
   const supabase = await createClient();
+  // A read that fails is never shown as "nothing waiting": the page says it could not load (the whole page when the approvals
+  // themselves failed, a notice when only a lookup did), and every row it can still show stays.
+  const failedReads: string[] = [];
+  const track = (what: string, error: { message: string } | null | undefined) => {
+    if (!error) return;
+    if (!failedReads.includes(what)) failedReads.push(what);
+    logServerError({ route: "/approvals", operation: `load ${what}` }, error);
+  };
   // approver_id is null for a QUEUE step — the legacy role_queue:% mechanism
   // (still used by manual/overnight-family recovery_credit until the
   // cutover script runs) and the new self-clock queue_roles mechanism (see
@@ -30,12 +41,25 @@ export default async function ApprovalsPage() {
   // eligibility filtering below (queueDecisionEligible) narrows further, to
   // "waiting on YOUR decision" specifically, matching every other entity
   // type's own approver_id-only semantics.
-  const { data: approvals } = await supabase
+  const { data: approvals, error: approvalsError } = await supabase
     .from("approvals")
     .select("id, entity_type, entity_id, step_order, workflow_id, approver_id, queue_roles, created_at")
     .eq("decision", "pending")
     .or(`approver_id.eq.${session.userId},approver_id.is.null`)
     .order("created_at", { ascending: true });
+
+  if (approvalsError) {
+    logServerError({ route: "/approvals", operation: "load pending approvals" }, approvalsError);
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold">Approvals</h1>
+          <p className="text-muted-foreground">Requests waiting on your decision.</p>
+        </div>
+        <LoadError what="your approvals" retryHref="/approvals" />
+      </div>
+    );
+  }
 
   const idsOf = (entityType: string) => (approvals ?? []).filter((a) => a.entity_type === entityType).map((a) => a.entity_id);
 
@@ -46,23 +70,23 @@ export default async function ApprovalsPage() {
   const payrollRunIds = idsOf("payroll_export_run");
   const recoveryCreditIds = idsOf("recovery_credit");
 
-  const [{ data: requests }, { data: claims }, { data: timesheets }, { data: letters }, { data: payrollRuns }, { data: recoveryRequests }] =
+  const [{ data: requests, error: requestsError }, { data: claims, error: claimsError }, { data: timesheets, error: timesheetsError }, { data: letters, error: lettersError }, { data: payrollRuns, error: payrollError }, { data: recoveryRequests, error: recoveryError }] =
     await Promise.all([
       leaveRequestIds.length > 0
         ? supabase.from("leave_requests").select("id, employee_id, leave_type_code, start_date, end_date, total_days, reason").in("id", leaveRequestIds)
-        : Promise.resolve({ data: [] as never[] }),
+        : Promise.resolve({ data: [] as never[], error: null }),
       claimIds.length > 0
         ? supabase.from("reimbursement_claims").select("id, employee_id, claim_date, currency, total_amount").in("id", claimIds)
-        : Promise.resolve({ data: [] as never[] }),
+        : Promise.resolve({ data: [] as never[], error: null }),
       timesheetIds.length > 0
         ? supabase.from("timesheets").select("id, employee_id, period_start, period_end").in("id", timesheetIds)
-        : Promise.resolve({ data: [] as never[] }),
+        : Promise.resolve({ data: [] as never[], error: null }),
       letterIds.length > 0
         ? supabase.from("generated_letters").select("id, employee_id, template_id").in("id", letterIds)
-        : Promise.resolve({ data: [] as never[] }),
+        : Promise.resolve({ data: [] as never[], error: null }),
       payrollRunIds.length > 0
         ? supabase.from("payroll_export_runs").select("id, period_month, period_year").in("id", payrollRunIds)
-        : Promise.resolve({ data: [] as never[] }),
+        : Promise.resolve({ data: [] as never[], error: null }),
       recoveryCreditIds.length > 0
         ? supabase
             .from("recovery_credit_requests")
@@ -70,8 +94,15 @@ export default async function ApprovalsPage() {
               "id, employee_id, attendance_record_id, segment_id, work_date, event_type, proposed_days, correction_reason, checked_with, corrected_at, work_mode, project_name, project_lead_employee_id, applicant_route, needs_policy_review, routing_issue, recovery_window_id, window_revision_no, adjusts_request_id, consumption_ack_at",
             )
             .in("id", recoveryCreditIds)
-        : Promise.resolve({ data: [] as never[] }),
+        : Promise.resolve({ data: [] as never[], error: null }),
     ]);
+
+  track("leave requests", requestsError);
+  track("reimbursement claims", claimsError);
+  track("timesheets", timesheetsError);
+  track("letters", lettersError);
+  track("payroll runs", payrollError);
+  track("Recovery Leave requests", recoveryError);
 
   // recovery_credit_requests.work_date/proposed_days are the CURRENT
   // (possibly HR-corrected) values — the ORIGINAL, unedited hours come from
@@ -79,18 +110,20 @@ export default async function ApprovalsPage() {
   // original vs. corrected side by side without ever overwriting the
   // evidence.
   const attendanceRecordIds = [...new Set((recoveryRequests ?? []).map((r) => r.attendance_record_id).filter((id): id is string => id !== null))];
-  const { data: attendanceRecords } =
+  const { data: attendanceRecords, error: attendanceError } =
     attendanceRecordIds.length > 0
       ? await supabase
           .from("attendance_records")
           .select("id, work_date, hours_worked, active_hours_after_midnight, source")
           .in("id", attendanceRecordIds)
-      : { data: [] as never[] };
+      : { data: [] as never[], error: null };
+  track("attendance evidence", attendanceError);
   const attendanceById = new Map((attendanceRecords ?? []).map((a) => [a.id, a]));
 
   const templateIds = [...new Set((letters ?? []).map((l) => l.template_id))];
-  const { data: templates } =
-    templateIds.length > 0 ? await supabase.from("letter_templates").select("id, name").in("id", templateIds) : { data: [] as never[] };
+  const { data: templates, error: templatesError } =
+    templateIds.length > 0 ? await supabase.from("letter_templates").select("id, name").in("id", templateIds) : { data: [] as never[], error: null };
+  track("letter names", templatesError);
   const templateName = new Map((templates ?? []).map((t) => [t.id, t.name]));
 
   const employeeIds = [
@@ -98,20 +131,21 @@ export default async function ApprovalsPage() {
       [...(requests ?? []), ...(claims ?? []), ...(timesheets ?? []), ...(letters ?? []), ...(recoveryRequests ?? [])].map((r) => r.employee_id),
     ),
   ];
-  const { data: employees } =
+  const { data: employees, error: employeesError } =
     employeeIds.length > 0
       ? await supabase.from("employees").select("id, first_name, last_name, company_id, country_code").in("id", employeeIds)
-      : { data: [] as never[] };
+      : { data: [] as never[], error: null };
+  track("employee names", employeesError);
   const employeeById = new Map((employees ?? []).map((e) => [e.id, e]));
   const employeeName = (id: string) => {
     const e = employeeById.get(id);
-    return e ? `${e.first_name} ${e.last_name}` : "—";
+    return e ? `${e.first_name} ${e.last_name}` : employeesError ? "Name not loaded" : "—";
   };
 
   // ---- Window-based Recovery Leave requests: the full evidence an approver needs ----
   const windowRequests = (recoveryRequests ?? []).filter((r) => r.recovery_window_id);
   const windowIds = [...new Set(windowRequests.map((r) => r.recovery_window_id!))];
-  const [{ data: windowRows }, { data: allocationRows }, { data: revisionRows }, { data: stepRows }] = await Promise.all([
+  const [{ data: windowRows, error: windowError }, { data: allocationRows, error: allocationError }, { data: revisionRows, error: revisionError }, { data: stepRows, error: stepError }] = await Promise.all([
     windowIds.length > 0
       ? supabase
           .from("recovery_windows")
@@ -119,21 +153,21 @@ export default async function ApprovalsPage() {
             "id, period_id, window_index, window_start, window_end, starting_local_date, classification, holiday_name, recorded_seconds, status, closed_reason, entitlement_days, review_flags, hr_verification_required, hr_verified_at, hr_verification_note, revision_no, policy_version_id",
           )
           .in("id", windowIds)
-      : Promise.resolve({ data: [] as never[] }),
+      : Promise.resolve({ data: [] as never[], error: null }),
     windowIds.length > 0
       ? supabase
           .from("recovery_window_allocations")
           .select("id, window_id, session_id, work_mode, project_name, project_lead_employee_id, alloc_start, alloc_end, seconds")
           .in("window_id", windowIds)
           .order("alloc_start")
-      : Promise.resolve({ data: [] as never[] }),
+      : Promise.resolve({ data: [] as never[], error: null }),
     windowIds.length > 0
       ? supabase
           .from("recovery_window_revisions")
           .select("window_id, revision_no, recorded_seconds, entitlement_days, reason, origin, created_at")
           .in("window_id", windowIds)
           .order("revision_no")
-      : Promise.resolve({ data: [] as never[] }),
+      : Promise.resolve({ data: [] as never[], error: null }),
     windowRequests.length > 0
       ? supabase
           .from("approvals")
@@ -141,33 +175,36 @@ export default async function ApprovalsPage() {
           .eq("entity_type", "recovery_credit")
           .in("entity_id", windowRequests.map((r) => r.id))
           .order("step_order")
-      : Promise.resolve({ data: [] as never[] }),
+      : Promise.resolve({ data: [] as never[], error: null }),
   ]);
+  track("Recovery Leave evidence", windowError ?? allocationError ?? revisionError ?? stepError);
   const periodIds = [...new Set((windowRows ?? []).map((w) => w.period_id))];
   const sessionIdsForWindows = [...new Set((allocationRows ?? []).map((a) => a.session_id))];
   const policyIds = [...new Set((windowRows ?? []).map((w) => w.policy_version_id))];
-  const [{ data: periodRows }, { data: sessionHrRows }, { data: policyRows }, { data: correctionRows }] = await Promise.all([
-    periodIds.length > 0 ? supabase.from("recovery_periods").select("id, started_at, rules").in("id", periodIds) : Promise.resolve({ data: [] as never[] }),
-    sessionIdsForWindows.length > 0 ? supabase.from("attendance_sessions").select("id, recorded_by_hr").in("id", sessionIdsForWindows) : Promise.resolve({ data: [] as never[] }),
-    policyIds.length > 0 ? supabase.from("policy_versions").select("id, version_no").in("id", policyIds) : Promise.resolve({ data: [] as never[] }),
+  const [{ data: periodRows, error: periodError }, { data: sessionHrRows, error: sessionHrError }, { data: policyRows, error: policyError }, { data: correctionRows, error: correctionError }] = await Promise.all([
+    periodIds.length > 0 ? supabase.from("recovery_periods").select("id, started_at, rules").in("id", periodIds) : Promise.resolve({ data: [] as never[], error: null }),
+    sessionIdsForWindows.length > 0 ? supabase.from("attendance_sessions").select("id, recorded_by_hr").in("id", sessionIdsForWindows) : Promise.resolve({ data: [] as never[], error: null }),
+    policyIds.length > 0 ? supabase.from("policy_versions").select("id, version_no").in("id", policyIds) : Promise.resolve({ data: [] as never[], error: null }),
     sessionIdsForWindows.length > 0
       ? supabase
           .from("attendance_session_corrections")
           .select("id, session_id, reason, created_at, original_clock_in_at, original_clock_out_at, corrected_clock_in_at, corrected_clock_out_at, actor_id")
           .in("session_id", sessionIdsForWindows)
           .order("created_at")
-      : Promise.resolve({ data: [] as never[] }),
+      : Promise.resolve({ data: [] as never[], error: null }),
   ]);
+  track("Recovery Leave evidence", periodError ?? sessionHrError ?? policyError ?? correctionError);
   const leadAndActorIds = [
     ...new Set([
       ...(allocationRows ?? []).map((a) => a.project_lead_employee_id).filter((id): id is string => !!id),
     ]),
   ];
   const actorUserIds = [...new Set((correctionRows ?? []).map((c) => c.actor_id))];
-  const [{ data: leadEmployees }, { data: actorEmployees }] = await Promise.all([
-    leadAndActorIds.length > 0 ? supabase.from("employees").select("id, first_name, last_name").in("id", leadAndActorIds) : Promise.resolve({ data: [] as never[] }),
-    actorUserIds.length > 0 ? supabase.from("employees").select("user_id, first_name, last_name").in("user_id", actorUserIds) : Promise.resolve({ data: [] as never[] }),
+  const [{ data: leadEmployees, error: leadError }, { data: actorEmployees, error: actorError }] = await Promise.all([
+    leadAndActorIds.length > 0 ? supabase.from("employees").select("id, first_name, last_name").in("id", leadAndActorIds) : Promise.resolve({ data: [] as never[], error: null }),
+    actorUserIds.length > 0 ? supabase.from("employees").select("user_id, first_name, last_name").in("user_id", actorUserIds) : Promise.resolve({ data: [] as never[], error: null }),
   ]);
+  track("Recovery Leave evidence", leadError ?? actorError);
   const leadNameById = new Map((leadEmployees ?? []).map((e) => [e.id, `${e.first_name} ${e.last_name}`]));
   const actorNameByUser = new Map((actorEmployees ?? []).map((e) => [e.user_id, `${e.first_name} ${e.last_name}`]));
   const windowById = new Map((windowRows ?? []).map((w) => [w.id, w]));
@@ -175,7 +212,11 @@ export default async function ApprovalsPage() {
   const policyVersionById = new Map((policyRows ?? []).map((p) => [p.id, p.version_no]));
   const hrSessionIds = new Set((sessionHrRows ?? []).filter((s) => s.recorded_by_hr).map((s) => s.id));
   const blockerEntries = await Promise.all(
-    windowRequests.map(async (r) => [r.id, (await supabase.rpc("get_recovery_request_blocker", { p_request_id: r.id })).data ?? null] as const),
+    windowRequests.map(async (r) => {
+      const blocker = await supabase.rpc("get_recovery_request_blocker", { p_request_id: r.id });
+      track("Recovery Leave checks", blocker.error);
+      return [r.id, blocker.data ?? null] as const;
+    }),
   );
   const blockerByRequest = new Map(blockerEntries);
 
@@ -183,7 +224,7 @@ export default async function ApprovalsPage() {
   // employee's own clock segments for that local date — previously these showed a blank "—".
   const legacySelfClock = (recoveryRequests ?? []).filter((r) => r.attendance_record_id === null && !r.recovery_window_id);
   const legacyEmployeeIds = [...new Set(legacySelfClock.map((r) => r.employee_id))];
-  const { data: legacySegments } =
+  const { data: legacySegments, error: segmentsError } =
     legacyEmployeeIds.length > 0
       ? await supabase
           .from("attendance_segments")
@@ -192,7 +233,8 @@ export default async function ApprovalsPage() {
           .not("segment_end", "is", null)
           .gte("segment_start", new Date(Math.min(...legacySelfClock.map((r) => new Date(`${r.work_date}T00:00:00Z`).getTime())) - 26 * 3600_000).toISOString())
           .lte("segment_start", new Date(Math.max(...legacySelfClock.map((r) => new Date(`${r.work_date}T00:00:00Z`).getTime())) + 50 * 3600_000).toISOString())
-      : { data: [] as { employee_id: string; segment_start: string; segment_end: string | null }[] };
+      : { data: [] as { employee_id: string; segment_start: string; segment_end: string | null }[], error: null };
+  track("clock evidence", segmentsError);
   function selfClockRecordedHours(request: { employee_id: string; work_date: string }): number | null {
     const tz = resolveCountryTimeZone(employeeById.get(request.employee_id)?.country_code);
     const seconds = (legacySegments ?? [])
@@ -210,23 +252,26 @@ export default async function ApprovalsPage() {
   // through comp-day for the employee's company/country as of the
   // request's start date.
   const leaveTypeCodes = [...new Set((requests ?? []).map((r) => r.leave_type_code))];
-  const [{ data: leaveBalances }, { data: compDayBalances }, { data: deductionRules }] = await Promise.all([
+  const [{ data: leaveBalances, error: leaveBalanceError }, { data: compDayBalances, error: compDayError }, { data: deductionRules, error: rulesError }] = await Promise.all([
     employeeIds.length > 0 && leaveTypeCodes.length > 0
       ? supabase.from("leave_balances").select("employee_id, leave_type_code, balance_days").in("employee_id", employeeIds).in("leave_type_code", leaveTypeCodes)
-      : Promise.resolve({ data: [] as never[] }),
+      : Promise.resolve({ data: [] as never[], error: null }),
     employeeIds.length > 0
       ? supabase.from("comp_day_balances").select("employee_id, balance_days").in("employee_id", employeeIds)
-      : Promise.resolve({ data: [] as never[] }),
+      : Promise.resolve({ data: [] as never[], error: null }),
     leaveTypeCodes.length > 0
       ? supabase.from("deduction_priority_rules").select("company_id, country_code, leave_type_code, source_ledger, effective_from").in("leave_type_code", leaveTypeCodes)
-      : Promise.resolve({ data: [] as never[] }),
+      : Promise.resolve({ data: [] as never[], error: null }),
   ]);
+  // When a balance read failed the page cannot tell enough from short, so it says that instead of flagging every request.
+  const balanceCheckFailed = !!(leaveBalanceError || compDayError || rulesError);
+  track("leave balances", leaveBalanceError ?? compDayError ?? rulesError);
   const leaveBalanceByKey = new Map((leaveBalances ?? []).map((b) => [`${b.employee_id}:${b.leave_type_code}`, Number(b.balance_days)]));
   const compDayBalanceByEmployee = new Map((compDayBalances ?? []).map((b) => [b.employee_id, Number(b.balance_days)]));
 
   function hasInsufficientBalance(request: { employee_id: string; leave_type_code: string; start_date: string; total_days: number | string }): boolean {
     const employee = employeeById.get(request.employee_id);
-    if (!employee) return false;
+    if (!employee || balanceCheckFailed) return false;
     const leaveBalance = leaveBalanceByKey.get(`${request.employee_id}:${request.leave_type_code}`) ?? 0;
     const usesCompDay = (deductionRules ?? []).some(
       (r) =>
@@ -253,7 +298,7 @@ export default async function ApprovalsPage() {
   const legacyQueueApprovals = (approvals ?? []).filter(
     (a) => a.entity_type === "recovery_credit" && a.queue_roles === null && a.workflow_id !== null,
   );
-  const { data: legacyWorkflowSteps } =
+  const { data: legacyWorkflowSteps, error: workflowStepsError } =
     legacyQueueApprovals.length > 0
       ? await supabase
           .from("approval_workflow_steps")
@@ -262,7 +307,8 @@ export default async function ApprovalsPage() {
             "workflow_id",
             legacyQueueApprovals.map((a) => a.workflow_id!),
           )
-      : { data: [] as { workflow_id: string; step_order: number; approver_type: string }[] };
+      : { data: [] as { workflow_id: string; step_order: number; approver_type: string }[], error: null };
+  track("approval routing", workflowStepsError);
   const legacyRoleByWorkflowStep = new Map(
     (legacyWorkflowSteps ?? [])
       .filter((s) => s.approver_type.startsWith("role_queue:"))
@@ -286,13 +332,14 @@ export default async function ApprovalsPage() {
   function queueDecisionEligible(a: { entity_id: string; workflow_id: string | null; step_order: number; queue_roles: string[] | null }): boolean {
     const recoveryRequest = recoveryRequestById.get(a.entity_id);
     if (!recoveryRequest) return false;
-    if (recoveryRequest.employee_id === session!.employeeId) return false;
-    const companyId = employeeById.get(recoveryRequest.employee_id)?.company_id;
-    if (!companyId) return false;
-    const roles =
-      a.queue_roles ??
-      (legacyRoleByWorkflowStep.has(`${a.workflow_id}:${a.step_order}`) ? [legacyRoleByWorkflowStep.get(`${a.workflow_id}:${a.step_order}`)!] : []);
-    return roles.some((role) => session!.grants.some((g) => g.role === role && (g.companyId === null || g.companyId === companyId)));
+    const legacyRole = legacyRoleByWorkflowStep.get(`${a.workflow_id}:${a.step_order}`);
+    return isQueueDecisionEligible({
+      roles: a.queue_roles ?? (legacyRole ? [legacyRole] : []),
+      beneficiaryEmployeeId: recoveryRequest.employee_id,
+      beneficiaryCompanyId: employeeById.get(recoveryRequest.employee_id)?.company_id,
+      viewerEmployeeId: session!.employeeId,
+      grants: session!.grants,
+    });
   }
 
   const recoveryApprovals = (approvals ?? []).filter((a) => {
@@ -343,18 +390,20 @@ export default async function ApprovalsPage() {
   // sync_attendance_recovery_for_day()'s own doc comment in schema.sql —
   // so they would otherwise be entirely invisible on this page. HR sees
   // them here as an UNRESOLVED review state, never silently dropped.
-  const { data: unresolvedRecoveryRequestsRaw } = await supabase
+  const { data: unresolvedRecoveryRequestsRaw, error: unresolvedError } = await supabase
     .from("recovery_credit_requests")
     .select("id, employee_id, status, work_date, event_type, proposed_days, work_mode, project_name, applicant_route, awaiting_project_lead, routing_issue")
     .or("awaiting_project_lead.eq.true,routing_issue.not.is.null");
+  track("unresolved Recovery Leave requests", unresolvedError);
   const unresolvedRecoveryRequests = (unresolvedRecoveryRequestsRaw ?? []).filter(
     (r) => !["cancelled", "rejected", "approved"].includes(r.status),
   );
   const unresolvedEmployeeIds = [...new Set(unresolvedRecoveryRequests.map((r) => r.employee_id))];
-  const { data: unresolvedEmployees } =
+  const { data: unresolvedEmployees, error: unresolvedEmployeesError } =
     unresolvedEmployeeIds.length > 0
       ? await supabase.from("employees").select("id, first_name, last_name, company_id").in("id", unresolvedEmployeeIds)
-      : { data: [] as { id: string; first_name: string; last_name: string; company_id: string }[] };
+      : { data: [] as { id: string; first_name: string; last_name: string; company_id: string }[], error: null };
+  track("unresolved Recovery Leave requests", unresolvedEmployeesError);
   const unresolvedEmployeeById = new Map((unresolvedEmployees ?? []).map((e) => [e.id, e]));
   const visibleUnresolvedRequests = unresolvedRecoveryRequests.filter((r) => {
     const companyId = unresolvedEmployeeById.get(r.employee_id)?.company_id;
@@ -392,7 +441,9 @@ export default async function ApprovalsPage() {
         <p className="text-muted-foreground">Requests waiting on your decision.</p>
       </div>
 
-      {nothingPending ? (
+      {failedReads.length > 0 ? <LoadError what={`part of your approvals (${failedReads.join(", ")})`} retryHref="/approvals" /> : null}
+
+      {nothingPending && failedReads.length === 0 ? (
         <Card>
           <CardContent>
             <EmptyState dense title="Nothing waiting on you right now." description="Requests routed to you for approval will show up here." />
@@ -432,6 +483,11 @@ export default async function ApprovalsPage() {
                       <TableCell>
                         <div className="flex items-center gap-2">
                           {request.total_days}
+                          {balanceCheckFailed ? (
+                            <Badge variant="outline" title="The balance could not be loaded, so this request was not checked against it.">
+                              Balance could not be checked
+                            </Badge>
+                          ) : null}
                           {insufficientBalance ? (
                             <Badge variant="destructive" title="This employee's available balance for this leave type won't cover the full request — approving will draw it negative.">
                               Insufficient balance

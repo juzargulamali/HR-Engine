@@ -3,10 +3,10 @@ import { Alert } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 
 /** A failed load. It says so and offers a retry: an error is never shown as "no records". */
-export function LoadError({ what, retryHref }: { what: string; retryHref?: string }) {
+export function LoadError({ what, retryHref, note }: { what: string; retryHref?: string; note?: string }) {
   return (
     <Alert variant="destructive">
-      Could not load {what}. This is a problem loading the information, not an empty list.{" "}
+      Could not load {what}. {note ?? "This is a problem loading the information, not an empty list."}{" "}
       {retryHref ? <Link href={retryHref} className="font-medium underline underline-offset-2">Try again</Link> : "Reload the page; if it keeps happening, tell an administrator."}
     </Alert>
   );
