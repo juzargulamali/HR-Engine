@@ -12,7 +12,7 @@ import { OsBadge } from "@/components/os/pills";
 import { Panel, Muted } from "@/components/projects/parts";
 import { closeSettlement, confirmReceipts, recordPayment, recordReceipts, reopenSettlement, reversePayment } from "@/lib/actions/projectBudget";
 import type { PbxBudgetView, PbxPayment } from "@/types/budget";
-import { ActionMessage, Field, Figure, cleanDecimal, day, money, stamp, useAction } from "./shared";
+import { ActionMessage, Field, Figure, TO_RETURN_HINT, advanceToReturnText, cleanDecimal, day, money, stamp, useAction } from "./shared";
 import { todayIn } from "./funds-section";
 
 /** Where Finance submitted the expenses, Finance only declares that receipts arrived; an independent CEO / CTO approver confirms them. */
@@ -209,7 +209,7 @@ export function SettlementSection({ view }: { view: PbxBudgetView }) {
         <Figure label="Receipts" value={RECEIPT_LABELS[budget.receipts_status]} />
         <Figure label="Advances provided" value={money(s.advances_provided, currency)} hint="Cash / bank money held by people" />
         <Figure label="Spent from advances" value={money(s.advance_spent, currency)} />
-        <Figure label="Advance still to be returned" value={money(s.advance_to_return, currency)} hint={`Returned so far ${money(s.returned, currency)}`} />
+        <Figure label="Advance still to be returned" value={advanceToReturnText(s.has_approved_actuals, s.advance_to_return, currency)} hint={s.has_approved_actuals ? `Returned so far ${money(s.returned, currency)}` : TO_RETURN_HINT} />
         <Figure label="Reimbursement still owed" value={money(s.reimbursement_outstanding, currency)} hint={`Owed ${money(s.reimbursement_owed, currency)} · paid ${money(s.reimbursement_paid, currency)}`} />
         <Figure label="Company card and Pluto spending" value={money(s.company_card_spent, currency)} hint={`Allocated ${money(s.card_allocations, currency)} (not owed back)`} />
         <Figure label="Paid directly by the company" value={money(s.direct_paid, currency)} />
@@ -230,7 +230,7 @@ export function SettlementSection({ view }: { view: PbxBudgetView }) {
                   <TableCell className="text-right tabular-nums">{money(p.advance_provided, currency)}</TableCell>
                   <TableCell className="text-right tabular-nums">{money(p.advance_spent, currency)}</TableCell>
                   <TableCell className="text-right tabular-nums">{money(p.returned, currency)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{money(p.advance_to_return, currency)}</TableCell>
+                  <TableCell className="text-right tabular-nums" title={s.has_approved_actuals ? undefined : TO_RETURN_HINT}>{advanceToReturnText(s.has_approved_actuals, p.advance_to_return, currency)}{s.has_approved_actuals ? null : <span className="sr-only"> {TO_RETURN_HINT}</span>}</TableCell>
                   <TableCell className="text-right tabular-nums">{money(p.reimbursement_owed, currency)}</TableCell>
                   <TableCell className="text-right tabular-nums">{money(p.reimbursement_paid, currency)}</TableCell>
                   <TableCell className="text-right tabular-nums">{money(p.reimbursement_outstanding, currency)}</TableCell>
@@ -238,6 +238,7 @@ export function SettlementSection({ view }: { view: PbxBudgetView }) {
               ))}
             </TableBody>
           </Table>
+          {s.has_approved_actuals ? null : <p className="mt-2 text-[12px] text-muted-foreground">Still to return: {TO_RETURN_HINT.toLowerCase()}.</p>}
         </Panel>
       ) : null}
 

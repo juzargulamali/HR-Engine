@@ -10,7 +10,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Table, TableBody, TableCell, TableHead, TableHeader } from "@/components/ui/table";
 import { ClickableRow } from "@/components/workspace/clickable-row";
 import type { PbxInbox, PbxInboxActuals, PbxInboxBase, PbxInboxBudget, PbxInboxSettlement } from "@/types/budget";
-import { money, stamp } from "./shared";
+import { TO_RETURN_HINT, advanceToReturnText, money, stamp } from "./shared";
 
 type Filter = "all" | "budget" | "actuals" | "settlement";
 
@@ -82,7 +82,7 @@ function SettlementTable({ rows }: { rows: PbxInboxSettlement[] }) {
             <Project r={r} section="settlement" />
             <TableCell>{r.pm_name ?? "—"}</TableCell>
             <TableCell className="text-right tabular-nums">{r.has_approved_actuals ? money(num(r.approved_actual_total), r.currency) : "Not approved"}</TableCell>
-            <TableCell className="text-right tabular-nums">{money(num(r.advance_to_return), r.currency)}</TableCell>
+            <TableCell className="text-right tabular-nums" title={r.has_approved_actuals ? undefined : TO_RETURN_HINT}>{advanceToReturnText(r.has_approved_actuals, num(r.advance_to_return), r.currency)}{r.has_approved_actuals ? null : <span className="block text-[11px] font-normal text-muted-foreground">{TO_RETURN_HINT}</span>}</TableCell>
             <TableCell className="text-right tabular-nums">{money(num(r.reimbursement_outstanding), r.currency)}</TableCell>
             <TableCell>{RECEIPT_LABELS[r.receipts_status]}</TableCell>
             <TableCell className="text-[13px]">

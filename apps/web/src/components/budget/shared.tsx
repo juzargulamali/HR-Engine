@@ -16,6 +16,17 @@ export const money = (amount: number | string | null | undefined, currency: stri
   return Number.isFinite(n) ? moneyText(n, currency) : "—";
 };
 
+/**
+ * "Advance still to be returned" is only a real figure once approved final expenses exist (before that the database
+ * subtracts nothing spent, so it equals the whole advance). Until then every surface shows this instead of a number.
+ */
+export const TO_RETURN_HINT = "Known once the final expenses are approved";
+
+/** The advance still to be returned: the figure when final expenses are approved, otherwise a dash that carries the reason. */
+export function advanceToReturnText(hasApprovedActuals: boolean, amount: number | string | null | undefined, currency: string): string {
+  return hasApprovedActuals ? money(amount, currency) : "—";
+}
+
 /** A calendar date typed as YYYY-MM-DD, written the way the rest of the application writes it. Dates have no time zone: they are the project's own days. */
 export const day = (d: string | null | undefined): string => {
   if (!d) return "—";
