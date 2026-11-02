@@ -1,3 +1,4 @@
+import { LoadError } from "@/components/workspace/states";
 import { canManageHolidays } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
@@ -24,11 +25,13 @@ export default async function HolidaysPage() {
   if (!session) return null;
 
   const supabase = await createClient();
-  const [{ data: holidays }, { data: countries }] = await Promise.all([
+  const [{ data: holidays, error: holidaysError }, { data: countries, error: countriesError }] = await Promise.all([
     supabase.from("public_holidays").select("id, country_code, holiday_date, name").order("holiday_date"),
     supabase.from("countries").select("code, name").order("name"),
   ]);
 
+  // A failed read is not "No holidays on the calendar yet".
+  if (holidaysError || countriesError) return <LoadError what="the public holidays" retryHref="/holidays" />;
   const countryName = new Map((countries ?? []).map((c) => [c.code, c.name]));
   const manageableCountries = (countries ?? []).filter((c) => canManageHolidays(session.grants, c.code));
 

@@ -105,7 +105,9 @@ export function OrganisationPicker({
   );
 }
 
-export function DuplicateWarning({ matches, onDismiss }: { matches: DuplicateMatch[]; onDismiss: (id: string) => void }) {
+export function DuplicateWarning({ matches, onDismiss, checkFailed = false }: { matches: DuplicateMatch[]; onDismiss: (id: string) => void; checkFailed?: boolean }) {
+  // A failed check is not "no duplicates": say so, and ask for a look at the existing enquiries (still a warning, never a block).
+  if (checkFailed) return <Alert variant="warning" role="status">Could not check for duplicates. Look at the existing enquiries before you save this one.</Alert>;
   if (matches.length === 0) return null;
   return (
     <section aria-label="Possible duplicate enquiry" role="status" className="space-y-3 rounded-lg border border-warning/50 bg-warning/10 p-4">
@@ -201,6 +203,7 @@ export function NewEnquiryForm({
 
   // Duplicate check: debounced, on the things that identify the job. Organisation overlap alone never flags (domain scoring).
   const [matches, setMatches] = useState<DuplicateMatch[]>([]);
+  const [dupFailed, setDupFailed] = useState(false);
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
   const hasSignal = !!agencyId || !!clientId || !!eventStart || !!installStart || location.trim() !== "";
   useEffect(() => {
@@ -216,8 +219,8 @@ export function NewEnquiryForm({
         location: location.trim() || null,
         technologies: tech.items.filter((t) => t.qty >= 1),
       })
-        .then((found) => { if (!cancelled) setMatches(found); })
-        .catch(() => { if (!cancelled) setMatches([]); });
+        .then((found) => { if (!cancelled) { setMatches(found); setDupFailed(false); } })
+        .catch(() => { if (!cancelled) { setMatches([]); setDupFailed(true); } });
     }, 700);
     return () => {
       cancelled = true;
@@ -331,7 +334,7 @@ export function NewEnquiryForm({
             </fieldset>
           </Section>
 
-          <DuplicateWarning matches={shownMatches} onDismiss={(id) => setDismissed((prev) => new Set(prev).add(id))} />
+          <DuplicateWarning matches={shownMatches} checkFailed={hasSignal && dupFailed} onDismiss={(id) => setDismissed((prev) => new Set(prev).add(id))} />
 
           <Section title="Next action and owner" description="Every enquiry needs an owner and a next step with a date, so nothing is left waiting.">
             <Field label="Next action" htmlFor="enq-next-title" hint="For example “Call to qualify the brief”.">

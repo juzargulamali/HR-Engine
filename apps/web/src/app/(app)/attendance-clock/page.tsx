@@ -1,3 +1,4 @@
+import { LoadError } from "@/components/workspace/states";
 import { CalendarClock, MapPin } from "lucide-react";
 import { resolveCountryTimeZone, formatBusinessTime } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
@@ -50,6 +51,9 @@ export default async function AttendanceClockPage() {
   const session = await getCurrentSession();
   if (!session) return null; // guarded by the layout above
 
+  // A failed role / employee read is not "no employee record": say it could not load.
+  if (session.loadFailed) return <LoadError what="your account" />;
+
   if (!session.employeeId) {
     return (
       <div className="space-y-6">
@@ -70,7 +74,7 @@ export default async function AttendanceClockPage() {
   const { data: employee } = await supabase.from("employees").select("company_id, country_code").eq("id", employeeId).maybeSingle();
   const timeZone = resolveCountryTimeZone(employee?.country_code);
 
-  const [{ data: openSession }, { data: colleagues }, { data: recentSessions }, { data: awaitingLeadRequests }] = await Promise.all([
+  const [{ data: openSession, error: openSessionError }, { data: colleagues }, { data: recentSessions }, { data: awaitingLeadRequests }] = await Promise.all([
     supabase
       .from("attendance_sessions")
       .select("id, clock_in_at, status")
@@ -98,6 +102,18 @@ export default async function AttendanceClockPage() {
       .eq("employee_id", employeeId)
       .eq("awaiting_project_lead", true),
   ]);
+
+  // A failed read is not "not clocked in": no Clock in button is offered on an unknown state (the database also blocks a second open session).
+  if (openSessionError) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold">My Attendance Clock</h1>
+        </div>
+        <LoadError what="your clock status" retryHref="/attendance-clock" note="Reload before clocking in; this is a problem loading the information, not a status of Not started." />
+      </div>
+    );
+  }
 
   let openSegment: {
     id: string;

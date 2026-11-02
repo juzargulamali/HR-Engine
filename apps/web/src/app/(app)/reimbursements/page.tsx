@@ -1,3 +1,4 @@
+import { LoadError } from "@/components/workspace/states";
 import Link from "next/link";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
@@ -16,6 +17,9 @@ export default async function ReimbursementsPage() {
   const session = await getCurrentSession();
   if (!session) return null;
 
+  // A failed role / employee read is not "no employee record": say it could not load.
+  if (session.loadFailed) return <LoadError what="your account" />;
+
   if (!session.employeeId) {
     return (
       <Card>
@@ -30,7 +34,7 @@ export default async function ReimbursementsPage() {
   }
 
   const supabase = await createClient();
-  const [{ data: claims }, { data: employee }] = await Promise.all([
+  const [{ data: claims, error: claimsError }, { data: employee, error: employeeError }] = await Promise.all([
     supabase
       .from("reimbursement_claims")
       .select("id, claim_date, currency, total_amount, status")
@@ -39,11 +43,15 @@ export default async function ReimbursementsPage() {
     supabase.from("employees").select("company_id").eq("id", session.employeeId).single(),
   ]);
 
-  let defaultCurrency = "AED";
+  // The currency comes from the company; when it cannot be read the form is not shown with a made-up "AED".
+  let defaultCurrency: string | null = "AED";
+  let currencyFailed = !!employeeError;
   if (employee) {
-    const { data: company } = await supabase.from("companies").select("default_currency").eq("id", employee.company_id).single();
-    if (company) defaultCurrency = company.default_currency;
+    const { data: company, error: companyError } = await supabase.from("companies").select("default_currency").eq("id", employee.company_id).single();
+    if (companyError) currencyFailed = true;
+    else if (company) defaultCurrency = company.default_currency;
   }
+  if (currencyFailed) defaultCurrency = null;
 
   return (
     <div className="space-y-6">
@@ -58,7 +66,7 @@ export default async function ReimbursementsPage() {
           <CardTitle>Start a new claim</CardTitle>
         </CardHeader>
         <CardContent>
-          <NewClaimForm defaultCurrency={defaultCurrency} />
+          {defaultCurrency === null ? <LoadError what="your company's currency" retryHref="/reimbursements" note="This is a problem loading the information, so the form is not shown with a guessed currency." /> : <NewClaimForm defaultCurrency={defaultCurrency} />}
         </CardContent>
       </Card>
 
@@ -67,6 +75,7 @@ export default async function ReimbursementsPage() {
           <CardTitle>My claims</CardTitle>
         </CardHeader>
         <CardContent>
+          {claimsError ? <LoadError what="your claims" retryHref="/reimbursements" note="This is a problem loading the information, not an empty list. Do not start a duplicate claim until it loads." /> : (
           <Table stack>
             <TableHeader>
               <TableRow>
@@ -103,6 +112,7 @@ export default async function ReimbursementsPage() {
               ) : null}
             </TableBody>
           </Table>
+          )}
         </CardContent>
       </Card>
     </div>

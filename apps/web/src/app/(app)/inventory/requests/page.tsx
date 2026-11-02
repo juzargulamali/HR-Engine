@@ -77,15 +77,19 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
   }
   const location = locations.some((l) => l.id === firstParam(sp, "location")) ? firstParam(sp, "location") : "";
 
-  const [quickScope, availabilityScope] = await Promise.all([
-    buildQuickAddScope(ctx, locations).catch(() => null),
-    buildAvailabilityScope(ctx, locations).catch(() => null),
-  ]);
+  // A failed scope read is not "you may not add requests": the header says the buttons could not be loaded.
+  const [quickRes, availabilityRes] = await Promise.allSettled([buildQuickAddScope(ctx, locations), buildAvailabilityScope(ctx, locations)]);
+  const scopeFailed = quickRes.status === "rejected" || availabilityRes.status === "rejected";
+  if (quickRes.status === "rejected") console.error("[inventory] quick-add scope failed", quickRes.reason);
+  if (availabilityRes.status === "rejected") console.error("[inventory] availability scope failed", availabilityRes.reason);
+  const quickScope = quickRes.status === "fulfilled" ? quickRes.value : null;
+  const availabilityScope = availabilityRes.status === "fulfilled" ? availabilityRes.value : null;
   const canAdd = !!quickScope && (quickScope.projects.length > 0 || quickScope.companies.some((c) => c.canEmployee));
   const header = (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h1 className="text-2xl font-semibold">Equipment requests</h1>
       <div className="flex flex-wrap items-center gap-2">
+        {scopeFailed ? <span role="status" className="text-sm text-destructive">Some buttons could not be loaded. Reload the page.</span> : null}
         {availabilityScope && availabilityScope.locations.length > 0 ? <AvailabilityButton scope={availabilityScope} /> : null}
         {canAdd && quickScope ? <RequestsQuickAdd scope={quickScope} /> : null}
       </div>

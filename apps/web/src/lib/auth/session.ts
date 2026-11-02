@@ -8,6 +8,11 @@ export interface CurrentSession {
   fullName: string | null;
   grants: RoleGrant[];
   employeeId: string | null;
+  /**
+   * True when the roles or the employee record could not be read (the data service did not answer). Grants stay empty, so nothing is
+   * opened up, but screens must say "could not load" instead of "no role" or "no employee record is linked to your account".
+   */
+  loadFailed?: boolean;
 }
 
 /**
@@ -24,7 +29,7 @@ export const getCurrentSession = cache(async (): Promise<CurrentSession | null> 
 
   if (!user) return null;
 
-  const [{ data: profile }, { data: roleRows }, { data: employee }] = await Promise.all([
+  const [{ data: profile }, { data: roleRows, error: roleError }, { data: employee, error: employeeError }] = await Promise.all([
     supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle(),
     supabase.from("user_roles").select("role, company_id, country_code").eq("user_id", user.id).is("revoked_at", null),
     supabase.from("employees").select("id").eq("user_id", user.id).is("deleted_at", null).maybeSingle(),
@@ -42,5 +47,6 @@ export const getCurrentSession = cache(async (): Promise<CurrentSession | null> 
     fullName: profile?.full_name ?? null,
     grants,
     employeeId: employee?.id ?? null,
+    ...(roleError || employeeError ? { loadFailed: true } : {}),
   };
 });

@@ -26,6 +26,8 @@ export type SalesTodayResult = { status: "none" } | { status: "error" } | { stat
  */
 export async function loadSalesToday(): Promise<SalesTodayResult> {
   const ctx = await getCrmContext();
+  // The grants could not be read: the card says so instead of vanishing as "no Sales access".
+  if (ctx?.loadFailed) return { status: "error" };
   if (!ctx || ctx.grants.length === 0) return { status: "none" };
   try {
     const [opportunities, followUps] = await Promise.all([loadOpportunities(ctx), loadFollowUps(ctx)]);

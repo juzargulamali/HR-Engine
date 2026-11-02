@@ -16,7 +16,9 @@ export async function QuickAddEnquiry() {
   try {
     organisations = (await loadOrganisations()).organisations;
   } catch (e) {
+    // Empty pickers would invite duplicate organisations: say it could not load and do not offer the form.
     console.error("[crm] quick add: organisations load failed", e);
+    return <span role="status" className="text-sm text-destructive">Could not load organisations, so enquiries cannot be added from here right now. Reload the page.</span>;
   }
   return (
     <QuickAddEnquiryForm

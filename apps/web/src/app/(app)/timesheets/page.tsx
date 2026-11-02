@@ -1,3 +1,4 @@
+import { LoadError } from "@/components/workspace/states";
 import Link from "next/link";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
@@ -23,6 +24,9 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
 export default async function TimesheetsPage() {
   const session = await getCurrentSession();
   if (!session) return null;
+
+  // A failed role / employee read is not "no employee record": say it could not load.
+  if (session.loadFailed) return <LoadError what="your account" />;
 
   if (!session.employeeId) {
     return (

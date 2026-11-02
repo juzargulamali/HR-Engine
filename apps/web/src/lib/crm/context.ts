@@ -59,11 +59,13 @@ export const getCrmContext = cache(async (): Promise<CrmContext | null> => {
   }
 
   const companyIds = grants.map((g) => g.companyId);
-  const [{ data: companyRows }, { data: settingsRows }, { data: peopleRows }] = await Promise.all([
+  const [{ data: companyRows, error: companyError }, { data: settingsRows, error: settingsError }, { data: peopleRows, error: peopleError }] = await Promise.all([
     supabase.from("companies").select("id, legal_name, country_code").in("id", companyIds).order("legal_name"),
     supabase.from("crm_company_settings").select("*").in("company_id", companyIds),
     supabase.rpc("crm_people"),
   ]);
+  // A failed read here would show "no Sales settings", an empty company list or "Former colleague": say it could not load instead.
+  if (companyError || settingsError || peopleError) return { userId: session.userId, fullName: session.fullName, grants: [], companies: [], people: [], personName: () => "Unknown", companyName: () => "Unknown", loadFailed: true };
   const settingsBy = new Map((settingsRows ?? []).map((s) => [s.company_id, s]));
   const companies: CrmCompanyInfo[] = (companyRows ?? []).map((c) => ({
     id: c.id,

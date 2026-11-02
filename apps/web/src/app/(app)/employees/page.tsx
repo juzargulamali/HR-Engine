@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/workspace/states";
 
 export const metadata = { title: "Employees" };
 
@@ -48,7 +49,8 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
   const showDeleted = canManageAnyCompany && params.deleted === "1";
 
   const supabase = await createClient();
-  const { data: companies } = await supabase.from("companies").select("id, legal_name");
+  const { data: companies, error: companiesError } = await supabase.from("companies").select("id, legal_name");
+  if (companiesError) return <LoadError what="the employees" retryHref="/employees" />;
   const companyName = new Map((companies ?? []).map((c) => [c.id, c.legal_name]));
 
   // Every filter is validated/clamped server-side before it ever reaches a
@@ -78,7 +80,9 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
   }
   query = query.range(offset, offset + PAGE_SIZE - 1);
 
-  const { data: employees, count } = await query;
+  const { data: employees, count, error: employeesError } = await query;
+  // A failed read is not "No employees match these filters".
+  if (employeesError) return <LoadError what="the employees" retryHref="/employees" />;
   const totalPages = count ? Math.max(1, Math.ceil(count / PAGE_SIZE)) : 1;
 
   function pageHref(overrides: Partial<EmployeesSearchParams>) {

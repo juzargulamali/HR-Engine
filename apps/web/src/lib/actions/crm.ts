@@ -285,10 +285,12 @@ export async function checkDuplicates(subject: {
   technologies?: { name: string; qty: number }[];
 }): Promise<DuplicateMatch[]> {
   const supabase = await createClient();
-  const { data } = await supabase.rpc("crm_find_duplicate_candidates", {
+  const { data, error } = await supabase.rpc("crm_find_duplicate_candidates", {
     p_agency_org_id: subject.agencyOrgId || null, p_client_org_id: subject.clientOrgId || null,
     p_event_start: subject.eventStart || null, p_install_start: subject.installStart || null, p_location: subject.location || null,
   });
+  // A failed check is not "no duplicates": throw so the form says it could not check.
+  if (error) throw new Error("Could not check for duplicates");
   const candidates: DuplicateCandidate[] = (data ?? []).map((r) => ({
     id: r.opportunity_id, reference: r.reference, stage: r.stage, agencyOrgId: r.agency_org_id, clientOrgId: r.client_org_id, title: r.title,
     eventStart: r.event_start, installStart: r.install_start, location: r.location, technologies: r.technologies, createdAt: r.created_at,

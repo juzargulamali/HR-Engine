@@ -1,3 +1,4 @@
+import { LoadError } from "@/components/workspace/states";
 import Link from "next/link";
 import { canManageAttendance, isWeekend, getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
@@ -37,7 +38,8 @@ export default async function AttendancePage({
   if (!session) return null;
 
   const supabase = await createClient();
-  const { data: companies } = await supabase.from("companies").select("id, legal_name, country_code");
+  const { data: companies, error: companiesError } = await supabase.from("companies").select("id, legal_name, country_code");
+  if (companiesError || session.loadFailed) return <LoadError what="attendance" retryHref="/attendance" />;
   const manageableCompanies = (companies ?? []).filter((c) => canManageAttendance(session.grants, c.id));
 
   if (manageableCompanies.length === 0) {

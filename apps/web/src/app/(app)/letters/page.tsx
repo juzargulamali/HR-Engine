@@ -1,3 +1,4 @@
+import { LoadError } from "@/components/workspace/states";
 import { canManageLetters } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
@@ -24,20 +25,22 @@ export default async function LettersPage() {
   if (!session) return null;
 
   const supabase = await createClient();
-  const { data: employee } = session.employeeId
+  const { data: employee, error: employeeError } = session.employeeId
     ? await supabase.from("employees").select("company_id").eq("id", session.employeeId).single()
-    : { data: null };
+    : { data: null, error: null };
+  // A failed read is not "No letters yet".
+  if (employeeError) return <LoadError what="the letters" retryHref="/letters" />;
 
   const canManage = employee ? canManageLetters(session.grants, employee.company_id) : false;
 
-  const { data: templates } = employee
+  const { data: templates, error: templatesError } = employee
     ? await supabase
         .from("letter_templates")
         .select("id, name, template_type, requires_approval")
         .eq("company_id", employee.company_id)
         .is("deleted_at", null)
         .order("name")
-    : { data: [] as never[] };
+    : { data: [] as never[], error: null };
 
   const lettersQuery = canManage
     ? supabase
@@ -51,7 +54,8 @@ export default async function LettersPage() {
           .eq("employee_id", session.employeeId)
           .order("generated_at", { ascending: false })
       : null;
-  const { data: letters } = lettersQuery ? await lettersQuery : { data: [] as never[] };
+  const { data: letters, error: lettersError } = lettersQuery ? await lettersQuery : { data: [] as never[], error: null };
+  if (templatesError || lettersError) return <LoadError what="the letters" retryHref="/letters" />;
 
   const downloadUrlByLetter = new Map(
     await Promise.all(

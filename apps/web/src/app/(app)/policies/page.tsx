@@ -1,3 +1,4 @@
+import { LoadError } from "@/components/workspace/states";
 import Link from "next/link";
 import { canActivatePolicy, canDeleteDraftPolicy, canDraftPolicy } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
@@ -17,7 +18,7 @@ export default async function PoliciesPage() {
   if (!session) return null;
 
   const supabase = await createClient();
-  const [{ data: policies }, { data: countries }, { data: phase2bStatus }] = await Promise.all([
+  const [{ data: policies, error: policiesError }, { data: countries, error: countriesError }, { data: phase2bStatus }] = await Promise.all([
     supabase
       .from("policy_versions")
       .select("id, country_code, policy_type, version_no, status, effective_from, effective_to, created_by, payload")
@@ -29,6 +30,9 @@ export default async function PoliciesPage() {
     // used only to decide whether the button below still has anything to do.
     supabase.rpc("preflight_phase2b_v2_policy_status"),
   ]);
+
+  // A failed read is not "No policies yet".
+  if (policiesError || countriesError) return <LoadError what="the policies" retryHref="/policies" />;
 
   // policy_leave_types.policy_version_id has no ON DELETE CASCADE — deleting
   // a policy_versions row that still has leave-type rows configured under

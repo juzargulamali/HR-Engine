@@ -45,6 +45,7 @@ function QuickForm({ companies, organisations: serverOrganisations, currentUserI
 
   // The same duplicate warning as the full form (a warning, never a block).
   const [matches, setMatches] = useState<DuplicateMatch[]>([]);
+  const [dupFailed, setDupFailed] = useState(false);
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
   const hasSignal = !!agencyId || !!clientId || !!eventStart || !!installStart || location.trim() !== "";
   useEffect(() => {
@@ -52,8 +53,8 @@ function QuickForm({ companies, organisations: serverOrganisations, currentUserI
     let cancelled = false;
     const timer = setTimeout(() => {
       checkDuplicates({ agencyOrgId: agencyId || null, clientOrgId: clientId || null, title, eventStart: eventStart || null, installStart: installStart || null, location: location.trim() || null, technologies: tech.items.filter((t) => t.qty >= 1) })
-        .then((found) => { if (!cancelled) setMatches(found); })
-        .catch(() => { if (!cancelled) setMatches([]); });
+        .then((found) => { if (!cancelled) { setMatches(found); setDupFailed(false); } })
+        .catch(() => { if (!cancelled) { setMatches([]); setDupFailed(true); } });
     }, 700);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [hasSignal, agencyId, clientId, title, eventStart, installStart, location, tech.items]);
@@ -102,7 +103,7 @@ function QuickForm({ companies, organisations: serverOrganisations, currentUserI
           </Field>
         </div>
 
-        <DuplicateWarning matches={shown} onDismiss={(id) => setDismissed((prev) => new Set(prev).add(id))} />
+        <DuplicateWarning matches={shown} checkFailed={hasSignal && dupFailed} onDismiss={(id) => setDismissed((prev) => new Set(prev).add(id))} />
 
         <MoreDetails>
           <div className="grid gap-3 sm:grid-cols-3">

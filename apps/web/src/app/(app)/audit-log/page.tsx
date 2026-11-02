@@ -1,3 +1,4 @@
+import { LoadError } from "@/components/workspace/states";
 import Link from "next/link";
 import { ROLE_LABELS, canViewAuditLog, isSysAdmin } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
@@ -94,7 +95,9 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
   if (params.from) query = query.gte("occurred_at", params.from);
   if (params.to) query = query.lte("occurred_at", `${params.to}T23:59:59.999Z`);
 
-  const { data: rows, count } = await query;
+  const { data: rows, count, error: rowsError } = await query;
+  // A failed read is not "No activity matches these filters".
+  if (rowsError) return <LoadError what="the audit log" retryHref="/audit-log" />;
 
   const actorIdsOnPage = [...new Set((rows ?? []).map((r) => r.actor_id).filter((id): id is string => !!id))];
   const { data: actorProfiles } = actorIdsOnPage.length

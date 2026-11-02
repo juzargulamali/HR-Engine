@@ -24,6 +24,14 @@ async function renderCard(summary: RecoveryLiveSummary) {
 const base: RecoveryLiveSummary = { linked: true, timezone: "Asia/Dubai", country_code: "AE", clock_status: "not_started", windowed: false, period: null, window: null };
 
 describe("AttendanceClockCard (dashboard status)", () => {
+  it("a failed read says the clock status could not be loaded: never 'Not started' with a Clock In action", async () => {
+    rpc.mockResolvedValue({ data: null, error: { message: "the data service did not answer" } });
+    render(await AttendanceClockCard({ employeeId: "emp-1" }));
+    expect(screen.getByText(/Could not load your clock status/)).toBeTruthy();
+    expect(screen.queryByText("Not started")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Clock In" })).toBeNull();
+  });
+
   it("shows a neutral Not started state with a Clock In action — no break buttons anywhere", async () => {
     await renderCard(base);
     expect(screen.getByRole("heading", { name: "Attendance clock" })).toBeTruthy();
