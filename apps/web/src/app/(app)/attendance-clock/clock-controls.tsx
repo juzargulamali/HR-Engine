@@ -42,7 +42,7 @@ export function ClockControls({
 }: {
   isClockedIn: boolean;
   currentWorkMode: string | null;
-  colleagues: { id: string; first_name: string; last_name: string }[];
+  colleagues: { id: string; name: string }[];
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -150,7 +150,7 @@ export function ClockControls({
           <option value="">None</option>
           {colleagues.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.first_name} {c.last_name}
+              {c.name}
             </option>
           ))}
         </Select>

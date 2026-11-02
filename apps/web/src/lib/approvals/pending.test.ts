@@ -21,52 +21,41 @@ describe("isQueueDecisionEligible", () => {
 });
 
 describe("loadMyPendingApprovalCount", () => {
-  const queueRow = { entity_id: "r1", workflow_id: null, step_order: 1, queue_roles: ["hr_admin"] };
+  const queueStep = (id: string, over: Record<string, unknown> = {}) => ({ approval_id: id, approver_id: null, queue_roles: ["hr_admin"], id: `r-${id}`, employee_id: "e-1", company_id: "c1", ...over });
 
-  it("counts the steps routed by name AND the Recovery Leave queue steps the viewer may decide (D-21)", async () => {
-    const db = fakeSupabase({
-      approvals: () => ({ data: [queueRow], error: null, count: 2 }),
-      recovery_credit_requests: rows([{ id: "r1", employee_id: "e-1" }]),
-      employees: rows([{ id: "e-1", company_id: "c1" }]),
-    });
+  it("counts the steps routed by name AND the Recovery Leave queue steps the person decides now (D-21)", async () => {
+    const db = fakeSupabase({ approvals: () => ({ data: [], error: null, count: 2 }) }, { recovery_decider_inbox: rows([queueStep("a1")]) });
     expect(await loadMyPendingApprovalCount(asClient(db), viewer)).toBe(3);
   });
 
-  it("does not count a queue step for the viewer's own request, or for a role they lack", async () => {
-    const own = fakeSupabase({
-      approvals: () => ({ data: [queueRow], error: null, count: 0 }),
-      recovery_credit_requests: rows([{ id: "r1", employee_id: "e-hr" }]),
-      employees: rows([{ id: "e-hr", company_id: "c1" }]),
-    });
-    expect(await loadMyPendingApprovalCount(asClient(own), viewer)).toBe(0);
-    const noRole = fakeSupabase({
-      approvals: () => ({ data: [queueRow], error: null, count: 0 }),
-      recovery_credit_requests: rows([{ id: "r1", employee_id: "e-1" }]),
-      employees: rows([{ id: "e-1", company_id: "c1" }]),
-    });
-    expect(await loadMyPendingApprovalCount(asClient(noRole), { ...viewer, grants: [] })).toBe(0);
+  it("counts an HR Admin's request on the shared queue for a CEO who cannot read the request or the queue row (A15)", async () => {
+    const db = fakeSupabase({ approvals: () => ({ data: [], error: null, count: 0 }) }, { recovery_decider_inbox: rows([queueStep("a9", { queue_roles: ["ceo", "cto"] })]) });
+    expect(await loadMyPendingApprovalCount(asClient(db), { userId: "u-ceo" })).toBe(1);
   });
 
-  it("reads the role of a legacy role_queue step from its workflow step", async () => {
-    const db = fakeSupabase({
-      approvals: () => ({ data: [{ ...queueRow, queue_roles: null, workflow_id: "w1" }], error: null, count: 0 }),
-      recovery_credit_requests: rows([{ id: "r1", employee_id: "e-1" }]),
-      approval_workflow_steps: rows([{ workflow_id: "w1", step_order: 1, approver_type: "role_queue:hr_admin" }]),
-      employees: rows([{ id: "e-1", company_id: "c1" }]),
-    });
+  it("does not count a step twice: a step assigned to the person by name is already in the first count", async () => {
+    const db = fakeSupabase({ approvals: () => ({ data: [], error: null, count: 1 }) }, { recovery_decider_inbox: rows([queueStep("a1", { approver_id: "u1", queue_roles: null })]) });
     expect(await loadMyPendingApprovalCount(asClient(db), viewer)).toBe(1);
+  });
+
+  it("counts the same queue step once even if the database lists it twice", async () => {
+    const db = fakeSupabase({ approvals: () => ({ data: [], error: null, count: 0 }) }, { recovery_decider_inbox: rows([queueStep("a1"), queueStep("a1")]) });
+    expect(await loadMyPendingApprovalCount(asClient(db), viewer)).toBe(1);
+  });
+
+  it("counts nothing extra when the database offers this person no queue step (another company, their own request, a role they lack)", async () => {
+    const db = fakeSupabase({ approvals: () => ({ data: [], error: null, count: 0 }) }, { recovery_decider_inbox: rows([]) });
+    expect(await loadMyPendingApprovalCount(asClient(db), viewer)).toBe(0);
   });
 
   it("THROWS when a read fails: never a false zero", async () => {
     await expect(loadMyPendingApprovalCount(asClient(fakeSupabase({ approvals: failing() })), viewer)).rejects.toBeTruthy();
-    const queueFails = fakeSupabase({ approvals: () => ({ data: [queueRow], error: null, count: 0 }), recovery_credit_requests: failing() });
-    await expect(loadMyPendingApprovalCount(asClient(queueFails), viewer)).rejects.toBeTruthy();
-    const employeesFail = fakeSupabase({ approvals: () => ({ data: [queueRow], error: null, count: 0 }), recovery_credit_requests: rows([{ id: "r1", employee_id: "e-1" }]), employees: failing() });
-    await expect(loadMyPendingApprovalCount(asClient(employeesFail), viewer)).rejects.toBeTruthy();
+    const inboxFails = fakeSupabase({ approvals: () => ({ data: [], error: null, count: 3 }) }, { recovery_decider_inbox: failing() });
+    await expect(loadMyPendingApprovalCount(asClient(inboxFails), viewer)).rejects.toBeTruthy();
   });
 
-  it("returns the named-step count without more reads when there is no queue", async () => {
-    const db = fakeSupabase({ approvals: () => ({ data: [], error: null, count: 4 }), recovery_credit_requests: failing() });
+  it("returns the named-step count when there is no queue step", async () => {
+    const db = fakeSupabase({ approvals: () => ({ data: [], error: null, count: 4 }) }, { recovery_decider_inbox: rows([]) });
     expect(await loadMyPendingApprovalCount(asClient(db), viewer)).toBe(4);
   });
 });

@@ -41,12 +41,27 @@ export default async function ApprovalsPage() {
   // eligibility filtering below (queueDecisionEligible) narrows further, to
   // "waiting on YOUR decision" specifically, matching every other entity
   // type's own approver_id-only semantics.
-  const { data: approvals, error: approvalsError } = await supabase
-    .from("approvals")
-    .select("id, entity_type, entity_id, step_order, workflow_id, approver_id, queue_roles, created_at")
-    .eq("decision", "pending")
-    .or(`approver_id.eq.${session.userId},approver_id.is.null`)
-    .order("created_at", { ascending: true });
+  const [{ data: ownApprovals, error: approvalsError }, { data: deciderRows, error: deciderError }] = await Promise.all([
+    supabase
+      .from("approvals")
+      .select("id, entity_type, entity_id, step_order, workflow_id, approver_id, queue_roles, created_at")
+      .eq("decision", "pending")
+      .or(`approver_id.eq.${session.userId},approver_id.is.null`)
+      .order("created_at", { ascending: true }),
+    // The Recovery Leave steps this person decides NOW, with the minimum their card shows. The tables' own policies hide some of them (a CEO / CTO cannot read an HR
+    // Admin's request on the shared queue, nor its queue approval; a project lead cannot read the applicant's name): the database function checks the authority itself.
+    supabase.rpc("recovery_decider_inbox"),
+  ]);
+  track("Recovery Leave approvals", deciderError);
+  // One list: what the table lets this person read, plus the inbox steps it did not (a queue step is still checked below against the person's own roles).
+  const approvals = approvalsError
+    ? ownApprovals
+    : [
+        ...(ownApprovals ?? []),
+        ...(deciderRows ?? [])
+          .filter((d) => !(ownApprovals ?? []).some((a) => a.id === d.approval_id))
+          .map((d) => ({ id: d.approval_id, entity_type: "recovery_credit" as const, entity_id: d.id, step_order: d.step_order, workflow_id: d.workflow_id, approver_id: d.approver_id, queue_roles: d.queue_roles, created_at: d.approval_created_at })),
+      ].sort((a, b) => a.created_at.localeCompare(b.created_at));
 
   if (approvalsError) {
     logServerError({ route: "/approvals", operation: "load pending approvals" }, approvalsError);
@@ -70,7 +85,7 @@ export default async function ApprovalsPage() {
   const payrollRunIds = idsOf("payroll_export_run");
   const recoveryCreditIds = idsOf("recovery_credit");
 
-  const [{ data: requests, error: requestsError }, { data: claims, error: claimsError }, { data: timesheets, error: timesheetsError }, { data: letters, error: lettersError }, { data: payrollRuns, error: payrollError }, { data: recoveryRequests, error: recoveryError }] =
+  const [{ data: requests, error: requestsError }, { data: claims, error: claimsError }, { data: timesheets, error: timesheetsError }, { data: letters, error: lettersError }, { data: payrollRuns, error: payrollError }, { data: directRecoveryRequests, error: recoveryError }] =
     await Promise.all([
       leaveRequestIds.length > 0
         ? supabase.from("leave_requests").select("id, employee_id, leave_type_code, start_date, end_date, total_days, reason").in("id", leaveRequestIds)
@@ -91,7 +106,7 @@ export default async function ApprovalsPage() {
         ? supabase
             .from("recovery_credit_requests")
             .select(
-              "id, employee_id, attendance_record_id, segment_id, work_date, event_type, proposed_days, correction_reason, checked_with, corrected_at, work_mode, project_name, project_lead_employee_id, applicant_route, needs_policy_review, routing_issue, recovery_window_id, window_revision_no, adjusts_request_id, consumption_ack_at",
+              "id, employee_id, attendance_record_id, work_date, event_type, proposed_days, corrected_at, work_mode, project_name, project_lead_employee_id, applicant_route, needs_policy_review, routing_issue, recovery_window_id, consumption_ack_at",
             )
             .in("id", recoveryCreditIds)
         : Promise.resolve({ data: [] as never[], error: null }),
@@ -103,6 +118,19 @@ export default async function ApprovalsPage() {
   track("letters", lettersError);
   track("payroll runs", payrollError);
   track("Recovery Leave requests", recoveryError);
+
+  // The requests this person can read themselves, plus the ones they decide but may not read (their applicant's name and company come with them).
+  const recoveryRequests = [
+    ...(directRecoveryRequests ?? []),
+    ...(deciderRows ?? [])
+      .filter((d) => !(directRecoveryRequests ?? []).some((r) => r.id === d.id))
+      .map((d) => ({
+        id: d.id, employee_id: d.employee_id, attendance_record_id: d.attendance_record_id, work_date: d.work_date, event_type: d.event_type,
+        proposed_days: d.proposed_days, corrected_at: d.corrected_at, work_mode: d.work_mode, project_name: d.project_name,
+        project_lead_employee_id: d.project_lead_employee_id, applicant_route: d.applicant_route, needs_policy_review: d.needs_policy_review,
+        routing_issue: d.routing_issue, recovery_window_id: d.recovery_window_id, consumption_ack_at: d.consumption_ack_at,
+      })),
+  ];
 
   // recovery_credit_requests.work_date/proposed_days are the CURRENT
   // (possibly HR-corrected) values — the ORIGINAL, unedited hours come from
@@ -137,9 +165,13 @@ export default async function ApprovalsPage() {
       : { data: [] as never[], error: null };
   track("employee names", employeesError);
   const employeeById = new Map((employees ?? []).map((e) => [e.id, e]));
+  // A person the viewer decides for but may not read in `employees`: the name, company and country the database hands over with the request.
+  for (const d of deciderRows ?? []) {
+    if (!employeeById.has(d.employee_id)) employeeById.set(d.employee_id, { id: d.employee_id, first_name: d.employee_name, last_name: "", company_id: d.company_id, country_code: d.country_code });
+  }
   const employeeName = (id: string) => {
     const e = employeeById.get(id);
-    return e ? `${e.first_name} ${e.last_name}` : employeesError ? "Name not loaded" : "—";
+    return e ? `${e.first_name} ${e.last_name}`.trim() : employeesError ? "Name not loaded" : "—";
   };
 
   // ---- Window-based Recovery Leave requests: the full evidence an approver needs ----

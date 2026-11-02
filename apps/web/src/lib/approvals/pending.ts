@@ -29,49 +29,18 @@ export function isQueueDecisionEligible({
 }
 
 /**
- * How many approvals wait on this person's own decision: the steps routed to them by name, plus the Recovery Leave queue steps they may
- * decide. Throws when any read fails, so the caller shows "could not load" and never a false zero.
+ * How many approvals wait on this person's own decision: the steps routed to them by name, plus the Recovery Leave queue steps they decide now. The queue steps come
+ * from the database's own list of what this person may decide (recovery_decider_inbox), because the tables hide some of them from a CEO / CTO (an HR Admin's request on
+ * the shared queue) and the badge must agree with the Approvals page. Throws when any read fails, so the caller shows "could not load" and never a false zero.
  */
-export async function loadMyPendingApprovalCount(
-  supabase: Supabase,
-  viewer: { userId: string; employeeId: string | null; grants: readonly Pick<RoleGrant, "role" | "companyId">[] },
-): Promise<number> {
-  const [direct, queue] = await Promise.all([
+export async function loadMyPendingApprovalCount(supabase: Supabase, viewer: { userId: string }): Promise<number> {
+  const [direct, inbox] = await Promise.all([
     supabase.from("approvals").select("id", { count: "exact", head: true }).eq("approver_id", viewer.userId).eq("decision", "pending"),
-    supabase.from("approvals").select("entity_id, workflow_id, step_order, queue_roles").eq("decision", "pending").is("approver_id", null).eq("entity_type", "recovery_credit"),
+    supabase.rpc("recovery_decider_inbox"),
   ]);
   if (direct.error) throw direct.error;
-  if (queue.error) throw queue.error;
-  const queued = queue.data ?? [];
-  if (queued.length === 0) return direct.count ?? 0;
-
-  const legacy = queued.filter((a) => a.queue_roles === null && a.workflow_id !== null);
-  const [requests, steps] = await Promise.all([
-    supabase.from("recovery_credit_requests").select("id, employee_id").in("id", queued.map((a) => a.entity_id)),
-    legacy.length > 0
-      ? supabase.from("approval_workflow_steps").select("workflow_id, step_order, approver_type").in("workflow_id", legacy.map((a) => a.workflow_id!))
-      : Promise.resolve({ data: [] as { workflow_id: string; step_order: number; approver_type: string }[], error: null }),
-  ]);
-  if (requests.error) throw requests.error;
-  if (steps.error) throw steps.error;
-  const employeeIds = [...new Set((requests.data ?? []).map((r) => r.employee_id))];
-  const employees = employeeIds.length > 0 ? await supabase.from("employees").select("id, company_id").in("id", employeeIds) : { data: [] as { id: string; company_id: string }[], error: null };
-  if (employees.error) throw employees.error;
-
-  const requestById = new Map((requests.data ?? []).map((r) => [r.id, r]));
-  const companyById = new Map((employees.data ?? []).map((e) => [e.id, e.company_id]));
-  const legacyRole = new Map((steps.data ?? []).filter((s) => s.approver_type.startsWith("role_queue:")).map((s) => [`${s.workflow_id}:${s.step_order}`, s.approver_type.replace("role_queue:", "")]));
-  const eligible = queued.filter((a) => {
-    const request = requestById.get(a.entity_id);
-    if (!request) return false;
-    const legacyName = legacyRole.get(`${a.workflow_id}:${a.step_order}`);
-    return isQueueDecisionEligible({
-      roles: a.queue_roles ?? (legacyName ? [legacyName] : []),
-      beneficiaryEmployeeId: request.employee_id,
-      beneficiaryCompanyId: companyById.get(request.employee_id),
-      viewerEmployeeId: viewer.employeeId,
-      grants: viewer.grants,
-    });
-  });
-  return (direct.count ?? 0) + eligible.length;
+  if (inbox.error) throw inbox.error;
+  // A step assigned to the person by name is already in the first count; add only the queue steps (no assigned person).
+  const queued = new Set((inbox.data ?? []).filter((r) => r.approver_id === null).map((r) => r.approval_id));
+  return (direct.count ?? 0) + queued.size;
 }

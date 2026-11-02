@@ -70,12 +70,9 @@ describe("My Day approvals", () => {
 
   it("an HR Admin with Recovery Leave queue steps sees them counted (D-21)", async () => {
     grants = [{ role: "hr_admin", companyId: "c1", countryCode: null }];
-    tables = {
-      ...tables,
-      approvals: () => ({ data: [{ entity_id: "r1", workflow_id: null, step_order: 1, queue_roles: ["hr_admin"] }], error: null, count: 0 }),
-      recovery_credit_requests: rows([{ id: "r1", employee_id: "e-other" }]),
-      employees: rows([{ id: "e-other", company_id: "c1" }]),
-    };
+    tables = { ...tables, approvals: () => ({ data: [], error: null, count: 0 }) };
+    // the queue steps this person decides now come from the database's own list (recovery_decider_inbox)
+    rpcs = { ...rpcs, recovery_decider_inbox: rows([{ approval_id: "a1", approver_id: null, queue_roles: ["hr_admin"], id: "r1", employee_id: "e-other", company_id: "c1" }]) };
     const html = await render();
     expect(html).toContain("Review approvals (1)");
     expect(html).not.toContain("Nothing needs your attention right now.");
