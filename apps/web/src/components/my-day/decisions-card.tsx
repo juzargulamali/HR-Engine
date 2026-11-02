@@ -31,7 +31,7 @@ function Row({ item, strong }: { item: ActionItem; strong?: boolean }) {
  * What waits on this person: decisions first (approvals, project handovers, work to review), then the other open items of Projects.
  * Each row is a real count that links to where it is handled. The rows come from the one list the page also builds the greeting from.
  */
-export function DecisionsCard({ decisions, other }: { decisions: readonly ActionItem[]; other: readonly ActionItem[] }) {
+export function DecisionsCard({ decisions, other, waiting = [] }: { decisions: readonly ActionItem[]; other: readonly ActionItem[]; waiting?: readonly ActionItem[] }) {
   const empty = decisions.length === 0 && other.length === 0;
   return (
     <MyDayCard id="decisions" title={decisions.length === 0 && other.length > 0 ? "Open for you" : "Needs your decision"} tone={decisions.some((d) => !d.error) ? "warm" : undefined} label="Needs your decision">
@@ -48,6 +48,12 @@ export function DecisionsCard({ decisions, other }: { decisions: readonly Action
           ) : null}
         </div>
       )}
+      {waiting.length > 0 ? (
+        <div className={empty ? "mt-3" : "mt-3 border-t border-border/60 pt-2"}>
+          <h3 className="mb-0.5 text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">Waiting on others</h3>
+          <ul className="-mx-2 divide-y divide-border/60">{waiting.map((i) => <Row key={i.key} item={i} />)}</ul>
+        </div>
+      ) : null}
     </MyDayCard>
   );
 }

@@ -25,4 +25,15 @@ describe("DecisionsCard", () => {
     expect(renderToStaticMarkup(<DecisionsCard decisions={[ok]} other={[]} />)).toContain("Waiting on your decision");
     expect(renderToStaticMarkup(<DecisionsCard decisions={[]} other={[]} />)).toContain("Nothing is waiting on you");
   });
+  it("'Waiting on others' lists what the person submitted themselves, separately from their decisions", () => {
+    const mine = { key: "budget-waiting", icon: ClipboardCheck, label: "Project budgets you submitted, waiting on others", count: 2, href: "/finance/project-budgets" };
+    const html = renderToStaticMarkup(<DecisionsCard decisions={[ok]} other={[]} waiting={[mine]} />);
+    expect(html).toContain("Waiting on others");
+    expect(html).toContain("Project budgets you submitted, waiting on others");
+    expect(html.indexOf("Waiting on your decision")).toBeLessThan(html.indexOf("Waiting on others"));
+    // with nothing for the person to decide, the empty line still shows and the waiting group is still visible
+    const onlyWaiting = renderToStaticMarkup(<DecisionsCard decisions={[]} other={[]} waiting={[mine]} />);
+    expect(onlyWaiting).toContain("Nothing is waiting on you");
+    expect(onlyWaiting).toContain("Waiting on others");
+  });
 });

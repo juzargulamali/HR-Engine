@@ -5,7 +5,7 @@
 export type ActionGroup = "decision" | "hr" | "sales" | "other";
 
 const HR_KEYS = new Set(["contracts", "probation", "docs", "identity"]);
-const DECISION_KEYS = new Set(["approvals", "proj-handovers", "proj-reviews"]);
+const DECISION_KEYS = new Set(["approvals", "proj-handovers", "proj-reviews", "budget-decisions"]);
 
 export function actionGroupOf(key: string): ActionGroup {
   if (DECISION_KEYS.has(key)) return "decision";

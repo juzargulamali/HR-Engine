@@ -12,6 +12,9 @@ export type PbxCompanyGrantRow = {
   granted_by: string | null; granted_at: string; revoked_at: string | null; revoked_by: string | null;
 };
 
+/** Only the authorship columns, for "which of these did I prepare or submit" (My Day). The rows themselves are read through pbx_budget_view / pbx_inbox. */
+export type PbxAuthorshipRow = { id: string; created_by: string | null; submitted_by: string | null };
+
 export type PbxJson = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
 export interface PbxProjectAccess {

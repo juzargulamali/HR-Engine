@@ -18,7 +18,7 @@
  * is a full peer of ceo everywhere in this system.
  */
 
-import type { PbxCompanyGrantRow, PbxJson, PbxReadOnlyTable } from "./budget";
+import type { PbxAuthorshipRow, PbxCompanyGrantRow, PbxJson, PbxReadOnlyTable } from "./budget";
 import type {
   CrmActivityRow, CrmApprovalRow, CrmAuditLogRow, CrmCompanyGrantRow, CrmCompanySettingsRow, CrmContactRow,
   CrmDuplicateCandidateRow, CrmFileRow, CrmFollowUpRow, CrmHandoverRow, CrmOpportunityContactRow, CrmOpportunityEventRow,
@@ -1645,6 +1645,8 @@ export interface Database {
       // Inventory (20261201000000-200): read-only to clients; every write is an inv_* function below.
       inv_company_grants: InvReadOnlyTable<InvCompanyGrantRow>;
       pbx_company_grants: PbxReadOnlyTable<PbxCompanyGrantRow>;
+      pbx_budget_versions: PbxReadOnlyTable<PbxAuthorshipRow>;
+      pbx_actual_submissions: PbxReadOnlyTable<PbxAuthorshipRow>;
       inv_audit_log: InvReadOnlyTable<InvAuditLogRow>;
       inv_company_settings: InvReadOnlyTable<InvCompanySettingsRow>;
       inv_locations: InvReadOnlyTable<InvLocationRow>;

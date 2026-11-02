@@ -10,7 +10,8 @@ vi.mock("@/lib/log", () => ({ logServerError: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/", redirect: vi.fn() }));
 vi.mock("@/lib/weather", () => ({ getCurrentWeather: async () => null }));
 let tables: Record<string, FakeResult | (() => FakeResult)> = {};
-vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeSupabase(tables) }));
+let rpcs: Record<string, FakeResult | (() => FakeResult)> = {};
+vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeSupabase(tables, rpcs) }));
 let grants: { role: string; companyId: string | null; countryCode: string | null }[] = [];
 vi.mock("@/lib/auth/session", () => ({ getCurrentSession: async () => ({ userId: "u1", employeeId: "e1", email: null, fullName: "Aisha Khan", grants }) }));
 vi.mock("@/lib/crm/my-day", () => ({ loadSalesToday: async () => ({ status: "none" }) }));
@@ -29,11 +30,15 @@ import DashboardPage from "./page";
 
 const render = async () => renderToStaticMarkup(await DashboardPage());
 const PENDING_NAMED = { data: [], error: null, count: 2 };
+const EMPTY_INBOX: FakeResult = { data: { companies: [], budget_approvals: [], final_expense_approvals: [], outstanding_settlement: [], is_finance_anywhere: false, is_executive_anywhere: false }, error: null };
+const inboxWith = (over: Record<string, unknown>): FakeResult => ({ data: { ...(EMPTY_INBOX.data as object), ...over }, error: null });
+const budgetRow = (over: Record<string, unknown>) => ({ budget_id: "b1", project_id: "p1", reference: "P-1", name: "Expo", company_id: "c1", version_id: "v1", i_can_decide: true, on_hold: false, ...over });
 
 beforeEach(() => {
   grants = [];
   projectsCtx = null;
   tables = { companies: rows([]), approvals: PENDING_NAMED, employees: rows([]) };
+  rpcs = { pbx_inbox: EMPTY_INBOX };
 });
 
 describe("My Day approvals", () => {
@@ -84,5 +89,51 @@ describe("My Day approvals", () => {
     projectsCtx = { installed: true, grants: [], loadFailed: true };
     const html = await render();
     expect(html).toContain("Project items could not be loaded");
+  });
+
+  it("a Finance person with no Projects grant sees the budgets waiting for them, and the count joins the decisions", async () => {
+    rpcs = { pbx_inbox: inboxWith({ budget_approvals: [budgetRow({}), budgetRow({ version_id: "v2" }), budgetRow({ version_id: "v3", i_can_decide: false })] }) };
+    tables = { ...tables, pbx_budget_versions: rows([]) };
+    const html = await render();
+    expect(html).toContain("Project budgets waiting for you");
+    expect(html).toContain("/finance/project-budgets?filter=budget");
+    expect(html).toContain("Decisions waiting");
+    expect(html).toContain("Review approvals (2)");   // the approvals count is unchanged: budgets are their own row
+    expect(html).toContain("Your updates for today: 4 items need your attention.");
+  });
+
+  it("items the person submitted themselves stay visible under 'Waiting on others', not as a decision", async () => {
+    rpcs = { pbx_inbox: inboxWith({ budget_approvals: [budgetRow({ i_can_decide: false })] }) };
+    tables = { ...tables, approvals: { data: [], error: null, count: 0 }, pbx_budget_versions: rows([{ id: "v1" }]) };
+    const html = await render();
+    expect(html).toContain("Waiting on others");
+    expect(html).toContain("Project budgets you submitted, waiting on others");
+    expect(html).not.toContain("Project budgets waiting for you");
+    expect(html).toContain("Nothing needs your attention right now.");
+  });
+
+  it("a failed pbx_inbox read shows an error row, not 0 and not nothing", async () => {
+    rpcs = { pbx_inbox: failing() };
+    const html = await render();
+    expect(html).toContain("Project budgets could not be loaded");
+    expect(html).not.toContain("Nothing needs your attention right now.");
+  });
+
+  it("a failed read of what the person authored is an error row too", async () => {
+    rpcs = { pbx_inbox: inboxWith({ budget_approvals: [budgetRow({})] }) };
+    tables = { ...tables, pbx_budget_versions: failing() };
+    expect(await render()).toContain("Project budgets could not be loaded");
+  });
+
+  it("a person with no budget access (empty inbox) sees no budget row at all", async () => {
+    const html = await render();
+    expect(html).not.toContain("Project budgets");
+    expect(html).not.toContain("Waiting on others");
+  });
+
+  it("Project budgets not installed here: no row and no error", async () => {
+    rpcs = { pbx_inbox: { data: null, error: { message: "Could not find the function public.pbx_inbox in the schema cache", code: "PGRST202" } } };
+    const html = await render();
+    expect(html).not.toContain("Project budgets");
   });
 });

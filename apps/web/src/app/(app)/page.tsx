@@ -44,6 +44,7 @@ import { AttendanceCompletionBar } from "./attendance-completion-bar";
 import { UpcomingSection } from "./upcoming-section";
 import { DashboardHeader } from "./dashboard-header";
 import { loadSalesToday } from "@/lib/crm/my-day";
+import { loadBudgetDay } from "@/lib/budget/my-day-data";
 import { getProjectsContext } from "@/lib/projects/context";
 import { projectDayRows } from "@/lib/projects/my-day";
 import { loadProjectsAttention } from "@/lib/projects/my-work";
@@ -331,12 +332,30 @@ export default async function DashboardPage() {
       ? [{ key: "proj-error", icon: FolderKanban, label: "Project items could not be loaded", count: 0, href: "/projects/work", error: true }]
       : [];
 
+  // Project budgets and final expenses waiting for this person's decision, from the Finance inbox (pbx_inbox: scoped by the database, no Projects access needed).
+  // What they submitted themselves waits under "Waiting on others", never as a decision for them. A failed read is an error row, never 0.
+  let budgetActionItems: ActionItem[] = [];
+  let budgetWaitingItems: ActionItem[] = [];
+  try {
+    const budgetDay = await loadBudgetDay(session.userId);
+    if (budgetDay.status === "error") {
+      budgetActionItems = [{ key: "budget-decisions", icon: ReceiptText, label: "Project budgets could not be loaded", count: 0, href: "/finance/project-budgets", error: true }];
+    } else if (budgetDay.status === "ok") {
+      const { waitingForMe, waitingOnOthers } = budgetDay.day;
+      budgetActionItems = [{ key: "budget-decisions", icon: ReceiptText, label: "Project budgets waiting for you", count: waitingForMe.count, href: waitingForMe.href }];
+      budgetWaitingItems = [{ key: "budget-waiting", icon: ReceiptText, label: "Project budgets you submitted, waiting on others", count: waitingOnOthers, href: "/finance/project-budgets" }];
+    }
+  } catch (e) {
+    logServerError({ route: ROUTE, operation: "load project budget decisions" }, e);
+    budgetActionItems = [{ key: "budget-decisions", icon: ReceiptText, label: "Project budgets could not be loaded", count: 0, href: "/finance/project-budgets", error: true }];
+  }
+
   // ONE list of what needs attention, from the same authorised data the card shows; the sentence under the greeting is derived
   // from it, so the two can never disagree (Sales follow-ups are in the list, so they count in the sentence too).
   const actionItems = buildActionItems({
     myPendingApprovals,
     ...(showHrView ? { contractsEndingCount, probationDueCount, docsExpiringCount, identityExpiringCount } : {}),
-    extraItems: [...salesActionItems, ...projectActionItems],
+    extraItems: [...salesActionItems, ...projectActionItems, ...budgetActionItems],
   });
 
   const summarySentence = hrSectionError ? "Workforce data couldn't be loaded right now — the numbers below may be incomplete." : attentionSentence(actionItems);
@@ -428,7 +447,7 @@ export default async function DashboardPage() {
           ) : null}
         </div>
         <div className={cn("contents xl:min-w-0", hasLeft ? "xl:flex xl:flex-col xl:gap-4" : "xl:grid xl:grid-cols-3 xl:items-start xl:gap-4")}>
-          <div className="order-1 min-w-0 xl:order-none"><DecisionsCard decisions={groups.decision} other={[...groups.other, ...quietProjectItems]} /></div>
+          <div className="order-1 min-w-0 xl:order-none"><DecisionsCard decisions={groups.decision} other={[...groups.other, ...quietProjectItems]} waiting={budgetWaitingItems.filter((i) => i.count > 0)} /></div>
           {session.employeeId ? <div className="order-2 min-w-0 xl:order-none"><AttendanceClockCard employeeId={session.employeeId} /></div> : null}
           {showHrView && live !== null ? <div className="order-3 min-w-0 xl:order-none"><PeopleToday live={live} /></div> : null}
           {equipment !== null ? <div className="order-6 min-w-0 xl:order-none"><NextDispatch equipment={equipment} /></div> : null}
