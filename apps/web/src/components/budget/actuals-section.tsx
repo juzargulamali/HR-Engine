@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Panel, Muted } from "@/components/projects/parts";
 import { decideActuals, returnApprovedActuals, reviseActuals, saveActualsDraft, startActuals, submitActuals } from "@/lib/actions/projectBudget";
 import type { PbxActualRow, PbxActuals, PbxBudgetView } from "@/types/budget";
+import { effectivePayment, followsDefault, inheritWhereSame, initialDefault, type PaymentDefault } from "./payment-defaults";
 import { ActionMessage, Field, HoldAlert, RouteLine, StatusPill, cleanDecimal, money, stamp, useAction } from "./shared";
 
 export interface ClaimOption { id: string; label: string }
@@ -106,7 +107,15 @@ export function ActualsTable({ rows, currency, approvedTotal, actualTotal }: { r
 
 function ActualsEditor({ view, submission, claims }: { view: PbxBudgetView; submission: PbxActuals; claims: ClaimOption[] }) {
   const currency = view.budget!.currency;
-  const [lines, setLines] = useState<Line[]>(() => toLines(submission, view.categories));
+  // "How paid" and "Who paid" are asked once for the list (the person entering is the default payer) and repeated on a line only when it differs.
+  const viewerId = view.viewer.user_id;
+  const [start] = useState(() => {
+    const all = toLines(submission, view.categories);
+    const d = initialDefault(all, view.people.some((p) => p.id === viewerId) ? viewerId : "");
+    return { lines: inheritWhereSame(all, d), def: d };
+  });
+  const [lines, setLines] = useState<Line[]>(start.lines);
+  const [def, setDef] = useState<PaymentDefault>(start.def);
   const [confirmed, setConfirmed] = useState(submission.complete_confirmed);
   const [varianceNote, setVarianceNote] = useState(submission.variance_note ?? "");
   const [rv, setRv] = useState(submission.row_version);
@@ -145,9 +154,13 @@ function ActualsEditor({ view, submission, claims }: { view: PbxBudgetView; subm
   };
   const remove = (key: string) => { setLines((ls) => ls.filter((l) => l.key !== key)); touch(); };
 
-  const rowsPayload = () => lines.map((l) => ({
-    budget_row_id: l.budget_row_id, category_id: l.category_id || null, description: l.description, actual_amount: l.actual === "" ? null : l.actual, paid_via: l.paid_via || null,
-    paid_by_user_id: l.paid_by || null, claim_id: l.claim_id || null, foreign_currency: l.foreign_currency, foreign_note: l.foreign_note || null, note: l.note || null,
+  const rowsPayload = () => lines.map((l, i) => {
+    // A line with an amount is saved with its effective payment (its own, or the default), exactly as if it had been entered on the line.
+    const pay = (entered[i] ?? 0) > 0 ? effectivePayment(l, def) : { via: l.paid_via, by: l.paid_by };
+    return { ...l, pay };
+  }).map(({ pay, ...l }) => ({
+    budget_row_id: l.budget_row_id, category_id: l.category_id || null, description: l.description, actual_amount: l.actual === "" ? null : l.actual, paid_via: pay.via || null,
+    paid_by_user_id: pay.by || null, claim_id: l.claim_id || null, foreign_currency: l.foreign_currency, foreign_note: l.foreign_note || null, note: l.note || null,
   }));
   const header = { projectId: view.project.id, submissionId: submission.id, completeConfirmed: confirmed, varianceNote: varianceNote || null };
   const doSave = () => save.run(() => saveActualsDraft({ ...header, expected: rv, rows: rowsPayload() }), (r) => { if (r.version !== undefined) setRv(r.version); setDirty(false); }, "Draft saved.");
@@ -166,12 +179,35 @@ function ActualsEditor({ view, submission, claims }: { view: PbxBudgetView; subm
       <Alert role="note" className="text-sm">
         Enter what was actually spent. Approved amounts are shown for comparison only and are <strong>never</strong> copied in as actuals. Leave a line empty until you know it; type <strong>0</strong> if nothing was spent. Receipts are handed to Finance in person; nothing is uploaded here.
       </Alert>
+      <div className="space-y-2 rounded-lg border border-border bg-secondary/30 p-3" role="group" aria-label="How these were paid">
+        <p className="text-sm font-medium">How were these paid?</p>
+        <div className="grid gap-2 sm:grid-cols-2 lg:max-w-3xl lg:grid-cols-[minmax(15rem,1.3fr)_minmax(9rem,1fr)]">
+          <Field label="How paid (all lines)" htmlFor="pbx-def-via">
+            <Select id="pbx-def-via" value={def.via} disabled={busy} onChange={(e) => { setDef({ ...def, via: e.target.value as PaidVia | "" }); touch(); }}>
+              <option value="">Choose…</option>
+              {PAID_VIA.map((p) => <option key={p} value={p}>{PAID_VIA_LABELS[p]}</option>)}
+            </Select>
+          </Field>
+          {def.via !== "" && PAID_VIA_NEEDS_PERSON[def.via] ? (
+            <Field label="Who paid (all lines)" htmlFor="pbx-def-by">
+              <Select id="pbx-def-by" value={def.by} disabled={busy} onChange={(e) => { setDef({ ...def, by: e.target.value }); touch(); }}>
+                <option value="">Choose…</option>
+                {view.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </Select>
+            </Field>
+          ) : null}
+        </div>
+        <p className="text-[13px] text-muted-foreground">Asked once. Every line with an amount uses this unless you choose “Different for this line”. Receipts are unchanged: they are still handed to Finance in person.</p>
+      </div>
       <ul className="space-y-2">
         {lines.map((l, i) => {
           const val = entered[i];
           const sum = l.budget_row_id ? groupSum.get(l.budget_row_id) : undefined;
           const showDetails = val !== null && val !== undefined && val > 0;
-          const needsPerson = l.paid_via !== "" && PAID_VIA_NEEDS_PERSON[l.paid_via];
+          const eff = effectivePayment(l, def);
+          const inherits = followsDefault(l, def);
+          const needsPerson = eff.via !== "" && PAID_VIA_NEEDS_PERSON[eff.via];
+          const nameOfPerson = (id: string) => view.people.find((p) => p.id === id)?.name ?? "";
           const base = `${l.key}`;
           return (
             <li key={l.key} className="rounded-lg border border-border p-3">
@@ -201,21 +237,30 @@ function ActualsEditor({ view, submission, claims }: { view: PbxBudgetView; subm
               </div>
               {showDetails ? (
                 <div className="mt-3 grid gap-2 border-t border-border pt-3 sm:grid-cols-2 lg:grid-cols-[minmax(15rem,1.3fr)_minmax(9rem,1fr)_minmax(0,2fr)]">
-                  <Field label="How was it paid?" htmlFor={`${base}-via`}>
-                    <Select id={`${base}-via`} value={l.paid_via} disabled={busy} onChange={(e) => update(l.key, { paid_via: e.target.value as PaidVia | "" })}>
-                      <option value="">Choose…</option>
-                      {PAID_VIA.map((p) => <option key={p} value={p}>{PAID_VIA_LABELS[p]}</option>)}
-                    </Select>
-                  </Field>
-                  {needsPerson ? (
-                    <Field label="Who paid?" htmlFor={`${base}-by`}>
-                      <Select id={`${base}-by`} value={l.paid_by} disabled={busy} onChange={(e) => update(l.key, { paid_by: e.target.value })}>
-                        <option value="">Choose…</option>
-                        {view.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                      </Select>
-                    </Field>
-                  ) : null}
-                  {l.paid_via === "existing_claim" ? (
+                  {inherits ? (
+                    <div className="flex flex-wrap items-center gap-2 text-sm sm:col-span-2 lg:col-span-1">
+                      <span><span className="text-muted-foreground">Paid: </span>{PAID_VIA_LABELS[def.via as PaidVia]}{needsPerson && eff.by ? ` · ${nameOfPerson(eff.by)}` : ""}</span>
+                      <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => update(l.key, { paid_via: def.via, paid_by: def.by })}>Different for this line</Button>
+                    </div>
+                  ) : (
+                    <>
+                      <Field label="How was it paid?" htmlFor={`${base}-via`}>
+                        <Select id={`${base}-via`} value={l.paid_via} disabled={busy} onChange={(e) => update(l.key, { paid_via: e.target.value as PaidVia | "", ...(e.target.value === "" ? { paid_by: "" } : {}) })}>
+                          <option value="">{def.via ? `Same as above (${PAID_VIA_LABELS[def.via]})` : "Choose…"}</option>
+                          {PAID_VIA.map((p) => <option key={p} value={p}>{PAID_VIA_LABELS[p]}</option>)}
+                        </Select>
+                      </Field>
+                      {needsPerson ? (
+                        <Field label="Who paid?" htmlFor={`${base}-by`}>
+                          <Select id={`${base}-by`} value={l.paid_by} disabled={busy} onChange={(e) => update(l.key, { paid_by: e.target.value })}>
+                            <option value="">{def.by && nameOfPerson(def.by) ? `Same as above (${nameOfPerson(def.by)})` : "Choose…"}</option>
+                            {view.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          </Select>
+                        </Field>
+                      ) : null}
+                    </>
+                  )}
+                  {eff.via === "existing_claim" ? (
                     <Field label="Your expense claim" htmlFor={`${base}-claim`} hint="This only links the claim. It is not paid twice, and the claim itself is not changed.">
                       <Select id={`${base}-claim`} value={l.claim_id} disabled={busy} onChange={(e) => update(l.key, { claim_id: e.target.value })}>
                         <option value="">Not listed — I will write the reference in the note</option>
