@@ -19,6 +19,7 @@ export function AppShell({
   projects,
   inventory,
   budget,
+  hasDirectReports = false,
   children,
 }: {
   session: CurrentSession;
@@ -31,11 +32,13 @@ export function AppShell({
   inventory?: { grants: readonly InvGrant[]; managesProjects?: boolean; isEmployee?: boolean };
   /** Project Budget & Expenses access (own grants). Absent means none: no Finance entry. */
   budget?: { any: boolean; finance?: boolean; manageAccess?: boolean };
+  /** The person has direct reports: offers "People & HR" to a manager who does not hold the Reporting Manager role. */
+  hasDirectReports?: boolean;
   children: React.ReactNode;
 }) {
   const roleLabels = roleLabelsFor(session.grants);
   const showAlertsLink = canViewHrAlerts(session.grants);
-  const modules = buildNavModules(session.grants, { hasPendingApprovals, crmGrants, projects, inventory, budget });
+  const modules = buildNavModules(session.grants, { hasPendingApprovals, crmGrants, projects, inventory, budget, hasDirectReports });
   const fullName = session.fullName ?? session.email ?? "Signed in";
 
   const signOutSlot = (

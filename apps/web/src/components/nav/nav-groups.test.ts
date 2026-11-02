@@ -122,7 +122,9 @@ describe("buildNavModules", () => {
   });
 
   it("always includes the base links every signed-in user gets, regardless of role", () => {
-    expect(hrefsOf(buildNavModules([]))).toEqual(expect.arrayContaining(["/", "/profile", "/employees", "/attendance", "/leave", "/attendance-clock", "/performance"]));
+    expect(hrefsOf(buildNavModules([]))).toEqual(
+      expect.arrayContaining(["/", "/profile", "/attendance", "/leave", "/attendance-clock", "/reimbursements", "/letters", "/performance", "/holidays", "/policies"]),
+    );
   });
 
   it("hides Payroll from a plain employee with no other role", () => {
@@ -172,37 +174,139 @@ describe("buildNavModules", () => {
 
   it("keeps every link the old navigation offered, for every role (nothing was lost in the move to modules)", () => {
     const OLD_HREFS_BY_ROLE: Record<string, string[]> = {
-      employee: ["/", "/profile", "/attendance-clock", "/employees", "/attendance", "/leave", "/reimbursements", "/performance", "/letters", "/policies", "/holidays"],
-      hr_admin: ["/approvals", "/alerts", "/payroll", "/assets", "/ai-suggestions", "/audit-log"],
+      // "/employees" is no longer offered to someone with no reports and no company-level role (the page showed them only their own row).
+      employee: ["/", "/profile", "/attendance-clock", "/attendance", "/leave", "/reimbursements", "/performance", "/letters", "/policies", "/holidays"],
+      hr_admin: ["/approvals", "/alerts", "/payroll", "/assets", "/ai-suggestions", "/audit-log", "/employees"],
       // Users & Roles moved into People & Access; the other sys_admin links are unchanged.
       sys_admin: ["/admin/companies", "/people-access", "/ai-suggestions", "/audit-log"],
     };
     expect(hrefsOf(buildNavModules([grant("employee")]))).toEqual(expect.arrayContaining(OLD_HREFS_BY_ROLE.employee!));
+    // An HR Admin keeps every old address; /attendance and /letters are the company register and letters desk for them (labelled so), not "My" pages.
     expect(hrefsOf(buildNavModules([grant("hr_admin")]))).toEqual(expect.arrayContaining([...OLD_HREFS_BY_ROLE.employee!, ...OLD_HREFS_BY_ROLE.hr_admin!]));
     expect(hrefsOf(buildNavModules([grant("sys_admin", null)]))).toEqual(expect.arrayContaining(OLD_HREFS_BY_ROLE.sys_admin!));
   });
 });
 
 describe("ENGINIOUS OS modules", () => {
-  it("lists the approved modules in order, for everyone; Projects & Tasks appears only with Projects access", () => {
-    const labels = buildNavModules([grant("employee")]).map((m) => m.label);
-    expect(labels).toEqual(["My Day", "People & HR", "Inventory", "Vendors & Purchasing", "KPIs & Performance"]);
-  });
-
-  it("marks every unbuilt module as coming soon: no link, no sub-links, no data", () => {
-    const soon = buildNavModules([grant("employee")]).filter((m) => m.comingSoon);
-    expect(soon.map((m) => m.label)).toEqual(["Inventory", "Vendors & Purchasing"]);
-    for (const m of soon) {
-      expect(m.href).toBe("");
-      expect(m.sections).toEqual([]);
+  it("shows an ordinary employee only My Day, Me and Company information: no placeholder, no HR module", () => {
+    const mods = buildNavModules([grant("employee")]);
+    expect(mods.map((m) => m.label)).toEqual(["My Day", "Me", "Company information"]);
+    expect(mods.some((m) => m.comingSoon)).toBe(false);
+    // Nothing in the menu is a row without a working link.
+    for (const m of mods) {
+      expect(m.href).not.toBe("");
+      for (const l of m.sections.flatMap((x) => x.links)) {
+        expect(l.comingSoon).toBeUndefined();
+        expect(l.href).not.toBe("");
+      }
     }
   });
 
-  it("keeps the existing HR performance reviews reachable and names them as HR, separate from the coming-soon KPIs", () => {
-    const kpis = buildNavModules([grant("employee")]).find((m) => m.id === "kpis")!;
-    const links = kpis.sections.flatMap((s) => s.links);
-    expect(links.find((l) => l.href === "/performance")?.label).toBe("Performance reviews (HR)");
-    expect(links.find((l) => l.label === "KPIs")).toMatchObject({ comingSoon: true, href: "" });
+  it("has no Vendors & Purchasing, KPIs or Inventory 'coming soon' row for anyone", () => {
+    const everyone: Parameters<typeof buildNavModules>[] = [
+      [[]],
+      [[grant("employee")]],
+      [[grant("sys_admin", null)], { inventory: { grants: [], isEmployee: false } }],
+      [[grant("ceo"), grant("hr_admin")], { crmGrants: [{ companyId: "c1", capabilities: ["founder"] }], inventory: { grants: [{ companyId: "c1", capabilities: ["founder"] }] }, budget: { any: true, finance: true } }],
+    ];
+    for (const args of everyone) {
+      const mods = buildNavModules(...args);
+      expect(mods.map((m) => m.label)).not.toEqual(expect.arrayContaining(["Vendors & Purchasing"]));
+      expect(mods.map((m) => m.id)).not.toContain("vendors");
+      expect(mods.map((m) => m.id)).not.toContain("kpis");
+      expect(mods.some((m) => m.comingSoon)).toBe(false);
+      expect(JSON.stringify(mods)).not.toContain("Coming soon");
+      expect(JSON.stringify(mods)).not.toContain('"KPIs"');
+    }
+  });
+
+  it("Me holds the eight personal pages, labelled as the person's own, and needs no grant", () => {
+    const me = buildNavModules([], { inventory: { grants: [], isEmployee: true } }).find((m) => m.id === "me")!;
+    expect(me.sections.flatMap((s) => s.links.map((l) => `${l.label} ${l.href}`))).toEqual([
+      "My Profile /profile",
+      "My Attendance Clock /attendance-clock",
+      "My Attendance /attendance",
+      "My Leave /leave",
+      "My Reimbursements /reimbursements",
+      "My Letters /letters",
+      "My Equipment /inventory/mine",
+      "My Performance /performance",
+    ]);
+    // Without a linked employee record there is no equipment link (the other seven need nothing).
+    const noRecord = buildNavModules([], { inventory: { grants: [], isEmployee: false } }).find((m) => m.id === "me")!;
+    expect(noRecord.sections[0]!.links.map((l) => l.label)).not.toContain("My Equipment");
+    expect(noRecord.sections[0]!.links).toHaveLength(7);
+  });
+
+  it("Company information holds Holidays and Policies for everyone", () => {
+    for (const grants of [[], [grant("employee")], [grant("hr_admin")], [grant("ceo")]]) {
+      const c = buildNavModules(grants).find((m) => m.id === "company")!;
+      expect(c.label).toBe("Company information");
+      expect(c.sections.flatMap((s) => s.links.map((l) => l.href))).toEqual(["/holidays", "/policies"]);
+    }
+  });
+
+  it("the three misleading labels are gone: no 'Employees', 'Attendance' or 'Performance reviews (HR)' for someone who sees only their own record", () => {
+    const labels = (grants: RoleGrant[]) => buildNavModules(grants).flatMap((m) => m.sections.flatMap((s) => s.links.map((l) => l.label)));
+    const own = labels([grant("employee")]);
+    expect(own).not.toContain("Employees");
+    expect(own).not.toContain("Attendance");
+    expect(own).not.toContain("Performance reviews (HR)");
+    expect(own).toEqual(expect.arrayContaining(["My Attendance", "My Performance"]));
+    expect(own).not.toContain("People & HR");
+  });
+
+  describe("People & HR is offered only to people who hold something company-level", () => {
+    const peopleLabels = (grants: RoleGrant[], o: Parameters<typeof buildNavModules>[1] = {}) => {
+      const m = buildNavModules(grants, o).find((x) => x.id === "people");
+      return m ? m.sections.flatMap((s) => s.links.map((l) => l.label)) : null;
+    };
+    it.each([
+      ["a plain employee", [grant("employee")], {}],
+      ["no roles", [], {}],
+      ["a CRM founder (access only is not a People & HR job on its own, but People & Access is)", [grant("employee")], { crmGrants: [{ companyId: "c1", capabilities: ["manage_settings"] as never[] }] }],
+    ])("is absent for %s", (_n, grants, o) => {
+      expect(peopleLabels(grants as RoleGrant[], o)).toBeNull();
+    });
+    it("is offered with the Employees directory to a manager (role or any direct report), HR, Finance, CEO, CTO and a Sys Admin", () => {
+      for (const g of [[grant("line_manager")], [grant("hr_admin")], [grant("finance")], [grant("ceo")], [grant("cto")], [grant("sys_admin", null)]]) {
+        expect(peopleLabels(g)).toContain("Employees");
+      }
+      expect(peopleLabels([grant("employee")], { hasDirectReports: true })).toEqual(["Employees"]);
+      expect(peopleLabels([grant("employee")], { hasDirectReports: false })).toBeNull();
+    });
+    it("gives a person who only manages access People & Access and nothing else", () => {
+      expect(peopleLabels([grant("employee")], { crmGrants: [{ companyId: "c1", capabilities: ["founder"] }] })).toEqual(["People & Access"]);
+      const mod = buildNavModules([grant("employee")], { budget: { any: false, manageAccess: true } }).find((m) => m.id === "people")!;
+      expect(mod.href).toBe("/people-access");
+    });
+    it("for HR, /attendance and /letters are the company register and the letters desk, labelled so and not duplicated under Me", () => {
+      const mods = buildNavModules([grant("hr_admin")]);
+      const all = mods.flatMap((m) => m.sections.flatMap((s) => s.links.map((l) => `${m.id}:${l.label}:${l.href}`)));
+      expect(all).toContain("people:Attendance register:/attendance");
+      expect(all).toContain("people:Letters:/letters");
+      expect(all.filter((x) => x.endsWith(":/attendance"))).toHaveLength(1);
+      expect(all.filter((x) => x.endsWith(":/letters"))).toHaveLength(1);
+      expect(all).not.toContain("me:My Attendance:/attendance");
+    });
+    it("never shows the same address twice in the whole menu, whatever the combination of responsibilities", () => {
+      const combos: [RoleGrant[], Parameters<typeof buildNavModules>[1]][] = [
+        [[grant("employee")], {}],
+        [[grant("hr_admin"), grant("finance"), grant("sys_admin", null)], { crmGrants: [{ companyId: "c1", capabilities: ["founder"] }], projects: { grants: [{ companyId: "c1", capabilities: ["founder"] }] }, inventory: { grants: [{ companyId: "c1", capabilities: ["founder"] }], isEmployee: true }, budget: { any: true, manageAccess: true } }],
+        [[grant("line_manager")], { projects: { grants: [{ companyId: "c1", capabilities: [] }], managesProjects: true }, inventory: { grants: [], managesProjects: true, isEmployee: true }, hasDirectReports: true }],
+        [[grant("ceo")], { inventory: { grants: [{ companyId: "c1", capabilities: ["warehouse"] }], isEmployee: false } }],
+      ];
+      for (const [g, o] of combos) {
+        const mods = buildNavModules(g, o);
+        const links = mods.flatMap((m) => m.sections.flatMap((x) => x.links.map((l) => l.href)));
+        expect(links.filter((h, i) => links.indexOf(h) !== i), `duplicate link in ${JSON.stringify(mods.map((m) => m.id))}`).toEqual([]);
+        expect(new Set(mods.map((m) => m.id)).size).toBe(mods.length);
+      }
+    });
+    it("merges several responsibilities into one sidebar: Me and People & HR once each", () => {
+      const mods = buildNavModules([grant("line_manager"), grant("finance")], { projects: { grants: [{ companyId: "c1", capabilities: [] }] }, crmGrants: [{ companyId: "c1", capabilities: [] }], budget: { any: true } });
+      expect(mods.map((m) => m.id)).toEqual(["my-day", "approvals", "sales", "me", "people", "projects", "finance", "company"]);
+    });
   });
 
   it("puts Sales & CRM after My Day (and Approvals) only for people with a Sales grant, whatever their HR roles", () => {
@@ -241,12 +345,14 @@ describe("ENGINIOUS OS modules", () => {
     assertNoFunctions(buildNavModules([grant("hr_admin")], { crmGrants: [{ companyId: "c1", capabilities: ["founder"] }] }));
   });
 
-  it("search lists only real, permitted pages (never a coming-soon module)", () => {
+  it("search lists only real, permitted pages", () => {
     const groups = navGroupsFromModules(buildNavModules([grant("employee")]));
     const labels = groups.flatMap((g) => g.links.map((l) => l.label));
     expect(labels).not.toContain("Inventory");
     expect(labels).not.toContain("KPIs");
-    expect(labels).toContain("Leave");
+    expect(labels).not.toContain("Payroll");
+    expect(labels).toContain("My Leave");
+    expect(groups.map((g) => g.label)).toEqual(["My Day", "Me", "Company information"]);
   });
 });
 
@@ -260,9 +366,11 @@ describe("active module and breadcrumb", () => {
     ["/sales/opportunities/abc", "sales"],
     ["/employees/123", "people"],
     ["/attendance", "people"],
-    ["/attendance-clock", "people"],
-    ["/leave/new", "people"],
-    ["/performance/goals", "kpis"],
+    ["/attendance-clock", "me"],
+    ["/leave/new", "me"],
+    ["/performance/goals", "me"],
+    ["/holidays", "company"],
+    ["/policies/abc", "company"],
   ])("%s belongs to %s", (path, id) => {
     expect(activeModuleId(path, modules)).toBe(id);
   });
@@ -271,8 +379,10 @@ describe("active module and breadcrumb", () => {
   });
   it("names the module and the most specific page", () => {
     expect(breadcrumbFor("/sales/opportunities/abc", modules)).toEqual({ module: "Sales & CRM", page: "Enquiries" });
-    expect(breadcrumbFor("/attendance-clock", modules)).toEqual({ module: "People & HR", page: "My Attendance Clock" });
-    expect(breadcrumbFor("/attendance", modules)).toEqual({ module: "People & HR", page: "Attendance" });
+    expect(breadcrumbFor("/attendance-clock", modules)).toEqual({ module: "Me", page: "My Attendance Clock" });
+    expect(breadcrumbFor("/attendance", modules)).toEqual({ module: "People & HR", page: "Attendance register" });
+    expect(breadcrumbFor("/leave", modules)).toEqual({ module: "Me", page: "My Leave" });
+    expect(breadcrumbFor("/policies", modules)).toEqual({ module: "Company information", page: "Policies" });
     expect(breadcrumbFor("/", modules)).toEqual({ module: "My Day", page: null });
     expect(breadcrumbFor("/sales/follow-ups", modules)).toEqual({ module: "Sales & CRM", page: null });
   });
@@ -382,24 +492,30 @@ describe("Inventory navigation", () => {
   const inv = (...caps: string[]) => ({ grants: [{ companyId: "c1", capabilities: caps as never[] }] });
   const sectionLinks = (mods: ReturnType<typeof buildNavModules>) => mods.find((m) => m.id === "inventory")!.sections.flatMap((s) => s.links.map((l) => `${s.label}:${l.label}${l.secondary ? "*" : ""}`));
 
-  it("stays a 'Coming soon' row for people with no Inventory involvement, whatever their HR roles", () => {
+  it("has no Inventory module (and no placeholder) for people with no Inventory involvement, whatever their HR roles", () => {
     for (const roles of [[grant("employee")], [grant("hr_admin")], [grant("ceo")], [grant("sys_admin")], [grant("finance")]]) {
-      const mod = buildNavModules(roles, { inventory: { grants: [], managesProjects: false, isEmployee: false } }).find((m) => m.id === "inventory")!;
-      expect(mod.comingSoon).toBe(true);
-      expect(mod.href).toBe("");
+      for (const isEmployee of [false, true]) {
+        expect(buildNavModules(roles, { inventory: { grants: [], managesProjects: false, isEmployee } }).find((m) => m.id === "inventory")).toBeUndefined();
+      }
     }
+    // a failed lookup behaves the same: nothing for that module, never a placeholder
+    expect(buildNavModules([grant("employee")]).find((m) => m.id === "inventory")).toBeUndefined();
   });
 
-  it("gives every employee a 'My equipment' link and nothing else", () => {
+  it("puts an employee's own equipment under Me, not in an Inventory module of one link", () => {
     const mods = buildNavModules([grant("employee")], { inventory: { grants: [], isEmployee: true } });
-    expect(mods.find((m) => m.id === "inventory")?.comingSoon).toBeUndefined();
-    expect(sectionLinks(mods)).toEqual(["Inventory:My equipment"]);
-    expect(mods.find((m) => m.id === "inventory")?.href).toBe("/inventory/mine");
+    expect(mods.find((m) => m.id === "inventory")).toBeUndefined();
+    expect(mods.find((m) => m.id === "me")!.sections[0]!.links.map((l) => l.href)).toContain("/inventory/mine");
+    expect(activeModuleId("/inventory/mine", mods)).toBe("me");
   });
 
   it("shows Today, Stock and History to a warehouse operator, with Requests, My equipment, Scan and who holds what kept out of the menu", () => {
     const links = sectionLinks(buildNavModules([grant("employee")], { inventory: inv("warehouse") }));
     expect(links).toEqual(["Inventory:Today", "Inventory:Stock", "Inventory:History", "Inventory:Requests*", "Inventory:My equipment*", "Inventory:Scan a label*", "Inventory:Equipment held by people*"]);
+    // With a linked employee record the same page is in Me instead (never listed twice).
+    const linked = buildNavModules([grant("employee")], { inventory: { ...inv("warehouse"), isEmployee: true } });
+    expect(sectionLinks(linked)).not.toContain("Inventory:My equipment*");
+    expect(hrefsOf(linked).filter((h) => h === "/inventory/mine")).toHaveLength(1);
   });
 
   it("offers 'Equipment held by people' (kept out of the menu, inside Stock) only to HR custody access, founders and warehouse operators", () => {
@@ -412,7 +528,7 @@ describe("Inventory navigation", () => {
       expect(held(buildNavModules([grant("hr_admin")], { inventory: inv(...caps) }))).toEqual([]);
     }
     expect(held(buildNavModules([grant("hr_admin")], { inventory: { grants: [], managesProjects: true, isEmployee: true } }))).toEqual([]);
-    expect(held(buildNavModules([grant("ceo")], { inventory: { grants: [], isEmployee: true } }))).toEqual([]);
+    expect(buildNavModules([grant("ceo")], { inventory: { grants: [], isEmployee: true } }).find((m) => m.id === "inventory")).toBeUndefined();
     // It is a real destination: found by search and it lights up Inventory, but it is not a menu row.
     const mods = buildNavModules([], { inventory: inv("view_employee_custody") });
     const link = mods.find((m) => m.id === "inventory")!.sections.flatMap((s) => s.links).find((l) => l.href === "/inventory/stock?view=people");
@@ -422,7 +538,7 @@ describe("Inventory navigation", () => {
 
   it("gives a Project Manager Stock (the catalogue) and Requests but neither Today nor History, and a plain Inventory grant no History", () => {
     expect(sectionLinks(buildNavModules([], { inventory: { grants: [], managesProjects: true, isEmployee: true } }))).toEqual([
-      "Inventory:Stock", "Inventory:Requests", "Inventory:My equipment*", "Inventory:Scan a label*",
+      "Inventory:Stock", "Inventory:Requests", "Inventory:Scan a label*",
     ]);
     expect(sectionLinks(buildNavModules([], { inventory: inv() }))).not.toContain("Inventory:History");
   });
@@ -442,7 +558,7 @@ describe("Inventory navigation", () => {
     const entry = (o: Parameters<typeof buildNavModules>[1]) => buildNavModules([], o).find((m) => m.id === "inventory")!.href;
     expect(entry({ inventory: inv("warehouse") })).toBe("/inventory");
     expect(entry({ inventory: { grants: [], managesProjects: true } })).toBe("/inventory/requests");
-    expect(entry({ inventory: { grants: [], isEmployee: true } })).toBe("/inventory/mine");
+    expect(entry({ inventory: { grants: [], managesProjects: true, isEmployee: true } })).toBe("/inventory/requests");
   });
 
   describe("Finance (Project Budget & Expenses)", () => {

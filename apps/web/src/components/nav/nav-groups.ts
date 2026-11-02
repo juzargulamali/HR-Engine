@@ -57,13 +57,13 @@ export interface NavGroupData {
   links: NavLinkData[];
 }
 
-export type NavModuleId = "my-day" | "approvals" | "sales" | "people" | "projects" | "finance" | "inventory" | "vendors" | "kpis";
+export type NavModuleId = "my-day" | "approvals" | "sales" | "me" | "people" | "projects" | "finance" | "inventory" | "company";
 
 export interface NavModuleData {
   id: NavModuleId;
   label: string;
   iconKey: NavIconKey;
-  /** Where the module's own row goes. Empty for a module that is not built yet. */
+  /** Where the module's own row goes. */
   href: string;
   comingSoon?: boolean;
   /** Sub-navigation, shown while the module is open. Same permission checks as before, just grouped under the module. */
@@ -82,7 +82,7 @@ export interface NavOptions {
   /**
    * Inventory access: the person's own grants from inv_company_grants (never HR roles, Sales or Projects grants), whether they run a
    * project (a Project Manager or department head prepares equipment requests without a stock grant), and whether they are an
-   * employee with a linked record (every employee can see the equipment assigned to them). No access of any kind means "Coming soon".
+   * employee with a linked record (every employee can see the equipment assigned to them: that link is in "Me"). No access of any kind means no Inventory module.
    */
   inventory?: { grants: readonly InvGrant[]; managesProjects?: boolean; isEmployee?: boolean };
   /**
@@ -90,6 +90,11 @@ export interface NavOptions {
    * holding Finance or view access in some company get the Finance entry; a Project Manager reaches the budget from the project itself.
    */
   budget?: { any: boolean; finance?: boolean; manageAccess?: boolean };
+  /**
+   * The person has at least one direct report (employees.manager_id), read through their own session. A manager without the Reporting
+   * Manager role still gets "People & HR" (the Employees directory shows exactly their reports; the database decides that, not the menu).
+   */
+  hasDirectReports?: boolean;
 }
 
 /**
@@ -161,41 +166,43 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
     });
   }
 
-  const peopleSections: NavGroupData[] = [
-    {
-      label: "Me",
-      links: [
-        { href: "/profile", label: "My Profile", iconKey: "profile" },
-        { href: "/attendance-clock", label: "My Attendance Clock", iconKey: "clock" },
-      ],
-    },
-    {
-      label: "People",
-      links: [
-        { href: "/employees", label: "Employees", iconKey: "employees" },
-        { href: "/attendance", label: "Attendance", iconKey: "attendance" },
-        { href: "/leave", label: "Leave", iconKey: "leave" },
-        { href: "/reimbursements", label: "Reimbursements", iconKey: "reimbursements" },
-      ],
-    },
-    {
-      label: "Workflow",
-      links: [
-        ...(showAlertsLink ? [{ href: "/alerts", label: "Alerts", iconKey: "alerts" as const }] : []),
-        { href: "/letters", label: "Letters", iconKey: "letters" },
-        ...(showPayrollLink ? [{ href: "/payroll", label: "Payroll", iconKey: "payroll" as const }] : []),
-      ],
-    },
-    {
-      label: "Organisation",
-      links: [
-        ...(showAssetsLink ? [{ href: "/assets", label: "Assets", iconKey: "assets" as const }] : []),
-        { href: "/policies", label: "Policies", iconKey: "policies" },
-        { href: "/holidays", label: "Holidays", iconKey: "holidays" },
-        ...(showAdminLink ? [{ href: "/admin/companies", label: "Companies", iconKey: "companies" as const }] : []),
-      ],
-    },
+  // "Me": the person's own pages, for everyone, needing no grant (so a failed grant lookup can never remove it). Every link here shows
+  // the viewer's own record only. Two company screens share an address with a personal page, so the label follows what the page shows:
+  // for an HR Admin /attendance is the company register and /letters the letters desk; those two are listed under People & HR instead.
+  const isHr = hasRoleAnyScope(grants, "hr_admin");
+  const meLinks: NavLinkData[] = [
+    { href: "/profile", label: "My Profile", iconKey: "profile" },
+    { href: "/attendance-clock", label: "My Attendance Clock", iconKey: "clock" },
+    ...(isHr ? [] : [{ href: "/attendance", label: "My Attendance", iconKey: "attendance" as const }]),
+    { href: "/leave", label: "My Leave", iconKey: "leave" },
+    { href: "/reimbursements", label: "My Reimbursements", iconKey: "reimbursements" },
+    ...(isHr ? [] : [{ href: "/letters", label: "My Letters", iconKey: "letters" as const }]),
+    ...(options.inventory?.isEmployee === true ? [{ href: "/inventory/mine", label: "My Equipment", iconKey: "inventory" as const }] : []),
+    { href: "/performance", label: "My Performance", iconKey: "performance" },
   ];
+  modules.push({ id: "me", label: "Me", iconKey: "profile", href: "/profile", sections: [{ label: "Me", links: meLinks }] });
+
+  // "People & HR": company-level screens only, for people who hold something there: a manager (the role or any direct report), HR, Finance,
+  // CEO/CTO, a System Administrator, or someone who can manage access. Showing or hiding a row grants nothing; the pages and the database decide.
+  const peopleRole = (["line_manager", "hr_admin", "finance", "ceo", "cto", "sys_admin"] as const).some((role) => hasRoleAnyScope(grants, role));
+  const showEmployees = peopleRole || options.hasDirectReports === true;
+  const peopleSections: NavGroupData[] = [];
+  const peopleLinks: NavLinkData[] = [
+    ...(showEmployees ? [{ href: "/employees", label: "Employees", iconKey: "employees" as const }] : []),
+    ...(isHr ? [{ href: "/attendance", label: "Attendance register", iconKey: "attendance" as const }] : []),
+  ];
+  if (peopleLinks.length > 0) peopleSections.push({ label: "People", links: peopleLinks });
+  const workflowLinks: NavLinkData[] = [
+    ...(showAlertsLink ? [{ href: "/alerts", label: "Alerts", iconKey: "alerts" as const }] : []),
+    ...(isHr ? [{ href: "/letters", label: "Letters", iconKey: "letters" as const }] : []),
+    ...(showPayrollLink ? [{ href: "/payroll", label: "Payroll", iconKey: "payroll" as const }] : []),
+  ];
+  if (workflowLinks.length > 0) peopleSections.push({ label: "Workflow", links: workflowLinks });
+  const organisationLinks: NavLinkData[] = [
+    ...(showAssetsLink ? [{ href: "/assets", label: "Assets", iconKey: "assets" as const }] : []),
+    ...(showAdminLink ? [{ href: "/admin/companies", label: "Companies", iconKey: "companies" as const }] : []),
+  ];
+  if (organisationLinks.length > 0) peopleSections.push({ label: "Organisation", links: organisationLinks });
   if (showInsightsLinks) {
     peopleSections.push({
       label: "Insights",
@@ -216,7 +223,8 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
   if (canUsePeopleAccess(grants, accessRefs)) {
     peopleSections.push({ label: "Access", links: [{ href: "/people-access", label: "People & Access", iconKey: "users" }] });
   }
-  modules.push({ id: "people", label: "People & HR", iconKey: "people", href: "/employees", sections: peopleSections });
+  const peopleFirst = peopleSections[0]?.links[0];
+  if (peopleFirst) modules.push({ id: "people", label: "People & HR", iconKey: "people", href: peopleFirst.href, sections: peopleSections });
 
   // Projects & Tasks has its own company-scoped access (proj_company_grants), independent of HR roles and Sales grants: shown only
   // to people granted it, or linked to a project as Sales (who see their own projects and nothing else). Handovers, new internal
@@ -261,28 +269,27 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
   const invAnyCap = (cap: Parameters<typeof hasInvCapability>[2]) => invGrants.some((g) => hasInvCapability([g], g.companyId, cap));
   const invStock = invGrants.some((g) => canViewStock([g], g.companyId));
   const invPlanner = invGrantee || inv?.managesProjects === true;
-  if (invPlanner || inv?.isEmployee === true) {
-    const mainLinks: NavLinkData[] = invPlanner
-      ? [
-          ...(invGrantee ? [{ href: "/inventory", label: "Today", iconKey: "inventory" as const }] : []),
-          { href: "/inventory/stock", label: "Stock", iconKey: "inventory" },
-          ...(invStock || invAnyCap("founder") ? [{ href: "/inventory/history", label: "History", iconKey: "inventory" as const }] : []),
-          { href: "/inventory/requests", label: "Requests", iconKey: "inventory", secondary: invGrantee },
-          { href: "/inventory/mine", label: "My equipment", iconKey: "inventory", secondary: true },
-          // Real destinations that are not menu rows (found by search): scanning and who holds what now live inside Stock.
-          { href: "/inventory/stock?action=scan", label: "Scan a label", iconKey: "inventory", secondary: true },
-          ...(invAnyCap("view_employee_custody") || invAnyCap("founder") || invAnyCap("warehouse")
-            ? [{ href: "/inventory/stock?view=people", label: "Equipment held by people", iconKey: "inventory" as const, secondary: true }]
-            : []),
-        ]
-      : [{ href: "/inventory/mine", label: "My equipment", iconKey: "inventory" }];
+  if (invPlanner) {
+    const mainLinks: NavLinkData[] = [
+      ...(invGrantee ? [{ href: "/inventory", label: "Today", iconKey: "inventory" as const }] : []),
+      { href: "/inventory/stock", label: "Stock", iconKey: "inventory" },
+      ...(invStock || invAnyCap("founder") ? [{ href: "/inventory/history", label: "History", iconKey: "inventory" as const }] : []),
+      { href: "/inventory/requests", label: "Requests", iconKey: "inventory", secondary: invGrantee },
+      // An employee's own equipment is under "Me"; someone with no employee record keeps it here, found by search.
+      ...(inv?.isEmployee === true ? [] : [{ href: "/inventory/mine", label: "My equipment", iconKey: "inventory" as const, secondary: true }]),
+      // Real destinations that are not menu rows (found by search): scanning and who holds what now live inside Stock.
+      { href: "/inventory/stock?action=scan", label: "Scan a label", iconKey: "inventory", secondary: true },
+      ...(invAnyCap("view_employee_custody") || invAnyCap("founder") || invAnyCap("warehouse")
+        ? [{ href: "/inventory/stock?view=people", label: "Equipment held by people", iconKey: "inventory" as const, secondary: true }]
+        : []),
+    ];
     const manage: NavLinkData[] = [];
     if (invAnyCap("manage_catalogue") || invAnyCap("founder")) manage.push({ href: "/inventory/manage", label: "Setup", iconKey: "inventory" });
     modules.push({
       id: "inventory",
       label: "Inventory",
       iconKey: "inventory",
-      href: invPlanner ? (invGrantee ? "/inventory" : "/inventory/requests") : "/inventory/mine",
+      href: invGrantee ? "/inventory" : "/inventory/requests",
       sections: [{ label: "Inventory", links: mainLinks }, ...(manage.length > 0 ? [{ label: "Manage", links: manage }] : [])],
     });
   }
@@ -298,27 +305,23 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
     });
   }
 
-  // Modules that are planned but not built: visible to everyone so the roadmap is honest, never links, never any data.
-  modules.push(
-    ...(invPlanner || inv?.isEmployee === true ? [] : [{ id: "inventory" as const, label: "Inventory", iconKey: "inventory" as const, href: "", comingSoon: true, sections: [] }]),
-    { id: "vendors", label: "Vendors & Purchasing", iconKey: "vendors", href: "", comingSoon: true, sections: [] },
-    // The existing HR appraisals and goals stay reachable (and are called what they are); the future KPI module is marked.
-    {
-      id: "kpis",
-      label: "KPIs & Performance",
-      iconKey: "kpis",
-      href: "/performance",
-      sections: [
-        {
-          label: "KPIs & Performance",
-          links: [
-            { href: "/performance", label: "Performance reviews (HR)", iconKey: "performance" },
-            { href: "", label: "KPIs", iconKey: "soon", comingSoon: true },
-          ],
-        },
-      ],
-    },
-  );
+  // Company information: reference pages every employee may read (the pages keep their own controls for HR). Nothing here is a placeholder:
+  // a module that is not built yet is not in the menu.
+  modules.push({
+    id: "company",
+    label: "Company information",
+    iconKey: "policies",
+    href: "/holidays",
+    sections: [
+      {
+        label: "Company information",
+        links: [
+          { href: "/holidays", label: "Holidays", iconKey: "holidays" },
+          { href: "/policies", label: "Policies", iconKey: "policies" },
+        ],
+      },
+    ],
+  });
 
   return modules;
 }

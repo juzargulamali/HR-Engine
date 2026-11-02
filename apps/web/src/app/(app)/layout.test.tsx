@@ -65,6 +65,14 @@ describe("App layout", () => {
     expect(await render()).not.toContain("Some menu items could not be loaded");
   });
 
+  it("a failed direct-reports read is reported; a healthy one is quiet", async () => {
+    session = { ...session, employeeId: "e1" };
+    tables = { ...tables, employees: failing() };
+    expect(await render()).toContain("Some menu items could not be loaded");
+    tables = { ...tables, employees: { data: null, error: null, count: 2 } };
+    expect(await render()).not.toContain("Some menu items could not be loaded");
+  });
+
   it.each(["projects", "inventory", "budget"])("a failed %s navigation probe is reported", async (name) => {
     probes[name] = { loadFailed: true };
     expect(await render()).toContain("Some menu items could not be loaded");
