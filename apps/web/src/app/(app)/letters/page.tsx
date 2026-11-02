@@ -10,6 +10,7 @@ import { NewTemplateForm } from "./new-template-form";
 import { DeleteLetterButton } from "./delete-letter-button";
 import { DeleteTemplateButton } from "./delete-template-button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { canDownloadLetter } from "./download-rule";
 
 export const metadata = { title: "Letters" };
 
@@ -60,7 +61,8 @@ export default async function LettersPage() {
   const downloadUrlByLetter = new Map(
     await Promise.all(
       (letters ?? []).map(async (l) => {
-        if (!l.file_path) return [l.id, null] as const;
+        // An employee gets the file only once the letter is issued (the storage policy enforces the same rule); HR keeps downloading for review.
+        if (!l.file_path || !canDownloadLetter(l.status, canManage)) return [l.id, null] as const;
         const { data } = await supabase.storage.from("letters").createSignedUrl(l.file_path, 300);
         return [l.id, data?.signedUrl ?? null] as const;
       }),
@@ -187,6 +189,8 @@ export default async function LettersPage() {
                         <a href={downloadUrlByLetter.get(l.id)!} className="text-sm text-accent hover:underline">
                           Download
                         </a>
+                      ) : !canManage && l.file_path && l.status === "pending_approval" ? (
+                        <span className="text-sm text-muted-foreground">Available once it is approved</span>
                       ) : null}
                       {canManage ? <DeleteLetterButton letterId={l.id} /> : null}
                     </div>

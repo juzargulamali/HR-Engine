@@ -18,7 +18,7 @@ export default async function PoliciesPage() {
   if (!session) return null;
 
   const supabase = await createClient();
-  const [{ data: policies, error: policiesError }, { data: countries, error: countriesError }, { data: phase2bStatus }] = await Promise.all([
+  const [{ data: policies, error: policiesError }, { data: countries, error: countriesError }] = await Promise.all([
     supabase
       .from("policy_versions")
       .select("id, country_code, policy_type, version_no, status, effective_from, effective_to, created_by, payload")
@@ -26,9 +26,6 @@ export default async function PoliciesPage() {
       .order("policy_type")
       .order("version_no", { ascending: false }),
     supabase.from("countries").select("code, name").order("name"),
-    // Read-only — safe to call even for a viewer with no drafting rights;
-    // used only to decide whether the button below still has anything to do.
-    supabase.rpc("preflight_phase2b_v2_policy_status"),
   ]);
 
   // A failed read is not "No policies yet".
@@ -49,6 +46,11 @@ export default async function PoliciesPage() {
 
   const countryName = new Map((countries ?? []).map((c) => [c.code, c.name]));
   const canDraftAnywhere = (countries ?? []).some((c) => canDraftPolicy(session.grants, c.code));
+  // Read-only, and asked only of people who may draft: the database answers nobody else (the function checks the role inside), and it is used only to decide
+  // whether the button below still has anything to do. A failed answer leaves the button offered (creating the drafts is idempotent).
+  const { data: phase2bStatus } = canDraftAnywhere
+    ? await supabase.rpc("preflight_phase2b_v2_policy_status")
+    : { data: [] as { status: string }[] };
   const phase2bAllCreated = (phase2bStatus ?? []).length > 0 && (phase2bStatus ?? []).every((r) => r.status !== "not_created");
   const isWindowsPayload = (payload: Record<string, unknown>) => payload?.model === "recovery_windows";
   const windowsCountries = new Set((policies ?? []).filter((p) => p.policy_type === "overtime_rules" && isWindowsPayload(p.payload)).map((p) => p.country_code));
