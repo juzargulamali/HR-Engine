@@ -217,17 +217,19 @@ await step("actual expenses start blank: approved amounts are shown, never copie
 await step("blank is not zero: a typed 0 counts, the difference is worded as over or under", async () => {
   const li = (text) => main().locator("li", { hasText: text }).first();
   const amt = (text) => li(text).getByLabel(/Actual \(AED\)/);
+  // How paid / Who paid are asked once for the list; only a line that differs repeats them.
+  await page.getByLabel("How paid (all lines)").selectOption({ label: "Paid from a cash / bank advance" });
+  await page.getByLabel("Who paid (all lines)").selectOption({ label: "mgr" });
   await amt("Lunch for the install team").fill("400");
-  await li("Lunch for the install team").getByLabel("How was it paid?").selectOption({ label: "Paid from a cash / bank advance" });
-  await li("Lunch for the install team").getByLabel("Who paid?").selectOption({ label: "mgr" });
   await expectText(/Over AED 40\.00/);
+  if ((await li("Lunch for the install team").getByLabel("How was it paid?").count()) !== 0) throw new Error("the line repeats How was it paid? although it follows the default");
   await amt("Petrol to the venue").fill("30");
-  await li("Petrol to the venue").getByLabel("How was it paid?").selectOption({ label: "Paid from a cash / bank advance" });
-  await li("Petrol to the venue").getByLabel("Who paid?").selectOption({ label: "mgr" });
   await amt("Metro cards").fill("0");              // a confirmed zero
   await amt("Truck to and from the site").fill("1050");
+  await li("Truck to and from the site").getByRole("button", { name: "Different for this line" }).click();
   await li("Truck to and from the site").getByLabel("How was it paid?").selectOption({ label: "Paid directly by the company" });
   await amt("Parking").fill("10");
+  await li("Parking").getByRole("button", { name: "Different for this line" }).click();
   await li("Parking").getByLabel("How was it paid?").selectOption({ label: "Company or Pluto card" });
   await expectText(/Under AED 30\.00|Under budget by AED 30\.00|Under AED/);
 });
