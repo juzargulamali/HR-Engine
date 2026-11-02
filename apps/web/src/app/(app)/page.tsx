@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlarmClock, CalendarClock, CalendarDays, ClipboardCheck, FolderKanban, Inbox, Layers, PackageCheck, ReceiptText, ShoppingBag, UserPlus, Users } from "lucide-react";
+import { AlarmClock, CalendarClock, CalendarDays, ClipboardCheck, FolderKanban, Hourglass, Inbox, Layers, PackageCheck, ReceiptText, ShoppingBag, UserPlus, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
   canCreateEmployee,
@@ -24,13 +24,16 @@ import { OsScope } from "@/components/os/scope";
 import { OsStatCard } from "@/components/os/stat-card";
 import { DecisionsCard } from "@/components/my-day/decisions-card";
 import { DeliveryWeekCard } from "@/components/my-day/delivery-week";
-import { HrAttention, HrStatCards, QuickActions, TeamDistribution } from "@/components/my-day/hr-section";
+import { HrAttention, HrStatCards, TeamDistribution } from "@/components/my-day/hr-section";
+import { MyWorkToday } from "@/components/my-day/my-work-today";
 import { NextDispatch } from "@/components/my-day/next-dispatch";
 import { PeopleToday } from "@/components/my-day/people-today";
 import { ProjectHealth } from "@/components/my-day/project-health";
 import { SalesPipeline } from "@/components/my-day/sales-pipeline";
-import { splitActions, sumCounts } from "@/lib/my-day/groups";
-import { loadEquipment, loadLiveClock, loadPortfolio, type Equipment, type Portfolio } from "@/lib/my-day/loaders";
+import { splitActions } from "@/lib/my-day/groups";
+import { loadEquipment, loadLiveClock } from "@/lib/my-day/loaders";
+import { loadProjectsDay } from "@/lib/my-day/projects-day";
+import { loadMyWaitingRequests } from "@/lib/my-day/waiting";
 import type { LiveSummary } from "@/lib/my-day/live";
 import { cn } from "@/lib/utils";
 import { logServerError } from "@/lib/log";
@@ -38,17 +41,13 @@ import { BirthdaysSection } from "./birthdays-section";
 import { getCompanySnapshot } from "./dashboard-data";
 import { CompanyComparisonTable } from "./company-comparison-table";
 import { attendanceSentence, CALENDAR_NOTE } from "./attendance-summary";
-import { attentionSentence, buildActionItems, commercialApprovalItems, handoverItems, type ActionItem } from "./action-centre";
+import { attentionSentence, buildActionItems, commercialApprovalItems, handoverItems, waitingOnOthersItems, type ActionItem } from "./action-centre";
 import { AttendanceClockCard } from "./attendance-clock-card";
 import { AttendanceCompletionBar } from "./attendance-completion-bar";
 import { UpcomingSection } from "./upcoming-section";
 import { DashboardHeader } from "./dashboard-header";
 import { loadSalesToday } from "@/lib/crm/my-day";
 import { loadBudgetDay } from "@/lib/budget/my-day-data";
-import { getProjectsContext } from "@/lib/projects/context";
-import { projectDayRows } from "@/lib/projects/my-day";
-import { loadProjectsAttention } from "@/lib/projects/my-work";
-import type { ProjectsContext } from "@/lib/projects/context";
 
 export const metadata = { title: "My Day" };
 
@@ -101,18 +100,29 @@ export default async function DashboardPage() {
   const overviewCompanies = allCompanies.filter((c) => canViewCompanyOverview(session.grants, c.id));
   const canAddEmployee = allCompanies.some((c) => canCreateEmployee(session.grants, c.id));
 
-  // Always computed, for anyone — approving isn't an HR/CEO-only capability
-  // (a line manager or Finance approver needs this too), unlike the
-  // company-wide sections below which stay gated to canViewHrAlerts.
-  // Steps routed to this person by name AND the Recovery Leave queue steps they may decide (the same rule as the Approvals page). A failed
-  // read is "error", never 0: the tile shows "—" and the greeting says the approvals could not be loaded.
-  let myPendingApprovals: number | "error" = 0;
-  try {
-    myPendingApprovals = await loadMyPendingApprovalCount(supabase, session);
-  } catch (error) {
-    logServerError({ route: ROUTE, operation: "count my pending approvals" }, error);
-    myPendingApprovals = "error";
-  }
+  // Every source of "Needs me" and "Waiting on others" is read at the same time and settled on its own (Promise.allSettled): a source that fails
+  // becomes its own error row and never hides, empties or delays the others. Approving isn't an HR/CEO-only capability (a line manager or
+  // Finance approver needs it too), so the approvals count is read for anyone; the company-wide sections below stay gated to canViewHrAlerts.
+  // The approvals count covers the steps routed to this person by name AND the Recovery Leave queue steps they may decide (the same rule as the Approvals page).
+  const [approvalsRead, salesRead, projectsRead, equipmentRead, budgetRead, waitingRead] = await Promise.allSettled([
+    loadMyPendingApprovalCount(supabase, session),
+    loadSalesToday(),
+    loadProjectsDay(today),
+    loadEquipment(),
+    loadBudgetDay(session.userId),
+    session.employeeId ? loadMyWaitingRequests(supabase, session.employeeId) : Promise.resolve(null),
+  ]);
+  const failedSource = (what: string, r: PromiseSettledResult<unknown>) => {
+    if (r.status === "rejected") logServerError({ route: ROUTE, operation: `load ${what}` }, r.reason);
+  };
+  failedSource("my pending approvals", approvalsRead);
+  failedSource("sales follow-ups", salesRead);
+  failedSource("projects", projectsRead);
+  failedSource("equipment requests", equipmentRead);
+  failedSource("project budget decisions", budgetRead);
+  failedSource("my submitted requests", waitingRead);
+  // A failed read is "error", never 0: the tile shows "—" and the greeting says the approvals could not be loaded.
+  const myPendingApprovals: number | "error" = approvalsRead.status === "fulfilled" ? approvalsRead.value : "error";
 
   let isMyBirthdayToday = false;
   // Also drives the employee-only dashboard header's own timezone/location
@@ -281,7 +291,7 @@ export default async function DashboardPage() {
   ].filter((a): a is { href: string; label: string; icon: LucideIcon } => a !== null && a.href !== primaryAction.href);
 
   // Sales follow-ups for people with a Sales grant (same loaders and rules as the Sales overview; "none" for everyone else).
-  const salesToday = await loadSalesToday();
+  const salesToday: Awaited<ReturnType<typeof loadSalesToday>> = salesRead.status === "fulfilled" ? salesRead.value : { status: "error" };
   const salesActionItems: ActionItem[] =
     salesToday.status === "ok"
       ? [
@@ -296,64 +306,47 @@ export default async function DashboardPage() {
   // Commercial approval requests waiting for a Sales founder (the only people who decide them). A failed read is an error row, never 0.
   const approvalActionItems = salesToday.status === "ok" ? commercialApprovalItems(salesToday.data.approvals) : [];
 
-  // Projects & Tasks for people with Projects access (null for everyone else, and when it is not installed). Real counts only.
-  let projectRows: ReturnType<typeof projectDayRows> | "error" | null = null;
-  let projectsCtx: ProjectsContext | null = null;
-  try {
-    projectsCtx = await getProjectsContext();
-    // The access lookup itself failed: the Projects card says so, it does not simply disappear.
-    if (projectsCtx?.loadFailed) projectRows = "error";
-    else if (projectsCtx?.installed && projectsCtx.grants.length > 0) projectRows = projectDayRows(await loadProjectsAttention(projectsCtx));
-  } catch (e) {
-    console.error("[projects] my day load failed", e);
-    projectRows = "error";
-  }
+  // Projects & Tasks for people with Projects access (null for everyone else, and when it is not installed). Real counts only; the person's own
+  // tasks by title ("My work today") and the ones they sent for review come from the same settled read.
+  const projectsDay = projectsRead.status === "fulfilled" ? projectsRead.value : null;
+  const projectRows = projectsRead.status === "rejected" ? "error" : (projectsDay?.rows ?? null);
+  const projectsCtx = projectsDay?.ctx ?? null;
   const hasProjects = projectRows !== null && !!projectsCtx?.installed && (projectsCtx.grants.length > 0 || !!projectsCtx.loadFailed);
-  let portfolio: Portfolio | "error" | null = null;
-  if (hasProjects && projectsCtx?.loadFailed) {
-    portfolio = "error";
-  } else if (hasProjects && projectsCtx) {
-    try {
-      portfolio = await loadPortfolio(projectsCtx, today);
-    } catch (e) {
-      console.error("[projects] my day portfolio failed", e);
-      portfolio = "error";
-    }
-  }
+  const portfolio = projectsRead.status === "rejected" ? "error" : (projectsDay?.portfolio ?? null);
+  const myWork = projectsRead.status === "rejected" ? "error" : (projectsDay?.work ?? null);
+  const tasksInReviewCount = projectsRead.status === "rejected" ? "error" : (projectsDay?.inReview ?? null);
   // Equipment requests for people with Inventory access (null otherwise, and when Inventory is not installed).
-  let equipment: Equipment | "error" | null = null;
-  try {
-    equipment = await loadEquipment();
-  } catch (e) {
-    console.error("[inventory] my day equipment failed", e);
-    equipment = "error";
-  }
-  const quietProjectItems: ActionItem[] = Array.isArray(projectRows)
-    ? projectRows.filter((r) => !r.needsYou).map((r) => ({ key: r.key, icon: FolderKanban, label: r.label, count: r.count, href: r.href }))
-    : [];
+  const equipment = equipmentRead.status === "fulfilled" ? equipmentRead.value : "error";
   const projectActionItems: ActionItem[] = Array.isArray(projectRows)
     ? projectRows.filter((r) => r.needsYou).map((r) => ({ key: r.key, icon: FolderKanban, label: r.label, count: r.count, href: r.href }))
     : projectRows === "error"
       ? [{ key: "proj-error", icon: FolderKanban, label: "Project items could not be loaded", count: 0, href: "/projects/work", error: true }]
       : [];
+  const quietProjectItems: ActionItem[] = Array.isArray(projectRows)
+    ? projectRows.filter((r) => !r.needsYou).map((r) => ({ key: r.key, icon: FolderKanban, label: r.label, count: r.count, href: r.href }))
+    : [];
 
   // Project budgets and final expenses waiting for this person's decision, from the Finance inbox (pbx_inbox: scoped by the database, no Projects access needed).
   // What they submitted themselves waits under "Waiting on others", never as a decision for them. A failed read is an error row, never 0.
   let budgetActionItems: ActionItem[] = [];
   let budgetWaitingItems: ActionItem[] = [];
-  try {
-    const budgetDay = await loadBudgetDay(session.userId);
-    if (budgetDay.status === "error") {
-      budgetActionItems = [{ key: "budget-decisions", icon: ReceiptText, label: "Project budgets could not be loaded", count: 0, href: "/finance/project-budgets", error: true }];
-    } else if (budgetDay.status === "ok") {
-      const { waitingForMe, waitingOnOthers } = budgetDay.day;
-      budgetActionItems = [{ key: "budget-decisions", icon: ReceiptText, label: "Project budgets waiting for you", count: waitingForMe.count, href: waitingForMe.href }];
-      budgetWaitingItems = [{ key: "budget-waiting", icon: ReceiptText, label: "Project budgets you submitted, waiting on others", count: waitingOnOthers, href: "/finance/project-budgets" }];
-    }
-  } catch (e) {
-    logServerError({ route: ROUTE, operation: "load project budget decisions" }, e);
-    budgetActionItems = [{ key: "budget-decisions", icon: ReceiptText, label: "Project budgets could not be loaded", count: 0, href: "/finance/project-budgets", error: true }];
+  const budgetErrorRow: ActionItem = { key: "budget-decisions", icon: ReceiptText, label: "Project budgets could not be loaded", count: 0, href: "/finance/project-budgets", error: true };
+  if (budgetRead.status === "rejected") {
+    budgetActionItems = [budgetErrorRow];
+  } else if (budgetRead.value.status === "error") {
+    budgetActionItems = [budgetErrorRow];
+  } else if (budgetRead.value.status === "ok") {
+    const { waitingForMe, waitingOnOthers } = budgetRead.value.day;
+    budgetActionItems = [{ key: "budget-decisions", icon: ReceiptText, label: "Project budgets waiting for you", count: waitingForMe.count, href: waitingForMe.href }];
+    budgetWaitingItems = [{ key: "budget-waiting", icon: ReceiptText, label: "Project budgets you submitted, waiting on others", count: waitingOnOthers, href: "/finance/project-budgets" }];
   }
+
+  // "Waiting on others": what this person submitted themselves (budgets, leave, claims, Recovery Leave, tasks sent for review). Never a decision for them.
+  const waitingItems: ActionItem[] = [
+    ...budgetWaitingItems,
+    ...waitingOnOthersItems(waitingRead.status === "rejected" ? "error" : waitingRead.value, typeof tasksInReviewCount === "number" ? tasksInReviewCount : 0, now),
+    ...(tasksInReviewCount === "error" ? [{ key: "waiting-review", icon: Hourglass, label: "Your tasks sent for review could not be loaded", count: 0, href: "/projects/work", error: true }] : []),
+  ].filter((i) => i.count > 0 || i.error);
 
   // ONE list of what needs attention, from the same authorised data the card shows; the sentence under the greeting is derived
   // from it, so the two can never disagree (Sales follow-ups are in the list, so they count in the sentence too).
@@ -365,7 +358,6 @@ export default async function DashboardPage() {
 
   const summarySentence = hrSectionError ? "Workforce data couldn't be loaded right now — the numbers below may be incomplete." : attentionSentence(actionItems);
   const groups = splitActions(actionItems);
-  const decisionsWaiting = sumCounts(groups.decision);
 
   // Cross-company CEO/HR view -> Dubai; an employee-only view -> that
   // employee's own company's country (myCountryCode, resolved above
@@ -392,8 +384,6 @@ export default async function DashboardPage() {
   } else if (salesToday.status === "error") {
     stats.push(<OsStatCard key="sales" href="/sales/opportunities" label="Open enquiries" value="—" icon={ShoppingBag} edge="cyan" hint="Could not be loaded" />);
   }
-  const approvalsUnknown = myPendingApprovals === "error";
-  stats.push(<OsStatCard key="decisions" href="#decisions" label="Decisions waiting" value={approvalsUnknown ? "—" : decisionsWaiting} icon={ClipboardCheck} edge="amber" hint={approvalsUnknown ? "Could not be loaded" : undefined} />);
   if (equipment && equipment !== "error") {
     stats.push(<OsStatCard key="equipment" href="/inventory/requests" label="Live equipment requests" value={equipment.summary.live} icon={PackageCheck} edge="cyan" hint={equipment.summary.withShortage > 0 ? `${equipment.summary.withShortage} with a shortage` : undefined} />);
   } else if (equipment === "error") {
@@ -401,6 +391,8 @@ export default async function DashboardPage() {
   }
   const hasLeft = hasProjects || salesToday.status !== "none";
   const statCols = ({ 1: "xl:grid-cols-1", 2: "xl:grid-cols-2", 3: "xl:grid-cols-3", 4: "xl:grid-cols-4" } as Record<number, string>)[Math.min(4, stats.length)];
+  // "Needs me" states the decisions count, so the figure is not repeated as a tile. "Overdue project tasks" is stated by "My work today", so it is not repeated in "Needs me" either.
+  const needsMeOther = [...groups.other, ...quietProjectItems].filter((i) => !(i.key === "proj-overdue" && myWork !== null && myWork !== "error"));
 
   return (
     <OsScope className="space-y-4">
@@ -436,26 +428,29 @@ export default async function DashboardPage() {
         </Alert>
       ) : null}
 
-      <ul className={cn("grid grid-cols-2 gap-3", statCols)} aria-label="Today at a glance">
-        {stats.map((card, n) => <li key={n} className={stats.length % 2 === 1 && n === stats.length - 1 ? "col-span-2 xl:col-span-1" : undefined}>{card}</li>)}
-      </ul>
+      {stats.length > 0 ? (
+        <ul className={cn("grid grid-cols-2 gap-3", statCols)} aria-label="Today at a glance">
+          {stats.map((card, n) => <li key={n} className={stats.length % 2 === 1 && n === stats.length - 1 ? "col-span-2 xl:col-span-1" : undefined}>{card}</li>)}
+        </ul>
+      ) : null}
 
       {/* On a phone the order is what needs you first, then the clock; on a wide screen the left column is the week and the pipeline, the right one what waits on you. */}
       <div className={cn("flex flex-col gap-4 xl:items-start", hasLeft ? "xl:grid xl:grid-cols-[minmax(0,68fr)_minmax(0,32fr)]" : "xl:grid xl:grid-cols-1")}>
         <div className="contents xl:flex xl:min-w-0 xl:flex-col xl:gap-4">
-          {hasProjects ? <div className="order-4 min-w-0 xl:order-none"><DeliveryWeekCard week={portfolio === "error" || portfolio === null ? "error" : portfolio.delivery} /></div> : null}
+          {hasProjects ? <div className="order-5 min-w-0 xl:order-none"><DeliveryWeekCard week={portfolio === "error" || portfolio === null ? "error" : portfolio.delivery} /></div> : null}
           {hasProjects || salesToday.status !== "none" ? (
-            <div className={cn("order-5 grid min-w-0 gap-4 xl:order-none", hasProjects && salesToday.status !== "none" && "md:grid-cols-2")}>
+            <div className={cn("order-6 grid min-w-0 gap-4 xl:order-none", hasProjects && salesToday.status !== "none" && "md:grid-cols-2")}>
               {salesToday.status !== "none" ? <SalesPipeline result={salesToday} /> : null}
               {hasProjects ? <ProjectHealth portfolio={portfolio ?? "error"} /> : null}
             </div>
           ) : null}
         </div>
         <div className={cn("contents xl:min-w-0", hasLeft ? "xl:flex xl:flex-col xl:gap-4" : "xl:grid xl:grid-cols-3 xl:items-start xl:gap-4")}>
-          <div className="order-1 min-w-0 xl:order-none"><DecisionsCard decisions={groups.decision} other={[...groups.other, ...quietProjectItems]} waiting={budgetWaitingItems.filter((i) => i.count > 0)} /></div>
-          {session.employeeId ? <div className="order-2 min-w-0 xl:order-none"><AttendanceClockCard employeeId={session.employeeId} /></div> : null}
-          {showHrView && live !== null ? <div className="order-3 min-w-0 xl:order-none"><PeopleToday live={live} /></div> : null}
-          {equipment !== null ? <div className="order-6 min-w-0 xl:order-none"><NextDispatch equipment={equipment} /></div> : null}
+          <div className="order-1 min-w-0 xl:order-none"><DecisionsCard decisions={groups.decision} other={needsMeOther} waiting={waitingItems} /></div>
+          {hasProjects && myWork !== null ? <div className="order-2 min-w-0 xl:order-none"><MyWorkToday work={myWork} /></div> : null}
+          {session.employeeId ? <div className="order-3 min-w-0 xl:order-none"><AttendanceClockCard employeeId={session.employeeId} /></div> : null}
+          {showHrView && live !== null ? <div className="order-4 min-w-0 xl:order-none"><PeopleToday live={live} /></div> : null}
+          {equipment !== null ? <div className="order-7 min-w-0 xl:order-none"><NextDispatch equipment={equipment} /></div> : null}
         </div>
       </div>
 
@@ -489,14 +484,10 @@ export default async function DashboardPage() {
             <div className="min-w-0 space-y-4">
               <TeamDistribution byCountry={snapshots.filter((snap) => !snap.error).map((snap) => ({ countryCode: snap.countryCode, employees: snap.totalEmployees }))} />
               <HrAttention items={groups.hr} />
-              <QuickActions />
             </div>
           </div>
         </section>
       ) : null}
-
-      {/* The sidebar already lists these; this is only a quiet reminder, with no figures. */}
-      <p className="text-sm text-muted-foreground">Coming soon to ENGINIOUS OS: Vendors &amp; Purchasing and KPIs.</p>
     </OsScope>
   );
 }

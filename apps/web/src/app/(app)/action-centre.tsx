@@ -1,8 +1,9 @@
 import type { LucideIcon } from "lucide-react";
-import { BadgeCheck, CalendarClock, ClipboardCheck, FileCheck2, FileClock, IdCard, ShieldCheck } from "lucide-react";
+import { BadgeCheck, CalendarClock, ClipboardCheck, FileCheck2, FileClock, Hourglass, IdCard, ShieldCheck } from "lucide-react";
 import { HANDOVER_KIND_LABEL, type HandoverRowKind } from "@/lib/crm/handover-attention";
 import type { HandoverCheck } from "@/lib/crm/handover-attention-data";
 import type { ApprovalsWaiting } from "@/lib/crm/my-day";
+import { waitingText, type WaitingResult, type WaitingSource } from "@/lib/my-day/waiting";
 
 export type ActionItem = {
   key: string;
@@ -12,6 +13,8 @@ export type ActionItem = {
   href: string;
   /** The read behind this row failed: the row says so (count shown as "—"), never "0" or a missing row. */
   error?: boolean;
+  /** A short second line, e.g. how long the oldest item has been waiting. */
+  detail?: string;
 };
 
 /**
@@ -87,4 +90,31 @@ export function commercialApprovalItems(a: ApprovalsWaiting): ActionItem[] {
   if (a.status === "error") return [{ key: "approval-commercial", icon: BadgeCheck, label: "Commercial approvals could not be loaded", count: 0, href: "/sales/opportunities", error: true }];
   if (a.count === 0) return [];
   return [{ key: "approval-commercial", icon: BadgeCheck, label: a.count === 1 ? "Commercial approval waiting for your decision" : "Commercial approvals waiting for your decision", count: a.count, href: `/sales/opportunities/${a.oldestOpportunityId}?tab=commercial` }];
+}
+
+const WAITING_LABEL: Record<WaitingSource, { one: string; many: string; error: string; href: string }> = {
+  leave: { one: "Leave request you submitted, waiting for a decision", many: "Leave requests you submitted, waiting for decisions", error: "Your leave requests could not be loaded", href: "/leave" },
+  claims: { one: "Expense claim you submitted, waiting for a decision", many: "Expense claims you submitted, waiting for decisions", error: "Your expense claims could not be loaded", href: "/reimbursements" },
+  recovery: { one: "Recovery Leave request you submitted, waiting for a decision", many: "Recovery Leave requests you submitted, waiting for decisions", error: "Your Recovery Leave requests could not be loaded", href: "/leave" },
+};
+
+/**
+ * "Waiting on others": things the person submitted themselves that wait for someone else's decision. They are never decisions for the person (a self-submitted item
+ * is not counted in "Needs me"); they stay visible here with how long the oldest has waited. A source that failed is its own error row; a source with nothing waiting adds no row.
+ * `inReview` is the number of the person's own tasks sent for review.
+ */
+export function waitingOnOthersItems(requests: Record<WaitingSource, WaitingResult> | "error" | null, inReview: number, now: Date): ActionItem[] {
+  const items: ActionItem[] = [];
+  if (requests === "error") {
+    items.push({ key: "waiting-requests", icon: Hourglass, label: "Your submitted requests could not be loaded", count: 0, href: "/leave", error: true });
+  } else if (requests) {
+    for (const source of Object.keys(WAITING_LABEL) as WaitingSource[]) {
+      const r = requests[source];
+      const text = WAITING_LABEL[source];
+      if (r.status === "error") items.push({ key: `waiting-${source}`, icon: Hourglass, label: text.error, count: 0, href: text.href, error: true });
+      else if (r.count > 0) items.push({ key: `waiting-${source}`, icon: Hourglass, label: r.count === 1 ? text.one : text.many, count: r.count, href: text.href, detail: waitingText(r.oldest, now) });
+    }
+  }
+  if (inReview > 0) items.push({ key: "waiting-review", icon: Hourglass, label: inReview === 1 ? "Task you sent for review, waiting on the reviewer" : "Tasks you sent for review, waiting on the reviewer", count: inReview, href: "/projects/work" });
+  return items;
 }
