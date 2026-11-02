@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { Fragment, useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,8 @@ import { parseLines, validateInput, type LineDraft, type MovementInput, type Sum
 import { BALANCE_CONDITION_WORDS, CONDITION_WORDS, formatQty } from "@/lib/inventory/words";
 import { returnOutcome, type HolderOf, type ItemTotals } from "@/lib/inventory/workspace";
 import { cn } from "@/lib/utils";
+import { applyConditionToLines, appliedMessage } from "@/lib/inventory/return-condition";
+import { ConditionForAll } from "../condition-for-all";
 import { DonePanel, ReviewPanel } from "../stock/movement-review";
 import { SentReturned } from "./sent-returned";
 import { liveServices } from "../stock/movement-services-live";
@@ -90,13 +92,14 @@ export function ReceiveStep(p: ReceiveStepProps) {
     { label: "From", value: `Project ${p.projectName}` },
     { label: "Back into", value: p.locations.find((l) => l.id === locationId)?.name ?? "—" },
     { label: "Still out", value: stay > 0 ? `${stay} ${stay === 1 ? "item stays" : "items stay"} with the project until you record ${stay === 1 ? "it" : "them"} coming back` : "Nothing else is out" },
-    ...(heldBack > 0 ? [{ label: "Held back", value: `${heldBack} ${heldBack === 1 ? "item is" : "items are"} not in good condition. ${heldBack === 1 ? "It is" : "They are"} held for checking and not available until someone releases ${heldBack === 1 ? "it" : "them"}` }] : []),
+    ...(heldBack > 0 ? [{ label: "Held back", value: `${heldBack} ${heldBack === 1 ? "item is" : "items are"} not available again (damaged, or needing a check). ${heldBack === 1 ? "It is" : "They are"} held for checking and not available until someone releases ${heldBack === 1 ? "it" : "them"}` }] : []),
   ];
 
   if (flow.phase === "done") return <DonePanel flow={flow} onAnother={() => { setTicked({}); setQty({}); setCond({}); setShown(false); flow.startNew(); }} />;
   if (flow.phase === "reviewing" || flow.phase === "sending") return <ReviewPanel flow={flow} rows={rows} confirmLabel="Confirm: record returns" onConfirm={onConfirm} />;
 
   const sentTotal = p.totals.reduce((n, t) => n + t.sent, 0);
+  const sorted = [...p.held].sort((a, b) => holderRank(holderOf(a, p.holders)) - holderRank(holderOf(b, p.holders)) || a.itemName.localeCompare(b.itemName));
   return (
     <div className="space-y-4" data-step="back">
       {p.totals.length > 0 ? (
@@ -119,16 +122,39 @@ export function ReceiveStep(p: ReceiveStepProps) {
               <><label htmlFor={`${uid}-into`} className="sr-only">Receive into</label><Select id={`${uid}-into`} value={locationId} onChange={(e) => setLocationId(e.target.value)} disabled={locked} className="h-9 w-auto font-semibold">{p.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></>
             ) : <strong>{p.locations[0]?.name ?? "—"}</strong>}
           </div>
+          <ConditionForAll
+            count={chosen.length}
+            disabled={locked}
+            onApply={(value) => {
+              const r = applyConditionToLines(cond, chosen.map((c) => ({ key: c.key, individual: isUnit(c) })), value);
+              setCond(r.next);
+              return appliedMessage(value, r.applied, r.skipped);
+            }}
+          />
           <ul className="divide-y divide-border/70 rounded-lg border border-border bg-card" aria-label="Held by the project">
-            {[...p.held].sort((a, b) => holderRank(holderOf(a, p.holders)) - holderRank(holderOf(b, p.holders)) || a.itemName.localeCompare(b.itemName)).map((c) => {
+            {sorted.map((c, i) => {
               const on = isUnit(c) ? !!ticked[c.key] : Number(qty[c.key] || 0) > 0;
               const individual = isUnit(c);
               const options = Object.entries(individual ? CONDITION_WORDS : BALANCE_CONDITION_WORDS);
               const outcome = returnOutcome(cond[c.key] ?? "", individual);
               const label = `${c.itemName}${c.code ? ` · ${c.code}` : c.binLabel ? ` · bin ${c.binLabel}` : ""}`;
               const holder = holderOf(c, p.holders);
+              const group = groupOf(sorted, i, p.holders);
               return (
-                <li key={c.key} className={cn("grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center", on && "bg-accent/5")}>
+                <Fragment key={c.key}>
+                {group && group.first ? (
+                  <li className="flex flex-wrap items-center justify-between gap-2 bg-secondary/40 px-4 py-2 text-sm">
+                    <span className="font-medium">{c.itemName} <span className="font-normal text-muted-foreground">· {group.size} here</span></span>
+                    <Button type="button" size="sm" variant="ghost" disabled={locked} onClick={() => {
+                      const all = sorted.slice(i, i + group.size);
+                      const allOn = all.every((x) => ticked[x.key]);
+                      setTicked({ ...ticked, ...Object.fromEntries(all.map((x) => [x.key, !allOn])) });
+                    }}>
+                      {sorted.slice(i, i + group.size).every((x) => ticked[x.key]) ? `Untick all ${group.size}` : `Tick all ${group.size}`}<span className="sr-only"> {c.itemName}</span>
+                    </Button>
+                  </li>
+                ) : null}
+                <li className={cn("grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center", on && "bg-accent/5")}>
                   <div className="flex items-start gap-3">
                     {individual ? <input id={`${uid}-t-${c.key}`} type="checkbox" checked={!!ticked[c.key]} onChange={(e) => setTicked({ ...ticked, [c.key]: e.target.checked })} disabled={locked} className="mt-1 h-5 w-5 flex-none accent-[hsl(var(--accent))]" /> : null}
                     <div className="min-w-0">
@@ -153,6 +179,7 @@ export function ReceiveStep(p: ReceiveStepProps) {
                     ) : null}
                   </div>
                 </li>
+                </Fragment>
               );
             })}
           </ul>
@@ -171,3 +198,15 @@ export function ReceiveStep(p: ReceiveStepProps) {
 const conditionWord = (individual: boolean, value: string): string => (individual ? (CONDITION_WORDS as Record<string, string>) : (BALANCE_CONDITION_WORDS as Record<string, string>))[value] ?? value;
 const holderOf = (c: Candidate, holders: Record<string, HolderOf>): HolderOf => (c.unitId ? holders[c.unitId] ?? "none" : "none");
 const holderRank = (h: HolderOf) => (h === "this" ? 0 : h === "other" ? 1 : 2);
+
+/** Runs of two or more individually tracked units of the same item (and the same holder) next to each other: each gets one "Tick all N". */
+function groupOf(sorted: readonly Candidate[], i: number, holders: Record<string, HolderOf>): { first: boolean; size: number } | null {
+  const c = sorted[i]!;
+  if (c.type !== "unit") return null;
+  const same = (a: Candidate, b: Candidate) => b.type === "unit" && a.itemId === b.itemId && holderOf(a, holders) === holderOf(b, holders);
+  const first = i === 0 || !same(c, sorted[i - 1]!);
+  if (!first) return { first: false, size: 0 };
+  let size = 1;
+  while (i + size < sorted.length && same(c, sorted[i + size]!)) size += 1;
+  return size >= 2 ? { first: true, size } : null;
+}

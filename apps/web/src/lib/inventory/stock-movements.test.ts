@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  KIND_CONFIG, emptyDraft, formatInZone, localToUtcIso, nowLocalInput, parseLines, parseQty, parseSerials, sanitizeLines, statusMessage, successMessage,
+  KIND_CONFIG, emptyDraft, formatInZone, lineBecomesAvailable, localToUtcIso, nowLocalInput, parseLines, parseQty, parseSerials, sanitizeLines, statusMessage, successMessage,
   summaryRows, toRpcCall, validateInput, type LineDraft, type MovementInput, type MovementKind,
 } from "./stock-movements";
 
@@ -244,10 +244,20 @@ describe("summaryRows (the review step)", () => {
   it("says what stays outstanding on a partial return and what is held back", () => {
     const r = summaryRows({ kind: "return", returnFrom: "employee", employee: "Sara Ali", location: "Dubai warehouse", stillOutstanding: 3, drafts: [unit("1"), unit("2", { condition: "damaged" })] });
     expect(get(r, "Still outstanding")).toMatch(/3 other items stay with the employee/);
-    expect(get(r, "Held back")).toMatch(/1 item is not in good condition/);
+    expect(get(r, "Held back")).toMatch(/1 item is not available again/);
     expect(get(r, "What")).toContain("good, available");
     expect(get(r, "What")).toContain("damaged, held back");
     expect(get(summaryRows({ kind: "return", returnFrom: "project", project: "P-1", location: "L", stillOutstanding: 0, drafts: [unit("1")] }), "Still outstanding")).toBe("Nothing else is outstanding");
+  });
+  it("describes a fair unit as available, because the database makes it available, and counted stock only when good", () => {
+    const r = summaryRows({ kind: "return", returnFrom: "project", project: "P-1", location: "L", stillOutstanding: 0, drafts: [unit("1", { condition: "fair" }), unit("2", { condition: "needs_inspection" })] });
+    expect(get(r, "What")).toContain("fair, available");
+    expect(get(r, "What")).toContain("needs checking, held back");
+    expect(get(r, "Held back")).toMatch(/^1 item is not available again/);
+    expect(lineBecomesAvailable({ unitId: null, tracking: "consumable" }, "fair")).toBe(false);
+    expect(lineBecomesAvailable({ unitId: null, tracking: "consumable" }, "good")).toBe(true);
+    expect(lineBecomesAvailable({ unitId: "u1", tracking: "individual" }, "fair")).toBe(true);
+    expect(lineBecomesAvailable({ unitId: "u1", tracking: "individual" }, "damaged")).toBe(false);
   });
   it("says a unit that never came back is missing from the project it was sent to, not from the shelf", () => {
     const out = summaryRows({ kind: "adjust", adjustAction: "missing", location: "Dubai warehouse", reason: "Not returned", drafts: [unit("1", { where: "On a project: P-7 Mall" })] });
