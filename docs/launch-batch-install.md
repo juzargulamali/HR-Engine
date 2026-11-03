@@ -38,6 +38,7 @@ Paste the whole of `launch_batch_00_preflight_and_snapshot_readonly.sql` and run
 
 Paste the whole of `launch_batch_20_install_3_to_14.sql` (about 157 KB, 2,400 lines) and run it once.
 
+* The editor may show a confirmation about "potentially destructive" statements: the file contains `drop policy` / `drop trigger if exists` lines, each replacing an object one of these migrations itself owns (the letters storage policy and four triggers and two policies of the dispatch / return notes tables, which do not exist yet). Confirming is expected if it asks. (We could not check what the hosted editor shows.)
 * **Expected:** one row: **`COMMITTED`** with a sentence saying migrations 3 to 14 are installed. (The editor shows only the last statement's result; the many lines of "CREATE FUNCTION" are not shown.)
 * **If it shows an error:** the whole file is one transaction (`begin` ... `commit`), so a failed run **changed nothing**. Copy the whole error message and send it. **Do not run anything else.** Error messages from the file's own checks start with "Batch install refused" (a prerequisite is missing) or "Batch install rolled back" (the final check after the twelve changes did not find what it expected; the rollback then undid all of it).
 * If the next thing you run in the same editor tab says "current transaction is aborted", run the single line `rollback;` once and continue (this is how PostgreSQL behaves when a script that began a transaction stops at an error; whether the Supabase editor keeps the same session open between runs is not something we could verify).
@@ -88,7 +89,7 @@ There is **no new combined rollback script**. A failed Run 2 needs none (the tra
 
 ## 6. Size, the SQL Editor and one transaction
 
-* **Size.** File 20 is about 157 KB; file 00 is 62 KB, file 90 is 131 KB. The fallback parts are 104 KB (A: migrations 3 to 13) and 75 KB (B: migration 14). For comparison, the repository's earlier deployment guides already asked you to paste single migration files of 215 KB (the Inventory stock functions) and 198 KB (Recovery Leave windows) into the same editor. We found no documented limit below 157 KB, but we **could not test the hosted editor itself**: if it refuses or truncates the paste of file 20 (it would say so; a truncated paste cannot do harm because the script would then lack its `commit` and nothing is saved), use the fallback.
+* **Size.** File 20 is about 157 KB; file 00 is 62 KB, file 90 is 131 KB. The fallback parts are 104 KB (A: migrations 3 to 13) and 75 KB (B: migration 14). For comparison, the repository's earlier deployment guides already asked you to paste single migration files of 215 KB (the Inventory stock functions) and 198 KB (Recovery Leave windows) into the same editor. We found no documented limit below 157 KB, but we **could not test the hosted editor itself**: if it refuses or truncates the paste of file 20 (it would say so; a paste cut short cannot commit anything, because the `commit` is the last line before the final status row; if the editor then still shows odd results, send the single line `rollback;`), use the fallback.
 * **Fallback rules (only if needed).** Run `launch_batch_21_install_part_a_3_to_13.sql`, then `launch_batch_22_install_part_b_14.sql`. Each is its own all-or-nothing transaction with the same prerequisite and final checks. If A fails, nothing changed: send the message. If A succeeds and B fails, 3 to 13 are installed and 14 is not: run B again (safe) or send the message. After B, run file 90 as usual. Tested here: A then B ends in exactly the same state as file 20 (all 112 digest items equal).
 * **One explicit `begin` ... `commit` inside the editor.** *Verified* with `psql` and with the `pg` driver sending the whole file as one simple query (what a SQL editor sends): the explicit `begin`/`commit` inside one multi-statement query works, the editor-style result is the last statement's (`COMMITTED`), a failure in any statement rolls everything back and leaves that session in "current transaction is aborted" until `rollback;` is sent, and a refused or failed run changed nothing (digest identical before and after). *Not verified (assumption):* that the Supabase SQL Editor itself sends a pasted script as one query on a session it then reuses. The repository already ships several owner scripts that begin their own transaction (for example the `_90_rollback.sql` files and `public_privileges_30_default_probe.sql`), which is the only local evidence of how the editor is used; the rollback note in Run 2 covers the one visible consequence.
 
@@ -98,7 +99,7 @@ Disposable PostgreSQL 16 database built from the migrations of `main` (which alr
 
 | # | Test | Result |
 |---|---|---|
-| a | file 00 on the pre-batch database | `PASS` (78 + 14 + 11 prerequisite checks pass, 77 required objects present, 12 of 12 markers absent); digest 112 items, 5,633 bytes |
+| a | file 00 on the pre-batch database | `PASS` (78 + 14 + 11 prerequisite checks pass, 51 required objects present, 12 of 12 markers absent); digest 112 items, 5,633 bytes |
 | b | file 20 | `COMMITTED`, 0.18 s |
 | c | file 90 with the digest | `PASS: verification OK (320 checks, 0 failing), preservation comparison PASS (61 unchanged, 51 intended, 0 unexpected), notes switch OFF, scheduler untouched`; the 51 INTENDED rows: 13 replaced functions, 17 added functions, 9 privilege / policy / column / table changes, 12 migration markers; 0 UNEXPECTED |
 | d | file 20 run again, then file 90 again | `COMMITTED`; same `PASS` (identical counts: a second run changes nothing) |
@@ -121,7 +122,21 @@ Disposable PostgreSQL 16 database built from the migrations of `main` (which alr
 
 No unexplained failure. (The suite had no failure for any of migrations 3, 5 to 7, 9 to 14.)
 
-Browser flows of `main`'s own application (built from the `main` worktree, `VERCEL_ENV=production next build`, served locally against a database built the same way and seeded with `main`'s own seed scripts) are listed in the last section.
+**Browser flows of `main`'s own application** (`main` built from the worktree with `VERCEL_ENV=production next build`, served locally; the database built from `main`'s migrations, then migrations 1 and 2, `main`'s grants and file 20, and seeded by `main`'s own seed scripts; everything local, nothing hosted):
+
+| Flow (`apps/web/os-shell-checks`) | Result against the migrated database |
+|---|---|
+| `my-day-checks.mjs` (My Day: each figure equals what that person's own session can read, widgets by access, phone) | 57 pass, 0 fail |
+| `nav-smoke.mjs` (every link the shell offers renders: approvals, leave, attendance, policies, letters, inventory, projects) | 101 pass, 0 fail |
+| `inventory-workspace-flow.mjs` (Prepare, Send out, Receive back on the real screens, with the notes switch off) | 23 pass, 0 fail |
+| `inventory-flow-2-employee.mjs` (an employee is issued equipment: migration 1's function) | 13 pass, 0 fail |
+| `inventory-flow-5-access.mjs` (Inventory access, tables read-only, company boundary) | 57 pass, 0 fail |
+| `people-access-flow.mjs` (People & Access: deactivation-related screens, module access) | 52 pass, 0 fail |
+| `page-survey.mjs` as the CEO, HR and an ordinary employee over 39 routes (approvals, leave, attendance, attendance clock, policies, letters, inventory, projects, timesheets, reimbursements, holidays, profile, user admin) | every route answers 200, 0 console errors, 0 sideways overflow, for all three |
+| `rollout-checks.mjs` | 15 pass, **1 fail**: "Inventory: 0 item rows are clickable" (it expects the old Inventory item table; `main`'s `/inventory` is now Today) |
+| `workflow-steps.mjs` | 4 of 5 jobs complete; job 3 "Update an assigned task" errors with "Element is not a `<select>` element" (the flow still expects an old control) |
+
+The last two are **not caused by the batch**: the same two checks give the identical failure on a control database built from `main` alone (no launch migrations 1 to 14), same application build. They are out-of-date check scripts of `main`, not behaviour of the database.
 
 ## 8. Order of everything, and what is not part of this
 

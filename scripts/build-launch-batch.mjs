@@ -111,13 +111,12 @@ const BASE_PACK = { label: "base", pack: "grant_rules" };
 const packLabels = (ms) => ms.map((m) => ({ label: mlabel(m), pack: m.pack }));
 
 function requiredObjects() {
-  // every "function public.X" / "table public.X" a per-change preflight says the change builds on
+  // every "function public.X" / "table public.X" a per-change preflight says the change builds on (the tables only fingerprinted by the snapshot are not prerequisites: an absent one is recorded as TABLE ABSENT)
   const fns = new Set(), tabs = new Set();
   for (const m of MIGS) {
     const t = read(path.join(OUTDIR, `${m.pack}_00_preflight_readonly.sql`));
     for (const x of t.matchAll(/'(function|table) public\.([a-z0-9_]+)/g)) (x[1] === "function" ? fns : tabs).add(x[2]);
   }
-  for (const [t] of ROW_TABLES) tabs.add(t);
   // functions the batch itself adds are not prerequisites
   for (const m of BATCH) for (const a of m.added) fns.delete(a);
   return { fns: [...fns].sort(), tabs: [...tabs].sort() };
