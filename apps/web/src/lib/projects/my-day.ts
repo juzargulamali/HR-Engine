@@ -14,6 +14,7 @@ export function projectDayRows(a: ProjectsAttention): ProjectDayRow[] {
   const plural = (n: number, one: string, many: string) => `${n === 1 ? one : many}`;
   const rows: ProjectDayRow[] = [
     { key: "proj-handovers", count: a.handoversWaiting, needsYou: true, href: "/projects/handovers", label: plural(a.handoversWaiting, "Project handover waiting on you", "Project handovers waiting on you") },
+    { key: "proj-scope", count: a.scopeChangesWaiting, needsYou: true, href: a.scopeChangeId ? `/projects/scope-decisions/${a.scopeChangeId}` : "/projects", label: plural(a.scopeChangesWaiting, "Scope change waiting for your decision", "Scope changes waiting for your decision") },
     { key: "proj-reviews", count: a.reviewsWaiting, needsYou: true, href: "/projects/work#reviews", label: plural(a.reviewsWaiting, "Project task waiting for your review", "Project tasks waiting for your review") },
     { key: "proj-overdue", count: a.overdueTasks, needsYou: true, href: "/projects/work", label: plural(a.overdueTasks, "Project task overdue", "Project tasks overdue") },
     { key: "proj-soon", count: a.dueSoonTasks, needsYou: false, href: "/projects/work", label: plural(a.dueSoonTasks, "Project task due in the next 7 days", "Project tasks due in the next 7 days") },

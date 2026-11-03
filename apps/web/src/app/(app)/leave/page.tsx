@@ -1,3 +1,4 @@
+import { LoadError } from "@/components/workspace/states";
 import Link from "next/link";
 import { getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
@@ -26,6 +27,9 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
   const session = await getCurrentSession();
   if (!session) return null;
 
+  // A failed role / employee read is not "no employee record": say it could not load.
+  if (session.loadFailed) return <LoadError what="your account" />;
+
   if (!session.employeeId) {
     return (
       <Card>
@@ -45,7 +49,7 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
   // This employee's own business-local date — "is this request still
   // upcoming" must use their own country's calendar day, not the server's
   // UTC one.
-  const { data: me } = await supabase.from("employees").select("country_code").eq("id", session.employeeId).maybeSingle();
+  const { data: me, error: meError } = await supabase.from("employees").select("country_code").eq("id", session.employeeId).maybeSingle();
   const today = getBusinessDateString(resolveCountryTimeZone(me?.country_code));
 
   let requestsQuery = supabase
@@ -55,11 +59,17 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
     .order("start_date", { ascending: false });
   if (status) requestsQuery = requestsQuery.eq("status", status);
 
-  const [{ data: leaveBalances }, { data: compBalance }, { data: requests }] = await Promise.all([
+  const [{ data: leaveBalances, error: balancesError }, { data: compBalance, error: compError }, { data: requests, error: requestsError }] = await Promise.all([
     supabase.from("leave_balances").select("leave_type_code, balance_days").eq("employee_id", session.employeeId),
     supabase.from("comp_day_balances").select("balance_days").eq("employee_id", session.employeeId).maybeSingle(),
     requestsQuery,
   ]);
+
+  // A failed read is never "0 days" or "No leave requests yet": each part says it could not load.
+  const balancesFailed = !!(balancesError || compError);
+  const requestsFailed = !!(requestsError || meError);
+  if (balancesFailed) console.error("[leave] balances could not be loaded", balancesError ?? compError);
+  if (requestsFailed) console.error("[leave] requests could not be loaded", requestsError ?? meError);
 
   return (
     <div className="space-y-6">
@@ -73,12 +83,16 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
         </Link>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {(leaveBalances ?? []).map((b) => (
-          <OsStatCard key={b.leave_type_code} label={sentenceCase(b.leave_type_code.replace(/_/g, " "))} value={`${b.balance_days} days`} icon={CalendarDays} edge={Number(b.balance_days) > 0 ? "cyan" : "muted"} compact={false} />
-        ))}
-        <OsStatCard label="Comp-off" value={`${compBalance?.balance_days ?? 0} days`} icon={Clock} edge={Number(compBalance?.balance_days ?? 0) > 0 ? "blue" : "muted"} compact={false} />
-      </div>
+      {balancesFailed ? (
+        <LoadError what="your leave balances" retryHref="/leave" note="This is a problem loading the information, not zero days." />
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {(leaveBalances ?? []).map((b) => (
+            <OsStatCard key={b.leave_type_code} label={sentenceCase(b.leave_type_code.replace(/_/g, " "))} value={`${b.balance_days} days`} icon={CalendarDays} edge={Number(b.balance_days) > 0 ? "cyan" : "muted"} compact={false} />
+          ))}
+          <OsStatCard label="Comp-off" value={`${compBalance?.balance_days ?? 0} days`} icon={Clock} edge={Number(compBalance?.balance_days ?? 0) > 0 ? "blue" : "muted"} compact={false} />
+        </div>
+      )}
 
       <Card>
         <CardHeader>
@@ -106,6 +120,7 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
               </Link>
             ) : null}
           </form>
+          {requestsFailed ? <LoadError what="your leave requests" retryHref="/leave" note="This is a problem loading the information, not an empty history." /> : (
           <Table stack>
             <TableHeader>
               <TableRow>
@@ -146,6 +161,7 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
               ) : null}
             </TableBody>
           </Table>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -55,6 +55,14 @@ export function PersonDetail({ data, tab, params }: { data: PeopleAccessData; ta
                 {p.accountStatus === "invited" && p.email ? <ResendInviteButton email={p.email} /> : null}
                 {!isSelf && p.email ? <DeleteUserButton userId={p.userId} email={p.email} /> : null}
               </div>
+              {data.accountDetails?.kind === "ok" ? (
+                <p className="mt-3 break-words text-sm text-muted-foreground">
+                  Deactivated{data.accountDetails.changedAt ? ` on ${new Date(data.accountDetails.changedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+                  {data.accountDetails.changedByName ? ` by ${data.accountDetails.changedByName}` : ""}. Reason: {data.accountDetails.reason ?? "none recorded"}.
+                </p>
+              ) : data.accountDetails?.kind === "error" ? (
+                <Alert variant="destructive" className="mt-3">Could not load the reason this account was deactivated. Reload the page to try again.</Alert>
+              ) : null}
             </Panel>
             </div>
           ) : null}

@@ -56,18 +56,22 @@ export const getInventoryContext = cache(async (): Promise<InventoryContext | nu
   ]);
   if (isNotInstalled(grantError)) return base(false);
   if (grantError) return base(true, { loadFailed: true });
+  // Any other failed read is a load failure too: "no warehouse set up", "switched off" or "not a project manager" would all be false.
+  // (A database without Projects tables just means the person manages no projects.)
+  if (emp.error || (mgr.error && !isNotInstalled(mgr.error))) return base(true, { loadFailed: true });
   const employeeId = emp.data?.[0]?.id ?? null;
   const managesProjects = !mgr.error && (mgr.count ?? 0) > 0;
   const grants: InvGrant[] = (grantRows ?? []).map((g) => ({ companyId: g.company_id, capabilities: g.capabilities as InvCapability[] }));
   if (grants.length === 0) return base(true, { employeeId, managesProjects });
 
   const companyIds = grants.map((g) => g.companyId);
-  const [{ data: companyRows }, { data: settingsRows }, { data: locationRows }, { data: assigned }] = await Promise.all([
+  const [{ data: companyRows, error: companyError }, { data: settingsRows, error: settingsError }, { data: locationRows, error: locationError }, { data: assigned, error: assignedError }] = await Promise.all([
     supabase.from("companies").select("id, legal_name").in("id", companyIds).order("legal_name"),
     supabase.from("inv_company_settings").select("company_id, reference_code, is_enabled").in("company_id", companyIds),
     supabase.from("inv_locations").select("*").in("company_id", companyIds).order("name"),
     supabase.from("inv_operator_locations").select("location_id").eq("user_id", session.userId).is("removed_at", null),
   ]);
+  if (companyError || settingsError || locationError || assignedError) return base(true, { loadFailed: true });
   const settings = new Map((settingsRows ?? []).map((s) => [s.company_id, s]));
   const companies: InvCompanyInfo[] = (companyRows ?? []).map((c) => ({
     id: c.id, name: c.legal_name, referenceCode: settings.get(c.id)?.reference_code ?? null, isEnabled: settings.get(c.id)?.is_enabled ?? false,
@@ -88,7 +92,7 @@ export const getInventoryContext = cache(async (): Promise<InventoryContext | nu
  * they are an employee with a linked record. One light read; degrades to "nothing" on any failure (including the tables not existing
  * yet), so the HR, Sales and Projects shell can never be broken by it.
  */
-export async function loadInventoryNavAccess(userId: string): Promise<{ grants: InvGrant[]; managesProjects: boolean; isEmployee: boolean }> {
+export async function loadInventoryNavAccess(userId: string): Promise<{ grants: InvGrant[]; managesProjects: boolean; isEmployee: boolean; loadFailed?: boolean }> {
   try {
     const supabase = await createClient();
     const [g, e, m] = await Promise.all([
@@ -98,8 +102,8 @@ export async function loadInventoryNavAccess(userId: string): Promise<{ grants: 
     ]);
     const grants = g.error ? [] : (g.data ?? []).map((x) => ({ companyId: x.company_id, capabilities: x.capabilities as InvCapability[] }));
     // A plain employee sees "My equipment" only when Inventory is installed (the grants table answered); otherwise the roadmap row stays.
-    return { grants, managesProjects: !m.error && (m.count ?? 0) > 0 && !g.error, isEmployee: !g.error && !e.error && (e.count ?? 0) > 0 };
+    return { grants, managesProjects: !m.error && (m.count ?? 0) > 0 && !g.error, isEmployee: !g.error && !e.error && (e.count ?? 0) > 0, ...((g.error && !isNotInstalled(g.error)) || e.error ? { loadFailed: true } : {}) };
   } catch {
-    return { grants: [], managesProjects: false, isEmployee: false };
+    return { grants: [], managesProjects: false, isEmployee: false, loadFailed: true };
   }
 }

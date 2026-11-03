@@ -1,6 +1,8 @@
 import "server-only";
-import { crmStageLabel, isCrmOpen } from "@enginious-hr/domain";
-import { getCrmContext } from "./context";
+import { crmStageLabel, isCrmFounder, isCrmOpen } from "@enginious-hr/domain";
+import { createClient } from "@/lib/supabase/server";
+import { getCrmContext, type CrmContext } from "./context";
+import { loadHandoverRows, type HandoverCheck } from "./handover-attention-data";
 import { loadFollowUps, loadOpportunities } from "./data";
 import { attentionItems, openPipelineByStage, type AttentionItem } from "./reports";
 
@@ -15,7 +17,32 @@ export interface SalesToday {
   opportunityCount: number;
   /** Open opportunities by stage, as on the Enquiries board (the six working stages, then On hold). Counts only: no values are read here. */
   pipeline: { stage: string; label: string; count: number }[];
+  /** The Sales-to-Projects handover rows (won without a submitted handover, the PM's question, accepted). A failed read is its own status, never an empty list. */
+  handover: HandoverCheck;
+  /** Commercial approval requests waiting for this person to decide (Sales founders only). */
+  approvals: ApprovalsWaiting;
 }
+
+/**
+ * Pending commercial approval requests in the companies where the person is a Sales founder (the only people who may decide one) and the company's
+ * approval policy is "required" (otherwise nothing can be decided). Read through the person's own session. Nothing here changes who decides.
+ */
+export async function loadApprovalsWaiting(ctx: CrmContext): Promise<ApprovalsWaiting> {
+  const companyIds = ctx.companies.filter((c) => isCrmFounder(ctx.grants, c.id) && c.settings?.approval_policy === "required").map((c) => c.id);
+  if (companyIds.length === 0) return { status: "none" };
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.from("crm_approvals").select("opportunity_id, requested_at").eq("state", "pending").in("company_id", companyIds).order("requested_at");
+    if (error) return { status: "error" };
+    const rows = data ?? [];
+    return rows.length === 0 ? { status: "ok", count: 0, oldestOpportunityId: "" } : { status: "ok", count: rows.length, oldestOpportunityId: rows[0]!.opportunity_id };
+  } catch {
+    return { status: "error" };
+  }
+}
+
+/** Commercial approval requests waiting for a Sales founder's decision. "none": not a founder anywhere or no company needs approvals; "error": the read failed. */
+export type ApprovalsWaiting = { status: "none" } | { status: "error" } | { status: "ok"; count: number; oldestOpportunityId: string };
 
 export type SalesTodayResult = { status: "none" } | { status: "error" } | { status: "ok"; data: SalesToday };
 
@@ -26,11 +53,14 @@ export type SalesTodayResult = { status: "none" } | { status: "error" } | { stat
  */
 export async function loadSalesToday(): Promise<SalesTodayResult> {
   const ctx = await getCrmContext();
+  // The grants could not be read: the card says so instead of vanishing as "no Sales access".
+  if (ctx?.loadFailed) return { status: "error" };
   if (!ctx || ctx.grants.length === 0) return { status: "none" };
   try {
     const [opportunities, followUps] = await Promise.all([loadOpportunities(ctx), loadFollowUps(ctx)]);
     const attention = attentionItems({ opportunities, followUps: followUps.open, userId: ctx.userId, scope: "mine" });
     const count = (kind: AttentionItem["kind"]) => attention.filter((a) => a.kind === kind).length;
+    const [handover, approvals] = await Promise.all([loadHandoverRows(ctx, opportunities), loadApprovalsWaiting(ctx)]);
     return {
       status: "ok",
       data: {
@@ -41,6 +71,8 @@ export async function loadSalesToday(): Promise<SalesTodayResult> {
         openCount: opportunities.filter((o) => isCrmOpen(o.opp.stage)).length,
         opportunityCount: opportunities.length,
         pipeline: openPipelineByStage(opportunities.map((i) => ({ ...i.opp, value: i.value }))).map((b) => ({ stage: b.stage, label: crmStageLabel(b.stage), count: b.count })),
+        handover,
+        approvals,
       },
     };
   } catch (e) {

@@ -30,6 +30,7 @@ import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
+import { LoadError } from "@/components/workspace/states";
 import { RestoreOrRemoveEmployeeButton } from "./restore-or-remove-employee-button";
 import { ProfileTabs, type ProfileTab } from "./profile-tabs";
 import { OverviewSection } from "./overview-section";
@@ -58,7 +59,7 @@ export default async function EmployeeDetailPage({
   if (!session) return null;
 
   const supabase = await createClient();
-  const { data: employee } = await supabase
+  const { data: employee, error: employeeError } = await supabase
     .from("employees")
     .select(
       "id, first_name, last_name, job_title, employment_status, company_id, country_code, manager_id, hire_date, date_of_birth, termination_date, deleted_at, personal_email, phone, user_id, recognised_prior_service_years, is_first_ever_employment",
@@ -66,6 +67,8 @@ export default async function EmployeeDetailPage({
     .eq("id", id)
     .maybeSingle();
 
+  // "Not found" is only for a record that is absent or not visible; a failed read says it could not load.
+  if (employeeError) return <LoadError what="this employee" retryHref={`/employees/${id}`} />;
   if (!employee) notFound();
 
   const isSelf = session.employeeId === employee.id;
@@ -78,11 +81,12 @@ export default async function EmployeeDetailPage({
   // row, kept eager. Everything else that used to load unconditionally here
   // (contracts, the linked-login lookup, the managers list) now loads only
   // when its own tab is selected.
-  const { data: company } = await supabase
+  const { data: company, error: companyError } = await supabase
     .from("companies")
     .select("legal_name, default_currency")
     .eq("id", employee.company_id)
     .single();
+  if (companyError) return <LoadError what="this employee" retryHref={`/employees/${id}`} />;
 
   const canEditCore = canEditEmployeeCore(session.grants, employee.company_id);
   const canSeeContracts = canViewContracts(session.grants, employee.company_id, { isSelf, isManager });

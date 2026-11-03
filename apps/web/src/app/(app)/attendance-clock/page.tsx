@@ -1,7 +1,9 @@
+import { LoadError } from "@/components/workspace/states";
 import { CalendarClock, MapPin } from "lucide-react";
 import { resolveCountryTimeZone, formatBusinessTime } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { loadLeadCandidates } from "@/lib/attendance/lead-candidates";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +52,9 @@ export default async function AttendanceClockPage() {
   const session = await getCurrentSession();
   if (!session) return null; // guarded by the layout above
 
+  // A failed role / employee read is not "no employee record": say it could not load.
+  if (session.loadFailed) return <LoadError what="your account" />;
+
   if (!session.employeeId) {
     return (
       <div className="space-y-6">
@@ -70,22 +75,16 @@ export default async function AttendanceClockPage() {
   const { data: employee } = await supabase.from("employees").select("company_id, country_code").eq("id", employeeId).maybeSingle();
   const timeZone = resolveCountryTimeZone(employee?.country_code);
 
-  const [{ data: openSession }, { data: colleagues }, { data: recentSessions }, { data: awaitingLeadRequests }] = await Promise.all([
+  const [{ data: openSession, error: openSessionError }, { leads: colleagues, failed: leadsFailed }, { data: recentSessions }, { data: awaitingLeadRequests }] = await Promise.all([
     supabase
       .from("attendance_sessions")
       .select("id, clock_in_at, status")
       .eq("employee_id", employeeId)
       .eq("status", "open")
       .maybeSingle(),
-    employee?.company_id
-      ? supabase
-          .from("employees")
-          .select("id, first_name, last_name")
-          .eq("company_id", employee.company_id)
-          .eq("employment_status", "active")
-          .is("deleted_at", null)
-          .order("first_name")
-      : Promise.resolve({ data: [] as { id: string; first_name: string; last_name: string }[] }),
+    // The people to choose as project lead come from a narrow database function (id and display name of the active people of the person's own company):
+    // an ordinary employee cannot read other employee rows, so reading `employees` here gave a picker holding only themself.
+    loadLeadCandidates(supabase),
     supabase
       .from("attendance_sessions")
       .select("id, clock_in_at, clock_out_at, status, hr_closed_reason")
@@ -98,6 +97,18 @@ export default async function AttendanceClockPage() {
       .eq("employee_id", employeeId)
       .eq("awaiting_project_lead", true),
   ]);
+
+  // A failed read is not "not clocked in": no Clock in button is offered on an unknown state (the database also blocks a second open session).
+  if (openSessionError) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold">My Attendance Clock</h1>
+        </div>
+        <LoadError what="your clock status" retryHref="/attendance-clock" note="Reload before clocking in; this is a problem loading the information, not a status of Not started." />
+      </div>
+    );
+  }
 
   let openSegment: {
     id: string;
@@ -134,8 +145,8 @@ export default async function AttendanceClockPage() {
 
   const employeeName = (id: string | null) => {
     if (!id) return "—";
-    const e = (colleagues ?? []).find((c) => c.id === id);
-    return e ? `${e.first_name} ${e.last_name}` : "—";
+    const e = colleagues.find((c) => c.id === id);
+    return e ? e.name : "—";
   };
 
   return (
@@ -171,10 +182,15 @@ export default async function AttendanceClockPage() {
               {formatDuration(openSegment.segment_start, null)} on this segment
             </p>
           ) : null}
+          {leadsFailed ? (
+            <div className="mb-4">
+              <LoadError what="the list of project leads" retryHref="/attendance-clock" note="Office and work-from-home clock-ins still work; Site work needs a project lead, so reload before choosing it." />
+            </div>
+          ) : null}
           <ClockControls
             isClockedIn={!!openSession}
             currentWorkMode={openSegment?.work_mode ?? null}
-            colleagues={colleagues ?? []}
+            colleagues={colleagues}
           />
         </CardContent>
       </Card>
@@ -195,7 +211,7 @@ export default async function AttendanceClockPage() {
                 requestId={r.id}
                 workDate={r.work_date}
                 proposedDays={Number(r.proposed_days)}
-                colleagues={colleagues ?? []}
+                colleagues={colleagues}
               />
             ))}
           </CardContent>

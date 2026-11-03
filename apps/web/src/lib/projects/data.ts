@@ -42,17 +42,21 @@ export const loadDirectory = cache(async (): Promise<ProjDirectoryRow[]> => (awa
 /**
  * Loads a project the person can see. Returns null when it does not exist or they may not see it (the two are not told apart).
  * RLS decides what comes back; `level` is derived from what did, and mirrors the database's own helpers.
+ * THROWS when a read fails: a failed read is not "no such project" (404) and not "not a member" (read-only), so the page says it could not load.
  */
 export const loadProjectView = cache(async (ctx: ProjectsContext, projectId: string): Promise<ProjectView | null> => {
   const supabase = await createClient();
-  const { data: project } = await supabase.from("proj_projects").select("*").eq("id", projectId).maybeSingle();
+  const { data: project, error: projectError } = await supabase.from("proj_projects").select("*").eq("id", projectId).maybeSingle();
+  if (projectError) throw new Error(`Project could not be loaded: ${projectError.message}`);
   if (!project) return null;
-  const [{ data: details }, { data: people }, { data: teamRows }, directory] = await Promise.all([
+  const [{ data: details, error: detailsError }, { data: people, error: peopleError }, { data: teamRows, error: teamsError }, directory] = await Promise.all([
     supabase.from("proj_project_details").select("*").eq("project_id", projectId).maybeSingle(),
     supabase.rpc("proj_project_people", { p_project_id: projectId }),
     supabase.from("proj_teams").select("*").eq("project_id", projectId).is("removed_at", null).order("name"),
     loadDirectory(),
   ]);
+  // Without the people and teams the person's standing is unknown: a real member would be shown as a non-member.
+  for (const e of [detailsError, peopleError, teamsError]) if (e) throw new Error(`Project could not be loaded: ${e.message}`);
   const peopleList = people ?? [];
   const teams = teamRows ?? [];
   const me = peopleList.find((p) => p.user_id === ctx.userId) ?? null;

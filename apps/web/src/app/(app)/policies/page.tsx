@@ -1,3 +1,4 @@
+import { LoadError } from "@/components/workspace/states";
 import Link from "next/link";
 import { canActivatePolicy, canDeleteDraftPolicy, canDraftPolicy } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
@@ -5,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { canSeedPolicyDrafts, SEED_POLICY_DRAFTS_BLOCKED_REASON } from "@enginious-hr/domain";
 import { CreatePhase2bDraftsButton } from "./create-phase2b-drafts-button";
 import { CreateRecoveryWindowsDraftsButton } from "./create-recovery-windows-drafts-button";
 import { PolicyVersionsTable, type PolicyVersionRow } from "./policy-versions-table";
@@ -17,7 +19,7 @@ export default async function PoliciesPage() {
   if (!session) return null;
 
   const supabase = await createClient();
-  const [{ data: policies }, { data: countries }, { data: phase2bStatus }] = await Promise.all([
+  const [{ data: policies, error: policiesError }, { data: countries, error: countriesError }] = await Promise.all([
     supabase
       .from("policy_versions")
       .select("id, country_code, policy_type, version_no, status, effective_from, effective_to, created_by, payload")
@@ -25,10 +27,10 @@ export default async function PoliciesPage() {
       .order("policy_type")
       .order("version_no", { ascending: false }),
     supabase.from("countries").select("code, name").order("name"),
-    // Read-only — safe to call even for a viewer with no drafting rights;
-    // used only to decide whether the button below still has anything to do.
-    supabase.rpc("preflight_phase2b_v2_policy_status"),
   ]);
+
+  // A failed read is not "No policies yet".
+  if (policiesError || countriesError) return <LoadError what="the policies" retryHref="/policies" />;
 
   // policy_leave_types.policy_version_id has no ON DELETE CASCADE — deleting
   // a policy_versions row that still has leave-type rows configured under
@@ -45,6 +47,15 @@ export default async function PoliciesPage() {
 
   const countryName = new Map((countries ?? []).map((c) => [c.code, c.name]));
   const canDraftAnywhere = (countries ?? []).some((c) => canDraftPolicy(session.grants, c.code));
+  // The two "Create ... drafts" buttons run database functions that need the HR Admin role for ALL of UAE, Saudi Arabia and Poland (unscoped by company): one shared test (the
+  // server actions refuse on it too). An HR Admin who holds the role for fewer countries or one company sees the buttons disabled with the reason, never a button that must fail.
+  const canSeedDrafts = canSeedPolicyDrafts(session.grants);
+  const holdsHrRole = session.grants.some((g) => g.role === "hr_admin");
+  // Read-only, and asked only of people who may draft: the database answers nobody else (the function checks the role inside), and it is used only to decide
+  // whether the button below still has anything to do. A failed answer leaves the button offered (creating the drafts is idempotent).
+  const { data: phase2bStatus } = canDraftAnywhere
+    ? await supabase.rpc("preflight_phase2b_v2_policy_status")
+    : { data: [] as { status: string }[] };
   const phase2bAllCreated = (phase2bStatus ?? []).length > 0 && (phase2bStatus ?? []).every((r) => r.status !== "not_created");
   const isWindowsPayload = (payload: Record<string, unknown>) => payload?.model === "recovery_windows";
   const windowsCountries = new Set((policies ?? []).filter((p) => p.policy_type === "overtime_rules" && isWindowsPayload(p.payload)).map((p) => p.country_code));
@@ -102,8 +113,17 @@ export default async function PoliciesPage() {
         </div>
       </div>
 
-      {canDraftAnywhere ? <CreatePhase2bDraftsButton allCreated={phase2bAllCreated} /> : null}
-      {canDraftAnywhere ? <CreateRecoveryWindowsDraftsButton allCreated={windowsAllCreated} /> : null}
+      {canSeedDrafts ? <CreatePhase2bDraftsButton allCreated={phase2bAllCreated} /> : null}
+      {canSeedDrafts ? <CreateRecoveryWindowsDraftsButton allCreated={windowsAllCreated} /> : null}
+      {!canSeedDrafts && holdsHrRole ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <CreatePhase2bDraftsButton allCreated={false} blocked />
+            <CreateRecoveryWindowsDraftsButton allCreated={false} blocked />
+          </div>
+          <p id="draft-buttons-blocked" className="text-sm text-muted-foreground">{SEED_POLICY_DRAFTS_BLOCKED_REASON}</p>
+        </div>
+      ) : null}
 
       <Card>
         <CardHeader>

@@ -74,6 +74,16 @@ export default async function InventoryLabelsPage({ searchParams }: { searchPara
     itemIds.length ? supabase.from("inv_items").select("id, name, model").in("id", itemIds) : null,
     binIds.length ? supabase.from("inv_bins").select("id, code").in("id", binIds) : null,
   ]);
+  // A sticker cannot be recalled once printed: never print one with a made-up "Equipment" / "Stock" name or an empty bin.
+  if (itemsRes?.error || binsRes?.error) {
+    console.error("[inventory] label names load failed", itemsRes?.error ?? binsRes?.error);
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Print labels" />
+        <LoadError what="the item names for these labels" retryHref={labelsHref(q, q.size)} />
+      </div>
+    );
+  }
   const itemName = new Map((itemsRes?.data ?? []).map((i) => [i.id, [i.name, i.model].filter(Boolean).join(" ")]));
   const binCode = new Map((binsRes?.data ?? []).map((b) => [b.id, b.code]));
 

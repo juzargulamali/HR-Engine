@@ -74,6 +74,10 @@ export function describeNotification(type: string, payload: Record<string, unkno
       return { text: `The key dates of ${project} changed.`, href: projectLink };
     case "project_scope_decision":
       return { text: `A scope change on ${project} was ${payload.decision === "approve" ? "approved" : "rejected"}.`, href: pid ? `/projects/${pid}/changes` : null };
+    case "project_scope_proposed": {
+      const title = str(payload.title);
+      return { text: `A scope change${title ? ` “${title}”` : ""} was proposed on ${project} and waits for your decision.`, href: pid ? `/projects/${pid}/changes` : null };
+    }
     case "project_completed":
       return { text: `${project} was completed.`, href: projectLink };
     case "project_budget_submitted":

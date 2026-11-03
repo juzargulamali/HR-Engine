@@ -78,7 +78,9 @@ export interface Equipment { summary: EquipmentSummary; next: DispatchRequest | 
 /** Null when the person has no Inventory access (or Inventory is not installed): the card is then not shown at all. */
 export async function loadEquipment(): Promise<Equipment | null> {
   const ctx = await getInventoryContext();
-  if (!ctx || !ctx.installed || ctx.loadFailed || (ctx.grants.length === 0 && !ctx.managesProjects)) return null;
+  // The access lookup failed: throw so the page shows "could not be loaded" instead of dropping the card.
+  if (ctx?.loadFailed) throw new Error("Inventory access could not be loaded");
+  if (!ctx || !ctx.installed || (ctx.grants.length === 0 && !ctx.managesProjects)) return null;
   const list = await loadRequestList(ctx.userId);
   const rows: DispatchRequest[] = list.rows.map((r) => ({ id: r.id, code: r.code, title: r.title, forLabel: r.forLabel, status: r.status, needed_from: r.needed_from, timezone: r.timezone, done: r.done, total: r.total, shortageLines: r.shortageLines }));
   return { summary: equipmentSummary(rows), next: nextDispatch(rows) };

@@ -1,3 +1,4 @@
+import { WonHandoverPrompt } from "@/components/sales/won-handover-prompt";
 import Link from "next/link";
 import { BackLink } from "@/components/workspace/list-memory";
 import { notFound } from "next/navigation";
@@ -119,7 +120,7 @@ export default async function OpportunityPage({ params, searchParams }: { params
         {isWon ? (
           <Alert variant="success" role="status">
             <p><strong>Won</strong> on {formatDate(opp.closed_at)}{opp.evidence_type ? `, confirmed by ${EVIDENCE[opp.evidence_type]} ${opp.evidence_reference ?? ""} dated ${formatDate(opp.evidence_date)}` : ""}.</p>
-            <p className="mt-1"><Link href={`/sales/opportunities/${opp.id}/handover`} className="font-medium underline">Open the handover package</Link></p>
+            <WonHandoverPrompt opportunityId={opp.id} />
             {reopenNote ? <p className="mt-1 text-sm">{reopenNote}</p> : <p className="mt-1 text-sm">If it was recorded by mistake or has changed, use Reopen. The win stays in the history.</p>}
           </Alert>
         ) : null}

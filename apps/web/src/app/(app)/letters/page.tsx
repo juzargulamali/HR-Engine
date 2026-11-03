@@ -1,3 +1,4 @@
+import { LoadError } from "@/components/workspace/states";
 import { canManageLetters } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
@@ -9,6 +10,7 @@ import { NewTemplateForm } from "./new-template-form";
 import { DeleteLetterButton } from "./delete-letter-button";
 import { DeleteTemplateButton } from "./delete-template-button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { canDownloadLetter } from "./download-rule";
 
 export const metadata = { title: "Letters" };
 
@@ -24,20 +26,22 @@ export default async function LettersPage() {
   if (!session) return null;
 
   const supabase = await createClient();
-  const { data: employee } = session.employeeId
+  const { data: employee, error: employeeError } = session.employeeId
     ? await supabase.from("employees").select("company_id").eq("id", session.employeeId).single()
-    : { data: null };
+    : { data: null, error: null };
+  // A failed read is not "No letters yet".
+  if (employeeError) return <LoadError what="the letters" retryHref="/letters" />;
 
   const canManage = employee ? canManageLetters(session.grants, employee.company_id) : false;
 
-  const { data: templates } = employee
+  const { data: templates, error: templatesError } = employee
     ? await supabase
         .from("letter_templates")
         .select("id, name, template_type, requires_approval")
         .eq("company_id", employee.company_id)
         .is("deleted_at", null)
         .order("name")
-    : { data: [] as never[] };
+    : { data: [] as never[], error: null };
 
   const lettersQuery = canManage
     ? supabase
@@ -51,12 +55,14 @@ export default async function LettersPage() {
           .eq("employee_id", session.employeeId)
           .order("generated_at", { ascending: false })
       : null;
-  const { data: letters } = lettersQuery ? await lettersQuery : { data: [] as never[] };
+  const { data: letters, error: lettersError } = lettersQuery ? await lettersQuery : { data: [] as never[], error: null };
+  if (templatesError || lettersError) return <LoadError what="the letters" retryHref="/letters" />;
 
   const downloadUrlByLetter = new Map(
     await Promise.all(
       (letters ?? []).map(async (l) => {
-        if (!l.file_path) return [l.id, null] as const;
+        // An employee gets the file only once the letter is issued (the storage policy enforces the same rule); HR keeps downloading for review.
+        if (!l.file_path || !canDownloadLetter(l.status, canManage)) return [l.id, null] as const;
         const { data } = await supabase.storage.from("letters").createSignedUrl(l.file_path, 300);
         return [l.id, data?.signedUrl ?? null] as const;
       }),
@@ -183,6 +189,8 @@ export default async function LettersPage() {
                         <a href={downloadUrlByLetter.get(l.id)!} className="text-sm text-accent hover:underline">
                           Download
                         </a>
+                      ) : !canManage && l.file_path && l.status === "pending_approval" ? (
+                        <span className="text-sm text-muted-foreground">Available once it is approved</span>
                       ) : null}
                       {canManage ? <DeleteLetterButton letterId={l.id} /> : null}
                     </div>

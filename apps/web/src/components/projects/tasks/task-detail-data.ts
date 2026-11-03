@@ -36,14 +36,16 @@ export interface TaskDetailData {
 
 /**
  * Everything the task details need, read through the person's own session (RLS decides). Used by both the side panel and the full page,
- * so the two can never differ. Returns null when the task is not in this project or not visible.
+ * so the two can never differ. Returns null when the task is not in this project or not visible. THROWS when a read fails: an empty
+ * history, no comments or "no dependencies" would be false, so the caller says the task could not be loaded.
  */
 export async function loadTaskDetail(view: ProjectView, ctx: ProjectsContext, taskId: string): Promise<TaskDetailData | null> {
   const supabase = await createClient();
   const id = view.project.id;
-  const { data: task } = await supabase.from("proj_tasks").select("*").eq("id", taskId).eq("project_id", id).maybeSingle();
+  const { data: task, error: taskError } = await supabase.from("proj_tasks").select("*").eq("id", taskId).eq("project_id", id).maybeSingle();
+  if (taskError) throw new Error(`Task could not be loaded: ${taskError.message}`);
   if (!task) return null;
-  const [{ data: allTasks }, { data: deliverables }, { data: milestones }, { data: collaborators }, { data: depRows }, { data: events }, { data: comments }] = await Promise.all([
+  const [{ data: allTasks, error: allTasksError }, { data: deliverables, error: deliverablesError }, { data: milestones, error: milestonesError }, { data: collaborators, error: collaboratorsError }, { data: depRows, error: depError }, { data: events, error: eventsError }, { data: comments, error: commentsError }] = await Promise.all([
     supabase.from("proj_tasks").select("id, title, status, due_date").eq("project_id", id),
     supabase.from("proj_deliverables").select("id, title, team_id, status, milestone_id").eq("project_id", id),
     supabase.from("proj_milestones").select("id, title, status").eq("project_id", id),
@@ -52,6 +54,7 @@ export async function loadTaskDetail(view: ProjectView, ctx: ProjectsContext, ta
     supabase.from("proj_task_events").select("*").eq("task_id", taskId).order("id", { ascending: false }),
     supabase.from("proj_task_comments").select("*").eq("task_id", taskId).order("created_at", { ascending: true }),
   ]);
+  for (const e of [allTasksError, deliverablesError, milestonesError, collaboratorsError, depError, eventsError, commentsError]) if (e) throw new Error(`Task could not be loaded: ${e.message}`);
   const readOnly = isFinishedProject(view.project.status);
   const role = readOnly ? null : taskActorRole(view.standing, ctx.userId, { assigneeId: task.assignee_id, teamId: task.team_id, requiresReview: task.requires_review, status: task.status, blocked: !!task.blocked_at });
   const members = memberOptions(view);

@@ -3,6 +3,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { AddIdentityDocumentForm } from "./add-identity-document-form";
 import { DeleteIdentityDocumentButton } from "./delete-identity-document-button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/workspace/states";
 
 export async function IdentityDocumentsSection({
   employeeId,
@@ -12,20 +13,30 @@ export async function IdentityDocumentsSection({
   canEdit: boolean;
 }) {
   const supabase = await createClient();
-  const { data: documents } = await supabase
+  const { data: documents, error } = await supabase
     .from("identity_documents")
     .select("id, document_type, document_number, expiry_date, file_path")
     .eq("employee_id", employeeId)
     .order("created_at", { ascending: false });
+
+  if (error) {
+    // A failed read is not "No identity documents on file". Adding one does not depend on the list, so that form stays.
+    return (
+      <div className="space-y-4">
+        <LoadError what="the identity documents" retryHref={`/employees/${employeeId}?tab=documents`} />
+        {canEdit ? <AddIdentityDocumentForm employeeId={employeeId} /> : null}
+      </div>
+    );
+  }
 
   // Signed URLs, not public ones — the bucket is private (RLS-gated by
   // storage.objects policies), so a link only ever works for someone this
   // page would already show the row to, and only for a few minutes.
   const documentsWithUrl = await Promise.all(
     (documents ?? []).map(async (d) => {
-      if (!d.file_path) return { ...d, url: null };
-      const { data } = await supabase.storage.from("identity-documents").createSignedUrl(d.file_path, 300);
-      return { ...d, url: data?.signedUrl ?? null };
+      if (!d.file_path) return { ...d, url: null, urlFailed: false };
+      const { data, error: urlError } = await supabase.storage.from("identity-documents").createSignedUrl(d.file_path, 300);
+      return { ...d, url: data?.signedUrl ?? null, urlFailed: !!urlError };
     }),
   );
 
@@ -52,6 +63,8 @@ export async function IdentityDocumentsSection({
                     <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
                       View / Download
                     </a>
+                  ) : d.urlFailed ? (
+                    <span className="text-sm text-destructive">File link could not be loaded; reload to try again</span>
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}

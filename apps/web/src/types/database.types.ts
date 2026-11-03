@@ -18,7 +18,7 @@
  * is a full peer of ceo everywhere in this system.
  */
 
-import type { PbxCompanyGrantRow, PbxJson, PbxReadOnlyTable } from "./budget";
+import type { PbxAuthorshipRow, PbxBudgetHeaderRow, PbxCompanyGrantRow, PbxJson, PbxReadOnlyTable } from "./budget";
 import type {
   CrmActivityRow, CrmApprovalRow, CrmAuditLogRow, CrmCompanyGrantRow, CrmCompanySettingsRow, CrmContactRow,
   CrmDuplicateCandidateRow, CrmFileRow, CrmFollowUpRow, CrmHandoverRow, CrmOpportunityContactRow, CrmOpportunityEventRow,
@@ -37,7 +37,7 @@ import type {
   ProjIssuedPlanRow, ProjMemberRow, ProjMessageFeedRow, ProjMessageMentionRow, ProjMessageRow, ProjMessageTombstoneRow, ProjMilestoneProgressRow,
   ProjMilestoneRow, ProjMyCalendarRow, ProjNotificationRow, ProjPersonRow, ProjPlanItemRow, ProjProjectCalendarRow, ProjProjectDetailsRow, ProjProjectPersonRow,
   ProjProjectRow, ProjReadOnlyTable, ProjReadStateRow, ProjSalesLinkRow, ProjScopeChangeCommercialRow, ProjScopeChangeRow, ProjSiteBookingRow,
-  ProjTaskAffectedRow, ProjTaskCollaboratorRow, ProjTaskCommentRow, ProjTaskDependencyRow, ProjTaskEventRow, ProjTaskRow, ProjTeamRow, ProjUnreadRow, ProjUploadIntent,
+  ProjTaskAffectedRow, ProjTaskCollaboratorRow, ProjTaskCommentRow, ProjTaskDependencyRow, ProjTaskEventRow, ProjTaskRow, ProjScopeDecisionContextRow, ProjScopeDecisionWaitingRow, ProjTeamRow, ProjUnreadRow, ProjUploadIntent,
 } from "./projects";
 
 export type AppRole = "employee" | "line_manager" | "hr_admin" | "finance" | "ceo" | "cto" | "sys_admin";
@@ -267,7 +267,9 @@ export interface Database {
         // status_reason/status_changed_by/status_changed_at are never set
         // directly by application code — only set_account_status() (a
         // SECURITY DEFINER RPC) writes them, same reasoning as audit_log's
-        // Insert type below.
+        // Insert type below. They are not readable directly either (column
+        // privileges, migration 20261216000400): a System Administrator reads
+        // them through account_status_details(). Never `select *` on profiles.
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
         Relationships: [];
       };
@@ -1645,6 +1647,9 @@ export interface Database {
       // Inventory (20261201000000-200): read-only to clients; every write is an inv_* function below.
       inv_company_grants: InvReadOnlyTable<InvCompanyGrantRow>;
       pbx_company_grants: PbxReadOnlyTable<PbxCompanyGrantRow>;
+      pbx_budgets: PbxReadOnlyTable<PbxBudgetHeaderRow>;
+      pbx_budget_versions: PbxReadOnlyTable<PbxAuthorshipRow>;
+      pbx_actual_submissions: PbxReadOnlyTable<PbxAuthorshipRow>;
       inv_audit_log: InvReadOnlyTable<InvAuditLogRow>;
       inv_company_settings: InvReadOnlyTable<InvCompanySettingsRow>;
       inv_locations: InvReadOnlyTable<InvLocationRow>;
@@ -1869,6 +1874,7 @@ export interface Database {
       pbx_project_access: { Args: { p_project_id: string }; Returns: PbxJson };
       pbx_budget_view: { Args: { p_project_id: string }; Returns: PbxJson };
       pbx_inbox: { Args: Record<string, never>; Returns: PbxJson };
+      pbx_decisions_waiting_count: { Args: Record<string, never>; Returns: number };
       pbx_create_budget: { Args: { p_project_id: string; p_currency: string }; Returns: string };
       pbx_save_budget_draft: { Args: { p_version_id: string; p_expected: number; p_header: PbxJson; p_rows: PbxJson }; Returns: number };
       pbx_submit_budget: { Args: { p_version_id: string; p_expected: number; p_request_id: string }; Returns: string };
@@ -2005,6 +2011,8 @@ export interface Database {
       proj_company_labels: { Args: Record<string, never>; Returns: { company_id: string; name: string }[] };
       proj_mark_read: { Args: { p_project_id: string }; Returns: undefined };
       proj_unread_counts: { Args: Record<string, never>; Returns: ProjUnreadRow[] };
+      proj_scope_decisions_waiting: { Args: Record<string, never>; Returns: ProjScopeDecisionWaitingRow[] };
+      proj_scope_decision_context: { Args: { p_scope_change_id: string }; Returns: ProjScopeDecisionContextRow[] };
       proj_my_notifications: { Args: { p_limit?: number; p_only_unread?: boolean }; Returns: ProjNotificationRow[] };
       proj_mark_notifications_read: { Args: { p_ids?: string[] | null }; Returns: number };
       proj_create_upload_intent: {
@@ -2051,6 +2059,47 @@ export interface Database {
       get_employee_manager_name: {
         Args: { p_employee_id: string };
         Returns: string | null;
+      };
+      attendance_lead_candidates: {
+        Args: Record<string, never>;
+        Returns: { employee_id: string; display_name: string }[];
+      };
+      recovery_decider_inbox: {
+        Args: { p_request_ids?: string[] | null };
+        Returns: {
+          approval_id: string;
+          step_order: number;
+          workflow_id: string | null;
+          approver_id: string | null;
+          queue_roles: string[] | null;
+          approval_created_at: string;
+          id: string;
+          employee_id: string;
+          employee_name: string;
+          company_id: string;
+          country_code: string;
+          work_date: string;
+          event_type: string;
+          proposed_days: number;
+          attendance_record_id: string | null;
+          corrected_at: string | null;
+          work_mode: string | null;
+          project_name: string | null;
+          project_lead_employee_id: string | null;
+          applicant_route: string | null;
+          needs_policy_review: boolean;
+          routing_issue: string | null;
+          recovery_window_id: string | null;
+          consumption_ack_at: string | null;
+        }[];
+      };
+      account_holdings: {
+        Args: { p_user_id: string };
+        Returns: Record<string, unknown>;
+      };
+      account_status_details: {
+        Args: { p_user_id: string };
+        Returns: Record<string, unknown> | null;
       };
       i_am_c_level: {
         Args: { p_company_id: string };

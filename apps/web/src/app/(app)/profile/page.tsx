@@ -1,3 +1,4 @@
+import { LoadError } from "@/components/workspace/states";
 import { redirect } from "next/navigation";
 import { getCurrentSession } from "@/lib/auth/session";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,6 +8,9 @@ export const metadata = { title: "My profile" };
 export default async function ProfilePage() {
   const session = await getCurrentSession();
   if (!session) return null;
+
+  // A failed role / employee read is not "no employee record": say it could not load.
+  if (session.loadFailed) return <LoadError what="your account" />;
 
   if (!session.employeeId) {
     return (

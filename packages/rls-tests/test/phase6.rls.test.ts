@@ -820,9 +820,13 @@ describe("Phase 6 row-level security: letters, payroll export, audit log, AI dra
         await db.seed(`insert into storage.buckets (id, name, public) values ('letters', 'letters', false) on conflict (id) do nothing;`);
       });
 
-      it("lets the owning employee, HR Admin, and CEO read a stored letter file; blocks a peer", async () => {
+      it("lets the owning employee (once the letter is issued), HR Admin, and CEO read a stored letter file; blocks a peer", async () => {
         const name = fileName();
-        await db.seed(`insert into storage.objects (bucket_id, name) values ('letters', '${name}');`);
+        // The employee reads the file only for an ISSUED letter (A17, migration 20261216000800); HR Admin and the CEO read it in any status.
+        await db.seed(`
+          insert into storage.objects (bucket_id, name) values ('letters', '${name}');
+          insert into generated_letters (employee_id, template_id, generated_by, file_path, status)
+            values ('${EMPLOYEE_REPORT}', '${templateId}', '${USER_HR}', '${name}', 'issued');`);
 
         for (const viewer of [USER_REPORT, USER_HR, USER_CEO]) {
           const { rows } = await db.asUser(viewer, (query) => query("select name from storage.objects where bucket_id = 'letters' and name = $1", [name]));

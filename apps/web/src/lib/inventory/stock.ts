@@ -171,14 +171,16 @@ export async function fillSummaryUsable(rows: readonly StockRow[], locations: re
   const todo = out.map((r, i) => ({ r, i })).filter((x) => !x.r.detail && x.r.status === "active");
   const calls = todo.flatMap(({ r, i }) => locations.filter((l) => l.company_id === r.companyId && l.is_active && (locationId === "" || l.id === locationId)).map((l) => ({ i, itemId: r.id, locationId: l.id })));
   const totals = new Map<number, number>();
+  // An availability call that failed is "could not be checked" (shown as "—"), never 0 available.
+  const unknown = new Set<number>();
   for (let k = 0; k < calls.length; k += 12) {
     await Promise.all(calls.slice(k, k + 12).map(async (c) => {
       const { data, error } = await db.rpc("inv_availability", { p_item_id: c.itemId, p_location_id: c.locationId, p_from: from.toISOString(), p_until: until.toISOString() });
-      if (error || !data || typeof data !== "object" || Array.isArray(data)) return;
+      if (error || !data || typeof data !== "object" || Array.isArray(data)) { unknown.add(c.i); return; }
       totals.set(c.i, (totals.get(c.i) ?? 0) + num((data as Record<string, unknown>).usable_now as number));
     }));
   }
-  for (const { i } of todo) out[i] = { ...out[i]!, usable: totals.get(i) ?? 0 };
+  for (const { i } of todo) out[i] = { ...out[i]!, usable: unknown.has(i) ? null : (totals.get(i) ?? 0) };
   return out;
 }
 

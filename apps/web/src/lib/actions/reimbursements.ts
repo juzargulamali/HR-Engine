@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
 import { resolveInitialApprover } from "./approvals";
+import { addNumberedClaimLine } from "@enginious-hr/domain";
 import { validateUploadFile, sanitizeForStoragePath } from "@/lib/uploads";
 
 async function currentEmployee(supabase: Awaited<ReturnType<typeof createClient>>) {
@@ -73,27 +74,37 @@ export async function addClaimLine(_prevState: ActionState, formData: FormData):
     if (uploadError) return { error: `Receipt upload failed: ${uploadError.message}` };
   }
 
-  const { count } = await supabase
-    .from("reimbursement_claim_lines")
-    .select("id", { count: "exact", head: true })
-    .eq("claim_id", d.claimId);
-  const nextLineNo = (count ?? 0) + 1;
-
-  const { error } = await supabase.from("reimbursement_claim_lines").insert({
-    claim_id: d.claimId,
-    line_no: nextLineNo,
-    expense_date: d.expenseDate,
-    category: d.category,
-    amount: d.amount,
-    description: d.description || null,
-    receipt_file_path: receiptFilePath,
+  // Next number = highest existing + 1, retried when a simultaneous add takes it (unique (claim_id, line_no)).
+  const result = await addNumberedClaimLine({
+    async highestLineNo() {
+      const { data, error } = await supabase
+        .from("reimbursement_claim_lines")
+        .select("line_no")
+        .eq("claim_id", d.claimId)
+        .order("line_no", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return { value: data?.line_no ?? null, error: error ? "Could not read this claim's lines." : null };
+    },
+    async insertLine(lineNo) {
+      const { error } = await supabase.from("reimbursement_claim_lines").insert({
+        claim_id: d.claimId,
+        line_no: lineNo,
+        expense_date: d.expenseDate,
+        category: d.category,
+        amount: d.amount,
+        description: d.description || null,
+        receipt_file_path: receiptFilePath,
+      });
+      return { error: error ? { code: error.code, message: error.message } : null };
+    },
   });
-  if (error) {
+  if (!result.ok) {
     // The receipt (if any) was already uploaded to Storage above — without
     // this, a failed line insert leaves it orphaned there with nothing
     // ever pointing at it.
     if (receiptFilePath) await supabase.storage.from("receipts").remove([receiptFilePath]);
-    return { error: error.message };
+    return { error: result.reason === "error" ? `Could not add the line: ${result.message}` : result.message };
   }
 
   revalidatePath(`/reimbursements/${d.claimId}`);

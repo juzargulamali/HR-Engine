@@ -1,3 +1,4 @@
+import { WonHandoverPrompt } from "@/components/sales/won-handover-prompt";
 import Link from "next/link";
 import { canActOnFollowUp } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
@@ -88,7 +89,7 @@ function EnquiryPanelBody({ view, picker }: { view: OppView; picker: ContactPick
       </div>
 
       {isHold ? <Alert variant="warning" role="status">On hold: {opp.hold_reason}. Review on {formatDate(opp.hold_review_date)}. It returns to {opp.stage_before_hold ? crmStageLabel(opp.stage_before_hold) : "its earlier stage"} when resumed (More actions, Resume).</Alert> : null}
-      {isWon ? <Alert variant="success" role="status">Won on {formatDate(opp.closed_at)}. <Link href={`/sales/opportunities/${opp.id}/handover`} className="font-medium underline">Open the handover package</Link>.</Alert> : null}
+      {isWon ? <Alert variant="success" role="status">Won on {formatDate(opp.closed_at)}.<WonHandoverPrompt opportunityId={opp.id} /></Alert> : null}
       {isLost ? <Alert role="status">Lost on {formatDate(opp.closed_at)}: {opp.lost_reason}. It is read-only until reopened.</Alert> : null}
       {isOpen && !view.canEdit ? <Alert role="status">Only the owner ({view.ownerName}) or a founder can move, edit or close this. You can add updates, files and follow-ups.</Alert> : null}
 

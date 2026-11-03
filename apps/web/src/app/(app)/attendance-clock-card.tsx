@@ -9,6 +9,7 @@ import { ClockStatus } from "@/components/attendance/clock-status";
 import { AutoRefresh } from "@/components/attendance/auto-refresh";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/server";
+import { LoadError } from "@/components/workspace/states";
 import { CLASSIFICATION_LABELS, formatHoursMinutes, workModeLabel } from "@/lib/recovery/labels";
 
 const EXPLAIN_NAME = "Attendance clock";
@@ -30,7 +31,23 @@ const EXPLAIN_NAME = "Attendance clock";
  */
 export async function AttendanceClockCard({ employeeId }: { employeeId: string }) {
   const supabase = await createClient();
-  const { data: summary } = await supabase.rpc("recovery_live_summary", { p_employee_id: employeeId });
+  const { data: summary, error: summaryError } = await supabase.rpc("recovery_live_summary", { p_employee_id: employeeId });
+  // A failed read is not "Not started": the card says the clock status could not be checked.
+  if (summaryError) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Clock className="h-5 w-5 text-muted-foreground" aria-hidden />
+            {EXPLAIN_NAME}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <LoadError what="your clock status" note="Reload before clocking in; this is a problem loading the information, not a status of Not started." />
+        </CardContent>
+      </Card>
+    );
+  }
   const generatedAt = new Date().toISOString();
 
   const timeZone = resolveCountryTimeZone(summary?.country_code);

@@ -12,6 +12,7 @@ import { ALERT_TYPE_LABELS } from "@/lib/recovery/labels";
 import { AcknowledgeAlertForm } from "./acknowledge-alert-form";
 import { ClickableRow } from "@/components/workspace/clickable-row";
 import { AccessNotice } from "@/components/os/access-notice";
+import { LoadError } from "@/components/workspace/states";
 
 export const metadata = { title: "Alerts" };
 
@@ -45,7 +46,15 @@ export default async function AlertsPage() {
   // RLS alone decides what's visible (every company an HR Admin/CEO/CTO
   // grant covers), never re-derived here.
   const generatedAt = new Date().toISOString();
-  const [{ data: employees }, { data: contracts }, { data: employeeDocs }, { data: identityDocs }, { data: recoveryAlerts }, { data: schedulerStatus }, { data: companies }] = await Promise.all([
+  const [
+    { data: employees, error: employeesError },
+    { data: contracts, error: contractsError },
+    { data: employeeDocs, error: docsError },
+    { data: identityDocs, error: identityError },
+    { data: recoveryAlerts, error: recoveryError },
+    { data: schedulerStatus, error: schedulerError },
+    { data: companies, error: companiesError },
+  ] = await Promise.all([
     supabase.from("employees").select("id, first_name, last_name, company_id, country_code").is("deleted_at", null),
     supabase
       .from("employment_contracts")
@@ -74,6 +83,16 @@ export default async function AlertsPage() {
     supabase.rpc("recovery_scheduler_status"),
     supabase.from("companies").select("id, legal_name"),
   ]);
+  // A failed read is never "Nothing needs attention": name what could not be loaded. (The processor status is only readable by HR Admin /
+  // Sys Admin, so an error there for anyone else just means "not for you" and the banner is omitted.)
+  const failedReads = [
+    employeesError || companiesError ? "employees" : null,
+    contractsError ? "contracts and probation" : null,
+    docsError ? "employee documents" : null,
+    identityError ? "identity documents" : null,
+    recoveryError ? "Recovery Leave alerts" : null,
+    schedulerError && (session.grants.some((g) => g.role === "hr_admin" || g.role === "sys_admin")) ? "background processing status" : null,
+  ].filter((x): x is string => x !== null);
   const companyName = new Map((companies ?? []).map((c) => [c.id, c.legal_name]));
   const employeeMeta = new Map((employees ?? []).map((e) => [e.id, e]));
   const isHrAdmin = session.grants.some((g) => g.role === "hr_admin");
@@ -119,6 +138,8 @@ export default async function AlertsPage() {
           overdue. As of {todayStr}.
         </p>
       </div>
+
+      {failedReads.length > 0 ? <LoadError what={`part of the alerts (${failedReads.join(", ")})`} retryHref="/alerts" /> : null}
 
       {schedulerStatus ? (
         <Alert
@@ -219,7 +240,7 @@ export default async function AlertsPage() {
         </Card>
       ) : null}
 
-      {nothingFlagged ? (
+      {nothingFlagged && failedReads.length === 0 ? (
         <Card>
           <CardContent>
             <EmptyState dense title="Nothing needs attention right now." description="No contracts, documents, or probation periods are due within the next 30 days." />

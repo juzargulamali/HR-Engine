@@ -1,3 +1,4 @@
+import { LoadError } from "@/components/workspace/states";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -9,10 +10,12 @@ export const metadata = { title: "Companies" };
 
 export default async function CompaniesPage() {
   const supabase = await createClient();
-  const [{ data: companies }, { data: countries }] = await Promise.all([
+  const [{ data: companies, error: companiesError }, { data: countries, error: countriesError }] = await Promise.all([
     supabase.from("companies").select("id, legal_name, country_code, default_currency, is_active, deleted_at").order("legal_name"),
     supabase.from("countries").select("code, name").order("name"),
   ]);
+  // A failed read is not "No companies yet".
+  if (companiesError || countriesError) return <LoadError what="the companies" retryHref="/admin/companies" />;
 
   return (
     <div className="space-y-6">

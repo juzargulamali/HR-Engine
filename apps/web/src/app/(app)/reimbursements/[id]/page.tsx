@@ -10,6 +10,7 @@ import { ClaimActions } from "./claim-actions";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
 import { BackLink } from "@/components/workspace/list-memory";
+import { LoadError } from "@/components/workspace/states";
 
 export const metadata = { title: "Reimbursement" };
 
@@ -19,14 +20,16 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
   if (!session) return null;
 
   const supabase = await createClient();
-  const { data: claim } = await supabase
+  const { data: claim, error: claimError } = await supabase
     .from("reimbursement_claims")
     .select("id, employee_id, claim_date, currency, total_amount, status")
     .eq("id", id)
     .maybeSingle();
+  // "Not found" is only for a claim that is absent or not visible; a failed read says it could not load.
+  if (claimError) return <LoadError what="this claim" retryHref={`/reimbursements/${id}`} />;
   if (!claim) notFound();
 
-  const { data: lines } = await supabase
+  const { data: lines, error: linesError } = await supabase
     .from("reimbursement_claim_lines")
     .select("id, line_no, expense_date, category, amount, description, receipt_file_path")
     .eq("claim_id", id)
@@ -65,6 +68,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
           <CardTitle>Expense lines</CardTitle>
         </CardHeader>
         <CardContent>
+          {linesError ? <LoadError what="the expense lines" retryHref={`/reimbursements/${id}`} /> : (
           <Table stack>
             <TableHeader>
               <TableRow>
@@ -104,6 +108,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
               ) : null}
             </TableBody>
           </Table>
+          )}
         </CardContent>
       </Card>
 

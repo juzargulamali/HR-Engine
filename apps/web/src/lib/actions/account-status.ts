@@ -6,6 +6,9 @@ import { canManageAccountStatus } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { parseHoldings, type AccountHoldings } from "@/lib/people-access/holdings";
+
+const targetUserSchema = z.object({ userId: z.string().uuid() });
 
 const setAccountStatusSchema = z.object({
   userId: z.string().uuid(),
@@ -40,6 +43,29 @@ async function setBan(userId: string, banned: boolean): Promise<{ error: string 
   };
 }
 
+async function readHoldings(userId: string): Promise<{ holdings: AccountHoldings | null; error: string | null }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("account_holdings", { p_user_id: userId });
+  const holdings = error ? null : parseHoldings(data);
+  if (!holdings) return { holdings: null, error: "Couldn't check what this account still holds. Try again before deactivating." };
+  return { holdings, error: null };
+}
+
+/**
+ * What the account still holds (pending approvals, projects, roles, module access, equipment) and anything that stops it being deactivated (the last active
+ * System Administrator, the only CEO / CTO approver or CEO / CTO of a company). Shown before the reason is typed. Read-only; System Administrator only (the
+ * database function checks the role as well).
+ */
+export async function getAccountHoldings(userId: string): Promise<{ holdings: AccountHoldings | null; error: string | null }> {
+  const session = await getCurrentSession();
+  if (!session || !canManageAccountStatus(session.grants)) {
+    return { holdings: null, error: "Only a System Administrator can deactivate an account." };
+  }
+  const parsed = targetUserSchema.safeParse({ userId });
+  if (!parsed.success) return { holdings: null, error: "Invalid account." };
+  return readHoldings(parsed.data.userId);
+}
+
 export async function deactivateAccount(userId: string, reason: string): Promise<{ error: string | null }> {
   const session = await getCurrentSession();
   if (!session || !canManageAccountStatus(session.grants)) {
@@ -50,6 +76,12 @@ export async function deactivateAccount(userId: string, reason: string): Promise
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
+
+  // Check BEFORE blocking sign-in: an account the database will refuse to deactivate (the last active System Administrator, the only CEO / CTO approver or
+  // CEO / CTO of a company) must not be locked out first and then refused. set_account_status() enforces the same rules again, so this is a courtesy, not the gate.
+  const held = await readHoldings(parsed.data.userId);
+  if (held.error || !held.holdings) return { error: held.error };
+  if (held.holdings.blockers.length > 0) return { error: held.holdings.blockers[0]! };
 
   const banResult = await setBan(parsed.data.userId, true);
   if (banResult.error) {
@@ -163,8 +195,6 @@ export async function reactivateAccount(userId: string, reason: string): Promise
       "Contact another System Administrator immediately.",
   };
 }
-
-const targetUserSchema = z.object({ userId: z.string().uuid() });
 
 /**
  * "Admin sends a password reset email" for an already-active user —

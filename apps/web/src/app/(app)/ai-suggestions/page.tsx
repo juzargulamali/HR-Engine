@@ -1,3 +1,4 @@
+import { LoadError } from "@/components/workspace/states";
 import { canReviewAiDrafts } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
@@ -18,11 +19,13 @@ export default async function AiSuggestionsPage() {
   }
 
   const supabase = await createClient();
-  const { data: drafts } = await supabase
+  const { data: drafts, error: draftsError } = await supabase
     .from("ai_drafts")
     .select("id, entity_type, proposed_action, proposed_payload, rationale, created_by_agent, status, created_at")
     .eq("status", "draft")
     .order("created_at", { ascending: true });
+  // A failed read is not "No pending AI suggestions".
+  if (draftsError) return <LoadError what="the AI suggestions" retryHref="/ai-suggestions" />;
 
   return (
     <div className="space-y-6">

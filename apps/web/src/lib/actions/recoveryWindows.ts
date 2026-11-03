@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { localDateTimeToUtcIso, resolveCountryTimeZone } from "@enginious-hr/domain";
+import { canSeedPolicyDrafts, localDateTimeToUtcIso, resolveCountryTimeZone, SEED_POLICY_DRAFTS_BLOCKED_REASON } from "@enginious-hr/domain";
+import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 
 export interface RecoveryActionResult {
@@ -143,6 +144,10 @@ export interface RecoveryWindowsDraftResult {
 
 /** Creates the NEXT Recovery Leave version as a DRAFT for UAE/Saudi Arabia/Poland. Never activates anything. */
 export async function createRecoveryWindowsPolicyDrafts(): Promise<RecoveryWindowsDraftResult> {
+  // The same test as the Policies page's button and as the database function (it needs the HR Admin role for all of AE, SA and PL, unscoped by company).
+  const session = await getCurrentSession();
+  if (!session) return { error: "Not signed in.", results: [] };
+  if (!canSeedPolicyDrafts(session.grants)) return { error: SEED_POLICY_DRAFTS_BLOCKED_REASON, results: [] };
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("seed_recovery_windows_policy_drafts");
   revalidatePath("/policies");

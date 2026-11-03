@@ -102,7 +102,8 @@ describe("account security controls", () => {
     it("lets Sys Admin set any profile's account_status directly (profiles_write_sysadmin)", async () => {
       const { rows } = await db.asUser(USER_ADMIN, async (query) => {
         await query("update profiles set account_status = 'deactivated', status_reason = 'test' where id = $1", [USER_INVITED]);
-        return query("select account_status, status_reason from profiles where id = $1", [USER_INVITED]);
+        // status_reason is not readable directly by anyone signed in (A13, migration 20261216000400): a System Administrator reads it through the function
+        return query("select account_status, account_status_details($1)->>'status_reason' as status_reason from profiles where id = $1", [USER_INVITED]);
       });
       expect(rows[0].account_status).toBe("deactivated");
       expect(rows[0].status_reason).toBe("test");
@@ -176,11 +177,11 @@ describe("account security controls", () => {
     it("lets a Sys Admin deactivate a plain user, recording who/why/when", async () => {
       const { rows } = await db.asUser(USER_ADMIN_A, async (query) => {
         await query("select set_account_status($1, 'deactivated', $2)", [USER_PLAIN, "policy violation"]);
-        return query("select account_status, status_reason, status_changed_by from profiles where id = $1", [USER_PLAIN]);
+        return query("select account_status, account_status_details($1) as d from profiles where id = $1", [USER_PLAIN]);
       });
       expect(rows[0].account_status).toBe("deactivated");
-      expect(rows[0].status_reason).toBe("policy violation");
-      expect(rows[0].status_changed_by).toBe(USER_ADMIN_A);
+      expect(rows[0].d.status_reason).toBe("policy violation");
+      expect(rows[0].d.status_changed_by).toBe(USER_ADMIN_A);
     });
 
     it("lets a Sys Admin reactivate a deactivated user", async () => {

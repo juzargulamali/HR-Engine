@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useRef } from "react";
+import { startTransition, useActionState, useEffect, useRef } from "react";
 import { addClaimLine } from "@/lib/actions/reimbursements";
 import type { ActionState } from "@/lib/actions/companies";
 import { Button } from "@/components/ui/button";
@@ -13,13 +13,25 @@ const initialState: ActionState = { error: null };
 export function AddLineForm({ claimId }: { claimId: string }) {
   const [state, formAction, pending] = useActionState(addClaimLine, initialState);
   const formRef = useRef<HTMLFormElement>(null);
+  const wasPending = useRef(false);
+
+  // The form is cleared only after the line was saved. On an error the typed values stay so nothing has to be retyped.
+  // (React clears an uncontrolled form after a form action on its own, so the submit is handled here instead.)
+  useEffect(() => {
+    if (pending) wasPending.current = true;
+    else if (wasPending.current) {
+      wasPending.current = false;
+      if (!state.error) formRef.current?.reset();
+    }
+  }, [pending, state.error]);
 
   return (
     <form
       ref={formRef}
-      action={(formData) => {
-        formAction(formData);
-        formRef.current?.reset();
+      onSubmit={(event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+        startTransition(() => formAction(formData));
       }}
       className="space-y-4"
     >

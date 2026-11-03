@@ -32,7 +32,13 @@ export async function RequestSidePanel({ openId, closeHref, retryHref }: { openI
   const model = models[0];
   if (!model) return shell("Request not found", <Alert role="status">This request does not exist, or you do not have access to it.</Alert>);
   const r = model.request;
-  const manage = r.kind === "project" && r.project_id ? await canManageProjectEquipment(r.project_id) : false;
+  let manage = false;
+  try {
+    manage = r.kind === "project" && r.project_id ? await canManageProjectEquipment(r.project_id) : false;
+  } catch (e) {
+    console.error("[inventory] project standing load failed", e);
+    return shell("Request", <LoadError what="this request" retryHref={retryHref} />);
+  }
   const can = requestCapabilities(model, ctx, locations, manage);
   const [technologies, returns] = await Promise.all([
     can.edit && isRequestEditable(r.status) ? loadTechnologies(r.company_id).catch(() => []) : Promise.resolve([]),

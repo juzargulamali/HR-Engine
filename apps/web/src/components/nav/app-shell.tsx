@@ -14,6 +14,7 @@ import { buildNavModules } from "./nav-groups";
 export function AppShell({
   session,
   clockOpenSince = null,
+  clockLoadFailed = false,
   hasPendingApprovals = false,
   crmGrants = [],
   projects,
@@ -24,13 +25,15 @@ export function AppShell({
   session: CurrentSession;
   /** Start of this employee's open attendance session, or null when there is none. */
   clockOpenSince?: string | null;
+  /** The attendance status could not be read: the header says it is unknown instead of "not clocked in". */
+  clockLoadFailed?: boolean;
   hasPendingApprovals?: boolean;
   crmGrants?: readonly CrmGrant[];
   /** Projects access (own grants, Sales link, waiting handover). Absent means none: the module is then not shown. */
   projects?: { grants: readonly ProjGrant[]; salesLinked?: boolean; pendingHandovers?: boolean; managesProjects?: boolean };
   inventory?: { grants: readonly InvGrant[]; managesProjects?: boolean; isEmployee?: boolean };
   /** Project Budget & Expenses access (own grants). Absent means none: no Finance entry. */
-  budget?: { any: boolean; finance?: boolean; manageAccess?: boolean };
+  budget?: { any: boolean; finance?: boolean; manageAccess?: boolean; waiting?: number };
   children: React.ReactNode;
 }) {
   const roleLabels = roleLabelsFor(session.grants);
@@ -63,6 +66,7 @@ export function AppShell({
           showAlertsLink={showAlertsLink}
           isEmployee={Boolean(session.employeeId)}
           clockOpenSince={clockOpenSince}
+          clockLoadFailed={clockLoadFailed}
           serverNowIso={new Date().toISOString()}
           fullName={fullName}
           email={session.email}

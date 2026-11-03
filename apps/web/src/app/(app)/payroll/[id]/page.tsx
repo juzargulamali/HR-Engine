@@ -11,6 +11,7 @@ import { DeletePayrollLineButton } from "./delete-payroll-line-button";
 import { AddManualPayrollLineForm } from "./add-manual-payroll-line-form";
 import { BackLink } from "@/components/workspace/list-memory";
 import { AccessNotice } from "@/components/os/access-notice";
+import { LoadError } from "@/components/workspace/states";
 
 export const metadata = { title: "Payroll run" };
 
@@ -29,11 +30,13 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
   if (!session) return null;
 
   const supabase = await createClient();
-  const { data: run } = await supabase
+  const { data: run, error: runError } = await supabase
     .from("payroll_export_runs")
     .select("id, company_id, period_month, period_year, status, authorized_by, authorized_at, sent_at")
     .eq("id", id)
     .maybeSingle();
+  // "Not found" is only for a run that is absent or not visible; a failed read says it could not load.
+  if (runError) return <LoadError what="this payroll run" retryHref={`/payroll/${id}`} />;
   if (!run) notFound();
 
   // The list page already blocks non-viewers outright; this detail page is
@@ -45,7 +48,7 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
     return <AccessNotice title="Payroll">Payroll export is restricted to HR Admin, Finance, CEO, and CTO.</AccessNotice>;
   }
 
-  const [{ data: lines }, { data: employees }, { data: company }] = await Promise.all([
+  const [{ data: lines, error: linesError }, { data: employees, error: employeesError }, { data: company, error: companyError }] = await Promise.all([
     supabase
       .from("payroll_export_lines")
       .select("id, employee_id, component_code, amount, currency, label, is_manual")
@@ -89,18 +92,20 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
       <Card>
         <CardHeader>
           <CardTitle>
-            Payroll table ({employeeIds.length} employee{employeeIds.length === 1 ? "" : "s"}) — net total {grandTotal.toFixed(2)}
+            {linesError ? "Payroll table" : `Payroll table (${employeeIds.length} employee${employeeIds.length === 1 ? "" : "s"}) — net total ${grandTotal.toFixed(2)}`}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
-          {employeeIds.length === 0 ? <p className="text-center text-sm text-muted-foreground">No lines yet.</p> : null}
+          {linesError ? <LoadError what="the payroll lines" retryHref={`/payroll/${id}`} note="No total is shown: it is not zero, the lines could not be read." /> : null}
+          {employeesError && !linesError ? <LoadError what="the employee names" retryHref={`/payroll/${id}`} note="The lines and totals below are correct; only the names could not be read." /> : null}
+          {!linesError && employeeIds.length === 0 ? <p className="text-center text-sm text-muted-foreground">No lines yet.</p> : null}
           {employeeIds.map((employeeId) => {
             const empLines = linesByEmployee.get(employeeId) ?? [];
             const subtotal = empLines.reduce((sum, l) => sum + Number(l.amount), 0);
             return (
               <div key={employeeId} className="space-y-2 rounded-md border border-border p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="font-medium">{employeeName.get(employeeId) ?? "—"}</h3>
+                  <h3 className="font-medium">{employeeName.get(employeeId) ?? (employeesError ? "Name could not load" : "—")}</h3>
                   <span className="text-sm font-medium">
                     Subtotal: {empLines[0]?.currency} {subtotal.toFixed(2)}
                   </span>
@@ -135,9 +140,11 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
               </div>
             );
           })}
+          {linesError ? null : (
           <div className="flex justify-end border-t border-border pt-3">
             <span className="text-base font-semibold">Grand total: {grandTotal.toFixed(2)}</span>
           </div>
+          )}
         </CardContent>
       </Card>
 
@@ -147,11 +154,15 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
             <CardTitle>Add manual line</CardTitle>
           </CardHeader>
           <CardContent>
-            <AddManualPayrollLineForm
-              runId={run.id}
-              employees={(employees ?? []).map((e) => ({ id: e.id, name: `${e.first_name} ${e.last_name}` }))}
-              defaultCurrency={company?.default_currency ?? ""}
-            />
+            {employeesError || companyError ? (
+              <LoadError what="the employees and currency" retryHref={`/payroll/${id}`} note="A manual line cannot be added until they load." />
+            ) : (
+              <AddManualPayrollLineForm
+                runId={run.id}
+                employees={(employees ?? []).map((e) => ({ id: e.id, name: `${e.first_name} ${e.last_name}` }))}
+                defaultCurrency={company?.default_currency ?? ""}
+              />
+            )}
           </CardContent>
         </Card>
       ) : null}

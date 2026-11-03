@@ -40,6 +40,12 @@ describe("describeNotification", () => {
     }
     expect(describeNotification("project_handover_accepted", { ...base, title: "Floor" }).href).toBe("/projects/p1");
   });
+  it("describes a scope proposal for the person who decides, linking to the changes page", () => {
+    expect(describeNotification("project_scope_proposed", { ...base, title: "Add a second wall" })).toEqual({
+      text: "A scope change “Add a second wall” was proposed on UAE-P-2026-0001 Floor projection and waits for your decision.", href: "/projects/p1/changes",
+    });
+    expect(describeNotification("project_scope_proposed", { ...base }).text).toContain("A scope change was proposed");
+  });
   it("handles leadership, scope, completion and unknown types without inventing anything", () => {
     expect(describeNotification("project_assigned", { ...base, team: "Programming" }).text).toContain("head of the Programming team");
     expect(describeNotification("project_assigned", { ...base, acting_until: "2099-01-01" }).text).toContain("temporary project leadership");
