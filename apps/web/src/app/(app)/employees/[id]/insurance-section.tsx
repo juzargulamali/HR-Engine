@@ -3,23 +3,34 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { AddInsuranceForm } from "./add-insurance-form";
 import { DeleteInsurancePolicyButton } from "./delete-insurance-policy-button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/workspace/states";
 
 export async function InsuranceSection({ employeeId, canEdit }: { employeeId: string; canEdit: boolean }) {
   const supabase = await createClient();
-  const { data: policies } = await supabase
+  const { data: policies, error } = await supabase
     .from("employee_insurance_policies")
     .select("id, insurance_name, policy_number, expiry_date, file_path")
     .eq("employee_id", employeeId)
     .order("created_at", { ascending: false });
+
+  if (error) {
+    // A failed read is not "No insurance policies on file". Adding one does not depend on the list, so that form stays.
+    return (
+      <div className="space-y-4">
+        <LoadError what="the insurance policies" retryHref={`/employees/${employeeId}?tab=insurance-loans`} />
+        {canEdit ? <AddInsuranceForm employeeId={employeeId} /> : null}
+      </div>
+    );
+  }
 
   // Signed URLs, not public ones — the bucket is private (RLS-gated by
   // storage.objects policies), so a link only ever works for someone this
   // page would already show the row to, and only for a few minutes.
   const policiesWithUrl = await Promise.all(
     (policies ?? []).map(async (p) => {
-      if (!p.file_path) return { ...p, url: null };
-      const { data } = await supabase.storage.from("insurance-documents").createSignedUrl(p.file_path, 300);
-      return { ...p, url: data?.signedUrl ?? null };
+      if (!p.file_path) return { ...p, url: null, urlFailed: false };
+      const { data, error: urlError } = await supabase.storage.from("insurance-documents").createSignedUrl(p.file_path, 300);
+      return { ...p, url: data?.signedUrl ?? null, urlFailed: !!urlError };
     }),
   );
 
@@ -46,6 +57,8 @@ export async function InsuranceSection({ employeeId, canEdit }: { employeeId: st
                     <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
                       View / Download
                     </a>
+                  ) : p.urlFailed ? (
+                    <span className="text-sm text-destructive">File link could not be loaded; reload to try again</span>
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}

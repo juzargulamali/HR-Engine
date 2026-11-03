@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { RateGoalForm } from "./rate-goal-form";
 import { StartAppraisalForm } from "./start-appraisal-form";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/workspace/states";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   in_progress: "secondary",
@@ -25,7 +26,7 @@ export async function PerformanceSection({
   canManage: boolean;
 }) {
   const supabase = await createClient();
-  const [{ data: goals }, { data: cycles }, { data: appraisals }] = await Promise.all([
+  const [{ data: goals, error: goalsError }, { data: cycles, error: cyclesError }, { data: appraisals, error: appraisalsError }] = await Promise.all([
     supabase
       .from("goals")
       .select("id, cycle_id, title, weight_percent, target_date, status, self_rating, manager_rating")
@@ -41,10 +42,13 @@ export async function PerformanceSection({
     .filter((c) => c.status === "open" && !appraisedCycleIds.has(c.id))
     .map((c) => ({ id: c.id, name: c.name }));
 
+  const here = `/employees/${employeeId}?tab=performance`;
   return (
     <div className="space-y-6">
+      {cyclesError && !goalsError && !appraisalsError ? <LoadError what="the cycle names" retryHref={here} note="Goals and appraisals are shown, but their cycle column could not be read." /> : null}
       <div>
         <h3 className="mb-2 text-sm font-medium text-muted-foreground">Goals</h3>
+        {goalsError ? <LoadError what="the goals" retryHref={here} /> : (
         <Table stack>
           <TableHeader>
             <TableRow>
@@ -57,7 +61,7 @@ export async function PerformanceSection({
           <TableBody>
             {(goals ?? []).map((g) => (
               <TableRow key={g.id}>
-                <TableCell>{cycleName.get(g.cycle_id) ?? "—"}</TableCell>
+                <TableCell>{cycleName.get(g.cycle_id) ?? (cyclesError ? "Could not load" : "—")}</TableCell>
                 <TableCell>
                   <div className="font-medium">{g.title}</div>
                   <Badge variant={STATUS_VARIANT[g.status] ?? "outline"} className="mt-1">
@@ -79,10 +83,12 @@ export async function PerformanceSection({
             ) : null}
           </TableBody>
         </Table>
+        )}
       </div>
 
       <div>
         <h3 className="mb-2 text-sm font-medium text-muted-foreground">Appraisals</h3>
+        {appraisalsError ? <LoadError what="the appraisals" retryHref={here} /> : (
         <Table stack>
           <TableHeader>
             <TableRow>
@@ -95,7 +101,7 @@ export async function PerformanceSection({
           <TableBody>
             {(appraisals ?? []).map((a) => (
               <TableRow key={a.id}>
-                <TableCell>{cycleName.get(a.cycle_id) ?? "—"}</TableCell>
+                <TableCell>{cycleName.get(a.cycle_id) ?? (cyclesError ? "Could not load" : "—")}</TableCell>
                 <TableCell>{a.overall_rating ?? "—"}</TableCell>
                 <TableCell>
                   <Badge variant={STATUS_VARIANT[a.status] ?? "outline"}>{a.status.replace(/_/g, " ")}</Badge>
@@ -116,8 +122,10 @@ export async function PerformanceSection({
             ) : null}
           </TableBody>
         </Table>
+        )}
 
-        {canManage && availableCyclesForAppraisal.length > 0 ? (
+        {/* The start-appraisal choice needs both the cycles and the existing appraisals: with either unreadable it is withheld, not offered from partial data. */}
+        {canManage && !cyclesError && !appraisalsError && availableCyclesForAppraisal.length > 0 ? (
           <div className="mt-4 border-t border-border pt-4">
             <StartAppraisalForm employeeId={employeeId} cycles={availableCyclesForAppraisal} />
           </div>

@@ -330,15 +330,22 @@ export default async function DashboardPage() {
   // What they submitted themselves waits under "Waiting on others", never as a decision for them. A failed read is an error row, never 0.
   let budgetActionItems: ActionItem[] = [];
   let budgetWaitingItems: ActionItem[] = [];
+  let budgetQuietItems: ActionItem[] = [];
   const budgetErrorRow: ActionItem = { key: "budget-decisions", icon: ReceiptText, label: "Project budgets could not be loaded", count: 0, href: "/finance/project-budgets", error: true };
   if (budgetRead.status === "rejected") {
     budgetActionItems = [budgetErrorRow];
   } else if (budgetRead.value.status === "error") {
     budgetActionItems = [budgetErrorRow];
   } else if (budgetRead.value.status === "ok") {
-    const { waitingForMe, waitingOnOthers } = budgetRead.value.day;
-    budgetActionItems = [{ key: "budget-decisions", icon: ReceiptText, label: "Project budgets waiting for you", count: waitingForMe.count, href: waitingForMe.href }];
-    budgetWaitingItems = [{ key: "budget-waiting", icon: ReceiptText, label: "Project budgets you submitted, waiting on others", count: waitingOnOthers, href: "/finance/project-budgets" }];
+    const { waitingForMe, waitingOnOthers, waitingOnOthersHref, returned, decidedRecently, pmReadFailed } = budgetRead.value.day;
+    budgetActionItems = [
+      { key: "budget-decisions", icon: ReceiptText, label: "Project budgets waiting for you", count: waitingForMe.count, href: waitingForMe.href },
+      // A Project Manager's own budgets sent back for changes: theirs to act on. Never a decision for someone else.
+      { key: "budget-returned", icon: ReceiptText, label: returned.count === 1 ? "Project budget returned to you" : "Project budgets returned to you", count: returned.count, href: returned.href },
+      ...(pmReadFailed ? [{ key: "budget-pm-error", icon: ReceiptText, label: "The budgets of your projects could not be loaded", count: 0, href: "/projects", error: true }] : []),
+    ];
+    budgetWaitingItems = [{ key: "budget-waiting", icon: ReceiptText, label: "Project budgets you submitted, waiting on others", count: waitingOnOthers, href: waitingOnOthersHref }];
+    budgetQuietItems = [{ key: "budget-decided", icon: ReceiptText, label: "Budget decisions on your projects in the last 14 days", count: decidedRecently.count, href: decidedRecently.href }];
   }
 
   // "Waiting on others": what this person submitted themselves (budgets, leave, claims, Recovery Leave, tasks sent for review). Never a decision for them.
@@ -392,7 +399,7 @@ export default async function DashboardPage() {
   const hasLeft = hasProjects || salesToday.status !== "none";
   const statCols = ({ 1: "xl:grid-cols-1", 2: "xl:grid-cols-2", 3: "xl:grid-cols-3", 4: "xl:grid-cols-4" } as Record<number, string>)[Math.min(4, stats.length)];
   // "Needs me" states the decisions count, so the figure is not repeated as a tile. "Overdue project tasks" is stated by "My work today", so it is not repeated in "Needs me" either.
-  const needsMeOther = [...groups.other, ...quietProjectItems].filter((i) => !(i.key === "proj-overdue" && myWork !== null && myWork !== "error"));
+  const needsMeOther = [...groups.other, ...quietProjectItems, ...budgetQuietItems.filter((i) => i.count > 0)].filter((i) => !(i.key === "proj-overdue" && myWork !== null && myWork !== "error"));
 
   return (
     <OsScope className="space-y-4">

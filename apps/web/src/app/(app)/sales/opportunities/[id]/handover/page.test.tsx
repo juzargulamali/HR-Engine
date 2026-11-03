@@ -8,7 +8,10 @@ vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("notFound"); }, useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/lib/actions/crm", () => ({ updateHandover: vi.fn() }));
 vi.mock("@/lib/actions/projectsCore", () => ({ saveHandover: vi.fn(), saveAndSubmitHandover: vi.fn(), submitHandover: vi.fn(), withdrawHandover: vi.fn() }));
-const rpc = vi.fn(async () => ({ data: [{ user_id: "u9", full_name: "Pia Manager", email: "pia@x.test", company_ids: ["c1"] }], error: null }));
+let directoryFails = false;
+const rpc = vi.fn(async () => (directoryFails
+  ? { data: null, error: { message: "the data service did not answer" } }
+  : { data: [{ user_id: "u9", full_name: "Pia Manager", email: "pia@x.test", company_ids: ["c1"] }], error: null }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc }) }));
 
 let canEdit = true;
@@ -34,7 +37,7 @@ vi.mock("./project-handover", () => ({
 import HandoverPage from "./page";
 
 const render = async () => renderToStaticMarkup(await HandoverPage({ params: Promise.resolve({ id: "o1" }) }));
-beforeEach(() => { canEdit = true; handover = null; projectState = { installed: true, status: null, row: null }; });
+beforeEach(() => { directoryFails = false; canEdit = true; handover = null; projectState = { installed: true, status: null, row: null }; });
 
 describe("Sales handover page", () => {
   it("shows ONE process, Prepare brief to Project created, and no second PM or status form", async () => {
@@ -91,5 +94,14 @@ describe("Sales handover page", () => {
     const html = await render();
     expect(html).not.toContain("Save handover");
     expect(html).toContain("Only the owner (Sales Owner) or a founder can change this");
+  });
+
+  it("a failed staff-directory read says the names could not load and withholds the Project Manager choice", async () => {
+    directoryFails = true;
+    projectState = { installed: false, status: null, row: null };
+    const html = await render();
+    expect(html).toContain("Could not load the staff names");
+    expect(html).toContain("The Project Manager cannot be chosen until they load");
+    expect(html).not.toContain("Save handover");
   });
 });

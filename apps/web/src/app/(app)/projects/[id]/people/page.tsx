@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Fact, Muted, Panel } from "@/components/projects/parts";
+import { LoadError } from "@/components/workspace/states";
 import { getProjectsContext } from "@/lib/projects/context";
 import { loadProjectView } from "@/lib/projects/data";
 import { formatDate, todayIso } from "@/lib/projects/format";
@@ -34,14 +35,15 @@ export default async function ProjectPeoplePage({ params }: { params: Promise<{ 
     supabase.from("proj_tasks").select("assignee_id").eq("project_id", id).in("status", ["todo", "in_progress", "ready_for_review"]),
     showSales ? supabase.from("proj_sales_links").select("id, user_id, source, added_at").eq("project_id", id).is("removed_at", null) : Promise.resolve({ data: [] as { id: string; user_id: string; source: string; added_at: string }[] }),
     // Names of active staff, for people who can assign PMs / manage access; empty for everyone else.
-    showSales || canAssignPm ? supabase.rpc("proj_staff_directory") : Promise.resolve({ data: [] as { user_id: string; full_name: string | null; email: string | null }[] }),
+    showSales || canAssignPm ? supabase.rpc("proj_staff_directory") : Promise.resolve({ data: [] as { user_id: string; full_name: string | null; email: string | null }[], error: null }),
   ]);
   const openBy = new Map<string, number>();
   for (const t of tasksR.data ?? []) openBy.set(t.assignee_id, (openBy.get(t.assignee_id) ?? 0) + 1);
+  const staffFailed = !!staffR.error;
   const staff = new Map((staffR.data ?? []).map((s) => [s.user_id, s.full_name?.trim() || s.email?.split("@")[0] || "Unnamed"]));
   const links = linksR.data ?? [];
   const memberIds = new Set(people.map((p) => p.user_id));
-  const nameFor = (uid: string) => view.nameOf(uid) !== "Former colleague" && view.nameOf(uid) !== "Unknown" ? view.nameOf(uid) : (staff.get(uid) ?? "Sales colleague (name not shown to you)");
+  const nameFor = (uid: string) => view.nameOf(uid) !== "Former colleague" && view.nameOf(uid) !== "Unknown" ? view.nameOf(uid) : (staff.get(uid) ?? (staffFailed ? "Name could not load" : "Sales colleague (name not shown to you)"));
 
   const memberOptions = people.map((p) => ({ id: p.user_id, name: p.full_name ?? "Unnamed" }));
   const teamOptions = teams.map((t) => ({ id: t.id, name: t.name }));
@@ -174,7 +176,7 @@ export default async function ProjectPeoplePage({ params }: { params: Promise<{ 
           {(canAssignPm || isProjFounder(ctx.grants, project.company_id)) && live ? (
             <div className="mt-4 border-t border-border pt-4">
               <h3 className="mb-3 text-sm font-semibold">Link another Sales person</h3>
-              <SalesLinkForm projectId={id} candidates={salesCandidates} />
+              {staffFailed ? <LoadError what="the staff names" retryHref={`/projects/${id}/people`} note="Sales people cannot be chosen until they load; names shown as “Name could not load” are not unknown people." /> : <SalesLinkForm projectId={id} candidates={salesCandidates} />}
             </div>
           ) : null}
         </Panel>

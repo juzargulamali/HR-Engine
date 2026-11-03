@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { AssignAssetForm } from "./assign-asset-form";
 import { ReturnAssetControl } from "./return-asset-control";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/workspace/states";
 
 export async function AssetsSection({
   employeeId,
@@ -15,7 +16,7 @@ export async function AssetsSection({
   canManage: boolean;
 }) {
   const supabase = await createClient();
-  const [{ data: assignments }, { data: availableAssets }] = await Promise.all([
+  const [{ data: assignments, error: assignmentsError }, { data: availableAssets, error: availableError }] = await Promise.all([
     supabase
       .from("asset_assignments")
       .select("id, asset_id, issued_date, returned_date, condition_on_issue, condition_on_return")
@@ -23,16 +24,20 @@ export async function AssetsSection({
       .order("issued_date", { ascending: false }),
     canManage
       ? supabase.from("assets").select("id, asset_tag, category").eq("company_id", companyId).eq("status", "in_stock")
-      : Promise.resolve({ data: [] as never[] }),
+      : Promise.resolve({ data: [] as never[], error: null }),
   ]);
 
   const assetIds = [...new Set((assignments ?? []).map((a) => a.asset_id))];
-  const { data: assets } =
-    assetIds.length > 0 ? await supabase.from("assets").select("id, asset_tag, category").in("id", assetIds) : { data: [] as never[] };
+  const { data: assets, error: assetsError } =
+    assetIds.length > 0 ? await supabase.from("assets").select("id, asset_tag, category").in("id", assetIds) : { data: [] as never[], error: null };
   const assetById = new Map((assets ?? []).map((a) => [a.id, a]));
+
+  const here = `/employees/${employeeId}?tab=assets`;
+  if (assignmentsError) return <LoadError what="the assigned assets" retryHref={here} />;
 
   return (
     <div className="space-y-4">
+      {assetsError ? <LoadError what="the asset tags and categories" retryHref={here} note="The assignments below are real; only the asset names could not be read." /> : null}
       <Table stack>
         <TableHeader>
           <TableRow>
@@ -55,7 +60,7 @@ export async function AssetsSection({
                       <span className="capitalize text-muted-foreground">{asset.category}</span>
                     </>
                   ) : (
-                    "—"
+                    assetsError ? "Could not load" : "—"
                   )}
                 </TableCell>
                 <TableCell>{a.issued_date}</TableCell>
@@ -80,7 +85,9 @@ export async function AssetsSection({
         </TableBody>
       </Table>
 
-      {canManage ? (
+      {canManage && availableError ? (
+        <LoadError what="the in-stock assets available to assign" retryHref={here} />
+      ) : canManage ? (
         (availableAssets ?? []).length > 0 ? (
           <AssignAssetForm employeeId={employeeId} availableAssets={availableAssets ?? []} />
         ) : (

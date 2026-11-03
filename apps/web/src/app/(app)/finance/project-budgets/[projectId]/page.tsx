@@ -27,12 +27,12 @@ export default async function FinanceProjectBudgetPage({ params, searchParams }:
   if (loaded.state === "denied") return <div className="space-y-4">{back}<AccessNotice title="Project budget">You do not have access to this budget. Finance of the owning company and the project&apos;s Project Manager can open it.</AccessNotice></div>;
   if (loaded.state === "error") return <div className="space-y-4">{back}<LoadError what="this budget" retryHref={`/finance/project-budgets/${projectId}`} /></div>;
   const view = loaded.view;
-  const claims = view.viewer.is_pm ? await loadOwnClaims(session.userId) : [];
+  const ownClaims = view.viewer.is_pm ? await loadOwnClaims(session.userId) : { claims: [], failed: false };
   const initial = SECTIONS.find((s) => s === section) as BudgetTab | undefined;
   return (
     <div className="space-y-4">
       {back}
-      <BudgetWorkspace view={view} claims={claims} initialTab={initial} projectHeader />
+      <BudgetWorkspace view={view} claims={ownClaims.claims} claimsFailed={ownClaims.failed} claimsRetryHref={`/finance/project-budgets/${projectId}?section=actuals`} initialTab={initial} projectHeader />
     </div>
   );
 }

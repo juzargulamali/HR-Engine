@@ -10,6 +10,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Panel, Muted } from "@/components/projects/parts";
+import { LoadError } from "@/components/workspace/states";
 import { decideActuals, returnApprovedActuals, reviseActuals, saveActualsDraft, startActuals, submitActuals } from "@/lib/actions/projectBudget";
 import type { PbxActualRow, PbxActuals, PbxBudgetView } from "@/types/budget";
 import { effectivePayment, followsDefault, inheritWhereSame, initialDefault, type PaymentDefault } from "./payment-defaults";
@@ -105,7 +106,7 @@ export function ActualsTable({ rows, currency, approvedTotal, actualTotal }: { r
   );
 }
 
-function ActualsEditor({ view, submission, claims }: { view: PbxBudgetView; submission: PbxActuals; claims: ClaimOption[] }) {
+function ActualsEditor({ view, submission, claims, claimsFailed, claimsRetryHref }: { view: PbxBudgetView; submission: PbxActuals; claims: ClaimOption[]; claimsFailed: boolean; claimsRetryHref?: string }) {
   const currency = view.budget!.currency;
   // "How paid" and "Who paid" are asked once for the list (the person entering is the default payer) and repeated on a line only when it differs.
   const viewerId = view.viewer.user_id;
@@ -260,7 +261,12 @@ function ActualsEditor({ view, submission, claims }: { view: PbxBudgetView; subm
                       ) : null}
                     </>
                   )}
-                  {eff.via === "existing_claim" ? (
+                  {eff.via === "existing_claim" && claimsFailed ? (
+                    // The claims could not be read: say so (a missing list is not "you have no claims"). A claim already linked stays linked; the reference can be written in the note.
+                    <div className="sm:col-span-2 lg:col-span-1">
+                      <LoadError what="your expense claims" retryHref={claimsRetryHref} note={`${l.claim_id ? "The claim already linked to this line is kept. " : ""}You can write the claim reference in the note meanwhile.`} />
+                    </div>
+                  ) : eff.via === "existing_claim" ? (
                     <Field label="Your expense claim" htmlFor={`${base}-claim`} hint="This only links the claim. It is not paid twice, and the claim itself is not changed.">
                       <Select id={`${base}-claim`} value={l.claim_id} disabled={busy} onChange={(e) => update(l.key, { claim_id: e.target.value })}>
                         <option value="">Not listed — I will write the reference in the note</option>
@@ -374,7 +380,7 @@ function ReturnApproved({ view, s }: { view: PbxBudgetView; s: PbxActuals }) {
 }
 
 /** Actual expenses: manual totals entered by the Project Manager after the project, compared with the approved budget, decided by the routed approver (Finance, or the CEO / CTO when the submitter holds Finance access). */
-export function ActualsSection({ view, claims }: { view: PbxBudgetView; claims: ClaimOption[] }) {
+export function ActualsSection({ view, claims, claimsFailed = false, claimsRetryHref }: { view: PbxBudgetView; claims: ClaimOption[]; claimsFailed?: boolean; claimsRetryHref?: string }) {
   const a = useAction();
   const budget = view.budget!;
   const currency = budget.currency;
@@ -402,7 +408,7 @@ export function ActualsSection({ view, claims }: { view: PbxBudgetView; claims: 
 
       {current && current.status === "draft" && isPm ? (
         <Panel title="Actual expenses (draft)" description={`Compared with the approved budget of ${money(view.baseline, currency)}. Nothing is sent for approval until you submit.`}>
-          <ActualsEditor key={`${current.id}:${current.row_version}`} view={view} submission={current} claims={claims} />
+          <ActualsEditor key={`${current.id}:${current.row_version}`} view={view} submission={current} claims={claims} claimsFailed={claimsFailed} claimsRetryHref={claimsRetryHref} />
         </Panel>
       ) : null}
 

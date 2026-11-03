@@ -3,6 +3,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { DeleteAttendanceButton } from "./delete-attendance-button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/workspace/states";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   not_recorded: "outline",
@@ -19,12 +20,14 @@ function formatTime(value: string | null): string {
 
 export async function AttendanceSection({ employeeId, canManage }: { employeeId: string; canManage: boolean }) {
   const supabase = await createClient();
-  const { data: records } = await supabase
+  const { data: records, error } = await supabase
     .from("attendance_records")
     .select("id, work_date, clock_in, clock_out, hours_worked, status, source")
     .eq("employee_id", employeeId)
     .order("work_date", { ascending: false })
     .limit(30);
+
+  if (error) return <LoadError what="the attendance records" retryHref={`/employees/${employeeId}?tab=attendance`} />;
 
   return (
     <div className="space-y-4">

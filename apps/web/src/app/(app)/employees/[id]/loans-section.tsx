@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { AddLoanForm } from "./add-loan-form";
 import { DeleteLoanButton } from "./delete-loan-button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/workspace/states";
 
 export async function LoansSection({
   employeeId,
@@ -15,11 +16,21 @@ export async function LoansSection({
   defaultCurrency: string;
 }) {
   const supabase = await createClient();
-  const { data: loans } = await supabase
+  const { data: loans, error } = await supabase
     .from("employee_loans")
     .select("id, loan_type, amount, currency, issued_date, note")
     .eq("employee_id", employeeId)
     .order("issued_date", { ascending: false });
+
+  if (error) {
+    // A failed read is not "No loans or cash advances on record". Adding one does not depend on the list, so that form stays.
+    return (
+      <div className="space-y-4">
+        <LoadError what="the loans and cash advances" retryHref={`/employees/${employeeId}?tab=insurance-loans`} />
+        {canEdit ? <AddLoanForm employeeId={employeeId} defaultCurrency={defaultCurrency} /> : null}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

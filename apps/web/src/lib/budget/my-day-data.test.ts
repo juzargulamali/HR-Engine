@@ -39,4 +39,29 @@ describe("loadBudgetDay", () => {
     tables = { pbx_actual_submissions: failing() };
     expect(await loadBudgetDay("u1")).toEqual({ status: "error" });
   });
+
+  describe("the Project Manager's own projects", () => {
+    const own = { proj_projects: rows([{ id: "p1" }]), proj_project_members: rows([]), pbx_budgets: rows([{ id: "b1", project_id: "p1" }]) };
+    it("a PM with no budget access sees their project's returned budget, waiting items and recent decisions, from the budget records", async () => {
+      rpcs = { pbx_inbox: inbox({}) };
+      tables = {
+        ...own,
+        pbx_budget_versions: rows([{ id: "v1", budget_id: "b1", seq: 1, status: "returned", decided_at: new Date().toISOString() }]),
+        pbx_actual_submissions: rows([{ id: "s1", budget_id: "b1", seq: 1, status: "submitted", decided_at: null }]),
+      };
+      expect(await loadBudgetDay("u1")).toMatchObject({ status: "ok", day: { returned: { count: 1, href: "/projects/p1/budget" }, waitingOnOthers: 1, waitingOnOthersHref: "/projects/p1/budget" } });
+    });
+    it("a failed read of the PM part keeps the inbox result and says so; it is never a zero", async () => {
+      rpcs = { pbx_inbox: inbox({ budget_approvals: [{ version_id: "theirs", i_can_decide: true, on_hold: false }] }) };
+      tables = { ...own, pbx_budgets: failing(), pbx_budget_versions: rows([]) };
+      expect(await loadBudgetDay("u1")).toMatchObject({ status: "ok", day: { waitingForMe: { count: 1 }, pmReadFailed: true } });
+      tables = { proj_projects: failing(), proj_project_members: rows([]) };
+      expect(await loadBudgetDay("u1")).toMatchObject({ status: "ok", day: { pmReadFailed: true } });
+    });
+    it("a person who manages no project makes no budget reads for it and has no PM rows", async () => {
+      rpcs = { pbx_inbox: inbox({}) };
+      tables = { proj_projects: rows([]), proj_project_members: rows([]), pbx_budgets: failing() };
+      expect(await loadBudgetDay("u1")).toMatchObject({ status: "ok", day: { returned: { count: 0 }, decidedRecently: { count: 0 }, waitingOnOthers: 0 } });
+    });
+  });
 });
