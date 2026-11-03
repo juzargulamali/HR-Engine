@@ -29,7 +29,7 @@ import type {
   InvAuditLogRow, InvAvailabilityCheckRow, InvBalanceRow, InvBinRow, InvCategoryRow, InvCompanyGrantRow, InvCompanySettingsRow, InvCostRow,
   InvCountLineRow, InvCountRow, InvImportLogRow, InvItemRow, InvKitContentRow, InvLabelPrintRow, InvLocationRow, InvMovementLineRow, InvMovementRow,
   InvOperatorLocationRow, InvReadOnlyTable, InvRentalRow, InvRequestLineRow, InvRequestRow, InvReservationRow, InvTechnologyComponentRow,
-  InvTechnologyRow, InvTransferRow, InvUnitRow, InvCompanySharingRow, InvJson, InvMyEquipmentRow, InvOutstandingRow, InvLegacyAssetRow,
+  InvTechnologyRow, InvTransferRow, InvUnitRow, InvCompanySharingRow, InvProjectNoteRow, InvProjectNoteEventRow, InvProjectNoteStatusRow, InvJson, InvMyEquipmentRow, InvOutstandingRow, InvLegacyAssetRow,
 } from "./inventory";
 import type {
   ProjAuditLogRow, ProjBookingConflictRow, ProjChangeLogRow, ProjCompanyCalendarRow, ProjCompanyGrantRow, ProjCompanySettingsRow, ProjCompletionReviewRow,
@@ -1675,6 +1675,8 @@ export interface Database {
       inv_count_lines: InvReadOnlyTable<InvCountLineRow>;
       inv_import_log: InvReadOnlyTable<InvImportLogRow>;
       inv_company_sharing: InvReadOnlyTable<InvCompanySharingRow>;
+      inv_project_notes: InvReadOnlyTable<InvProjectNoteRow>;
+      inv_project_note_events: InvReadOnlyTable<InvProjectNoteEventRow>;
       // Projects & Tasks (20261120000000-500): read-only to clients; every write is a proj_* function below.
       proj_company_grants: ProjReadOnlyTable<ProjCompanyGrantRow>;
       proj_audit_log: ProjReadOnlyTable<ProjAuditLogRow>;
@@ -1734,6 +1736,7 @@ export interface Database {
         Row: { employee_id: string; balance_days: string };
         Relationships: [];
       };
+      inv_project_note_status: { Row: InvProjectNoteStatusRow; Relationships: [] };
     };
     Functions: {
       crm_has_access: { Args: { p_company_id: string }; Returns: boolean };
@@ -1870,6 +1873,9 @@ export interface Database {
       inv_opportunity_availability: { Args: { p_opportunity_id: string }; Returns: InvJson };
       inv_project_equipment: { Args: { p_project_id: string }; Returns: InvJson };
       inv_import_handover_requirements: { Args: { p_project_id: string }; Returns: string };
+      inv_ack_project_note: { Args: { p_note_id: string; p_action: string; p_lines?: InvJson; p_comment?: string | null; p_reason?: string | null; p_key?: string | null }; Returns: InvJson };
+      inv_resolve_note_difference: { Args: { p_note_id: string; p_resolution: string; p_comment: string; p_linked_movement_id?: string | null; p_key?: string | null }; Returns: InvJson };
+      inv_notes_waiting_for_me: { Args: Record<string, never>; Returns: { note_id: string; note_no: string; kind: string; project_id: string; project_ref: string; project_name: string; waiting_since: string }[] };
       pbx_project_access: { Args: { p_project_id: string }; Returns: PbxJson };
       pbx_budget_view: { Args: { p_project_id: string }; Returns: PbxJson };
       pbx_inbox: { Args: Record<string, never>; Returns: PbxJson };

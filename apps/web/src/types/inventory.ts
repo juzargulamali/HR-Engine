@@ -150,3 +150,25 @@ export type InvLegacyAssetRow = {
 export type InvCompanySharingRow = {
   id: string; company_id: string; use_company_id: string; note: string | null; authorised_by: string; authorised_at: string; revoked_by: string | null; revoked_at: string | null;
 }
+
+// Dispatch notes and return checklists (20261217000100_inv_project_notes.sql): frozen, numbered, read-only to clients. A note is never edited; its history is append-only.
+export type InvProjectNoteRow = {
+  id: string; company_id: string; kind: "dispatch" | "return"; note_no: string; movement_id: string; movement_code: string; project_id: string; project_company_id: string;
+  project_ref: string; project_name: string; destination: string | null; site_timezone: string | null; location_id: string; location_name: string; location_timezone: string;
+  recorded_by: string; recorded_by_name: string; recorded_by_role: string | null; pm_user_id_at_time: string | null; pm_name_at_time: string | null; occurred_at: string;
+  expected_return_at: string | null; request_id: string | null; request_code: string | null; replaces_note_id: string | null; payload: Record<string, unknown>;
+  payload_hash: string; created_at: string;
+}
+export type InvProjectNoteEventKind = "acknowledged" | "difference_reported" | "difference_withdrawn" | "resolved_record_stands" | "resolved_corrected" | "correction_of";
+export type InvProjectNoteCapacity = "pm" | "acting_pm" | "projects_founder" | "warehouse";
+export type InvProjectNoteEventRow = {
+  id: string; seq: number; note_id: string; company_id: string; project_id: string; event: InvProjectNoteEventKind; by_user: string; by_name: string;
+  capacity: InvProjectNoteCapacity; at: string; reason: string | null; lines: unknown[] | null; comment: string | null; linked_note_id: string | null; linked_movement_id: string | null;
+}
+export type InvProjectNoteStatusRow = {
+  note_id: string; company_id: string; project_id: string; kind: "dispatch" | "return"; note_no: string; created_at: string; replaces_note_id: string | null;
+  superseded_by_note_id: string | null; acknowledged_at: string | null; acknowledged_by: string | null; acknowledged_by_name: string | null;
+  acknowledged_capacity: InvProjectNoteCapacity | null; difference_state: "none" | "open" | "resolved" | "withdrawn"; difference_reported_at: string | null;
+  difference_reason: string | null; difference_lines: unknown[] | null; awaiting: "pm" | "warehouse" | null; pending_since: string;
+  state: "waiting_for_pm" | "acknowledged" | "difference_open" | "superseded";
+}
