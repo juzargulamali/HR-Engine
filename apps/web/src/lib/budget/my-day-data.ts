@@ -27,8 +27,8 @@ async function loadPmBudgetRows(supabase: SupabaseClient, userId: string): Promi
   const budgetIds = (budgets.data ?? []).map((b) => b.id as string);
   if (budgetIds.length === 0) return { budgets: [], versions: [], submissions: [] };
   const [versions, submissions] = await Promise.all([
-    supabase.from("pbx_budget_versions").select("id, budget_id, seq, status, decided_at").in("budget_id", budgetIds),
-    supabase.from("pbx_actual_submissions").select("id, budget_id, seq, status, decided_at").in("budget_id", budgetIds),
+    supabase.from("pbx_budget_versions").select("id, budget_id, seq, status, decided_at, approval_route, submitted_at").in("budget_id", budgetIds),
+    supabase.from("pbx_actual_submissions").select("id, budget_id, seq, status, decided_at, approval_route, submitted_at").in("budget_id", budgetIds),
   ]);
   if (versions.error || submissions.error) throw new Error("budget versions could not be read");
   return {
