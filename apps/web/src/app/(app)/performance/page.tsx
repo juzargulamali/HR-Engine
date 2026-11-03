@@ -46,16 +46,17 @@ export default async function PerformancePage() {
   }
 
   const supabase = await createClient();
-  const { data: employee } = await supabase.from("employees").select("company_id").eq("id", session.employeeId).single();
+  const { data: employee, error: employeeError } = await supabase.from("employees").select("company_id").eq("id", session.employeeId).single();
+  if (employeeError) return <LoadError what="your employee record" retryHref="/performance" />;
 
-  const [{ data: cycles }, { data: goals }, { data: appraisals }] = await Promise.all([
+  const [{ data: cycles, error: cyclesError }, { data: goals, error: goalsError }, { data: appraisals, error: appraisalsError }] = await Promise.all([
     employee
       ? supabase
           .from("performance_cycles")
           .select("id, name, status")
           .eq("company_id", employee.company_id)
           .order("period_start", { ascending: false })
-      : Promise.resolve({ data: [] as never[] }),
+      : Promise.resolve({ data: [] as never[], error: null }),
     supabase
       .from("goals")
       .select("id, cycle_id, title, weight_percent, target_date, status, self_rating, manager_rating")
@@ -91,6 +92,7 @@ export default async function PerformancePage() {
           <CardTitle>Goals</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {goalsError ? <LoadError what="your goals" retryHref="/performance" /> : (
           <Table stack>
             <TableHeader>
               <TableRow>
@@ -105,7 +107,7 @@ export default async function PerformancePage() {
             <TableBody>
               {(goals ?? []).map((g) => (
                 <TableRow key={g.id}>
-                  <TableCell>{cycleName.get(g.cycle_id) ?? "—"}</TableCell>
+                  <TableCell>{cycleName.get(g.cycle_id) ?? (cyclesError ? "Could not load" : "—")}</TableCell>
                   <TableCell>
                     <div className="font-medium">{g.title}</div>
                     <Badge variant={STATUS_VARIANT[g.status] ?? "outline"} className="mt-1">
@@ -131,10 +133,14 @@ export default async function PerformancePage() {
               ) : null}
             </TableBody>
           </Table>
+          )}
 
+          {/* The new-goal form offers only the open cycles: with the cycles unreadable it is withheld, not shown with an empty cycle list. */}
+          {cyclesError ? <LoadError what="the performance cycles" retryHref="/performance" note="Adding a goal is unavailable until they load." /> : (
           <div className="border-t border-border pt-4">
             <GoalForm cycles={openCycles} />
           </div>
+          )}
         </CardContent>
       </Card>
 
@@ -143,6 +149,7 @@ export default async function PerformancePage() {
           <CardTitle>Appraisals</CardTitle>
         </CardHeader>
         <CardContent>
+          {appraisalsError ? <LoadError what="your appraisals" retryHref="/performance" /> : (
           <Table stack>
             <TableHeader>
               <TableRow>
@@ -155,7 +162,7 @@ export default async function PerformancePage() {
             <TableBody>
               {(appraisals ?? []).map((a) => (
                 <ClickableRow key={a.id} href={`/performance/appraisals/${a.id}`}>
-                  <TableCell>{cycleName.get(a.cycle_id) ?? "—"}</TableCell>
+                  <TableCell>{cycleName.get(a.cycle_id) ?? (cyclesError ? "Could not load" : "—")}</TableCell>
                   <TableCell>{a.overall_rating ?? "—"}</TableCell>
                   <TableCell>
                     <Badge variant={STATUS_VARIANT[a.status] ?? "outline"}>{a.status.replace(/_/g, " ")}</Badge>
@@ -176,6 +183,7 @@ export default async function PerformancePage() {
               ) : null}
             </TableBody>
           </Table>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { AddCompensationForm } from "./add-compensation-form";
+import { LoadError } from "@/components/workspace/states";
 
 export async function CompensationSection({
   employeeId,
@@ -11,12 +12,15 @@ export async function CompensationSection({
   isSelf: boolean;
 }) {
   const supabase = await createClient();
-  const { data: current } = await supabase
+  const { data: current, error } = await supabase
     .from("compensation_details")
     .select("id, effective_from, base_salary, allowances, currency, bank_iban")
     .eq("employee_id", employeeId)
     .eq("is_current", true)
     .maybeSingle();
+
+  // A failed read is not "No compensation on record yet", and the change form (which supersedes the current record) is withheld too.
+  if (error) return <LoadError what="the compensation" retryHref={`/employees/${employeeId}?tab=compensation`} />;
 
   const otherAllowance = typeof current?.allowances?.other === "number" ? current.allowances.other : 0;
   const total = current ? Number(current.base_salary) + otherAllowance : 0;

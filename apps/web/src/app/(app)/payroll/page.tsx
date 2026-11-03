@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ClickableRow } from "@/components/workspace/clickable-row";
 import { RememberList } from "@/components/workspace/list-memory";
 import { AccessNotice } from "@/components/os/access-notice";
+import { LoadError } from "@/components/workspace/states";
 
 export const metadata = { title: "Payroll" };
 
@@ -26,10 +27,14 @@ export default async function PayrollPage() {
   const session = await getCurrentSession();
   if (!session) return null;
 
+  // A failed role / employee read is not "restricted to HR Admin...": say it could not load, and do not show the no-access notice.
+  if (session.loadFailed) return <LoadError what="your account" retryHref="/payroll" />;
+
   const supabase = await createClient();
-  const { data: employee } = session.employeeId
+  const { data: employee, error: employeeError } = session.employeeId
     ? await supabase.from("employees").select("company_id").eq("id", session.employeeId).single()
-    : { data: null };
+    : { data: null, error: null };
+  if (employeeError) return <LoadError what="your employee record" retryHref="/payroll" note="Payroll access could not be checked. This is a problem loading the information, not a missing permission." />;
 
   const canManage = employee ? canManagePayrollExport(session.grants, employee.company_id) : false;
   const canView = employee ? canViewPayrollExport(session.grants, employee.company_id) : false;
@@ -38,7 +43,7 @@ export default async function PayrollPage() {
     return <AccessNotice title="Payroll">Payroll export is restricted to HR Admin, Finance, CEO, and CTO.</AccessNotice>;
   }
 
-  const { data: runs } = await supabase
+  const { data: runs, error: runsError } = await supabase
     .from("payroll_export_runs")
     .select("id, period_month, period_year, status, sent_at")
     .eq("company_id", employee!.company_id)
@@ -72,6 +77,7 @@ export default async function PayrollPage() {
           <CardTitle>Export runs</CardTitle>
         </CardHeader>
         <CardContent>
+          {runsError ? <LoadError what="the export runs" retryHref="/payroll" /> : (
           <Table stack>
             <TableHeader>
               <TableRow>
@@ -103,6 +109,7 @@ export default async function PayrollPage() {
               ) : null}
             </TableBody>
           </Table>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -3,6 +3,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { RecordCareerEventForm } from "./record-career-event-form";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/workspace/states";
 
 const EVENT_LABEL: Record<string, string> = {
   promotion: "Promotion",
@@ -28,7 +29,7 @@ export async function CareerHistorySection({
   if (!canView) return null;
 
   const supabase = await createClient();
-  const [{ data: events }, { data: employee }, { data: currentComp }] = await Promise.all([
+  const [{ data: events, error: eventsError }, { data: employee, error: employeeError }, { data: currentComp, error: compError }] = await Promise.all([
     supabase
       .from("employee_career_events")
       .select(
@@ -42,8 +43,10 @@ export async function CareerHistorySection({
 
   const currentOther = typeof currentComp?.allowances?.other === "number" ? currentComp.allowances.other : 0;
 
+  const here = `/employees/${employeeId}?tab=employment`;
   return (
     <div className="space-y-4">
+      {eventsError ? <LoadError what="the promotions and salary history" retryHref={here} /> : (
       <Table stack>
         <TableHeader>
           <TableRow>
@@ -91,8 +94,11 @@ export async function CareerHistorySection({
           ) : null}
         </TableBody>
       </Table>
+      )}
 
-      {canRecord ? (
+      {/* The form pre-fills the current title and salary: with either unreadable it is withheld rather than shown with blanks that look like "no salary". */}
+      {canRecord && (employeeError || compError) ? <LoadError what="the current title and salary" retryHref={here} note="Recording a change is unavailable until they load." /> : null}
+      {canRecord && !employeeError && !compError ? (
         <RecordCareerEventForm
           employeeId={employeeId}
           currentJobTitle={employee?.job_title ?? null}

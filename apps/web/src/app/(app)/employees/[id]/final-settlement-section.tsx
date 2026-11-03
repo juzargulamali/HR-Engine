@@ -2,6 +2,7 @@ import { computeFinalSettlement, type EosbPolicyPayload } from "@enginious-hr/do
 import { checkPolandTerminationSettlementReadiness } from "@/lib/actions/polandTermination";
 import { createClient } from "@/lib/supabase/server";
 import { Alert } from "@/components/ui/alert";
+import { LoadError } from "@/components/workspace/states";
 import { SettlementRateForm } from "./settlement-rate-form";
 import { AcknowledgePolandExcessButton } from "./acknowledge-poland-excess-button";
 import { ConfirmPolandManualReconciliationButton } from "./confirm-poland-manual-reconciliation-button";
@@ -50,7 +51,14 @@ export async function FinalSettlementSection({
     );
   }
 
-  const [{ data: compensation }, { data: leaveBalance }, { data: approvedClaims }, { data: eosbPolicy }, { data: loans }, { data: settlementInput }] =
+  const [
+    { data: compensation, error: compensationError },
+    { data: leaveBalance, error: leaveError },
+    { data: approvedClaims, error: claimsError },
+    { data: eosbPolicy, error: policyError },
+    { data: loans, error: loansError },
+    { data: settlementInput, error: inputError },
+  ] =
     await Promise.all([
       supabase
         .from("compensation_details")
@@ -74,8 +82,13 @@ export async function FinalSettlementSection({
       // without cash conversion, at termination.
       needsStatutoryRate
         ? supabase.from("termination_settlement_inputs").select("leave_encashment_daily_rate").eq("employee_id", employeeId).maybeSingle()
-        : Promise.resolve({ data: null }),
+        : Promise.resolve({ data: null, error: null }),
     ]);
+
+  // Every figure below feeds the total: with any input unreadable no estimate is shown (a missing loan or claim would silently change the total).
+  if (compensationError || leaveError || claimsError || policyError || loansError || inputError) {
+    return <LoadError what="the final settlement inputs" retryHref={`/employees/${employeeId}?tab=compensation`} note="No figure is shown because a missing input would change the total." />;
+  }
 
   if (!compensation) {
     return <Alert>No current compensation record on file — can&apos;t compute a settlement figure.</Alert>;
