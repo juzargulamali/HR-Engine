@@ -10,6 +10,18 @@ What exists now, in `docs/`:
 * Runnable flows and what each proves: `apps/web/os-shell-checks/README.md`. Local auth is an in-repo stand-in, not Supabase Auth (`docs/people-access-account-controls-verification.md`).
 * The pre-release specification (role/navigation matrix, everyday paths, dispatch design) is on branch `docs/launch-refinement-spec` only, written at `76c121b`; parts are stale.
 
+## App-map task: started, stopped on 2026-11-03, to be resumed later
+Status: **attempted and stopped by the owner to save credits. Nothing from it was written** (no `docs/enginious-os/` files exist; the only output is this file).
+
+What was planned (resume from here, do not start from zero):
+* Seven core files in `docs/enginious-os/`: `README.md` (index, "verified at commit" stamp, maintenance rule), `01-overview-and-modules.md`, `02-screens-and-navigation.md`, `03-roles-access-and-approvals.md`, `04-flows-sales-to-warehouse-and-others.md`, `05-data-tests-and-release-ledger.md`, `06-change-log.md`.
+* Per-module control references in `docs/enginious-os/modules/`: `people-and-hr.md`, `sales-and-crm.md`, `projects.md`, `inventory.md`, `budget-access-and-admin.md` (every tab, dropdown, filter, button and form field: what it does, which server action and database function it triggers, who can use it, validation, failed-read behaviour).
+* Content rules: every claim cites its source path; unknowns are marked `Unverified`; hosted facts are owner-reported; verified against the commit current at writing time (stamp it; the last full release was `551f615`).
+
+What went wrong and how to do it better next time: nine agents were run in parallel, each reading a large part of the code, which was too costly. Run **one module at a time**, only when about to test or change that module, starting from the existing docs listed above and then checking the code. Do the cross-module files (overview, roles, Sales → warehouse flow) once, one agent each, sequentially.
+
+Related plan, also not started: a bounded launch test pass (existing browser suites once on the merged build, ordinary-staff journeys, a per-role security and breakage matrix, hosted and real-phone checks by the owner), awaiting the owner's approval of its scope.
+
 ## When the app map is written, keep it current
 Any change to behaviour, roles or permissions, navigation, a flow, a migration or the tests must update the relevant document and be recorded in a change log in the same pull request. Evidence rules: cite the source path for every claim, mark anything not verified as `Unverified`, and record hosted-database facts as owner-reported unless Claude itself ran the check.
 
