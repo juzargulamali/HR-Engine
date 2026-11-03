@@ -8,7 +8,8 @@ const HR_KEYS = new Set(["contracts", "probation", "docs", "identity"]);
 const DECISION_KEYS = new Set(["approvals", "proj-handovers", "proj-reviews", "proj-scope", "budget-decisions", "approval-commercial", "handover-check", "handover-question", "handover-won"]);
 
 export function actionGroupOf(key: string): ActionGroup {
-  if (DECISION_KEYS.has(key)) return "decision";
+  // Dispatch notes and return checklists waiting for the person's acknowledgement are theirs to answer: "Needs me".
+  if (DECISION_KEYS.has(key) || key.startsWith("inv-notes")) return "decision";
   if (HR_KEYS.has(key)) return "hr";
   if (key.startsWith("sales-")) return "sales";
   return "other";

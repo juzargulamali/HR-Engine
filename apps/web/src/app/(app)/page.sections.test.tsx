@@ -171,6 +171,30 @@ describe("Needs me and Waiting on others", () => {
   });
 });
 
+describe("Dispatch and return notes waiting for me (C4)", () => {
+  it("lists a note waiting for my acknowledgement under Needs me, linking to the project's Equipment page", async () => {
+    rpcs = { ...rpcs, inv_notes_waiting_for_me: rows([{ note_id: "n1", note_no: "ENG-D-00017", kind: "dispatch", project_id: "p9", project_ref: "ENG-P-9", project_name: "Mall activation", waiting_since: new Date(Date.now() - 2 * 86_400_000).toISOString() }]) };
+    const html = await render();
+    expect(html).toContain("Dispatch note waiting for you: Mall activation");
+    expect(html).toContain("/projects/p9/equipment?note=n1#notes");
+    expect(html).not.toContain("Dispatch and return notes could not be loaded");
+  });
+  it("a failed read is an error row, never 'nothing waiting', and the rest of the page still lists", async () => {
+    rpcs = { ...rpcs, inv_notes_waiting_for_me: failing() };
+    const html = await render();
+    expect(html).toContain("Dispatch and return notes could not be loaded");
+    expect(html).not.toContain("Nothing needs your attention right now.");
+  });
+  it("nothing waiting, or notes not installed in this database, adds nothing to the page", async () => {
+    const quiet = await render();
+    expect(quiet).not.toContain("waiting for you");
+    rpcs = { ...rpcs, inv_notes_waiting_for_me: { data: null, error: { message: "Could not find the function public.inv_notes_waiting_for_me", code: "PGRST202" } } };
+    const html = await render();
+    expect(html).not.toContain("Dispatch and return notes could not be loaded");
+    expect(html).not.toContain("Dispatch note waiting");
+  });
+});
+
 describe("one block per fact; no dead rows", () => {
   it("has no 'Coming soon' line, no Quick actions card and no Decisions waiting tile", async () => {
     grants = [{ role: "hr_admin", companyId: "c1", countryCode: null }];

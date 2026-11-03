@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Panel, Muted } from "@/components/projects/parts";
+import { NotesLoadError, NotesSection } from "@/components/inventory/notes/notes-section";
 import { ImportHandoverButton } from "@/components/inventory/planning/import-handover";
 import { RequestsQuickAdd } from "@/components/inventory/planning/requests-quick-add";
 import { RequestEditor, requestCapabilities } from "@/components/inventory/planning/request-view";
@@ -16,6 +17,7 @@ import { formatDateTime } from "@/lib/projects/format";
 import { getInventoryContext } from "@/lib/inventory/context";
 import { asArray, asRecord, formatInZone, num, progressFromDb, shortageLabel, str, windowLabel } from "@/lib/inventory/planning";
 import { canManageProjectEquipment, loadRequestModels, loadTechnologies, loadVisibleLocations } from "@/lib/inventory/planning-data";
+import { loadProjectNotes } from "@/lib/inventory/project-notes-data";
 import { resolveProjectHeld } from "@/lib/inventory/project-returns";
 import { outstandingView, requestItemTotals } from "@/lib/inventory/workspace";
 import { formatQty } from "@/lib/inventory/words";
@@ -124,6 +126,17 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
   const { data: logRows } = importable ? await db.from("inv_import_log").select("outcome, detail, created_at").eq("project_id", id).order("created_at", { ascending: false }).limit(1) : { data: null };
   const lastImport = logRows?.[0] ?? null;
 
+  // Dispatch and return notes: what the warehouse recorded, with the pending acknowledgement on the note itself. A failed read says so; a project without notes shows nothing.
+  let projectNotes: Awaited<ReturnType<typeof loadProjectNotes>> | "error" = "error";
+  try {
+    projectNotes = await loadProjectNotes(id);
+  } catch (e) {
+    console.error("[inventory] project notes load failed", e instanceof Error ? e.message : e);
+  }
+  const canResolveNoteFor = (companyId: string) => inv.grants.some((g) => g.companyId === companyId && (g.capabilities.includes("founder") || g.capabilities.includes("warehouse")));
+  const notesBlock = projectNotes === "error" ? <NotesLoadError projectId={id} />
+    : projectNotes.state === "ok" ? <NotesSection notes={projectNotes.notes} canAnswer={view.canManage} canResolveFor={canResolveNoteFor} now={new Date()} openNoteId={parseRecordId(firstParam(sp, "note"))} /> : null;
+
   const quickScope = canEditList ? {
     companies: inv.companies.map((c) => ({ id: c.id, name: c.name, canEmployee: false })),
     projects: [{ id, name: project.name, reference: project.reference, companyId: project.company_id }],
@@ -143,6 +156,8 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
 
       {off ? <Alert variant="warning" role="status">Inventory is switched off for {company?.name ?? "this company"}. What is already recorded is shown, but nothing new can be requested until a founder switches it on.</Alert> : null}
       {finished ? <Alert role="status">This project is {project.status}. Its equipment list is read-only; unused reservations were released when it finished.</Alert> : null}
+
+      {notesBlock}
 
       <Panel
         title="Equipment still out"
