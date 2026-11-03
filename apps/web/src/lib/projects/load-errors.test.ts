@@ -83,21 +83,21 @@ describe("My Day project work", () => {
 
 describe("My Day scope changes waiting for the person's decision", () => {
   const decider = { ...ctx, grants: [{ companyId: "c1", capabilities: ["approve_scope"] }] } as unknown as ProjectsContext;
-  it("counts proposed changes on open projects of a company the person decides for, and names the oldest project", async () => {
-    tables = { ...tables, proj_scope_changes: rows([{ project_id: "p1", proposed_at: "2026-11-01" }, { project_id: "p2", proposed_at: "2026-11-02" }, { project_id: "p3", proposed_at: "2026-11-03" }]),
-      proj_projects: rows([{ id: "p1", company_id: "c1", status: "in_progress" }, { id: "p2", company_id: "c1", status: "completed" }, { id: "p3", company_id: "c2", status: "in_progress" }]) };
-    expect(await loadProjectsAttention(decider)).toMatchObject({ scopeChangesWaiting: 1, scopeChangeProjectId: "p1" });
+  const waiting = (id: string, project: string) => ({ scope_change_id: id, project_id: project, project_reference: `R-${project}`, project_name: `Name ${project}`, title: `Change ${id}`, proposed_at: "2026-11-01" });
+  it("counts what the narrow function returns (the proposals the person may decide, member or not) and opens the oldest one's decision page", async () => {
+    rpcs = { ...rpcs, proj_scope_decisions_waiting: rows([waiting("s1", "p1"), waiting("s2", "p2")]) };
+    expect(await loadProjectsAttention(decider)).toMatchObject({ scopeChangesWaiting: 2, scopeChangeProjectId: "p1", scopeChangeId: "s1" });
   });
   it("a person who cannot decide scope is never counted and nothing is read for them", async () => {
-    tables = { ...tables, proj_scope_changes: failing() };
-    expect(await loadProjectsAttention(ctx)).toMatchObject({ scopeChangesWaiting: 0, scopeChangeProjectId: null });
+    rpcs = { ...rpcs, proj_scope_decisions_waiting: failing() };
+    expect(await loadProjectsAttention(ctx)).toMatchObject({ scopeChangesWaiting: 0, scopeChangeProjectId: null, scopeChangeId: null });
   });
   it("a failed read THROWS: a waiting decision is not '0'", async () => {
-    tables = { ...tables, proj_scope_changes: failing() };
+    rpcs = { ...rpcs, proj_scope_decisions_waiting: failing() };
     await expect(loadProjectsAttention(decider)).rejects.toThrow(/could not be loaded/);
   });
   it("no proposals: zero", async () => {
-    tables = { ...tables, proj_scope_changes: rows([]) };
-    expect(await loadProjectsAttention(decider)).toMatchObject({ scopeChangesWaiting: 0 });
+    rpcs = { ...rpcs, proj_scope_decisions_waiting: rows([]) };
+    expect(await loadProjectsAttention(decider)).toMatchObject({ scopeChangesWaiting: 0, scopeChangeId: null });
   });
 });

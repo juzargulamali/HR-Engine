@@ -144,5 +144,9 @@ export type ProjMessageFeedRow = {
 export type ProjNotificationRow = { id: string; type: string; payload: Record<string, unknown>; read_at: string | null; created_at: string }
 export type ProjCompletionReviewRow = { kind: "task" | "deliverable" | "milestone" | "feedback" | "booking"; item_id: string; title: string; status: string; detail: string | null }
 export type ProjTaskAffectedRow = { task_id: string; title: string; assignee_name: string | null; start_date: string | null; due_date: string | null }
+/** proj_scope_decisions_waiting(): the open proposals the caller may decide, with the minimum needed to list and open them. */
+export type ProjScopeDecisionWaitingRow = { scope_change_id: string; project_id: string; project_reference: string; project_name: string; title: string; proposed_at: string }
+/** proj_scope_decision_context(): what the decision page shows. No current scope, cost effect or other project data. */
+export type ProjScopeDecisionContextRow = ProjScopeDecisionWaitingRow & { proposed_scope: string; effect_on_dates: string | null; proposed_by_name: string; status: string; can_decide: boolean }
 export type ProjUnreadRow = { project_id: string; unread: number; mentioned: boolean }
 export type ProjMilestoneProgressRow = { accepted_required: number; total_required: number }
