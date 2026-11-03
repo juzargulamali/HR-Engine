@@ -1,6 +1,6 @@
-# Launch package 3a: dispatch notes and return checklists, database layer: manual database steps
+# Launch package 3: dispatch notes and return checklists: manual database steps (3a) and how to enable and check the screens and PDF (3b)
 
-**Nothing here has been run on any hosted project.** This is the database part of the dispatch note / return checklist work (the PDF and the screens come in package 3b and need no SQL). It is applied by you, in the Supabase SQL Editor of **Enginious HR Engine_V2**, when you decide to. Run each file, paste the **whole** result back, and wait for a reply before the next step.
+**Nothing here has been run on any hosted project.** This is the database part of the dispatch note / return checklist work (package 3a). The PDF and the screens (package 3b, section "Package 3b" below) need no SQL and no new migration. It is applied by you, in the Supabase SQL Editor of **Enginious HR Engine_V2**, when you decide to. Run each file, paste the **whole** result back, and wait for a reply before the next step.
 
 ## What it adds, in plain words
 
@@ -41,3 +41,31 @@ There is no settings screen. You turn it on for **one company** with `inv_notes_
 The plan PDF (and the coming note PDF) read the logo and the Carlito fonts through `process.cwd()`. Checked locally: the plan PDF rendered with the app's own component embeds Carlito Regular and Bold and the logo image (`pdffonts` / `pdfimages`; page checked by eye), and after a production build the build's file trace for `/projects/[id]/documents/plans/[planId]/pdf` lists `public/brand/enginious-logo.png` and both `src/lib/pdf/fonts/Carlito-*.ttf`. Vercel bundles exactly what that trace lists, so no `outputFileTracingIncludes` is needed. `apps/web/src/lib/pdf/pdf-assets.test.tsx` pins the paths and the embedding.
 
 **Preview-deployment check (owner, I cannot run Vercel):** on the branch preview, sign in as a project member, open an issued client timeline PDF (Project -> Documents -> Plans -> PDF). It must show the ENGINIOUS logo top left and text in the same typeface as the screen (Carlito), not a plain default font. If the logo is missing or the PDF fails, tell me before the note PDF is released.
+
+
+## Package 3b: the PDF and the screens (no SQL), and how to enable and check them end to end
+
+Everything in 3b is application code on top of the 3a database layer. **With the switch off nothing new shows anywhere**: the Send out and Receive back results carry no note, Project -> Equipment has no notes section, My Day has no row, Today has no "PM reported a difference" filter, History has no Note row. Notes that already exist stay readable after the switch is turned off again.
+
+**What was added**
+
+* **PDF** `/projects/<project>/equipment/notes/<note>/pdf` (Node runtime, on demand, from the note's frozen content, read with the caller's own session): reference number, project, from / to, date in the warehouse's zone, who sent, the lines with items, units and serials, the project totals for a return, a band that says **ACKNOWLEDGEMENT PENDING** (or CONFIRMATION PENDING, DIFFERENCE REPORTED, SUPERSEDED BY ...) until the Project Manager acts, the acknowledgement history and a Content ID. No signature image and no signature wording. A person who may not read the note gets 404 (as if it did not exist), a signed-out person is not served, and a read that fails gives a **503 "could not be loaded"**, never an empty document.
+* **Project Manager** (current PM, an acting PM, a Projects founder): Project -> Equipment shows **Dispatch & return notes** with "Dispatch waiting for you" / "Returned, please confirm", Acknowledge (with an optional note), **Report a difference** (lines and reason chosen by the PM, nothing pre-ticked), Withdraw, and the whole history. My Day -> Needs me has one row per project with notes waiting (from `inv_notes_waiting_for_me`; a failed read is an error row). Acknowledging never blocks anything and changes no stock.
+* **Warehouse**: Download PDF / Open to print on the Send out and Receive back results (and on the project's notes); **PM reported a difference** on Today (own group, own filter, with its age, the PM's words and the lines named) with the **Answer the difference** action ("the record stands", or "corrected" naming the movement that corrected it; a correction of the same kind for the same project becomes a NEW note that cites the old one; the old note and its events are never altered); a Note row on the History entry of every dispatch / return.
+* **Return checklist**: lines with the recorded outcome (Back, available / Back, held for checking), the project totals (units exact, counted stock at project level, never attributed to a request line), the dispatch notes the totals count, and Confirm / Report a difference. Confirming never releases a held unit: only a warehouse condition check does.
+
+**How to enable it for one company and check it (local stack first, then a preview, then the real company)**
+
+1. Apply the 3a migration and verify it with the owner pack (steps 1 to 5 above).
+2. Switch it on for **one** company: `inv_notes_30_switch_one_company_OPTIONAL_writes.sql` (or, locally, a founder runs `select inv_set_project_notes('<company id>', true)`).
+3. Open the **branch preview** and run the checks in this order, as the real people:
+   * Warehouse operator: Send out (any request with reserved items) -> the "Recorded" panel shows **Dispatch note ENG-D-00001** with **Download PDF** and **Open to print**. Download it: it must show the logo top left, the typeface of the screen (Carlito), **ACKNOWLEDGEMENT PENDING**, the lines with equipment ID and serial, the ledger reference, and no word about a signature. (This is also the C0.5 fonts and logo check on a real deployment.)
+   * Project Manager: My Day -> **Dispatch note waiting for you: <project>** -> Project -> Equipment -> Acknowledge. The history now says "Acknowledged by <name> (Project Manager)".
+   * Warehouse operator: Stock -> History -> open the dispatch: the Note row says acknowledged; download the PDF again: it now names who acknowledged it and when.
+   * Warehouse operator: Receive back (a partial return, one unit damaged) -> **Return checklist ENG-RT-00001** with its PDF. Project Manager: "Returned, please confirm", Report a difference on one line -> warehouse Today shows **PM reported a difference** with its age -> Answer the difference. Stock, availability and custody must be exactly as the warehouse recorded them throughout.
+   * A person with no part in the project opens the PDF address: 404.
+4. To stop: `inv_notes_80_switch_off_writes.sql` (every issued note and its history stays and can still be read and answered). The screens go quiet by themselves.
+
+After a production build the file trace of the note PDF route lists `public/brand/enginious-logo.png` and both `src/lib/pdf/fonts/Carlito-*.ttf`, as for the plan PDF, so Vercel bundles them. Found and fixed while testing: when a dispatch sent everything, the page refresh made the request "fulfilled" and replaced the Send out step, which removed the "Recorded" panel (and with it the note's PDF links) at once; the step now stays mounted.
+
+**Tested locally (package 3b)**: unit and component tests for the PDF wording and route (404 / 401 / 503 / inline PDF), the loaders (a failed read throws, never "no notes"), the PM and warehouse screens, the My Day row and the Today row; and the real-browser flow `apps/web/os-shell-checks/inventory-project-notes-flow.mjs` (switch on -> Send out -> PDF downloaded and read with pdftotext / pdffonts / pdfimages -> PM pending on My Day and Project -> Equipment -> acknowledge -> warehouse sees the status and the PDF now names the PM -> return checklist -> PM reports a difference -> warehouse answers -> custody and availability unchanged at every step -> who may read the PDF -> light and dark, phone width -> switch off: nothing new shows).

@@ -98,19 +98,19 @@ export default async function RequestWorkspacePage({ params, searchParams }: { p
   } else if (!can.warehouse) {
     content = <Alert role="status">The warehouse sends equipment and receives it back. You will see reserved, sent and returned numbers on this request as they happen.</Alert>;
   } else if (step === "send") {
-    if (!live) {
-      content = <Alert role="status">This request is {r.status === "draft" ? "not submitted yet" : r.status}, so equipment cannot be sent against it. {r.status !== "draft" ? "Equipment that is already out is received back in the next step." : ""}</Alert>;
-    } else {
-      let formContext: FormContext | null = null;
+    // The step stays mounted when the request stops being live (a dispatch that sends everything makes it "fulfilled"), so the "Recorded" panel and the note's PDF links are not torn down by the refresh.
+    let formContext: FormContext | null = null;
+    if (live) {
       try { formContext = await loadFormContext(ctx, { projects: true, requests: true }); } catch (e) { console.error("[inventory] workspace form context failed", e); }
-      content = (
-        <SendStep
-          requestId={r.id} requestCode={r.code} projectId={r.project_id!} projectName={model.forLabel} companyId={r.company_id}
-          items={sendItemsOf(model)} sentCodes={sentCodesOf(model)} locations={operable} defaultLocationId={defaultLocationId}
-          expectedReturnLabel={r.expected_return_at ? formatInZone(r.expected_return_at, r.timezone) : "the request's date"} formContext={formContext}
-        />
-      );
     }
+    const blocked = live ? undefined : `This request is ${r.status === "draft" ? "not submitted yet" : r.status}, so equipment cannot be sent against it. ${r.status !== "draft" ? "Equipment that is already out is received back in the next step." : ""}`.trim();
+    content = (
+      <SendStep
+        requestId={r.id} requestCode={r.code} projectId={r.project_id!} projectName={model.forLabel} companyId={r.company_id}
+        items={sendItemsOf(model)} sentCodes={sentCodesOf(model)} locations={operable} defaultLocationId={defaultLocationId}
+        expectedReturnLabel={r.expected_return_at ? formatInZone(r.expected_return_at, r.timezone) : "the request's date"} formContext={formContext} blockedMessage={blocked}
+      />
+    );
   } else {
     let projectModels: RequestModel[] = [model];
     try { projectModels = await loadRequestModels({ projectId: r.project_id! }, ctx.userId); } catch (e) { console.error("[inventory] workspace project requests failed", e); }

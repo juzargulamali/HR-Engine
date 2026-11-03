@@ -33,6 +33,8 @@ export interface SendStepProps {
   expectedReturnLabel: string;
   /** For the unplanned-dispatch exception (the existing dispatch form). Null when it could not be loaded. */
   formContext: FormContext | null;
+  /** Set when the request can no longer be sent against (fulfilled, closed, not submitted): said instead of the form, but never in place of a "Recorded" result just shown. */
+  blockedMessage?: string;
 }
 
 /**
@@ -136,6 +138,7 @@ export function SendStep(p: SendStepProps) {
     ];
   })();
 
+  if (p.blockedMessage && flow.phase !== "done") return <Alert role="status">{p.blockedMessage}</Alert>;
   if (flow.phase === "done") {
     return <DonePanel flow={flow} onAnother={() => { setTicked({}); setCounted({}); setUnknown([]); setInfo(null); flow.startNew(); }} />;
   }

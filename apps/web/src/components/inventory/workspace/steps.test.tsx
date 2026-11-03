@@ -81,6 +81,27 @@ describe("Send out", () => {
     await waitFor(() => expect(refresh).toHaveBeenCalled());
   });
 
+  it("a request that can no longer be sent against says so instead of the form", () => {
+    render(send({ blockedMessage: "This request is fulfilled, so equipment cannot be sent against it." }));
+    expect(screen.getByText(/This request is fulfilled, so equipment cannot be sent against it/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Review/ })).toBeNull();
+  });
+
+  it("the Recorded panel, with the note's PDF, survives the refresh that makes the request fulfilled (a dispatch that sent everything)", async () => {
+    submit.mockImplementation(async () => ({ error: null, message: "Dispatched.", result: { project_id: "p1", note_id: "n1", note_no: "ENG-D-00001" }, uncertain: false }));
+    const { rerender } = render(send());
+    fireEvent.click(screen.getByLabelText(/PJ-0403/));
+    fireEvent.click(screen.getByRole("button", { name: /^Review/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /confirm: send 1/i }));
+    await screen.findByText("Recorded");
+    // the page re-renders with the request fulfilled: the step is told it is blocked, and must keep showing what was just recorded
+    rerender(send({ items: [], blockedMessage: "This request is fulfilled, so equipment cannot be sent against it." }));
+    expect(screen.getByText("Recorded")).toBeTruthy();
+    expect(screen.getAllByText("ENG-D-00001").length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: /Download PDF/ }).getAttribute("href")).toBe("/projects/p1/equipment/notes/n1/pdf");
+    expect(screen.queryByText(/cannot be sent against it/)).toBeNull();
+  });
+
   it("more counted than reserved is refused before the review", () => {
     render(send());
     fireEvent.change(screen.getByLabelText(/counted quantity/i), { target: { value: "9" } });
