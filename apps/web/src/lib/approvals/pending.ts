@@ -51,3 +51,81 @@ export async function loadMyPendingApprovals(supabase: Supabase, viewer: { userI
 export async function loadMyPendingApprovalCount(supabase: Supabase, viewer: { userId: string }): Promise<number> {
   return (await loadMyPendingApprovals(supabase, viewer)).count;
 }
+
+/** One approval step waiting on this person, with just enough to name it in "Needs me". */
+export type PendingApprovalItem = {
+  approvalId: string;
+  entityType: string;
+  entityId: string;
+  createdAt: string;
+  /** "Leave request: Aisha Khan", "Expense claim: Omar Ali": what it is and whose, when the person's own session can read that. */
+  title: string;
+  /** A plain date (YYYY-MM-DD) the decision is needed by, when the record has one (a leave request that starts on it). */
+  dueDate: string | null;
+};
+
+const ENTITY_TITLE: Record<string, string> = {
+  leave_request: "Leave request",
+  reimbursement_claim: "Expense claim",
+  timesheet: "Timesheet",
+  generated_letter: "Letter",
+  payroll_export_run: "Payroll export",
+  recovery_credit: "Recovery Leave request",
+};
+
+/**
+ * Every approval step that waits on this person's own decision, one item per step, oldest first: the steps routed to them by name plus the Recovery Leave queue steps
+ * they decide now (the same two reads as the count above, so they agree). This is the list behind the My Day headline: the headline number IS this list's length.
+ * Throws when either read fails (the caller shows "Approvals could not be loaded", never a false zero). The names and dates come from a best-effort second read
+ * through the person's own session: when it fails the items keep their type and age and simply do not name the person.
+ */
+export async function loadMyPendingApprovalItems(supabase: Supabase, viewer: { userId: string }): Promise<PendingApprovalItem[]> {
+  const [direct, inbox] = await Promise.all([
+    supabase.from("approvals").select("id, entity_type, entity_id, created_at").eq("approver_id", viewer.userId).eq("decision", "pending").order("created_at", { ascending: true }).limit(1000),
+    supabase.rpc("recovery_decider_inbox"),
+  ]);
+  if (direct.error) throw direct.error;
+  if (inbox.error) throw inbox.error;
+  const byStep = new Map<string, PendingApprovalItem>();
+  for (const r of direct.data ?? []) {
+    byStep.set(r.id as string, { approvalId: r.id as string, entityType: r.entity_type as string, entityId: r.entity_id as string, createdAt: r.created_at as string, title: ENTITY_TITLE[r.entity_type as string] ?? "Approval", dueDate: null });
+  }
+  // A queue step (no assigned person) the person decides now; a step assigned by name is already above.
+  for (const r of (inbox.data ?? []).filter((x) => x.approver_id === null)) {
+    if (byStep.has(r.approval_id)) continue;
+    byStep.set(r.approval_id, { approvalId: r.approval_id, entityType: "recovery_credit", entityId: r.id, createdAt: r.approval_created_at as string, title: ENTITY_TITLE.recovery_credit!, dueDate: null });
+  }
+  const items = [...byStep.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.approvalId.localeCompare(b.approvalId));
+  try {
+    return await nameApprovals(supabase, items);
+  } catch {
+    return items;
+  }
+}
+
+/** Adds whose request it is (and, for leave, the day it starts) to the leave and expense items; every other kind keeps its plain type. */
+async function nameApprovals(supabase: Supabase, items: PendingApprovalItem[]): Promise<PendingApprovalItem[]> {
+  const ids = (type: string) => items.filter((i) => i.entityType === type).map((i) => i.entityId);
+  const [leave, claims] = await Promise.all([
+    ids("leave_request").length > 0 ? supabase.from("leave_requests").select("id, employee_id, start_date, end_date").in("id", ids("leave_request")) : Promise.resolve({ data: [], error: null }),
+    ids("reimbursement_claim").length > 0 ? supabase.from("reimbursement_claims").select("id, employee_id").in("id", ids("reimbursement_claim")) : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (leave.error || claims.error) throw new Error("requests could not be read");
+  const employeeIds = [...new Set([...(leave.data ?? []), ...(claims.data ?? [])].map((r) => r.employee_id as string))];
+  const { data: people, error } = employeeIds.length > 0 ? await supabase.from("employees").select("id, first_name, last_name").in("id", employeeIds) : { data: [], error: null };
+  if (error) throw error;
+  const name = new Map((people ?? []).map((p) => [p.id as string, `${p.first_name} ${p.last_name}`.trim()]));
+  const leaveBy = new Map((leave.data ?? []).map((r) => [r.id as string, r]));
+  const claimBy = new Map((claims.data ?? []).map((r) => [r.id as string, r]));
+  return items.map((i) => {
+    if (i.entityType === "leave_request") {
+      const r = leaveBy.get(i.entityId);
+      return r ? { ...i, title: `${i.title}: ${name.get(r.employee_id as string) ?? "an employee"}`, dueDate: (r.start_date as string | null) ?? null } : i;
+    }
+    if (i.entityType === "reimbursement_claim") {
+      const r = claimBy.get(i.entityId);
+      return r ? { ...i, title: `${i.title}: ${name.get(r.employee_id as string) ?? "an employee"}` } : i;
+    }
+    return i;
+  });
+}

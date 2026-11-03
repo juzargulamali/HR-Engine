@@ -304,6 +304,8 @@ export interface AttentionItem {
   detail: string;
   /** Due moment (follow-ups) or review date (holds), for ordering and display. */
   at: string | null;
+  /** The follow-up this row is about (overdue / due today rows), so the same follow-up is never listed twice. */
+  followUpId?: string;
 }
 
 const RANK: Record<AttentionKind, number> = { overdue: 0, due_today: 1, hold_review: 2, no_next_action: 3, no_first_response: 4 };
@@ -314,7 +316,7 @@ interface AttentionOpp {
 }
 
 interface AttentionFollowUp {
-  followUp: { assigned_to: string; title: string; due_at: string; status: string };
+  followUp: { id?: string; assigned_to: string; title: string; due_at: string; status: string };
   opportunity: { id: string; reference: string; title: string };
 }
 
@@ -334,7 +336,7 @@ export function attentionItems(
     if (f.followUp.status !== "open" || (mineOnly && f.followUp.assigned_to !== input.userId)) continue;
     const t = followUpTiming(f.followUp.due_at, now);
     if (t === "upcoming") continue;
-    out.push({ kind: t === "overdue" ? "overdue" : "due_today", opportunityId: f.opportunity.id, reference: f.opportunity.reference, title: f.opportunity.title, detail: f.followUp.title, at: f.followUp.due_at });
+    out.push({ kind: t === "overdue" ? "overdue" : "due_today", opportunityId: f.opportunity.id, reference: f.opportunity.reference, title: f.opportunity.title, detail: f.followUp.title, at: f.followUp.due_at, ...(f.followUp.id ? { followUpId: f.followUp.id } : {}) });
   }
   for (const { opp, openFollowUps } of input.opportunities) {
     if (mineOnly && opp.owner_id !== input.userId) continue;

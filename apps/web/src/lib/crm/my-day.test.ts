@@ -16,9 +16,18 @@ const ctx = (caps: string[], policy: "required" | "not_required" | "not_configur
 beforeEach(() => { tables = {}; });
 
 describe("loadApprovalsWaiting (Sales founders)", () => {
-  it("counts pending requests and points at the oldest enquiry", async () => {
-    tables = { crm_approvals: rows([{ opportunity_id: "o-old", requested_at: "2026-10-30" }, { opportunity_id: "o-new", requested_at: "2026-11-01" }]) };
-    expect(await loadApprovalsWaiting(ctx(["founder"]))).toEqual({ status: "ok", count: 2, oldestOpportunityId: "o-old" });
+  it("lists each pending request (oldest first) with the enquiry it is about", async () => {
+    tables = {
+      crm_approvals: rows([{ id: "a1", opportunity_id: "o-old", requested_at: "2026-10-30" }, { id: "a2", opportunity_id: "o-new", requested_at: "2026-11-01" }]),
+      crm_opportunities: rows([{ id: "o-old", reference: "ENQ-1", title: "Expo stand" }]),
+    };
+    expect(await loadApprovalsWaiting(ctx(["founder"]))).toEqual({
+      status: "ok",
+      requests: [
+        { id: "a1", opportunityId: "o-old", requestedAt: "2026-10-30", reference: "ENQ-1", title: "Expo stand" },
+        { id: "a2", opportunityId: "o-new", requestedAt: "2026-11-01", reference: null, title: null },
+      ],
+    });
   });
   it("a person who is not a founder sees nothing, and nothing is read", async () => {
     tables = { crm_approvals: failing() };
@@ -35,6 +44,6 @@ describe("loadApprovalsWaiting (Sales founders)", () => {
   });
   it("no pending requests: a real zero", async () => {
     tables = { crm_approvals: rows([]) };
-    expect(await loadApprovalsWaiting(ctx(["founder"]))).toMatchObject({ status: "ok", count: 0 });
+    expect(await loadApprovalsWaiting(ctx(["founder"]))).toEqual({ status: "ok", requests: [] });
   });
 });

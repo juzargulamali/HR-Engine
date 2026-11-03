@@ -79,8 +79,8 @@ describe("budgetDayFromInbox", () => {
 
   it("a person with no budget access (empty lists) has nothing waiting", () => {
     expect(budgetDayFromInbox(inbox({}), none, none)).toEqual({
-      waitingForMe: { count: 0, href: "/finance/project-budgets" }, waitingOnOthers: 0, waitingOnOthersHref: "/projects",
-      returned: { count: 0, href: "/projects" }, decidedRecently: { count: 0, href: "/projects" },
+      waitingForMe: { count: 0, href: "/finance/project-budgets", items: [] }, waitingOnOthers: 0, waitingOnOthersHref: "/projects",
+      returned: { count: 0, href: "/projects", items: [] }, decidedRecently: { count: 0, href: "/projects" },
     });
   });
 });
@@ -98,7 +98,7 @@ describe("pmBudgetDay (the Project Manager's own projects, from the authoritativ
         v("v2", "b2", 1, "approved", "2026-11-09T00:00:00Z"), v("v2b", "b2", 2, "submitted"),  // approved, then an addition waits: it is waiting now
       ],
     }), NOW);
-    expect(day.returned).toEqual({ count: 1, projectIds: ["p1"] });
+    expect(day.returned).toMatchObject({ count: 1, projectIds: ["p1"], items: [{ id: "v1", kind: "budget", projectId: "p1", label: "Project" }] });
     expect(day.waitingIds).toEqual(["v2b"]);
     expect(day.waitingProjectIds).toEqual(["p2"]);
     expect(day.decided.count).toBe(0);
@@ -142,7 +142,7 @@ describe("budgetDayFromInbox with the PM part", () => {
     const day = budgetDayFromInbox(inbox({}), none, none, { ...pm, waitingIds: ["v-pm"], waitingProjectIds: ["p2"], returned: { count: 1, projectIds: ["p1"] } });
     expect(day.waitingOnOthers).toBe(1);
     expect(day.waitingOnOthersHref).toBe("/projects/p2/budget");
-    expect(day.returned).toEqual({ count: 1, href: "/projects/p1/budget" });
+    expect(day.returned).toMatchObject({ count: 1, href: "/projects/p1/budget" });
     expect(day.decidedRecently).toEqual({ count: 1, href: "/projects/p3/budget" });
     expect(budgetDayFromInbox(inbox({}), none, none, { ...pm, returned: { count: 2, projectIds: ["p1", "p2"] } }).returned.href).toBe("/projects");
   });

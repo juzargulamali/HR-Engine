@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { attendanceSentence, CALENDAR_NOTE, noRecordHint } from "./attendance-summary";
-import { attentionSentence, buildActionItems, type ActionItem } from "./action-centre";
 
 const base = { totalEmployees: 11, notRecordedCount: 10, notRecordedScheduledCount: 0, notRecordedRestCount: 0, notRecordedUnknownCount: 0 };
 
@@ -24,29 +23,6 @@ describe("attendanceSentence", () => {
     const s = attendanceSentence({ totalEmployees: 1, notRecordedCount: 1, notRecordedScheduledCount: 1, notRecordedRestCount: 0, notRecordedUnknownCount: 0 });
     expect(s).toBe("Attendance is recorded for 0 of 1 employee today. 1 scheduled to work has no attendance recorded yet.");
     expect(s).not.toMatch(/\bin today\b|everyone/i);
-  });
-});
-
-describe("attention sentence and card come from the same items", () => {
-  const sales: ActionItem[] = [{ key: "sales-overdue", icon: (() => null) as never, label: "Sales follow-ups overdue", count: 2, href: "/sales/follow-ups" }];
-  it("never says nothing is waiting while a card row exists (Sales rows count too)", () => {
-    const items = buildActionItems({ myPendingApprovals: 0, extraItems: sales });
-    expect(items).toHaveLength(1);
-    expect(attentionSentence(items)).toBe("Your updates for today: 2 items need your attention.");
-    expect(attentionSentence(items)).not.toMatch(/nothing/i);
-  });
-  it("says nothing needs attention only when the card has no rows", () => {
-    const items = buildActionItems({ myPendingApprovals: 0, contractsEndingCount: 0, probationDueCount: 0, docsExpiringCount: 0, identityExpiringCount: 0, extraItems: [{ ...sales[0]!, count: 0 }] });
-    expect(items).toEqual([]);
-    expect(attentionSentence(items)).toBe("Nothing needs your attention right now.");
-  });
-  it("counts approvals and HR rows, and uses the singular for one", () => {
-    const items = buildActionItems({ myPendingApprovals: 1, contractsEndingCount: 0, docsExpiringCount: 0 });
-    expect(items.map((i) => i.key)).toEqual(["approvals"]);
-    expect(attentionSentence(items)).toBe("Your updates for today: 1 item needs your attention.");
-  });
-  it("HR rows only appear when the caller supplies them (people without HR visibility never get them)", () => {
-    expect(buildActionItems({ myPendingApprovals: 2 }).map((i) => i.key)).toEqual(["approvals"]);
   });
 });
 
