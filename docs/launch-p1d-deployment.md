@@ -1,6 +1,6 @@
 # Launch correctness package 1d: manual database steps (completion pass)
 
-**Nothing here has been run on any hosted project.** Three small database changes, applied by you in the Supabase SQL Editor of **Enginious HR Engine_V2** when you decide to. Each has the same five steps as package 1b and 1c (the file names start with the prefix shown in each heading):
+**Nothing here has been run on any hosted project.** Three small database changes, applied by you in the Supabase SQL Editor of **Enginious HR Engine_V2** when you decide to. Each has the same five steps as package 1b and 1c (the file names start with the prefix shown in each heading). Steps 1, 2, 4 and 5 are read-only; step 3 (apply) is not: it changes the database (here: functions only, no existing row). **Order, and what each kind of SQL file does (read-only, migration, rollback, data write): `docs/launch-refinement-install-order.md`, the one authoritative list.**
 
 1. **Preflight (read-only):** `<prefix>_00_preflight_readonly.sql`. Section B must say `OK` on every row and *not applied yet*. Section D is information (for the first change it is the **hosted answer** to "does this change anything for anyone today").
 2. **Snapshot (read-only):** `<prefix>_05_preservation_check_readonly.sql`, exactly as it is. Keep the whole `paste` column.
@@ -10,27 +10,9 @@
 
 Rollback for each: `<prefix>_90_rollback.sql` (read its header first). Each pack was run end to end on a throwaway database built from every migration (preflight, snapshot, apply twice, verify, compare = PASS, rollback twice, verify shows the change as missing, apply again).
 
-## The one installation order for the whole stack
+## The installation order
 
-Migration timestamps sort in installation order across packages 1 -> 2 -> 3. Apply **in file-name order**; skip none that a later one needs.
-
-| Order | Migration | Package | Needs |
-|---|---|---|---|
-| 1 | `20261216000100_inv_issue_to_employee_consumes_reservation.sql` | 1b (A7) | Inventory |
-| 2 | `20261216000200_proj_scope_proposal_notifies_deciders.sql` | 1b (A11) | Projects |
-| 3 | `20261216000300_account_deactivation_inactive_people.sql` | 1c (A12) | |
-| 4 | `20261216000400_profiles_status_columns_restricted.sql` | 1c (A13) | |
-| 5 | `20261216000500_attendance_lead_candidates.sql` | 1c (A14) | |
-| 6 | `20261216000600_recovery_decider_inbox.sql` | 1c (A15) | |
-| 7 | `20261216000700_policy_status_role_check.sql` | 1c (A16) | |
-| 8 | `20261216000800_letters_storage_issued_only.sql` | 1c (A17) | |
-| 9 | `20261216000810_approval_routing_country_scope.sql` | **1d** | needs 3 (`user_is_active`) |
-| 10 | `20261216000820_proj_scope_decision_context.sql` | **1d** | Projects |
-| 11 | `20261216000830_pbx_decisions_waiting_count.sql` | **1d** | Project budgets |
-| 12+ | `20261216000900` and later | package 2 | |
-| last | `20261217000100_inv_project_notes.sql` and later | package 3 | |
-
-Every migration is additive and idempotent. The application degrades safely when one of them is missing: a screen that needs a missing function says it could not load that part (or, for the menu number, shows no number), it never shows an empty list or a zero.
+There is one list of all 14 migrations of the stack and one sequence for the database changes, the three pull requests and the notes switch: **`docs/launch-refinement-install-order.md`**. It is not repeated here. In it: this package's three changes are #9 to #11 (#9 needs #3 first), the current application keeps working after each of them, and the new screens say they could not load a part (never an empty list or a zero) if one is not yet applied.
 
 ## 1. Approval routing honours the country on a role grant (prefix `apprscope`, `20261216000810_approval_routing_country_scope.sql`)
 
@@ -80,10 +62,10 @@ Since A16 (`20261216000700`), `preflight_phase2b_v2_policy_status()` answers onl
 **Intended outcome (already the rule since the policy engine, not changed by A16):**
 
 * They **keep** the Policies list, read-only, showing the **active** versions (what `policy_versions_select` always gave them). They keep Public holidays.
-* They do **not** see draft versions, do not get the *Draft a policy* or *Create … drafts* buttons, and cannot draft, edit, activate or delete a policy: the draft functions and the table policies need an HR Admin grant that is **not** limited to one company for that country (`has_role('hr_admin', null, country)`). The reason is in the design: a single-company HR Admin manages that company's employees but should not unilaterally change a policy that can affect every company operating in that country (`docs/02-database-schema.md`, section 2.4).
+* They do **not** see draft versions, do not get the *Draft a policy* button, see the *Create … drafts* buttons disabled with the reason, and cannot draft, edit, activate or delete a policy: the draft functions and the table policies need an HR Admin grant that is **not** limited to one company for that country (`has_role('hr_admin', null, country)`). The reason is in the design: a single-company HR Admin manages that company's employees but should not unilaterally change a policy that can affect every company operating in that country (`docs/02-database-schema.md`, section 2.4).
 * CEO and CTO with a country-wide grant read drafts and can activate a draft someone else drafted; they do not draft.
 
-**Why this is not a broken workflow.** Before A16 the page also showed the draft buttons only to people for whom `canDraftPolicy` is true (the same country-wide rule), and the database refused everyone else. A16 only stopped the status function answering people who cannot read drafts. No screen a company-only HR Admin could use before has been removed, and no access was broadened to restore one.
+**Why this is not a broken workflow.** Before A16 the page showed the *Create … drafts* buttons whenever `canDraftPolicy` was true for any country, and the database refused anyone who lacked the role for all three; the buttons are now disabled for them with the reason. A16 only stopped the status function answering people who cannot read drafts. No screen a company-only HR Admin could use before has been removed, and no access was broadened to restore one.
 
 **If you want company-only HR Admins to draft** that is a policy decision (it lets one company's HR change rules for a whole country); it needs a new rule and is not part of this work.
 
@@ -91,5 +73,5 @@ Since A16 (`20261216000700`), `preflight_phase2b_v2_policy_status()` answers onl
 
 ## Noted, not changed
 
-* The two "Create drafts" buttons need an HR Admin grant for **all three** countries (AE, SA, PL) because the draft functions loop over all three, while the page offers the buttons to an HR Admin limited to one country, who is then refused with a clear message. Pre-existing; outside this work.
+* The two "Create drafts" buttons need an HR Admin grant for **all three** countries (AE, SA, PL) because the draft functions loop over all three. The page now shows them disabled, with one sentence of explanation, to an HR Admin whose role does not cover all three unscoped by company (before, it offered them enabled and the database refused), and the two server actions refuse the same people with the same sentence. The screen and the actions use one helper (`canSeedPolicyDrafts`), so they cannot drift; the database still checks it. No permission was broadened.
 * `resolve_role_holders()` (used to choose who is emailed about leave) still ignores the country limit on a grant, so a country-limited holder could be emailed about another country's request. Notification only; no decision is affected.
