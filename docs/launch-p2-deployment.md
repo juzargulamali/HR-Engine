@@ -12,6 +12,8 @@ Rollback for each: `<prefix>_90_rollback.sql` (read its header first). Each pack
 
 ## The one installation order (packages stack: 1 -> 2 -> 3)
 
+The same list, with the owner pack prefixes and the three optional data-writing files, is `docs/launch-refinement-install-order.md`.
+
 Migration timestamps sort in installation order across the three packages. Apply **in file-name order**, nothing skipped that a later one needs:
 
 | Order | Migration | Package |
@@ -19,7 +21,7 @@ Migration timestamps sort in installation order across the three packages. Apply
 | 1 to 11 | `20261216000100` … `20261216000830` (see `docs/launch-p1d-deployment.md`, its table) | package 1 (1b, 1c, 1d) |
 | 12 | `20261216000900_proj_block_task_notifies_pm.sql` | **package 2** (needs Projects) |
 | 13 | `20261216000910_module_access_managers.sql` | **package 2** (needs the access tables of the modules you use) |
-| last | `20261217000100_inv_project_notes.sql` and later | package 3 |
+| 14 | `20261217000100_inv_project_notes.sql` | package 3 |
 
 Package 2 needs package 1 installed first (its branch is stacked on package 1). Both changes are additive and idempotent. The application degrades safely when one is missing: a screen that needs a missing function says it could not load that part, it never shows an empty list.
 

@@ -2,6 +2,8 @@
 
 **Nothing here has been run on any hosted project.** Each section below is one database change from the launch correctness work (accounts, confidentiality and a few visibility fixes). Each is applied by you, in the Supabase SQL Editor of **Enginious HR Engine_V2**, when you decide to; each can be reviewed, applied, paused or rolled back on its own. The application changes that go with them need no SQL. Run each file, paste the **whole** result back, and wait for a reply before the next step.
 
+**Installation order for the whole stack: `docs/launch-refinement-install-order.md` (one list, 14 migrations, `20261216000100` to `20261217000100`; packages 1 then 2 then 3).** This guide covers #3 to #8 of that list.
+
 Every section has the same five steps (the file names start with the prefix shown in each heading):
 
 1. **Preflight (read-only):** `<prefix>_00_preflight_readonly.sql`. Section B must say `OK` on every row and *not applied yet*. Section D is information, and for some changes it is the **hosted answer** to a question the local copy could not settle (marked *READ-ONLY CHECK*).
@@ -10,7 +12,7 @@ Every section has the same five steps (the file names start with the prefix show
 4. **Verify (read-only):** `<prefix>_20_verify_readonly.sql`; the last row must say `OK … 0 failing`.
 5. **Preservation compare (read-only):** paste the step 2 lines where the comment says `>>> PASTE <<<` and run the same file again. The summary must start with **PASS**.
 
-Rollback for each: `<prefix>_90_rollback.sql` (read its header first). The migrations are independent of each other, so they can go in any order, except that the application's Approvals, Attendance clock, Policies, Letters and People & Access screens use the new functions: apply the migration for a screen before (or together with) releasing that screen, or the screen says it could not load the new part (it never shows an empty list instead).
+Rollback for each: `<prefix>_90_rollback.sql` (read its header first). Apply them in file-name order (the one installation order above; #9 needs #3). Each one is independent of the others' data, and the application's Approvals, Attendance clock, Policies, Letters and People & Access screens use the new functions: apply the migration for a screen before (or together with) releasing that screen, or the screen says it could not load the new part (it never shows an empty list instead).
 
 **What the local checks showed (each reproduced on a throwaway copy before it was fixed):**
 

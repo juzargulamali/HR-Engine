@@ -12,6 +12,8 @@ Rollback for each: `<prefix>_90_rollback.sql` (read its header first). Each pack
 
 ## The one installation order for the whole stack
 
+The same list, with the owner pack prefixes and the three optional data-writing files, is `docs/launch-refinement-install-order.md`.
+
 Migration timestamps sort in installation order across packages 1 -> 2 -> 3. Apply **in file-name order**; skip none that a later one needs.
 
 | Order | Migration | Package | Needs |

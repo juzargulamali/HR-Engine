@@ -2,6 +2,8 @@
 
 **Nothing here has been run on any hosted project.** Each section below is one database change from the launch correctness work. Each is applied by you, in the Supabase SQL Editor of **Enginious HR Engine_V2**, when you decide to; each can be reviewed, applied, paused or rolled back on its own. The application changes that go with them need no SQL. Run each file, paste the **whole** result back, and wait for a reply before the next step. No step writes data: the migrations replace functions only.
 
+**Installation order for the whole stack: `docs/launch-refinement-install-order.md` (one list, 14 migrations, `20261216000100` to `20261217000100`; packages 1 then 2 then 3).** This guide covers #1 and #2 of that list.
+
 ## A7. Employee equipment: reserve, then issue (`20261216000100_inv_issue_to_employee_consumes_reservation.sql`)
 
 **The defect (reproduced on a local copy before the fix).** The request workspace tells the warehouse to *Reserve*, then give the equipment. Issuing a reserved unit to the employee against the same request was refused with "is reserved for *that very request*"; for counted stock the request's own reservation was subtracted from what could be issued, and the reservation was never marked as issued, so Today kept saying "ready to send".
