@@ -66,7 +66,7 @@ Purchase cost, rental cost or any price (those live in `inv_costs`, which the fu
 
 Pack in `supabase/manual-sql/` (prefix `inv_xshare`). Read-only files are SELECT only.
 
-**Migration #15 is not applied on V2 yet** (and the notes switch is untouched by it). The owner runs, in this order: `inv_xshare_00` (read-only) → `inv_xshare_05` snapshot (read-only) → the migration (**changes the database**) → `inv_xshare_20` verify (read-only) → `inv_xshare_05` compare (read-only).
+**Migration #15 is applied on V2 (owner-reported: verify 69 checks, 0 failing; preservation compare PASS; 9 schema and 8 table fingerprints unchanged; the 6 protected functions unchanged; exactly 11 functions added). These are the owner's hosted results, not run by Claude.** The notes switch is untouched by it. The order below is kept as the record of what the owner ran. The owner runs, in this order: `inv_xshare_00` (read-only) → `inv_xshare_05` snapshot (read-only) → the migration (**changes the database**) → `inv_xshare_20` verify (read-only) → `inv_xshare_05` compare (read-only).
 
 1. `inv_xshare_00_preflight_readonly.sql` (read-only): section B must say OK and "not applied yet".
 2. `inv_xshare_05_preservation_check_readonly.sql` (read-only), **snapshot run**: keep the whole `paste` column.
