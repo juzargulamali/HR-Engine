@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { canSeedPolicyDrafts, SEED_POLICY_DRAFTS_BLOCKED_REASON } from "@enginious-hr/domain";
 import { CreatePhase2bDraftsButton } from "./create-phase2b-drafts-button";
 import { CreateRecoveryWindowsDraftsButton } from "./create-recovery-windows-drafts-button";
 import { PolicyVersionsTable, type PolicyVersionRow } from "./policy-versions-table";
@@ -66,6 +67,10 @@ export default async function PoliciesPage() {
 
   const countryName = new Map((countries ?? []).map((c) => [c.code, c.name]));
   const canDraftAnywhere = (countries ?? []).some((c) => canDraftPolicy(session.grants, c.code));
+  // The two "Create ... drafts" buttons run database functions that need the HR Admin role for ALL of UAE, Saudi Arabia and Poland (unscoped by company): one shared test (the
+  // server actions refuse on it too). An HR Admin who holds the role for fewer countries or one company sees the buttons disabled with the reason, never a button that must fail.
+  const canSeedDrafts = canSeedPolicyDrafts(session.grants);
+  const holdsHrRole = session.grants.some((g) => g.role === "hr_admin");
   // Read-only, and asked only of people who may draft: the database answers nobody else (the function checks the role inside), and it is used only to decide
   // whether the button below still has anything to do. A failed answer leaves the button offered (creating the drafts is idempotent).
   const { data: phase2bStatus } = canDraftAnywhere
@@ -128,8 +133,17 @@ export default async function PoliciesPage() {
         </div>
       </div>
 
-      {canDraftAnywhere ? <CreatePhase2bDraftsButton allCreated={phase2bAllCreated} /> : null}
-      {canDraftAnywhere ? <CreateRecoveryWindowsDraftsButton allCreated={windowsAllCreated} /> : null}
+      {canSeedDrafts ? <CreatePhase2bDraftsButton allCreated={phase2bAllCreated} /> : null}
+      {canSeedDrafts ? <CreateRecoveryWindowsDraftsButton allCreated={windowsAllCreated} /> : null}
+      {!canSeedDrafts && holdsHrRole ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <CreatePhase2bDraftsButton allCreated={false} blocked />
+            <CreateRecoveryWindowsDraftsButton allCreated={false} blocked />
+          </div>
+          <p id="draft-buttons-blocked" className="text-sm text-muted-foreground">{SEED_POLICY_DRAFTS_BLOCKED_REASON}</p>
+        </div>
+      ) : null}
 
       <Card>
         <CardHeader>

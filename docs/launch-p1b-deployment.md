@@ -1,6 +1,6 @@
 # Launch correctness package 1b: manual database steps
 
-**Nothing here has been run on any hosted project.** Each section below is one database change from the launch correctness work. Each is applied by you, in the Supabase SQL Editor of **Enginious HR Engine_V2**, when you decide to; each can be reviewed, applied, paused or rolled back on its own. The application changes that go with them need no SQL. Run each file, paste the **whole** result back, and wait for a reply before the next step. No step writes data: the migrations replace functions only.
+**Nothing here has been run on any hosted project.** Each section below is one database change from the launch correctness work. Each is applied by you, in the Supabase SQL Editor of **Enginious HR Engine_V2**, when you decide to; each can be reviewed, applied, paused or rolled back on its own. The application changes that go with them need no SQL. Run each file, paste the **whole** result back, and wait for a reply before the next step. Steps 1, 2, 4 and 5 below are read-only; step 3 (apply) is not: the migration changes the database (here it replaces one function; no existing row is inserted, edited or deleted). **Order, and what each kind of SQL file does (read-only, migration, rollback, data write): `docs/launch-refinement-install-order.md`, the one authoritative list.**
 
 ## A7. Employee equipment: reserve, then issue (`20261216000100_inv_issue_to_employee_consumes_reservation.sql`)
 

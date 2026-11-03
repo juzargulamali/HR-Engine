@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { canSeedPolicyDrafts, SEED_POLICY_DRAFTS_BLOCKED_REASON } from "@enginious-hr/domain";
+import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
 
@@ -187,6 +189,10 @@ export interface Phase2bDraftResult {
  * with no session, e.g. from the Supabase SQL Editor).
  */
 export async function createPhase2bPolicyDrafts(): Promise<{ error: string | null; results: Phase2bDraftResult[] }> {
+  // The same test as the Policies page's button and as the database function (it needs the HR Admin role for all of AE, SA and PL, unscoped by company).
+  const session = await getCurrentSession();
+  if (!session) return { error: "Not signed in.", results: [] };
+  if (!canSeedPolicyDrafts(session.grants)) return { error: SEED_POLICY_DRAFTS_BLOCKED_REASON, results: [] };
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("seed_phase2b_policy_drafts");
   revalidatePath("/policies");

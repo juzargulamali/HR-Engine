@@ -14,7 +14,8 @@ import { Alert } from "@/components/ui/alert";
  * is activated — activation is a separate, controlled step with a chosen
  * effective date.
  */
-export function CreateRecoveryWindowsDraftsButton({ allCreated }: { allCreated: boolean }) {
+/** `blocked`: the person holds an HR Admin role that cannot use this (see canSeedPolicyDrafts); the button is shown disabled and the page says why (id `draft-buttons-blocked`). */
+export function CreateRecoveryWindowsDraftsButton({ allCreated, blocked = false }: { allCreated: boolean; blocked?: boolean }) {
   const [pending, startTransition] = useTransition();
   const [outcome, setOutcome] = useState<RecoveryWindowsDraftResult | null>(null);
 
@@ -26,7 +27,8 @@ export function CreateRecoveryWindowsDraftsButton({ allCreated }: { allCreated: 
         type="button"
         variant="outline"
         size="sm"
-        disabled={pending}
+        disabled={pending || blocked}
+        aria-describedby={blocked ? "draft-buttons-blocked" : undefined}
         onClick={() => {
           if (
             !window.confirm(
