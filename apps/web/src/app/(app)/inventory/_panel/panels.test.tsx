@@ -34,7 +34,7 @@ const item = (over: Partial<InvItemRow> = {}): InvItemRow => ({ id: I1, company_
 const unitView = (over: Partial<UnitView> = {}): UnitView => ({
   id: U1, company_id: C1, item_id: I1, code: "UAE-E-00042", serial_number: "SN-1", ownership: "owned", rental_id: null, lifecycle: "active", condition: "good", custody_kind: "employee", location_id: L1, bin_id: null,
   employee_id: "e1", project_id: null, transfer_id: null, repair_reference: null, in_kit_id: null, expected_return_at: null, verified_at: "2026-10-01T00:00:00Z", verified_by: "u", legacy_asset_id: null, notes: null,
-  version: 1, created_by: "u", created_at: "2026-10-01T00:00:00Z", updated_at: "", retired_at: null, where: "With an employee: Sara Ali", employeeName: "Sara Ali", projectName: null, binLabel: null, locationName: "Dubai warehouse", cost: { amount: 4200, currency: "AED" }, overdue: false, ...over,
+  version: 1, created_by: "u", created_at: "2026-10-01T00:00:00Z", updated_at: "", retired_at: null, where: "With an employee: Sara Ali", employeeName: "Sara Ali", projectName: null, binLabel: null, locationName: "Dubai warehouse", cost: { amount: 4200, currency: "AED" }, overdue: false, ownedByNote: null, ...over,
 });
 const counts = (detail: boolean) => buildStockRows({ items: [item()], categories: [], units: detail ? [{ id: "unit-42", item_id: I1, code: "UAE-E-00042", serial_number: "SN-1", lifecycle: "active", condition: "good", custody_kind: "employee", location_id: L1, in_kit_id: null, ownership: "owned" }] : [], balances: [], reservations: [], detailCompanyIds: new Set(detail ? [C1] : []), locationId: "", now: new Date() })[0]!;
 
@@ -49,6 +49,12 @@ vi.mock("@/lib/inventory/stock", () => ({
   employeeNameFor: async () => null, resolveCodes: async () => [],
 }));
 
+let xUnits: Record<string, unknown>[] = [];
+vi.mock("@/lib/inventory/xshare-data", async () => {
+  const { mapUnit } = await import("@/lib/inventory/xshare");
+  return { loadXUnits: async () => xUnits.map(mapUnit), loadXTransfersOfUnit: async () => [] };
+});
+
 import { ItemSidePanel } from "./item-panel";
 import { UnitSidePanel } from "./unit-panel";
 import { MovementSidePanel } from "../history/_panel/movement-panel";
@@ -57,7 +63,7 @@ const render = async (el: Promise<React.ReactElement | null>) => renderToStaticM
 const here = (p: Record<string, string | null> = {}) => `/inventory?${new URLSearchParams(Object.fromEntries(Object.entries(p).filter(([, v]) => v) as [string, string][])).toString()}`;
 const baseItem = (over: Partial<ItemDetail> = {}): ItemDetail => ({
   item: item(), categoryName: "Computers", companyName: "Enginious", detail: true, canEdit: true, canSeeCosts: true, canConfirm: false, counts: counts(true), categories: [], units: [unitView()], unitsTruncated: false,
-  balances: [], kits: new Map(), movements: [], locations: [loc], bins: [bin], summaryAvailability: [], names, replacedBy: null, ...over,
+  balances: [], kits: new Map(), movements: [], locations: [loc], placeLocations: [loc], bins: [bin], summaryAvailability: [], names, replacedBy: null, ...over,
 });
 
 beforeEach(() => { grants = [{ companyId: C1, capabilities: ["founder"] }]; itemDetail = baseItem(); });
@@ -119,7 +125,7 @@ describe("ItemSidePanel", () => {
 });
 
 const baseUnit = (over: Partial<UnitDetail> = {}): UnitDetail => ({
-  unit: unitView(), item: item(), companyName: "Enginious", canOperate: true, canEdit: true, canSeeCosts: true, kit: [], packable: [], rental: null, history: [], historyTruncated: false, names, locations: [loc], bins: [bin], inKitCode: null, ...over,
+  unit: unitView(), item: item(), companyName: "Enginious", canOperate: true, canEdit: true, canSeeCosts: true, kit: [], packable: [], rental: null, history: [], historyTruncated: false, names, locations: [loc], placeLocations: [loc], bins: [bin], inKitCode: null, ...over,
 });
 
 describe("UnitSidePanel", () => {
@@ -143,6 +149,17 @@ describe("UnitSidePanel", () => {
     expect(draft).toContain("Not counted yet");
     expect(draft).not.toContain("Issue to a person");
   });
+  it("says who owns a unit that sits in another company's warehouse, apart from where it is and who holds it (never for a unit at home)", async () => {
+    unitDetail = baseUnit({ unit: unitView({ custody_kind: "warehouse", employee_id: null, employeeName: null, where: "In the warehouse: Riyadh warehouse · Enginious KSA", ownedByNote: "Owned by Enginious UAE" }) });
+    const away = await render(UnitSidePanel({ unitRef: U1, closeHref: "/inventory", here }));
+    expect(away).toContain("In the warehouse: Riyadh warehouse · Enginious KSA");
+    expect(away).toContain("Owned by");
+    expect(away).toContain("Enginious UAE");
+    expect(away).toContain("never changes who owns it");
+    unitDetail = baseUnit({ unit: unitView({ custody_kind: "warehouse", employee_id: null, employeeName: null, where: "In the warehouse: Dubai warehouse" }) });
+    const home = await render(UnitSidePanel({ unitRef: U1, closeHref: "/inventory", here }));
+    expect(home).not.toContain("never changes who owns it");
+  });
   it("flags overdue equipment", async () => {
     unitDetail = baseUnit({ unit: unitView({ overdue: true, expected_return_at: "2026-09-01T00:00:00Z" }) });
     expect(await render(UnitSidePanel({ unitRef: U1, closeHref: "/inventory", here }))).toContain("Overdue");
@@ -164,6 +181,38 @@ describe("UnitSidePanel", () => {
   it("is 'not found' for a person who may not read units (the database returns nothing)", async () => {
     unitDetail = null;
     expect(await render(UnitSidePanel({ unitRef: "UAE-E-00042", closeHref: "/inventory", here }))).toContain("or you do not have access to it");
+  });
+  it("shows another company's unit that the person may handle as a minimal record: owner, ID, serial, status, no cost and no history", async () => {
+    unitDetail = null;
+    xUnits = [{ unit_id: "ux", code: "UAE-E-00042", serial_number: "SN-7", item_id: "i1", item_name: "LED panel", category_name: "Screens", condition: "good", custody_kind: "transit", ownership: "owned",
+      owner_company_id: "c-uae", owner_company_name: "Enginious UAE", location_id: "l9", location_name: "Riyadh warehouse", location_company_id: "c-ksa", bin_id: null, bin_code: null, transfer_id: "t1", transfer_code: "UAE-T-00001", usable_here: false }];
+    try {
+      const html = await render(UnitSidePanel({ unitRef: "UAE-E-00042", closeHref: "/inventory", here }));
+      expect(html).toContain("Owned by Enginious UAE");
+      expect(html).toContain("SN-7");
+      expect(html).toContain("On the way to Riyadh warehouse (UAE-T-00001)");
+      expect(html).toContain("/inventory/transfers/t1");
+      expect(html).not.toMatch(/Purchase cost|Notes|>History</);
+    } finally { xUnits = []; }
+  });
+  it("says 'Sharing revoked\u2014contact owner' on another company's unit once the owner stopped sharing, keeps the receive action while it is on the way, and offers no issue or send", async () => {
+    unitDetail = null;
+    const row = { unit_id: "ux", code: "UAE-E-00042", serial_number: "SN-7", item_id: "i1", item_name: "LED panel", category_name: "Screens", condition: "good", custody_kind: "transit", ownership: "owned",
+      owner_company_id: "c-uae", owner_company_name: "Enginious UAE", location_id: "l9", location_name: "Riyadh warehouse", location_company_id: "c-ksa", bin_id: null, bin_code: null, transfer_id: "t1", transfer_code: "UAE-T-00001", usable_here: false, sharing_revoked: true };
+    try {
+      xUnits = [row];
+      const html = await render(UnitSidePanel({ unitRef: "UAE-E-00042", closeHref: "/inventory", here }));
+      expect(html).toContain("Sharing revoked\u2014contact owner");
+      expect(html).toContain("Receive the transfer");
+      xUnits = [{ ...row, custody_kind: "warehouse", transfer_id: null, transfer_code: null, sharing_revoked: true }];
+      const onShelf = await render(UnitSidePanel({ unitRef: "UAE-E-00042", closeHref: "/inventory", here }));
+      expect(onShelf).toContain("Sharing revoked\u2014contact owner");
+      expect(onShelf).toContain("At Riyadh warehouse");
+      expect(onShelf).not.toContain("Issue to a person");
+      expect(onShelf).not.toContain("Dispatch to a project");
+      xUnits = [{ ...row, sharing_revoked: false }];
+      expect(await render(UnitSidePanel({ unitRef: "UAE-E-00042", closeHref: "/inventory", here }))).not.toContain("Sharing revoked");
+    } finally { xUnits = []; }
   });
   it("shows no actions to someone who cannot operate stock", async () => {
     grants = [{ companyId: C1, capabilities: ["view_stock"] }];

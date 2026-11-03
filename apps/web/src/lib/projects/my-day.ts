@@ -10,7 +10,7 @@ export interface ProjectDayRow {
 }
 
 /** The Projects rows of My Day, from real counts only. Zero rows are dropped; the order is the order shown. */
-export function projectDayRows(a: ProjectsAttention): ProjectDayRow[] {
+export function projectDayRows(a: Omit<ProjectsAttention, "handoverList" | "scopeList">): ProjectDayRow[] {
   const plural = (n: number, one: string, many: string) => `${n === 1 ? one : many}`;
   const rows: ProjectDayRow[] = [
     { key: "proj-handovers", count: a.handoversWaiting, needsYou: true, href: "/projects/handovers", label: plural(a.handoversWaiting, "Project handover waiting on you", "Project handovers waiting on you") },

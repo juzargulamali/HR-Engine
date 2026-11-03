@@ -232,5 +232,10 @@ describe("outText", () => {
     expect(outText({ outProjects: 2, outEmployees: 1 })).toBe("2 on projects, 1 with employees");
     expect(outText({ outProjects: 0, outEmployees: 0 })).toBe("None");
     expect(outText({ outProjects: 2.5, outEmployees: 0 })).toBe("2.5 on projects");
+    // equipment on its way between warehouses is said to be in transit (it is available at neither end until received)
+    expect(outText({ outProjects: 0, outEmployees: 0, inTransit: 1 })).toBe("1 in transit");
+    expect(outText({ outProjects: 2, outEmployees: 0, inTransit: 3 })).toBe("2 on projects, 3 in transit");
+    expect(outText({ outProjects: 0, outEmployees: 0, inTransit: 0 })).toBe("None");
+    expect(outText({ outProjects: null, outEmployees: null, inTransit: 1 })).toBe("—");
   });
 });

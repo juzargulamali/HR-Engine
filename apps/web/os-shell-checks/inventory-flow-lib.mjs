@@ -8,7 +8,7 @@ export const DB_NAME = process.env.LOCAL_DB_NAME ?? "hr_local_stack";
 export const SHOTS = process.env.SHOTS_DIR ?? new URL("../../../docs/inventory-screenshots", import.meta.url).pathname;
 mkdirSync(SHOTS, { recursive: true });
 export const U = (n) => `00000000-0000-4000-8000-0000000000a${n}`;
-export const PERSONA = { ceo: ["ceo@e2e.local", 3], pol: ["pol.exec@e2e.local", 8], hr1: ["hr1@e2e.local", 1], lead: ["lead@e2e.local", 7], hr: ["hr@e2e.local", 2], mgr: ["mgr@e2e.local", 4], emp: ["emp@e2e.local", 5], admin: ["admin@e2e.local", 6] };
+export const PERSONA = { ceo: ["ceo@e2e.local", 3], pol: ["pol.exec@e2e.local", 8], hr1: ["hr1@e2e.local", 1], lead: ["lead@e2e.local", 7], hr: ["hr@e2e.local", 2], mgr: ["mgr@e2e.local", 4], emp: ["emp@e2e.local", 5], admin: ["admin@e2e.local", 6], polw: ["pol.worker@e2e.local", 9] };
 
 /** Re-seeds the throwaway database (and nothing else) when RESEED=1. The app holds no database state, so it keeps running. */
 export function maybeReseed(seed = "inventory.sh") {

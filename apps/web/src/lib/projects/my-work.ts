@@ -90,6 +90,10 @@ export interface ProjectsAttention {
   scopeChangeId: string | null;
   unreadMessages: number;
   unreadProjects: number;
+  /** The handovers behind `handoversWaiting`, one per handover (their number is that count). */
+  handoverList: { id: string; opportunityId: string; reference: string; title: string; status: string; at: string }[];
+  /** The scope proposals behind `scopeChangesWaiting`, oldest first. */
+  scopeList: { id: string; projectId: string; projectReference: string; projectName: string; title: string; at: string }[];
 }
 
 /**
@@ -97,13 +101,13 @@ export interface ProjectsAttention {
  * THROWS when a read fails (never zeros): My Day shows one "could not be loaded" line, the Projects overview says so too.
  */
 export const loadProjectsAttention = cache(async (ctx: ProjectsContext): Promise<ProjectsAttention> => {
-  const empty: ProjectsAttention = { overdueTasks: 0, dueSoonTasks: 0, reviewsWaiting: 0, handoversWaiting: 0, scopeChangesWaiting: 0, scopeChangeProjectId: null, scopeChangeId: null, unreadMessages: 0, unreadProjects: 0 };
+  const empty: ProjectsAttention = { overdueTasks: 0, dueSoonTasks: 0, reviewsWaiting: 0, handoversWaiting: 0, scopeChangesWaiting: 0, scopeChangeProjectId: null, scopeChangeId: null, unreadMessages: 0, unreadProjects: 0, handoverList: [], scopeList: [] };
   if (ctx.grants.length === 0) return empty;
   const supabase = await createClient();
   const deciderCompanies = new Set(ctx.grants.map((g) => g.companyId).filter((c) => canDecideScope(ctx.grants, c)));
   const [work, handovers, unread, scope] = await Promise.all([
     loadMyWork(ctx),
-    supabase.from("proj_handovers").select("company_id, status, pm_user_id").in("status", ["submitted", "pm_assigned"]).limit(100),
+    supabase.from("proj_handovers").select("id, company_id, status, pm_user_id, crm_opportunity_id, crm_reference, title, submitted_at, updated_at").in("status", ["submitted", "pm_assigned"]).limit(100),
     supabase.rpc("proj_unread_counts"),
     // Proposed scope changes the person may decide NOW, from the narrow function (id, project reference, title, time only): a holder of approve_scope who is not a member of the
     // project is authorised to decide but cannot read the proposal through row-level security. Only worth asking for someone who may decide one.
@@ -116,16 +120,21 @@ export const loadProjectsAttention = cache(async (ctx: ProjectsContext): Promise
   const oldestScope = scopeRows[0] ?? null;
   const groups = groupTasksByDue(work.open, work.today);
   const unreadRows = (unread.data ?? []).filter((r) => r.unread > 0);
+  const handoverList = (handovers.data ?? [])
+    .filter((h) => handoverWaitsOnMe(h, ctx.userId, (c) => hasProjCapability(ctx.grants, c, "assign_pm")))
+    .map((h) => ({ id: h.id, opportunityId: h.crm_opportunity_id, reference: h.crm_reference, title: h.title, status: h.status, at: h.submitted_at ?? h.updated_at }));
   return {
     overdueTasks: groups.overdue.length,
     dueSoonTasks: groups.soon.length,
     reviewsWaiting: work.reviews.length,
-    handoversWaiting: (handovers.data ?? []).filter((h) => handoverWaitsOnMe(h, ctx.userId, (c) => hasProjCapability(ctx.grants, c, "assign_pm"))).length,
+    handoversWaiting: handoverList.length,
     scopeChangesWaiting: scopeWaiting,
     scopeChangeProjectId: oldestScope?.project_id ?? null,
     scopeChangeId: oldestScope?.scope_change_id ?? null,
     unreadMessages: unreadRows.reduce((n, r) => n + r.unread, 0),
     unreadProjects: unreadRows.length,
+    handoverList,
+    scopeList: scopeRows.map((r) => ({ id: r.scope_change_id, projectId: r.project_id, projectReference: r.project_reference, projectName: r.project_name, title: r.title, at: r.proposed_at })),
   };
 });
 

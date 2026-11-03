@@ -34,7 +34,9 @@ vi.mock("@/components/my-day/next-dispatch", () => ({ NextDispatch: () => null }
 import DashboardPage from "./page";
 
 const render = async () => renderToStaticMarkup(await DashboardPage());
-const NO_ATTENTION = { overdueTasks: 0, dueSoonTasks: 0, reviewsWaiting: 0, handoversWaiting: 0, scopeChangesWaiting: 0, scopeChangeProjectId: null, unreadMessages: 0, unreadProjects: 0 };
+const NO_ATTENTION = { overdueTasks: 0, dueSoonTasks: 0, reviewsWaiting: 0, handoversWaiting: 0, scopeChangesWaiting: 0, scopeChangeProjectId: null, unreadMessages: 0, unreadProjects: 0, handoverList: [] as unknown[], scopeList: [] as unknown[] };
+const plain = (html: string) => html.replace(/<[^>]*>/g, "");
+const step = (id: string, type: string, at = "2026-10-30T09:00:00Z") => ({ id, entity_type: type, entity_id: `e-${id}`, created_at: at });
 const EMPTY_INBOX: FakeResult = { data: { companies: [], budget_approvals: [], final_expense_approvals: [], outstanding_settlement: [], is_finance_anywhere: false, is_executive_anywhere: false }, error: null };
 const task = (id: string, over: Record<string, unknown> = {}) => ({
   id, title: `Task ${id}`, status: "in_progress", due_date: null, blocked_at: null, blocked_reason: null, unblock_owner_id: null, unblock_action: null,
@@ -75,21 +77,24 @@ describe("My work today", () => {
     expect(html.indexOf("Send the invoice")).toBeLessThan(html.indexOf("Rig the stage lights"));
     expect(html.indexOf("Rig the stage lights")).toBeLessThan(html.indexOf("Order the cabling"));
     expect(html).toContain("/projects/work?task=a");
-    // one block per fact: the overdue count is not repeated as a row in "Needs me"
+    // the overdue and due-today tasks are items of the one attention list too (named, with their dates); the headline counts exactly those
+    expect(plain(html)).toContain("Your updates for today: 2 items need your attention.");
+    expect(html).toContain('aria-label="Items that need your attention"');
     expect(html).not.toContain("Project task overdue");
   });
 
   it("a failed read of the tasks is one error line, and the rest of the page still lists", async () => {
     withProjects();
     myWork = "fail";
-    attention = { ok: { ...NO_ATTENTION, reviewsWaiting: 2 } };
-    tables = { ...tables, approvals: { data: [], error: null, count: 3 } };
+    attention = { ok: { ...NO_ATTENTION, handoversWaiting: 1, handoverList: [{ id: "h1", opportunityId: "o1", reference: "ENQ-1", title: "Gala handover", status: "submitted", at: "2026-10-30T09:00:00Z" }] } };
+    tables = { ...tables, approvals: rows([step("a1", "timesheet"), step("a2", "timesheet")]) };
     const html = await render();
     expect(html).toContain("Your tasks could not be loaded");
     expect(html).not.toContain("No open tasks assigned to you");
-    expect(html).toContain("Waiting on your decision");
-    expect(html).toContain("Project tasks waiting for your review");
-    expect(html).toContain("/projects/work?show=review");
+    expect(html).toContain("Gala handover");
+    expect(html).toContain("Project tasks could not be loaded");
+    // the headline counts what did load and names what did not
+    expect(plain(html)).toContain("Your updates for today: 3 items need your attention; 1 part could not be loaded: Project tasks.");
   });
 
   it("someone with no Projects access sees no card and nothing about tasks", async () => {
@@ -107,13 +112,20 @@ describe("My work today", () => {
 describe("Needs me and Waiting on others", () => {
   it("one 'Needs me' list: approvals, budget steps and project reviews together, titled for the person", async () => {
     withProjects();
-    attention = { ok: { ...NO_ATTENTION, reviewsWaiting: 1, handoversWaiting: 1 } };
-    tables = { ...tables, approvals: { data: [], error: null, count: 2 } };
+    attention = { ok: { ...NO_ATTENTION, handoversWaiting: 1, handoverList: [{ id: "h1", opportunityId: "o1", reference: "ENQ-1", title: "Gala handover", status: "pm_assigned", at: "2026-10-30T09:00:00Z" }] } };
+    myWork = { ok: { open: [], reviews: [task("rv", { title: "Floor plan", status: "ready_for_review", assignee_id: "u9" })], today: todayDubai } };
+    tables = { ...tables, approvals: rows([step("a1", "timesheet"), step("a2", "generated_letter")]) };
     const html = await render();
     expect((html.match(/aria-label="Needs me"/g) ?? []).length).toBe(1);
-    expect(html).toContain("Waiting on your decision");
-    expect(html).toContain("Project handover waiting on you");
-    expect(html).toContain("Project task waiting for your review");
+    expect(html).toContain("Timesheet");
+    expect(html).toContain("Gala handover");
+    expect(html).toContain("Floor plan");
+    expect(html).toContain("Task waiting for your review");
+    // four things, one headline, four list entries
+    expect(plain(html)).toContain("Your updates for today: 4 items need your attention.");
+    expect(html.match(/data-attention-key=/g)).toHaveLength(4);
+    expect(html).toContain('href="#attention"');
+    expect(html).toContain('id="attention"');
   });
 
   it("what the person submitted themselves stays under 'Waiting on others', with its age, and is never a decision for them", async () => {
@@ -131,8 +143,8 @@ describe("Needs me and Waiting on others", () => {
     expect(html).toContain("Recovery Leave request you submitted, waiting for a decision");
     expect(html).toContain("Oldest waiting 2 days");
     // not counted as something that needs the person
-    expect(html).toContain("Nothing needs your attention right now.");
-    expect(html).toContain("Nothing is waiting on you");
+    expect(plain(html)).toContain("Nothing needs your attention right now.");
+    expect(html.match(/data-attention-key=/g)).toBeNull();
   });
 
   it("a task the person sent for review waits on the reviewer, not on them", async () => {
@@ -159,11 +171,11 @@ describe("Needs me and Waiting on others", () => {
     tables = { ...tables, approvals: failing(), leave_requests: failing(), reimbursement_claims: failing(), recovery_credit_requests: failing() };
     rpcs = { pbx_inbox: failing() };
     const html = await render();
-    for (const line of ["Approvals could not be loaded", "Project items could not be loaded", "Project budgets could not be loaded", "Your tasks could not be loaded", "Your leave requests could not be loaded", "Your expense claims could not be loaded", "Your Recovery Leave requests could not be loaded"]) {
+    for (const line of ["Approvals could not be loaded", "Project tasks could not be loaded", "Project handovers and scope decisions could not be loaded", "Project budgets could not be loaded", "Your tasks could not be loaded", "Your leave requests could not be loaded", "Your expense claims could not be loaded", "Your Recovery Leave requests could not be loaded"]) {
       expect(html, line).toContain(line);
     }
-    expect(html).not.toContain("Nothing is waiting on you");
     expect(html).not.toContain("Nothing needs your attention right now.");
+    expect(plain(html)).toContain("parts could not be loaded: Approvals, Project tasks, Project handovers and scope decisions, Project budgets");
   });
 
   it("a person with nothing submitted sees no 'Waiting on others' heading", async () => {
@@ -175,7 +187,10 @@ describe("Dispatch and return notes waiting for me (C4)", () => {
   it("lists a note waiting for my acknowledgement under Needs me, linking to the project's Equipment page", async () => {
     rpcs = { ...rpcs, inv_notes_waiting_for_me: rows([{ note_id: "n1", note_no: "ENG-D-00017", kind: "dispatch", project_id: "p9", project_ref: "ENG-P-9", project_name: "Mall activation", waiting_since: new Date(Date.now() - 2 * 86_400_000).toISOString() }]) };
     const html = await render();
-    expect(html).toContain("Dispatch note waiting for you: Mall activation");
+    expect(html).toContain("ENG-D-00017");
+    expect(html).toContain("Dispatch note waiting for you");
+    expect(html).toContain("ENG-P-9 · Mall activation");
+    expect(plain(html)).toContain("1 item needs your attention");
     expect(html).toContain("/projects/p9/equipment?note=n1#notes");
     expect(html).not.toContain("Dispatch and return notes could not be loaded");
   });

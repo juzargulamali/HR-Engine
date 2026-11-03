@@ -756,7 +756,8 @@ function embeddedBodies(text) {
 }
 
 const mode = process.argv[2] || "write";
-const migFiles = readdirSync(MIGDIR).filter((f) => f >= "20261216").sort();
+// The batch covers migrations 1 to 14 (20261216 to 20261217). Later migrations (#15, 20261218000100_inv_cross_company_receiving.sql) are installed on their own with their own pack and are not part of it.
+const migFiles = readdirSync(MIGDIR).filter((f) => f >= "20261216" && f < "20261218").sort();
 const problems = [];
 if (migFiles.length !== 14 || migFiles.join() !== MIGS.map((m) => m.file).join()) problems.push(`the launch migrations in supabase/migrations (${migFiles.length}) are not exactly the 14 this script knows: ${migFiles.join(", ")}`);
 if (!existsSync(path.join(MIGDIR, BASE_FILE))) problems.push(`missing base migration ${BASE_FILE}`);

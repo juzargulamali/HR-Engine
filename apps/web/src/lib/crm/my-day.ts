@@ -32,17 +32,26 @@ export async function loadApprovalsWaiting(ctx: CrmContext): Promise<ApprovalsWa
   if (companyIds.length === 0) return { status: "none" };
   try {
     const supabase = await createClient();
-    const { data, error } = await supabase.from("crm_approvals").select("opportunity_id, requested_at").eq("state", "pending").in("company_id", companyIds).order("requested_at");
+    const { data, error } = await supabase.from("crm_approvals").select("id, opportunity_id, requested_at").eq("state", "pending").in("company_id", companyIds).order("requested_at");
     if (error) return { status: "error" };
     const rows = data ?? [];
-    return rows.length === 0 ? { status: "ok", count: 0, oldestOpportunityId: "" } : { status: "ok", count: rows.length, oldestOpportunityId: rows[0]!.opportunity_id };
+    if (rows.length === 0) return { status: "ok", requests: [] };
+    // Which enquiry each request is about: a best-effort read (the request still lists, unnamed, when it fails).
+    const named = new Map<string, { reference: string; title: string }>();
+    const { data: opps } = await supabase.from("crm_opportunities").select("id, reference, title").in("id", [...new Set(rows.map((r) => r.opportunity_id))]);
+    for (const o of opps ?? []) named.set(o.id, { reference: o.reference, title: o.title });
+    return {
+      status: "ok",
+      requests: rows.map((r) => ({ id: r.id, opportunityId: r.opportunity_id, requestedAt: r.requested_at, reference: named.get(r.opportunity_id)?.reference ?? null, title: named.get(r.opportunity_id)?.title ?? null })),
+    };
   } catch {
     return { status: "error" };
   }
 }
 
 /** Commercial approval requests waiting for a Sales founder's decision. "none": not a founder anywhere or no company needs approvals; "error": the read failed. */
-export type ApprovalsWaiting = { status: "none" } | { status: "error" } | { status: "ok"; count: number; oldestOpportunityId: string };
+export type CommercialApprovalRequest = { id: string; opportunityId: string; requestedAt: string; reference: string | null; title: string | null };
+export type ApprovalsWaiting = { status: "none" } | { status: "error" } | { status: "ok"; /** One entry per request, oldest first. */ requests: CommercialApprovalRequest[] };
 
 export type SalesTodayResult = { status: "none" } | { status: "error" } | { status: "ok"; data: SalesToday };
 

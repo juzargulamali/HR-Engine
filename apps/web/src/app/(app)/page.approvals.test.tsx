@@ -36,7 +36,8 @@ vi.mock("@/components/my-day/next-dispatch", () => ({ NextDispatch: () => null }
 import DashboardPage from "./page";
 
 const render = async () => renderToStaticMarkup(await DashboardPage());
-const PENDING_NAMED = { data: [], error: null, count: 2 };
+const PENDING_NAMED = rows([{ id: "a1", entity_type: "timesheet", entity_id: "t1", created_at: "2026-10-30T09:00:00Z" }, { id: "a2", entity_type: "generated_letter", entity_id: "l1", created_at: "2026-10-31T09:00:00Z" }]);
+const plain = (html: string) => html.replace(/<[^>]*>/g, "");
 const EMPTY_INBOX: FakeResult = { data: { companies: [], budget_approvals: [], final_expense_approvals: [], outstanding_settlement: [], is_finance_anywhere: false, is_executive_anywhere: false }, error: null };
 const inboxWith = (over: Record<string, unknown>): FakeResult => ({ data: { ...(EMPTY_INBOX.data as object), ...over }, error: null });
 const budgetRow = (over: Record<string, unknown>) => ({ budget_id: "b1", project_id: "p1", reference: "P-1", name: "Expo", company_id: "c1", version_id: "v1", i_can_decide: true, on_hold: false, ...over });
@@ -56,7 +57,8 @@ describe("My Day approvals", () => {
   it("healthy: the count, the primary button and the tile", async () => {
     const html = await render();
     expect(html).toContain("Review approvals (2)");
-    expect(html).toContain("Your updates for today: 2 items need your attention.");
+    expect(plain(html)).toContain("Your updates for today: 2 items need your attention.");
+    expect(html).toContain("Timesheet");
   });
 
   it("a failed approvals read: tile '—', error row, honest greeting, no fall-back to 'Request leave'", async () => {
@@ -66,14 +68,14 @@ describe("My Day approvals", () => {
     expect(html).toContain("Could not be loaded");
     expect(html).toContain("Review approvals");
     expect(html).not.toContain("Nothing needs your attention right now.");
-    expect(html).not.toContain("Nothing is waiting on you");
+    expect(plain(html)).toContain("could not be loaded: Approvals");
     expect(html).not.toContain("Request leave");
   });
 
   it("a genuine zero still says nothing is waiting", async () => {
     tables = { ...tables, approvals: { data: [], error: null, count: 0 } };
     const html = await render();
-    expect(html).toContain("Nothing needs your attention right now.");
+    expect(plain(html)).toContain("Nothing needs your attention right now.");
     expect(html).toContain("Request leave");
   });
 
@@ -81,7 +83,7 @@ describe("My Day approvals", () => {
     grants = [{ role: "hr_admin", companyId: "c1", countryCode: null }];
     tables = { ...tables, approvals: () => ({ data: [], error: null, count: 0 }) };
     // the queue steps this person decides now come from the database's own list (recovery_decider_inbox)
-    rpcs = { ...rpcs, recovery_decider_inbox: rows([{ approval_id: "a1", approver_id: null, queue_roles: ["hr_admin"], id: "r1", employee_id: "e-other", company_id: "c1" }]) };
+    rpcs = { ...rpcs, recovery_decider_inbox: rows([{ approval_id: "a1", approver_id: null, queue_roles: ["hr_admin"], id: "r1", employee_id: "e-other", company_id: "c1", approval_created_at: "2026-10-30T09:00:00Z" }]) };
     const html = await render();
     expect(html).toContain("Review approvals (1)");
     expect(html).not.toContain("Nothing needs your attention right now.");
@@ -90,26 +92,28 @@ describe("My Day approvals", () => {
   it("a failed Projects read shows one error row instead of dropping the card", async () => {
     projectsCtx = { installed: true, grants: [{ companyId: "c1", capabilities: ["view"] }], loadFailed: false };
     const html = await render();
-    expect(html).toContain("Project items could not be loaded");
+    expect(html).toContain("Project tasks could not be loaded");
   });
 
   it("a failed Projects access lookup shows the error row too (the card does not vanish)", async () => {
     projectsCtx = { installed: true, grants: [], loadFailed: true };
     const html = await render();
-    expect(html).toContain("Project items could not be loaded");
+    expect(html).toContain("Project tasks could not be loaded");
+    expect(html).toContain("Project handovers and scope decisions could not be loaded");
   });
 
   it("a Finance person with no Projects grant sees the budgets waiting for them, and the count joins the decisions", async () => {
     rpcs = { pbx_inbox: inboxWith({ budget_approvals: [budgetRow({}), budgetRow({ version_id: "v2" }), budgetRow({ version_id: "v3", i_can_decide: false })] }) };
     tables = { ...tables, pbx_budget_versions: rows([]) };
     const html = await render();
-    expect(html).toContain("Project budgets waiting for you");
+    expect(html).toContain("Project budget waiting for your decision");
+    expect(html).toContain("P-1 · Expo");
     expect(html).toContain("/finance/project-budgets?filter=budget");
     // the decisions count is stated once, by the "Needs me" card, not repeated as a tile
     expect(html).not.toContain("Decisions waiting");
     expect(html).toContain("Needs me");
     expect(html).toContain("Review approvals (2)");   // the approvals count is unchanged: budgets are their own row
-    expect(html).toContain("Your updates for today: 4 items need your attention.");
+    expect(plain(html)).toContain("Your updates for today: 4 items need your attention.");
   });
 
   it("items the person submitted themselves stay visible under 'Waiting on others', not as a decision", async () => {
@@ -118,8 +122,8 @@ describe("My Day approvals", () => {
     const html = await render();
     expect(html).toContain("Waiting on others");
     expect(html).toContain("Project budgets you submitted, waiting on others");
-    expect(html).not.toContain("Project budgets waiting for you");
-    expect(html).toContain("Nothing needs your attention right now.");
+    expect(html).not.toContain("Project budget waiting for your decision");
+    expect(plain(html)).toContain("Nothing needs your attention right now.");
   });
 
   describe("Project Manager's own project budgets (no budget grant)", () => {
@@ -133,7 +137,7 @@ describe("My Day approvals", () => {
       expect(html).toContain("Project budget returned to you");
       expect(html).toContain("/projects/p1/budget");
       expect(html).toContain("Project budgets you submitted, waiting on others");
-      expect(html).not.toContain("Project budgets waiting for you");
+      expect(html).not.toContain("Project budget waiting for your decision");
     });
     it("a recent approval is shown quietly", async () => {
       tables = pmTables([{ id: "v1", budget_id: "b1", seq: 1, status: "approved", decided_at: new Date().toISOString() }]);
@@ -184,23 +188,25 @@ describe("My Day approvals", () => {
     expect(html).toContain("Handover: the PM asked a question");
     expect(html).toContain("Won, handover not submitted");
     expect(html).toContain("/sales/opportunities/a/handover");
-    expect(html).toContain("Your updates for today: 3 items need your attention.");
+    expect(plain(html)).toContain("Your updates for today: 3 items need your attention.");
   });
 
   it("a failed handover read is an error row, 'Could not check handovers', not a missing row", async () => {
     salesToday = salesOk({ status: "error" });
     tables = { ...tables, approvals: { data: [], error: null, count: 0 } };
     const html = await render();
-    expect(html).toContain("Could not check handovers");
+    expect(html).toContain("Sales handovers could not be loaded");
     expect(html).not.toContain("Nothing needs your attention right now.");
   });
 
   it("a Sales founder sees the commercial approvals waiting for them; a failed read is an error row", async () => {
     tables = { ...tables, approvals: { data: [], error: null, count: 0 } };
     salesToday = salesOk({ status: "ok", rows: [] });
-    (salesToday.data as Record<string, unknown>).approvals = { status: "ok", count: 2, oldestOpportunityId: "o1" };
+    (salesToday.data as Record<string, unknown>).approvals = { status: "ok", requests: [{ id: "c1", opportunityId: "o1", requestedAt: "2026-10-30T09:00:00Z", reference: "ENQ-1", title: "Pavilion" }, { id: "c2", opportunityId: "o2", requestedAt: "2026-10-31T09:00:00Z", reference: null, title: null }] };
     let html = await render();
-    expect(html).toContain("Commercial approvals waiting for your decision");
+    expect(html).toContain("Commercial approval waiting for your decision");
+    expect(html).toContain("Pavilion");
+    expect(html.match(/data-attention-key=/g)).toHaveLength(2);
     expect(html).toContain("/sales/opportunities/o1?tab=commercial");
     (salesToday.data as Record<string, unknown>).approvals = { status: "error" };
     html = await render();

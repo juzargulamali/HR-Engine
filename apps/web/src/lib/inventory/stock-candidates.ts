@@ -40,12 +40,14 @@ export interface Candidate {
   projectName: string | null;
   /** "On the shelf at Dubai, bin A1", "With an employee"… */
   where: string;
+  /** "Owned by Enginious UAE": only set when the owner is not the company that runs the place the unit is in (moving never changes the owner). */
+  ownedBy: string | null;
 }
 
 export const candidateBase = (over: Partial<Candidate> & Pick<Candidate, "key" | "type" | "itemId" | "itemName">): Candidate => ({
   unitId: null, code: null, serial: null, detail: null, tracking: "individual", uom: "each", scale: 0, condition: "good", lifecycle: null, custody: null, qty: null,
   binId: null, binLabel: null, locationId: null, rentalId: null, repairReference: null, inKit: false, employeeId: null, employeeName: null, projectId: null,
-  projectName: null, where: "", ...over,
+  projectName: null, where: "", ownedBy: null, ...over,
 });
 
 export function whereText(c: Pick<Candidate, "custody" | "lifecycle" | "binLabel" | "employeeName" | "projectName" | "repairReference" | "inKit">, locationName?: string | null): string {
@@ -133,10 +135,16 @@ export function candidateMatches(c: Candidate, q: string): boolean {
 // What the movement forms are given (plain data, safe to pass from the server to the browser)
 // ---------------------------------------------------------------------------------------------------------------
 
-export interface FormLocation { id: string; companyId: string; companyName: string; name: string; timezone: string; bins: { id: string; code: string; label: string | null }[] }
+export interface FormLocation {
+  id: string; companyId: string; companyName: string; name: string; timezone: string; bins: { id: string; code: string; label: string | null }[];
+  /** Only on a Send destination run by ANOTHER company: the owning company whose sharing authorisation makes it a valid destination (offered only from that company's warehouse). */
+  sharedFrom?: string;
+}
 export interface FormProject { id: string; companyId: string; reference: string; name: string; status: string }
 export interface FormRequest { id: string; companyId: string; code: string; kind: "project" | "employee"; projectId: string | null; employeeId: string | null; title: string | null; status: string; expectedReturnAt: string | null }
-export interface FormTransfer { id: string; code: string; companyId: string; fromLocationId: string; fromName: string; toLocationId: string; toName: string; expectedAt: string | null; carrier: string | null; reference: string | null; dispatchedAt: string; held: Candidate[] }
+export interface FormTransfer { id: string; code: string; companyId: string; fromLocationId: string; fromName: string; toLocationId: string; toName: string; expectedAt: string | null; carrier: string | null; reference: string | null; dispatchedAt: string; held: Candidate[];
+  /** Set by the database for a transfer sent by another company whose sharing authorisation has since been revoked: it can still be received. */
+  sharingRevoked?: boolean }
 export interface FormRental { id: string; companyId: string; supplier: string; reference: string; deadline: string }
 
 export interface FormContext {

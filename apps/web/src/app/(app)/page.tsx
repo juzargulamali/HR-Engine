@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlarmClock, CalendarClock, CalendarDays, ClipboardCheck, FolderKanban, Hourglass, Inbox, Layers, PackageCheck, ReceiptText, ShoppingBag, UserPlus, Users } from "lucide-react";
+import { CalendarDays, ClipboardCheck, FolderKanban, Hourglass, Layers, PackageCheck, ReceiptText, ShoppingBag, UserPlus, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
   canCreateEmployee,
@@ -14,7 +14,7 @@ import {
   DASHBOARD_TIMEZONE,
 } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
-import { loadMyPendingApprovals } from "@/lib/approvals/pending";
+import { loadMyPendingApprovalItems } from "@/lib/approvals/pending";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentWeather } from "@/lib/weather";
 import { Alert } from "@/components/ui/alert";
@@ -22,6 +22,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { OsHero } from "@/components/os/hero";
 import { OsScope } from "@/components/os/scope";
 import { OsStatCard } from "@/components/os/stat-card";
+import { AttentionLine } from "@/components/my-day/attention-line";
 import { DecisionsCard } from "@/components/my-day/decisions-card";
 import { DeliveryWeekCard } from "@/components/my-day/delivery-week";
 import { HrAttention, HrStatCards, TeamDistribution } from "@/components/my-day/hr-section";
@@ -30,7 +31,8 @@ import { NextDispatch } from "@/components/my-day/next-dispatch";
 import { PeopleToday } from "@/components/my-day/people-today";
 import { ProjectHealth } from "@/components/my-day/project-health";
 import { SalesPipeline } from "@/components/my-day/sales-pipeline";
-import { splitActions } from "@/lib/my-day/groups";
+import { approvalCandidates, budgetCandidates, buildAttention, commercialApprovalCandidates, failed, handoverCandidates, hrCandidates, noteCandidates, ok, projectDecisionCandidates, salesCandidates, taskCandidates, type AttentionSourceResult } from "@/lib/my-day/attention";
+import { dateText } from "@/lib/projects/format";
 import { loadEquipment, loadLiveClock } from "@/lib/my-day/loaders";
 import { loadProjectsDay } from "@/lib/my-day/projects-day";
 import { loadMyWaitingRequests, waitingText } from "@/lib/my-day/waiting";
@@ -41,7 +43,7 @@ import { BirthdaysSection } from "./birthdays-section";
 import { getCompanySnapshot } from "./dashboard-data";
 import { CompanyComparisonTable } from "./company-comparison-table";
 import { attendanceSentence, CALENDAR_NOTE } from "./attendance-summary";
-import { attentionSentence, budgetWaitingDetail, buildActionItems, commercialApprovalItems, handoverItems, projectNoteItems, waitingOnOthersItems, type ActionItem } from "./action-centre";
+import { budgetWaitingDetail, handoverNotice, waitingOnOthersItems, type ActionItem } from "./action-centre";
 import { AttendanceClockCard } from "./attendance-clock-card";
 import { AttendanceCompletionBar } from "./attendance-completion-bar";
 import { UpcomingSection } from "./upcoming-section";
@@ -106,7 +108,7 @@ export default async function DashboardPage() {
   // Finance approver needs it too), so the approvals count is read for anyone; the company-wide sections below stay gated to canViewHrAlerts.
   // The approvals count covers the steps routed to this person by name AND the Recovery Leave queue steps they may decide (the same rule as the Approvals page).
   const [approvalsRead, salesRead, projectsRead, equipmentRead, budgetRead, waitingRead, notesRead] = await Promise.allSettled([
-    loadMyPendingApprovals(supabase, session),
+    loadMyPendingApprovalItems(supabase, session),
     loadSalesToday(),
     loadProjectsDay(today),
     loadEquipment(),
@@ -125,8 +127,7 @@ export default async function DashboardPage() {
   failedSource("my submitted requests", waitingRead);
   failedSource("dispatch and return notes", notesRead);
   // A failed read is "error", never 0: the tile shows "—" and the greeting says the approvals could not be loaded.
-  const myPendingApprovals: number | "error" = approvalsRead.status === "fulfilled" ? approvalsRead.value.count : "error";
-  const myPendingOldest = approvalsRead.status === "fulfilled" ? approvalsRead.value.oldest : null;
+  const myPendingApprovals: number | "error" = approvalsRead.status === "fulfilled" ? approvalsRead.value.length : "error";
 
   let isMyBirthdayToday = false;
   // Also drives the employee-only dashboard header's own timezone/location
@@ -296,19 +297,6 @@ export default async function DashboardPage() {
 
   // Sales follow-ups for people with a Sales grant (same loaders and rules as the Sales overview; "none" for everyone else).
   const salesToday: Awaited<ReturnType<typeof loadSalesToday>> = salesRead.status === "fulfilled" ? salesRead.value : { status: "error" };
-  const salesActionItems: ActionItem[] =
-    salesToday.status === "ok"
-      ? [
-          { key: "sales-overdue", icon: AlarmClock, label: "Sales follow-ups overdue", count: salesToday.data.overdue, href: "/sales/follow-ups" },
-          { key: "sales-today", icon: CalendarClock, label: "Sales follow-ups due today", count: salesToday.data.dueToday, href: "/sales/follow-ups?view=today" },
-          { key: "sales-response", icon: Inbox, label: "Enquiries awaiting a first response", count: salesToday.data.noFirstResponse, href: "/sales/opportunities" },
-        ]
-      : [];
-
-  // The Sales-to-Projects handover family for the owner and preparer (and Sales founders): from the Sales side only, no Projects access needed.
-  const handoverActionItems = salesToday.status === "ok" ? handoverItems(salesToday.data.handover) : [];
-  // Commercial approval requests waiting for a Sales founder (the only people who decide them). A failed read is an error row, never 0.
-  const approvalActionItems = salesToday.status === "ok" ? commercialApprovalItems(salesToday.data.approvals) : [];
 
   // Projects & Tasks for people with Projects access (null for everyone else, and when it is not installed). Real counts only; the person's own
   // tasks by title ("My work today") and the ones they sent for review come from the same settled read.
@@ -321,39 +309,19 @@ export default async function DashboardPage() {
   const tasksInReviewCount = projectsRead.status === "rejected" ? "error" : (projectsDay?.inReview ?? null);
   // Equipment requests for people with Inventory access (null otherwise, and when Inventory is not installed).
   const equipment = equipmentRead.status === "fulfilled" ? equipmentRead.value : "error";
-  const projectActionItems: ActionItem[] = Array.isArray(projectRows)
-    ? projectRows.filter((r) => r.needsYou).map((r) => ({ key: r.key, icon: FolderKanban, label: r.label, count: r.count, href: r.href }))
-    : projectRows === "error"
-      ? [{ key: "proj-error", icon: FolderKanban, label: "Project items could not be loaded", count: 0, href: "/projects/work", error: true }]
-      : [];
   const quietProjectItems: ActionItem[] = Array.isArray(projectRows)
     ? projectRows.filter((r) => !r.needsYou).map((r) => ({ key: r.key, icon: FolderKanban, label: r.label, count: r.count, href: r.href }))
     : [];
 
   // Project budgets and final expenses waiting for this person's decision, from the Finance inbox (pbx_inbox: scoped by the database, no Projects access needed).
   // What they submitted themselves waits under "Waiting on others", never as a decision for them. A failed read is an error row, never 0.
-  let budgetActionItems: ActionItem[] = [];
   let budgetWaitingItems: ActionItem[] = [];
   let budgetQuietItems: ActionItem[] = [];
-  const budgetErrorRow: ActionItem = { key: "budget-decisions", icon: ReceiptText, label: "Project budgets could not be loaded", count: 0, href: "/finance/project-budgets", error: true };
-  if (budgetRead.status === "rejected") {
-    budgetActionItems = [budgetErrorRow];
-  } else if (budgetRead.value.status === "error") {
-    budgetActionItems = [budgetErrorRow];
-  } else if (budgetRead.value.status === "ok") {
-    const { waitingForMe, waitingOnOthers, waitingOnOthersWith, waitingOnOthersHref, returned, decidedRecently, pmReadFailed } = budgetRead.value.day;
-    budgetActionItems = [
-      { key: "budget-decisions", icon: ReceiptText, label: "Project budgets waiting for you", count: waitingForMe.count, href: waitingForMe.href, detail: waitingText(waitingForMe.oldest ?? null, now) },
-      // A Project Manager's own budgets sent back for changes: theirs to act on. Never a decision for someone else.
-      { key: "budget-returned", icon: ReceiptText, label: returned.count === 1 ? "Project budget returned to you" : "Project budgets returned to you", count: returned.count, href: returned.href },
-      ...(pmReadFailed ? [{ key: "budget-pm-error", icon: ReceiptText, label: "The budgets of your projects could not be loaded", count: 0, href: "/projects", error: true }] : []),
-    ];
+  if (budgetRead.status === "fulfilled" && budgetRead.value.status === "ok") {
+    const { waitingOnOthers, waitingOnOthersWith, waitingOnOthersHref, decidedRecently } = budgetRead.value.day;
     budgetWaitingItems = [{ key: "budget-waiting", icon: ReceiptText, label: "Project budgets you submitted, waiting on others", count: waitingOnOthers, href: waitingOnOthersHref, detail: budgetWaitingDetail(waitingOnOthersWith, now) }];
     budgetQuietItems = [{ key: "budget-decided", icon: ReceiptText, label: "Budget decisions on your projects in the last 14 days", count: decidedRecently.count, href: decidedRecently.href }];
   }
-
-  // Dispatch notes and return checklists waiting for this person's acknowledgement (current PM, acting PM, Projects founder). Not a gate: nothing waits for it. A failed read is an error row.
-  const noteActionItems = projectNoteItems(notesRead.status === "fulfilled" ? notesRead.value : { status: "error" }, now);
 
   // "Waiting on others": what this person submitted themselves (budgets, leave, claims, Recovery Leave, tasks sent for review). Never a decision for them.
   const waitingItems: ActionItem[] = [
@@ -362,18 +330,35 @@ export default async function DashboardPage() {
     ...(tasksInReviewCount === "error" ? [{ key: "waiting-review", icon: Hourglass, label: "Your tasks sent for review could not be loaded", count: 0, href: "/projects/work", error: true }] : []),
   ].filter((i) => i.count > 0 || i.error);
 
-  // ONE list of what needs attention, from the same authorised data the card shows; the sentence under the greeting is derived
-  // from it, so the two can never disagree (Sales follow-ups are in the list, so they count in the sentence too).
-  const actionItems = buildActionItems({
-    myPendingApprovals,
-    myPendingOldest,
-    now,
-    ...(showHrView ? { contractsEndingCount, probationDueCount, docsExpiringCount, identityExpiringCount } : {}),
-    extraItems: [...salesActionItems, ...handoverActionItems, ...approvalActionItems, ...projectActionItems, ...budgetActionItems, ...noteActionItems],
-  });
-
-  const summarySentence = hrSectionError ? "Workforce data couldn't be loaded right now — the numbers below may be incomplete." : attentionSentence(actionItems);
-  const groups = splitActions(actionItems);
+  // ONE list of what needs attention, built once from the authorised data of every source. The headline under the greeting and the "Needs me" list are both
+  // read from this same value (the number is the list's length), so they cannot disagree. A source that failed is named in both and never read as "nothing".
+  const sources: AttentionSourceResult[] = [
+    approvalsRead.status === "fulfilled" ? ok("approvals", approvalCandidates(approvalsRead.value, today, now, dateText)) : failed("approvals"),
+    ...(projectsRead.status === "rejected"
+      ? [failed("project-tasks"), failed("project-decisions")]
+      : [
+          ...(!projectsDay || projectsDay.tasks === null ? [] : [projectsDay.tasks === "error" ? failed("project-tasks") : ok("project-tasks", taskCandidates(projectsDay.tasks, dateText))]),
+          ...(!projectsDay || projectsDay.decisions === null ? [] : [projectsDay.decisions === "error" ? failed("project-decisions") : ok("project-decisions", projectDecisionCandidates(projectsDay.decisions, now))]),
+        ]),
+    ...(salesToday.status === "error"
+      ? [failed("sales")]
+      : salesToday.status === "ok"
+        ? [
+            ok("sales", salesCandidates(salesToday.data, dateText)),
+            ...(salesToday.data.handover.status === "ok" ? [ok("sales-handover", handoverCandidates(salesToday.data.handover, now))] : salesToday.data.handover.status === "error" ? [failed("sales-handover")] : []),
+            ...(salesToday.data.approvals.status === "ok" ? [ok("sales-approvals", commercialApprovalCandidates(salesToday.data.approvals, now))] : salesToday.data.approvals.status === "error" ? [failed("sales-approvals")] : []),
+          ]
+        : []),
+    ...(budgetRead.status === "rejected" || budgetRead.value.status === "error"
+      ? [failed("budgets")]
+      : budgetRead.value.status === "ok"
+        ? [ok("budgets", budgetCandidates(budgetRead.value.day, now)), ...(budgetRead.value.day.pmReadFailed ? [failed("budget-projects")] : [])]
+        : []),
+    ...(notesRead.status === "rejected" || notesRead.value.status === "error" ? [failed("notes")] : notesRead.value.status === "ok" ? [ok("notes", noteCandidates(notesRead.value, now))] : []),
+    ...(showHrView ? [hrSectionError ? failed("hr") : ok("hr", hrCandidates({ contracts: contractsEndingCount, probation: probationDueCount, docs: docsExpiringCount, identity: identityExpiringCount }))] : []),
+  ];
+  const attention = buildAttention(sources);
+  const hrAlertRows: ActionItem[] = attention.items.filter((i) => i.sources.includes("hr")).map((i) => ({ key: i.key, icon: i.icon, label: i.title, count: i.records ?? 0, href: i.href }));
 
   // Cross-company CEO/HR view -> Dubai; an employee-only view -> that
   // employee's own company's country (myCountryCode, resolved above
@@ -407,8 +392,8 @@ export default async function DashboardPage() {
   }
   const hasLeft = hasProjects || salesToday.status !== "none";
   const statCols = ({ 1: "xl:grid-cols-1", 2: "xl:grid-cols-2", 3: "xl:grid-cols-3", 4: "xl:grid-cols-4" } as Record<number, string>)[Math.min(4, stats.length)];
-  // "Needs me" states the decisions count, so the figure is not repeated as a tile. "Overdue project tasks" is stated by "My work today", so it is not repeated in "Needs me" either.
-  const needsMeOther = [...groups.other, ...quietProjectItems, ...budgetQuietItems.filter((i) => i.count > 0)].filter((i) => !(i.key === "proj-overdue" && myWork !== null && myWork !== "error"));
+  // What is open but not an action (and so not counted in the headline): unread discussion, recent budget decisions, a handover the PM accepted.
+  const alsoOpen = [...quietProjectItems, ...budgetQuietItems.filter((i) => i.count > 0), ...(salesToday.status === "ok" ? handoverNotice(salesToday.data.handover) : [])];
 
   return (
     <OsScope className="space-y-4">
@@ -420,7 +405,7 @@ export default async function DashboardPage() {
 
       <OsHero
         title={`Good ${greetingPeriod(getBusinessHour(dashboardTimeZone, now))}${firstName ? `, ${firstName}` : ""}`}
-        sub={summarySentence}
+        sub={<AttentionLine headline={attention.headline} />}
         meta={
           <DashboardHeader timeZone={dashboardTimeZone} locationLabel={headerLocationLabel} initialDateLabel={headerInitialDateLabel} initialTimeLabel={headerInitialTimeLabel} weather={headerWeather} />
         }
@@ -462,7 +447,7 @@ export default async function DashboardPage() {
           ) : null}
         </div>
         <div className={cn("contents xl:min-w-0", hasLeft ? "xl:flex xl:flex-col xl:gap-4" : "xl:grid xl:grid-cols-3 xl:items-start xl:gap-4")}>
-          <div className="order-1 min-w-0 xl:order-none"><DecisionsCard decisions={groups.decision} other={needsMeOther} waiting={waitingItems} /></div>
+          <div className="order-1 min-w-0 xl:order-none"><DecisionsCard attention={attention} other={alsoOpen} waiting={waitingItems} /></div>
           {hasProjects && myWork !== null ? <div className="order-2 min-w-0 xl:order-none"><MyWorkToday work={myWork} /></div> : null}
           {session.employeeId ? <div className="order-3 min-w-0 xl:order-none"><AttendanceClockCard employeeId={session.employeeId} /></div> : null}
           {showHrView && live !== null ? <div className="order-4 min-w-0 xl:order-none"><PeopleToday live={live} /></div> : null}
@@ -499,7 +484,7 @@ export default async function DashboardPage() {
             </div>
             <div className="min-w-0 space-y-4">
               <TeamDistribution byCountry={snapshots.filter((snap) => !snap.error).map((snap) => ({ countryCode: snap.countryCode, employees: snap.totalEmployees }))} />
-              <HrAttention items={groups.hr} />
+              <HrAttention items={hrAlertRows} />
             </div>
           </div>
         </section>

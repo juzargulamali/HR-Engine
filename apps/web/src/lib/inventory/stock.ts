@@ -9,6 +9,10 @@ import {
 import { candidateBase, candidateMatches, cleanSearch, whereText, type Candidate, type FormContext, type FormLocation, type FormRental, type FormRequest, type FormTransfer, type ScanResolution } from "./stock-candidates";
 export type { ScanResolution, FormContext, FormLocation, FormProject, FormRental, FormRequest, FormTransfer } from "./stock-candidates";
 import { sourceFor, type AdjustAction, type MovementKind } from "./stock-movements";
+import { FOREIGN_PLACE, itemOwnedByNote, ownedByNote, placeOf, transitRoute, type PlaceCtx } from "./places";
+import { CUSTODY_WORDS } from "./words";
+import { loadXDestinations, loadXIncoming, loadXUnits } from "./xshare-data";
+import { formDestination, unitCandidate as xUnitCandidate } from "./xshare";
 import type {
   InvBalanceRow, InvBinRow, InvCategoryRow, InvCustody, InvItemRow, InvKitContentRow, InvLocationRow, InvMovementKind, InvMovementRow, InvRentalRow, InvTracking, InvTransferRow, InvUnitRow,
 } from "@/types/inventory";
@@ -197,6 +201,8 @@ export interface UnitView extends InvUnitRow {
   cost: { amount: number; currency: string } | null;
   /** Out (with an employee, on a project, in transit, at the repairer) and past its expected return. */
   overdue: boolean;
+  /** "Owned by Enginious UAE", only when the company that owns it is not the company that runs the place it is in. */
+  ownedByNote: string | null;
 }
 export interface BalanceView extends InvBalanceRow {
   locationName: string | null;
@@ -231,6 +237,8 @@ export interface ItemDetail {
   kits: Map<string, { required: number; presentRequired: number; items: number; present: number }>;
   movements: MovementBrief[];
   locations: InvLocationRow[];
+  /** `locations` plus every location this person can read, for naming where a unit or balance is (it can be in another company's warehouse). */
+  placeLocations: InvLocationRow[];
   bins: InvBinRow[];
   summaryAvailability: { locationId: string; name: string; usableNow: number }[];
   names: Names;
@@ -245,6 +253,25 @@ async function companyNameOf(db: Db, ctx: InventoryContext, companyId: string): 
   if (known !== "Unknown") return known;
   const { data } = await db.from("companies").select("legal_name").eq("id", companyId).maybeSingle();
   return data?.legal_name ?? "Unknown company";
+}
+
+/** What the place helpers need from the signed-in person's context. */
+export const placeCtx = (ctx: InventoryContext): PlaceCtx => ({ locations: ctx.locations, companyName: ctx.companyName, companyCount: ctx.companies.length });
+
+/** The locations of the unit's own company plus every location this person can read (a unit can sit in another company's warehouse). */
+const withReadable = (own: readonly InvLocationRow[], ctx: InventoryContext): InvLocationRow[] => {
+  const seen = new Set(own.map((l) => l.id));
+  return [...own, ...ctx.locations.filter((l) => !seen.has(l.id))];
+};
+
+/** "Dubai warehouse to Riyadh warehouse (UAE-T-00001)" for each transfer id the person can read; a transfer they cannot read simply has no entry. */
+async function transitRoutes(db: Db, pc: PlaceCtx, ownerCompanyId: string, transferIds: readonly string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const ids = [...new Set(transferIds)].slice(0, 200);
+  if (ids.length === 0) return out;
+  const { data } = await db.from("inv_transfers").select("id, code, from_location_id, to_location_id").in("id", ids);
+  for (const t of data ?? []) out.set(t.id, `${transitRoute(placeOf(pc, t.from_location_id, ownerCompanyId).label, placeOf(pc, t.to_location_id, ownerCompanyId).label)} (${t.code})`);
+  return out;
 }
 
 export async function loadItemDetail(ctx: InventoryContext, itemId: string): Promise<ItemDetail | null> {
@@ -264,7 +291,8 @@ export async function loadItemDetail(ctx: InventoryContext, itemId: string): Pro
   fail("locations", locs.error);
   const categories = (cat.data ?? []) as InvCategoryRow[];
   const locations = (locs.data ?? []) as InvLocationRow[];
-  const locName = new Map(locations.map((l) => [l.id, l.name]));
+  const placeLocations = withReadable(locations, ctx);
+  const locName = new Map(placeLocations.map((l) => [l.id, l.name]));
   const binLabel = new Map((bins.data ?? []).map((b) => [b.id, b.label?.trim() ? `${b.code} (${b.label})` : b.code]));
 
   let units: InvUnitRow[] = [];
@@ -311,13 +339,18 @@ export async function loadItemDetail(ctx: InventoryContext, itemId: string): Pro
     companyIds: [item.company_id],
   });
   const costByUnit = new Map(costRows.filter((c) => c.unit_id && c.unit_cost !== null && c.currency).map((c) => [c.unit_id!, { amount: num(c.unit_cost), currency: c.currency! }]));
+  const pc = placeCtx(ctx);
+  const routes = await transitRoutes(db, pc, item.company_id, units.filter((u) => u.custody_kind === "transit" && u.transfer_id).map((u) => u.transfer_id!));
   const unitViews: UnitView[] = units.map((u) => {
     const employeeName = u.employee_id ? names.employee(u.employee_id) : null;
     const projectName = u.project_id ? names.project(u.project_id) : null;
     const bin = u.bin_id ? (binLabel.get(u.bin_id) ?? null) : null;
+    const place = placeOf(pc, u.location_id, u.company_id);
     return {
       ...u, employeeName, projectName, binLabel: bin, locationName: u.location_id ? (locName.get(u.location_id) ?? null) : null, cost: costByUnit.get(u.id) ?? null, overdue: isOverdue(u),
-      where: whereText({ custody: u.custody_kind, lifecycle: u.lifecycle, binLabel: bin, employeeName, projectName, repairReference: u.repair_reference, inKit: !!u.in_kit_id }, u.location_id ? locName.get(u.location_id) : null),
+      where: u.custody_kind === "transit" && u.lifecycle === "active" && u.transfer_id && routes.has(u.transfer_id) ? `${CUSTODY_WORDS.transit}: ${routes.get(u.transfer_id)}`
+        : whereText({ custody: u.custody_kind, lifecycle: u.lifecycle, binLabel: bin, employeeName, projectName, repairReference: u.repair_reference, inKit: !!u.in_kit_id }, place.label),
+      ownedByNote: ownedByNote(pc, u.company_id, place),
     };
   });
   const balanceViews: BalanceView[] = balances.map((b) => ({
@@ -338,7 +371,7 @@ export async function loadItemDetail(ctx: InventoryContext, itemId: string): Pro
   return {
     item, categoryName: categoryPath(categories, item.category_id), companyName, detail,
     canEdit: canManageCatalogue(ctx.grants, item.company_id), canSeeCosts: costs, canConfirm: canConfirmStock(ctx.grants, item.company_id),
-    counts, categories, units: unitViews, unitsTruncated, balances: balanceViews, kits, movements, locations, bins: (bins.data ?? []) as InvBinRow[], summaryAvailability, names,
+    counts, categories, units: unitViews, unitsTruncated, balances: balanceViews, kits, movements, locations, placeLocations, bins: (bins.data ?? []) as InvBinRow[], summaryAvailability, names,
     replacedBy: replaced.data ?? null,
   };
 }
@@ -362,6 +395,8 @@ export interface UnitDetail {
   historyTruncated: boolean;
   names: Names;
   locations: InvLocationRow[];
+  /** `locations` plus every location this person can read (the unit can be in another company's warehouse). */
+  placeLocations: InvLocationRow[];
   bins: InvBinRow[];
   inKitCode: string | null;
 }
@@ -387,7 +422,8 @@ export async function loadUnitDetail(ctx: InventoryContext, idOrCode: string): P
   ]);
   if (!item) return null;
   const locations = (locs.data ?? []) as InvLocationRow[];
-  const locName = new Map(locations.map((l) => [l.id, l.name]));
+  const placeLocations = withReadable(locations, ctx);
+  const locName = new Map(placeLocations.map((l) => [l.id, l.name]));
   const binMap = new Map((bins.data ?? []).map((b) => [b.id, b.label?.trim() ? `${b.code} (${b.label})` : b.code]));
   const costs = canSeeCosts(ctx.grants, u.company_id);
 
@@ -418,10 +454,15 @@ export async function loadUnitDetail(ctx: InventoryContext, idOrCode: string): P
   const employeeName = u.employee_id ? names.employee(u.employee_id) : null;
   const projectName = u.project_id ? names.project(u.project_id) : null;
   const bin = u.bin_id ? (binMap.get(u.bin_id) ?? null) : null;
+  const pc = placeCtx(ctx);
+  const place = placeOf(pc, u.location_id, u.company_id);
+  const routes = u.custody_kind === "transit" && u.transfer_id ? await transitRoutes(db, pc, u.company_id, [u.transfer_id]) : new Map<string, string>();
   const unit: UnitView = {
     ...u, employeeName, projectName, binLabel: bin, locationName: u.location_id ? (locName.get(u.location_id) ?? null) : null, overdue: isOverdue(u),
     cost: costRow.data?.[0]?.unit_cost != null && costRow.data[0].currency ? { amount: num(costRow.data[0].unit_cost), currency: costRow.data[0].currency } : null,
-    where: whereText({ custody: u.custody_kind, lifecycle: u.lifecycle, binLabel: bin, employeeName, projectName, repairReference: u.repair_reference, inKit: !!u.in_kit_id }, u.location_id ? locName.get(u.location_id) : null),
+    where: u.custody_kind === "transit" && u.lifecycle === "active" && u.transfer_id && routes.has(u.transfer_id) ? `${CUSTODY_WORDS.transit}: ${routes.get(u.transfer_id)}`
+      : whereText({ custody: u.custody_kind, lifecycle: u.lifecycle, binLabel: bin, employeeName, projectName, repairReference: u.repair_reference, inKit: !!u.in_kit_id }, place.label),
+    ownedByNote: ownedByNote(pc, u.company_id, place),
   };
 
   // Units that could be packed into this kit: on the shelf at the kit's location, usable, not already in a kit, of an item named by the checklist.
@@ -436,10 +477,11 @@ export async function loadUnitDetail(ctx: InventoryContext, idOrCode: string): P
   }
   return {
     unit, item, companyName,
-    canOperate: u.location_id ? canOperateLocation(ctx.grants, u.company_id, u.location_id, ctx.assignedLocationIds) : false,
+    // Whether someone may work with the unit is decided by the warehouse it is in (the database's inv_can_operate), not by who owns it.
+    canOperate: u.location_id && !place.unreadable ? canOperateLocation(ctx.grants, place.operatingCompanyId ?? u.company_id, u.location_id, ctx.assignedLocationIds) : false,
     canEdit: canManageCatalogue(ctx.grants, u.company_id), canSeeCosts: costs,
     kit: kitData.map((k) => ({ ...k, itemName: nameOf.get(k.item_id) ?? "Item", itemTracking: infoOf.get(k.item_id)?.tracking ?? "individual", itemUom: infoOf.get(k.item_id)?.unit_of_measure ?? "each", itemScale: infoOf.get(k.item_id)?.quantity_scale ?? 0, substituteName: k.substitute_item_id ? (nameOf.get(k.substitute_item_id) ?? "Item") : null, contentCode: k.content_unit_id ? (codeOf.get(k.content_unit_id) ?? null) : null })),
-    packable, rental: (rental.data ?? null) as InvRentalRow | null, history, historyTruncated: history.length >= 200, names, locations, bins: (bins.data ?? []) as InvBinRow[],
+    packable, rental: (rental.data ?? null) as InvRentalRow | null, history, historyTruncated: history.length >= 200, names, locations, placeLocations, bins: (bins.data ?? []) as InvBinRow[],
     inKitCode: inKit.data?.code ?? null,
   };
 }
@@ -450,15 +492,24 @@ export async function loadUnitDetail(ctx: InventoryContext, idOrCode: string): P
 
 type UnitSelect = InvUnitRow;
 
-function unitCandidate(u: UnitSelect, itemName: string, detail: string | null, locName: Map<string, string>, binMap: Map<string, string>, names?: Names): Candidate {
+/** Where a unit is and who owns it, for a list: the place (named with its company when the person works with several), and "Owned by X" only when X does not run that place. */
+function unitPlaceFor(ctx: InventoryContext, u: Pick<InvUnitRow, "company_id" | "location_id">): { label: string | null; note: string | null } {
+  const pc = placeCtx(ctx);
+  const place = placeOf(pc, u.location_id, u.company_id);
+  return { label: place.label, note: ownedByNote(pc, u.company_id, place) };
+}
+
+function unitCandidate(u: UnitSelect, itemName: string, detail: string | null, locName: Map<string, string>, binMap: Map<string, string>, names?: Names, place?: { label: string | null; note: string | null }): Candidate {
   const employeeName = u.employee_id ? (names?.employee(u.employee_id) ?? null) : null;
   const projectName = u.project_id ? (names?.project(u.project_id) ?? null) : null;
   const bin = u.bin_id ? (binMap.get(u.bin_id) ?? null) : null;
+  const label = place ? place.label : u.location_id ? (locName.get(u.location_id) ?? FOREIGN_PLACE) : null;
+  const where = whereText({ custody: u.custody_kind, lifecycle: u.lifecycle, binLabel: bin, employeeName, projectName, repairReference: u.repair_reference, inKit: !!u.in_kit_id }, label);
   return candidateBase({
     key: `unit-${u.id}`, type: "unit", unitId: u.id, code: u.code, serial: u.serial_number, itemId: u.item_id, itemName, detail, condition: u.condition, lifecycle: u.lifecycle,
     custody: u.custody_kind, locationId: u.location_id, binId: u.bin_id, binLabel: bin, rentalId: u.rental_id, repairReference: u.repair_reference, inKit: !!u.in_kit_id,
     employeeId: u.employee_id, employeeName, projectId: u.project_id, projectName,
-    where: whereText({ custody: u.custody_kind, lifecycle: u.lifecycle, binLabel: bin, employeeName, projectName, repairReference: u.repair_reference, inKit: !!u.in_kit_id }, u.location_id ? locName.get(u.location_id) : null),
+    where: place?.note ? `${where} · ${place.note}` : where, ownedBy: place?.note ?? null,
   });
 }
 
@@ -612,7 +663,7 @@ export async function loadHeld(ctx: InventoryContext, p: { companyId: string; em
   const out: Candidate[] = [];
   for (const u of units.rows) {
     const i = itemById.get(u.item_id);
-    if (i) out.push(unitCandidate(u, i.name, itemDetailText(i), locName, binMap, names));
+    if (i) out.push(unitCandidate(u, i.name, itemDetailText(i), locName, binMap, names, unitPlaceFor(ctx, u)));
   }
   for (const b of balances.rows) {
     const i = itemById.get(b.item_id);
@@ -633,12 +684,19 @@ export async function resolveCode(ctx: InventoryContext, raw: string): Promise<S
   if (parsed.kind === "unit") {
     const { data: u, error } = await db.from("inv_units").select("*").eq("code", parsed.code).maybeSingle();
     if (error) return { ok: false, message: "The code could not be looked up right now. Try again." };
-    if (!u) return { ok: false, message: NOT_FOUND_MESSAGE };
+    if (!u) {
+      // Another company's unit that this person may handle (in transit to, or on the shelf at, a warehouse they operate): the narrow function answers.
+      let x: Awaited<ReturnType<typeof loadXUnits>>;
+      try { x = await loadXUnits({ code: parsed.code }, db); } catch { return { ok: false, message: "The code could not be looked up right now. Try again." }; }
+      const found = x[0];
+      if (!found) return { ok: false, message: NOT_FOUND_MESSAGE };
+      return { ok: true, kind: "unit", unitId: found.unitId, itemId: found.itemId, code: found.code, candidate: xUnitCandidate(found, { transit: found.custody === "transit", locationId: found.custody === "warehouse" ? found.locationId : null }) };
+    }
     const { data: item } = await db.from("inv_items").select("*").eq("id", u.item_id).maybeSingle();
     if (!item) return { ok: false, message: NOT_FOUND_MESSAGE };
     const { locName, binMap } = await locationAndBinMaps(db, u.company_id);
     const names = await loadNames(db, ctx, { employeeIds: u.employee_id ? [u.employee_id] : [], projectIds: u.project_id ? [u.project_id] : [], companyIds: [u.company_id] });
-    return { ok: true, kind: "unit", unitId: u.id, itemId: u.item_id, code: u.code, candidate: unitCandidate(u, item.name, itemDetailText(item as InvItemRow), locName, binMap, names) };
+    return { ok: true, kind: "unit", unitId: u.id, itemId: u.item_id, code: u.code, candidate: unitCandidate(u, item.name, itemDetailText(item as InvItemRow), locName, binMap, names, unitPlaceFor(ctx, u)) };
   }
   const { data: b, error } = await db.from("inv_balances").select("*").eq("label_code", parsed.code).maybeSingle();
   if (error) return { ok: false, message: "The code could not be looked up right now. Try again." };
@@ -676,11 +734,16 @@ export async function loadFormContext(ctx: InventoryContext, needs: { projects?:
   const locations = operable.map(toForm);
   const destinations = destCandidates.map(toForm);
 
-  const [projects, requests, transfers, rentals] = await Promise.all([
+  // Cross-company receiving (migration 20261218000100): warehouses of other companies that this company's owner has authorised as destinations, and
+  // transfers sent to a warehouse this person operates by another company. Both are answered by narrow database functions, never by reading the owner's rows.
+  const wantTransfers = !!needs.transfers && operable.length > 0;
+  const [projects, requests, transfers, rentals, xDest, xIncoming] = await Promise.all([
     needs.projects && companyIds.length > 0 ? db.from("proj_projects").select("id, company_id, reference, name, status").in("company_id", companyIds).neq("status", "archived").order("name").limit(500) : Promise.resolve({ data: [] as { id: string; company_id: string; reference: string; name: string; status: string }[], error: null }),
     needs.requests && companyIds.length > 0 ? db.from("inv_requests").select("id, company_id, code, kind, project_id, employee_id, title, status, expected_return_at, needed_until").in("company_id", companyIds).in("status", ["submitted", "in_progress"]).order("created_at", { ascending: false }).limit(300) : Promise.resolve({ data: [] as { id: string; company_id: string; code: string; kind: "project" | "employee"; project_id: string | null; employee_id: string | null; title: string | null; status: string; expected_return_at: string | null; needed_until: string | null }[], error: null }),
     needs.transfers && operable.length > 0 ? db.from("inv_transfers").select("*").in("to_location_id", operable.map((l) => l.id)).eq("status", "in_transit").order("dispatched_at", { ascending: false }).limit(100) : Promise.resolve({ data: [] as InvTransferRow[], error: null }),
     needs.rentals && companyIds.length > 0 ? db.from("inv_rentals").select("*").in("company_id", companyIds).eq("status", "open").order("return_deadline").limit(200) : Promise.resolve({ data: [] as InvRentalRow[], error: null }),
+    needs.transfers && companyIds.length > 0 ? loadXDestinations(db) : Promise.resolve([]),
+    wantTransfers ? loadXIncoming(operable.map((l) => l.id), db) : Promise.resolve([]),
   ]);
   fail("projects", projects.error);
   fail("requests", requests.error);
@@ -688,7 +751,9 @@ export async function loadFormContext(ctx: InventoryContext, needs: { projects?:
   fail("rentals", rentals.error);
 
   const trs = (transfers.data ?? []) as InvTransferRow[];
-  const locName = new Map(destinations.concat(locations).map((l) => [l.id, l.name]));
+  // A route names the company too when the person works with several (there can be a "Dubai" under each of them).
+  const pcx = placeCtx(ctx);
+  const routeName = (id: string, owner: string) => placeOf(pcx, id, owner).label ?? ctx.locationName(id);
   const heldByTransfer = new Map<string, Candidate[]>();
   if (trs.length > 0) {
     const ids = trs.map((t) => t.id);
@@ -702,18 +767,30 @@ export async function loadFormContext(ctx: InventoryContext, needs: { projects?:
     const empty = new Map<string, string>();
     for (const u of (units.data ?? []) as InvUnitRow[]) {
       const i = itemById.get(u.item_id);
-      if (i && u.transfer_id) (heldByTransfer.get(u.transfer_id) ?? heldByTransfer.set(u.transfer_id, []).get(u.transfer_id)!).push(unitCandidate(u, i.name, itemDetailText(i), empty, empty));
+      if (i && u.transfer_id) {
+        // Owned by X is judged against the company that runs the DESTINATION: moving does not change the owner.
+        const toCompany = trs.find((t) => t.id === u.transfer_id)?.to_location_id;
+        const note = itemOwnedByNote(placeCtx(ctx), u.company_id, ctx.locations.find((l) => l.id === toCompany)?.company_id);
+        (heldByTransfer.get(u.transfer_id) ?? heldByTransfer.set(u.transfer_id, []).get(u.transfer_id)!).push(unitCandidate(u, i.name, itemDetailText(i), empty, empty, undefined, { label: null, note }));
+      }
     }
     for (const b of (balances.data ?? []) as InvBalanceRow[]) {
       const i = itemById.get(b.item_id);
       if (i && b.transfer_id) (heldByTransfer.get(b.transfer_id) ?? heldByTransfer.set(b.transfer_id, []).get(b.transfer_id)!).push({ ...balanceCandidate(b, i, empty, empty), where: "In transit" });
     }
   }
+  const knownIds = new Set(destinations.map((d) => d.id));
+  const sharedDestinations = xDest.filter((d) => !knownIds.has(d.id)).map(formDestination);
+  const ownTransferIds = new Set(trs.map((t) => t.id));
   return {
-    locations, destinations,
+    locations, destinations: [...destinations, ...sharedDestinations],
     projects: (projects.data ?? []).map((p) => ({ id: p.id, companyId: p.company_id, reference: p.reference, name: p.name, status: p.status })),
     requests: (requests.data ?? []).map((r) => ({ id: r.id, companyId: r.company_id, code: r.code, kind: r.kind, projectId: r.project_id, employeeId: r.employee_id, title: r.title, status: r.status, expectedReturnAt: r.expected_return_at ?? r.needed_until })),
-    transfers: trs.map((t) => ({ id: t.id, code: t.code, companyId: t.company_id, fromLocationId: t.from_location_id, fromName: locName.get(t.from_location_id) ?? ctx.locationName(t.from_location_id), toLocationId: t.to_location_id, toName: locName.get(t.to_location_id) ?? ctx.locationName(t.to_location_id), expectedAt: t.expected_at, carrier: t.carrier, reference: t.reference, dispatchedAt: t.dispatched_at, held: heldByTransfer.get(t.id) ?? [] })),
+    transfers: [
+      ...trs.map((t) => ({ id: t.id, code: t.code, companyId: t.company_id, fromLocationId: t.from_location_id, fromName: routeName(t.from_location_id, t.company_id), toLocationId: t.to_location_id, toName: routeName(t.to_location_id, t.company_id), expectedAt: t.expected_at, carrier: t.carrier, reference: t.reference, dispatchedAt: t.dispatched_at, held: heldByTransfer.get(t.id) ?? [] })),
+      // Sent to this person's warehouse by another company: the owner's rows are not readable here, so these come from the narrow function (a transfer already read above is not listed twice).
+      ...xIncoming.filter((t) => !ownTransferIds.has(t.id)),
+    ],
     rentals: ((rentals.data ?? []) as InvRentalRow[]).map((r) => ({ id: r.id, companyId: r.company_id, supplier: r.supplier_name, reference: r.external_reference, deadline: r.return_deadline })),
     canSeeCostsByCompany: Object.fromEntries(companyIds.map((id) => [id, canSeeCosts(ctx.grants, id)])),
   };

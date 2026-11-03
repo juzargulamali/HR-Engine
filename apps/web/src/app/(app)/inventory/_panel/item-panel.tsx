@@ -57,7 +57,7 @@ export async function ItemSidePanel({ openId, closeHref, here, binCode }: { open
   const categoryOptions: CategoryOption[] = d.categories.filter((c) => c.is_active).map((c) => ({ id: c.id, label: categoryPath(d.categories, c.id) ?? c.name })).sort((a, b) => a.label.localeCompare(b.label));
   const locationsForUnit = (canOperate && !d.canEdit ? operableHere.map((l) => ({ id: l.id, name: l.name, bins: l.bins })) : d.locations.filter((l) => l.is_active).map((l) => ({ id: l.id, name: l.name, bins: d.bins.filter((b) => b.location_id === l.id).map((b) => ({ id: b.id, code: b.code, label: b.label })) })));
   const subtitle = [d.categoryName, trackingLabel(item.tracking)].filter(Boolean).join(" · ");
-  const resolver = makeResolver(d.locations, d.bins, d.names);
+  const resolver = makeResolver(d.placeLocations, d.bins, d.names);
   const c = d.counts;
   const unitLink = (unitId: string) => here({ unit: unitId });
   const totalCodes = d.units.map((u) => u.code);
@@ -102,7 +102,7 @@ export async function ItemSidePanel({ openId, closeHref, here, binCode }: { open
 
   const unitRows: UnitRowView[] = d.units.map((u) => ({
     id: u.id, code: u.code, serial: u.serial_number, condition: conditionLabel(u.condition), lifecycle: u.lifecycle === "active" ? null : lifecycleLabel(u.lifecycle),
-    where: u.where || null, cost: u.cost ? formatMoney(u.cost.amount, u.cost.currency) : null, href: unitLink(u.id),
+    where: u.where || null, ownedBy: u.ownedByNote, cost: u.cost ? formatMoney(u.cost.amount, u.cost.currency) : null, href: unitLink(u.id),
   }));
   const inWarehouse = d.balances.filter((b) => b.holder_kind === "warehouse");
   const elsewhere = d.balances.filter((b) => b.holder_kind !== "warehouse");
@@ -201,7 +201,7 @@ export async function ItemSidePanel({ openId, closeHref, here, binCode }: { open
 
       {d.detail && hasStock ? (
         <Section title="Recent movements" aside={<Link href={`/inventory/history?item=${item.id}`} className="text-sm font-medium underline-offset-2 hover:underline">All movements of this item</Link>}>
-          <HistoryList rows={d.movements} names={d.names} resolver={resolver} itemName={() => item.name} locations={d.locations} fallbackZone={d.locations[0]?.timezone ?? "Asia/Dubai"} emptyText="Nothing has been recorded for this item yet." linkToLedger />
+          <HistoryList rows={d.movements} names={d.names} resolver={resolver} itemName={() => item.name} locations={d.placeLocations} fallbackZone={d.locations[0]?.timezone ?? "Asia/Dubai"} emptyText="Nothing has been recorded for this item yet." linkToLedger />
         </Section>
       ) : null}
 

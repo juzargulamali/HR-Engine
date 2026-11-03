@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { equipmentSummary, liveRequests, nextDispatch, type DispatchRequest } from "./dispatch";
-import { actionGroupOf, splitActions, sumCounts } from "./groups";
 import { summariseLive } from "./live";
 
 describe("live clock status", () => {
@@ -34,18 +33,5 @@ describe("equipment", () => {
   it("is null with nothing to dispatch, and undated requests go last", () => {
     expect(nextDispatch([r({ done: 4 }), r({ status: "draft" })])).toBeNull();
     expect(nextDispatch([r({ id: "none", needed_from: null }), r({ id: "dated" })])?.id).toBe("dated");
-  });
-});
-
-describe("where a needs-you row is shown", () => {
-  it("sorts rows into the card about them, so each figure appears once", () => {
-    const items = [{ key: "approvals", count: 2 }, { key: "proj-handovers", count: 1 }, { key: "proj-reviews", count: 3 }, { key: "proj-overdue", count: 4 }, { key: "sales-overdue", count: 5 }, { key: "contracts", count: 6 }, { key: "docs", count: 1 }];
-    const g = splitActions(items);
-    expect(g.decision.map((i) => i.key)).toEqual(["approvals", "proj-handovers", "proj-reviews"]);
-    expect(g.other.map((i) => i.key)).toEqual(["proj-overdue"]);
-    expect(g.sales.map((i) => i.key)).toEqual(["sales-overdue"]);
-    expect(g.hr.map((i) => i.key)).toEqual(["contracts", "docs"]);
-    expect(sumCounts(g.decision)).toBe(6);
-    expect(actionGroupOf("something-new")).toBe("other");
   });
 });

@@ -17,6 +17,10 @@ import { LoadError } from "@/components/workspace/states";
 import { createClient } from "@/lib/supabase/server";
 import { getInventoryContext } from "@/lib/inventory/context";
 import { loadFormContext, loadUnitDetail, type UnitDetail } from "@/lib/inventory/stock";
+import { loadXTransfersOfUnit, loadXUnits } from "@/lib/inventory/xshare-data";
+import { traceSteps, type XUnit } from "@/lib/inventory/xshare";
+import { parseInventoryScan } from "@enginious-hr/domain";
+import { ForeignUnitPanel } from "./foreign-unit";
 import { candidateBase, type FormContext } from "@/lib/inventory/stock-candidates";
 import { CUSTODY_WORDS, formatQty } from "@/lib/inventory/words";
 import { cn } from "@/lib/utils";
@@ -41,7 +45,23 @@ export async function UnitSidePanel({ unitRef, closeHref, here }: { unitRef: str
     console.error("[inventory] unit panel load failed", e);
     return shell("Unit", <LoadError what="this unit" retryHref={here({ unit: unitRef })} />);
   }
-  if (!d) return shell("Unit not found", <Alert role="status">No equipment with that ID was found, or you do not have access to it.</Alert>);
+  if (!d) {
+    // Not one of this person's own companies' units: it may be another company's equipment that they may receive or handle at their warehouse.
+    const parsed = parseInventoryScan(unitRef);
+    let foreign: XUnit | null = null;
+    let foreignFailed = false;
+    if (parsed.ok && parsed.kind === "unit") {
+      try {
+        foreign = (await loadXUnits({ code: parsed.code }))[0] ?? null;
+      } catch (e) {
+        console.error("[inventory] cross-company unit load failed", e);
+        foreignFailed = true;
+      }
+    }
+    if (foreignFailed) return shell("Unit", <LoadError what="this unit" retryHref={here({ unit: unitRef })} />);
+    if (foreign) return <ForeignUnitPanel unit={foreign} closeHref={closeHref} here={here} canOperate={canOperateAnyStock(ctx.grants)} />;
+    return shell("Unit not found", <Alert role="status">No equipment with that ID was found, or you do not have access to it.</Alert>);
+  }
 
   const { unit: u, item } = d;
   const canOperateStock = canOperateAnyStock(ctx.grants) && d.canOperate;
@@ -49,7 +69,7 @@ export async function UnitSidePanel({ unitRef, closeHref, here }: { unitRef: str
   if (canOperateStock) {
     try { form = await loadFormContext(ctx, { projects: true, requests: true, rentals: true }); } catch (e) { console.error("[inventory] unit panel form context failed", e); }
   }
-  const resolver = makeResolver(d.locations, d.bins, d.names);
+  const resolver = makeResolver(d.placeLocations, d.bins, d.names);
   const isKit = item.tracking === "kit";
   const overdue = u.overdue;
   const cand = candidateBase({
@@ -120,10 +140,19 @@ export async function UnitSidePanel({ unitRef, closeHref, here }: { unitRef: str
     ),
   };
 
+  // The owner's own history lacks the receipt of a transfer to another company (it is filed under the receiving company): the trace is where both sides read it.
+  let xTransfers: Awaited<ReturnType<typeof loadXTransfersOfUnit>> = [];
+  let xFailed = false;
+  const xRoutes = d.history.filter((m) => m.kind === "transfer_dispatch" && m.lines.some((l) => l.unit_id === u.id)).map((m) => ({ from: m.from_location_id, to: m.to_location_id }));
+  if (xRoutes.length > 0) {
+    try { xTransfers = await loadXTransfersOfUnit(u.id, xRoutes.filter((r) => !d.placeLocations.some((l) => l.id === r.to))); } catch (e) { console.error("[inventory] cross-company transfers of a unit failed", e); xFailed = true; }
+  }
+
   const detailRows: [string, React.ReactNode][] = [
     ["Item", <PanelLink key="i" href={here({ open: item.id, unit: null })} className="font-medium underline underline-offset-2">{item.name}</PanelLink>],
     ["Serial number", u.serial_number ?? "—"],
     ["Where it is", u.where || "—"],
+    ...(u.ownedByNote ? [["Owned by", <span key="o">{u.ownedByNote.replace(/^Owned by /, "")}<span className="block text-[13px] text-muted-foreground">Moving equipment between warehouses never changes who owns it.</span></span>] as [string, React.ReactNode]] : []),
     ...(u.expected_return_at && ["employee", "project", "transit", "repair"].includes(u.custody_kind) ? [["Expected back", <span key="e" className={overdue ? "font-medium text-destructive" : undefined}>{formatDateTime(u.expected_return_at)}{overdue ? " (overdue)" : ""}</span>] as [string, React.ReactNode]] : []),
     ...(u.in_kit_id ? [["Packed in kit", <PanelLink key="k" href={here({ unit: u.in_kit_id })} className="font-mono underline underline-offset-2">{d.inKitCode ?? "a kit"}</PanelLink>] as [string, React.ReactNode]] : []),
     ["Ownership", u.ownership === "rental" ? `Rented${d.rental ? ` from ${d.rental.supplier_name}, reference ${d.rental.external_reference}, back by ${formatDate(d.rental.return_deadline)}` : ""}` : "Owned"],
@@ -183,8 +212,22 @@ export async function UnitSidePanel({ unitRef, closeHref, here }: { unitRef: str
         </Section>
       ) : null}
 
+      {xFailed ? <Alert variant="warning" role="status">Transfers to other companies could not be loaded, so the receipt may be missing below. Reload to try again.</Alert> : null}
+      {xTransfers.length > 0 ? (
+        <Section title="Transfers to other companies">
+          <ul className="space-y-2 text-sm">
+            {xTransfers.map((x) => (
+              <li key={x.transfer.transferId} className="rounded-md border border-border px-3 py-2">
+                <Link href={`/inventory/transfers/${x.transfer.transferId}`} className="font-medium underline-offset-2 hover:underline">{x.transfer.code} to {x.transfer.toName} · {x.transfer.toCompanyName}</Link>
+                <span className="block text-muted-foreground">{traceSteps(x, (iso) => formatDateTime(iso)).filter((s) => s.state !== "waiting").map((s) => `${s.label}: ${s.detail}`).join(" → ")}</span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+
       <Section title="History" aside={<Link href={`/inventory/history?item=${item.id}`} className="text-sm font-medium underline-offset-2 hover:underline">All movements of this item</Link>}>
-        <HistoryList rows={d.history} names={d.names} resolver={resolver} itemName={() => item.name} locations={d.locations} fallbackZone={d.locations[0]?.timezone ?? "Asia/Dubai"} emptyText="Nothing has been recorded for this unit yet." linkToLedger />
+        <HistoryList rows={d.history} names={d.names} resolver={resolver} itemName={() => item.name} locations={d.placeLocations} fallbackZone={d.locations[0]?.timezone ?? "Asia/Dubai"} emptyText="Nothing has been recorded for this unit yet." linkToLedger />
         {d.historyTruncated ? <p className="text-sm text-muted-foreground">Showing the latest 200 entries.</p> : null}
       </Section>
     </div>,

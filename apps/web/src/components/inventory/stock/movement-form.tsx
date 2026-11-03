@@ -8,6 +8,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useUnsavedChanges } from "@/components/workspace/unsaved";
 import { countStillOutstanding, draftFromCandidate, unitProblemFor, type Candidate, type FormContext, type FormLocation, type FormTransfer } from "@/lib/inventory/stock-candidates";
+import { SHARING_REVOKED_TEXT } from "@/lib/inventory/xshare";
 import {
   ADJUST_WORDS, KIND_CONFIG, formatInZone, localToUtcIso, nowLocalInput, parseLines, sourceFor, summaryRows, validateInput,
   type AdjustAction, type LineDraft, type MovementInput, type MovementKind, type ReturnFrom, type SummaryInput,
@@ -143,7 +144,8 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
     context.requests.filter((r) => r.companyId === companyId && r.kind === kindOfRequest && (kindOfRequest === "project" ? r.projectId === pid : empId ? r.employeeId === empId : false));
   const chosenRequest = context.requests.find((r) => r.id === requestId);
 
-  const destinations = context.destinations.filter((l) => l.companyId === companyId && l.id !== effectiveLocationId);
+  // Same-company warehouses, plus warehouses of another company that the OWNING company (the one whose warehouse this is) has authorised.
+  const destinations = context.destinations.filter((l) => (l.companyId === companyId || l.sharedFrom === companyId) && l.id !== effectiveLocationId);
   const source = sourceFor(kind, adjustAction);
 
   const held: HeldSource | null = (() => {
@@ -220,11 +222,13 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
     return bad ? { error: bad } : { input };
   }
 
+  // A warehouse is named with its company when the person works with several ("Dubai warehouse · Enginious UAE").
+  const placeText = (l: FormLocation) => (multiCompany || l.companyId !== companyId ? `${l.name} · ${l.companyName}` : l.name);
   const names = {
     project: (id: string) => { const p = context.projects.find((x) => x.id === id); return p ? `${p.reference} ${p.name}` : undefined; },
   };
   const summary: SummaryInput = {
-    kind, drafts, location: location?.name ?? "", toLocation: context.destinations.find((l) => l.id === toLocationId)?.name,
+    kind, drafts, location: location ? placeText(location) : "", toLocation: ((l) => (l ? placeText(l) : undefined))(context.destinations.find((x) => x.id === toLocationId)),
     employee: employee?.name, project: names.project(projectId), toProject: names.project(toProjectId), request: chosenRequest ? `${chosenRequest.code}${chosenRequest.title ? ` · ${chosenRequest.title}` : ""}` : undefined,
     returnFrom: returnFrom || undefined, expectedReturn: expectedReturn ? formatInZone(toIso(expectedReturn), tz) : chosenRequest?.expectedReturnAt && kind === "dispatch" ? `${formatInZone(chosenRequest.expectedReturnAt, tz)} (from the request)` : undefined,
     expectedArrival: expectedArrival ? formatInZone(toIso(expectedArrival), tz) : undefined, repairReference: repairReference.trim() || undefined, transferCode: transfer?.code,
@@ -293,6 +297,7 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
             <option value="">{transfersHere.length === 0 ? "No transfer is on its way to you" : "Choose a transfer…"}</option>
             {transfersHere.map((t) => <option key={t.id} value={t.id}>{t.code} · {t.fromName} to {t.toName} · {t.held.length} line{t.held.length === 1 ? "" : "s"}</option>)}
           </Select>
+          {transfer?.sharingRevoked ? <p className="text-sm font-medium text-warning" role="status">{SHARING_REVOKED_TEXT}</p> : null}
           {transfer ? <p className="text-sm text-muted-foreground">Sent {formatInZone(transfer.dispatchedAt, tz)}{transfer.expectedAt ? `, expected ${formatInZone(transfer.expectedAt, tz)}` : ""}{transfer.carrier ? ` · ${transfer.carrier}` : ""}{transfer.reference ? ` · ref ${transfer.reference}` : ""}. It is not available at {transfer.toName} until you confirm it here.</p> : null}
         </div>
       ) : null}
@@ -388,12 +393,12 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
           <label htmlFor={`${uid}-to`} className="text-sm font-medium leading-none">Send to</label>
           <Select id={`${uid}-to`} value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} disabled={locked || !effectiveLocationId} required>
             <option value="">Choose the destination…</option>
-            {destinations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            {destinations.map((l) => <option key={l.id} value={l.id}>{l.name}{l.companyId !== companyId ? ` · ${l.companyName} (authorised)` : ""}</option>)}
           </Select>
           {destinations.length === 0 ? (
             <p className="text-sm text-muted-foreground" role="status">There is no other location to send to yet. Add one in Manage, Setup, Locations, then come back.</p>
           ) : (
-            <p className="text-sm text-muted-foreground">It will be in transit, and not available at the destination, until someone there records it as received.</p>
+            <p className="text-sm text-muted-foreground">It will be in transit, and not available at the destination, until someone there records it as received.{destinations.some((l) => l.id === toLocationId && l.companyId !== companyId) ? " The equipment stays yours: the other company only receives and holds it." : ""}</p>
           )}
         </div>
       ) : null}
@@ -426,7 +431,8 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
                 <label className="flex items-center gap-2"><input type="radio" name={`${uid}-all`} checked={receiveAll} onChange={() => { setReceiveAll(true); setDrafts([]); }} /> Everything on the way ({transfer.held.length} line{transfer.held.length === 1 ? "" : "s"})</label>
                 <label className="flex items-center gap-2"><input type="radio" name={`${uid}-all`} checked={!receiveAll} onChange={() => setReceiveAll(false)} /> Only some of it. The rest stays in transit.</label>
               </div>
-              {receiveAll ? <ul className="list-disc space-y-0.5 pl-5 text-sm text-muted-foreground">{transfer.held.map((c) => <li key={c.key}>{c.itemName}{c.code ? ` (${c.code})` : ""}{c.qty !== null ? `, ${c.qty} ${c.uom === "each" ? "" : c.uom}`.trimEnd() : ""}</li>)}</ul> : null}
+              {receiveAll ? <ul className="list-disc space-y-0.5 pl-5 text-sm text-muted-foreground">{transfer.held.map((c) => <li key={c.key}>{c.itemName}{c.code ? ` (${c.code})` : ""}{c.qty !== null ? `, ${c.qty} ${c.uom === "each" ? "" : c.uom}`.trimEnd() : ""}{c.ownedBy ? ` · ${c.ownedBy}` : ""}</li>)}</ul> : null}
+              {transfer.held.some((c) => c.ownedBy) ? <p className="text-sm text-muted-foreground">Receiving it puts it in {transfer.toName}, available there from then on if its condition allows. It does not change who owns it.</p> : null}
             </fieldset>
           ) : null}
           {!(kind === "receive_transfer" && receiveAll) ? (

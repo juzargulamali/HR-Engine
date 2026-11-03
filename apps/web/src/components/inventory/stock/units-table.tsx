@@ -17,6 +17,8 @@ export interface UnitRowView {
   lifecycle: string | null;
   /** Where it is, and with whom, only filled in for people who may see custody. */
   where: string | null;
+  /** "Owned by Enginious UAE", only when the owner is not the company that runs the place it is in. */
+  ownedBy?: string | null;
   cost: string | null;
   href: string;
 }
@@ -52,7 +54,7 @@ export function UnitsTable({ units, showWhere, showCost, truncated }: { units: r
               <TableCell className="whitespace-nowrap"><PanelLink href={u.href} className="font-mono font-medium underline-offset-2 hover:underline">{u.code}</PanelLink></TableCell>
               <TableCell data-label="Serial" className="whitespace-nowrap">{u.serial ?? <span className="text-muted-foreground">—</span>}</TableCell>
               <TableCell data-label="Condition">{u.condition}{u.lifecycle ? <span className="block text-[13px] text-muted-foreground">{u.lifecycle}</span> : null}</TableCell>
-              {showWhere ? <TableCell data-label="Where" className="break-words">{u.where ?? "—"}</TableCell> : null}
+              {showWhere ? <TableCell data-label="Where" className="break-words">{u.where ?? "—"}{u.ownedBy ? <span className="block text-[13px] text-muted-foreground">{u.ownedBy}</span> : null}</TableCell> : null}
               {showCost ? <TableCell data-label="Cost" className="whitespace-nowrap">{u.cost ?? "—"}</TableCell> : null}
               <TableCell data-label="Label">
                 <span className="inline-flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
