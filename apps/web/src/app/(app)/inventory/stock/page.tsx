@@ -24,6 +24,7 @@ import { firstParam, nextSort, parseColumns, parseRecordId, parseSort, sortToPar
 import { getInventoryContext } from "@/lib/inventory/context";
 import { WAREHOUSE_COOKIE, pickWorkingLocation, warehouseOptions } from "@/lib/inventory/working-location";
 import { fillSummaryUsable, loadStockList, type StockList } from "@/lib/inventory/stock";
+import { itemOwnedByNote } from "@/lib/inventory/places";
 import {
   STATUS_FILTERS, STATUS_FILTER_LABELS, STOCK_ALL_COLUMNS, STOCK_COLUMNS, STOCK_DEFAULT_COLUMNS, STOCK_DEFAULT_SORT, STOCK_ONLY_COLUMNS, STOCK_SORT_KEYS,
   categoryPath, filterStockRows, fmt, isFilterActive, outText, sortStockRows, type StatusFilter, type StockColumn, type StockFilter, type StockRow,
@@ -169,6 +170,8 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
     rows = rows.map((r) => byId.get(r.id) ?? r);
     if (needSummary.length > SUMMARY_CAP) summaryNote = `Counts are shown for the first ${SUMMARY_CAP} items you can only see in summary. Search or filter to see the rest.`;
   }
+  // Under a chosen warehouse, say whose equipment an item is when the warehouse is run by another company (never when they are the same).
+  const warehouseCompanyId = location ? (ctx.locations.find((l) => l.id === location)?.company_id ?? null) : null;
   const sorted = sortStockRows(rows, sort);
   const shown = sorted.slice(0, MAX_ROWS);
 
@@ -215,7 +218,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
                 <ClickableRow key={r.id} href={here({ open: r.id, unit: null, action: null, bin: null })} panel selected={openId === r.id} className="align-top" aria-selected={openId === r.id || undefined}>
                   {cols.map((c) => (
                     <TableCell key={c} data-label={c === cols[0] ? undefined : columnLabel(c, location)} className={cellClass(c)}>
-                      <Cell column={c} row={r} href={here({ open: r.id, unit: null, action: null, bin: null })} companyName={ctx.companyName(r.companyId)} />
+                      <Cell column={c} row={r} href={here({ open: r.id, unit: null, action: null, bin: null })} companyName={ctx.companyName(r.companyId)} ownedBy={r.detail ? itemOwnedByNote(ctx, r.companyId, warehouseCompanyId) : null} />
                     </TableCell>
                   ))}
                 </ClickableRow>
@@ -246,7 +249,7 @@ function cellClass(c: StockColumn): string {
 
 const count = (r: StockRow, n: number | null) => (n === null ? <span className="text-muted-foreground" title="Not shown to you">—</span> : <>{formatQty(n, r.tracking === "quantity" || r.tracking === "consumable" ? r.uom : null)}</>);
 
-function Cell({ column, row: r, href, companyName }: { column: StockColumn; row: StockRow; href: string; companyName: string }) {
+function Cell({ column, row: r, href, companyName, ownedBy }: { column: StockColumn; row: StockRow; href: string; companyName: string; ownedBy: string | null }) {
   switch (column) {
     case "item": {
       const sub = [r.model, r.specification].filter(Boolean).join(" · ");
@@ -254,6 +257,7 @@ function Cell({ column, row: r, href, companyName }: { column: StockColumn; row:
         <>
           <PanelLink href={href} className="break-words font-medium underline-offset-2 hover:underline">{r.name}</PanelLink>
           {sub ? <div className="mt-0.5 break-words text-sm text-muted-foreground">{sub}</div> : null}
+          {ownedBy ? <div className="mt-0.5 text-sm text-muted-foreground">{ownedBy}</div> : null}
           {r.status === "draft" || r.status === "retired" || (r.draftUnits ?? 0) > 0 ? (
             <div className="mt-1 flex flex-wrap gap-1">
               {r.status === "draft" ? <Badge variant="warning">Draft</Badge> : null}

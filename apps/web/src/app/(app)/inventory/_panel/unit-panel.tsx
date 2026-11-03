@@ -49,7 +49,7 @@ export async function UnitSidePanel({ unitRef, closeHref, here }: { unitRef: str
   if (canOperateStock) {
     try { form = await loadFormContext(ctx, { projects: true, requests: true, rentals: true }); } catch (e) { console.error("[inventory] unit panel form context failed", e); }
   }
-  const resolver = makeResolver(d.locations, d.bins, d.names);
+  const resolver = makeResolver(d.placeLocations, d.bins, d.names);
   const isKit = item.tracking === "kit";
   const overdue = u.overdue;
   const cand = candidateBase({
@@ -124,6 +124,7 @@ export async function UnitSidePanel({ unitRef, closeHref, here }: { unitRef: str
     ["Item", <PanelLink key="i" href={here({ open: item.id, unit: null })} className="font-medium underline underline-offset-2">{item.name}</PanelLink>],
     ["Serial number", u.serial_number ?? "—"],
     ["Where it is", u.where || "—"],
+    ...(u.ownedByNote ? [["Owned by", <span key="o">{u.ownedByNote.replace(/^Owned by /, "")}<span className="block text-[13px] text-muted-foreground">Moving equipment between warehouses never changes who owns it.</span></span>] as [string, React.ReactNode]] : []),
     ...(u.expected_return_at && ["employee", "project", "transit", "repair"].includes(u.custody_kind) ? [["Expected back", <span key="e" className={overdue ? "font-medium text-destructive" : undefined}>{formatDateTime(u.expected_return_at)}{overdue ? " (overdue)" : ""}</span>] as [string, React.ReactNode]] : []),
     ...(u.in_kit_id ? [["Packed in kit", <PanelLink key="k" href={here({ unit: u.in_kit_id })} className="font-mono underline underline-offset-2">{d.inKitCode ?? "a kit"}</PanelLink>] as [string, React.ReactNode]] : []),
     ["Ownership", u.ownership === "rental" ? `Rented${d.rental ? ` from ${d.rental.supplier_name}, reference ${d.rental.external_reference}, back by ${formatDate(d.rental.return_deadline)}` : ""}` : "Owned"],
@@ -184,7 +185,7 @@ export async function UnitSidePanel({ unitRef, closeHref, here }: { unitRef: str
       ) : null}
 
       <Section title="History" aside={<Link href={`/inventory/history?item=${item.id}`} className="text-sm font-medium underline-offset-2 hover:underline">All movements of this item</Link>}>
-        <HistoryList rows={d.history} names={d.names} resolver={resolver} itemName={() => item.name} locations={d.locations} fallbackZone={d.locations[0]?.timezone ?? "Asia/Dubai"} emptyText="Nothing has been recorded for this unit yet." linkToLedger />
+        <HistoryList rows={d.history} names={d.names} resolver={resolver} itemName={() => item.name} locations={d.placeLocations} fallbackZone={d.locations[0]?.timezone ?? "Asia/Dubai"} emptyText="Nothing has been recorded for this unit yet." linkToLedger />
         {d.historyTruncated ? <p className="text-sm text-muted-foreground">Showing the latest 200 entries.</p> : null}
       </Section>
     </div>,

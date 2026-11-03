@@ -220,11 +220,13 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
     return bad ? { error: bad } : { input };
   }
 
+  // A warehouse is named with its company when the person works with several ("Dubai warehouse · Enginious UAE").
+  const placeText = (l: FormLocation) => (multiCompany ? `${l.name} · ${l.companyName}` : l.name);
   const names = {
     project: (id: string) => { const p = context.projects.find((x) => x.id === id); return p ? `${p.reference} ${p.name}` : undefined; },
   };
   const summary: SummaryInput = {
-    kind, drafts, location: location?.name ?? "", toLocation: context.destinations.find((l) => l.id === toLocationId)?.name,
+    kind, drafts, location: location ? placeText(location) : "", toLocation: ((l) => (l ? placeText(l) : undefined))(context.destinations.find((x) => x.id === toLocationId)),
     employee: employee?.name, project: names.project(projectId), toProject: names.project(toProjectId), request: chosenRequest ? `${chosenRequest.code}${chosenRequest.title ? ` · ${chosenRequest.title}` : ""}` : undefined,
     returnFrom: returnFrom || undefined, expectedReturn: expectedReturn ? formatInZone(toIso(expectedReturn), tz) : chosenRequest?.expectedReturnAt && kind === "dispatch" ? `${formatInZone(chosenRequest.expectedReturnAt, tz)} (from the request)` : undefined,
     expectedArrival: expectedArrival ? formatInZone(toIso(expectedArrival), tz) : undefined, repairReference: repairReference.trim() || undefined, transferCode: transfer?.code,
@@ -426,7 +428,8 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
                 <label className="flex items-center gap-2"><input type="radio" name={`${uid}-all`} checked={receiveAll} onChange={() => { setReceiveAll(true); setDrafts([]); }} /> Everything on the way ({transfer.held.length} line{transfer.held.length === 1 ? "" : "s"})</label>
                 <label className="flex items-center gap-2"><input type="radio" name={`${uid}-all`} checked={!receiveAll} onChange={() => setReceiveAll(false)} /> Only some of it. The rest stays in transit.</label>
               </div>
-              {receiveAll ? <ul className="list-disc space-y-0.5 pl-5 text-sm text-muted-foreground">{transfer.held.map((c) => <li key={c.key}>{c.itemName}{c.code ? ` (${c.code})` : ""}{c.qty !== null ? `, ${c.qty} ${c.uom === "each" ? "" : c.uom}`.trimEnd() : ""}</li>)}</ul> : null}
+              {receiveAll ? <ul className="list-disc space-y-0.5 pl-5 text-sm text-muted-foreground">{transfer.held.map((c) => <li key={c.key}>{c.itemName}{c.code ? ` (${c.code})` : ""}{c.qty !== null ? `, ${c.qty} ${c.uom === "each" ? "" : c.uom}`.trimEnd() : ""}{c.ownedBy ? ` · ${c.ownedBy}` : ""}</li>)}</ul> : null}
+              {transfer.held.some((c) => c.ownedBy) ? <p className="text-sm text-muted-foreground">Receiving it puts it in {transfer.toName}, available there from then on if its condition allows. It does not change who owns it.</p> : null}
             </fieldset>
           ) : null}
           {!(kind === "receive_transfer" && receiveAll) ? (

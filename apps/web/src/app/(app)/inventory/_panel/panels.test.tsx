@@ -34,7 +34,7 @@ const item = (over: Partial<InvItemRow> = {}): InvItemRow => ({ id: I1, company_
 const unitView = (over: Partial<UnitView> = {}): UnitView => ({
   id: U1, company_id: C1, item_id: I1, code: "UAE-E-00042", serial_number: "SN-1", ownership: "owned", rental_id: null, lifecycle: "active", condition: "good", custody_kind: "employee", location_id: L1, bin_id: null,
   employee_id: "e1", project_id: null, transfer_id: null, repair_reference: null, in_kit_id: null, expected_return_at: null, verified_at: "2026-10-01T00:00:00Z", verified_by: "u", legacy_asset_id: null, notes: null,
-  version: 1, created_by: "u", created_at: "2026-10-01T00:00:00Z", updated_at: "", retired_at: null, where: "With an employee: Sara Ali", employeeName: "Sara Ali", projectName: null, binLabel: null, locationName: "Dubai warehouse", cost: { amount: 4200, currency: "AED" }, overdue: false, ...over,
+  version: 1, created_by: "u", created_at: "2026-10-01T00:00:00Z", updated_at: "", retired_at: null, where: "With an employee: Sara Ali", employeeName: "Sara Ali", projectName: null, binLabel: null, locationName: "Dubai warehouse", cost: { amount: 4200, currency: "AED" }, overdue: false, ownedByNote: null, ...over,
 });
 const counts = (detail: boolean) => buildStockRows({ items: [item()], categories: [], units: detail ? [{ id: "unit-42", item_id: I1, code: "UAE-E-00042", serial_number: "SN-1", lifecycle: "active", condition: "good", custody_kind: "employee", location_id: L1, in_kit_id: null, ownership: "owned" }] : [], balances: [], reservations: [], detailCompanyIds: new Set(detail ? [C1] : []), locationId: "", now: new Date() })[0]!;
 
@@ -57,7 +57,7 @@ const render = async (el: Promise<React.ReactElement | null>) => renderToStaticM
 const here = (p: Record<string, string | null> = {}) => `/inventory?${new URLSearchParams(Object.fromEntries(Object.entries(p).filter(([, v]) => v) as [string, string][])).toString()}`;
 const baseItem = (over: Partial<ItemDetail> = {}): ItemDetail => ({
   item: item(), categoryName: "Computers", companyName: "Enginious", detail: true, canEdit: true, canSeeCosts: true, canConfirm: false, counts: counts(true), categories: [], units: [unitView()], unitsTruncated: false,
-  balances: [], kits: new Map(), movements: [], locations: [loc], bins: [bin], summaryAvailability: [], names, replacedBy: null, ...over,
+  balances: [], kits: new Map(), movements: [], locations: [loc], placeLocations: [loc], bins: [bin], summaryAvailability: [], names, replacedBy: null, ...over,
 });
 
 beforeEach(() => { grants = [{ companyId: C1, capabilities: ["founder"] }]; itemDetail = baseItem(); });
@@ -119,7 +119,7 @@ describe("ItemSidePanel", () => {
 });
 
 const baseUnit = (over: Partial<UnitDetail> = {}): UnitDetail => ({
-  unit: unitView(), item: item(), companyName: "Enginious", canOperate: true, canEdit: true, canSeeCosts: true, kit: [], packable: [], rental: null, history: [], historyTruncated: false, names, locations: [loc], bins: [bin], inKitCode: null, ...over,
+  unit: unitView(), item: item(), companyName: "Enginious", canOperate: true, canEdit: true, canSeeCosts: true, kit: [], packable: [], rental: null, history: [], historyTruncated: false, names, locations: [loc], placeLocations: [loc], bins: [bin], inKitCode: null, ...over,
 });
 
 describe("UnitSidePanel", () => {
@@ -142,6 +142,17 @@ describe("UnitSidePanel", () => {
     const draft = await render(UnitSidePanel({ unitRef: U1, closeHref: "/inventory", here }));
     expect(draft).toContain("Not counted yet");
     expect(draft).not.toContain("Issue to a person");
+  });
+  it("says who owns a unit that sits in another company's warehouse, apart from where it is and who holds it (never for a unit at home)", async () => {
+    unitDetail = baseUnit({ unit: unitView({ custody_kind: "warehouse", employee_id: null, employeeName: null, where: "In the warehouse: Riyadh warehouse · Enginious KSA", ownedByNote: "Owned by Enginious UAE" }) });
+    const away = await render(UnitSidePanel({ unitRef: U1, closeHref: "/inventory", here }));
+    expect(away).toContain("In the warehouse: Riyadh warehouse · Enginious KSA");
+    expect(away).toContain("Owned by");
+    expect(away).toContain("Enginious UAE");
+    expect(away).toContain("never changes who owns it");
+    unitDetail = baseUnit({ unit: unitView({ custody_kind: "warehouse", employee_id: null, employeeName: null, where: "In the warehouse: Dubai warehouse" }) });
+    const home = await render(UnitSidePanel({ unitRef: U1, closeHref: "/inventory", here }));
+    expect(home).not.toContain("never changes who owns it");
   });
   it("flags overdue equipment", async () => {
     unitDetail = baseUnit({ unit: unitView({ overdue: true, expected_return_at: "2026-09-01T00:00:00Z" }) });

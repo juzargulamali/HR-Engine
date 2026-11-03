@@ -40,12 +40,14 @@ export interface Candidate {
   projectName: string | null;
   /** "On the shelf at Dubai, bin A1", "With an employee"… */
   where: string;
+  /** "Owned by Enginious UAE": only set when the owner is not the company that runs the place the unit is in (moving never changes the owner). */
+  ownedBy: string | null;
 }
 
 export const candidateBase = (over: Partial<Candidate> & Pick<Candidate, "key" | "type" | "itemId" | "itemName">): Candidate => ({
   unitId: null, code: null, serial: null, detail: null, tracking: "individual", uom: "each", scale: 0, condition: "good", lifecycle: null, custody: null, qty: null,
   binId: null, binLabel: null, locationId: null, rentalId: null, repairReference: null, inKit: false, employeeId: null, employeeName: null, projectId: null,
-  projectName: null, where: "", ...over,
+  projectName: null, where: "", ownedBy: null, ...over,
 });
 
 export function whereText(c: Pick<Candidate, "custody" | "lifecycle" | "binLabel" | "employeeName" | "projectName" | "repairReference" | "inKit">, locationName?: string | null): string {

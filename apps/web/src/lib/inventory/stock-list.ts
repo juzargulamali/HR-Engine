@@ -317,11 +317,13 @@ export function sortStockRows<T extends StockRow>(rows: readonly T[], sort: Sort
 }
 
 /** What the "Out" cell says in words: "2 on projects, 1 with employees". */
-export function outText(r: Pick<StockRow, "outProjects" | "outEmployees">): string {
+export function outText(r: Pick<StockRow, "outProjects" | "outEmployees"> & { inTransit?: number | null }): string {
   if (r.outProjects === null || r.outEmployees === null) return "—";
   const parts: string[] = [];
   if (r.outProjects > 0) parts.push(`${fmt(r.outProjects)} on projects`);
   if (r.outEmployees > 0) parts.push(`${fmt(r.outEmployees)} with employees`);
+  // Equipment on its way between warehouses is not available at either end until it is received: say where it is.
+  if ((r.inTransit ?? 0) > 0) parts.push(`${fmt(r.inTransit ?? 0)} in transit`);
   return parts.length > 0 ? parts.join(", ") : "None";
 }
 

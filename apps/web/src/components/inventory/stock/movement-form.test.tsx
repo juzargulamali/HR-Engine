@@ -324,3 +324,23 @@ describe("MovementForm: transfers", () => {
     expect(await screen.findByText(/Riyadh warehouse \(in transit: not available there until it is received\)/)).toBeTruthy();
   });
 });
+
+describe("MovementForm: receiving a transfer of equipment another company owns", () => {
+  const ksaTruss: Candidate = { ...laptop, key: "unit-truss", unitId: "u7", code: "KSA-E-00007", itemName: "Truss 3 m", custody: "transit", where: "In transit · Owned by Enginious KSA", ownedBy: "Owned by Enginious KSA" };
+  const withTransfer = (held: Candidate[]): FormContext => ({
+    ...context,
+    transfers: [{ id: "t1", code: "UAE-T-00001", companyId: "c1", fromLocationId: "l1", fromName: "Dubai warehouse", toLocationId: "l2", toName: "Riyadh warehouse", expectedAt: null, carrier: null, reference: null, dispatchedAt: "2026-11-01T08:00:00Z", held }],
+    locations: [{ id: "l2", companyId: "c1", companyName: "Enginious", name: "Riyadh warehouse", timezone: "Asia/Riyadh", bins: [] }],
+  });
+  it("names the owner on each line and says that receiving moves it to the warehouse without changing who owns it", async () => {
+    render(<MovementForm kind="receive_transfer" services={services()} context={withTransfer([ksaTruss])} initial={{ transferId: "t1" }} />);
+    expect(await screen.findByText(/Truss 3 m \(KSA-E-00007\) · Owned by Enginious KSA/)).toBeTruthy();
+    expect(screen.getByText(/Receiving it puts it in Riyadh warehouse.*does not change who owns it/)).toBeTruthy();
+  });
+  it("adds nothing when every item is owned by the company that runs the destination", async () => {
+    render(<MovementForm kind="receive_transfer" services={services()} context={withTransfer([{ ...laptop, custody: "transit", where: "In transit" }])} initial={{ transferId: "t1" }} />);
+    expect(await screen.findByText(/Laptop X1 \(UAE-E-00042\)/)).toBeTruthy();
+    expect(screen.queryByText(/Owned by/)).toBeNull();
+    expect(screen.queryByText(/does not change who owns it/)).toBeNull();
+  });
+});
