@@ -12,16 +12,9 @@ Rollback for each: `<prefix>_90_rollback.sql` (read its header first). Each pack
 
 ## The one installation order (packages stack: 1 -> 2 -> 3)
 
-Migration timestamps sort in installation order across the three packages. Apply **in file-name order**, nothing skipped that a later one needs:
+The single authoritative list of all 14 database changes and the sequence (database first, then the application merges) is **`docs/launch-refinement-install-order.md`**; if this guide and that page differ, that page wins. In short: the two package 2 changes are #12 (`20261216000900_proj_block_task_notifies_pm.sql`, needs Projects) and #13 (`20261216000910_module_access_managers.sql`, needs the access tables of the modules you use), applied in file-name order after #1 to #11 of package 1 and before #14 of package 3.
 
-| Order | Migration | Package |
-|---|---|---|
-| 1 to 11 | `20261216000100` … `20261216000830` (see `docs/launch-p1d-deployment.md`, its table) | package 1 (1b, 1c, 1d) |
-| 12 | `20261216000900_proj_block_task_notifies_pm.sql` | **package 2** (needs Projects) |
-| 13 | `20261216000910_module_access_managers.sql` | **package 2** (needs the access tables of the modules you use) |
-| last | `20261217000100_inv_project_notes.sql` and later | package 3 |
-
-Package 2 needs package 1 installed first (its branch is stacked on package 1). Both changes are additive and idempotent. The application degrades safely when one is missing: a screen that needs a missing function says it could not load that part, it never shows an empty list.
+Both changes below are **migrations, not read-only**: they replace or add database functions (they insert, edit or delete no existing rows) and are additive and safe to run twice. Only the preflight, snapshot, verify and compare files are read-only; the rollback changes things back. Neither changes anything for the current `main` application; the new screens say they could not load that part when a change is missing, never an empty list.
 
 ## 1. A blocker that names someone else also tells the Project Manager (prefix `blocknotify`, `20261216000900_proj_block_task_notifies_pm.sql`)
 
