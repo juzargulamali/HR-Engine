@@ -2011,10 +2011,10 @@ export interface Database {
       proj_company_labels: { Args: Record<string, never>; Returns: { company_id: string; name: string }[] };
       proj_mark_read: { Args: { p_project_id: string }; Returns: undefined };
       proj_unread_counts: { Args: Record<string, never>; Returns: ProjUnreadRow[] };
-      proj_my_notifications: { Args: { p_limit?: number; p_only_unread?: boolean }; Returns: ProjNotificationRow[] };
-      proj_mark_notifications_read: { Args: { p_ids?: string[] | null }; Returns: number };
       proj_scope_decisions_waiting: { Args: Record<string, never>; Returns: ProjScopeDecisionWaitingRow[] };
       proj_scope_decision_context: { Args: { p_scope_change_id: string }; Returns: ProjScopeDecisionContextRow[] };
+      proj_my_notifications: { Args: { p_limit?: number; p_only_unread?: boolean }; Returns: ProjNotificationRow[] };
+      proj_mark_notifications_read: { Args: { p_ids?: string[] | null }; Returns: number };
       proj_create_upload_intent: {
         Args: { p_project_id: string; p_original_name: string; p_mime_type: string; p_size_bytes: number; p_safe_name: string; p_purpose?: string; p_label?: string | null; p_restricted?: boolean };
         Returns: { intent_id: string; quarantine_path: string }[];
