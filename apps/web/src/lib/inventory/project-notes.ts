@@ -21,11 +21,19 @@ export function formatNoteInstant(iso: string | null | undefined, timeZone: stri
   return `${Number(parts.day)} ${MONTHS[Number(parts.month) - 1]} ${parts.year}, ${hour}:${parts.minute} (${zone})`;
 }
 
-/** How long a note has waited, in words ("today", "1 day", "3 days"), counted in whole elapsed days. */
-export function ageText(sinceIso: string, now: Date): string {
-  const ms = now.getTime() - Date.parse(sinceIso);
-  if (!Number.isFinite(ms) || ms < 0) return "today";
-  const days = Math.floor(ms / 86_400_000);
+/** The calendar day an instant falls on in a zone, as a day number (so two instants are compared by calendar day, the way Today does). */
+function dayNumber(ms: number, timeZone: string): number {
+  let zone = "UTC";
+  try { new Intl.DateTimeFormat("en-GB", { timeZone }); zone = timeZone; } catch { /* unknown zone: UTC */ }
+  const [y, m, d] = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms)).split("-").map(Number) as [number, number, number];
+  return Math.floor(Date.UTC(y, m - 1, d) / 86_400_000);
+}
+
+/** How long a note has waited, in words ("today", "1 day", "3 days"): whole calendar days in the warehouse's zone (UTC when none is given). */
+export function ageText(sinceIso: string, now: Date, timeZone = "UTC"): string {
+  const since = Date.parse(sinceIso);
+  if (Number.isNaN(since)) return "today";
+  const days = dayNumber(now.getTime(), timeZone) - dayNumber(since, timeZone);
   if (days < 1) return "today";
   return days === 1 ? "1 day" : `${days} days`;
 }
@@ -209,4 +217,12 @@ export const projectNotesHref = (projectId: string, noteId?: string) => `/projec
 export function notePdfFileName(noteNo: string): string {
   const safe = noteNo.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "").slice(0, 60) || "note";
   return `${safe}.pdf`;
+}
+
+/** The note a dispatch or return made, read from the movement's result (only present when the company switched notes on). Never trusts the shape. */
+export function noteFromResult(result: unknown): { noteId: string; noteNo: string; projectId: string; kind: "dispatch" | "return" } | null {
+  const r = rec(result);
+  const noteId = text(r.note_id), noteNo = text(r.note_no), projectId = text(r.project_id);
+  if (!noteId || !noteNo || !projectId) return null;
+  return { noteId, noteNo, projectId, kind: /-RT-/.test(noteNo) ? "return" : "dispatch" };
 }

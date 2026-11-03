@@ -104,3 +104,23 @@ export async function loadOpenDifferences(locationId: string | null): Promise<No
   if (views.length !== notes.length) throw new Error("A note was read without its current state");
   return views.sort((a, b) => (a.status.difference_reported_at ?? "").localeCompare(b.status.difference_reported_at ?? ""));
 }
+
+export type MovementNoteLoad =
+  | { status: "none" }
+  | { status: "error" }
+  | { status: "ok"; note: { id: string; noteNo: string; projectId: string; kind: "dispatch" | "return"; state: string; supersededBy: string | null } };
+
+/** The note a dispatch or return movement made, if any (History). "none" when the company has notes off, the movement has none, or notes are not installed. */
+export async function loadNoteForMovement(movementId: string): Promise<MovementNoteLoad> {
+  try {
+    const db = await createClient();
+    const { data: note, error } = await db.from("inv_project_notes").select("id, note_no, project_id, kind").eq("movement_id", movementId).maybeSingle();
+    if (error) return isNotInstalled(error) ? { status: "none" } : { status: "error" };
+    if (!note) return { status: "none" };
+    const { data: s, error: sError } = await db.from("inv_project_note_status").select("state, superseded_by_note_id").eq("note_id", note.id).maybeSingle();
+    if (sError || !s) return { status: "error" };
+    return { status: "ok", note: { id: note.id, noteNo: note.note_no, projectId: note.project_id, kind: note.kind, state: s.state, supersededBy: s.superseded_by_note_id } };
+  } catch {
+    return { status: "error" };
+  }
+}

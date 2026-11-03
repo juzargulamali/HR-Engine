@@ -23,6 +23,12 @@ describe("ageText", () => {
     expect(ageText("2026-11-13T08:00:00Z", now)).toBe("1 day");
     expect(ageText("2026-11-10T08:00:00Z", now)).toBe("4 days");
   });
+  it("counts calendar days in the warehouse's zone, the way Today does", () => {
+    // 21:00 UTC on the 13th is already the 14th in Dubai: the same day as 05:00 Dubai time on the 14th.
+    expect(ageText("2026-11-13T21:00:00Z", new Date("2026-11-14T01:00:00Z"), "Asia/Dubai")).toBe("today");
+    expect(ageText("2026-11-13T21:00:00Z", new Date("2026-11-14T01:00:00Z"))).toBe("1 day");
+    expect(ageText("nonsense", now)).toBe("today");
+  });
 });
 
 describe("noteStateWord", () => {

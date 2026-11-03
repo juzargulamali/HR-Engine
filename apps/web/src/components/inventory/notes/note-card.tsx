@@ -1,24 +1,12 @@
 import Link from "next/link";
-import { Download, Printer } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
 import {
-  NOTE_KIND_WORDS, ageText, capacityWord, conditionWord, contentId, differenceLineNumbers, eventText, formatNoteInstant, lineIdentity, lineQtyText, lineTitle, noteStateWord, notePdfHref,
+  NOTE_KIND_WORDS, ageText, capacityWord, conditionWord, contentId, differenceLineNumbers, eventText, formatNoteInstant, lineIdentity, lineQtyText, lineTitle, noteStateWord,
   outcomeWord, replacesNo, supersededByNo, totalQtyText, type NoteView,
 } from "@/lib/inventory/project-notes";
 import { cn } from "@/lib/utils";
+import { NotePdfLinks } from "./note-pdf-links";
 import { AcknowledgeNote, ReportDifference, ResolveDifference, WithdrawDifference } from "./note-actions";
-
-/** Download and print links for one note. The PDF is made on demand from the note's frozen content under the caller's own access. */
-export function NotePdfLinks({ projectId, noteId, noteNo, size = "sm", className }: { projectId: string; noteId: string; noteNo: string; size?: "sm" | "default"; className?: string }) {
-  const href = notePdfHref(projectId, noteId);
-  return (
-    <span className={cn("inline-flex flex-wrap items-center gap-2", className)}>
-      <a href={href} download className={buttonVariants({ size, variant: "outline" })}><Download className="mr-1.5 h-4 w-4" aria-hidden />Download PDF<span className="sr-only"> of {noteNo}</span></a>
-      <a href={href} target="_blank" rel="noopener noreferrer" className={buttonVariants({ size, variant: "ghost" })}><Printer className="mr-1.5 h-4 w-4" aria-hidden />Open to print<span className="sr-only"> {noteNo}</span></a>
-    </span>
-  );
-}
 
 /**
  * One dispatch note or return checklist on Project -> Equipment: number, when, state, PDF, the recorded lines (and for a return, the project totals), the
@@ -26,7 +14,7 @@ export function NotePdfLinks({ projectId, noteId, noteNo, size = "sm", className
  * warehouse operator or Inventory founder of the company that recorded it (the database re-checks the location). Everything shown is the frozen record plus its
  * append-only history; nothing here moves stock.
  */
-export function NoteCard({ view, canAnswer, canResolve, now, open }: { view: NoteView; canAnswer: boolean; canResolve: boolean; now: Date; open?: boolean }) {
+export function NoteCard({ view, canAnswer, canResolve, now, open, sentIn = [] }: { view: NoteView; canAnswer: boolean; canResolve: boolean; now: Date; open?: boolean; sentIn?: readonly string[] }) {
   const n = view.note;
   const st = view.status;
   const tz = n.location_timezone;
@@ -42,7 +30,7 @@ export function NoteCard({ view, canAnswer, canResolve, now, open }: { view: Not
         <span className="font-mono font-medium">{n.note_no}</span>
         <Badge variant={state.tone}>{state.label}</Badge>
         <span className="text-muted-foreground">{NOTE_KIND_WORDS[n.kind]} · {formatNoteInstant(n.occurred_at, tz)}</span>
-        {waiting ? <span className="text-muted-foreground">waiting {ageText(st.pending_since, now)}</span> : null}
+        {waiting ? <span className="text-muted-foreground">waiting {ageText(st.pending_since, now, tz)}</span> : null}
         <span className="text-muted-foreground">{view.payload.lines.length} {view.payload.lines.length === 1 ? "line" : "lines"}</span>
       </summary>
       <div className="space-y-4 border-t border-border p-4">
@@ -86,6 +74,7 @@ export function NoteCard({ view, canAnswer, canResolve, now, open }: { view: Not
                 </li>
               ))}
             </ul>
+            {sentIn.length > 0 ? <p className="mt-1 text-xs" data-sent-in>Sent in dispatch {sentIn.length === 1 ? "note" : "notes"} <span className="font-mono">{sentIn.join(", ")}</span>. The totals count everything sent to the project; nothing is attributed to one request line.</p> : null}
             <p className="mt-1 text-xs text-muted-foreground">Units are exact. Counted stock is shown for the whole project, not per request: the system does not guess which request it belongs to. Confirming this list changes no stock and releases no equipment; a damaged or unchecked item is released only by a warehouse condition check.</p>
           </section>
         ) : null}
@@ -99,7 +88,7 @@ export function NoteCard({ view, canAnswer, canResolve, now, open }: { view: Not
                 <span className="text-muted-foreground">{formatNoteInstant(e.at, tz)}:</span> {eventText(e, n.kind, view.noteNos)}
               </li>
             ))}
-            {st.acknowledged_at === null && st.state !== "superseded" ? <li className="font-medium">{st.difference_state === "open" ? "Waiting for the warehouse to answer the reported difference." : `Waiting for the Project Manager (${ageText(st.pending_since, now)}). Nothing is blocked while it waits.`}</li> : null}
+            {st.acknowledged_at === null && st.state !== "superseded" ? <li className="font-medium">{st.difference_state === "open" ? "Waiting for the warehouse to answer the reported difference." : `Waiting for the Project Manager (${ageText(st.pending_since, now, tz)}). Nothing is blocked while it waits.`}</li> : null}
           </ol>
           {st.acknowledged_at ? <p className="mt-1 text-xs text-muted-foreground">{capacityWord(st.acknowledged_capacity)} acknowledgement of the recorded list in ENGINIOUS OS, using an authenticated account.</p> : null}
         </section>

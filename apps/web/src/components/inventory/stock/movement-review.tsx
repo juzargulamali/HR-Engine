@@ -4,7 +4,9 @@ import { useEffect, useId, useRef } from "react";
 import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { noteFromResult, noteKindWord } from "@/lib/inventory/project-notes";
 import type { SummaryRow } from "@/lib/inventory/stock-movements";
+import { NotePdfLinks } from "../notes/note-pdf-links";
 import type { useMovementFlow } from "./use-movement-flow";
 
 type Flow = ReturnType<typeof useMovementFlow>;
@@ -55,12 +57,20 @@ export function ReviewPanel({ flow, rows, confirmLabel, onConfirm }: { flow: Flo
 export function DonePanel({ flow, onAnother, onClose }: { flow: Flow; onAnother: () => void; onClose?: () => void }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { heading.current?.focus(); }, []);
+  // A dispatch to a project or a return from one made a numbered note (only when the company switched notes on): the PDF can be downloaded or printed right away.
+  const note = noteFromResult(flow.outcome?.result);
   return (
     <div className="space-y-4" data-step="done">
       <Alert variant="success" role="status">
         <h3 ref={heading} tabIndex={-1} style={{ outline: "none" }} className="font-semibold">Recorded</h3>
         <p className="mt-1">{flow.outcome?.message ?? "Recorded."}</p>
       </Alert>
+      {note ? (
+        <div className="space-y-2 rounded-md border border-border p-3" data-note={note.noteNo}>
+          <p className="text-sm"><span className="font-medium">{noteKindWord(note.kind)} <span className="font-mono">{note.noteNo}</span></span> is made. It waits for the Project Manager to {note.kind === "return" ? "confirm" : "acknowledge"} it; nothing else waits for that.</p>
+          <NotePdfLinks projectId={note.projectId} noteId={note.noteId} noteNo={note.noteNo} size="default" />
+        </div>
+      ) : null}
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="outline" onClick={onAnother}>Record another</Button>
         <Link href="/inventory/history" className="inline-flex h-9 items-center rounded-md px-3 text-sm font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">See it in History</Link>

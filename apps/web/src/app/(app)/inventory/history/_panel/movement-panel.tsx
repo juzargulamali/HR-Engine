@@ -4,6 +4,7 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CorrectEntry } from "@/components/inventory/stock/movement-correct";
+import { NotePdfLinks } from "@/components/inventory/notes/note-pdf-links";
 import { listTable } from "@/components/workspace/list-table";
 import { SidePanel } from "@/components/workspace/side-panel";
 import { LoadError } from "@/components/workspace/states";
@@ -11,6 +12,8 @@ import { parseRecordId } from "@/components/workspace/url-state";
 import { getInventoryContext } from "@/lib/inventory/context";
 import { lineFrom, lineTo, movementKindWord, movementWhen, movementZone, type Resolver } from "@/lib/inventory/movement-view";
 import { loadMovementDetail, type MovementDetail } from "@/lib/inventory/stock";
+import { loadNoteForMovement, type MovementNoteLoad } from "@/lib/inventory/project-notes-data";
+import { noteKindWord } from "@/lib/inventory/project-notes";
 import { CONDITION_WORDS, formatQty } from "@/lib/inventory/words";
 import type { InvLocationRow } from "@/types/inventory";
 import { cn } from "@/lib/utils";
@@ -32,6 +35,8 @@ export async function MovementSidePanel({ openId, closeHref, locations }: { open
   if (!d) return shell("Entry not found", <Alert role="status">This entry does not exist, or you do not have access to it.</Alert>);
 
   const m = d.movement;
+  // The numbered note a dispatch to a project or a return from one made (only when the company switched notes on). A failed read says so; a movement without a note shows nothing.
+  const noteLoad: MovementNoteLoad = m.kind === "dispatch_project" || m.kind === "return_project" ? await loadNoteForMovement(m.id) : { status: "none" };
   const loc = new Map(locations.map((l) => [l.id, l]));
   const zone = movementZone(m, (lid) => loc.get(lid)?.timezone ?? null, locations[0]?.timezone ?? "Asia/Dubai");
   const resolver: Resolver = {
@@ -42,6 +47,17 @@ export async function MovementSidePanel({ openId, closeHref, locations }: { open
   };
   const canCorrect = canConfirmStock(ctx.grants, m.company_id) && d.correctable.size > 0;
   const correctLines = m.lines.filter((l) => d.correctable.has(l.id)).map((l) => ({ id: l.id, label: `${d.items.get(l.item_id) ?? "Item"}${l.to_bin_id ? `, bin ${d.binLabels.get(l.to_bin_id) ?? ""}` : ""}`, recorded: formatQty(l.qty), effective: null }));
+  const noteRow: [string, React.ReactNode][] = noteLoad.status === "none" ? [] : [[
+    "Note",
+    noteLoad.status === "error"
+      ? <span key="n" role="status" className="text-destructive">The note of this movement could not be loaded. This is a problem loading it, not proof that there is none.</span>
+      : (
+        <span key="n" className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>{noteKindWord(noteLoad.note.kind)} <span className="font-mono">{noteLoad.note.noteNo}</span> · {NOTE_STATE_WORDS[noteLoad.note.state] ?? noteLoad.note.state}</span>
+          <NotePdfLinks projectId={noteLoad.note.projectId} noteId={noteLoad.note.id} noteNo={noteLoad.note.noteNo} />
+        </span>
+      ),
+  ]];
   const rows: [string, React.ReactNode][] = [
     ["When", movementWhen(m.occurred_at, zone)],
     ["Recorded by", d.names.user(m.performed_by)],
@@ -53,6 +69,7 @@ export async function MovementSidePanel({ openId, closeHref, locations }: { open
     ...(m.note ? [["Note", m.note] as [string, React.ReactNode]] : []),
     ...(m.reason ? [["Reason", m.reason] as [string, React.ReactNode]] : []),
     ...(d.corrects ? [["Corrects", <Link key="c" href={`/inventory/history?open=${d.corrects.id}`} className="font-mono underline underline-offset-2">{d.corrects.code}</Link>] as [string, React.ReactNode]] : []),
+    ...noteRow,
     ...(d.correctedBy.length > 0 ? [["Corrected by", <span key="b" className="space-x-2">{d.correctedBy.map((c) => <Link key={c.id} href={`/inventory/history?open=${c.id}`} className="font-mono underline underline-offset-2">{c.code}</Link>)}</span>] as [string, React.ReactNode]] : []),
   ];
 
@@ -98,5 +115,7 @@ export async function MovementSidePanel({ openId, closeHref, locations }: { open
     `${d.names.user(m.performed_by)} · ${movementWhen(m.occurred_at, zone)}`,
   );
 }
+
+const NOTE_STATE_WORDS: Record<string, string> = { waiting_for_pm: "waiting for the Project Manager", acknowledged: "acknowledged", difference_open: "difference reported, waiting for the warehouse", superseded: "superseded" };
 
 const word = (c: string | null) => (c ? (CONDITION_WORDS[c as keyof typeof CONDITION_WORDS] ?? c.replace("_", " ")) : "—");

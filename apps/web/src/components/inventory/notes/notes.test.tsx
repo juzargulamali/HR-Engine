@@ -56,6 +56,13 @@ describe("Dispatch & return notes on Project -> Equipment", () => {
     expect(html).toContain("released only by a warehouse condition check");
   });
 
+  it("names the dispatch notes a return checklist's totals count, so the two read together", () => {
+    const ret = noteView(returnNoteRow({ created_at: "2026-11-21T12:20:00Z" }), statusRow({ note_id: "n2", kind: "return", note_no: "ENG-RT-00005" }));
+    const html = render([noteView(), ret], { canAnswer: true });
+    expect(html).toMatch(/Sent in dispatch note <span class="font-mono">ENG-D-00017<\/span>/);
+    expect(html).toContain("nothing is attributed to one request line");
+  });
+
   it("an acknowledged note shows who, in what capacity and when, and offers no second acknowledge", () => {
     const s = statusRow({ state: "acknowledged", awaiting: null, acknowledged_at: "2026-11-14T05:10:00Z", acknowledged_by_name: "M. Manager", acknowledged_capacity: "pm" });
     const html = render([noteView(noteRow(), s, [eventRow()])], { canAnswer: true });
@@ -99,5 +106,50 @@ describe("Dispatch & return notes on Project -> Equipment", () => {
     expect(html).toContain("Could not load the dispatch and return notes of this project");
     expect(html).toContain("not an empty list");
     expect(html).toContain('href="/projects/p1/equipment"');
+  });
+});
+
+import { DonePanel } from "../stock/movement-review";
+import { TodayRow } from "../today/today-row";
+import { differenceRows } from "@/lib/inventory/today";
+
+describe("Download / Print on the Send out and Receive back results (C5)", () => {
+  const flow = (result: unknown) => ({ outcome: { error: null, message: "Dispatched.", result } }) as unknown as Parameters<typeof DonePanel>[0]["flow"];
+  it("offers the PDF right after a dispatch or return that made a note", () => {
+    const html = renderToStaticMarkup(<DonePanel flow={flow({ project_id: "p1", note_id: "n1", note_no: "ENG-D-00017" })} onAnother={() => {}} />);
+    expect(html).toContain("Dispatch note");
+    expect(html).toContain("ENG-D-00017");
+    expect(html).toContain('href="/projects/p1/equipment/notes/n1/pdf"');
+    expect(html).toContain("Download PDF");
+    expect(html).toContain("Open to print");
+    expect(html).toContain("nothing else waits");
+    const back = renderToStaticMarkup(<DonePanel flow={flow({ project_id: "p1", note_id: "n2", note_no: "ENG-RT-00005" })} onAnother={() => {}} />);
+    expect(back).toContain("Return checklist");
+    expect(back).toContain("confirm");
+  });
+  it("shows nothing new when the company has not switched notes on (the result carries no note)", () => {
+    const html = renderToStaticMarkup(<DonePanel flow={flow({ project_id: "p1", lines: [] })} onAnother={() => {}} />);
+    expect(html).not.toContain("Download PDF");
+    expect(html).not.toContain("data-note");
+    expect(renderToStaticMarkup(<DonePanel flow={flow(null)} onAnother={() => {}} />)).not.toContain("Download PDF");
+  });
+});
+
+describe("the warehouse Today row for a reported difference (C5)", () => {
+  const s = statusRow({ state: "difference_open", awaiting: "warehouse", difference_state: "open", difference_reason: "quantity_differs", difference_lines: [2], difference_reported_at: "2026-11-15T08:00:00Z" });
+  const [row] = differenceRows([noteView(noteRow(), s, [eventRow({ event: "difference_reported", reason: "quantity_differs", lines: [2], comment: "Only 10 arrived" })])], { now });
+  it("shows the signal with its age and, to a person who may operate stock, the answer control and the PDF", () => {
+    const html = renderToStaticMarkup(<TodayRow row={row!} canOperate checkLocations={[]} />);
+    expect(html).toContain("the Project Manager reports a difference");
+    expect(html).toContain("waiting 1 day");
+    expect(html).toContain("Answer the difference");
+    expect(html).toContain("Download PDF");
+    expect(html).toContain("Custody and availability are unchanged");
+  });
+  it("is still visible to someone who may not operate stock, without the control", () => {
+    const html = renderToStaticMarkup(<TodayRow row={row!} canOperate={false} checkLocations={[]} />);
+    expect(html).toContain("the Project Manager reports a difference");
+    expect(html).not.toContain("Answer the difference");
+    expect(html).toContain("Only a warehouse operator can answer it");
   });
 });

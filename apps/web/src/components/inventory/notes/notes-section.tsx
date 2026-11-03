@@ -18,7 +18,9 @@ export function NotesSection({ notes, canAnswer, canResolveFor, now, openNoteId 
   const rest = notes.filter((v) => v.status.state !== "waiting_for_pm" && v.status.state !== "difference_open");
   const dispatchWaiting = pending.filter((v) => v.note.kind === "dispatch");
   const returnWaiting = pending.filter((v) => v.note.kind === "return");
-  const card = (v: NoteView, open: boolean) => <NoteCard key={v.note.id} view={v} canAnswer={canAnswer} canResolve={canResolveFor(v.note.company_id)} now={now} open={open || openNoteId === v.note.id} />;
+  // A return checklist's totals count what was sent in the project's earlier dispatch notes: they are named so the two documents can be read together (never attributed to one request line).
+  const sentIn = (v: NoteView) => v.note.kind === "return" ? notes.filter((d) => d.note.kind === "dispatch" && d.note.created_at <= v.note.created_at).sort((a, b) => a.note.created_at.localeCompare(b.note.created_at)).map((d) => d.note.note_no) : [];
+  const card = (v: NoteView, open: boolean) => <NoteCard key={v.note.id} view={v} canAnswer={canAnswer} canResolve={canResolveFor(v.note.company_id)} now={now} open={open || openNoteId === v.note.id} sentIn={sentIn(v)} />;
   return (
     <Panel id="notes" title="Dispatch & return notes" description="What the warehouse recorded as sent to this project and received back, kept exactly as recorded. The Project Manager acknowledges each one; nothing waits for the answer.">
       <div className="space-y-5">

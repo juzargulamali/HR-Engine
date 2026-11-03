@@ -9,20 +9,24 @@
  *  - one source that could not be read is reported as failed, never as an empty list or a zero count.
  */
 import { pendingDates, pendingTechnologies, zonedLocalToUtcIso } from "./planning";
+import { ageText, differenceLineNumbers, noteKindWord, reasonWord, type NoteLine, type NoteView } from "./project-notes";
 
 /* ---------- kinds, filters, sources ---------- */
 
-/** "waiting" is stock that has to be bought or rented before a request line can be finished; "held" is a unit held back for checking. Both stay visible. */
-export type QueueKind = "prepare" | "send" | "returns" | "transfer" | "sales" | "waiting" | "held";
-export type SourceKey = "requests" | "returns" | "transfers" | "sales" | "held";
-export const SOURCE_OF: Record<QueueKind, SourceKey> = { prepare: "requests", send: "requests", returns: "returns", transfer: "transfers", sales: "sales", waiting: "requests", held: "held" };
+/**
+ * "waiting" is stock that has to be bought or rented before a request line can be finished; "held" is a unit held back for checking; "difference" is a dispatch note or return
+ * checklist whose Project Manager reported a difference that the warehouse has not answered. All three stay visible until they are dealt with.
+ */
+export type QueueKind = "prepare" | "send" | "returns" | "transfer" | "sales" | "waiting" | "held" | "difference";
+export type SourceKey = "requests" | "returns" | "transfers" | "sales" | "held" | "differences";
+export const SOURCE_OF: Record<QueueKind, SourceKey> = { prepare: "requests", send: "requests", returns: "returns", transfer: "transfers", sales: "sales", waiting: "requests", held: "held", difference: "differences" };
 /** What a failed source is called in the red banner. */
-export const SOURCE_NOUN: Record<SourceKey, string> = { requests: "Equipment requests", returns: "Equipment due back", transfers: "Incoming transfers", sales: "Sales checks", held: "Equipment held for checking" };
-export const SOURCE_KEYS: readonly SourceKey[] = ["requests", "returns", "transfers", "sales", "held"];
+export const SOURCE_NOUN: Record<SourceKey, string> = { requests: "Equipment requests", returns: "Equipment due back", transfers: "Incoming transfers", sales: "Sales checks", held: "Equipment held for checking", differences: "Differences reported on dispatch and return notes" };
+export const SOURCE_KEYS: readonly SourceKey[] = ["requests", "returns", "transfers", "sales", "held", "differences"];
 
 export type ShowFilter = "all" | QueueKind;
-export const SHOW_FILTERS: readonly ShowFilter[] = ["all", "prepare", "send", "returns", "transfer", "sales", "waiting", "held"];
-export const FILTER_LABEL: Record<ShowFilter, string> = { all: "Everything", prepare: "Prepare", send: "Send out", returns: "Receive back", transfer: "Transfers", sales: "Sales checks", waiting: "Waiting / Shortages", held: "Held for checking" };
+export const SHOW_FILTERS: readonly ShowFilter[] = ["all", "prepare", "send", "returns", "transfer", "sales", "waiting", "held", "difference"];
+export const FILTER_LABEL: Record<ShowFilter, string> = { all: "Everything", prepare: "Prepare", send: "Send out", returns: "Receive back", transfer: "Transfers", sales: "Sales checks", waiting: "Waiting / Shortages", held: "Held for checking", difference: "PM reported a difference" };
 
 /** Anything that is not a known value is ignored rather than trusted from the address. */
 export const parseShow = (raw: string): ShowFilter => ((SHOW_FILTERS as readonly string[]).includes(raw) ? (raw as ShowFilter) : "all");
@@ -123,6 +127,12 @@ export interface QueueRow {
   /** Who must act (said in words, never a person's name made up), and what the next action is. Present on Waiting / Shortages and Held rows. */
   responsible?: string;
   next?: string;
+  /** Present only on a "PM reported a difference" row: what the warehouse needs to answer it (the note, what the Project Manager said, the lines they named). */
+  difference?: DifferenceRef;
+}
+
+export interface DifferenceRef {
+  noteId: string; projectId: string; noteNo: string; kind: "dispatch" | "return"; reason: string | null; reportedBy: string | null; comment: string | null; lines: NoteLine[];
 }
 
 export interface BuildContext { now: Date }
@@ -252,6 +262,35 @@ export function heldRows(units: readonly HeldUnitInput[]): QueueRow[] {
       responsible: "The warehouse checks it, then releases it or sends it for repair.",
       next: reserved.length > 0 ? "Check it, or reserve another unit for the request." : "Open the unit and record the check.",
       href: `/inventory/stock?unit=${u.id}`, actionLabel: "Check it", operates: true,
+    };
+  });
+}
+
+/* ---------- differences the Project Manager reported on a dispatch note or return checklist ---------- */
+
+/**
+ * One row per note with an open difference, oldest report first, with its age. The row names who must act (the warehouse that recorded the note) and the next action; it
+ * carries what the Project Manager said so the warehouse can answer it from here. A difference changes no custody and no availability: the row says so.
+ */
+export function differenceRows(views: readonly NoteView[], ctx: BuildContext): QueueRow[] {
+  return views.map((v): QueueRow => {
+    const n = v.note;
+    const zone = safeZone(n.location_timezone);
+    const reportedAt = v.status.difference_reported_at;
+    const report = [...v.events].reverse().find((e) => e.event === "difference_reported");
+    const named = new Set(differenceLineNumbers(v.status.difference_lines));
+    const count = named.size;
+    return {
+      id: `difference:${n.id}`, kind: "difference",
+      title: `${n.note_no}: the Project Manager reports a difference`,
+      forWhom: `${noteKindWord(n.kind)} · ${n.project_ref} ${n.project_name} · ${n.location_name}`,
+      when: reportedAt, zone, late: false,
+      whenLabel: reportedAt ? `Reported ${fmtDay(reportedAt, zone)}, ${fmtTime(reportedAt, zone)} · waiting ${ageText(reportedAt, ctx.now, zone)}` : "Reported",
+      facts: [{ text: reasonWord(n.kind, v.status.difference_reason) }, ...(count > 0 ? [{ text: `${count} ${count === 1 ? "line" : "lines"}` }] : []), { text: "Custody and availability are unchanged" }],
+      responsible: `The warehouse at ${n.location_name} answers it.`,
+      next: "Check the lines, then record that the record stands, or that it was corrected (name the movement that corrected it).",
+      href: null, actionLabel: "Answer the difference", operates: true,
+      difference: { noteId: n.id, projectId: n.project_id, noteNo: n.note_no, kind: n.kind, reason: v.status.difference_reason, reportedBy: report?.by_name ?? null, comment: report?.comment ?? null, lines: v.payload.lines.filter((l) => named.has(l.n)) },
     };
   });
 }
@@ -388,10 +427,11 @@ const byDate = (a: QueueRow, b: QueueRow) => {
 };
 
 /** Rows that wait on something other than a date: each has its own group after the dated ones, so an unresolved shortage or a held unit is never lost among dates. */
-export type GroupKey = Bucket | "waiting" | "held";
-export const GROUP_LABEL: Record<GroupKey, string> = { ...BUCKET_LABEL, waiting: "Waiting / Shortages", held: "Held for checking" };
-export const GROUP_ORDER: readonly GroupKey[] = [...BUCKET_ORDER, "waiting", "held"];
-const groupOf = (r: QueueRow, now: Date): GroupKey => (r.kind === "waiting" ? "waiting" : r.kind === "held" ? "held" : bucketOf(r.when, r.zone, now));
+export type GroupKey = Bucket | "waiting" | "held" | "difference";
+export const GROUP_LABEL: Record<GroupKey, string> = { ...BUCKET_LABEL, waiting: "Waiting / Shortages", held: "Held for checking", difference: "PM reported a difference" };
+/** A difference the Project Manager reported waits for the warehouse's answer, whatever the date: it comes first so it is never lost among dated jobs. */
+export const GROUP_ORDER: readonly GroupKey[] = ["difference", ...BUCKET_ORDER, "waiting", "held"];
+const groupOf = (r: QueueRow, now: Date): GroupKey => (r.kind === "waiting" ? "waiting" : r.kind === "held" ? "held" : r.kind === "difference" ? "difference" : bucketOf(r.when, r.zone, now));
 
 export function groupRows(rows: readonly QueueRow[], now: Date): { bucket: GroupKey; rows: QueueRow[] }[] {
   return GROUP_ORDER
