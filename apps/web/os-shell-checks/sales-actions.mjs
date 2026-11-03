@@ -48,7 +48,7 @@ await step("create enquiry through Quick Add (agency only, short form) lands on 
 const oppId = () => url.split("/").pop();
 await step("completing the only follow-up demands the next action", async () => {
   await page.getByRole("button", { name: /complete/i }).first().click();
-  await dialog().getByLabel(/what happened/i).fill("Spoke to Hana; wants options."); await dialog().getByLabel(/^next action/i).fill("Send two concept options"); await dialog().getByLabel(/^date/i).fill("2026-10-30");
+  await dialog().getByLabel(/what happened/i).fill("Spoke to Hana; wants options."); await dialog().getByLabel(/^next action/i).fill("Send two concept options"); await dialog().getByLabel(/^date/i).fill("2026-11-30");
   await dialog().getByRole("button", { name: /^complete$/i }).click(); await page.getByText("Send two concept options").first().waitFor({ timeout: 10000 });
 });
 await step("move stage to Qualified", async () => {
