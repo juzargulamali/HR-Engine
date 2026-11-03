@@ -70,6 +70,6 @@ These are the owner's own runs and the owner's reported results. They were **not
 |---|---|
 | #1 and #2 | Applied; their verify scripts and preservation comparisons passed. |
 | #3 to #14 | Installed with the batch (`launch_batch_*`); reported applied and verified before #15. |
-| #15 `20261218000100_inv_cross_company_receiving.sql` (pack `inv_xshare_*`) | Applied. Verify: **69 checks, 0 failing**. Preservation compare: **PASS**. All 9 schema fingerprints and 8 checked table fingerprints unchanged. All 6 protected existing functions unchanged. **Exactly 11 functions added.** |
+| #15 (cross-company receiving, pack `inv_xshare_*`) | Applied. Verify: **69 checks, 0 failing**. Preservation compare: **PASS**. All 9 schema fingerprints and 8 checked table fingerprints unchanged. All 6 protected existing functions unchanged. **Exactly 11 functions added.** |
 
 Not part of any of these results, and still not done: the dispatch / return notes switch (`inv_notes_30`) stays **off**; `deact_30_align_deactivated_accounts_OPTIONAL_writes.sql` is unrun; no scheduled job was activated; the broader user and security testing is planned separately after this release and is **not** recorded here as completed.
