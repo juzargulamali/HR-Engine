@@ -1,48 +1,60 @@
 # Launch refinement: the one installation order (packages 1, 2 and 3)
 
-**Nothing here has been run on any hosted project.** This page is the single list; the per-package guides (`docs/launch-p1b-deployment.md`, `launch-p1c`, `launch-p1d`, `launch-p2`, `launch-p3`) explain each change and agree with it. If a guide and this page ever differ, this page wins and the guide is a bug.
+**Nothing here has been run on any hosted project, and nothing in this stack is a hosted action until the owner runs it.** This page is the single authoritative list of the 14 database changes and the sequence for them, the three pull requests and the optional notes switch. The package guides (`docs/launch-p1b-deployment.md`, `launch-p1c`, `launch-p1d`, and `launch-p2` / `launch-p3` on #54 / #55) explain each change and link here; if a guide and this page differ, this page wins and the guide is a bug.
 
-**Prerequisites.** The stack is three pull requests in order: package 1 (#53) is merged first, then package 2 (#54), then package 3 (#55). Apply the migrations **in file-name order** (the timestamps sort in install order across all three). A migration may be skipped only if the module it belongs to is not in use; nothing else may be reordered. Every migration is additive and idempotent (safe to run twice) and **none inserts or edits existing rows** (they replace functions and add objects; the one new column, #14's switch, is added as false for every company).
+## 1. What each kind of SQL file does (read this before running anything)
 
-For each migration use the same five steps from its owner pack in `supabase/manual-sql/` (`<prefix>_00_preflight_readonly.sql`, `_05_preservation_check_readonly.sql`, apply, `_20_verify_readonly.sql`, then `_05` again for the compare); rollback is `<prefix>_90_rollback.sql`. All of those are read-only except the rollback, which restores the earlier function definitions.
-
-| # | Migration (`supabase/migrations/`) | Owner pack prefix | Package | Needs |
-|---|---|---|---|---|
-| 1 | `20261216000100_inv_issue_to_employee_consumes_reservation.sql` | `inv_emp_issue` | 1b (A7) | Inventory |
-| 2 | `20261216000200_proj_scope_proposal_notifies_deciders.sql` | `proj_scope_notify` | 1b (A11) | Projects |
-| 3 | `20261216000300_account_deactivation_inactive_people.sql` | `deact` | 1c (A12) | |
-| 4 | `20261216000400_profiles_status_columns_restricted.sql` | `profstat` | 1c (A13) | |
-| 5 | `20261216000500_attendance_lead_candidates.sql` | `leadpick` | 1c (A14) | |
-| 6 | `20261216000600_recovery_decider_inbox.sql` | `reccard` | 1c (A15) | |
-| 7 | `20261216000700_policy_status_role_check.sql` | `polstat` | 1c (A16) | |
-| 8 | `20261216000800_letters_storage_issued_only.sql` | `letters` | 1c (A17) | |
-| 9 | `20261216000810_approval_routing_country_scope.sql` | `apprscope` | 1d | #3 (`user_is_active`) |
-| 10 | `20261216000820_proj_scope_decision_context.sql` | `scopectx` | 1d | Projects |
-| 11 | `20261216000830_pbx_decisions_waiting_count.sql` | `pbxwait` | 1d | Project budgets |
-| 12 | `20261216000900_proj_block_task_notifies_pm.sql` | `blocknotify` | 2 | Projects |
-| 13 | `20261216000910_module_access_managers.sql` | `modaccess` | 2 | the modules' access tables |
-| 14 | `20261217000100_inv_project_notes.sql` | `inv_notes` | 3 | Inventory, Projects |
-
-Fourteen migrations (11 in package 1, 2 in package 2, 1 in package 3). The latest migration before this stack is `20261215000000_access_grant_rules.sql`.
-
-## The only files that write data (all optional, all owner-run, none run by this work)
-
-| File | What it does | State |
+| Kind | Files | What it does |
 |---|---|---|
-| `deact_30_align_deactivated_accounts_OPTIONAL_writes.sql` | sets the active flag for accounts deactivated before #3 | **UNRUN. Owner decision; skipping it breaks nothing.** |
-| `inv_notes_30_switch_one_company_OPTIONAL_writes.sql` | switches dispatch notes on for **one** company (the switch is off for every company after #14) | **NOT run.** Owner-run only, after #14 is verified. |
-| `inv_notes_80_switch_off_writes.sql` | switches dispatch notes off again for every company | Not run. The safe first response to any note problem. |
+| **(i) Read-only** | `<prefix>_00_preflight_readonly.sql`, `<prefix>_05_preservation_check_readonly.sql` (run twice: snapshot, then compare), `<prefix>_20_verify_readonly.sql`, and the older `*_readonly.sql` files | SELECT only. They create, change and delete nothing. (Checked: no CREATE / INSERT / UPDATE / DELETE / DROP / GRANT statement in any of them for these 14 changes. Older exceptions are labelled in their own headers: `balance_views_00_confirm_readonly.sql` and `balance_views_20_verify_readonly.sql` create one temporary table that only your connection sees; `public_privileges_30_default_probe.sql` is **not** read-only: it creates a table inside a transaction that it rolls back on purpose.) |
+| **(ii) The 14 migrations** | `supabase/migrations/…` listed in section 3 | **Not read-only.** They CHANGE the database structure: replace or add functions, one storage policy, one table's SELECT privilege (#4), one column and one constraint (#14), two tables, a view and triggers (#14). They insert, edit or delete no existing rows. Each is additive and safe to run twice. |
+| **(iii) Rollbacks** | `<prefix>_90_rollback.sql` | **Not read-only.** They CHANGE things back: restore the earlier function definitions, drop the new functions, re-create the earlier policy, or (#4) grant the table's SELECT to signed-in users again, which re-opens the exposure the change closed; `inv_notes_90_rollback.sql` also removes the new objects when no note has been issued. Not part of a normal install; read the file header first. Roll back in the reverse of the order below. |
+| **(iv) Data writes** | `deact_30_align_deactivated_accounts_OPTIONAL_writes.sql`, `inv_notes_30_switch_one_company_OPTIONAL_writes.sql`, `inv_notes_80_switch_off_writes.sql` | **Write data.** `deact_30` sets `profiles.is_active` for accounts already shown as deactivated; `inv_notes_30` switches dispatch and return notes **on** for one company; `inv_notes_80` switches them **off** for every company. All optional, owner-run, **not run**. |
 
-Everything else in the packs is read-only SQL. The scheduled-job activation is deferred and is not part of this stack.
+Unchanged owner decisions: `deact_30` stays unrun pending the owner's review of the affected accounts (skipping it breaks nothing); the notes switch stays **off**; the scheduled-job activation is deferred and is not part of this stack.
 
-## How this order was checked (reproducible)
+## 2. The sequence
+
+Every one of the 14 changes was checked against the **current `main` code** (before any of the three pull requests): **none breaks it**, so the database changes can go first and the old application keeps working while they are applied (section 3, column A). Several new screens do need the new functions (column B), which is why the database goes first.
+
+1. **Baseline (once, before anything).** Record the Vercel cron run history and the PostgreSQL `pg_cron` job list and history as two separate records (`docs/launch-refinement-hosted-checklist.md`). Nothing in this stack activates or changes either scheduler.
+2. **Database: apply migrations 1 to 14 in file-name order** (the timestamps sort in install order across all three packages). The one hard dependency is **#9 needs #3** (`user_is_active`): applying #9 before #3 would break approval routing for new requests, so never reorder it. A migration may be skipped only when the module it belongs to is not in use (column "Needs"). For **each** migration, in the SQL Editor of the V2 project, in this order: preflight (`_00`, section B says "not applied yet"), snapshot (`_05`, keep the `paste` column), apply the migration once, verify (`_20`, last row `OK … 0 failing`), compare (`_05` again with the pasted lines, summary starts `PASS`). Stop at the first row that is not as stated and send the whole result. The checklist's "expected before" findings (an existing defect shown by a preflight) are not a failed installation.
+3. **Application: merge #53, then #54, then #55** (each is based on the one before it; after a merge, retarget the next pull request to `main` and let CI pass before merging it). Vercel deploys `main`. After each merge, run that package's rows of the hosted checklist. If the database changes of a package are not yet applied when its application is released, the new screens say they could not load that part (they never show an empty list or a zero): safe, but noisy, which is why step 2 comes first. Releasing in steps is also safe: apply 1 to 11 then merge #53; apply 12 and 13 then merge #54; apply 14 then merge #55.
+4. **The notes switch stays OFF** during installation and verification. Switching dispatch and return notes on (`inv_notes_30`) is a **separate, later owner decision**, made after #14 is verified and not as part of this installation; `inv_notes_80` switches it off again and is the first response to any note problem. With the switch off the dispatch and return functions behave as before, the note screens show nothing, and there is **no hosted verification of the new dispatch / return workflow in this release** (previews use the live V2 database, so nothing is written there).
+
+Rollback, if ever needed: the pack's `_90_rollback.sql`, in the reverse of the order above (for example #9 before #3: rolling #3 back restores the older routing functions and would also undo #9's change).
+
+## 3. The 14 migrations
+
+**A** = does the current `main` application (before #53, #54, #55) keep working when this migration alone is applied? **B** = what the new application needs it for, and what it does if it is not applied yet. Every migration's pack prefix files are in `supabase/manual-sql/`.
+
+| # | Migration (`supabase/migrations/`) | Pack prefix | PR | A: current `main` after it | B: new application, if not yet applied |
+|---|---|---|---|---|---|
+| 1 | `20261216000100_inv_issue_to_employee_consumes_reservation.sql` | `inv_emp_issue` | #53 | Yes: same function, signature and result; only the refusal of a request's own reservation goes away | No screen. The warehouse's Issue after Reserve is refused with the old message |
+| 2 | `20261216000200_proj_scope_proposal_notifies_deciders.sql` | `proj_scope_notify` | #53 | Yes: same function; deciders gain a notice that `main` words as "A project update." | No screen. No notice is sent (My Day uses #10) |
+| 3 | `20261216000300_account_deactivation_inactive_people.sql` | `deact` | #53 | Yes: same signatures. Deactivating now also clears `is_active` and refuses the last CEO / CTO cases with a message `main` shows; `main` never changes `is_active` itself, so the new self-change guard is never hit; its pickers already filter `is_active` | People & Access deactivation shows "Couldn't check what this account still holds" and **refuses to deactivate** until applied (nothing is changed). Needed by #9 |
+| 4 | `20261216000400_profiles_status_columns_restricted.sql` | `profstat` | #53 | Yes, by code audit: every `profiles` read in `main` names only `id`, `email`, `full_name`, `account_status`, `is_active`; none reads `status_reason` / `status_changed_*` or uses `select *`; the only write (first sign-in activation) is unchanged (`profiles_status_columns.rls.test.ts`). Anything else using `select *` on `profiles` as a signed-in role would now be refused | People & Access shows "could not load" for the deactivation reason of a deactivated account; the old exposure stays until applied |
+| 5 | `20261216000500_attendance_lead_candidates.sql` | `leadpick` | #53 | Yes: new function only | Attendance clock: "could not load the list of project leads" (office and work-from-home still work; Site work needs the list) |
+| 6 | `20261216000600_recovery_decider_inbox.sql` | `reccard` | #53 | Yes: new function only | Approvals page lists what it could not load and the **menu and Home count for every signed-in person say a part could not be loaded** until applied |
+| 7 | `20261216000700_policy_status_role_check.sql` | `polstat` | #53 | Yes: `main`'s Policies page calls it for everyone; afterwards non-drafters get no rows and anonymous has no EXECUTE, and the page only uses the answer to hide a button for people who may draft | Nothing breaks (the page asks only people who may draft; a failed answer leaves the buttons offered). The draft-status exposure stays until applied |
+| 8 | `20261216000800_letters_storage_issued_only.sql` | `letters` | #53 | Yes: `main` shows an employee a Download link only when a signed link could be made, so a pending letter just has none | Letters shows Download for issued letters only either way; the stored-file exposure stays until applied |
+| 9 | `20261216000810_approval_routing_country_scope.sql` | `apprscope` | #53 | Yes **once #3 is applied** (it calls `user_is_active`; before #3 it breaks routing of new requests) | No screen. New requests route as before |
+| 10 | `20261216000820_proj_scope_decision_context.sql` | `scopectx` | #53 | Yes: new functions only | For founders and scope approvers, My Day's Projects line and the Projects overview say they could not be loaded; the decision page says "could not load this scope change" |
+| 11 | `20261216000830_pbx_decisions_waiting_count.sql` | `pbxwait` | #53 | Yes: new function only | Finance menu shows no waiting number (a missing function is treated as not installed; never a zero) |
+| 12 | `20261216000900_proj_block_task_notifies_pm.sql` | `blocknotify` | #54 | Yes: same function; the Project Manager gets an extra information-only blocker notice | No screen. The PM is not told when someone else is named |
+| 13 | `20261216000910_module_access_managers.sql` | `modaccess` | #54 | Yes: new function only | The access-denied screens say "Could not load who can grant access" instead of naming people |
+| 14 | `20261217000100_inv_project_notes.sql` | `inv_notes` | #55 | Yes: dispatch, return and code functions are the old ones plus one guarded call that is skipped while the switch is off (diffed line by line); the new column is false for every company | Project Equipment, My Day and the History panel treat missing note tables as "not installed": no note section and no row (no note can exist before it); a failed read of existing notes says "could not load" |
+
+Fourteen migrations: 11 in package 1 (#53), 2 in package 2 (#54), 1 in package 3 (#55). The latest migration before this stack is `20261215000000_access_grant_rules.sql`.
+
+## 4. How this was checked (reproducible)
 
 ```bash
-# 1. file names strictly increasing, no duplicate timestamps, the 14 above are the only ones from 20261216 on
+# file names strictly increasing, no duplicate timestamps, exactly 14 from 20261216 on (all three branches merged)
 ls supabase/migrations | sort -c && ls supabase/migrations | cut -c1-14 | sort | uniq -d   # prints nothing
 ls supabase/migrations | awk '$0>="20261216"' | wc -l                                         # 14
-# 2. every launch migration is named in a package guide, and every .sql a guide names exists
-# 3. a throwaway database built from every migration (packages/e2e-tests/local-stack/build-db.sh scratch_db),
-#    then the 14 applied again twice with ON_ERROR_STOP: clean, then each owner pack's *_20_verify_readonly.sql
-#    ends "OK ... 0 failing" (14, 11, 49, 9, 7, 8, 9, 3, 14, 11, 7, 12, 11, 77 checks, in the table's order)
+# every .sql file a launch guide names exists, and no package guide still says that the order does not matter
+grep -rn -i "any ord[e]r" docs/launch-p*.md                                                     # prints nothing
 ```
+
+Column A: for each migration the replaced or dropped object was compared with what `main` calls (`git grep` of `main` for the function, table and column names; the three replaced movement functions were diffed against their earlier definitions). Each pack's end-to-end run on a throwaway database is described in its guide.

@@ -14,7 +14,8 @@ import { Alert } from "@/components/ui/alert";
  * v2 drafts already exist (nothing left for it to do); the real
  * authorization/idempotency guarantees still live in the RPC itself.
  */
-export function CreatePhase2bDraftsButton({ allCreated }: { allCreated: boolean }) {
+/** `blocked`: the person holds an HR Admin role that cannot use this (see canSeedPolicyDrafts); the button is shown disabled and the page says why (id `draft-buttons-blocked`). */
+export function CreatePhase2bDraftsButton({ allCreated, blocked = false }: { allCreated: boolean; blocked?: boolean }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<Phase2bDraftResult[] | null>(null);
@@ -27,7 +28,8 @@ export function CreatePhase2bDraftsButton({ allCreated }: { allCreated: boolean 
         type="button"
         variant="outline"
         size="sm"
-        disabled={pending}
+        disabled={pending || blocked}
+        aria-describedby={blocked ? "draft-buttons-blocked" : undefined}
         onClick={() => {
           if (
             !window.confirm(

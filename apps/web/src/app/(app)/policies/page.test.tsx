@@ -80,14 +80,15 @@ describe("Policies page and the seeded-draft status function (A16)", () => {
     expect(html).toContain("Draft a policy");
   });
 
-  it("company-only HR Admin (intended restriction, same rule as the database): the read-only list stays, no draft buttons, no draft-status request", async () => {
+  it("company-only HR Admin (intended restriction, same rule as the database): the read-only list stays, no draft link, no draft-status request, and the draft buttons are disabled with the reason", async () => {
     grants = [{ role: "hr_admin", companyId: "c1", countryCode: null }];
     const html = renderToStaticMarkup((await PoliciesPage()) as never);
     expect(rpcCalls).toEqual([]);
     expect(html).toContain("Country policies");
     expect(html).toContain("All policy versions you can see");
     expect(html).not.toContain("Draft a policy");
-    expect(html).not.toMatch(/Create (Phase|Recovery)/);
+    expect(html.match(/<button[^>]*>Create corrected Phase 2B drafts/)?.[0].replace(/class="[^"]*"/, "")).toContain("disabled");
+    expect(html).toContain("need an HR Admin role that covers all three countries");
   });
 
   it("a country-wide CEO sees the list and no drafting buttons (activation only)", async () => {

@@ -2,7 +2,7 @@
 
 **Nothing here has been run on any hosted project.** This is the database part of the dispatch note / return checklist work (package 3a). The PDF and the screens (package 3b, section "Package 3b" below) need no SQL and no new migration. It is applied by you, in the Supabase SQL Editor of **Enginious HR Engine_V2**, when you decide to. Run each file, paste the **whole** result back, and wait for a reply before the next step.
 
-**Installation order:** this is #14, the last migration of the stack. Packages 1 and 2 are installed first, in file-name order: `docs/launch-refinement-install-order.md`. The switch files `inv_notes_30_...` and `inv_notes_80_...` are owner-run, optional and have **not** been run.
+**Installation order:** this is #14, the last migration of the stack. The database is installed **first**: migrations 1 to 14 in file-name order, then the three pull requests are merged (#53, #54, #55); the one authoritative sequence and the list of all 14 migrations are in **`docs/launch-refinement-install-order.md`** (if this guide and that page differ, that page wins). The switch files `inv_notes_30_...` and `inv_notes_80_...` are **data writes** (they change one setting), owner-run, optional and have **not** been run. **The notes switch stays OFF during installation and verification**; switching it on (`inv_notes_30`) is a separate, later owner decision.
 
 ## What it adds, in plain words
 
@@ -20,19 +20,19 @@ The two movement functions (`inv_dispatch_to_project`, `inv_return_from_project`
 
 With it on, the note is made **inside the same transaction as the movement**: there is never a dispatch without its note or a note without its dispatch, and a number is taken only if the movement is recorded. If a note cannot be made the dispatch or return is **refused with a clear message and nothing is recorded**; the answer is to switch it off (below).
 
-There is no settings screen. You turn it on for **one company** with `inv_notes_30_switch_one_company_OPTIONAL_writes.sql` (edit one reference code, run it; it refuses if the code is wrong or Inventory is off). A founder can also call `inv_set_project_notes(company, true / false)` (audited). Recommended rollout: apply, verify, test on the branch preview with one company, then switch on.
+There is no settings screen. **Not part of this installation:** if the owner later decides to use notes, `inv_notes_30_switch_one_company_OPTIONAL_writes.sql` (edit one reference code, run it; it refuses if the code is wrong or Inventory is off) turns it on for **one company** (a data write; a founder can also call `inv_set_project_notes(company, true / false)`, audited). That decision comes after #14 is applied and verified. **There is no hosted verification of the dispatch / return workflow in this release:** previews use the live V2 database, so no note, dispatch or return may be recorded there. Local verification evidence is in the section "Local verification" below.
 
 ## Steps
 
 1. **Preflight (read-only):** `inv_notes_00_preflight_readonly.sql`. Section B must say OK on every row and "not applied yet". Section D has a row that must say `true` three times (the three functions this replaces are exactly the versions it was built on); if any says false, stop and send the result.
 2. **Snapshot (read-only):** `inv_notes_05_preservation_check_readonly.sql`, exactly as it is. Keep the whole `paste` column.
-3. **Apply:** paste `supabase/migrations/20261217000100_inv_project_notes.sql` into the SQL Editor and run it once (safe to run twice). It adds two tables, one view, seven functions, one column (the switch, false) and replaces three functions (`inv_next_code` gains two counter kinds, plus the two movement functions). It writes no data.
+3. **Apply (a schema and function change, NOT read-only):** paste `supabase/migrations/20261217000100_inv_project_notes.sql` into the SQL Editor and run it once (safe to run twice). It adds two tables, one view, seven functions, one column (the switch, false) and a guard trigger, and replaces three functions (`inv_next_code` gains two counter kinds, plus the two movement functions). It inserts, edits and deletes no existing row.
 4. **Verify (read-only):** `inv_notes_20_verify_readonly.sql`; the last row must say `OK ... 0 failing`.
 5. **Preservation compare (read-only):** paste the step 2 lines where the comment says `>>> PASTE <<<` and run the same file again. The summary must start with **PASS**.
-6. **Switch on, later (optional, writes one column):** `inv_notes_30_switch_one_company_OPTIONAL_writes.sql`.
+6. **Not part of the installation: switch on, later (optional owner decision, a data write of one column):** `inv_notes_30_switch_one_company_OPTIONAL_writes.sql`. The switch stays **off** until the owner decides.
 
-**Safe first response to any problem:** `inv_notes_80_switch_off_writes.sql` (switches it off for every company; every issued note and its history stay and can still be read and answered).
-**Full rollback:** `inv_notes_90_rollback.sql` (read its header): restores the earlier function definitions; removes the new objects only while **no** note has been issued, otherwise keeps the notes and their history.
+**Safe first response to any problem:** `inv_notes_80_switch_off_writes.sql` (a data write: switches it off for every company; every issued note and its history stay and can still be read and answered).
+**Full rollback (not read-only):** `inv_notes_90_rollback.sql` (read its header): restores the earlier function definitions; removes the new objects only while **no** note has been issued, otherwise keeps the notes and their history.
 
 ## Tested locally
 
@@ -42,7 +42,7 @@ There is no settings screen. You turn it on for **one company** with `inv_notes_
 
 The plan PDF (and the coming note PDF) read the logo and the Carlito fonts through `process.cwd()`. Checked locally: the plan PDF rendered with the app's own component embeds Carlito Regular and Bold and the logo image (`pdffonts` / `pdfimages`; page checked by eye), and after a production build the build's file trace for `/projects/[id]/documents/plans/[planId]/pdf` lists `public/brand/enginious-logo.png` and both `src/lib/pdf/fonts/Carlito-*.ttf`. Vercel bundles exactly what that trace lists, so no `outputFileTracingIncludes` is needed. `apps/web/src/lib/pdf/pdf-assets.test.tsx` pins the paths and the embedding.
 
-**Preview-deployment check (owner, I cannot run Vercel):** on the branch preview, sign in as a project member, open an issued client timeline PDF (Project -> Documents -> Plans -> PDF). It must show the ENGINIOUS logo top left and text in the same typeface as the screen (Carlito), not a plain default font. If the logo is missing or the PDF fails, tell me before the note PDF is released.
+**Preview-deployment check (owner, I cannot run Vercel): asset loading only.** On the branch preview, sign in as a project member and open an **already issued** client timeline PDF (Project -> Documents -> Plans -> PDF) without creating anything. It must show the ENGINIOUS logo top left and text in the same typeface as the screen (Carlito), not a plain default font. This checks only that the logo and fonts load on Vercel (`docs/launch-refinement-hosted-checklist.md`, section D); it does not verify the dispatch / return workflow. If the logo is missing or the PDF fails, tell me before the note PDF is released.
 
 
 ## Package 3b: the PDF and the screens (no SQL), and how to enable and check them end to end
@@ -56,17 +56,17 @@ Everything in 3b is application code on top of the 3a database layer. **With the
 * **Warehouse**: Download PDF / Open to print on the Send out and Receive back results (and on the project's notes); **PM reported a difference** on Today (own group, own filter, with its age, the PM's words and the lines named) with the **Answer the difference** action ("the record stands", or "corrected" naming the movement that corrected it; a correction of the same kind for the same project becomes a NEW note that cites the old one; the old note and its events are never altered); a Note row on the History entry of every dispatch / return.
 * **Return checklist**: lines with the recorded outcome (Back, available / Back, held for checking), the project totals (units exact, counted stock at project level, never attributed to a request line), the dispatch notes the totals count, and Confirm / Report a difference. Confirming never releases a held unit: only a warehouse condition check does.
 
-**How to enable it for one company and check it (local stack first, then a preview, then the real company)**
+**How the screens were checked (local stack only; no hosted verification in this release)**
 
-1. Apply the 3a migration and verify it with the owner pack (steps 1 to 5 above).
-2. Switch it on for **one** company: `inv_notes_30_switch_one_company_OPTIONAL_writes.sql` (or, locally, a founder runs `select inv_set_project_notes('<company id>', true)`).
-3. Open the **branch preview** and run the checks in this order, as the real people:
-   * Warehouse operator: Send out (any request with reserved items) -> the "Recorded" panel shows **Dispatch note ENG-D-00001** with **Download PDF** and **Open to print**. Download it: it must show the logo top left, the typeface of the screen (Carlito), **ACKNOWLEDGEMENT PENDING**, the lines with equipment ID and serial, the ledger reference, and no word about a signature. (This is also the C0.5 fonts and logo check on a real deployment.)
+The switch stays **off** during installation and verification, and previews use the live V2 database, so the steps below were run **only on the local disposable stack** (see "Local verification" below; the local switch is turned on by a founder calling `select inv_set_project_notes('<company id>', true)`). They are also the checks the owner can repeat if the notes are ever switched on for a real company, which is a **separate, later owner decision** (`inv_notes_30_...`, a data write), after #14 is applied and verified:
+
+   * Warehouse operator: Send out (any request with reserved items) -> the "Recorded" panel shows **Dispatch note ENG-D-00001** with **Download PDF** and **Open to print**. The PDF shows the logo top left, the typeface of the screen (Carlito), **ACKNOWLEDGEMENT PENDING**, the lines with equipment ID and serial, the ledger reference, and no word about a signature.
    * Project Manager: My Day -> **Dispatch note waiting for you: <project>** -> Project -> Equipment -> Acknowledge. The history now says "Acknowledged by <name> (Project Manager)".
    * Warehouse operator: Stock -> History -> open the dispatch: the Note row says acknowledged; download the PDF again: it now names who acknowledged it and when.
    * Warehouse operator: Receive back (a partial return, one unit damaged) -> **Return checklist ENG-RT-00001** with its PDF. Project Manager: "Returned, please confirm", Report a difference on one line -> warehouse Today shows **PM reported a difference** with its age -> Answer the difference. Stock, availability and custody must be exactly as the warehouse recorded them throughout.
    * A person with no part in the project opens the PDF address: 404.
-4. To stop: `inv_notes_80_switch_off_writes.sql` (every issued note and its history stays and can still be read and answered). The screens go quiet by themselves.
+
+To stop (if the switch is ever turned on): `inv_notes_80_switch_off_writes.sql` (a data write; every issued note and its history stays and can still be read and answered). The screens go quiet by themselves.
 
 After a production build the file trace of the note PDF route lists `public/brand/enginious-logo.png` and both `src/lib/pdf/fonts/Carlito-*.ttf`, as for the plan PDF, so Vercel bundles them. Found and fixed while testing: when a dispatch sent everything, the page refresh made the request "fulfilled" and replaced the Send out step, which removed the "Recorded" panel (and with it the note's PDF links) at once; the step now stays mounted.
 

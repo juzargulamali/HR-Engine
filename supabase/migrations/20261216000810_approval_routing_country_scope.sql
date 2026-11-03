@@ -13,7 +13,7 @@
 -- WHAT DOES NOT CHANGE: grants with no country limit (company-only and global) resolve exactly as before; inactive, terminated and revoked holders are still skipped; the
 -- 'role:ceo' = CEO or CTO rule, the ordering (oldest grant first) and the self-approval refusals; APPROVALS ALREADY PENDING keep their approver (nothing re-routes them: only
 -- new requests use the corrected lookup); the shared-queue checks (has_role on the caller), resolve_role_holders (notification recipients) and every other function.
--- Rollback: supabase/manual-sql/approval_scope_90_rollback.sql restores the previous bodies.
+-- Rollback: supabase/manual-sql/apprscope_90_rollback.sql restores the previous bodies.
 
 create or replace function resolve_approver(p_approver_type text, p_employee_id uuid)
 returns uuid
