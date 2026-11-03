@@ -15,6 +15,7 @@ import { QuickAddItem } from "@/components/inventory/stock/quick-add-item";
 import { ColumnsMenu } from "@/components/workspace/columns-menu";
 import { listTable } from "@/components/workspace/list-table";
 import { ListToolbar, type ToolbarFilter } from "@/components/workspace/list-toolbar";
+import { CrossCompanySection } from "@/components/inventory/cross-company-section";
 import { ClickableRow } from "@/components/workspace/clickable-row";
 import { RememberList } from "@/components/workspace/list-memory";
 import { PanelLink } from "@/components/workspace/panel-link";
@@ -87,6 +88,8 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
   const cols = parseColumns(firstParam(sp, "cols"), offered, STOCK_DEFAULT_COLUMNS.filter((c) => offered.includes(c)));
   const canAdd = ctx.grants.some((g) => canManageCatalogue(ctx.grants, g.companyId));
   const canOperate = canOperateAnyStock(ctx.grants);
+  // Other companies' equipment at, or on its way to, a warehouse this person operates (and transfers between companies): only people who operate stock can have any.
+  const cross = canOperate ? <CrossCompanySection locationId={location} here={here} /> : null;
 
   const hrefs = {
     scan: here({ action: "scan", open: null, unit: null }),
@@ -155,6 +158,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
       <div className="space-y-5">
         {header(addButton)}
         <EmptyState title="No items yet" description={canAdd ? "Add the first item to the catalogue, then receive stock for it." : "Nothing has been added to the catalogue yet. Ask someone who manages the catalogue."} />
+        {cross}
         {panel}
       </div>
     );
@@ -227,6 +231,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
           </Table>
         </>
       )}
+      {cross}
       {panel}
     </div>
   );

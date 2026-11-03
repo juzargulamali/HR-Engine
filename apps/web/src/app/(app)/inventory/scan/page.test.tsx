@@ -48,11 +48,11 @@ describe("Scan page address (the QR on a label)", () => {
     expect(state.rpc).toBe(0);
   });
 
-  it("gives the safe message, and opens nothing, for a code that is unknown or not allowed", async () => {
+  it("gives the safe message, and opens nothing, for a code that is unknown or not allowed (after the one read-only look for another company's unit the person may handle)", async () => {
     const html = await run({ c: "UAE-E-00042" });
     expect(html).toContain("This code is not available to you or does not exist.");
     expect(state.redirected).toBeNull();
-    expect(state.rpc).toBe(0);
+    expect(state.rpc).toBe(1);
   });
 
   it("shows the scanner with no code in the address, and looks nothing up", async () => {

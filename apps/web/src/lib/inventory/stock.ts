@@ -11,6 +11,8 @@ export type { ScanResolution, FormContext, FormLocation, FormProject, FormRental
 import { sourceFor, type AdjustAction, type MovementKind } from "./stock-movements";
 import { FOREIGN_PLACE, itemOwnedByNote, ownedByNote, placeOf, transitRoute, type PlaceCtx } from "./places";
 import { CUSTODY_WORDS } from "./words";
+import { loadXDestinations, loadXIncoming, loadXUnits } from "./xshare-data";
+import { formDestination, unitCandidate as xUnitCandidate } from "./xshare";
 import type {
   InvBalanceRow, InvBinRow, InvCategoryRow, InvCustody, InvItemRow, InvKitContentRow, InvLocationRow, InvMovementKind, InvMovementRow, InvRentalRow, InvTracking, InvTransferRow, InvUnitRow,
 } from "@/types/inventory";
@@ -682,7 +684,14 @@ export async function resolveCode(ctx: InventoryContext, raw: string): Promise<S
   if (parsed.kind === "unit") {
     const { data: u, error } = await db.from("inv_units").select("*").eq("code", parsed.code).maybeSingle();
     if (error) return { ok: false, message: "The code could not be looked up right now. Try again." };
-    if (!u) return { ok: false, message: NOT_FOUND_MESSAGE };
+    if (!u) {
+      // Another company's unit that this person may handle (in transit to, or on the shelf at, a warehouse they operate): the narrow function answers.
+      let x: Awaited<ReturnType<typeof loadXUnits>>;
+      try { x = await loadXUnits({ code: parsed.code }, db); } catch { return { ok: false, message: "The code could not be looked up right now. Try again." }; }
+      const found = x[0];
+      if (!found) return { ok: false, message: NOT_FOUND_MESSAGE };
+      return { ok: true, kind: "unit", unitId: found.unitId, itemId: found.itemId, code: found.code, candidate: xUnitCandidate(found, { transit: found.custody === "transit", locationId: found.custody === "warehouse" ? found.locationId : null }) };
+    }
     const { data: item } = await db.from("inv_items").select("*").eq("id", u.item_id).maybeSingle();
     if (!item) return { ok: false, message: NOT_FOUND_MESSAGE };
     const { locName, binMap } = await locationAndBinMaps(db, u.company_id);
@@ -725,11 +734,16 @@ export async function loadFormContext(ctx: InventoryContext, needs: { projects?:
   const locations = operable.map(toForm);
   const destinations = destCandidates.map(toForm);
 
-  const [projects, requests, transfers, rentals] = await Promise.all([
+  // Cross-company receiving (migration 20261218000100): warehouses of other companies that this company's owner has authorised as destinations, and
+  // transfers sent to a warehouse this person operates by another company. Both are answered by narrow database functions, never by reading the owner's rows.
+  const wantTransfers = !!needs.transfers && operable.length > 0;
+  const [projects, requests, transfers, rentals, xDest, xIncoming] = await Promise.all([
     needs.projects && companyIds.length > 0 ? db.from("proj_projects").select("id, company_id, reference, name, status").in("company_id", companyIds).neq("status", "archived").order("name").limit(500) : Promise.resolve({ data: [] as { id: string; company_id: string; reference: string; name: string; status: string }[], error: null }),
     needs.requests && companyIds.length > 0 ? db.from("inv_requests").select("id, company_id, code, kind, project_id, employee_id, title, status, expected_return_at, needed_until").in("company_id", companyIds).in("status", ["submitted", "in_progress"]).order("created_at", { ascending: false }).limit(300) : Promise.resolve({ data: [] as { id: string; company_id: string; code: string; kind: "project" | "employee"; project_id: string | null; employee_id: string | null; title: string | null; status: string; expected_return_at: string | null; needed_until: string | null }[], error: null }),
     needs.transfers && operable.length > 0 ? db.from("inv_transfers").select("*").in("to_location_id", operable.map((l) => l.id)).eq("status", "in_transit").order("dispatched_at", { ascending: false }).limit(100) : Promise.resolve({ data: [] as InvTransferRow[], error: null }),
     needs.rentals && companyIds.length > 0 ? db.from("inv_rentals").select("*").in("company_id", companyIds).eq("status", "open").order("return_deadline").limit(200) : Promise.resolve({ data: [] as InvRentalRow[], error: null }),
+    needs.transfers && companyIds.length > 0 ? loadXDestinations(db) : Promise.resolve([]),
+    wantTransfers ? loadXIncoming(operable.map((l) => l.id), db) : Promise.resolve([]),
   ]);
   fail("projects", projects.error);
   fail("requests", requests.error);
@@ -765,11 +779,18 @@ export async function loadFormContext(ctx: InventoryContext, needs: { projects?:
       if (i && b.transfer_id) (heldByTransfer.get(b.transfer_id) ?? heldByTransfer.set(b.transfer_id, []).get(b.transfer_id)!).push({ ...balanceCandidate(b, i, empty, empty), where: "In transit" });
     }
   }
+  const knownIds = new Set(destinations.map((d) => d.id));
+  const sharedDestinations = xDest.filter((d) => !knownIds.has(d.id)).map(formDestination);
+  const ownTransferIds = new Set(trs.map((t) => t.id));
   return {
-    locations, destinations,
+    locations, destinations: [...destinations, ...sharedDestinations],
     projects: (projects.data ?? []).map((p) => ({ id: p.id, companyId: p.company_id, reference: p.reference, name: p.name, status: p.status })),
     requests: (requests.data ?? []).map((r) => ({ id: r.id, companyId: r.company_id, code: r.code, kind: r.kind, projectId: r.project_id, employeeId: r.employee_id, title: r.title, status: r.status, expectedReturnAt: r.expected_return_at ?? r.needed_until })),
-    transfers: trs.map((t) => ({ id: t.id, code: t.code, companyId: t.company_id, fromLocationId: t.from_location_id, fromName: routeName(t.from_location_id, t.company_id), toLocationId: t.to_location_id, toName: routeName(t.to_location_id, t.company_id), expectedAt: t.expected_at, carrier: t.carrier, reference: t.reference, dispatchedAt: t.dispatched_at, held: heldByTransfer.get(t.id) ?? [] })),
+    transfers: [
+      ...trs.map((t) => ({ id: t.id, code: t.code, companyId: t.company_id, fromLocationId: t.from_location_id, fromName: routeName(t.from_location_id, t.company_id), toLocationId: t.to_location_id, toName: routeName(t.to_location_id, t.company_id), expectedAt: t.expected_at, carrier: t.carrier, reference: t.reference, dispatchedAt: t.dispatched_at, held: heldByTransfer.get(t.id) ?? [] })),
+      // Sent to this person's warehouse by another company: the owner's rows are not readable here, so these come from the narrow function (a transfer already read above is not listed twice).
+      ...xIncoming.filter((t) => !ownTransferIds.has(t.id)),
+    ],
     rentals: ((rentals.data ?? []) as InvRentalRow[]).map((r) => ({ id: r.id, companyId: r.company_id, supplier: r.supplier_name, reference: r.external_reference, deadline: r.return_deadline })),
     canSeeCostsByCompany: Object.fromEntries(companyIds.map((id) => [id, canSeeCosts(ctx.grants, id)])),
   };

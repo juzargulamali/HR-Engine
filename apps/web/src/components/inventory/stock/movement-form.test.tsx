@@ -325,6 +325,26 @@ describe("MovementForm: transfers", () => {
   });
 });
 
+describe("MovementForm: sending to another company's warehouse", () => {
+  const withShared: FormContext = {
+    ...context,
+    destinations: [...context.destinations, { id: "k1", companyId: "c2", companyName: "Enginious KSA", name: "Jeddah warehouse", timezone: "Asia/Riyadh", bins: [], sharedFrom: "c1" }, { id: "k2", companyId: "c3", companyName: "Enginious Qatar", name: "Doha warehouse", timezone: "Asia/Qatar", bins: [], sharedFrom: "c9" }],
+  };
+  it("offers a warehouse of another company only when its owner authorised it for the company whose warehouse this is, naming the company", () => {
+    render(<MovementForm kind="transfer" services={services()} context={withShared} initial={{ candidates: [laptop], locationId: "l1" }} />);
+    const options = within(screen.getByLabelText("Send to")).getAllByRole("option").map((o) => o.textContent);
+    expect(options).toEqual(["Choose the destination…", "Riyadh warehouse", "Jeddah warehouse · Enginious KSA (authorised)"]);
+    expect(options.join("|")).not.toMatch(/Doha/);
+  });
+  it("says the equipment stays the sender's and names the other company in the review", async () => {
+    render(<MovementForm kind="transfer" services={services()} context={withShared} initial={{ candidates: [laptop], locationId: "l1" }} />);
+    fireEvent.change(screen.getByLabelText("Send to"), { target: { value: "k1" } });
+    expect(screen.getByText(/The equipment stays yours: the other company only receives and holds it/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    expect(await screen.findByText(/Jeddah warehouse · Enginious KSA \(in transit: not available there until it is received\)/)).toBeTruthy();
+  });
+});
+
 describe("MovementForm: receiving a transfer of equipment another company owns", () => {
   const ksaTruss: Candidate = { ...laptop, key: "unit-truss", unitId: "u7", code: "KSA-E-00007", itemName: "Truss 3 m", custody: "transit", where: "In transit · Owned by Enginious KSA", ownedBy: "Owned by Enginious KSA" };
   const withTransfer = (held: Candidate[]): FormContext => ({

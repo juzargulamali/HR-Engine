@@ -143,7 +143,8 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
     context.requests.filter((r) => r.companyId === companyId && r.kind === kindOfRequest && (kindOfRequest === "project" ? r.projectId === pid : empId ? r.employeeId === empId : false));
   const chosenRequest = context.requests.find((r) => r.id === requestId);
 
-  const destinations = context.destinations.filter((l) => l.companyId === companyId && l.id !== effectiveLocationId);
+  // Same-company warehouses, plus warehouses of another company that the OWNING company (the one whose warehouse this is) has authorised.
+  const destinations = context.destinations.filter((l) => (l.companyId === companyId || l.sharedFrom === companyId) && l.id !== effectiveLocationId);
   const source = sourceFor(kind, adjustAction);
 
   const held: HeldSource | null = (() => {
@@ -221,7 +222,7 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
   }
 
   // A warehouse is named with its company when the person works with several ("Dubai warehouse · Enginious UAE").
-  const placeText = (l: FormLocation) => (multiCompany ? `${l.name} · ${l.companyName}` : l.name);
+  const placeText = (l: FormLocation) => (multiCompany || l.companyId !== companyId ? `${l.name} · ${l.companyName}` : l.name);
   const names = {
     project: (id: string) => { const p = context.projects.find((x) => x.id === id); return p ? `${p.reference} ${p.name}` : undefined; },
   };
@@ -390,12 +391,12 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
           <label htmlFor={`${uid}-to`} className="text-sm font-medium leading-none">Send to</label>
           <Select id={`${uid}-to`} value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} disabled={locked || !effectiveLocationId} required>
             <option value="">Choose the destination…</option>
-            {destinations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            {destinations.map((l) => <option key={l.id} value={l.id}>{l.name}{l.companyId !== companyId ? ` · ${l.companyName} (authorised)` : ""}</option>)}
           </Select>
           {destinations.length === 0 ? (
             <p className="text-sm text-muted-foreground" role="status">There is no other location to send to yet. Add one in Manage, Setup, Locations, then come back.</p>
           ) : (
-            <p className="text-sm text-muted-foreground">It will be in transit, and not available at the destination, until someone there records it as received.</p>
+            <p className="text-sm text-muted-foreground">It will be in transit, and not available at the destination, until someone there records it as received.{destinations.some((l) => l.id === toLocationId && l.companyId !== companyId) ? " The equipment stays yours: the other company only receives and holds it." : ""}</p>
           )}
         </div>
       ) : null}

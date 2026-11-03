@@ -30,6 +30,7 @@ vi.mock("@/lib/inventory/context", () => ({
 vi.mock("./_panel/action-panel", () => ({ ActionSidePanel: () => null, parseAction: (r: string) => (["receive", "issue", "dispatch", "return", "transfer", "scan"].includes(r) ? r : null) }));
 let quickAddCompanies: { id: string; name: string; categories: { id: string; label: string }[] }[] = [];
 vi.mock("@/components/inventory/stock/quick-add-item", () => ({ QuickAddItem: (p: { companies: typeof quickAddCompanies }) => { quickAddCompanies = p.companies; return <button type="button">Add item</button>; } }));
+vi.mock("@/components/inventory/cross-company-section", () => ({ CrossCompanySection: () => null }));
 vi.mock("./_panel/item-panel", () => ({ ItemSidePanel: () => null }));
 vi.mock("./_panel/unit-panel", () => ({ UnitSidePanel: () => null }));
 

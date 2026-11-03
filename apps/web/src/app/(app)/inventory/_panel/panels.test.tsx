@@ -49,6 +49,12 @@ vi.mock("@/lib/inventory/stock", () => ({
   employeeNameFor: async () => null, resolveCodes: async () => [],
 }));
 
+let xUnits: Record<string, unknown>[] = [];
+vi.mock("@/lib/inventory/xshare-data", async () => {
+  const { mapUnit } = await import("@/lib/inventory/xshare");
+  return { loadXUnits: async () => xUnits.map(mapUnit), loadXTransfersOfUnit: async () => [] };
+});
+
 import { ItemSidePanel } from "./item-panel";
 import { UnitSidePanel } from "./unit-panel";
 import { MovementSidePanel } from "../history/_panel/movement-panel";
@@ -175,6 +181,19 @@ describe("UnitSidePanel", () => {
   it("is 'not found' for a person who may not read units (the database returns nothing)", async () => {
     unitDetail = null;
     expect(await render(UnitSidePanel({ unitRef: "UAE-E-00042", closeHref: "/inventory", here }))).toContain("or you do not have access to it");
+  });
+  it("shows another company's unit that the person may handle as a minimal record: owner, ID, serial, status, no cost and no history", async () => {
+    unitDetail = null;
+    xUnits = [{ unit_id: "ux", code: "UAE-E-00042", serial_number: "SN-7", item_id: "i1", item_name: "LED panel", category_name: "Screens", condition: "good", custody_kind: "transit", ownership: "owned",
+      owner_company_id: "c-uae", owner_company_name: "Enginious UAE", location_id: "l9", location_name: "Riyadh warehouse", location_company_id: "c-ksa", bin_id: null, bin_code: null, transfer_id: "t1", transfer_code: "UAE-T-00001", usable_here: false }];
+    try {
+      const html = await render(UnitSidePanel({ unitRef: "UAE-E-00042", closeHref: "/inventory", here }));
+      expect(html).toContain("Owned by Enginious UAE");
+      expect(html).toContain("SN-7");
+      expect(html).toContain("On the way to Riyadh warehouse (UAE-T-00001)");
+      expect(html).toContain("/inventory/transfers/t1");
+      expect(html).not.toMatch(/Purchase cost|Notes|>History</);
+    } finally { xUnits = []; }
   });
   it("shows no actions to someone who cannot operate stock", async () => {
     grants = [{ companyId: C1, capabilities: ["view_stock"] }];

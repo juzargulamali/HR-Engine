@@ -135,7 +135,11 @@ export function candidateMatches(c: Candidate, q: string): boolean {
 // What the movement forms are given (plain data, safe to pass from the server to the browser)
 // ---------------------------------------------------------------------------------------------------------------
 
-export interface FormLocation { id: string; companyId: string; companyName: string; name: string; timezone: string; bins: { id: string; code: string; label: string | null }[] }
+export interface FormLocation {
+  id: string; companyId: string; companyName: string; name: string; timezone: string; bins: { id: string; code: string; label: string | null }[];
+  /** Only on a Send destination run by ANOTHER company: the owning company whose sharing authorisation makes it a valid destination (offered only from that company's warehouse). */
+  sharedFrom?: string;
+}
 export interface FormProject { id: string; companyId: string; reference: string; name: string; status: string }
 export interface FormRequest { id: string; companyId: string; code: string; kind: "project" | "employee"; projectId: string | null; employeeId: string | null; title: string | null; status: string; expectedReturnAt: string | null }
 export interface FormTransfer { id: string; code: string; companyId: string; fromLocationId: string; fromName: string; toLocationId: string; toName: string; expectedAt: string | null; carrier: string | null; reference: string | null; dispatchedAt: string; held: Candidate[] }
