@@ -38,4 +38,21 @@ describe("Policies page and the seeded-draft status function (A16)", () => {
     expect(rpcCalls).toEqual(["preflight_phase2b_v2_policy_status"]);
     expect(html).toContain("Draft a policy");
   });
+
+  it("company-only HR Admin (intended restriction, same rule as the database): the read-only list stays, no draft buttons, no draft-status request", async () => {
+    grants = [{ role: "hr_admin", companyId: "c1", countryCode: null }];
+    const html = renderToStaticMarkup((await PoliciesPage()) as never);
+    expect(rpcCalls).toEqual([]);
+    expect(html).toContain("Country policies");
+    expect(html).toContain("All policy versions you can see");
+    expect(html).not.toContain("Draft a policy");
+    expect(html).not.toMatch(/Create (Phase|Recovery)/);
+  });
+
+  it("a country-wide CEO sees the list and no drafting buttons (activation only)", async () => {
+    grants = [{ role: "ceo", companyId: null, countryCode: null }];
+    const html = renderToStaticMarkup((await PoliciesPage()) as never);
+    expect(rpcCalls).toEqual([]);
+    expect(html).not.toContain("Draft a policy");
+  });
 });

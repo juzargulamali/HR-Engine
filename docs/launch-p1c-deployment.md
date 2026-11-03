@@ -73,7 +73,9 @@ Rollback for each: `<prefix>_90_rollback.sql` (read its header first). The migra
 
 **Hosted check first.** Preflight section D shows who can execute it today, how many seeded drafts exist, and whether any draft payload mentions pay (the answer that decides whether this is more than a low risk).
 
-**Tested locally:** `policy_status_role_check.rls.test.ts`.
+**Company-only HR Admin (intended, tested).** An HR Admin whose grant is limited to one company keeps the read-only Policies list (active versions) and Public holidays, and does not see drafts or the draft / activate / delete controls. That is the rule the policy engine has always had (a policy can affect every company in a country, so drafting needs an HR Admin grant not limited to one company, `docs/02-database-schema.md` section 2.4) and the same one the status function now applies; the page already hid the draft buttons from them before A16. Nothing was broadened to restore a screen. Details and the tests are in `docs/launch-p1d-deployment.md`.
+
+**Tested locally:** `policy_status_role_check.rls.test.ts`, `policy_company_only_hr.rls.test.ts`.
 
 ## A17. A letter still pending approval cannot be downloaded by the employee (prefix `letters`, `20261216000800_letters_storage_issued_only.sql`)
 
