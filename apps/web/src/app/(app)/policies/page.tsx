@@ -40,7 +40,9 @@ export default async function PoliciesPage() {
   // nothing is deleted or modified by this query.
   // Staff (nobody who may draft or review drafts) get the readable page: the rules in force, their own country first. The database already hides drafts and
   // old versions from them; this only decides which page is drawn, so HR and the executives keep the console below exactly as it was.
-  const isConsoleUser = (countries ?? []).some((c) => canDraftPolicy(session.grants, c.code) || canViewDraftPolicies(session.grants, c.code));
+  // A company-only HR Admin (or CEO / CTO) holds the role without a country-wide grant: the database shows them the active versions only and refuses drafting, but they are HR, so they
+  // keep the list as it was (read-only) rather than the staff page. Any HR Admin, CEO or CTO grant counts for the page; what each may do stays decided by the database and by the checks below.
+  const isConsoleUser = session.grants.some((g) => g.role === "hr_admin" || g.role === "ceo" || g.role === "cto") || (countries ?? []).some((c) => canDraftPolicy(session.grants, c.code) || canViewDraftPolicies(session.grants, c.code));
   if (!isConsoleUser) {
     const { data: me, error: meError } = session.employeeId ? await supabase.from("employees").select("country_code").eq("id", session.employeeId).maybeSingle() : { data: null, error: null };
     // If the person's country cannot be read, every country is listed (nothing is hidden, nothing guessed).
