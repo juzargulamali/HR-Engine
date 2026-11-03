@@ -1,8 +1,10 @@
 import type { LucideIcon } from "lucide-react";
-import { BadgeCheck, CalendarClock, ClipboardCheck, FileCheck2, FileClock, Hourglass, IdCard, ShieldCheck } from "lucide-react";
+import { BadgeCheck, CalendarClock, ClipboardCheck, ClipboardList, FileCheck2, FileClock, Hourglass, IdCard, ShieldCheck } from "lucide-react";
 import { HANDOVER_KIND_LABEL, type HandoverRowKind } from "@/lib/crm/handover-attention";
 import type { HandoverCheck } from "@/lib/crm/handover-attention-data";
 import type { ApprovalsWaiting } from "@/lib/crm/my-day";
+import type { WaitingNotesLoad } from "@/lib/inventory/project-notes-data";
+import { projectNotesHref } from "@/lib/inventory/project-notes";
 import { waitingText, type WaitingResult, type WaitingSource } from "@/lib/my-day/waiting";
 
 export type ActionItem = {
@@ -137,4 +139,26 @@ export function waitingOnOthersItems(requests: Record<WaitingSource, WaitingResu
   }
   if (inReview > 0) items.push({ key: "waiting-review", icon: Hourglass, label: inReview === 1 ? "Task you sent for review, waiting on the reviewer" : "Tasks you sent for review, waiting on the reviewer", count: inReview, href: "/projects/work" });
   return items;
+}
+
+/**
+ * "Needs me" rows for dispatch notes and return checklists waiting for the person's acknowledgement (they are the current Project Manager, an acting Project Manager
+ * or a Projects founder: the database decides, `inv_notes_waiting_for_me`). One row per project, oldest waiting first, linking to that project's Equipment page where the
+ * notes are. Acknowledging is never blocking: it is an item to do, not a gate. A failed read is an error row, never "nothing waiting".
+ */
+export function projectNoteItems(load: WaitingNotesLoad, now: Date): ActionItem[] {
+  if (load.status === "none") return [];
+  if (load.status === "error") return [{ key: "inv-notes", icon: ClipboardList, label: "Dispatch and return notes could not be loaded", count: 0, href: "/projects", error: true }];
+  const byProject = new Map<string, typeof load.notes>();
+  for (const n of load.notes) byProject.set(n.projectId, [...(byProject.get(n.projectId) ?? []), n]);
+  return [...byProject.entries()].map(([projectId, notes]) => {
+    const dispatches = notes.filter((n) => n.kind === "dispatch").length;
+    const returns = notes.length - dispatches;
+    const what = returns === 0 ? (dispatches === 1 ? "Dispatch note waiting for you" : "Dispatch notes waiting for you") : dispatches === 0 ? (returns === 1 ? "Returned equipment, please confirm" : "Returned equipment, please confirm") : "Dispatch and return notes waiting for you";
+    const oldest = notes.map((n) => n.waitingSince).sort()[0] ?? null;
+    return {
+      key: `inv-notes-${projectId}`, icon: ClipboardList, label: `${what}: ${notes[0]!.projectName}`, count: notes.length,
+      href: projectNotesHref(projectId, notes.length === 1 ? notes[0]!.noteId : undefined), detail: waitingText(oldest, now),
+    };
+  });
 }

@@ -41,13 +41,14 @@ import { BirthdaysSection } from "./birthdays-section";
 import { getCompanySnapshot } from "./dashboard-data";
 import { CompanyComparisonTable } from "./company-comparison-table";
 import { attendanceSentence, CALENDAR_NOTE } from "./attendance-summary";
-import { attentionSentence, budgetWaitingDetail, buildActionItems, commercialApprovalItems, handoverItems, waitingOnOthersItems, type ActionItem } from "./action-centre";
+import { attentionSentence, budgetWaitingDetail, buildActionItems, commercialApprovalItems, handoverItems, projectNoteItems, waitingOnOthersItems, type ActionItem } from "./action-centre";
 import { AttendanceClockCard } from "./attendance-clock-card";
 import { AttendanceCompletionBar } from "./attendance-completion-bar";
 import { UpcomingSection } from "./upcoming-section";
 import { DashboardHeader } from "./dashboard-header";
 import { loadSalesToday } from "@/lib/crm/my-day";
 import { loadBudgetDay } from "@/lib/budget/my-day-data";
+import { loadWaitingNotes } from "@/lib/inventory/project-notes-data";
 
 export const metadata = { title: "My Day" };
 
@@ -104,13 +105,14 @@ export default async function DashboardPage() {
   // becomes its own error row and never hides, empties or delays the others. Approving isn't an HR/CEO-only capability (a line manager or
   // Finance approver needs it too), so the approvals count is read for anyone; the company-wide sections below stay gated to canViewHrAlerts.
   // The approvals count covers the steps routed to this person by name AND the Recovery Leave queue steps they may decide (the same rule as the Approvals page).
-  const [approvalsRead, salesRead, projectsRead, equipmentRead, budgetRead, waitingRead] = await Promise.allSettled([
+  const [approvalsRead, salesRead, projectsRead, equipmentRead, budgetRead, waitingRead, notesRead] = await Promise.allSettled([
     loadMyPendingApprovals(supabase, session),
     loadSalesToday(),
     loadProjectsDay(today),
     loadEquipment(),
     loadBudgetDay(session.userId),
     session.employeeId ? loadMyWaitingRequests(supabase, session.employeeId) : Promise.resolve(null),
+    loadWaitingNotes(),
   ]);
   const failedSource = (what: string, r: PromiseSettledResult<unknown>) => {
     if (r.status === "rejected") logServerError({ route: ROUTE, operation: `load ${what}` }, r.reason);
@@ -121,6 +123,7 @@ export default async function DashboardPage() {
   failedSource("equipment requests", equipmentRead);
   failedSource("project budget decisions", budgetRead);
   failedSource("my submitted requests", waitingRead);
+  failedSource("dispatch and return notes", notesRead);
   // A failed read is "error", never 0: the tile shows "—" and the greeting says the approvals could not be loaded.
   const myPendingApprovals: number | "error" = approvalsRead.status === "fulfilled" ? approvalsRead.value.count : "error";
   const myPendingOldest = approvalsRead.status === "fulfilled" ? approvalsRead.value.oldest : null;
@@ -349,6 +352,9 @@ export default async function DashboardPage() {
     budgetQuietItems = [{ key: "budget-decided", icon: ReceiptText, label: "Budget decisions on your projects in the last 14 days", count: decidedRecently.count, href: decidedRecently.href }];
   }
 
+  // Dispatch notes and return checklists waiting for this person's acknowledgement (current PM, acting PM, Projects founder). Not a gate: nothing waits for it. A failed read is an error row.
+  const noteActionItems = projectNoteItems(notesRead.status === "fulfilled" ? notesRead.value : { status: "error" }, now);
+
   // "Waiting on others": what this person submitted themselves (budgets, leave, claims, Recovery Leave, tasks sent for review). Never a decision for them.
   const waitingItems: ActionItem[] = [
     ...budgetWaitingItems,
@@ -363,7 +369,7 @@ export default async function DashboardPage() {
     myPendingOldest,
     now,
     ...(showHrView ? { contractsEndingCount, probationDueCount, docsExpiringCount, identityExpiringCount } : {}),
-    extraItems: [...salesActionItems, ...handoverActionItems, ...approvalActionItems, ...projectActionItems, ...budgetActionItems],
+    extraItems: [...salesActionItems, ...handoverActionItems, ...approvalActionItems, ...projectActionItems, ...budgetActionItems, ...noteActionItems],
   });
 
   const summarySentence = hrSectionError ? "Workforce data couldn't be loaded right now — the numbers below may be incomplete." : attentionSentence(actionItems);

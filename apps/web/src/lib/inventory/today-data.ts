@@ -3,8 +3,9 @@ import type { InventoryContext } from "@/lib/inventory/context";
 import { createClient } from "@/lib/supabase/server";
 import { loadEmployeeNames, loadRequestModels, type RequestModel } from "@/lib/inventory/planning-data";
 import type { PendingSalesCheck } from "@/lib/inventory/planning";
+import { loadOpenDifferences } from "@/lib/inventory/project-notes-data";
 import {
-  heldRows, requestRows, returnRows, safeZone, salesCheckInScope, salesRows, settleSources, transferRows,
+  differenceRows, heldRows, requestRows, returnRows, safeZone, salesCheckInScope, salesRows, settleSources, transferRows,
   type HeldEntry, type HeldUnitInput, type ProjectRequestLink, type QueueRow, type RequestInput, type SalesInput, type SourceKey, type TransferInput,
 } from "@/lib/inventory/today";
 
@@ -56,18 +57,26 @@ export async function loadToday(ctx: InventoryContext, scope: { locationId: stri
   const zone = (id: string | null | undefined) => (id ? zoneOf.get(id) : undefined) ?? fallbackZone;
   const build = { now };
 
-  const [requests, returns, transfers, sales, held] = await Promise.allSettled([
+  const [requests, returns, transfers, sales, held, differences] = await Promise.allSettled([
     loadRequestRows(ctx, scope.locationId, build, notes),
     loadReturnRows(scope.locationId, build, zone, fallbackZone),
     loadTransferRows(ctx, scope.locationId, build, zone),
     loadSalesRows(scope.locationId, build, zone),
     loadHeldRows(ctx, scope.locationId, notes),
+    loadDifferenceRows(scope.locationId, build),
   ]);
-  for (const [name, r] of [["requests", requests], ["returns", returns], ["transfers", transfers], ["sales", sales], ["held", held]] as const) {
+  for (const [name, r] of [["requests", requests], ["returns", returns], ["transfers", transfers], ["sales", sales], ["held", held], ["differences", differences]] as const) {
     if (r.status === "rejected") console.error(`[inventory] today: ${name} could not be loaded`, r.reason instanceof Error ? r.reason.message : r.reason);
   }
-  const { rows, failed } = settleSources({ requests, returns, transfers, sales, held });
+  const { rows, failed } = settleSources({ requests, returns, transfers, sales, held, differences });
   return { rows, failed, notes, nowIso: now.toISOString() };
+}
+
+/* ---------- differences reported on dispatch notes and return checklists ---------- */
+
+/** Notes whose Project Manager reported a difference the warehouse has not answered yet (read through the person's own access; empty while notes are not installed or none exist). */
+async function loadDifferenceRows(locationId: string | null, build: { now: Date }): Promise<QueueRow[]> {
+  return differenceRows(await loadOpenDifferences(locationId), build);
 }
 
 /* ---------- requests (prepare / send) ---------- */

@@ -1,6 +1,7 @@
+import { eventRow, noteRow, noteView, statusRow } from "@/test/note-fixtures";
 import { describe, expect, it } from "vitest";
 import {
-  bucketOf, daysFromToday, filterCounts, filterRows, fmtDay, groupRows, heldRows, isQueueEmpty, parseShow, requestRow, requestRows, waitingRow, returnRows, salesCheckInScope, salesRows,
+  bucketOf, daysFromToday, filterCounts, filterRows, fmtDay, groupRows, differenceRows, heldRows, isQueueEmpty, parseShow, requestRow, requestRows, waitingRow, returnRows, salesCheckInScope, salesRows,
   settleSources, transferRows, type HeldEntry, type QueueRow, type RequestInput, type RequestLineInput, type SalesInput, type SourceKey,
 } from "./today";
 
@@ -284,16 +285,16 @@ describe("sources that fail", () => {
 
   it("all sources answered: counts are numbers and Everything is the total", () => {
     const counts = filterCounts([prepare, send, returns], []);
-    expect(counts).toEqual({ all: 3, prepare: 1, send: 1, returns: 1, transfer: 0, sales: 0, waiting: 0, held: 0 });
+    expect(counts).toEqual({ all: 3, prepare: 1, send: 1, returns: 1, transfer: 0, sales: 0, waiting: 0, held: 0, difference: 0 });
   });
 
   it("an empty queue is 'nothing waiting' only when every source answered", () => {
     expect(isQueueEmpty([], [])).toBe(true);
     expect(isQueueEmpty([], ["transfers"])).toBe(false);
     expect(isQueueEmpty([prepare], [])).toBe(false);
-    const all = settleSources({ requests: bad, returns: bad, transfers: bad, sales: bad, held: bad });
+    const all = settleSources({ requests: bad, returns: bad, transfers: bad, sales: bad, held: bad, differences: bad });
     expect(all.rows).toEqual([]);
-    expect(all.failed).toEqual(["requests", "returns", "transfers", "sales", "held"]);
+    expect(all.failed).toEqual(["requests", "returns", "transfers", "sales", "held", "differences"]);
     expect(isQueueEmpty(all.rows, all.failed)).toBe(false);
   });
 });
@@ -385,5 +386,39 @@ describe("units held for checking", () => {
   it("says it could not tell about reservations rather than saying there are none", () => {
     const [r] = heldRows([{ id: "u1", code: "X-1", itemName: "Cable", condition: "damaged", locationName: null, reservedFor: null }]);
     expect(r!.facts[0]!.text).toMatch(/could not be read/);
+  });
+});
+
+describe("differences the Project Manager reported on a dispatch note or return checklist (C5)", () => {
+  const open = (over: { reportedAt?: string; reason?: string; lines?: number[]; comment?: string | null } = {}) => noteView(
+    noteRow(),
+    statusRow({ state: "difference_open", awaiting: "warehouse", difference_state: "open", difference_reason: over.reason ?? "quantity_differs", difference_lines: over.lines ?? [2], difference_reported_at: over.reportedAt ?? "2026-10-16T06:00:00Z" }),
+    [eventRow({ event: "difference_reported", reason: over.reason ?? "quantity_differs", lines: over.lines ?? [2], comment: over.comment === undefined ? "Only 10 arrived" : over.comment, at: over.reportedAt ?? "2026-10-16T06:00:00Z" })],
+  );
+
+  it("is one row per note, with its age, who must act, the next action and the lines the Project Manager named", () => {
+    const [r] = differenceRows([open()], { now: NOW });
+    expect(r).toMatchObject({ id: "difference:n1", kind: "difference", title: "ENG-D-00017: the Project Manager reports a difference", operates: true, href: null });
+    expect(r!.forWhom).toContain("Dispatch note · ENG-P-2026-0007 Mall activation · Dubai warehouse");
+    expect(r!.whenLabel).toMatch(/^Reported Fri 16 Oct, 10:00 · waiting 3 days$/);
+    expect(r!.facts.map((f) => f.text)).toEqual(["Quantity differs", "1 line", "Custody and availability are unchanged"]);
+    expect(r!.responsible).toBe("The warehouse at Dubai warehouse answers it.");
+    expect(r!.difference).toMatchObject({ noteNo: "ENG-D-00017", reportedBy: "M. Manager", comment: "Only 10 arrived", reason: "quantity_differs" });
+    expect(r!.difference!.lines.map((l) => l.n)).toEqual([2]);
+  });
+
+  it("sits in its own group, first, whatever the date, and has its own filter", () => {
+    const [d] = differenceRows([open()], { now: NOW });
+    const send: QueueRow = { id: "s", kind: "send", title: "s", forWhom: "", when: "2026-10-10T09:00:00+04:00", zone: DXB, whenLabel: "", late: true, facts: [], href: "/x", actionLabel: "Go", operates: true };
+    expect(groupRows([send, d!], NOW).map((g) => g.bucket)).toEqual(["difference", "late"]);
+    expect(filterRows([send, d!], "difference").map((r) => r.id)).toEqual(["difference:n1"]);
+    expect(parseShow("difference")).toBe("difference");
+  });
+
+  it("a failed read of the differences is its own failure, never an empty queue", () => {
+    const r = settleSources({ differences: { status: "rejected", reason: new Error("down") } as PromiseRejectedResult });
+    expect(r.failed).toEqual(["differences"]);
+    expect(filterCounts([], ["differences"]).difference).toBeNull();
+    expect(isQueueEmpty(r.rows, r.failed)).toBe(false);
   });
 });

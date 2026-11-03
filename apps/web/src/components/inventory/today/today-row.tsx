@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { ArrowLeftRight, ClipboardList, Hourglass, PackageCheck, SearchCheck, Send, Undo2 } from "lucide-react";
+import { ArrowLeftRight, ClipboardList, FileWarning, Hourglass, PackageCheck, SearchCheck, Send, Undo2 } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { RecordCheckButton } from "@/components/inventory/planning/record-check-button";
+import { ResolveDifference } from "@/components/inventory/notes/note-actions";
+import { NotePdfLinks } from "@/components/inventory/notes/note-pdf-links";
 import type { QueueKind, QueueRow } from "@/lib/inventory/today";
 import { cn } from "@/lib/utils";
 
-const ICON: Record<QueueKind, React.ComponentType<{ className?: string }>> = { prepare: ClipboardList, send: Send, returns: Undo2, transfer: ArrowLeftRight, sales: PackageCheck, waiting: Hourglass, held: SearchCheck };
+const ICON: Record<QueueKind, React.ComponentType<{ className?: string }>> = { prepare: ClipboardList, send: Send, returns: Undo2, transfer: ArrowLeftRight, sales: PackageCheck, waiting: Hourglass, held: SearchCheck, difference: FileWarning };
 
 /**
  * One job. Its title is a real link stretched over the whole row (so the empty part of the row opens the record, and keyboard and "open in a
@@ -31,6 +33,17 @@ export function TodayRow({ row, canOperate, checkLocations }: { row: QueueRow; c
           {row.next ? <p className="break-words text-sm"><span className="font-medium">Next:</span> <span className="text-muted-foreground">{row.next}</span></p> : null}
         </div>
       </div>
+      {row.difference ? (
+        <div className="relative z-10 space-y-2 sm:col-span-2 sm:pl-11" data-difference={row.difference.noteNo}>
+          {showButton ? (
+            <ResolveDifference
+              noteId={row.difference.noteId} projectId={row.difference.projectId} noteNo={row.difference.noteNo} kind={row.difference.kind} reason={row.difference.reason}
+              reportedBy={row.difference.reportedBy} comment={row.difference.comment} lines={row.difference.lines}
+            />
+          ) : <p className="text-sm text-muted-foreground">Only a warehouse operator can answer it.</p>}
+          <NotePdfLinks projectId={row.difference.projectId} noteId={row.difference.noteId} noteNo={row.difference.noteNo} />
+        </div>
+      ) : null}
       <div className={cn("relative z-10 sm:justify-self-end", row.check && "[&>button]:h-11 [&>button]:w-full sm:[&>button]:h-8 sm:[&>button]:w-auto")}>
         {row.check ? (
           <RecordCheckButton

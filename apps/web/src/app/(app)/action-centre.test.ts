@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attentionSentence, budgetWaitingDetail, buildActionItems, commercialApprovalItems, handoverItems } from "./action-centre";
+import { attentionSentence, budgetWaitingDetail, buildActionItems, commercialApprovalItems, handoverItems, projectNoteItems } from "./action-centre";
 import { splitActions } from "@/lib/my-day/groups";
 import type { HandoverRow } from "@/lib/crm/handover-attention";
 
@@ -65,6 +65,31 @@ describe("My Day commercial approval row (U-01)", () => {
     expect(commercialApprovalItems({ status: "error" })).toEqual([expect.objectContaining({ error: true, label: "Commercial approvals could not be loaded" })]);
     expect(commercialApprovalItems({ status: "none" })).toEqual([]);
     expect(commercialApprovalItems({ status: "ok", count: 0, oldestOpportunityId: "" })).toEqual([]);
+  });
+});
+
+describe("My Day dispatch and return notes (C4)", () => {
+  const now = new Date("2026-11-16T09:00:00Z");
+  const note = (id: string, project: string, kind: "dispatch" | "return", since: string) => ({ noteId: id, noteNo: `ENG-${kind === "dispatch" ? "D" : "RT"}-${id}`, kind, projectId: project, projectRef: `P-${project}`, projectName: `Project ${project}`, waitingSince: since });
+  it("one row per project, oldest waiting, a single note links straight to it and several to the project's notes", () => {
+    const items = projectNoteItems({ status: "ok", notes: [note("1", "a", "dispatch", "2026-11-13T09:00:00Z"), note("2", "b", "dispatch", "2026-11-15T09:00:00Z"), note("3", "b", "return", "2026-11-14T09:00:00Z")] }, now);
+    expect(items.map((i) => [i.label, i.count, i.href])).toEqual([
+      ["Dispatch note waiting for you: Project a", 1, "/projects/a/equipment?note=1#notes"],
+      ["Dispatch and return notes waiting for you: Project b", 2, "/projects/b/equipment#notes"],
+    ]);
+    expect(items[0]!.detail).toMatch(/3 days/);
+  });
+  it("is 'Needs me' (a decision row) and counts in the sentence", () => {
+    const items = projectNoteItems({ status: "ok", notes: [note("1", "a", "return", "2026-11-16T08:00:00Z")] }, now);
+    expect(items[0]!.label).toBe("Returned equipment, please confirm: Project a");
+    expect(splitActions(items).decision).toHaveLength(1);
+    expect(attentionSentence(buildActionItems({ myPendingApprovals: 0, extraItems: items }))).toMatch(/1 item needs your attention/);
+  });
+  it("nothing waiting adds no row; a failed read is an error row, never 'nothing waiting'", () => {
+    expect(projectNoteItems({ status: "none" }, now)).toEqual([]);
+    const failed = projectNoteItems({ status: "error" }, now);
+    expect(failed).toEqual([expect.objectContaining({ key: "inv-notes", label: "Dispatch and return notes could not be loaded", error: true })]);
+    expect(attentionSentence(buildActionItems({ myPendingApprovals: 0, extraItems: failed }))).toMatch(/could not be loaded/);
   });
 });
 

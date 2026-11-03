@@ -92,6 +92,8 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
       <nav aria-label="Show" className="flex flex-wrap gap-2">
         {SHOW_FILTERS.map((k) => {
           const c = counts[k];
+          // "PM reported a difference" is new: it is not offered while there is none (a company that has not switched notes on never sees it), but a failed read or the open filter still shows it.
+          if (k === "difference" && c === 0 && show !== "difference") return null;
           const on = show === k;
           return (
             <Link
