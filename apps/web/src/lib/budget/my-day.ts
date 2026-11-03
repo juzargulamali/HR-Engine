@@ -1,3 +1,4 @@
+import { APPROVER_NAME } from "@enginious-hr/domain";
 import type { PbxInbox } from "@/types/budget";
 
 /**
@@ -14,8 +15,11 @@ import type { PbxInbox } from "@/types/budget";
  * budget, versions and final-expense sets; nothing else): never from notices, which show participants only.
  */
 export type BudgetDay = {
-  waitingForMe: { count: number; href: string };
+  /** `oldest`: when the oldest item the person can decide now was submitted (null when unknown): My Day shows how long it has waited. */
+  waitingForMe: { count: number; href: string; oldest?: string | null };
   waitingOnOthers: number;
+  /** Of the budgets and final expenses the person submitted themselves (read from the Finance inbox): the oldest submission and who decides them, named as the shared queue ("Finance", "the CEO or CTO"), never one invented person. */
+  waitingOnOthersWith?: { oldest: string | null; queues: string[] };
   /** Where "waiting on others" opens: the Finance inbox when the person prepared items there, otherwise the budget of their project (or Projects when several). */
   waitingOnOthersHref: string;
   returned: { count: number; href: string };
@@ -27,8 +31,8 @@ export type BudgetDay = {
 /** What the PM's own session read about the projects they manage (columns only; the database decides which rows they may see). */
 export type PmBudgetRows = {
   budgets: { id: string; project_id: string }[];
-  versions: { id: string; budget_id: string; seq: number; status: string; decided_at: string | null }[];
-  submissions: { id: string; budget_id: string; seq: number; status: string; decided_at: string | null }[];
+  versions: { id: string; budget_id: string; seq: number; status: string; decided_at: string | null; approval_route?: string | null; submitted_at?: string | null }[];
+  submissions: { id: string; budget_id: string; seq: number; status: string; decided_at: string | null; approval_route?: string | null; submitted_at?: string | null }[];
 };
 
 export type PmBudgetDay = {
@@ -36,6 +40,8 @@ export type PmBudgetDay = {
   /** Ids of the submitted versions / final-expense sets still waiting for a decision on the PM's projects (and their projects, for the link). */
   waitingIds: string[];
   waitingProjectIds: string[];
+  /** The same waiting items with the shared route that decides them and when they were submitted (null when the record does not say). */
+  waitingDetail?: { id: string; route: string | null; at: string | null }[];
   decided: { count: number; projectIds: string[] };
 };
 
@@ -48,8 +54,8 @@ const RECENT_DAYS = 14;
 export function pmBudgetDay(rows: PmBudgetRows, now: Date): PmBudgetDay {
   const projectOf = new Map(rows.budgets.map((b) => [b.id, b.project_id]));
   const since = now.getTime() - RECENT_DAYS * 86_400_000;
-  const out: PmBudgetDay = { returned: { count: 0, projectIds: [] }, waitingIds: [], waitingProjectIds: [], decided: { count: 0, projectIds: [] } };
-  const latest = (list: { id: string; budget_id: string; seq: number; status: string; decided_at: string | null }[]) => {
+  const out: PmBudgetDay = { returned: { count: 0, projectIds: [] }, waitingIds: [], waitingProjectIds: [], waitingDetail: [], decided: { count: 0, projectIds: [] } };
+  const latest = <R extends { id: string; budget_id: string; seq: number; status: string; decided_at: string | null }>(list: R[]) => {
     const best = new Map<string, (typeof list)[number]>();
     for (const r of list) {
       if (r.status === "draft" || r.status === "discarded" || !projectOf.has(r.budget_id)) continue;
@@ -60,7 +66,7 @@ export function pmBudgetDay(rows: PmBudgetRows, now: Date): PmBudgetDay {
   };
   for (const r of [...latest(rows.versions), ...latest(rows.submissions)]) {
     const project = projectOf.get(r.budget_id)!;
-    if (r.status === "submitted") { out.waitingIds.push(r.id); out.waitingProjectIds.push(project); }
+    if (r.status === "submitted") { out.waitingIds.push(r.id); out.waitingProjectIds.push(project); (out.waitingDetail ??= []).push({ id: r.id, route: r.approval_route ?? null, at: r.submitted_at ?? null }); }
     else if (r.status === "returned") { out.returned.count += 1; out.returned.projectIds.push(project); }
     else if ((r.status === "approved" || r.status === "rejected") && r.decided_at && new Date(r.decided_at).getTime() >= since) { out.decided.count += 1; out.decided.projectIds.push(project); }
   }
@@ -94,9 +100,19 @@ export function budgetDayFromInbox(
   const waitingOnOthers = waiting.size;
   const kinds = [budgets > 0 ? "budget" : null, actuals > 0 ? "actuals" : null, settlements > 0 ? "settlement" : null].filter((k): k is string => k !== null);
   const href = kinds.length === 1 ? `/finance/project-budgets?filter=${kinds[0]}` : "/finance/project-budgets";
+  const oldestOf = (xs: readonly (string | null)[]) => xs.filter((x): x is string => !!x).sort()[0] ?? null;
+  const oldestDecidable = oldestOf([...decidableBudgets, ...decidableActuals].map((r) => r.submitted_at));
+  const authoredRows = [
+    ...inbox.budget_approvals.filter((r) => authoredVersionIds.has(r.version_id) && !decidableBudgets.includes(r)).map((r) => ({ id: r.version_id, route: r.approval_route as string | null, at: r.submitted_at })),
+    ...inbox.final_expense_approvals.filter((r) => authoredSubmissionIds.has(r.submission_id) && !decidableActuals.includes(r)).map((r) => ({ id: r.submission_id, route: r.approval_route as string | null, at: r.submitted_at })),
+  ];
+  // The Project Manager's own waiting items (from the budget records of their projects) say the same: which shared route decides them and since when. Counted once per item.
+  const detailRows = [...authoredRows, ...(pm?.waitingDetail ?? []).filter((d) => waiting.has(d.id) && !authoredRows.some((a) => a.id === d.id))];
+  const routeNames = (rows: { route: string | null }[]) => [...new Set(rows.map((r) => (r.route === "finance" || r.route === "executive" ? APPROVER_NAME[r.route] : null)).filter((x): x is string => !!x))];
   return {
-    waitingForMe: { count: budgets + actuals + settlements, href },
+    waitingForMe: { count: budgets + actuals + settlements, href, ...(oldestDecidable ? { oldest: oldestDecidable } : {}) },
     waitingOnOthers,
+    ...(detailRows.length > 0 ? { waitingOnOthersWith: { oldest: oldestOf(detailRows.map((r) => r.at)), queues: routeNames(detailRows) } } : {}),
     waitingOnOthersHref: authoredWaiting.length > 0 ? "/finance/project-budgets" : projectHref(pm?.waitingProjectIds ?? []),
     returned: { count: pm?.returned.count ?? 0, href: projectHref(pm?.returned.projectIds ?? []) },
     decidedRecently: { count: pm?.decided.count ?? 0, href: projectHref(pm?.decided.projectIds ?? []) },

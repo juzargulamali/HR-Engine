@@ -167,6 +167,45 @@ describe("Receive back", () => {
     expect(sent.lines).toEqual([{ unit_id: "u7", condition: "good" }, { item_id: "i-hdmi", qty: 5, condition: "damaged" }]);
   });
 
+  it("sets one condition for the ticked lines only, starting empty, and never touches an unticked line", () => {
+    render(receive({ holders: { u7: "this", u8: "this" } }));
+    const helper = () => screen.getByRole("combobox", { name: /Set the condition for all ticked lines/ }) as HTMLSelectElement;
+    const apply = () => screen.getByRole("button", { name: /^Apply to \d+ ticked lines?$/ }) as HTMLButtonElement;
+    expect(helper().value).toBe("");
+    expect(helper().disabled).toBe(true); // nothing ticked: nothing to set
+    fireEvent.click(screen.getByLabelText("LED wall panel · LED-0007"));
+    fireEvent.click(screen.getByLabelText("LED wall panel · LED-0008"));
+    fireEvent.change(screen.getByLabelText(/How many HDMI cable came back/), { target: { value: "2" } });
+    expect(helper().value).toBe(""); // ticking never selects a condition for you
+    expect(apply().disabled).toBe(true);
+    fireEvent.change(helper(), { target: { value: "damaged" } });
+    expect(apply().textContent).toBe("Apply to 3 ticked lines");
+    fireEvent.click(apply());
+    expect((screen.getByLabelText(/Condition of LED wall panel · LED-0007/) as HTMLSelectElement).value).toBe("damaged");
+    expect((screen.getByLabelText(/Condition of LED wall panel · LED-0008/) as HTMLSelectElement).value).toBe("damaged");
+    expect((screen.getByLabelText(/Condition of HDMI cable/) as HTMLSelectElement).value).toBe("damaged");
+    expect(helper().value).toBe("");
+    // untick one: it keeps its condition for when it is ticked again, but the helper only counts what is ticked now
+    fireEvent.click(screen.getByLabelText("LED wall panel · LED-0008"));
+    fireEvent.change(helper(), { target: { value: "good" } });
+    expect(apply().textContent).toBe("Apply to 2 ticked lines");
+    fireEvent.click(apply());
+    expect((screen.getByLabelText(/Condition of LED wall panel · LED-0007/) as HTMLSelectElement).value).toBe("good");
+    expect((screen.getByLabelText(/Condition of HDMI cable/) as HTMLSelectElement).value).toBe("good");
+    fireEvent.click(screen.getByLabelText("LED wall panel · LED-0008"));
+    expect((screen.getByLabelText(/Condition of LED wall panel · LED-0008/) as HTMLSelectElement).value).toBe("damaged");
+  });
+
+  it("offers Tick all N for several units of one item, and a line without a condition still blocks Review", async () => {
+    render(receive({ holders: { u7: "this", u8: "this" } }));
+    fireEvent.click(screen.getByRole("button", { name: /Tick all 2/ }));
+    expect((screen.getAllByRole("checkbox") as HTMLInputElement[]).filter((c) => c.checked)).toHaveLength(2);
+    expect(screen.getByRole("button", { name: /Untick all 2/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Review/ }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Choose a condition/);
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it("says when what the project holds could not be loaded, rather than showing an empty list", () => {
     render(receive({ held: [], heldError: "It could not be read." }));
     expect(screen.getByRole("alert").textContent).toMatch(/could not be loaded.*not an empty list/s);

@@ -4,7 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BellRing, Briefcase, Clock, LayoutDashboard, Menu, MoreHorizontal, Users } from "lucide-react";
+import { BellRing, Briefcase, Clock, LayoutDashboard, Menu, MoreHorizontal, UserRound } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
@@ -123,9 +123,9 @@ export function ShellChrome({ modules, showAlertsLink, isEmployee, clockOpenSinc
             <span>{clockLoadFailed ? "Clock" : clockOpenSince ? "Clocked in" : "Clock"}</span>
           </Link>
         ) : null}
-        <Link href="/employees" aria-current={active === "people" && !onClockPage ? "page" : undefined} className={tabClass(active === "people" && !onClockPage)}>
-          <Users className="h-5 w-5" aria-hidden />
-          <span>People</span>
+        <Link href="/profile" aria-current={active === "me" && !onClockPage ? "page" : undefined} className={tabClass(active === "me" && !onClockPage)}>
+          <UserRound className="h-5 w-5" aria-hidden />
+          <span>Me</span>
         </Link>
         <button type="button" onClick={() => setDrawer(true)} className={tabClass(false)}>
           <MoreHorizontal className="h-5 w-5" aria-hidden />

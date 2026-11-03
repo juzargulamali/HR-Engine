@@ -124,10 +124,10 @@ export async function setProjectTaskStatus(_prev: S, fd: FormData): Promise<S> {
 }
 
 export async function blockProjectTask(_prev: S, fd: FormData): Promise<S> {
-  const p = z.object({ projectId: uuid, taskId: uuid, reason: z.string().trim().min(1, "Say what is blocking the task"), unblockOwner: optionalUuid, unblockAction: optionalText }).safeParse(Object.fromEntries(fd));
+  const p = z.object({ projectId: uuid, taskId: uuid, reason: z.string().trim().min(1, "Say what is blocking the task"), unblockOwner: z.string({ error: "Choose who is responsible for unblocking it" }).uuid("Choose who is responsible for unblocking it"), unblockAction: optionalText }).safeParse(Object.fromEntries(fd));
   if (!p.success) return { error: firstIssue(p.error) };
   const supabase = await createClient();
-  const { error } = await supabase.rpc("proj_block_task", { p_task_id: p.data.taskId, p_reason: p.data.reason, p_unblock_owner: p.data.unblockOwner ?? null, p_unblock_action: p.data.unblockAction ?? null });
+  const { error } = await supabase.rpc("proj_block_task", { p_task_id: p.data.taskId, p_reason: p.data.reason, p_unblock_owner: p.data.unblockOwner, p_unblock_action: p.data.unblockAction ?? null });
   if (error) return fail(error.message);
   refreshProjects(p.data.projectId);
   return ok();

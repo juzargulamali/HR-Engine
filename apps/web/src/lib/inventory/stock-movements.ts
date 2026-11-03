@@ -478,6 +478,18 @@ const typedQty = (d: LineDraft): number | null => {
   return d.qty.trim() !== "" && Number.isFinite(n) ? n : null;
 };
 
+/** Kinds whose lines say whether what comes back is available at once (the same ones the form labels "available now" / "held back"). */
+const RELEASING_KINDS: readonly MovementKind[] = ["return", "repair_in", "receive_transfer", "receive"];
+
+/**
+ * Does a line of this condition become available at once? The database's rule: good or fair individual units, and good counted stock (counted stock has no
+ * "fair"). Anything else is held for checking. Used for the words on the review step, so they cannot contradict the form's "Fair: available now".
+ */
+export function lineBecomesAvailable(d: Pick<LineDraft, "unitId" | "tracking">, condition: string): boolean {
+  const individual = d.unitId !== null || d.tracking === "individual" || d.tracking === "kit";
+  return individual ? condition === "good" || condition === "fair" : condition === "good";
+}
+
 export function describeLine(d: LineDraft, kind: MovementKind): string {
   const cond = (c: string) => (isUnitLine(d) ? CONDITION_WORDS[c as keyof typeof CONDITION_WORDS] : BALANCE_CONDITION_WORDS[c as keyof typeof BALANCE_CONDITION_WORDS]) ?? c;
   const bits: string[] = [];
@@ -488,7 +500,10 @@ export function describeLine(d: LineDraft, kind: MovementKind): string {
     bits.push(n === null ? `? ${d.itemName}` : unitsOfOne ? `${n} × ${d.itemName}` : `${formatQty(n, d.uom)} ${d.itemName}`);
   }
   if (d.binLabel) bits.push(`bin ${d.binLabel}`);
-  if (KIND_CONFIG[kind].lineCondition || kind === "check") bits.push(d.condition === "good" ? "good, available" : `${cond(d.condition).toLowerCase()}, held back`);
+  if (KIND_CONFIG[kind].lineCondition || kind === "check") {
+    const available = RELEASING_KINDS.includes(kind) ? lineBecomesAvailable(d, d.condition) : d.condition === "good";
+    bits.push(available ? `${(d.condition === "good" ? "good" : cond(d.condition).toLowerCase())}, available` : `${cond(d.condition).toLowerCase()}, held back`);
+  }
   if (d.serials.trim()) bits.push(`serial ${parseSerials(d.serials).join(", ")}`);
   return bits.join(", ");
 }
@@ -551,8 +566,8 @@ export function summaryRows(s: SummaryInput): SummaryRow[] {
   if (s.kind === "return") {
     const n = s.stillOutstanding ?? 0;
     rows.push({ label: "Still outstanding", value: n > 0 ? `${n} other item${n === 1 ? "" : "s"} stay${n === 1 ? "s" : ""} with ${s.returnFrom === "project" ? "the project" : "the employee"} until you record them coming back` : "Nothing else is outstanding" });
-    const held = s.drafts.filter((d) => d.condition !== "good").length;
-    if (held > 0) rows.push({ label: "Held back", value: `${held} item${held === 1 ? " is" : "s are"} not in good condition. ${held === 1 ? "It is" : "They are"} held for checking and not available until someone releases ${held === 1 ? "it" : "them"}` });
+    const held = s.drafts.filter((d) => !lineBecomesAvailable(d, d.condition)).length;
+    if (held > 0) rows.push({ label: "Held back", value: `${held} item${held === 1 ? " is" : "s are"} not available again (damaged, or needing a check). ${held === 1 ? "It is" : "They are"} held for checking and not available until someone releases ${held === 1 ? "it" : "them"}` });
   }
   if (s.kind === "transfer") rows.push({ label: "Status after", value: "In transit. The other warehouse records it as received." });
   return rows;

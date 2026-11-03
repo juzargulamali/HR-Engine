@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { InvCapability } from "@enginious-hr/domain";
 import type { InvLocationRow } from "@/types/inventory";
-import { requestRow, returnRows, salesRows, transferRows, type QueueRow, type SourceKey } from "@/lib/inventory/today";
+import { heldRows, requestRow, returnRows, salesRows, transferRows, waitingRow, type QueueRow, type SourceKey } from "@/lib/inventory/today";
 import type { TodayData } from "@/lib/inventory/today-data";
 
 vi.mock("server-only", () => ({}));
@@ -87,6 +87,35 @@ describe("Today page", () => {
     for (const f of ["Everything", "Prepare", "Send out", "Receive back", "Transfers", "Sales checks"]) expect(html).toContain(f);
     expect(html).not.toContain('role="alert"');
     expect(loadToday).toHaveBeenCalledWith(expect.anything(), { locationId: L1 });
+  });
+
+  it("keeps unresolved shortages and held units visible in their own groups, with who acts and the next action", async () => {
+    const waiting = waitingRow(req({ id: "r3", code: "REQ-0052", forLabel: "Marina Launch", lines: [{ ...line({ toReserve: 3 }), shortageAction: "need_to_rent", itemName: "LED wall panel", qty: 3 }] }), ctx)!;
+    const [held] = heldRows([{ id: "u9", code: "UAE-E-00031", itemName: "Projector", condition: "damaged", locationName: "Dubai warehouse", reservedFor: [{ requestId: "r2", code: "REQ-0047" }] }]);
+    data = today([...allRows, waiting, held!]);
+    const html = await render();
+    expect(html).toContain("Waiting / Shortages");
+    expect(html).toContain("Held for checking");
+    expect(html).toContain("1 line of Marina Launch is waiting for stock to be bought or rented");
+    expect(html).toContain("LED wall panel × 3: to rent");
+    expect(html).toContain("Who acts:");
+    expect(html).toContain("whoever arranges the rental");
+    expect(html).toContain("Next:");
+    expect(html).toContain("Projector UAE-E-00031 is held for checking");
+    expect(html).toContain("it needs a replacement before it can be sent");
+    // the shortage group comes after the dated groups, and each has its own filter
+    expect(html.indexOf('id="today-waiting"')).toBeGreaterThan(html.indexOf('id="today-none"'));
+    expect(html.indexOf('id="today-held"')).toBeGreaterThan(html.indexOf('id="today-waiting"'));
+    const only = await render({ show: "waiting" });
+    expect(only).toContain("Marina Launch");
+    expect(only).not.toContain("Al Khail Roadshow still has");
+  });
+
+  it("a failed held-units read is its own red alert and its filter reads ?, never zero", async () => {
+    data = today(allRows, ["held"]);
+    const html = await render();
+    expect(html).toContain("Equipment held for checking could not be loaded.");
+    expect(html).not.toContain("Nothing waiting");
   });
 
   it("a Sales row shows only what the Sales checks list shows: no client, value or notes", async () => {

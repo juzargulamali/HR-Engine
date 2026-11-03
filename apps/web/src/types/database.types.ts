@@ -1875,6 +1875,7 @@ export interface Database {
       pbx_budget_view: { Args: { p_project_id: string }; Returns: PbxJson };
       pbx_inbox: { Args: Record<string, never>; Returns: PbxJson };
       pbx_decisions_waiting_count: { Args: Record<string, never>; Returns: number };
+      module_access_managers: { Args: { p_module: string }; Returns: { user_id: string; display_name: string }[] };
       pbx_create_budget: { Args: { p_project_id: string; p_currency: string }; Returns: string };
       pbx_save_budget_draft: { Args: { p_version_id: string; p_expected: number; p_header: PbxJson; p_rows: PbxJson }; Returns: number };
       pbx_submit_budget: { Args: { p_version_id: string; p_expected: number; p_request_id: string }; Returns: string };

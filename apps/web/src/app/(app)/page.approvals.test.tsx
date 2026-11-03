@@ -15,12 +15,18 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeSupabase
 let grants: { role: string; companyId: string | null; countryCode: string | null }[] = [];
 vi.mock("@/lib/auth/session", () => ({ getCurrentSession: async () => ({ userId: "u1", employeeId: "e1", email: null, fullName: "Aisha Khan", grants }) }));
 let salesToday: Record<string, unknown> = { status: "none" };
+let equipmentFails = false;
 vi.mock("@/lib/crm/my-day", () => ({ loadSalesToday: async () => salesToday }));
 let projectsCtx: Record<string, unknown> | null = null;
 vi.mock("@/lib/projects/context", () => ({ getProjectsContext: async () => projectsCtx }));
-vi.mock("@/lib/projects/my-work", () => ({ loadProjectsAttention: async () => { throw new Error("Work could not be loaded"); } }));
+let myWork: { open: unknown[]; reviews: unknown[]; today: string } | "fail" = "fail";
+let attention: Record<string, unknown> | "fail" = "fail";
+vi.mock("@/lib/projects/my-work", () => ({
+  loadProjectsAttention: async () => { if (attention === "fail") throw new Error("Work could not be loaded"); return attention; },
+  loadMyWork: async () => { if (myWork === "fail") throw new Error("Work could not be loaded"); return myWork; },
+}));
 vi.mock("@/lib/my-day/loaders", () => ({
-  loadEquipment: async () => null, loadLiveClock: async () => ({}), loadPortfolio: async () => { throw new Error("down"); },
+  loadEquipment: async () => { if (equipmentFails) throw new Error("down"); return null; }, loadLiveClock: async () => ({}), loadPortfolio: async () => { throw new Error("down"); },
 }));
 vi.mock("./attendance-clock-card", () => ({ AttendanceClockCard: () => null }));
 vi.mock("./birthdays-section", () => ({ BirthdaysSection: () => null }));
@@ -41,6 +47,9 @@ beforeEach(() => {
   tables = { companies: rows([]), approvals: PENDING_NAMED, employees: rows([]) };
   rpcs = { pbx_inbox: EMPTY_INBOX };
   salesToday = { status: "none" };
+  myWork = "fail";
+  attention = "fail";
+  equipmentFails = false;
 });
 
 describe("My Day approvals", () => {
@@ -96,7 +105,9 @@ describe("My Day approvals", () => {
     const html = await render();
     expect(html).toContain("Project budgets waiting for you");
     expect(html).toContain("/finance/project-budgets?filter=budget");
-    expect(html).toContain("Decisions waiting");
+    // the decisions count is stated once, by the "Needs me" card, not repeated as a tile
+    expect(html).not.toContain("Decisions waiting");
+    expect(html).toContain("Needs me");
     expect(html).toContain("Review approvals (2)");   // the approvals count is unchanged: budgets are their own row
     expect(html).toContain("Your updates for today: 4 items need your attention.");
   });
@@ -106,7 +117,7 @@ describe("My Day approvals", () => {
     tables = { ...tables, approvals: { data: [], error: null, count: 0 }, pbx_budget_versions: rows([{ id: "v1" }]) };
     const html = await render();
     expect(html).toContain("Waiting on others");
-    expect(html).toContain("Project budgets waiting on others");
+    expect(html).toContain("Project budgets you submitted, waiting on others");
     expect(html).not.toContain("Project budgets waiting for you");
     expect(html).toContain("Nothing needs your attention right now.");
   });
@@ -121,7 +132,7 @@ describe("My Day approvals", () => {
       const html = await render();
       expect(html).toContain("Project budget returned to you");
       expect(html).toContain("/projects/p1/budget");
-      expect(html).toContain("Project budgets waiting on others");
+      expect(html).toContain("Project budgets you submitted, waiting on others");
       expect(html).not.toContain("Project budgets waiting for you");
     });
     it("a recent approval is shown quietly", async () => {

@@ -388,14 +388,51 @@ export async function reopenOpportunity(_prev: ActionState, formData: FormData):
 // Activities and follow-ups
 // ---------------------------------------------------------------------------------------------------------------
 
-const activitySchema = z.object({ id: uuid, kind: z.enum(["call", "email", "meeting", "note", "client_response"]), body: z.string().trim().min(1, "Write what happened"), internal: z.string().optional() });
+const activitySchema = z.object({
+  id: uuid, kind: z.enum(["call", "email", "meeting", "note", "client_response"]), body: z.string().trim().min(1, "Write what happened"), internal: z.string().optional(),
+  // "Plan the next step" in the same dialog: a new follow-up, and optionally the open follow-up this update completes.
+  planNext: z.string().optional(), nextTitle: optionalText, nextDate: optionalDate, nextTime: optionalText, nextKind: z.enum(["call", "email", "meeting", "proposal", "other"]).default("other"),
+  completeFollowUpId: optionalUuid,
+});
+/**
+ * Adds an update to the timeline and, in the same step, plans the next one. With `completeFollowUpId` the update is that follow-up's outcome (the
+ * database function that completes it also creates the next follow-up and refuses to leave an active enquiry without one); otherwise the new follow-up
+ * is created after the update is logged. Everything that can be checked is checked before anything is written. If the second write is refused after
+ * the first succeeded, the first stays (it is true) and the answer says exactly which part was not saved.
+ */
 export async function addActivity(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const p = activitySchema.safeParse(Object.fromEntries(formData));
   if (!p.success) return { error: firstIssue(p.error) };
+  const d = p.data;
+  const planNext = d.planNext === "on";
+  let nextDue: string | null = null;
+  if (planNext) {
+    if (!d.nextTitle || !d.nextDate) return { error: "Say what the next step is and when, or turn off “Plan the next step”." };
+    nextDue = dueIso(d.nextDate, d.nextTime);
+    if (!nextDue) return { error: "The next step needs a valid date and time." };
+  }
   const supabase = await createClient();
-  const { error } = await supabase.rpc("crm_add_activity", { p_id: p.data.id, p_kind: p.data.kind, p_body: p.data.body, p_internal: p.data.internal === "on" });
-  if (error) return fail(error.message);
-  refresh(p.data.id);
+  if (d.completeFollowUpId) {
+    const done = await supabase.rpc("crm_complete_follow_up", {
+      p_follow_up_id: d.completeFollowUpId, p_outcome: d.body, p_next_title: planNext ? (d.nextTitle ?? null) : null, p_next_due: nextDue, p_next_kind: d.nextKind,
+      p_hold_reason: null, p_hold_review_date: null,
+    });
+    if (done.error) return fail(done.error.message);
+    const logged = await supabase.rpc("crm_add_activity", { p_id: d.id, p_kind: d.kind, p_body: d.body, p_internal: d.internal === "on" });
+    refresh(d.id);
+    if (logged.error) return { error: null, warning: `The follow-up was completed${planNext ? " and the next step planned" : ""}, but the update could not be added to the timeline: ${friendlyCrmError(logged.error.message)}` };
+    return { error: null };
+  }
+  const logged = await supabase.rpc("crm_add_activity", { p_id: d.id, p_kind: d.kind, p_body: d.body, p_internal: d.internal === "on" });
+  if (logged.error) return fail(logged.error.message);
+  if (planNext) {
+    const next = await supabase.rpc("crm_create_follow_up", { p_id: d.id, p_title: d.nextTitle!, p_due_at: nextDue!, p_kind: d.nextKind, p_assigned_to: null });
+    if (next.error) {
+      refresh(d.id);
+      return { error: null, warning: `The update is on the timeline, but the next step was not saved: ${friendlyCrmError(next.error.message)} Add it from Follow-ups.` };
+    }
+  }
+  refresh(d.id);
   return { error: null };
 }
 

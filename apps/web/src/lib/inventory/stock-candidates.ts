@@ -67,8 +67,8 @@ export function whereText(c: Pick<Candidate, "custody" | "lifecycle" | "binLabel
 export function draftFromCandidate(c: Candidate, kind: MovementKind, id: string): LineDraft {
   const cfg = KIND_CONFIG[kind];
   const isUnit = c.type === "unit";
-  // Returns default to "good, available now"; a check or a repair-in starts from what it is now / good.
-  let condition = "good";
+  // A return starts with NO condition: it is chosen for every line that came back (nothing is assumed to be good). A check or a repair-in starts from what it is now / good.
+  let condition = kind === "return" ? "" : "good";
   if (kind === "check" || kind === "receive_transfer") condition = c.condition;
   if (kind === "adjust" || kind === "transfer" || kind === "repair_out") condition = isUnit ? c.condition : (c.condition as InvBalanceCondition);
   if (kind === "unpack_kit" || kind === "pack_kit") condition = c.condition;

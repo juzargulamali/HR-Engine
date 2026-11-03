@@ -13,6 +13,19 @@ export interface PickOption {
   name: string;
 }
 
+/**
+ * Who a new blocker names as responsible for unblocking it, before the person changes it: the project head (the Project Manager) when that is
+ * someone other than the person reporting it, else the head of the task's department team, else the Project Manager anyway. Only people who are
+ * members of the project can be named (the database checks the same), so an empty answer means "the person must choose".
+ */
+export function defaultUnblocker(o: { viewerId: string; pmId: string | null; teamHeadId: string | null; memberIds: readonly string[] }): string {
+  const ok = (id: string | null): id is string => !!id && o.memberIds.includes(id);
+  if (ok(o.pmId) && o.pmId !== o.viewerId) return o.pmId;
+  if (ok(o.teamHeadId) && o.teamHeadId !== o.viewerId) return o.teamHeadId;
+  if (ok(o.pmId)) return o.pmId;
+  return "";
+}
+
 // ---- Moves ---------------------------------------------------------------------------------------------------------
 
 export interface TaskMoveSpec {

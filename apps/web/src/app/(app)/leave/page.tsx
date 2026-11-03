@@ -15,6 +15,10 @@ import { StatusBadge, statusNextAction } from "@/components/ui/status-badge";
 import type { RequestStatus } from "@/types/database.types";
 import { CalendarDays, Clock } from "lucide-react";
 import { OsStatCard } from "@/components/os/stat-card";
+import { EVENT_TYPE_LABELS } from "@/lib/recovery/labels";
+import { loadLeaveApprover, type LeaveApprover } from "@/lib/leave/approver";
+import { loadLeaveTeam } from "@/lib/leave/team-data";
+import { TeamLeaveSection } from "./team-section";
 
 export const metadata = { title: "Leave" };
 
@@ -49,7 +53,7 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
   // This employee's own business-local date — "is this request still
   // upcoming" must use their own country's calendar day, not the server's
   // UTC one.
-  const { data: me, error: meError } = await supabase.from("employees").select("country_code").eq("id", session.employeeId).maybeSingle();
+  const { data: me, error: meError } = await supabase.from("employees").select("country_code, company_id").eq("id", session.employeeId).maybeSingle();
   const today = getBusinessDateString(resolveCountryTimeZone(me?.country_code));
 
   let requestsQuery = supabase
@@ -59,11 +63,19 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
     .order("start_date", { ascending: false });
   if (status) requestsQuery = requestsQuery.eq("status", status);
 
-  const [{ data: leaveBalances, error: balancesError }, { data: compBalance, error: compError }, { data: requests, error: requestsError }] = await Promise.all([
-    supabase.from("leave_balances").select("leave_type_code, balance_days").eq("employee_id", session.employeeId),
-    supabase.from("comp_day_balances").select("balance_days").eq("employee_id", session.employeeId).maybeSingle(),
+  const employeeId = session.employeeId;
+  // Each part stands alone: one that cannot be read says so and the rest still show. The approver and the team are read through the person's own session.
+  const [{ data: leaveBalances, error: balancesError }, { data: compBalance, error: compError }, { data: requests, error: requestsError }, recoveryRes, approverRes, team] = await Promise.all([
+    supabase.from("leave_balances").select("leave_type_code, balance_days").eq("employee_id", employeeId),
+    supabase.from("comp_day_balances").select("balance_days").eq("employee_id", employeeId).maybeSingle(),
     requestsQuery,
+    supabase.from("recovery_credit_requests").select("id, work_date, event_type, proposed_days, status").eq("employee_id", employeeId).in("status", ["submitted", "pending_approval"]).order("work_date", { ascending: false }).limit(20),
+    me?.company_id ? loadLeaveApprover(supabase, { companyId: me.company_id, employeeId, userId: session.userId }).then((v): { ok: LeaveApprover } | { failed: true } => ({ ok: v })).catch((e) => { console.error("[leave] approver could not be loaded", e); return { failed: true as const }; }) : Promise.resolve({ failed: true as const }),
+    loadLeaveTeam(supabase, { employeeId, grants: session.grants }, today),
   ]);
+  const recoveryFailed = !!recoveryRes.error;
+  if (recoveryFailed) console.error("[leave] recovery requests could not be loaded", recoveryRes.error);
+  const approver = "ok" in approverRes ? approverRes.ok : null;
 
   // A failed read is never "0 days" or "No leave requests yet": each part says it could not load.
   const balancesFailed = !!(balancesError || compError);
@@ -83,6 +95,15 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
         </Link>
       </div>
 
+      <p className="text-sm" data-testid="leave-approver">
+        <span className="text-muted-foreground">Your leave requests go to </span>
+        {approver === null ? <span className="text-destructive">Could not load who approves your leave. <Link href="/leave" className="font-medium underline underline-offset-2">Try again</Link></span>
+          : approver.kind === "person" ? <strong>{approver.name}</strong>
+          : approver.kind === "self_approved" ? <span>nobody: as a company executive your own leave needs no approver.</span>
+          : <span>nobody yet. {approver.why}</span>}
+        {approver?.kind === "person" ? <span className="text-muted-foreground"> first.</span> : null}
+      </p>
+
       {balancesFailed ? (
         <LoadError what="your leave balances" retryHref="/leave" note="This is a problem loading the information, not zero days." />
       ) : (
@@ -90,9 +111,36 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
           {(leaveBalances ?? []).map((b) => (
             <OsStatCard key={b.leave_type_code} label={sentenceCase(b.leave_type_code.replace(/_/g, " "))} value={`${b.balance_days} days`} icon={CalendarDays} edge={Number(b.balance_days) > 0 ? "cyan" : "muted"} compact={false} />
           ))}
-          <OsStatCard label="Comp-off" value={`${compBalance?.balance_days ?? 0} days`} icon={Clock} edge={Number(compBalance?.balance_days ?? 0) > 0 ? "blue" : "muted"} compact={false} />
+          <OsStatCard label="Recovery Leave" value={`${compBalance?.balance_days ?? 0} days`} icon={Clock} edge={Number(compBalance?.balance_days ?? 0) > 0 ? "blue" : "muted"} compact={false} />
         </div>
       )}
+
+      {recoveryFailed ? (
+        <LoadError what="your Recovery Leave requests" retryHref="/leave" note="This is a problem loading the information, not an empty list." />
+      ) : (recoveryRes.data ?? []).length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Recovery Leave waiting for approval</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table stack>
+              <TableHeader>
+                <TableRow><TableHead>Day worked</TableHead><TableHead>Kind</TableHead><TableHead>Days</TableHead><TableHead>Status</TableHead></TableRow>
+              </TableHeader>
+              <TableBody>
+                {(recoveryRes.data ?? []).map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell>{r.work_date}</TableCell>
+                    <TableCell>{EVENT_TYPE_LABELS[r.event_type] ?? r.event_type}</TableCell>
+                    <TableCell>{r.proposed_days}</TableCell>
+                    <TableCell><StatusBadge status={r.status} /></TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -164,6 +212,8 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
           )}
         </CardContent>
       </Card>
+
+      <TeamLeaveSection result={team} today={today} />
     </div>
   );
 }

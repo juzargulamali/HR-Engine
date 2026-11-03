@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { failing, fakeSupabase, rows } from "@/test/fake-supabase";
-import { isQueueDecisionEligible, loadMyPendingApprovalCount } from "./pending";
+import { isQueueDecisionEligible, loadMyPendingApprovalCount, loadMyPendingApprovals } from "./pending";
 
 const HR_ADMIN = [{ role: "hr_admin" as const, companyId: "c1" }];
 const viewer = { userId: "u1", employeeId: "e-hr", grants: HR_ADMIN };
@@ -57,5 +57,16 @@ describe("loadMyPendingApprovalCount", () => {
   it("returns the named-step count when there is no queue step", async () => {
     const db = fakeSupabase({ approvals: () => ({ data: [], error: null, count: 4 }) }, { recovery_decider_inbox: rows([]) });
     expect(await loadMyPendingApprovalCount(asClient(db), viewer)).toBe(4);
+  });
+});
+
+describe("loadMyPendingApprovals: how long the longest-waiting decision has waited", () => {
+  it("is the earliest of the named step and the queue steps the person decides now", async () => {
+    const db = fakeSupabase({ approvals: () => ({ data: [{ created_at: "2026-10-30T08:00:00Z" }], error: null, count: 2 }) }, { recovery_decider_inbox: rows([{ approval_id: "q1", approver_id: null, approval_created_at: "2026-10-28T08:00:00Z", queue_roles: ["hr_admin"] }]) });
+    expect(await loadMyPendingApprovals(asClient(db), viewer)).toEqual({ count: 3, oldest: "2026-10-28T08:00:00Z" });
+  });
+  it("is null when nothing waits", async () => {
+    const db = fakeSupabase({ approvals: () => ({ data: [], error: null, count: 0 }) }, { recovery_decider_inbox: rows([]) });
+    expect(await loadMyPendingApprovals(asClient(db), viewer)).toEqual({ count: 0, oldest: null });
   });
 });

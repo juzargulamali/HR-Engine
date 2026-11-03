@@ -10,7 +10,7 @@ const tables: string[] = [];
 const from = (t: string) => { tables.push(t); return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: held === null ? null : { version: held } }) }) }) }; };
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc, from }) }));
 
-import { saveDeliverable, saveMilestone, setProjectTaskStatus, updateProjectTask } from "./projectsDelivery";
+import { blockProjectTask, saveDeliverable, saveMilestone, setProjectTaskStatus, updateProjectTask } from "./projectsDelivery";
 import { updateProject } from "./projectsCore";
 import { saveSiteBooking, savePlanItem } from "./projectsPlans";
 
@@ -46,5 +46,16 @@ describe("stale edits are answered in words before anything is sent", () => {
     expect((await saveMilestone({ error: null }, fd({ projectId: P, milestoneId: X, title: "M" }))).error).toBeNull();
     expect((await saveMilestone({ error: null }, fd({ projectId: P, milestoneId: X, title: "M", expectedVersion: "9" }))).error).toBeNull();
     expect(rpc).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("a blocker always names the person responsible for unblocking it", () => {
+  it("refuses a blocker without one, before anything is sent, and passes the person on when given", async () => {
+    const r = await blockProjectTask({ error: null }, fd({ projectId: P, taskId: X, reason: "Waiting for power", unblockOwner: "" }));
+    expect(r.error).toMatch(/responsible for unblocking/);
+    expect(rpc).not.toHaveBeenCalled();
+    const ok = await blockProjectTask({ error: null }, fd({ projectId: P, taskId: X, reason: "Waiting for power", unblockOwner: P }));
+    expect(ok.error).toBeNull();
+    expect(rpc).toHaveBeenCalledWith("proj_block_task", expect.objectContaining({ p_unblock_owner: P, p_reason: "Waiting for power" }));
   });
 });

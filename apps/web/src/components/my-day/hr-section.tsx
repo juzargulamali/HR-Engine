@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Building2, CalendarClock, CalendarDays, ClipboardCheck, Users, UserCheck } from "lucide-react";
+import { ArrowRight, CalendarDays, ClipboardCheck, Users, UserCheck } from "lucide-react";
 import type { ActionItem } from "@/app/(app)/action-centre";
 import { OsStatCard } from "@/components/os/stat-card";
 import { OsDonut } from "@/components/os/donut";
@@ -11,8 +11,9 @@ export function HrStatCards({ employees, present, onLeave, leaveInReview }: { em
     <ul className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="People and HR figures">
       <li><OsStatCard href="/employees" label="Employees" value={employees} icon={Users} edge="blue" hint="Across the companies you can see" /></li>
       <li><OsStatCard href="/attendance" label="Recorded present" value={present} icon={UserCheck} edge="cyan" hint="Daily record, not live status" /></li>
-      <li><OsStatCard href="/leave" label="On leave" value={onLeave} icon={CalendarDays} edge="amber" hint="Leave recorded for today" /></li>
-      <li><OsStatCard href="/approvals" label="Leave requests in review" value={leaveInReview} icon={ClipboardCheck} edge="blue" hint="Company-wide, any approver" /></li>
+      <li><OsStatCard href="/attendance" label="On leave" value={onLeave} icon={CalendarDays} edge="amber" hint="Leave recorded for today; see the register" /></li>
+      {/* A figure only: /approvals lists what waits on the viewer, not every request in review, so it would not match this number. Yours are under Needs me. */}
+      <li><OsStatCard label="Leave requests in review" value={leaveInReview} icon={ClipboardCheck} edge="blue" hint="Company-wide, any approver" /></li>
     </ul>
   );
 }
@@ -51,27 +52,6 @@ export function HrAttention({ items }: { items: readonly ActionItem[] }) {
           ))}
         </ul>
       )}
-    </MyDayCard>
-  );
-}
-
-const QUICK = [
-  { href: "/employees", label: "Employees directory", icon: Building2 },
-  { href: "/attendance", label: "Attendance register", icon: CalendarClock },
-  { href: "/leave", label: "Leave requests", icon: ClipboardCheck },
-];
-export function QuickActions() {
-  return (
-    <MyDayCard title="Quick actions">
-      <ul className="-mx-2 divide-y divide-border/60">
-        {QUICK.map((q) => (
-          <li key={q.href}>
-            <Link href={q.href} className="group flex items-center gap-3 rounded-lg px-2 py-2.5 text-sm transition-colors hover:bg-[hsl(var(--primary)/0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <q.icon className="h-4 w-4 flex-none text-accent" aria-hidden /><span className="flex-1">{q.label}</span><ArrowRight className="h-4 w-4 flex-none text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden />
-            </Link>
-          </li>
-        ))}
-      </ul>
     </MyDayCard>
   );
 }

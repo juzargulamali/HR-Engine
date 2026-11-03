@@ -18,9 +18,10 @@ describe("draftFromCandidate", () => {
     const d = draftFromCandidate(unit(), "issue", "x");
     expect(d).toMatchObject({ unitId: "unit-1", code: "UAE-E-00042", binId: "" });
   });
-  it("returns default to good, so one click completes the check", () => {
-    expect(draftFromCandidate(unit({ custody: "employee" }), "return", "x").condition).toBe("good");
-    expect(draftFromCandidate(counted(), "return", "x").condition).toBe("good");
+  it("a return starts with no condition at all: it is chosen for every line, never assumed to be good", () => {
+    expect(draftFromCandidate(unit({ custody: "employee" }), "return", "x").condition).toBe("");
+    expect(draftFromCandidate(counted(), "return", "x").condition).toBe("");
+    expect(draftFromCandidate(unit(), "repair_in", "x").condition).toBe("good");
   });
   it("a condition check and a transfer arrival start from what it is now", () => {
     expect(draftFromCandidate(unit({ condition: "needs_inspection" }), "check", "x").condition).toBe("needs_inspection");

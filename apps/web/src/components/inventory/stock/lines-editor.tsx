@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { QrScanner } from "@/components/inventory/qr-scanner";
+import { ConditionForAll } from "@/components/inventory/condition-for-all";
+import { applyConditionToLines, appliedMessage } from "@/lib/inventory/return-condition";
 import { draftFromCandidate, unitProblemFor, type Candidate } from "@/lib/inventory/stock-candidates";
 import { KIND_CONFIG, sourceFor, type AdjustAction, type LineDraft, type MovementKind } from "@/lib/inventory/stock-movements";
 import { BALANCE_CONDITION_WORDS, CONDITION_WORDS, formatQty } from "@/lib/inventory/words";
@@ -219,6 +221,20 @@ export function LinesEditor(props: Props) {
         </div>
       ) : null}
 
+      {kind === "return" && drafts.length > 1 ? (
+        <ConditionForAll
+          count={drafts.length}
+          noun="listed"
+          disabled={disabled}
+          onApply={(value) => {
+            const r = applyConditionToLines(Object.fromEntries(drafts.map((d) => [d.id, d.condition])), drafts.map((d) => ({ key: d.id, individual: d.unitId !== null })), value);
+            const next = drafts.map((d) => ({ ...d, condition: r.next[d.id] ?? d.condition }));
+            draftsRef.current = next;
+            onChange(next);
+            return appliedMessage(value, r.applied, r.skipped);
+          }}
+        />
+      ) : null}
       {drafts.length === 0 ? (
         <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">{props.emptyHint ?? (cfg.linesOptional ? "The list is empty, which means everything that applies. Add items to choose only some." : "Nothing on the list yet. Search for an item or scan a label.")}</p>
       ) : (
@@ -264,7 +280,8 @@ function DraftRow({ d, kind, bins, canSeeCosts, error, patch, remove, taking }: 
   const conditionField = wantsCondition ? (
     <div className="space-y-1.5">
       <label htmlFor={`${uid}-c`} className="text-sm font-medium leading-none">{kind === "check" ? "Condition after the check" : "Condition"}</label>
-      <Select id={`${uid}-c`} value={d.condition} onChange={(e) => patch(d.id, { condition: e.target.value })}>
+      <Select id={`${uid}-c`} value={d.condition} onChange={(e) => patch(d.id, { condition: e.target.value })} aria-invalid={d.condition === "" ? true : undefined}>
+        {d.condition === "" ? <option value="">Choose condition</option> : null}
         {conditions.map(([value, word]) => <option key={value} value={value}>{condLabel(value, word)}</option>)}
       </Select>
     </div>

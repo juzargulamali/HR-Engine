@@ -255,7 +255,7 @@ describe("MovementForm: counted stock", () => {
 });
 
 describe("MovementForm: returns", () => {
-  it("defaults every returned line to Good (available now), holds anything else, and says what stays outstanding", async () => {
+  it("starts every returned line with NO condition, refuses to review until one is chosen, then records it and says what stays outstanding", async () => {
     const submit = vi.fn(async (_i: MovementInput) => ({ error: null, message: "Recorded as MV-5." }));
     const s = services({ submit, held: vi.fn(async () => ({ error: null, candidates: [heldLaptop, { ...heldLaptop, key: "unit-h2", unitId: "u10", code: "UAE-E-00100" }] })) });
     render(<MovementForm kind="return" services={s} context={context} />);
@@ -265,9 +265,13 @@ describe("MovementForm: returns", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Sara Ali/ }));
     fireEvent.click(await screen.findByRole("button", { name: /add laptop x1 uae-e-00099/i }));
     const cond = screen.getByLabelText("Condition") as HTMLSelectElement;
-    expect(cond.value).toBe("good");
-    expect(within(cond).getByRole("option", { name: /good: available now/i })).toBeTruthy();
+    expect(cond.value).toBe("");
+    expect(within(cond).getByRole("option", { name: /fair: available now/i })).toBeTruthy();
     expect(within(cond).getByRole("option", { name: /damaged: held back/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    expect((await screen.findAllByText(/choose a condition for/i)).length).toBeGreaterThan(0);
+    expect(submit).not.toHaveBeenCalled();
+    fireEvent.change(cond, { target: { value: "good" } });
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
     expect(await screen.findByText("Check before you confirm")).toBeTruthy();
     expect(screen.getByText(/1 other item stays with the employee/i)).toBeTruthy();
@@ -277,12 +281,29 @@ describe("MovementForm: returns", () => {
     expect(submit.mock.calls[0]![0].returnFrom).toBe("employee");
   });
 
+  it("sets one condition for every listed line only when asked, starting empty, and a fair unit is described as available", async () => {
+    const s = services({ held: vi.fn(async () => ({ error: null, candidates: [heldLaptop, { ...heldLaptop, key: "unit-h2", unitId: "u10", code: "UAE-E-00100" }] })) });
+    render(<MovementForm kind="return" services={s} context={context} initial={{ candidates: [heldLaptop, { ...heldLaptop, key: "unit-h2", unitId: "u10", code: "UAE-E-00100" }], locationId: "l1", returnFrom: "employee", employee: { id: "e1", name: "Sara Ali" } }} />);
+    const conds = () => screen.getAllByLabelText("Condition") as HTMLSelectElement[];
+    expect(conds().map((c) => c.value)).toEqual(["", ""]);
+    const helper = screen.getByRole("combobox", { name: /Set the condition for all listed lines/ }) as HTMLSelectElement;
+    expect(helper.value).toBe("");
+    expect((screen.getByRole("button", { name: /Apply to 2 listed lines/ }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(helper, { target: { value: "fair" } });
+    fireEvent.click(screen.getByRole("button", { name: /Apply to 2 listed lines/ }));
+    expect(conds().map((c) => c.value)).toEqual(["fair", "fair"]);
+    expect((screen.getByRole("combobox", { name: /Set the condition for all listed lines/ }) as HTMLSelectElement).value).toBe(""); // it starts empty again
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    expect((await screen.findAllByText(/fair, available/i)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Held back/)).toBeNull();
+  });
+
   it("a damaged unit is shown as held back on the review step", async () => {
     const s = services();
     render(<MovementForm kind="return" services={s} context={context} initial={{ candidates: [heldLaptop], locationId: "l1", returnFrom: "employee", employee: { id: "e1", name: "Sara Ali" } }} />);
     fireEvent.change(screen.getByLabelText("Condition"), { target: { value: "damaged" } });
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
-    expect(await screen.findByText(/not in good condition/i)).toBeTruthy();
+    expect(await screen.findByText(/not available again/i)).toBeTruthy();
     expect(screen.getAllByText(/damaged, held back/i).length).toBeGreaterThan(0);
   });
 });

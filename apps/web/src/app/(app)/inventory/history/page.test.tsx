@@ -7,6 +7,8 @@ import type { InvCapability } from "@enginious-hr/domain";
 import type { InvLocationRow } from "@/types/inventory";
 import type { MovementList, Names } from "@/lib/inventory/stock";
 
+// The "whom to ask" sentence is an async server component (it reads who can grant access); these page tests render synchronously, so it is stood in for here and tested in components/os/ask-for-access.test.tsx.
+vi.mock("@/components/os/ask-for-access", () => ({ AskForAccess: ({ generic = "a founder", to = "give you access" }: { generic?: string; to?: string }) => <span>Ask {generic} to {to}.</span> }));
 vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }), usePathname: () => "/inventory/movements", useSearchParams: () => new URLSearchParams() }));
 const C1 = "11111111-1111-4111-8111-111111111111";

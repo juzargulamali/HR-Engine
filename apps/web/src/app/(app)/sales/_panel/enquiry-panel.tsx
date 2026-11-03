@@ -18,10 +18,10 @@ import { buildContactPicker, type ContactPickerData } from "../opportunities/[id
 import { CommercialPanel } from "../opportunities/[id]/commercial-panel";
 import { DetailTabs, type DetailTab } from "../opportunities/[id]/detail-tabs";
 import { FilesPanel } from "../opportunities/[id]/files-panel";
-import { isOnlyOpenFollowUp } from "../opportunities/[id]/helpers";
+import { isOnlyOpenFollowUp, planNextProps } from "../opportunities/[id]/helpers";
 import { ProposalsPanel } from "../opportunities/[id]/proposals-panel";
 import { ScopePanel } from "../opportunities/[id]/scope-panel";
-import { buildOppView, type OppView } from "../opportunities/[id]/view";
+import { buildOppView, planNextInput, type OppView } from "../opportunities/[id]/view";
 import { buildEnquiryActions } from "./actions-props";
 import { EnquiryActions } from "./enquiry-actions";
 import { PanelOverview } from "./panel-overview";
@@ -117,7 +117,7 @@ function EnquiryPanelBody({ view, picker }: { view: OppView; picker: ContactPick
       <EquipmentAvailabilityCard opportunityId={opp.id} companyId={opp.company_id} stage={opp.stage} canAsk={view.canEdit} />
 
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Enquiry actions">
-        {!isLost ? <AddUpdateButton opportunityId={opp.id} /> : null}
+        {!isLost ? <AddUpdateButton opportunityId={opp.id} {...planNextProps(planNextInput(view))} /> : null}
         <EnquiryActions {...buildEnquiryActions(view)} />
       </div>
 

@@ -8,7 +8,7 @@ let fails = 0; const ok = (c, m) => { console.log(`${c ? "PASS" : "FAIL"}  ${m}`
 const arrived = (page, re) => page.waitForURL((u) => re.test(u.pathname), { timeout: 10000 }).then(() => true, () => false);
 const landed = async (page) => { await page.locator("main h1, main h2").first().waitFor({ timeout: 10000 }).catch(() => {}); return (await page.locator("main h1, main h2").count()) > 0 && !/Application error/i.test(await page.locator("body").innerText()); };
 const SIDE = "aside[aria-label='ENGINIOUS OS modules']";
-const MODULES = [["Sales & CRM", /^\/sales/], ["People & HR", /^\/(employees|leave|attendance|payroll|recovery|performance|hr)/], ["Inventory", /^\/inventory/], ["Projects & Tasks", /^\/projects/]];
+const MODULES = [["Sales & CRM", /^\/sales/], ["Me", /^\/(profile|leave|attendance|attendance-clock|reimbursements|letters|inventory\/mine|performance)/], ["People & HR", /^\/(employees|attendance|alerts|payroll|assets|ai-suggestions|audit-log|people-access|admin|letters)/], ["Company information", /^\/(holidays|policies)/], ["Inventory", /^\/inventory/], ["Projects & Tasks", /^\/projects/]];
 
 async function renders(page, path, label) {
   const res = await page.goto(`${BASE}${path}`, { waitUntil: "networkidle" });
@@ -54,7 +54,7 @@ console.log("\n=== founder phone (390x844)");
   const page = await newPage(browser, { width: 390, height: 844 }); await login(page, "ceo@e2e.local");
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   const bar = page.locator("nav[aria-label='Primary']");
-  for (const [tab, re] of [["Sales", /^\/sales/], ["People", /^\/(employees|leave|attendance|payroll|recovery|performance|hr)/]]) {
+  for (const [tab, re] of [["Sales", /^\/sales/], ["Me", /^\/(profile|leave|attendance|reimbursements|letters|inventory\/mine|performance)/]]) {
     const t = bar.locator("a, button").filter({ hasText: new RegExp(`^${tab}$`) }).first();
     if ((await t.count()) === 0) { ok(false, `phone bottom bar lacks ${tab}`); continue; }
     await t.click(); const there = await arrived(page, re);

@@ -4,9 +4,9 @@ import { formatDateTime } from "@/components/sales/format";
 import { AddActivityForm } from "./add-activity-form";
 import { describeHistoryEvent } from "./closure-helpers";
 import { ClosureHistory } from "./closure-history";
-import { buildTimeline, describeEvent } from "./helpers";
+import { buildTimeline, describeEvent, planNextProps } from "./helpers";
 import { Muted, Panel } from "./parts";
-import type { OppView } from "./view";
+import { planNextInput, type OppView } from "./view";
 
 const KIND_LABEL = { call: "Call", email: "Email", meeting: "Meeting", note: "Note", client_response: "Client response" } as const;
 
@@ -14,13 +14,14 @@ const KIND_LABEL = { call: "Call", email: "Email", meeting: "Meeting", note: "No
 export function ActivityPanel({ view, showForm = true }: { view: OppView; showForm?: boolean }) {
   const { detail, ctx, opp, isLost } = view;
   const timeline = buildTimeline(detail.activities, detail.events);
+  const next = planNextProps(planNextInput(view));
   return (
     <div className="space-y-6">
       {isLost ? (
         <Muted>A lost opportunity can no longer be updated until it is reopened. The history below is kept.</Muted>
       ) : !showForm ? null : (
-        <Panel title="Log an activity" description="Anyone with Sales access can add to the timeline.">
-          <AddActivityForm opportunityId={opp.id} />
+        <Panel title="Log an activity" description="Anyone with Sales access can add to the timeline. Log a call and plan the next step here, in one go.">
+          <AddActivityForm opportunityId={opp.id} {...next} />
         </Panel>
       )}
       <ClosureHistory view={view} />

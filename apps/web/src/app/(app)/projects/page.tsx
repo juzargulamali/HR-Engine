@@ -86,9 +86,9 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
 
   const needs = !attention ? [] : [
     attention.handoversWaiting > 0 ? { label: `${attention.handoversWaiting} handover${attention.handoversWaiting === 1 ? "" : "s"} waiting on you`, href: "/projects/handovers" } : null,
-    attention.reviewsWaiting > 0 ? { label: `${attention.reviewsWaiting} waiting for your review`, href: "/projects/work" } : null,
-    attention.overdueTasks > 0 ? { label: `${attention.overdueTasks} overdue task${attention.overdueTasks === 1 ? "" : "s"} of yours`, href: "/projects/work" } : null,
-    attention.unreadMessages > 0 ? { label: `${attention.unreadMessages} unread message${attention.unreadMessages === 1 ? "" : "s"} in ${attention.unreadProjects} project${attention.unreadProjects === 1 ? "" : "s"}`, href: "/projects/work" } : null,
+    attention.reviewsWaiting > 0 ? { label: `${attention.reviewsWaiting} waiting for your review`, href: "/projects/work?show=review" } : null,
+    attention.overdueTasks > 0 ? { label: `${attention.overdueTasks} overdue task${attention.overdueTasks === 1 ? "" : "s"} of yours`, href: "/projects/work?show=overdue" } : null,
+    attention.unreadMessages > 0 ? { label: `${attention.unreadMessages} unread message${attention.unreadMessages === 1 ? "" : "s"} in ${attention.unreadProjects} project${attention.unreadProjects === 1 ? "" : "s"}`, href: "/projects" } : null,
   ].filter((n): n is { label: string; href: string } => n !== null);
 
   // ---- side panel: the authorised summary of one project (?open=ID)

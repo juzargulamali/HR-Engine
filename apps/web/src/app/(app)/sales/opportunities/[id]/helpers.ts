@@ -1,4 +1,5 @@
 import { AVAILABILITY_LABELS, crmStageLabel, isCrmActive, type ApprovalPolicy, type AvailabilityDisplay } from "@enginious-hr/domain";
+import { nextWorkingDay } from "@/lib/crm/next-working-day";
 import type { CrmActivityRow, CrmFileRow, CrmFollowUpRow, CrmOpportunityEventRow, CrmOpportunityRow, CrmProposalRow, CrmCompanySettingsRow } from "@/types/crm";
 
 /**
@@ -76,6 +77,18 @@ export function describeEvent(e: Pick<CrmOpportunityEventRow, "kind" | "from_val
 export function isOnlyOpenFollowUp(followUps: readonly Pick<CrmFollowUpRow, "id" | "status">[], followUpId: string, stage: string): boolean {
   const open = followUps.filter((f) => f.status === "open");
   return isCrmActive(stage) && open.length === 1 && open[0]?.id === followUpId;
+}
+
+/**
+ * What "Add update" needs to also plan the next step: the open follow-ups this person may complete with the update (each says whether it is the only one,
+ * which then makes the next step required), and the suggested date for the next one. `canAct` is the page's own check (the database repeats it).
+ */
+export function planNextProps(view: { openFollowUps: readonly Pick<CrmFollowUpRow, "id" | "title">[]; followUps: readonly Pick<CrmFollowUpRow, "id" | "status">[]; stage: string; calendar: unknown; today: string; canAct: (f: { id: string }) => boolean }) {
+  return {
+    completable: view.openFollowUps.filter((f) => view.canAct(f)).map((f) => ({ id: f.id, title: f.title, isOnlyOpen: isOnlyOpenFollowUp(view.followUps, f.id, view.stage) })),
+    suggestedDate: nextWorkingDay(view.today, view.calendar),
+    minDate: view.today,
+  };
 }
 
 /** What the database insists on before a plain move, stated in words; null when the move has no extra requirement. */

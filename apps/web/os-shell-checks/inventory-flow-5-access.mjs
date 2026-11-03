@@ -74,7 +74,7 @@ if (run("B1")) {
       await R.page.keyboard.press("Control+a"); await R.page.keyboard.type("scan");
       await sleep(400);
       const t2 = (await R.page.getByRole("dialog").first().innerText()).replace(/\s+/g, " ");
-      for (const label of ["My equipment", "Equipment held by people"]) check(PALETTE[who].includes(label) === t1.includes(label), `${who}@ palette "equip": ${label} should ${PALETTE[who].includes(label) ? "" : "not "}be offered: ${t1.slice(0, 200)}`);
+      for (const label of ["My equipment", "Equipment held by people"]) check(PALETTE[who].includes(label) === t1.toLowerCase().includes(label.toLowerCase()), `${who}@ palette "equip": ${label} should ${PALETTE[who].includes(label) ? "" : "not "}be offered: ${t1.slice(0, 200)}`);
       check(PALETTE[who].includes("Scan a label") === t2.includes("Scan a label"), `${who}@ palette "scan": ${t2.slice(0, 200)}`);
     });
   }

@@ -50,7 +50,7 @@ await step("Complete follow-up: refused without the next action, then done; the 
   await d.getByRole("button", { name: /^complete$/i }).click(); // next action left empty: the form must refuse
   await sleep(700); if (!(await d.isVisible())) throw new Error("dialog closed without a next action");
   if (sql(`select status from crm_follow_ups where title='Confirm the table dimensions'`) !== "open") throw new Error("follow-up completed without a next action");
-  await d.getByLabel(/^next action/i).fill("Send the table render"); await d.getByLabel(/^date/i).fill("2026-10-28");
+  await d.getByLabel(/^next action/i).fill("Send the table render"); await d.getByLabel(/^date/i).fill("2026-11-30");
   await d.getByRole("button", { name: /^complete$/i }).click(); await d.waitFor({ state: "hidden", timeout: 12000 });
   const st = sql(`select status || '|' || coalesce(outcome,'') from crm_follow_ups where title='Confirm the table dimensions'`); if (st !== "done|Confirmed the table size with the museum.") throw new Error("completed follow-up not saved: " + st);
   if (stageOf(T.museum) !== "new") throw new Error("stage changed to " + stageOf(T.museum)); if (sql(`select count(*) from crm_closures where opportunity_id='${idOf(T.museum)}'`) !== "0") throw new Error("a closure was recorded");

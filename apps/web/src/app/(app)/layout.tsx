@@ -12,6 +12,7 @@ import { OsScope } from "@/components/os/scope";
 import { loadInventoryNavAccess } from "@/lib/inventory/context";
 import { loadBudgetNavAccess, loadBudgetWaitingCount } from "@/lib/budget/data";
 import { loadProjectsNavAccess } from "@/lib/projects/context";
+import { loadDirectReportsNav } from "@/lib/nav/direct-reports";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await getCurrentSession();
@@ -79,11 +80,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   // Projects & Tasks: its own company grants, a Sales link, or a handover waiting on this person. Degrades to "no access" on any failure.
   const projects = await loadProjectsNavAccess(session.userId);
-  // Inventory: its own company grants, a running project, or an employee record. Degrades to the "Coming soon" row on any failure.
+  // Inventory: its own company grants, a running project, or an employee record. A failed read shows no entry and the notice below.
   const inventory = await loadInventoryNavAccess(session.userId);
   // Project Budget & Expenses: the person's own Finance / view grants only. Degrades to no entry on any failure, including the module not being installed yet.
   const budget = await loadBudgetNavAccess(session.userId);
-  if (projects.loadFailed || inventory.loadFailed || budget.loadFailed) menuLoadFailed = true;
+  // Direct reports decide whether a manager without the Reporting Manager role is offered "People & HR". Unknown keeps the entry.
+  const directReports = await loadDirectReportsNav(await createClient(), session.employeeId);
+  if (projects.loadFailed || inventory.loadFailed || budget.loadFailed || directReports.loadFailed) menuLoadFailed = true;
   // The Finance entry's "waiting for your decision" number: one small function (not the whole inbox), asked only of people who can decide. A failed read shows no number
   // (never 0) and the same banner as any other menu part that could not load.
   let budgetWaiting: number | undefined;
@@ -94,7 +97,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <AppShell session={session} clockOpenSince={clockOpenSince} clockLoadFailed={clockLoadFailed} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants} projects={projects} inventory={inventory} budget={{ ...budget, ...(budgetWaiting ? { waiting: budgetWaiting } : {}) }}>
+    <AppShell session={session} clockOpenSince={clockOpenSince} clockLoadFailed={clockLoadFailed} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants} projects={projects} inventory={inventory} budget={{ ...budget, ...(budgetWaiting ? { waiting: budgetWaiting } : {}) }} hasDirectReports={directReports.hasDirectReports}>
       <OsScope>
         {session.loadFailed || menuLoadFailed ? (
           <div className="mb-4 space-y-3">

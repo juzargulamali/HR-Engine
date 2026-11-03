@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Copy, Plus, Trash2 } from "lucide-react";
 import {
   ACTIVITIES, ACTIVITY_LABELS, BASIS_FIELDS, BASIS_LABELS, BUDGET_BASES, DEFAULT_CATEGORIES, QTY_LABELS, RATE_LABELS, RATE_LABELS_BY_KEY, inclusiveDays, moneyText, rowTotal, suggestedRate, sumMoney,
   type BudgetActivity, type BudgetBasis, type RateKey,
@@ -53,7 +53,10 @@ export function BudgetEditor({ view, version }: { view: PbxBudgetView; version: 
   const [rows, setRows] = useState<DraftRow[]>(() => fromVersion(version));
   const [periodStart, setPeriodStart] = useState(version.period_start ?? "");
   const [periodEnd, setPeriodEnd] = useState(version.period_end ?? "");
-  const [people, setPeople] = useState<string[]>(() => version.people.map((p) => p.id));
+  // A new draft (no lines, nobody chosen yet) starts with every project member ticked: untick whoever is not covered. A saved draft keeps its own choice.
+  const [people, setPeople] = useState<string[]>(() => (version.people.length === 0 && version.rows.length === 0 ? view.people.map((p) => p.id) : version.people.map((p) => p.id)));
+  // The activity last chosen is offered again on the next new line (each line can still change it).
+  const [lastActivity, setLastActivity] = useState<BudgetActivity>("other");
   const [note, setNote] = useState(version.note ?? "");
   const [rv, setRv] = useState(version.row_version);
   const [dirty, setDirty] = useState(false);
@@ -82,11 +85,20 @@ export function BudgetEditor({ view, version }: { view: PbxBudgetView; version: 
   const grand = sumMoney(totals, currency);
   const incomplete = rows.filter((_, i) => totals[i] === null).length;
 
-  const update = (key: string, patch: Partial<DraftRow>) => { setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r))); touch(); };
+  const update = (key: string, patch: Partial<DraftRow>) => {
+    setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+    if (patch.activity) setLastActivity(patch.activity);
+    touch();
+  };
+  /** A copy of the line right below it, to edit what differs (a different day, a different description). Totals are recalculated like any line. */
+  const duplicate = (key: string) => {
+    setRows((rs) => { const i = rs.findIndex((r) => r.key === key); return i < 0 ? rs : [...rs.slice(0, i + 1), { ...rs[i]!, key: newKey() }, ...rs.slice(i + 1)]; });
+    touch();
+  };
   const addRow = (category_id: string) => {
     const cat = categories.find((c) => c.id === category_id);
     const meal = cat?.key === "food";
-    setRows((rs) => [...rs, { key: newKey(), category_id, date_from: "", date_to: "", activity: "other", description: "", basis: meal ? "per_person_day" : "fixed", people: "", days: "", qty: "", rate: "", fixed: "", rate_key: "" }]);
+    setRows((rs) => [...rs, { key: newKey(), category_id, date_from: "", date_to: "", activity: lastActivity, description: "", basis: meal ? "per_person_day" : "fixed", people: "", days: "", qty: "", rate: "", fixed: "", rate_key: "" }]);
     touch();
   };
   const remove = (key: string) => { setRows((rs) => rs.filter((r) => r.key !== key)); touch(); };
@@ -147,7 +159,7 @@ export function BudgetEditor({ view, version }: { view: PbxBudgetView; version: 
               <ul className="divide-y divide-border">
                 {mine.map((r) => (
                   <li key={r.key} className="p-3">
-                    <RowFields row={r} currency={currency} total={totals[rows.indexOf(r)] ?? null} petrol={rate("petrol_per_km")} meal={rate("meal_per_person")} disabled={busy} onChange={(p) => update(r.key, p)} onRemove={() => remove(r.key)} />
+                    <RowFields row={r} currency={currency} total={totals[rows.indexOf(r)] ?? null} petrol={rate("petrol_per_km")} meal={rate("meal_per_person")} disabled={busy} onChange={(p) => update(r.key, p)} onRemove={() => remove(r.key)} onDuplicate={() => duplicate(r.key)} />
                   </li>
                 ))}
               </ul>
@@ -182,8 +194,8 @@ export function BudgetEditor({ view, version }: { view: PbxBudgetView; version: 
   );
 }
 
-function RowFields({ row, currency, total, petrol, meal, disabled, onChange, onRemove }: {
-  row: DraftRow; currency: string; total: number | null; petrol: number | null; meal: number | null; disabled: boolean; onChange: (p: Partial<DraftRow>) => void; onRemove: () => void;
+function RowFields({ row, currency, total, petrol, meal, disabled, onChange, onRemove, onDuplicate }: {
+  row: DraftRow; currency: string; total: number | null; petrol: number | null; meal: number | null; disabled: boolean; onChange: (p: Partial<DraftRow>) => void; onRemove: () => void; onDuplicate: () => void;
 }) {
   const fields = BASIS_FIELDS[row.basis];
   const id = row.key;
@@ -230,6 +242,7 @@ function RowFields({ row, currency, total, petrol, meal, disabled, onChange, onR
             <div className="text-[13px] text-muted-foreground">Line total</div>
             <div className="font-semibold tabular-nums" data-testid="line-total">{total === null ? "—" : money(total, currency)}</div>
           </div>
+          <Button type="button" variant="ghost" size="sm" onClick={onDuplicate} disabled={disabled} aria-label={`Duplicate the line ${row.description || "without a description"}`}><Copy className="h-4 w-4" aria-hidden /></Button>
           <Button type="button" variant="ghost" size="sm" onClick={onRemove} disabled={disabled} aria-label={`Remove the line ${row.description || "without a description"}`}><Trash2 className="h-4 w-4" aria-hidden /></Button>
         </div>
       </div>

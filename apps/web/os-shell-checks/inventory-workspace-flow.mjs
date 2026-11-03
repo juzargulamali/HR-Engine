@@ -129,9 +129,13 @@ await step("Receive back: a partial return needs a condition; good is available 
   await R.page.getByLabel(/How many HDMI cable came back/).fill("2");
   await R.page.getByRole("button", { name: /^Review/ }).click();
   await R.expectText(/Choose a condition/);
-  const sel = R.page.locator("select").filter({ hasText: "Choose condition" });
-  await sel.nth(0).selectOption("good");
-  await sel.nth(1).selectOption("damaged");
+  // The helper starts empty and only touches ticked lines: Good for both ticked lines, then the exception is changed on its own line.
+  const helper = R.page.getByRole("combobox", { name: /Set the condition for all ticked lines/ });
+  eq(await helper.inputValue(), "", "the helper starts empty");
+  await helper.selectOption("good");
+  await R.page.getByRole("button", { name: /^Apply to 2 ticked lines$/ }).click();
+  eq(await R.page.getByLabel(/^Condition of Laptop 14 inch/).inputValue(), "good", "helper set the ticked laptop");
+  await R.page.getByLabel(/^Condition of HDMI cable/).selectOption("damaged");
   await R.expectText(/Available again/); await R.expectText(/Held, not available/);
   await R.page.getByRole("button", { name: /^Review/ }).click();
   await R.page.getByText("Check before you confirm").waitFor();

@@ -42,6 +42,11 @@ describe("Approvals page", () => {
     expect(html).not.toContain("Could not load");
   });
 
+  it("each row says how long it has waited on the person (the step's own creation time)", async () => {
+    const html = await render();
+    expect(html).toMatch(/Waiting (\d+ days?|since today)/);
+  });
+
   it("an empty successful read still says nothing is waiting", async () => {
     tables = { ...healthy(), approvals: rows([]) };
     expect(await render()).toContain("Nothing waiting on you right now.");

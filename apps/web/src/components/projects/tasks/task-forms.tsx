@@ -35,17 +35,22 @@ export function StatusMoveForm({ projectId, taskId, version, move, taskTitle, on
   );
 }
 
-export function BlockForm({ projectId, taskId, members, onDone }: { projectId: string; taskId: string; members: PickOption[]; onDone?: () => void }) {
+/**
+ * Report a blocker: what is in the way (one field to type) and who is responsible for unblocking it. That person is pre-filled (the project head or
+ * the team head), still required and still editable: the blocker is recorded with its reason and that person, who is told.
+ */
+export function BlockForm({ projectId, taskId, members, defaultOwner, onDone }: { projectId: string; taskId: string; members: PickOption[]; defaultOwner: string; onDone?: () => void }) {
   return (
-    <ActionForm action={blockProjectTask} submitLabel="Mark as blocked" onDone={onDone}>
+    <ActionForm action={blockProjectTask} submitLabel="Report blocker" pendingLabel="Reporting…" onDone={onDone}>
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="taskId" value={taskId} />
-      <p className="text-sm text-muted-foreground">A blocked task cannot be completed until the blocker is cleared. Say what is in the way and who or what will clear it.</p>
-      <Field label="What is blocking it" htmlFor="bl-reason"><Textarea id="bl-reason" name="reason" rows={3} required /></Field>
-      <Field label="Who can unblock it" htmlFor="bl-owner" hint="Choose a person, describe an action below, or both.">
-        <Select id="bl-owner" name="unblockOwner" defaultValue=""><option value="">Nobody in particular</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select>
+      <Field label="What is blocking it" htmlFor="bl-reason"><Textarea id="bl-reason" name="reason" rows={3} required autoFocus /></Field>
+      <Field label="Who is responsible for unblocking it" htmlFor="bl-owner" hint="They are told. Change it if someone else can clear it. The task cannot be completed until the blocker is cleared.">
+        <Select id="bl-owner" name="unblockOwner" defaultValue={defaultOwner} required>
+          {defaultOwner === "" ? <option value="" disabled>Choose a person</option> : null}
+          {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </Select>
       </Field>
-      <Field label="Or what action will unblock it" htmlFor="bl-action"><Input id="bl-action" name="unblockAction" maxLength={300} placeholder="e.g. Standbuilder delivers the truss" /></Field>
     </ActionForm>
   );
 }

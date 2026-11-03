@@ -15,6 +15,7 @@ import { ClickableRow } from "@/components/workspace/clickable-row";
 import { LoadError } from "@/components/workspace/states";
 import { isQueueDecisionEligible } from "@/lib/approvals/pending";
 import { logServerError } from "@/lib/log";
+import { waitingAgeText } from "@/lib/my-day/waiting";
 
 export const metadata = { title: "Approvals" };
 
@@ -466,6 +467,13 @@ export default async function ApprovalsPage() {
     return hours === null || hours === undefined ? null : Number(hours);
   }
 
+  // How long each request has waited on this person (the step's own creation time, already loaded above).
+  const nowForAge = new Date();
+  const waitingAge = (since: string | null | undefined) => {
+    const t = waitingAgeText(since, nowForAge);
+    return t ? <p className="text-sm text-muted-foreground">{t}</p> : null;
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -532,6 +540,7 @@ export default async function ApprovalsPage() {
                         <div className="space-y-0.5">
                           <StatusBadge status="pending_approval" />
                           <p className="text-sm text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                          {waitingAge(a.created_at)}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -582,6 +591,7 @@ export default async function ApprovalsPage() {
                         <div className="space-y-0.5">
                           <StatusBadge status="pending_approval" />
                           <p className="text-sm text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                          {waitingAge(a.created_at)}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -624,6 +634,7 @@ export default async function ApprovalsPage() {
                         <div className="space-y-0.5">
                           <StatusBadge status="pending_approval" />
                           <p className="text-sm text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                          {waitingAge(a.created_at)}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -664,6 +675,7 @@ export default async function ApprovalsPage() {
                         <div className="space-y-0.5">
                           <StatusBadge status="pending_approval" />
                           <p className="text-sm text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                          {waitingAge(a.created_at)}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -704,6 +716,7 @@ export default async function ApprovalsPage() {
                         <div className="space-y-0.5">
                           <StatusBadge status="pending_approval" />
                           <p className="text-sm text-muted-foreground">{statusNextAction("pending_approval", { asApprover: true })}</p>
+                          {waitingAge(a.created_at)}
                         </div>
                       </TableCell>
                       <TableCell>

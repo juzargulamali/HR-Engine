@@ -11,8 +11,9 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: 
 vi.mock("./cancel-request-button", () => ({ CancelRequestButton: () => null }));
 
 let tables: Record<string, FakeResult | (() => FakeResult)> = {};
+let rpcs: Record<string, FakeResult | (() => FakeResult)> = {};
 let session: Record<string, unknown> = {};
-vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeSupabase(tables) }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeSupabase(tables, rpcs) }));
 vi.mock("@/lib/auth/session", () => ({ getCurrentSession: async () => session }));
 
 import LeavePage from "./page";
@@ -24,8 +25,13 @@ const renderNew = async () => renderToStaticMarkup(await NewLeaveRequestPage());
 
 beforeEach(() => {
   session = SESSION;
+  rpcs = { i_am_c_level: row(false), resolve_approver: row("mgr-user") };
   tables = {
-    employees: row({ country_code: "AE" }),
+    employees: row({ country_code: "AE", company_id: "c1" }),
+    approval_workflows: rows([{ id: "w1" }]),
+    approval_workflow_steps: row({ approver_type: "direct_manager" }),
+    profiles: row({ full_name: "Mona Manager", email: "mona@example.com" }),
+    recovery_credit_requests: rows([]),
     leave_balances: rows([{ leave_type_code: "annual", balance_days: 12 }]),
     comp_day_balances: row({ balance_days: 1 }),
     leave_requests: rows([{ id: "r1", leave_type_code: "annual", start_date: "2026-12-01", end_date: "2026-12-02", total_days: 2, status: "approved", reason: null }]),
@@ -36,20 +42,53 @@ describe("Leave page", () => {
   it("healthy: shows the balances and the requests", async () => {
     const html = await renderLeave();
     expect(html).toContain("12 days");
-    expect(html).toContain("Comp-off");
+    expect(html).toContain("Recovery Leave");
     expect(html).toContain("2026-12-01");
+  });
+
+  it("names who the leave requests go to, and calls the balance Recovery Leave", async () => {
+    const html = await renderLeave();
+    expect(html).toContain("Your leave requests go to");
+    expect(html).toContain("Mona Manager");
+    expect(html).not.toContain("Comp-off");
+  });
+
+  it("a failed read of who approves says it could not load, never 'nobody'", async () => {
+    tables = { ...tables, approval_workflows: failing() };
+    const html = await renderLeave();
+    expect(html).toContain("Could not load who approves your leave");
+    expect(html).not.toContain("nobody yet");
+    expect(html).toContain("12 days"); // the rest of the page still shows
+  });
+
+  it("an executive's own leave needs no approver, and a missing manager is said in words", async () => {
+    rpcs = { ...rpcs, i_am_c_level: row(true) };
+    expect(await renderLeave()).toContain("needs no approver");
+    rpcs = { i_am_c_level: row(false), resolve_approver: row(null) };
+    expect(await renderLeave()).toContain("nobody yet");
+  });
+
+  it("lists Recovery Leave that is waiting for approval, and says when that list could not be loaded", async () => {
+    tables = { ...tables, recovery_credit_requests: rows([{ id: "q1", work_date: "2026-10-30", event_type: "standard", proposed_days: 1, status: "pending_approval" }]) };
+    const html = await renderLeave();
+    expect(html).toContain("Recovery Leave waiting for approval");
+    expect(html).toContain("2026-10-30");
+    tables = { ...tables, recovery_credit_requests: failing() };
+    const failed = await renderLeave();
+    expect(failed).toContain("Could not load your Recovery Leave requests");
+    expect(failed).not.toContain("Recovery Leave waiting for approval");
   });
 
   it("failed balances read: an error, not '0 days'", async () => {
     tables = { ...tables, leave_balances: failing() };
     const html = await renderLeave();
     expect(html).toContain("Could not load your leave balances");
-    expect(html).not.toContain("Comp-off");
+    expect(html).not.toContain("Recovery Leave");
     expect(html).not.toContain("0 days");
     expect(html).toContain("2026-12-01"); // the requests still show
   });
 
-  it("failed comp-off read is the same error, never 'Comp-off 0 days'", async () => {
+  it("failed Recovery Leave read is the same error, never a zero balance", async () => {
     tables = { ...tables, comp_day_balances: failing() };
     const html = await renderLeave();
     expect(html).toContain("Could not load your leave balances");

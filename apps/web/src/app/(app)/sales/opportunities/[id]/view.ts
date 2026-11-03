@@ -1,4 +1,5 @@
-import { canAssignOwner, canChangeOpportunityContacts, canConfirmAvailability, canDecideApproval, canEditContactRecord, canEditOpportunity, canReopenClosed, isCrmActive, isCrmClosed, isCrmFounder, type ApprovalPolicy } from "@enginious-hr/domain";
+import { canActOnFollowUp, canAssignOwner, canChangeOpportunityContacts, canConfirmAvailability, canDecideApproval, canEditContactRecord, canEditOpportunity, canReopenClosed, isCrmActive, isCrmClosed, isCrmFounder, type ApprovalPolicy } from "@enginious-hr/domain";
+import { todayInDubai } from "@/components/sales/format";
 import type { CrmContext } from "@/lib/crm/context";
 import type { OpportunityDetail } from "@/lib/crm/data";
 import type { CrmFollowUpRow, CrmOpportunityRow } from "@/types/crm";
@@ -73,4 +74,16 @@ export function canEditSharedContact(view: Pick<OppView, "ctx" | "opp" | "isLost
   const { ctx, opp } = view;
   const ownedHere = opp.owner_id === ctx.userId ? [{ stage: opp.stage }] : [];
   return canEditContactRecord(ctx.grants, { createdBy }, ctx.userId, ownedHere);
+}
+
+/** The page-specific inputs of `planNextProps`: who may complete which follow-up, the company's working calendar and today in Dubai. */
+export function planNextInput(view: OppView) {
+  const { ctx, opp, detail } = view;
+  const ref = { companyId: opp.company_id, ownerId: opp.owner_id };
+  return {
+    openFollowUps: view.openFollowUps, followUps: detail.followUps, stage: opp.stage,
+    calendar: ctx.companies.find((c) => c.id === opp.company_id)?.settings?.working_calendar ?? null,
+    today: todayInDubai(),
+    canAct: (f: { id: string }) => canActOnFollowUp(ctx.grants, { assignedTo: view.openFollowUps.find((x) => x.id === f.id)?.assigned_to ?? "" }, ref, ctx.userId),
+  };
 }

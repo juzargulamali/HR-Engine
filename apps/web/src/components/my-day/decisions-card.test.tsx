@@ -36,4 +36,15 @@ describe("DecisionsCard", () => {
     expect(onlyWaiting).toContain("Nothing is waiting on you");
     expect(onlyWaiting).toContain("Waiting on others");
   });
+  it("is titled 'Needs me'", () => {
+    expect(renderToStaticMarkup(<DecisionsCard decisions={[ok]} other={[]} />)).toContain(">Needs me<");
+  });
+  it("a waiting row can say how long it has waited, and a failed waiting source is its own error row", () => {
+    const aged = { key: "waiting-leave", icon: ClipboardCheck, label: "Leave request you submitted, waiting for a decision", count: 1, href: "/leave", detail: "Oldest waiting 3 days" };
+    const bad = { key: "waiting-claims", icon: ClipboardCheck, label: "Your expense claims could not be loaded", count: 0, href: "/reimbursements", error: true };
+    const html = renderToStaticMarkup(<DecisionsCard decisions={[ok]} other={[]} waiting={[aged, bad]} />);
+    expect(html).toContain("Oldest waiting 3 days");
+    expect(html).toContain("Your expense claims could not be loaded");
+    expect(html).toContain("Waiting on others");
+  });
 });

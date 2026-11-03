@@ -9,14 +9,15 @@ describe("projectDayRows", () => {
   });
   it("lists only non-zero rows, handovers and reviews first, and marks what needs the person", () => {
     const rows = projectDayRows({ ...none, overdueTasks: 2, dueSoonTasks: 4, reviewsWaiting: 1, handoversWaiting: 1, unreadMessages: 3, unreadProjects: 2 });
-    expect(rows.map((r) => r.key)).toEqual(["proj-handovers", "proj-reviews", "proj-overdue", "proj-soon", "proj-unread"]);
+    // due-soon tasks are in the "My work today" card, not repeated as a count
+    expect(rows.map((r) => r.key)).toEqual(["proj-handovers", "proj-reviews", "proj-overdue", "proj-unread"]);
     expect(rows.filter((r) => r.needsYou).map((r) => r.key)).toEqual(["proj-handovers", "proj-reviews", "proj-overdue"]);
   });
   it("uses singular and plural wording and links to the page that handles each", () => {
     const [one] = projectDayRows({ ...none, overdueTasks: 1 });
-    expect(one).toMatchObject({ label: "Project task overdue", href: "/projects/work" });
+    expect(one).toMatchObject({ label: "Project task overdue", href: "/projects/work?show=overdue" });
     expect(projectDayRows({ ...none, overdueTasks: 3 })[0]!.label).toBe("Project tasks overdue");
-    expect(projectDayRows({ ...none, reviewsWaiting: 2 })[0]!.href).toBe("/projects/work#reviews");
+    expect(projectDayRows({ ...none, reviewsWaiting: 2 })[0]!.href).toBe("/projects/work?show=review");
   });
   it("scope changes waiting for the person's decision come after handovers, need them, and open the decision page of the oldest one", () => {
     const rows = projectDayRows({ ...none, handoversWaiting: 1, reviewsWaiting: 1, scopeChangesWaiting: 2, scopeChangeProjectId: "p9", scopeChangeId: "s9" });

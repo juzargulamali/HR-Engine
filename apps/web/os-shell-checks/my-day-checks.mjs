@@ -37,7 +37,8 @@ console.log("\n=== CEO (ceo@): everything the CEO may see");
   const topLabels = top.map((t) => t.text.replace(/^(\d+|—)\s/, "").replace(/ (\d+ with a shortage|Could not be loaded)$/, ""));
   const hrLabels = hr.map((t) => t.text.replace(/^(\d+|—)\s/, ""));
   console.log("  top:", topLabels.join(" | ")); console.log("  hr:", hrLabels.join(" | "));
-  ok(["Active projects", "Open enquiries", "Decisions waiting", "Live equipment requests"].every((l) => topLabels.some((t) => t.startsWith(l))), "the overview strip has the four CEO figures");
+  ok(["Active projects", "Open enquiries", "Live equipment requests"].every((l) => topLabels.some((t) => t.startsWith(l))), "the overview strip has the three CEO figures");
+  ok(!topLabels.some((t) => t.startsWith("Decisions waiting")), "the decisions count is stated once, in Needs me, not repeated as a tile");
   ok(["Employees", "Recorded present", "On leave", "Leave requests in review"].every((l) => hrLabels.some((t) => t.startsWith(l))), "People & HR has its four recorded figures");
   ok(!topLabels.some((t) => /Employees|Recorded present|On leave|Leave requests/.test(t)), "no HR figure is repeated in the overview strip");
 
@@ -46,9 +47,7 @@ console.log("\n=== CEO (ceo@): everything the CEO may see");
   ok((await valueOf(p, "Today at a glance", "Open enquiries")) === asUser("ceo@e2e.local", "select count(*) from crm_opportunities where stage not in ('won','lost')"), "Open enquiries = open opportunities this person can see");
   const eqLive = asUser("ceo@e2e.local", "select count(*) from inv_requests where status in ('submitted','in_progress')");
   ok((await valueOf(p, "Today at a glance", "Live equipment requests")) === eqLive, "Live equipment requests = submitted and in-progress requests this person can see");
-  const decisionRows = await region(p, "Needs your decision").locator("li a").evaluateAll((as) => as.map((a) => a.innerText.replace(/\s+/g, " ").trim()));
-  const sumRows = decisionRows.reduce((n, t) => n + Number(t.match(/(\d+)\s*$/)?.[1] ?? 0), 0);
-  ok((await valueOf(p, "Today at a glance", "Decisions waiting")) !== null && Number(await valueOf(p, "Today at a glance", "Decisions waiting")) <= sumRows, "Decisions waiting is the sum of the decision rows (the card may add other open items below)");
+  ok((await region(p, "Needs me").count()) === 1, "one Needs me list");
 
   // live clock status is told apart from recorded attendance, and each equals what this person can read
   const liveTxt = await region(p, "People today, live clock status").innerText();
@@ -70,7 +69,7 @@ console.log("\n=== CEO (ceo@): everything the CEO may see");
   ok((await region(p, "Delivery this week").locator("ul.md\\:sr-only li").count()) >= 1, "Delivery this week lists the scheduled projects (also as a reading list)");
 
   // layout: main column and rail, level at the top
-  const dw = await region(p, "Delivery this week").boundingBox(), dec = await region(p, "Needs your decision").boundingBox();
+  const dw = await region(p, "Delivery this week").boundingBox(), dec = await region(p, "Needs me").boundingBox();
   const ratio = dw.width / (dw.width + dec.width);
   ok(Math.abs(dw.y - dec.y) < 4 && dw.x < dec.x, "the overview's left column and the decisions rail start level");
   ok(ratio > 0.64 && ratio < 0.74, `left column about 2/3 of the width (${ratio.toFixed(2)})`);
@@ -106,9 +105,9 @@ for (const [email, want] of cases) {
   }
   if (email === "emp@e2e.local") ok((await region(p, "Sales pipeline").locator("a[href^='/sales/opportunities/']").count()) >= 1, "emp@: the individual follow-ups (title, reference, due) are still listed in the Sales card");
   if (email === "mgr@e2e.local") {
-    const d = await region(p, "Needs your decision").innerText();
-    ok(/due in the next 7 days/.test(d), "mgr@: the quieter Projects rows (due in the next 7 days) are still on My Day, under 'Also open'");
-    ok(/waiting for your review|overdue|handover/.test(d) || /Also open/.test(d), "mgr@: Projects rows keep their links to My Work");
+    const d = await region(p, "Needs me").innerText();
+    ok(/waiting for your review|handover|Also open|Waiting on your decision|Nothing is waiting on you/.test(d), "mgr@: Needs me lists what waits, or says nothing does");
+    ok((await region(p, "My work today").count()) === 1, "mgr@: My work today shows their own tasks by title");
   }
   if (email === "pol.worker@e2e.local") ok(/Nothing is waiting on you/.test(await p.locator("main").innerText()), "an employee with nothing waiting is told so plainly");
   if (email === "hr@e2e.local") {
@@ -128,10 +127,10 @@ for (const [email, theme] of [["ceo@e2e.local", "dark"], ["ceo@e2e.local", "ligh
   if (email.startsWith("ceo") && theme === "dark") {
     const y = async (name) => (await region(p, name).first().boundingBox())?.y ?? Infinity;
     const yc = await p.locator("main").getByText("Attendance clock", { exact: true }).first().evaluate((e) => e.getBoundingClientRect().top + window.scrollY);
-    const yd = (await y("Needs your decision")) + await p.evaluate(() => window.scrollY), yw = (await y("Delivery this week")) + await p.evaluate(() => window.scrollY);
+    const yd = (await y("Needs me")) + await p.evaluate(() => window.scrollY), yw = (await y("Delivery this week")) + await p.evaluate(() => window.scrollY);
     ok(yd < yc && yc < yw, "phone order: what needs you, then your clock, then the week");
     const cards = await p.getByRole("list", { name: "Today at a glance" }).locator("> li").evaluateAll((lis) => lis.map((l) => Math.round(l.getBoundingClientRect().left)));
-    ok(new Set(cards).size === 2, "the four figures sit in two columns on a phone");
+    ok(new Set(cards).size === 2, "the figures sit in two columns on a phone");
     ok(await p.locator("ul.md\\:sr-only").first().isVisible(), "the delivery week is a readable list on a phone (the seven-day grid is for wide screens)");
   }
   await p.context().close();

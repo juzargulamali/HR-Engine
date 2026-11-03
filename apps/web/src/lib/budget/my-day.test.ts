@@ -51,6 +51,32 @@ describe("budgetDayFromInbox", () => {
     expect(budgetDayFromInbox(inbox({ budget_approvals: [budget("a")], final_expense_approvals: [actual("a")] }), none, none).waitingForMe.href).toBe("/finance/project-budgets");
   });
 
+  it("age and who decides: the oldest wait on what is theirs to decide; their own submissions name the shared queue, never a person", () => {
+    const day = budgetDayFromInbox(
+      inbox({
+        budget_approvals: [budget("a", { submitted_at: "2026-10-30T08:00:00Z" }), budget("b", { submitted_at: "2026-10-28T08:00:00Z" }), budget("mine", { i_can_decide: false, submitted_at: "2026-10-25T08:00:00Z", approval_route: "finance" })],
+        final_expense_approvals: [actual("mine-x", { i_can_decide: false, submitted_at: "2026-10-27T08:00:00Z", approval_route: "executive" })],
+      }),
+      new Set(["mine"]), new Set(["mine-x"]),
+    );
+    expect(day.waitingForMe.oldest).toBe("2026-10-28T08:00:00Z");
+    expect(day.waitingOnOthersWith).toEqual({ oldest: "2026-10-25T08:00:00Z", queues: ["Finance", "the CEO or CTO"] });
+  });
+
+  it("a Project Manager's own waiting budget names the shared route that decides it and since when, counted once with what the inbox lists", () => {
+    const pm = { returned: { count: 0, projectIds: [] }, waitingIds: ["v1", "s1"], waitingProjectIds: ["p1", "p1"], decided: { count: 0, projectIds: [] },
+      waitingDetail: [{ id: "v1", route: "finance", at: "2026-10-29T08:00:00Z" }, { id: "s1", route: "executive", at: "2026-10-27T08:00:00Z" }] };
+    const day = budgetDayFromInbox(inbox({}), none, none, pm);
+    expect(day.waitingOnOthers).toBe(2);
+    expect(day.waitingOnOthersWith).toEqual({ oldest: "2026-10-27T08:00:00Z", queues: ["Finance", "the CEO or CTO"] });
+    // the same item also listed by the inbox is not counted twice in the detail
+    const both = budgetDayFromInbox(inbox({ budget_approvals: [budget("v1", { i_can_decide: false, submitted_at: "2026-10-29T08:00:00Z", approval_route: "finance" })] }), new Set(["v1"]), none, pm);
+    expect(both.waitingOnOthers).toBe(2);
+    expect(both.waitingOnOthersWith!.queues).toEqual(["Finance", "the CEO or CTO"]);
+    // no route recorded: no queue is invented
+    expect(budgetDayFromInbox(inbox({}), none, none, { ...pm, waitingDetail: [{ id: "v1", route: null, at: null }] }).waitingOnOthersWith).toEqual({ oldest: null, queues: [] });
+  });
+
   it("a person with no budget access (empty lists) has nothing waiting", () => {
     expect(budgetDayFromInbox(inbox({}), none, none)).toEqual({
       waitingForMe: { count: 0, href: "/finance/project-budgets" }, waitingOnOthers: 0, waitingOnOthersHref: "/projects",

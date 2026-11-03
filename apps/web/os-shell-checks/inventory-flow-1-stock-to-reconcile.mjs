@@ -445,6 +445,9 @@ await step("project returns part: sensor 1 good, sensor 2 damaged, 3 HDMI, 5.25 
   await addHeld(new RegExp(`^Add Floor sensor ${S2}`));
   await addHeld(/^Add HDMI cable/);
   await addHeld(/^Add Power cable/);
+  // A return has no default condition: set Good for every listed line with the one helper (it starts empty), then change the exceptions.
+  await mvPanel().getByRole("combobox", { name: /Set the condition for all listed lines/ }).selectOption("good");
+  await mvPanel().getByRole("button", { name: /^Apply to \d+ listed lines$/ }).click();
   await lineOf(`Floor sensor ${S2}`).getByLabel("Condition").selectOption({ label: "Damaged: held back" });
   await lineOf(`Floor sensor ${S2}`).getByLabel("Note (optional)").fill("Cracked glass on one corner");
   await qtyOf("HDMI cable").fill("3");
@@ -515,6 +518,9 @@ await step("final return: sensor 3, the other 3 HDMI, the other 15.25 m and the 
   await addHeld(/^Add HDMI cable/);
   await addHeld(/^Add Power cable/);
   await addHeld(/^Add Mounting bracket/);
+  // A return has no default condition: set Good for every listed line with the one helper (it starts empty), then change the exceptions.
+  await mvPanel().getByRole("combobox", { name: /Set the condition for all listed lines/ }).selectOption("good");
+  await mvPanel().getByRole("button", { name: /^Apply to \d+ listed lines$/ }).click();
   await qtyOf("HDMI cable").fill("3");
   await qtyOf("Power cable").fill("15.25");
   await qtyOf("Mounting bracket").fill("10");

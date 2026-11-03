@@ -33,14 +33,21 @@ export function isQueueDecisionEligible({
  * from the database's own list of what this person may decide (recovery_decider_inbox), because the tables hide some of them from a CEO / CTO (an HR Admin's request on
  * the shared queue) and the badge must agree with the Approvals page. Throws when any read fails, so the caller shows "could not load" and never a false zero.
  */
-export async function loadMyPendingApprovalCount(supabase: Supabase, viewer: { userId: string }): Promise<number> {
+export async function loadMyPendingApprovals(supabase: Supabase, viewer: { userId: string }): Promise<{ count: number; oldest: string | null }> {
   const [direct, inbox] = await Promise.all([
-    supabase.from("approvals").select("id", { count: "exact", head: true }).eq("approver_id", viewer.userId).eq("decision", "pending"),
+    // The oldest step comes from the same query as the count (ordered, one row): how long the longest-waiting decision has waited.
+    supabase.from("approvals").select("created_at", { count: "exact" }).eq("approver_id", viewer.userId).eq("decision", "pending").order("created_at", { ascending: true }).limit(1),
     supabase.rpc("recovery_decider_inbox"),
   ]);
   if (direct.error) throw direct.error;
   if (inbox.error) throw inbox.error;
   // A step assigned to the person by name is already in the first count; add only the queue steps (no assigned person).
-  const queued = new Set((inbox.data ?? []).filter((r) => r.approver_id === null).map((r) => r.approval_id));
-  return (direct.count ?? 0) + queued.size;
+  const queueRows = (inbox.data ?? []).filter((r) => r.approver_id === null);
+  const queued = new Set(queueRows.map((r) => r.approval_id));
+  const stamps = [(direct.data?.[0] as { created_at?: string } | undefined)?.created_at, ...queueRows.map((r) => r.approval_created_at as string | null)].filter((x): x is string => !!x).sort();
+  return { count: (direct.count ?? 0) + queued.size, oldest: stamps[0] ?? null };
+}
+
+export async function loadMyPendingApprovalCount(supabase: Supabase, viewer: { userId: string }): Promise<number> {
+  return (await loadMyPendingApprovals(supabase, viewer)).count;
 }
