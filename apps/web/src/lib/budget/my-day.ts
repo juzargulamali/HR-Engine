@@ -1,3 +1,4 @@
+import { APPROVER_NAME } from "@enginious-hr/domain";
 import type { PbxInbox } from "@/types/budget";
 
 /**
@@ -14,8 +15,11 @@ import type { PbxInbox } from "@/types/budget";
  * budget, versions and final-expense sets; nothing else): never from notices, which show participants only.
  */
 export type BudgetDay = {
-  waitingForMe: { count: number; href: string };
+  /** `oldest`: when the oldest item the person can decide now was submitted (null when unknown): My Day shows how long it has waited. */
+  waitingForMe: { count: number; href: string; oldest?: string | null };
   waitingOnOthers: number;
+  /** Of the budgets and final expenses the person submitted themselves (read from the Finance inbox): the oldest submission and who decides them, named as the shared queue ("Finance", "the CEO or CTO"), never one invented person. */
+  waitingOnOthersWith?: { oldest: string | null; queues: string[] };
   /** Where "waiting on others" opens: the Finance inbox when the person prepared items there, otherwise the budget of their project (or Projects when several). */
   waitingOnOthersHref: string;
   returned: { count: number; href: string };
@@ -94,9 +98,17 @@ export function budgetDayFromInbox(
   const waitingOnOthers = waiting.size;
   const kinds = [budgets > 0 ? "budget" : null, actuals > 0 ? "actuals" : null, settlements > 0 ? "settlement" : null].filter((k): k is string => k !== null);
   const href = kinds.length === 1 ? `/finance/project-budgets?filter=${kinds[0]}` : "/finance/project-budgets";
+  const oldestOf = (xs: readonly (string | null)[]) => xs.filter((x): x is string => !!x).sort()[0] ?? null;
+  const authoredRows = [
+    ...inbox.budget_approvals.filter((r) => authoredVersionIds.has(r.version_id) && !decidableBudgets.includes(r)),
+    ...inbox.final_expense_approvals.filter((r) => authoredSubmissionIds.has(r.submission_id) && !decidableActuals.includes(r)),
+  ];
+  const oldestDecidable = oldestOf([...decidableBudgets, ...decidableActuals].map((r) => r.submitted_at));
+  const queues = [...new Set(authoredRows.map((r) => (r.approval_route ? APPROVER_NAME[r.approval_route] : null)).filter((x): x is string => !!x))];
   return {
-    waitingForMe: { count: budgets + actuals + settlements, href },
+    waitingForMe: { count: budgets + actuals + settlements, href, ...(oldestDecidable ? { oldest: oldestDecidable } : {}) },
     waitingOnOthers,
+    ...(authoredRows.length > 0 ? { waitingOnOthersWith: { oldest: oldestOf(authoredRows.map((r) => r.submitted_at)), queues } } : {}),
     waitingOnOthersHref: authoredWaiting.length > 0 ? "/finance/project-budgets" : projectHref(pm?.waitingProjectIds ?? []),
     returned: { count: pm?.returned.count ?? 0, href: projectHref(pm?.returned.projectIds ?? []) },
     decidedRecently: { count: pm?.decided.count ?? 0, href: projectHref(pm?.decided.projectIds ?? []) },

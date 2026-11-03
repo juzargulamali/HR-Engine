@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attentionSentence, buildActionItems, commercialApprovalItems, handoverItems } from "./action-centre";
+import { attentionSentence, budgetWaitingDetail, buildActionItems, commercialApprovalItems, handoverItems } from "./action-centre";
 import { splitActions } from "@/lib/my-day/groups";
 import type { HandoverRow } from "@/lib/crm/handover-attention";
 
@@ -65,5 +65,18 @@ describe("My Day commercial approval row (U-01)", () => {
     expect(commercialApprovalItems({ status: "error" })).toEqual([expect.objectContaining({ error: true, label: "Commercial approvals could not be loaded" })]);
     expect(commercialApprovalItems({ status: "none" })).toEqual([]);
     expect(commercialApprovalItems({ status: "ok", count: 0, oldestOpportunityId: "" })).toEqual([]);
+  });
+});
+
+describe("My Day waiting age and who decides", () => {
+  const now = new Date("2026-11-02T12:00:00Z");
+  it("the approvals row says how long the longest-waiting decision has waited; no age when unknown", () => {
+    expect(buildActionItems({ myPendingApprovals: 2, myPendingOldest: "2026-10-30T09:00:00Z", now })[0]).toMatchObject({ detail: "Oldest waiting 3 days" });
+    expect(buildActionItems({ myPendingApprovals: 2, now })[0]!.detail).toBeUndefined();
+  });
+  it("a budget the person submitted waits with a named shared queue", () => {
+    expect(budgetWaitingDetail({ oldest: "2026-10-30T09:00:00Z", queues: ["Finance"] }, now)).toBe("Oldest waiting 3 days · with the Finance queue");
+    expect(budgetWaitingDetail({ oldest: null, queues: ["Finance", "the CEO or CTO"] }, now)).toBe("with the Finance queue and the CEO or CTO queue");
+    expect(budgetWaitingDetail(undefined, now)).toBeUndefined();
   });
 });

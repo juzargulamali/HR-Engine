@@ -24,14 +24,20 @@ export type ActionItem = {
  */
 export function buildActionItems({
   myPendingApprovals,
+  myPendingOldest,
   contractsEndingCount,
   probationDueCount,
   docsExpiringCount,
   identityExpiringCount,
   extraItems = [],
+  now = new Date(),
 }: {
   /** "error" when the count could not be loaded: the row is then an error row, not a zero. */
   myPendingApprovals: number | "error";
+  /** When the longest-waiting step routed to the person was created: shown as how long it has waited. */
+  myPendingOldest?: string | null;
+  /** The current time, for that age. */
+  now?: Date;
   contractsEndingCount?: number;
   probationDueCount?: number;
   docsExpiringCount?: number;
@@ -42,7 +48,7 @@ export function buildActionItems({
   const items: ActionItem[] = [
     myPendingApprovals === "error"
       ? { key: "approvals", icon: ClipboardCheck, label: "Approvals could not be loaded", count: 0, href: "/approvals", error: true }
-      : { key: "approvals", icon: ClipboardCheck, label: "Waiting on your decision", count: myPendingApprovals, href: "/approvals" },
+      : { key: "approvals", icon: ClipboardCheck, label: "Waiting on your decision", count: myPendingApprovals, href: "/approvals", detail: waitingText(myPendingOldest ?? null, now) },
     ...(contractsEndingCount !== undefined
       ? [{ key: "contracts", icon: CalendarClock, label: "Contracts ending soon", count: contractsEndingCount, href: "/alerts" }]
       : []),
@@ -98,6 +104,20 @@ const WAITING_LABEL: Record<WaitingSource, { one: string; many: string; error: s
   recovery: { one: "Recovery Leave request you submitted, waiting for a decision", many: "Recovery Leave requests you submitted, waiting for decisions", error: "Your Recovery Leave requests could not be loaded", href: "/leave" },
 };
 
+/** The budget "waiting on others" row's second line: the oldest wait and which shared queue decides ("Finance", "the CEO or CTO"). Nothing is said about people. */
+export function budgetWaitingDetail(w: { oldest: string | null; queues: string[] } | undefined, now: Date): string | undefined {
+  if (!w) return undefined;
+  const named = w.queues.map((q) => (q.startsWith("the ") ? `${q} queue` : `the ${q} queue`));
+  const parts = [waitingText(w.oldest, now), named.length > 0 ? `with ${named.join(" and ")}` : undefined].filter((x): x is string => !!x);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
+/** "Oldest waiting 3 days · with Pia Manager" (or "with the HR queue"); when who decides could not be read the line says so, never stays silent. */
+function waitingDetail(r: Extract<WaitingResult, { status: "ok" }>, now: Date): string | undefined {
+  const parts = [waitingText(r.oldest, now), r.with ? `with ${r.with}` : r.withFailed ? "who decides could not be loaded" : undefined].filter((x): x is string => !!x);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
 /**
  * "Waiting on others": things the person submitted themselves that wait for someone else's decision. They are never decisions for the person (a self-submitted item
  * is not counted in "Needs me"); they stay visible here with how long the oldest has waited. A source that failed is its own error row; a source with nothing waiting adds no row.
@@ -112,7 +132,7 @@ export function waitingOnOthersItems(requests: Record<WaitingSource, WaitingResu
       const r = requests[source];
       const text = WAITING_LABEL[source];
       if (r.status === "error") items.push({ key: `waiting-${source}`, icon: Hourglass, label: text.error, count: 0, href: text.href, error: true });
-      else if (r.count > 0) items.push({ key: `waiting-${source}`, icon: Hourglass, label: r.count === 1 ? text.one : text.many, count: r.count, href: text.href, detail: waitingText(r.oldest, now) });
+      else if (r.count > 0) items.push({ key: `waiting-${source}`, icon: Hourglass, label: r.count === 1 ? text.one : text.many, count: r.count, href: text.href, detail: waitingDetail(r, now) });
     }
   }
   if (inReview > 0) items.push({ key: "waiting-review", icon: Hourglass, label: inReview === 1 ? "Task you sent for review, waiting on the reviewer" : "Tasks you sent for review, waiting on the reviewer", count: inReview, href: "/projects/work" });

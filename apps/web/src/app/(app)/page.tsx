@@ -14,7 +14,7 @@ import {
   DASHBOARD_TIMEZONE,
 } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
-import { loadMyPendingApprovalCount } from "@/lib/approvals/pending";
+import { loadMyPendingApprovals } from "@/lib/approvals/pending";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentWeather } from "@/lib/weather";
 import { Alert } from "@/components/ui/alert";
@@ -33,7 +33,7 @@ import { SalesPipeline } from "@/components/my-day/sales-pipeline";
 import { splitActions } from "@/lib/my-day/groups";
 import { loadEquipment, loadLiveClock } from "@/lib/my-day/loaders";
 import { loadProjectsDay } from "@/lib/my-day/projects-day";
-import { loadMyWaitingRequests } from "@/lib/my-day/waiting";
+import { loadMyWaitingRequests, waitingText } from "@/lib/my-day/waiting";
 import type { LiveSummary } from "@/lib/my-day/live";
 import { cn } from "@/lib/utils";
 import { logServerError } from "@/lib/log";
@@ -41,7 +41,7 @@ import { BirthdaysSection } from "./birthdays-section";
 import { getCompanySnapshot } from "./dashboard-data";
 import { CompanyComparisonTable } from "./company-comparison-table";
 import { attendanceSentence, CALENDAR_NOTE } from "./attendance-summary";
-import { attentionSentence, buildActionItems, commercialApprovalItems, handoverItems, waitingOnOthersItems, type ActionItem } from "./action-centre";
+import { attentionSentence, budgetWaitingDetail, buildActionItems, commercialApprovalItems, handoverItems, waitingOnOthersItems, type ActionItem } from "./action-centre";
 import { AttendanceClockCard } from "./attendance-clock-card";
 import { AttendanceCompletionBar } from "./attendance-completion-bar";
 import { UpcomingSection } from "./upcoming-section";
@@ -105,7 +105,7 @@ export default async function DashboardPage() {
   // Finance approver needs it too), so the approvals count is read for anyone; the company-wide sections below stay gated to canViewHrAlerts.
   // The approvals count covers the steps routed to this person by name AND the Recovery Leave queue steps they may decide (the same rule as the Approvals page).
   const [approvalsRead, salesRead, projectsRead, equipmentRead, budgetRead, waitingRead] = await Promise.allSettled([
-    loadMyPendingApprovalCount(supabase, session),
+    loadMyPendingApprovals(supabase, session),
     loadSalesToday(),
     loadProjectsDay(today),
     loadEquipment(),
@@ -122,7 +122,8 @@ export default async function DashboardPage() {
   failedSource("project budget decisions", budgetRead);
   failedSource("my submitted requests", waitingRead);
   // A failed read is "error", never 0: the tile shows "—" and the greeting says the approvals could not be loaded.
-  const myPendingApprovals: number | "error" = approvalsRead.status === "fulfilled" ? approvalsRead.value : "error";
+  const myPendingApprovals: number | "error" = approvalsRead.status === "fulfilled" ? approvalsRead.value.count : "error";
+  const myPendingOldest = approvalsRead.status === "fulfilled" ? approvalsRead.value.oldest : null;
 
   let isMyBirthdayToday = false;
   // Also drives the employee-only dashboard header's own timezone/location
@@ -337,14 +338,14 @@ export default async function DashboardPage() {
   } else if (budgetRead.value.status === "error") {
     budgetActionItems = [budgetErrorRow];
   } else if (budgetRead.value.status === "ok") {
-    const { waitingForMe, waitingOnOthers, waitingOnOthersHref, returned, decidedRecently, pmReadFailed } = budgetRead.value.day;
+    const { waitingForMe, waitingOnOthers, waitingOnOthersWith, waitingOnOthersHref, returned, decidedRecently, pmReadFailed } = budgetRead.value.day;
     budgetActionItems = [
-      { key: "budget-decisions", icon: ReceiptText, label: "Project budgets waiting for you", count: waitingForMe.count, href: waitingForMe.href },
+      { key: "budget-decisions", icon: ReceiptText, label: "Project budgets waiting for you", count: waitingForMe.count, href: waitingForMe.href, detail: waitingText(waitingForMe.oldest ?? null, now) },
       // A Project Manager's own budgets sent back for changes: theirs to act on. Never a decision for someone else.
       { key: "budget-returned", icon: ReceiptText, label: returned.count === 1 ? "Project budget returned to you" : "Project budgets returned to you", count: returned.count, href: returned.href },
       ...(pmReadFailed ? [{ key: "budget-pm-error", icon: ReceiptText, label: "The budgets of your projects could not be loaded", count: 0, href: "/projects", error: true }] : []),
     ];
-    budgetWaitingItems = [{ key: "budget-waiting", icon: ReceiptText, label: "Project budgets you submitted, waiting on others", count: waitingOnOthers, href: waitingOnOthersHref }];
+    budgetWaitingItems = [{ key: "budget-waiting", icon: ReceiptText, label: "Project budgets you submitted, waiting on others", count: waitingOnOthers, href: waitingOnOthersHref, detail: budgetWaitingDetail(waitingOnOthersWith, now) }];
     budgetQuietItems = [{ key: "budget-decided", icon: ReceiptText, label: "Budget decisions on your projects in the last 14 days", count: decidedRecently.count, href: decidedRecently.href }];
   }
 
@@ -359,6 +360,8 @@ export default async function DashboardPage() {
   // from it, so the two can never disagree (Sales follow-ups are in the list, so they count in the sentence too).
   const actionItems = buildActionItems({
     myPendingApprovals,
+    myPendingOldest,
+    now,
     ...(showHrView ? { contractsEndingCount, probationDueCount, docsExpiringCount, identityExpiringCount } : {}),
     extraItems: [...salesActionItems, ...handoverActionItems, ...approvalActionItems, ...projectActionItems, ...budgetActionItems],
   });

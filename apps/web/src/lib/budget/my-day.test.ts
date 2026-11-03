@@ -51,6 +51,18 @@ describe("budgetDayFromInbox", () => {
     expect(budgetDayFromInbox(inbox({ budget_approvals: [budget("a")], final_expense_approvals: [actual("a")] }), none, none).waitingForMe.href).toBe("/finance/project-budgets");
   });
 
+  it("age and who decides: the oldest wait on what is theirs to decide; their own submissions name the shared queue, never a person", () => {
+    const day = budgetDayFromInbox(
+      inbox({
+        budget_approvals: [budget("a", { submitted_at: "2026-10-30T08:00:00Z" }), budget("b", { submitted_at: "2026-10-28T08:00:00Z" }), budget("mine", { i_can_decide: false, submitted_at: "2026-10-25T08:00:00Z", approval_route: "finance" })],
+        final_expense_approvals: [actual("mine-x", { i_can_decide: false, submitted_at: "2026-10-27T08:00:00Z", approval_route: "executive" })],
+      }),
+      new Set(["mine"]), new Set(["mine-x"]),
+    );
+    expect(day.waitingForMe.oldest).toBe("2026-10-28T08:00:00Z");
+    expect(day.waitingOnOthersWith).toEqual({ oldest: "2026-10-25T08:00:00Z", queues: ["Finance", "the CEO or CTO"] });
+  });
+
   it("a person with no budget access (empty lists) has nothing waiting", () => {
     expect(budgetDayFromInbox(inbox({}), none, none)).toEqual({
       waitingForMe: { count: 0, href: "/finance/project-budgets" }, waitingOnOthers: 0, waitingOnOthersHref: "/projects",
