@@ -64,6 +64,8 @@ export function describeNotification(type: string, payload: Record<string, unkno
     }
     case "project_task_blocked": {
       const reason = str(payload.reason);
+      // The Project Manager's copy, when someone else was named to unblock it: who was asked, and no request for the PM to act.
+      if (payload.fyi === true) return { text: `${task ? `“${task}”` : "A task"} on ${project} is blocked${reason ? `: ${reason}` : ""}. ${str(payload.unblocker) ?? "Someone else"} was asked to unblock it.`, href: taskLink };
       return { text: `${task ? `“${task}”` : "A task"} on ${project} is blocked and needs your action${reason ? `: ${reason}` : ""}.`, href: taskLink };
     }
     case "project_mention":
