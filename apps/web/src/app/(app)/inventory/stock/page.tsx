@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AskForAccess } from "@/components/os/ask-for-access";
 import { cookies } from "next/headers";
 import { canManageCatalogue, canOperateAnyStock, canSeeCosts, canViewStock, hasInvCapability, isInvFounder } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
@@ -52,7 +53,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
     return (
       <div className="space-y-4">
         <h1 className="text-2xl font-semibold">Inventory</h1>
-        <Alert role="status">You do not have Inventory access. Ask an Inventory founder to give you access. Equipment that has been issued to you is listed under My equipment.</Alert>
+        <Alert role="status">You do not have Inventory access. <AskForAccess module="inventory" generic="an Inventory founder" /> Equipment that has been issued to you is listed under My equipment.</Alert>
       </div>
     );
   }

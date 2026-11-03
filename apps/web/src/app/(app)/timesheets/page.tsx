@@ -42,15 +42,15 @@ export default async function TimesheetsPage() {
   }
 
   const supabase = await createClient();
-  const { data: timesheets } = await supabase
+  const { data: timesheets, error: timesheetsError } = await supabase
     .from("timesheets")
     .select("id, period_start, period_end, status")
     .eq("employee_id", session.employeeId)
     .order("period_start", { ascending: false });
 
   const timesheetIds = (timesheets ?? []).map((t) => t.id);
-  const { data: entries } =
-    timesheetIds.length > 0 ? await supabase.from("timesheet_entries").select("timesheet_id, hours").in("timesheet_id", timesheetIds) : { data: [] as never[] };
+  const { data: entries, error: entriesError } =
+    timesheetIds.length > 0 ? await supabase.from("timesheet_entries").select("timesheet_id, hours").in("timesheet_id", timesheetIds) : { data: [] as never[], error: null };
   const hoursByTimesheet = new Map<string, number>();
   for (const e of entries ?? []) {
     hoursByTimesheet.set(e.timesheet_id, (hoursByTimesheet.get(e.timesheet_id) ?? 0) + Number(e.hours));
@@ -78,6 +78,9 @@ export default async function TimesheetsPage() {
           <CardTitle>My timesheets</CardTitle>
         </CardHeader>
         <CardContent>
+          {timesheetsError ? <LoadError what="your timesheets" retryHref="/timesheets" /> : (
+          <>
+          {entriesError ? <LoadError what="the hours" retryHref="/timesheets" note="The timesheets are listed, but their hours could not be read; none of them is zero." /> : null}
           <Table stack>
             <TableHeader>
               <TableRow>
@@ -94,7 +97,7 @@ export default async function TimesheetsPage() {
                       {t.period_start} – {t.period_end}
                     </Link>
                   </TableCell>
-                  <TableCell>{hoursByTimesheet.get(t.id) ?? 0}</TableCell>
+                  <TableCell>{entriesError ? "Could not load" : (hoursByTimesheet.get(t.id) ?? 0)}</TableCell>
                   <TableCell>
                     <Badge variant={STATUS_VARIANT[t.status] ?? "outline"}>{t.status.replace(/_/g, " ")}</Badge>
                   </TableCell>
@@ -109,6 +112,8 @@ export default async function TimesheetsPage() {
               ) : null}
             </TableBody>
           </Table>
+          </>
+          )}
         </CardContent>
       </Card>
     </div>

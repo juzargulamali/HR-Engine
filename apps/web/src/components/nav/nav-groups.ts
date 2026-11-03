@@ -68,6 +68,8 @@ export interface NavModuleData {
   comingSoon?: boolean;
   /** Sub-navigation, shown while the module is open. Same permission checks as before, just grouped under the module. */
   sections: NavGroupData[];
+  /** How many items wait for this person's decision in the module (Finance: budgets and final expenses). Absent when there are none or the count could not be read: never 0, never a guess. */
+  waiting?: number;
 }
 
 export interface NavOptions {
@@ -89,7 +91,7 @@ export interface NavOptions {
    * Project Budget & Expenses access: the person's own grants from pbx_company_grants (never HR roles, Projects, Sales or Inventory grants). Only people
    * holding Finance or view access in some company get the Finance entry; a Project Manager reaches the budget from the project itself.
    */
-  budget?: { any: boolean; finance?: boolean; manageAccess?: boolean };
+  budget?: { any: boolean; finance?: boolean; manageAccess?: boolean; waiting?: number };
   /**
    * The person has at least one direct report (employees.manager_id), read through their own session. A manager without the Reporting
    * Manager role still gets "People & HR" (the Employees directory shows exactly their reports; the database decides that, not the menu).
@@ -302,6 +304,7 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
       iconKey: "reimbursements",
       href: "/finance/project-budgets",
       sections: [{ label: "Finance", links: [{ href: "/finance/project-budgets", label: "Project budgets", iconKey: "reimbursements" }] }],
+      ...(options.budget.waiting && options.budget.waiting > 0 ? { waiting: options.budget.waiting } : {}),
     });
   }
 

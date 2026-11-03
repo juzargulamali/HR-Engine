@@ -22,6 +22,8 @@ interface ShellChromeProps {
   isEmployee: boolean;
   /** Start of the employee's open attendance session, or null. */
   clockOpenSince: string | null;
+  /** The status could not be read: unknown, not "not clocked in". */
+  clockLoadFailed?: boolean;
   serverNowIso: string;
   fullName: string;
   email: string | null;
@@ -50,7 +52,7 @@ function Crumbs({ modules }: { modules: NavModuleData[] }) {
  * Header (breadcrumb, search, attendance status, alerts, theme), the mobile menu drawer and the mobile bottom bar. The
  * bottom bar offers only places this person can actually go: Sales only with a Sales grant, Clock only for an employee.
  */
-export function ShellChrome({ modules, showAlertsLink, isEmployee, clockOpenSince, serverNowIso, fullName, email, roleLabels, signOutSlot }: ShellChromeProps) {
+export function ShellChrome({ modules, showAlertsLink, isEmployee, clockOpenSince, clockLoadFailed = false, serverNowIso, fullName, email, roleLabels, signOutSlot }: ShellChromeProps) {
   const [drawer, setDrawer] = useState(false);
   const pathname = usePathname();
   const groups = navGroupsFromModules(modules);
@@ -82,7 +84,7 @@ export function ShellChrome({ modules, showAlertsLink, isEmployee, clockOpenSinc
           <CommandPalette groups={groups} />
         </div>
         <div className="ml-auto flex items-center gap-1.5">
-          {isEmployee ? <ClockChip openSince={clockOpenSince} serverNowIso={serverNowIso} /> : null}
+          {isEmployee ? <ClockChip openSince={clockOpenSince} unknown={clockLoadFailed} serverNowIso={serverNowIso} /> : null}
           {showAlertsLink ? (
             <Link href="/alerts" aria-label="Alerts" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "hidden h-9 w-9 px-0 lg:inline-flex")}>
               <BellRing className="h-4 w-4" aria-hidden />
@@ -118,7 +120,7 @@ export function ShellChrome({ modules, showAlertsLink, isEmployee, clockOpenSinc
         {isEmployee ? (
           <Link href="/attendance-clock" aria-current={onClockPage ? "page" : undefined} className={tabClass(onClockPage)}>
             <Clock className="h-5 w-5" aria-hidden />
-            <span>{clockOpenSince ? "Clocked in" : "Clock"}</span>
+            <span>{clockLoadFailed ? "Clock" : clockOpenSince ? "Clocked in" : "Clock"}</span>
           </Link>
         ) : null}
         <Link href="/profile" aria-current={active === "me" && !onClockPage ? "page" : undefined} className={tabClass(active === "me" && !onClockPage)}>

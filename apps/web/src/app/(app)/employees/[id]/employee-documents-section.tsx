@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { AddEmployeeDocumentForm } from "./add-employee-document-form";
 import { DeleteEmployeeDocumentButton } from "./delete-employee-document-button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/workspace/states";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
   valid: "default",
@@ -19,20 +20,30 @@ export async function EmployeeDocumentsSection({
   canEdit: boolean;
 }) {
   const supabase = await createClient();
-  const { data: documents } = await supabase
+  const { data: documents, error } = await supabase
     .from("employee_documents")
     .select("id, document_type, expiry_date, status, file_path, deleted_at")
     .eq("employee_id", employeeId)
     .order("created_at", { ascending: false });
+
+  if (error) {
+    // A failed read is not "No documents on file". Adding a document does not depend on the list, so that form stays.
+    return (
+      <div className="space-y-4">
+        <LoadError what="the documents" retryHref={`/employees/${employeeId}?tab=documents`} />
+        {canEdit ? <AddEmployeeDocumentForm employeeId={employeeId} /> : null}
+      </div>
+    );
+  }
 
   // Signed URLs, not public ones — the bucket is private (RLS-gated by
   // storage.objects policies), so a link only ever works for someone this
   // page would already show the row to, and only for a few minutes.
   const documentsWithUrl = await Promise.all(
     (documents ?? []).map(async (d) => {
-      if (!d.file_path) return { ...d, url: null };
-      const { data } = await supabase.storage.from("employee-documents").createSignedUrl(d.file_path, 300);
-      return { ...d, url: data?.signedUrl ?? null };
+      if (!d.file_path) return { ...d, url: null, urlFailed: false };
+      const { data, error: urlError } = await supabase.storage.from("employee-documents").createSignedUrl(d.file_path, 300);
+      return { ...d, url: data?.signedUrl ?? null, urlFailed: !!urlError };
     }),
   );
 
@@ -65,6 +76,8 @@ export async function EmployeeDocumentsSection({
                     <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
                       View / Download
                     </a>
+                  ) : d.urlFailed ? (
+                    <span className="text-sm text-destructive">File link could not be loaded; reload to try again</span>
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}

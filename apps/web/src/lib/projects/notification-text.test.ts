@@ -19,6 +19,7 @@ describe("describeNotification", () => {
   });
   it("tells a blocker with its reason", () => {
     expect(describeNotification("project_task_blocked", { ...base, task_id: "t1", task: "Truss", reason: "Waiting for power" }).text).toContain("Waiting for power");
+    expect(describeNotification("project_task_blocked", { ...base, task_id: "t1", task: "Truss", reason: "Waiting for power", fyi: true, unblocker: "Pia Manager" }).text).toBe("“Truss” on UAE-P-2026-0001 Floor projection is blocked: Waiting for power. Pia Manager was asked to unblock it.");
   });
   it("carries no message text for mentions and replies, and links to the discussion", () => {
     const m = describeNotification("project_mention", { ...base, message_id: "m1" });

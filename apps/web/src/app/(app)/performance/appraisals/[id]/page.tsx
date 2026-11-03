@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { AppraisalForm } from "./appraisal-form";
 import { AppraisalActions } from "./appraisal-actions";
 import { BackLink } from "@/components/workspace/list-memory";
+import { LoadError } from "@/components/workspace/states";
 
 export const metadata = { title: "Appraisal" };
 
@@ -17,21 +18,26 @@ export default async function AppraisalDetailPage({ params }: { params: Promise<
   if (!session) return null;
 
   const supabase = await createClient();
-  const { data: appraisal } = await supabase
+  const { data: appraisal, error: appraisalError } = await supabase
     .from("appraisals")
     .select(
       "id, employee_id, cycle_id, appraiser_id, overall_rating, quality_of_work_rating, productivity_rating, initiative_rating, teamwork_rating, punctuality_rating, strengths, areas_for_improvement, status, submitted_at, acknowledged_at",
     )
     .eq("id", id)
     .maybeSingle();
+  // "Not found" is only for an appraisal that is absent or not visible; a failed read says it could not load.
+  if (appraisalError) return <LoadError what="this appraisal" retryHref={`/performance/appraisals/${id}`} />;
   if (!appraisal) notFound();
 
-  const [{ data: employee }, { data: cycle }, { data: appraiser }, { data: careerSummary }] = await Promise.all([
+  const [{ data: employee, error: employeeError }, { data: cycle, error: cycleError }, { data: appraiser, error: appraiserError }, { data: careerSummary, error: careerError }] = await Promise.all([
     supabase.from("employees").select("first_name, last_name, company_id").eq("id", appraisal.employee_id).single(),
     supabase.from("performance_cycles").select("name").eq("id", appraisal.cycle_id).single(),
     supabase.from("profiles").select("full_name, email").eq("id", appraisal.appraiser_id).maybeSingle(),
     supabase.rpc("get_career_summary_for_appraisal", { p_employee_id: appraisal.employee_id }).maybeSingle(),
   ]);
+
+  // Who may manage this appraisal depends on the employee's company: with that unreadable no page is shown rather than one with the management controls silently missing.
+  if (employeeError) return <LoadError what="this appraisal" retryHref={`/performance/appraisals/${id}`} note="The employee it belongs to could not be read." />;
 
   const isSelf = session.employeeId === appraisal.employee_id;
   const isAppraiser = session.userId === appraisal.appraiser_id;
@@ -47,9 +53,9 @@ export default async function AppraisalDetailPage({ params }: { params: Promise<
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">
-            {employee?.first_name} {employee?.last_name} — {cycle?.name}
+            {employee?.first_name} {employee?.last_name} — {cycle?.name ?? (cycleError ? "cycle could not load" : "")}
           </h1>
-          <p className="text-muted-foreground">Appraised by {appraiser?.full_name ?? appraiser?.email ?? "—"}</p>
+          <p className="text-muted-foreground">Appraised by {appraiser?.full_name ?? appraiser?.email ?? (appraiserError ? "name could not load" : "—")}</p>
         </div>
         <Badge>{appraisal.status.replace(/_/g, " ")}</Badge>
       </div>
@@ -123,15 +129,15 @@ export default async function AppraisalDetailPage({ params }: { params: Promise<
           <dl className="grid gap-3 text-sm sm:grid-cols-3">
             <div>
               <dt className="font-medium text-muted-foreground">Last promotion</dt>
-              <dd>{careerSummary?.last_promotion_date ?? "—"}</dd>
+              <dd>{careerSummary?.last_promotion_date ?? (careerError ? "Could not load" : "—")}</dd>
             </div>
             <div>
               <dt className="font-medium text-muted-foreground">Last title change</dt>
-              <dd>{careerSummary?.last_title_change_date ?? "—"}</dd>
+              <dd>{careerSummary?.last_title_change_date ?? (careerError ? "Could not load" : "—")}</dd>
             </div>
             <div>
               <dt className="font-medium text-muted-foreground">Last salary change</dt>
-              <dd>{careerSummary?.last_salary_change_date ?? "—"}</dd>
+              <dd>{careerSummary?.last_salary_change_date ?? (careerError ? "Could not load" : "—")}</dd>
             </div>
           </dl>
         </CardContent>

@@ -122,6 +122,33 @@ describe("My Day approvals", () => {
     expect(html).toContain("Nothing needs your attention right now.");
   });
 
+  describe("Project Manager's own project budgets (no budget grant)", () => {
+    const pmTables = (versions: unknown[], submissions: unknown[] = []) => ({
+      ...tables, approvals: { data: [], error: null, count: 0 }, proj_projects: rows([{ id: "p1" }]), proj_project_members: rows([]), pbx_budgets: rows([{ id: "b1", project_id: "p1" }]),
+      pbx_budget_versions: rows(versions), pbx_actual_submissions: rows(submissions),
+    });
+    it("a returned budget is theirs to act on and links to the project's budget; a waiting one is under Waiting on others; neither is a decision for them", async () => {
+      tables = pmTables([{ id: "v1", budget_id: "b1", seq: 1, status: "returned", decided_at: new Date().toISOString() }], [{ id: "s1", budget_id: "b1", seq: 1, status: "submitted", decided_at: null }]);
+      const html = await render();
+      expect(html).toContain("Project budget returned to you");
+      expect(html).toContain("/projects/p1/budget");
+      expect(html).toContain("Project budgets you submitted, waiting on others");
+      expect(html).not.toContain("Project budgets waiting for you");
+    });
+    it("a recent approval is shown quietly", async () => {
+      tables = pmTables([{ id: "v1", budget_id: "b1", seq: 1, status: "approved", decided_at: new Date().toISOString() }]);
+      const html = await render();
+      expect(html).toContain("Budget decisions on your projects in the last 14 days");
+      expect(html).not.toContain("returned to you");
+    });
+    it("a failed read of the budgets of their projects is an error row, never nothing", async () => {
+      tables = { ...pmTables([]), pbx_budgets: failing() };
+      const html = await render();
+      expect(html).toContain("The budgets of your projects could not be loaded");
+      expect(html).not.toContain("Nothing needs your attention right now.");
+    });
+  });
+
   it("a failed pbx_inbox read shows an error row, not 0 and not nothing", async () => {
     rpcs = { pbx_inbox: failing() };
     const html = await render();

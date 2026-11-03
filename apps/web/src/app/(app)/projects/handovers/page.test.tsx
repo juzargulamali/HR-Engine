@@ -11,7 +11,8 @@ vi.mock("@/components/projects/handover-brief", () => ({ HandoverBrief: () => nu
 vi.mock("./handover-actions", () => ({ AcceptHandoverForm: () => null, AssignPmForm: () => null, ClarifyHandoverForm: () => null }));
 
 let tables: Record<string, FakeResult | (() => FakeResult)> = {};
-vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeSupabase(tables, { proj_staff_directory: rows([]) }) }));
+let rpcs: Record<string, FakeResult | (() => FakeResult)> = {};
+vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeSupabase(tables, rpcs) }));
 vi.mock("@/lib/projects/context", () => ({
   getProjectsContext: async () => ({ userId: "u1", grants: [{ companyId: "c1", capabilities: ["founder"] }], people: [], companyName: () => "Enginious" }),
 }));
@@ -23,7 +24,7 @@ const HANDOVER = {
   accepted_at: null, clarification_note: null, clarification_requested_at: null, project_id: null, submitted_at: "2026-11-01T08:00:00Z", updated_at: "2026-11-01T08:00:00Z",
 };
 
-beforeEach(() => { tables = { proj_handovers: rows([HANDOVER]) }; });
+beforeEach(() => { tables = { proj_handovers: rows([HANDOVER]) }; rpcs = { proj_staff_directory: rows([]) }; });
 
 describe("Handovers page", () => {
   it("healthy: lists the handover", async () => {
@@ -41,5 +42,16 @@ describe("Handovers page", () => {
     expect(html).toContain("Could not load the handovers");
     expect(html).toContain("Try again");
     expect(html).not.toContain("No handovers to show");
+  });
+  it("a failed staff-directory read does not show people as unknown Sales colleagues", async () => {
+    rpcs = { proj_staff_directory: failing() };
+    const html = renderToStaticMarkup(await HandoversPage());
+    expect(html).toContain("Could not load the staff names");
+    expect(html).toContain("name could not load");
+    expect(html).not.toContain("a Sales colleague");
+    expect(html).toContain("Expo stage");
+  });
+  it("a readable directory that simply lacks the person keeps the plain label", async () => {
+    expect(renderToStaticMarkup(await HandoversPage())).toContain("a Sales colleague");
   });
 });

@@ -39,12 +39,14 @@ export default async function HandoversPage() {
 
   // Names of people who may not hold Projects access (Sales owners): the directory is readable only by those who assign PMs.
   const names = new Map<string, string>();
+  let staffFailed = false;
   if (ctx.grants.some((g) => hasProjCapability([g], g.companyId, "assign_pm") || hasProjCapability([g], g.companyId, "manage_access"))) {
-    const { data: staff } = await supabase.rpc("proj_staff_directory");
+    const { data: staff, error: staffError } = await supabase.rpc("proj_staff_directory");
+    staffFailed = !!staffError;
     for (const s of staff ?? []) names.set(s.user_id, s.full_name?.trim() || s.email?.split("@")[0] || "Unnamed");
   }
   // Sales people usually hold no Projects grant, so only people who assign PMs can read their names; everyone else sees a plain label.
-  const nameOf = (id: string | null) => (id ? (names.get(id) ?? ctx.people.find((p) => p.id === id)?.name ?? (id === ctx.userId ? "you" : "a Sales colleague")) : "Not chosen yet");
+  const nameOf = (id: string | null) => (id ? (names.get(id) ?? ctx.people.find((p) => p.id === id)?.name ?? (id === ctx.userId ? "you" : staffFailed ? "name could not load" : "a Sales colleague")) : "Not chosen yet");
 
   const mine = handovers.filter((h) => h.pm_user_id === ctx.userId && (h.status === "pm_assigned" || h.status === "clarification_requested"));
   const rest = handovers.filter((h) => !mine.includes(h));
@@ -57,6 +59,8 @@ export default async function HandoversPage() {
         title="Handovers"
         description="Sales hands a won opportunity to delivery here, in one process: prepare brief, submit, assign PM, PM accepts, project created. A founder names the Project Manager, who accepts it (which creates the project) or asks Sales to clarify. The brief carries no prices, budgets or purchase-order details."
       />
+
+      {staffFailed ? <LoadError what="the staff names" retryHref="/projects/handovers" note="Where a name reads “name could not load” the person is not unknown: the directory could not be read." /> : null}
 
       {mine.length > 0 ? (
         <section className="space-y-4" aria-labelledby="mine">

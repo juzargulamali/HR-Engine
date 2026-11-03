@@ -95,10 +95,22 @@ await job("3 Update an assigned task", "hr@e2e.local", async (t) => {
     if (await dlg.count()) await t.click(dlg.getByRole("button", { name: /^(start|save|move|confirm)/i }).last(), "confirm");
   } else {
     await t.click(modulesNav(page).getByRole("link", { name: "Projects & Tasks", exact: true }), "Projects & Tasks");
-    await t.choose(page.getByRole("row", { name: /Sensor calibration/ }).getByLabel(/status of/i), { label: "Start" }, "status");
+    // The status control is a menu (a button that opens a list of the moves this person may make), not a select.
+    const trigger = () => page.getByRole("row", { name: /Sensor calibration/ }).getByRole("button", { name: /status of sensor calibration/i });
+    if (!/To do/i.test(await trigger().getAttribute("aria-label"))) throw new Error(`the task did not start as To do in the screen: ${await trigger().getAttribute("aria-label")}`);
+    await t.click(trigger(), "open the status menu");
+    await t.click(trigger().locator("xpath=..").locator("[role=menu]").getByRole("menuitem", { name: /^Start/ }), "Start");
   }
   await page.waitForTimeout(2500);
-  return sql("select status from proj_tasks where title = 'Sensor calibration'") === "in_progress";
+  const saved = sql("select status from proj_tasks where title = 'Sensor calibration'") === "in_progress";
+  if (VARIANT === "before") return saved;
+  // The screen shows the change at once, and it is still there after a reload (it was saved, not only drawn).
+  const label = () => page.getByRole("row", { name: /Sensor calibration/ }).getByRole("button", { name: /status of sensor calibration/i }).getAttribute("aria-label");
+  const shownNow = /In progress/i.test(await label());
+  await page.reload({ waitUntil: "networkidle" });
+  const shownAfterReload = /In progress/i.test(await label());
+  console.log(JSON.stringify({ job: "3 assertions", saved, shownNow, shownAfterReload }));
+  return saved && shownNow && shownAfterReload;
 });
 
 // 4. Open a project discussion ---------------------------------------------------------------------------------------------------------

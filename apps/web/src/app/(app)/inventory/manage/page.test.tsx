@@ -24,6 +24,8 @@ function emptyChain(result: unknown): unknown {
 const ok = { data: [], error: null, count: 0 };
 const state = vi.hoisted(() => ({ caps: [] as string[], loadError: false }));
 
+// The "whom to ask" sentence is an async server component (it reads who can grant access); these page tests render synchronously, so it is stood in for here and tested in components/os/ask-for-access.test.tsx.
+vi.mock("@/components/os/ask-for-access", () => ({ AskForAccess: ({ generic = "a founder", to = "give you access" }: { generic?: string; to?: string }) => <span>Ask {generic} to {to}.</span> }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ from: () => emptyChain(state.loadError ? { data: null, error: { message: "boom" } } : ok), rpc: () => emptyChain(ok) }),
 }));

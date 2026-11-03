@@ -1,4 +1,5 @@
 import { hasCrmCapability, isAnyCrmFounder } from "@enginious-hr/domain";
+import { AskForAccess } from "@/components/os/ask-for-access";
 import { AccessNotice } from "@/components/os/access-notice";
 import { SalesTabs, type SalesTab } from "@/components/sales/sales-tabs";
 import { LoadError } from "@/components/workspace/states";
@@ -20,7 +21,7 @@ export default async function SalesLayout({ children }: { children: React.ReactN
     );
   }
   if (ctx.grants.length === 0) {
-    return <AccessNotice title="Sales & CRM">You do not have Sales access. Sales access is granted per company by the founders.</AccessNotice>;
+    return <AccessNotice title="Sales & CRM">You do not have Sales access. Sales access is granted per company by the founders. <AskForAccess module="sales" /></AccessNotice>;
   }
   const manageSettings = ctx.grants.some((g) => hasCrmCapability([g], g.companyId, "manage_settings"));
   // The same short list as the sidebar: contacts and proposals are reached from Enquiries, settings from Manage (access is under People & Access).

@@ -1,6 +1,7 @@
 import type { ComponentProps } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { Alert } from "@/components/ui/alert";
+import { LoadError } from "@/components/workspace/states";
 import { EditEmployeeForm } from "./edit-employee-form";
 
 // Reuses EditEmployeeForm's own prop type (rather than redeclaring it) so
@@ -30,10 +31,10 @@ export async function OverviewSection({
   isSelf: boolean;
 }) {
   const supabase = await createClient();
-  const [{ data: linkedProfile }, { data: managers }, { data: managerName }] = await Promise.all([
+  const [{ data: linkedProfile, error: profileError }, { data: managers, error: managersError }, { data: managerName, error: managerNameError }] = await Promise.all([
     employee.user_id
       ? supabase.from("profiles").select("email").eq("id", employee.user_id).maybeSingle()
-      : Promise.resolve({ data: null }),
+      : Promise.resolve({ data: null, error: null }),
     supabase.from("employees").select("id, first_name, last_name").eq("company_id", employee.company_id).is("deleted_at", null),
     // The `managers` list above is RLS-scoped to the CURRENT VIEWER (self,
     // rows they manage, or hr_admin/sys_admin/finance/ceo/cto) — it never
@@ -44,7 +45,7 @@ export async function OverviewSection({
     // is a narrowly-scoped RPC that resolves just this one name, gated by
     // the same visibility rule employees_select already applies — see its
     // migration/schema.sql doc comment.
-    employee.manager_id ? supabase.rpc("get_employee_manager_name", { p_employee_id: employee.id }) : Promise.resolve({ data: null }),
+    employee.manager_id ? supabase.rpc("get_employee_manager_name", { p_employee_id: employee.id }) : Promise.resolve({ data: null, error: null }),
   ]);
 
   // A CEO/CTO is top of the org chart: nothing ever assigns them a manager and
@@ -54,17 +55,27 @@ export async function OverviewSection({
   // Admin looking at a CEO's profile must get the same answer. Only looked up
   // when it could matter (active, no manager).
   let isExecutive = false;
+  let executiveCheckFailed = false;
   if (!employee.manager_id && employee.employment_status === "active") {
-    const { data } = await supabase.rpc("employee_is_c_level", { p_employee_id: employee.id });
+    const { data, error } = await supabase.rpc("employee_is_c_level", { p_employee_id: employee.id });
     isExecutive = data === true;
+    executiveCheckFailed = !!error;
   }
 
   const outstanding: string[] = [];
   if (!employee.job_title) outstanding.push("No job title set.");
-  if (!employee.manager_id && employee.employment_status === "active" && !isExecutive) outstanding.push("No manager assigned.");
+  // "No manager assigned" is only said when it is known: an unreadable manager name or C-level check is reported below instead.
+  if (!employee.manager_id && employee.employment_status === "active" && !isExecutive && !executiveCheckFailed) outstanding.push("No manager assigned.");
+  const unreadable = [
+    profileError ? "the linked login" : null,
+    managersError ? "the list of possible managers" : null,
+    managerNameError ? "the manager's name" : null,
+    executiveCheckFailed ? "whether this person is a C-level executive" : null,
+  ].filter((x): x is string => x !== null);
 
   return (
     <div className="space-y-4">
+      {unreadable.length > 0 ? <LoadError what={unreadable.join(", ")} retryHref={`/employees/${employee.id}`} note="Nothing here is missing: those parts could not be read, and editing is withheld until they load." /> : null}
       {outstanding.length > 0 ? (
         <Alert variant="warning">{outstanding.join(" ")}</Alert>
       ) : null}
@@ -72,8 +83,8 @@ export async function OverviewSection({
         employee={employee}
         linkedEmail={linkedProfile?.email ?? null}
         managers={(managers ?? []).filter((m) => m.id !== employee.id)}
-        managerName={managerName ?? null}
-        canEditCore={canEditCore}
+        managerName={managerNameError ? "Could not load" : managerName ?? null}
+        canEditCore={canEditCore && !profileError && !managersError}
         isSelf={isSelf}
       />
     </div>

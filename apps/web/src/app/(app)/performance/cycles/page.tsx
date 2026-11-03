@@ -8,6 +8,7 @@ import { Alert } from "@/components/ui/alert";
 import { NewCycleForm } from "./new-cycle-form";
 import { CloseCycleButton } from "./close-cycle-button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/workspace/states";
 
 export const metadata = { title: "Appraisal cycles" };
 
@@ -21,21 +22,22 @@ export default async function PerformanceCyclesPage() {
   }
 
   const supabase = await createClient();
-  const { data: companies } = await supabase.from("companies").select("id, legal_name");
+  const { data: companies, error: companiesError } = await supabase.from("companies").select("id, legal_name");
+  if (companiesError) return <LoadError what="the companies" retryHref="/performance/cycles" note="No cycles can be shown or started until they load." />;
   const manageableCompanies = (companies ?? []).filter((c) => canManagePerformanceCycles(session.grants, c.id));
   const companyIds = manageableCompanies.map((c) => c.id);
 
   // performance_cycles_select has no company scoping (any signed-in user
   // can read it), so this view narrows to the companies this HR Admin
   // actually administers itself, same as assets/page.tsx's manageableCompanies.
-  const { data: cycles } =
+  const { data: cycles, error: cyclesError } =
     companyIds.length > 0
       ? await supabase
           .from("performance_cycles")
           .select("id, company_id, name, period_start, period_end, status")
           .in("company_id", companyIds)
           .order("period_start", { ascending: false })
-      : { data: [] as never[] };
+      : { data: [] as never[], error: null };
 
   const companyName = new Map((companies ?? []).map((c) => [c.id, c.legal_name]));
 
@@ -62,6 +64,7 @@ export default async function PerformanceCyclesPage() {
           <CardTitle>All cycles</CardTitle>
         </CardHeader>
         <CardContent>
+          {cyclesError ? <LoadError what="the cycles" retryHref="/performance/cycles" /> : (
           <Table stack>
             <TableHeader>
               <TableRow>
@@ -95,6 +98,7 @@ export default async function PerformanceCyclesPage() {
               ) : null}
             </TableBody>
           </Table>
+          )}
         </CardContent>
       </Card>
     </div>

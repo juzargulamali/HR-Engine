@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ProjectsContext } from "./context";
 import { dateText, todayIso } from "./format";
 import { groupTasksByDue, handoverWaitsOnMe, isWaitingOnMyReview, type ReviewContext } from "./work-logic";
-import type { ProjHandoverRow, ProjProjectPersonRow, ProjTaskRow } from "@/types/projects";
+import type { ProjHandoverRow, ProjProjectPersonRow, ProjScopeDecisionWaitingRow, ProjTaskRow } from "@/types/projects";
 import type { ProjectStanding } from "@enginious-hr/domain";
 import { buildTaskRow, type ProjectLookup, type TaskRowData } from "@/components/projects/tasks/task-logic";
 
@@ -82,10 +82,12 @@ export interface ProjectsAttention {
   dueSoonTasks: number;
   reviewsWaiting: number;
   handoversWaiting: number;
-  /** Proposed scope changes the person may decide (a founder, or an approve_scope holder who can read them), on projects that are still open. */
+  /** Proposed scope changes the person may decide (a founder or an approve_scope holder, member or not), on projects that are still open. */
   scopeChangesWaiting: number;
-  /** The project holding the oldest of them, so the My Day row opens a real decision page. */
+  /** The project holding the oldest of them. */
   scopeChangeProjectId: string | null;
+  /** The oldest proposal itself: the My Day row opens its decision page, which works without project membership. */
+  scopeChangeId: string | null;
   unreadMessages: number;
   unreadProjects: number;
 }
@@ -95,7 +97,7 @@ export interface ProjectsAttention {
  * THROWS when a read fails (never zeros): My Day shows one "could not be loaded" line, the Projects overview says so too.
  */
 export const loadProjectsAttention = cache(async (ctx: ProjectsContext): Promise<ProjectsAttention> => {
-  const empty: ProjectsAttention = { overdueTasks: 0, dueSoonTasks: 0, reviewsWaiting: 0, handoversWaiting: 0, scopeChangesWaiting: 0, scopeChangeProjectId: null, unreadMessages: 0, unreadProjects: 0 };
+  const empty: ProjectsAttention = { overdueTasks: 0, dueSoonTasks: 0, reviewsWaiting: 0, handoversWaiting: 0, scopeChangesWaiting: 0, scopeChangeProjectId: null, scopeChangeId: null, unreadMessages: 0, unreadProjects: 0 };
   if (ctx.grants.length === 0) return empty;
   const supabase = await createClient();
   const deciderCompanies = new Set(ctx.grants.map((g) => g.companyId).filter((c) => canDecideScope(ctx.grants, c)));
@@ -103,24 +105,15 @@ export const loadProjectsAttention = cache(async (ctx: ProjectsContext): Promise
     loadMyWork(ctx),
     supabase.from("proj_handovers").select("company_id, status, pm_user_id").in("status", ["submitted", "pm_assigned"]).limit(100),
     supabase.rpc("proj_unread_counts"),
-    // Proposed scope changes, as far as row-level security lets this person read them (a founder or a member); only worth reading for someone who may decide one.
-    deciderCompanies.size > 0 ? supabase.from("proj_scope_changes").select("project_id, proposed_at").eq("status", "proposed").order("proposed_at").limit(200) : Promise.resolve({ data: [] as { project_id: string; proposed_at: string }[], error: null }),
+    // Proposed scope changes the person may decide NOW, from the narrow function (id, project reference, title, time only): a holder of approve_scope who is not a member of the
+    // project is authorised to decide but cannot read the proposal through row-level security. Only worth asking for someone who may decide one.
+    deciderCompanies.size > 0 ? supabase.rpc("proj_scope_decisions_waiting") : Promise.resolve({ data: [] as ProjScopeDecisionWaitingRow[], error: null }),
   ]);
   ok(handovers, unread, scope);
-  // Only those on projects still open and in a company where the person decides.
-  let scopeWaiting = 0;
-  let scopeProject: string | null = null;
+  // The function returns only open proposals on projects still open, in companies where the person decides, oldest first.
   const scopeRows = scope.data ?? [];
-  if (scopeRows.length > 0) {
-    const projectsRes = await supabase.from("proj_projects").select("id, company_id, status").in("id", [...new Set(scopeRows.map((r) => r.project_id))]);
-    ok(projectsRes);
-    const decidable = new Set((projectsRes.data ?? []).filter((p) => deciderCompanies.has(p.company_id) && p.status !== "completed" && p.status !== "archived").map((p) => p.id));
-    for (const r of scopeRows) {
-      if (!decidable.has(r.project_id)) continue;
-      scopeWaiting += 1;
-      scopeProject ??= r.project_id;
-    }
-  }
+  const scopeWaiting = scopeRows.length;
+  const oldestScope = scopeRows[0] ?? null;
   const groups = groupTasksByDue(work.open, work.today);
   const unreadRows = (unread.data ?? []).filter((r) => r.unread > 0);
   return {
@@ -129,7 +122,8 @@ export const loadProjectsAttention = cache(async (ctx: ProjectsContext): Promise
     reviewsWaiting: work.reviews.length,
     handoversWaiting: (handovers.data ?? []).filter((h) => handoverWaitsOnMe(h, ctx.userId, (c) => hasProjCapability(ctx.grants, c, "assign_pm"))).length,
     scopeChangesWaiting: scopeWaiting,
-    scopeChangeProjectId: scopeProject,
+    scopeChangeProjectId: oldestScope?.project_id ?? null,
+    scopeChangeId: oldestScope?.scope_change_id ?? null,
     unreadMessages: unreadRows.reduce((n, r) => n + r.unread, 0),
     unreadProjects: unreadRows.length,
   };

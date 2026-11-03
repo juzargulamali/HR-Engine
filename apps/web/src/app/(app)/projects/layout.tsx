@@ -1,6 +1,7 @@
 import { Alert } from "@/components/ui/alert";
 import { PageHeader } from "@/components/projects/parts";
 import { LoadError } from "@/components/workspace/states";
+import { AskForAccess } from "@/components/os/ask-for-access";
 import { AccessNotice } from "@/components/os/access-notice";
 import { OsScope } from "@/components/os/scope";
 import { getProjectsContext } from "@/lib/projects/context";
@@ -32,7 +33,7 @@ export default async function ProjectsLayout({ children }: { children: React.Rea
   if (!ctx.hasAnyAccess) {
     return (
       <OsScope>
-        <AccessNotice title="Projects & Tasks">You do not have Projects access. It is granted per company by the founders. Ask one of them if you need to see or work on projects.</AccessNotice>
+        <AccessNotice title="Projects & Tasks">You do not have Projects access. It is granted per company by the founders. <AskForAccess module="projects" to="give you access if you need to see or work on projects" /></AccessNotice>
       </OsScope>
     );
   }

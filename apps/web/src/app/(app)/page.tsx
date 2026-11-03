@@ -14,7 +14,7 @@ import {
   DASHBOARD_TIMEZONE,
 } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
-import { loadMyPendingApprovalCount } from "@/lib/approvals/pending";
+import { loadMyPendingApprovals } from "@/lib/approvals/pending";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentWeather } from "@/lib/weather";
 import { Alert } from "@/components/ui/alert";
@@ -33,7 +33,7 @@ import { SalesPipeline } from "@/components/my-day/sales-pipeline";
 import { splitActions } from "@/lib/my-day/groups";
 import { loadEquipment, loadLiveClock } from "@/lib/my-day/loaders";
 import { loadProjectsDay } from "@/lib/my-day/projects-day";
-import { loadMyWaitingRequests } from "@/lib/my-day/waiting";
+import { loadMyWaitingRequests, waitingText } from "@/lib/my-day/waiting";
 import type { LiveSummary } from "@/lib/my-day/live";
 import { cn } from "@/lib/utils";
 import { logServerError } from "@/lib/log";
@@ -41,7 +41,7 @@ import { BirthdaysSection } from "./birthdays-section";
 import { getCompanySnapshot } from "./dashboard-data";
 import { CompanyComparisonTable } from "./company-comparison-table";
 import { attendanceSentence, CALENDAR_NOTE } from "./attendance-summary";
-import { attentionSentence, buildActionItems, commercialApprovalItems, handoverItems, projectNoteItems, waitingOnOthersItems, type ActionItem } from "./action-centre";
+import { attentionSentence, budgetWaitingDetail, buildActionItems, commercialApprovalItems, handoverItems, projectNoteItems, waitingOnOthersItems, type ActionItem } from "./action-centre";
 import { AttendanceClockCard } from "./attendance-clock-card";
 import { AttendanceCompletionBar } from "./attendance-completion-bar";
 import { UpcomingSection } from "./upcoming-section";
@@ -106,7 +106,7 @@ export default async function DashboardPage() {
   // Finance approver needs it too), so the approvals count is read for anyone; the company-wide sections below stay gated to canViewHrAlerts.
   // The approvals count covers the steps routed to this person by name AND the Recovery Leave queue steps they may decide (the same rule as the Approvals page).
   const [approvalsRead, salesRead, projectsRead, equipmentRead, budgetRead, waitingRead, notesRead] = await Promise.allSettled([
-    loadMyPendingApprovalCount(supabase, session),
+    loadMyPendingApprovals(supabase, session),
     loadSalesToday(),
     loadProjectsDay(today),
     loadEquipment(),
@@ -125,7 +125,8 @@ export default async function DashboardPage() {
   failedSource("my submitted requests", waitingRead);
   failedSource("dispatch and return notes", notesRead);
   // A failed read is "error", never 0: the tile shows "—" and the greeting says the approvals could not be loaded.
-  const myPendingApprovals: number | "error" = approvalsRead.status === "fulfilled" ? approvalsRead.value : "error";
+  const myPendingApprovals: number | "error" = approvalsRead.status === "fulfilled" ? approvalsRead.value.count : "error";
+  const myPendingOldest = approvalsRead.status === "fulfilled" ? approvalsRead.value.oldest : null;
 
   let isMyBirthdayToday = false;
   // Also drives the employee-only dashboard header's own timezone/location
@@ -333,15 +334,22 @@ export default async function DashboardPage() {
   // What they submitted themselves waits under "Waiting on others", never as a decision for them. A failed read is an error row, never 0.
   let budgetActionItems: ActionItem[] = [];
   let budgetWaitingItems: ActionItem[] = [];
+  let budgetQuietItems: ActionItem[] = [];
   const budgetErrorRow: ActionItem = { key: "budget-decisions", icon: ReceiptText, label: "Project budgets could not be loaded", count: 0, href: "/finance/project-budgets", error: true };
   if (budgetRead.status === "rejected") {
     budgetActionItems = [budgetErrorRow];
   } else if (budgetRead.value.status === "error") {
     budgetActionItems = [budgetErrorRow];
   } else if (budgetRead.value.status === "ok") {
-    const { waitingForMe, waitingOnOthers } = budgetRead.value.day;
-    budgetActionItems = [{ key: "budget-decisions", icon: ReceiptText, label: "Project budgets waiting for you", count: waitingForMe.count, href: waitingForMe.href }];
-    budgetWaitingItems = [{ key: "budget-waiting", icon: ReceiptText, label: "Project budgets you submitted, waiting on others", count: waitingOnOthers, href: "/finance/project-budgets" }];
+    const { waitingForMe, waitingOnOthers, waitingOnOthersWith, waitingOnOthersHref, returned, decidedRecently, pmReadFailed } = budgetRead.value.day;
+    budgetActionItems = [
+      { key: "budget-decisions", icon: ReceiptText, label: "Project budgets waiting for you", count: waitingForMe.count, href: waitingForMe.href, detail: waitingText(waitingForMe.oldest ?? null, now) },
+      // A Project Manager's own budgets sent back for changes: theirs to act on. Never a decision for someone else.
+      { key: "budget-returned", icon: ReceiptText, label: returned.count === 1 ? "Project budget returned to you" : "Project budgets returned to you", count: returned.count, href: returned.href },
+      ...(pmReadFailed ? [{ key: "budget-pm-error", icon: ReceiptText, label: "The budgets of your projects could not be loaded", count: 0, href: "/projects", error: true }] : []),
+    ];
+    budgetWaitingItems = [{ key: "budget-waiting", icon: ReceiptText, label: "Project budgets you submitted, waiting on others", count: waitingOnOthers, href: waitingOnOthersHref, detail: budgetWaitingDetail(waitingOnOthersWith, now) }];
+    budgetQuietItems = [{ key: "budget-decided", icon: ReceiptText, label: "Budget decisions on your projects in the last 14 days", count: decidedRecently.count, href: decidedRecently.href }];
   }
 
   // Dispatch notes and return checklists waiting for this person's acknowledgement (current PM, acting PM, Projects founder). Not a gate: nothing waits for it. A failed read is an error row.
@@ -358,6 +366,8 @@ export default async function DashboardPage() {
   // from it, so the two can never disagree (Sales follow-ups are in the list, so they count in the sentence too).
   const actionItems = buildActionItems({
     myPendingApprovals,
+    myPendingOldest,
+    now,
     ...(showHrView ? { contractsEndingCount, probationDueCount, docsExpiringCount, identityExpiringCount } : {}),
     extraItems: [...salesActionItems, ...handoverActionItems, ...approvalActionItems, ...projectActionItems, ...budgetActionItems, ...noteActionItems],
   });
@@ -398,7 +408,7 @@ export default async function DashboardPage() {
   const hasLeft = hasProjects || salesToday.status !== "none";
   const statCols = ({ 1: "xl:grid-cols-1", 2: "xl:grid-cols-2", 3: "xl:grid-cols-3", 4: "xl:grid-cols-4" } as Record<number, string>)[Math.min(4, stats.length)];
   // "Needs me" states the decisions count, so the figure is not repeated as a tile. "Overdue project tasks" is stated by "My work today", so it is not repeated in "Needs me" either.
-  const needsMeOther = [...groups.other, ...quietProjectItems].filter((i) => !(i.key === "proj-overdue" && myWork !== null && myWork !== "error"));
+  const needsMeOther = [...groups.other, ...quietProjectItems, ...budgetQuietItems.filter((i) => i.count > 0)].filter((i) => !(i.key === "proj-overdue" && myWork !== null && myWork !== "error"));
 
   return (
     <OsScope className="space-y-4">

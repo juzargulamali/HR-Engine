@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AskForAccess } from "@/components/os/ask-for-access";
 import {
   canConfirmStock, canManageCatalogue, canOperateLocation, canViewStock, hasInvCapability, isInvFounder,
 } from "@enginious-hr/domain";
@@ -40,7 +41,7 @@ export default async function InventoryManagePage({ searchParams }: { searchPara
     return (
       <div className="space-y-4">
         <PageHeader title="Inventory setup" />
-        <Alert role="status">Setup is for founders and people who manage the catalogue. Ask a founder if you need it.</Alert>
+        <Alert role="status">Setup is for founders and people who manage the catalogue. <AskForAccess module="inventory" to="give you that right if you need it" /></Alert>
       </div>
     );
   }

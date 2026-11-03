@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, CheckCircle2, Circle } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { LoadError } from "@/components/workspace/states";
 import { AvailabilityBadge, StageBadge } from "@/components/sales/badges";
 import { formatDate, formatDateTime, formatMoney } from "@/components/sales/format";
 import { displayNameFor, getCrmContext } from "@/lib/crm/context";
@@ -74,9 +75,11 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
   // process below is the route and the Project Manager is named on Projects, Handovers, so the directory is not needed here.
   // Project Managers are any active staff (not only Sales users): read through the directory function, names only for non-founders.
   let staff: { id: string; name: string }[] = [];
+  let staffFailed = false;
   if (canEdit && !projectHandover.installed) {
     const supabase = await createClient();
-    const { data } = await supabase.rpc("crm_staff_directory");
+    const { data, error: staffError } = await supabase.rpc("crm_staff_directory");
+    staffFailed = !!staffError;
     staff = (data ?? []).map((p) => ({ id: p.user_id, name: displayNameFor(p) }));
   }
   const handover = detail.handover;
@@ -143,7 +146,10 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
           title="Project Manager and status"
           description={handover?.prepared_at ? `Prepared ${formatDateTime(handover.prepared_at)}${handover.prepared_by ? ` by ${ctx.personName(handover.prepared_by)}` : ""}.${handover.handed_over_at ? ` Handed over ${formatDateTime(handover.handed_over_at)}.` : ""}` : "Not marked ready yet."}
         >
-          {canEdit ? (
+          {canEdit && staffFailed ? (
+            // The form's Project Manager choice comes from the directory: withheld rather than offered with nobody to choose, and the chosen name is not guessed.
+            <LoadError what="the staff names" retryHref={`/sales/opportunities/${opp.id}/handover`} note="The Project Manager cannot be chosen until they load." />
+          ) : canEdit ? (
             <HandoverForm key={handover?.updated_at ?? "new"} opportunityId={opp.id} status={status} pmUserId={pmId} notes={handover?.notes ?? null} people={people} />
           ) : (
             <dl className="grid gap-3 sm:grid-cols-3">

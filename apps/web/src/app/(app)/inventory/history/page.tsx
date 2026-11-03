@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AskForAccess } from "@/components/os/ask-for-access";
 import { canViewStock } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
@@ -46,7 +47,7 @@ export default async function MovementsPage({ searchParams }: { searchParams: Pr
     return (
       <div className="space-y-4">
         {title}
-        <Alert role="status">Movements are for people who may see stock: warehouse operators, Inventory founders and people given the right to view stock. Ask an Inventory founder if you need it.</Alert>
+        <Alert role="status">Movements are for people who may see stock: warehouse operators, Inventory founders and people given the right to view stock. <AskForAccess module="inventory" generic="an Inventory founder" to="give you that right if you need it" /></Alert>
       </div>
     );
   }

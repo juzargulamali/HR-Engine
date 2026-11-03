@@ -1,4 +1,5 @@
 import { AccessNotice } from "@/components/os/access-notice";
+import { AskForAccess } from "@/components/os/ask-for-access";
 import { Alert } from "@/components/ui/alert";
 import { InboxList } from "@/components/budget/inbox-list";
 import { LoadError } from "@/components/workspace/states";
@@ -16,7 +17,7 @@ export default async function ProjectBudgetsInboxPage({ searchParams }: { search
   if (loaded.state === "error") return <div className="space-y-4"><h1 className="text-2xl font-semibold">Project budgets</h1><LoadError what="the Finance inbox" retryHref="/finance/project-budgets" /></div>;
   const { inbox } = loaded;
   if (inbox.companies.length === 0) {
-    return <AccessNotice title="Project budgets">You do not have access to project budgets. Finance people are given access, company by company, by the owner of the system; a Project Manager opens the budget from the project itself.</AccessNotice>;
+    return <AccessNotice title="Project budgets">You do not have access to project budgets. Finance people are given access, company by company. <AskForAccess module="budget" generic="the owner of the system" /> A Project Manager opens the budget from the project itself.</AccessNotice>;
   }
   const initial = FILTERS.find((f) => f === filter);
   return (

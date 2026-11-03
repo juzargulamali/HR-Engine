@@ -24,7 +24,7 @@ export default async function ProjectBudgetPage({ params, searchParams }: { para
   if (loaded.state === "denied") return <div className="space-y-4">{heading}<Alert role="status">You do not have access to this project&apos;s budget. The Project Manager and Finance of the owning company can open it.</Alert></div>;
   if (loaded.state === "error") return <div className="space-y-4">{heading}<LoadError what="the budget of this project" retryHref={`/projects/${id}/budget`} /></div>;
   const view = loaded.view;
-  const claims = view.viewer.is_pm ? await loadOwnClaims(session.userId) : [];
+  const ownClaims = view.viewer.is_pm ? await loadOwnClaims(session.userId) : { claims: [], failed: false };
   const initial = SECTIONS.find((s) => s === section) as BudgetTab | undefined;
-  return <div className="space-y-4">{heading}<BudgetWorkspace view={view} claims={claims} initialTab={initial} /></div>;
+  return <div className="space-y-4">{heading}<BudgetWorkspace view={view} claims={ownClaims.claims} claimsFailed={ownClaims.failed} claimsRetryHref={`/projects/${id}/budget?section=actuals`} initialTab={initial} /></div>;
 }

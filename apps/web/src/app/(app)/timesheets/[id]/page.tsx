@@ -10,6 +10,7 @@ import { DeleteEntryButton } from "./delete-entry-button";
 import { TimesheetActions } from "./timesheet-actions";
 import { EmptyState } from "@/components/ui/empty-state";
 import { BackLink } from "@/components/workspace/list-memory";
+import { LoadError } from "@/components/workspace/states";
 
 export const metadata = { title: "Timesheet" };
 
@@ -19,14 +20,16 @@ export default async function TimesheetDetailPage({ params }: { params: Promise<
   if (!session) return null;
 
   const supabase = await createClient();
-  const { data: timesheet } = await supabase
+  const { data: timesheet, error: timesheetError } = await supabase
     .from("timesheets")
     .select("id, employee_id, period_start, period_end, status")
     .eq("id", id)
     .maybeSingle();
+  // "Not found" is only for a timesheet that is absent or not visible; a failed read says it could not load.
+  if (timesheetError) return <LoadError what="this timesheet" retryHref={`/timesheets/${id}`} />;
   if (!timesheet) notFound();
 
-  const [{ data: entries }, { data: employee }] = await Promise.all([
+  const [{ data: entries, error: entriesError }, { data: employee, error: employeeError }] = await Promise.all([
     supabase
       .from("timesheet_entries")
       .select("id, work_date, project_id, task_description, hours, is_billable")
@@ -36,11 +39,11 @@ export default async function TimesheetDetailPage({ params }: { params: Promise<
   ]);
 
   const projectIds = [...new Set((entries ?? []).map((e) => e.project_id).filter(Boolean))] as string[];
-  const [{ data: projects }, { data: availableProjects }] = await Promise.all([
-    projectIds.length > 0 ? supabase.from("projects").select("id, name").in("id", projectIds) : Promise.resolve({ data: [] as never[] }),
+  const [{ data: projects, error: projectsError }, { data: availableProjects, error: availableError }] = await Promise.all([
+    projectIds.length > 0 ? supabase.from("projects").select("id, name").in("id", projectIds) : Promise.resolve({ data: [] as never[], error: null }),
     employee
       ? supabase.from("projects").select("id, name").eq("company_id", employee.company_id).eq("is_active", true).order("name")
-      : Promise.resolve({ data: [] as never[] }),
+      : Promise.resolve({ data: [] as never[], error: null }),
   ]);
   const projectName = new Map((projects ?? []).map((p) => [p.id, p.name]));
 
@@ -58,7 +61,7 @@ export default async function TimesheetDetailPage({ params }: { params: Promise<
           <h1 className="text-2xl font-semibold">
             Timesheet — {timesheet.period_start} to {timesheet.period_end}
           </h1>
-          <p className="text-muted-foreground">{totalHours} hours logged</p>
+          <p className="text-muted-foreground">{entriesError ? "Hours could not be loaded" : `${totalHours} hours logged`}</p>
         </div>
         <Badge>{timesheet.status.replace(/_/g, " ")}</Badge>
       </div>
@@ -68,6 +71,9 @@ export default async function TimesheetDetailPage({ params }: { params: Promise<
           <CardTitle>Entries</CardTitle>
         </CardHeader>
         <CardContent>
+          {entriesError ? <LoadError what="the entries" retryHref={`/timesheets/${id}`} note="This is a problem loading the information, not an empty timesheet." /> : (
+          <>
+          {projectsError ? <LoadError what="the project names" retryHref={`/timesheets/${id}`} /> : null}
           <Table>
             <TableHeader>
               <TableRow>
@@ -83,7 +89,7 @@ export default async function TimesheetDetailPage({ params }: { params: Promise<
               {(entries ?? []).map((entry) => (
                 <TableRow key={entry.id}>
                   <TableCell>{entry.work_date}</TableCell>
-                  <TableCell>{entry.project_id ? (projectName.get(entry.project_id) ?? "—") : "—"}</TableCell>
+                  <TableCell>{entry.project_id ? (projectName.get(entry.project_id) ?? (projectsError ? "Could not load" : "—")) : "—"}</TableCell>
                   <TableCell className="max-w-xs truncate text-muted-foreground">{entry.task_description ?? "—"}</TableCell>
                   <TableCell>{entry.hours}</TableCell>
                   <TableCell>{entry.is_billable ? "Yes" : "No"}</TableCell>
@@ -99,6 +105,8 @@ export default async function TimesheetDetailPage({ params }: { params: Promise<
               ) : null}
             </TableBody>
           </Table>
+          </>
+          )}
         </CardContent>
       </Card>
 
@@ -108,7 +116,11 @@ export default async function TimesheetDetailPage({ params }: { params: Promise<
             <CardTitle>Add an entry</CardTitle>
           </CardHeader>
           <CardContent>
-            <AddEntryForm timesheetId={timesheet.id} projects={availableProjects ?? []} />
+            {employeeError || availableError ? (
+              <LoadError what="the list of projects to choose from" retryHref={`/timesheets/${id}`} note="Adding an entry is unavailable until it loads." />
+            ) : (
+              <AddEntryForm timesheetId={timesheet.id} projects={availableProjects ?? []} />
+            )}
           </CardContent>
         </Card>
       ) : null}
