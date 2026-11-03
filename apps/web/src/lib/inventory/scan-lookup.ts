@@ -10,7 +10,7 @@ import { parseInventoryScan } from "@enginious-hr/domain";
 import type { Database } from "@/types/database.types";
 import { isNotInstalled } from "@/lib/projects/errors";
 import { CUSTODY_WORDS, LIFECYCLE_WORDS } from "./words";
-import { mapUnit, ownedByText, xUnitStatus } from "./xshare";
+import { SHARING_REVOKED_TEXT, mapUnit, ownedByText, xUnitStatus } from "./xshare";
 
 export type ScanResolution =
   | {
@@ -54,7 +54,7 @@ async function crossCompanyUnit(db: Db, code: string): Promise<ScanResolution> {
   const u = mapUnit(first);
   return {
     status: "found", kind: "unit", code: u.code, id: u.unitId, itemId: u.itemId, itemName: u.itemName,
-    openHref: `/inventory/stock?unit=${encodeURIComponent(u.code)}`, facts: [xUnitStatus(u), ownedByText(u.ownerName)],
+    openHref: `/inventory/stock?unit=${encodeURIComponent(u.code)}`, facts: [xUnitStatus(u), ownedByText(u.ownerName), ...(u.sharingRevoked ? [SHARING_REVOKED_TEXT] : [])],
   };
 }
 

@@ -195,6 +195,25 @@ describe("UnitSidePanel", () => {
       expect(html).not.toMatch(/Purchase cost|Notes|>History</);
     } finally { xUnits = []; }
   });
+  it("says 'Sharing revoked\u2014contact owner' on another company's unit once the owner stopped sharing, keeps the receive action while it is on the way, and offers no issue or send", async () => {
+    unitDetail = null;
+    const row = { unit_id: "ux", code: "UAE-E-00042", serial_number: "SN-7", item_id: "i1", item_name: "LED panel", category_name: "Screens", condition: "good", custody_kind: "transit", ownership: "owned",
+      owner_company_id: "c-uae", owner_company_name: "Enginious UAE", location_id: "l9", location_name: "Riyadh warehouse", location_company_id: "c-ksa", bin_id: null, bin_code: null, transfer_id: "t1", transfer_code: "UAE-T-00001", usable_here: false, sharing_revoked: true };
+    try {
+      xUnits = [row];
+      const html = await render(UnitSidePanel({ unitRef: "UAE-E-00042", closeHref: "/inventory", here }));
+      expect(html).toContain("Sharing revoked\u2014contact owner");
+      expect(html).toContain("Receive the transfer");
+      xUnits = [{ ...row, custody_kind: "warehouse", transfer_id: null, transfer_code: null, sharing_revoked: true }];
+      const onShelf = await render(UnitSidePanel({ unitRef: "UAE-E-00042", closeHref: "/inventory", here }));
+      expect(onShelf).toContain("Sharing revoked\u2014contact owner");
+      expect(onShelf).toContain("At Riyadh warehouse");
+      expect(onShelf).not.toContain("Issue to a person");
+      expect(onShelf).not.toContain("Dispatch to a project");
+      xUnits = [{ ...row, sharing_revoked: false }];
+      expect(await render(UnitSidePanel({ unitRef: "UAE-E-00042", closeHref: "/inventory", here }))).not.toContain("Sharing revoked");
+    } finally { xUnits = []; }
+  });
   it("shows no actions to someone who cannot operate stock", async () => {
     grants = [{ companyId: C1, capabilities: ["view_stock"] }];
     unitDetail = baseUnit({ canOperate: false, canEdit: false, canSeeCosts: false });

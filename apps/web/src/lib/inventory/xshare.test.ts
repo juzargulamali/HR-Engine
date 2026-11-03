@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formDestination, formTransferFrom, mapDestination, mapTrace, mapUnit, ownedByText, traceSteps, xUnitStatus, type Raw } from "./xshare";
+import { SHARING_REVOKED_TEXT, formDestination, formTransferFrom, mapCounted, mapDestination, mapTrace, mapUnit, ownedByText, traceSteps, xCountedText, xUnitStatus, type Raw } from "./xshare";
 
 const head: Raw = {
   transfer_id: "t1", code: "UAE-T-00001", status: "in_transit", sender_company_id: "c1", sender_company_name: "Enginious UAE", from_location_id: "l1", from_location_name: "Dubai warehouse",
@@ -40,6 +40,30 @@ describe("cross-company receiving: mapping what the database functions return", 
     expect(xUnitStatus(mapUnit({ ...base, custody_kind: "warehouse", transfer_id: null, usable_here: true }))).toBe("Available at Riyadh warehouse");
     expect(xUnitStatus(mapUnit({ ...base, custody_kind: "warehouse", condition: "needs_inspection", transfer_id: null }))).toBe("At Riyadh warehouse, held back (needs checking)");
     expect(ownedByText("Enginious UAE")).toBe("Owned by Enginious UAE");
+  });
+  it("uses the exact revoked message, with the em dash, and takes the flag from the database rather than working it out", () => {
+    expect(SHARING_REVOKED_TEXT).toBe("Sharing revoked\u2014contact owner");
+    const base: Raw = { unit_id: "u1", code: "UAE-E-00042", serial_number: null, item_id: "i1", item_name: "LED panel", category_name: null, condition: "good", custody_kind: "warehouse", ownership: "owned", owner_company_id: "c1", owner_company_name: "Enginious UAE",
+      location_id: "l2", location_name: "Riyadh warehouse", location_company_id: "c2", bin_id: null, bin_code: null, transfer_id: null, transfer_code: null, usable_here: false };
+    expect(mapUnit(base).sharingRevoked).toBe(false);
+    expect(mapUnit({ ...base, sharing_revoked: true }).sharingRevoked).toBe(true);
+    // revoked but in good condition: it is simply there (not "held back"); a damaged one is still held back for its condition
+    expect(xUnitStatus(mapUnit({ ...base, sharing_revoked: true }))).toBe("At Riyadh warehouse");
+    expect(xUnitStatus(mapUnit({ ...base, sharing_revoked: true, condition: "damaged" }))).toBe("At Riyadh warehouse, held back (damaged)");
+    expect(mapTrace({ ...raw(), transfer: { ...head, sharing_revoked: true } }).transfer.sharingRevoked).toBe(true);
+    expect(mapTrace(raw()).transfer.sharingRevoked).toBe(false);
+    const f = formTransferFrom(mapTrace({ ...raw(), transfer: { ...head, sharing_revoked: true } }), { from: "a", to: "b" });
+    expect(f.sharingRevoked).toBe(true);
+    expect(f.held).toHaveLength(2); // still receivable
+  });
+  it("says counted stock of another company as 'N \u00d7 item \u00b7 Owned by X \u00b7 at <warehouse>' with owner and place apart, and 'on the way to' before receipt", () => {
+    const row: Raw = { item_id: "i2", item_name: "HDMI cable 5 m", category_name: "Cables", unit_of_measure: "each", condition: "good", qty: "4.000", rented: false, custody_kind: "warehouse",
+      owner_company_id: "c1", owner_company_name: "Enginious UAE", location_id: "l2", location_name: "Riyadh warehouse", location_company_id: "c2", bin_id: null, bin_code: null, transfer_id: null, transfer_code: null, sharing_revoked: false };
+    const c = mapCounted(row);
+    expect(c).toMatchObject({ qty: 4, ownerName: "Enginious UAE", locationName: "Riyadh warehouse", locationCompanyId: "c2", custody: "warehouse", sharingRevoked: false });
+    expect(xCountedText(c)).toBe("4 \u00d7 HDMI cable 5 m \u00b7 Owned by Enginious UAE \u00b7 at Riyadh warehouse");
+    expect(xCountedText(mapCounted({ ...row, custody_kind: "transit", qty: "2.500", unit_of_measure: "m", transfer_id: "t1", transfer_code: "UAE-T-00002" }))).toBe("2.5 m \u00d7 HDMI cable 5 m \u00b7 Owned by Enginious UAE \u00b7 on the way to Riyadh warehouse");
+    expect(mapCounted({ ...row, sharing_revoked: true }).sharingRevoked).toBe(true);
   });
   it("the trace reads dispatch, in transit, receipt the same for both sides, and shows the receipt only when it happened", () => {
     const fmt = (iso: string) => iso.slice(0, 10);

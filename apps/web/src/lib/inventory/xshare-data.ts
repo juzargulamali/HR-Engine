@@ -2,7 +2,7 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { isNotInstalled } from "@/lib/projects/errors";
 import {
-  formTransferFrom, mapDestination, mapHead, mapTrace, mapUnit, type XDestination, type XTrace, type XTransferHead, type XUnit,
+  formTransferFrom, mapCounted, mapDestination, mapHead, mapTrace, mapUnit, type XCounted, type XDestination, type XTrace, type XTransferHead, type XUnit,
 } from "./xshare";
 import type { FormTransfer } from "./stock-candidates";
 
@@ -30,6 +30,11 @@ export async function loadXDestinations(db?: Db): Promise<XDestination[]> {
 /** Other companies' units in transit to, or on the shelf at, a warehouse the caller operates (the minimum fields), optionally for one warehouse or one exact code. */
 export async function loadXUnits(opts: { locationId?: string | null; code?: string | null } = {}, db?: Db): Promise<XUnit[]> {
   return rows(db ?? (await createClient()), "inv_xshare_units", { p_location_id: opts.locationId || null, p_code: opts.code || null }, mapUnit);
+}
+
+/** Other companies' counted stock in transit to, or on the shelf at, a warehouse the caller operates (item, owner, quantity, place; no costs). */
+export async function loadXCounted(opts: { locationId?: string | null } = {}, db?: Db): Promise<XCounted[]> {
+  return rows(db ?? (await createClient()), "inv_xshare_counted_stock", { p_location_id: opts.locationId || null }, mapCounted);
 }
 
 /** Cross-company transfers the caller is a party to, newest first. */

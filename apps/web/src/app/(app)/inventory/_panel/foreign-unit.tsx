@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { SidePanel } from "@/components/workspace/side-panel";
 import { cn } from "@/lib/utils";
-import { ownedByText, xUnitStatus, type XUnit } from "@/lib/inventory/xshare";
+import { SHARING_REVOKED_TEXT, ownedByText, xUnitStatus, type XUnit } from "@/lib/inventory/xshare";
 import { ConditionBadge, Section } from "./parts";
 
 type Here = (patch?: Record<string, string | null>) => string;
@@ -40,6 +40,7 @@ export function ForeignUnitPanel({ unit: u, closeHref, here, canOperate }: { uni
           {u.rented ? <Badge variant="outline">Rented</Badge> : null}
           <span className="text-muted-foreground">{u.custody === "transit" ? "In transit" : "In the warehouse"}</span>
         </div>
+        {u.sharingRevoked ? <Alert variant="warning" role="status"><strong>{SHARING_REVOKED_TEXT}</strong>. You can still receive and keep track of this equipment while it is at {u.locationName}; it cannot be issued or sent on until its owner authorises sharing again.</Alert> : null}
         <Alert role="status">This equipment belongs to {u.ownerName}. You can see what is needed to receive and handle it here; its history, cost and other details stay with the owner.</Alert>
         {quick.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Unit actions">

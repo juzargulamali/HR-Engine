@@ -8,6 +8,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useUnsavedChanges } from "@/components/workspace/unsaved";
 import { countStillOutstanding, draftFromCandidate, unitProblemFor, type Candidate, type FormContext, type FormLocation, type FormTransfer } from "@/lib/inventory/stock-candidates";
+import { SHARING_REVOKED_TEXT } from "@/lib/inventory/xshare";
 import {
   ADJUST_WORDS, KIND_CONFIG, formatInZone, localToUtcIso, nowLocalInput, parseLines, sourceFor, summaryRows, validateInput,
   type AdjustAction, type LineDraft, type MovementInput, type MovementKind, type ReturnFrom, type SummaryInput,
@@ -296,6 +297,7 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
             <option value="">{transfersHere.length === 0 ? "No transfer is on its way to you" : "Choose a transfer…"}</option>
             {transfersHere.map((t) => <option key={t.id} value={t.id}>{t.code} · {t.fromName} to {t.toName} · {t.held.length} line{t.held.length === 1 ? "" : "s"}</option>)}
           </Select>
+          {transfer?.sharingRevoked ? <p className="text-sm font-medium text-warning" role="status">{SHARING_REVOKED_TEXT}</p> : null}
           {transfer ? <p className="text-sm text-muted-foreground">Sent {formatInZone(transfer.dispatchedAt, tz)}{transfer.expectedAt ? `, expected ${formatInZone(transfer.expectedAt, tz)}` : ""}{transfer.carrier ? ` · ${transfer.carrier}` : ""}{transfer.reference ? ` · ref ${transfer.reference}` : ""}. It is not available at {transfer.toName} until you confirm it here.</p> : null}
         </div>
       ) : null}

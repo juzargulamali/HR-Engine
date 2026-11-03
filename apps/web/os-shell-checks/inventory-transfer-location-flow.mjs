@@ -7,9 +7,11 @@
 //   Proves: the Send form lists PL's warehouses only once AE has authorised sharing; a PL warehouse operator (works for PL only) sees the incoming unit
 //   and its transfer (minimum fields, "Owned by Enginious Local AE", never a cost, never AE's other units), receives it through the screen, and then sees
 //   it available there; the owner (AE) traces the same transfer through dispatch and receipt; anyone else is told nothing.
+//   Revoking the sharing AFTER dispatch strands nothing: 3 counted Sending cards sent, sharing revoked, the PL operator still sees them (and the laptop) with
+//   "Sharing revoked\u2014contact owner", receives them through the screen, reads "3 \u00d7 Sending card \u00b7 Owned by ... \u00b7 at the hub"; new dispatches and the Send form are refused; authorising again clears the flag.
 // NEEDS: the Inventory seed (seed/inventory.sh). RESEED=1 reseeds first (the script writes to the database it drives).
 //   Usage: RESEED=1 SHOTS_DIR=<dir> node os-shell-checks/inventory-transfer-location-flow.mjs
-import { makeRunner, maybeReseed, sql, sqlRows, asDb, rest, rpc, until, sleep, movementHelpers, dayAt, U } from "./inventory-flow-lib.mjs";
+import { makeRunner, maybeReseed, sql, sqlRows, asDb, asDbTry, rest, rpc, until, sleep, movementHelpers, dayAt, U } from "./inventory-flow-lib.mjs";
 
 maybeReseed();
 const R = makeRunner("transfer-location");
@@ -299,13 +301,77 @@ await step("the OWNER traces the same transfer through dispatch and receipt (the
   eq(JSON.stringify(a.body), JSON.stringify(b.body), "both sides read the very same record");
 });
 
-await step("revoking the authorisation ends the PL operator's access at once (the owner keeps its own view)", async () => {
+// Revoking AFTER dispatch must not strand equipment: 3 counted Sending cards are dispatched while the sharing is active, AE then revokes it, and the PL operator
+// still sees the cards on the way (flagged "Sharing revoked\u2014contact owner"), receives them through the screen, and keeps seeing them (and the laptop) at the hub.
+const REVOKED = "Sharing revoked\u2014contact owner";
+const CARD = s1("select id from inv_items where name='Sending card'");
+let CTR = "";
+const dubaiCards = () => Number(s1(`select coalesce(sum(qty),0) from inv_balances where item_id='${CARD}' and holder_kind='warehouse' and location_id='${DXB}'`));
+
+await step("counted stock sent, then the owner revokes the sharing: the source drops by 3, 3 are in transit (owner AE), and the PL operator still sees them with the revoked message", async () => {
+  const before = dubaiCards();
+  CTR = asDb(1, `select (inv_transfer_dispatch('${AE}', '${DXB}', '${HUB}', '${key("qsend")}', '[{"item_id":"${CARD}","qty":3}]'::jsonb, '${new Date(Date.now() + 3 * 86400000).toISOString()}'))->>'transfer_id'`);
+  eq(dubaiCards(), before - 3, "the source quantity dropped by exactly 3");
+  eq(s1(`select company_id||'/'||qty from inv_balances where holder_kind='transit' and transfer_id='${CTR}'`), `${AE}/3.000`, "3 in transit, owner AE");
+  eq(s1(`select count(*) from inv_balances where item_id='${CARD}' and location_id='${HUB}'`), "0", "nothing at the hub before receipt");
   asDb(3, `select inv_set_company_sharing('${AE}', '${PL}', false)`);
-  eq(JSON.stringify((await rpc("polw", "inv_xshare_units", {})).body), "[]", "no units after revoke");
+  const rows = (await rpc("polw", "inv_xshare_counted_stock", {})).body;
+  eq(rows.length, 1, "the narrow function lists the 3 cards on the way");
+  check(!Object.keys(rows[0]).some((k) => /cost|price|supplier|note/i.test(k)), "no cost-like field: " + Object.keys(rows[0]).join(","));
   await R.as("polw");
-  await R.go(`/inventory/transfers/${XTR}`);
-  check(/not found|do not have access/i.test(await R.mainText()), "the transfer is no longer readable");
-  eq((await rpc("hr1", "inv_xshare_transfer_trace", { p_transfer_id: XTR })).status, 200, "the owner still traces it");
+  await R.go(`/inventory/stock?location=${HUB}`);
+  const t = await R.mainText();
+  check(/3 \u00d7 Sending card/.test(t) && new RegExp(`On the way to ${HUB_NAME}`).test(t) && new RegExp(`Owned by ${AE_NAME}`).test(t), "3 \u00d7 Sending card on the way, owner named: " + t.slice(0, 900));
+  check(t.includes(REVOKED), "the revoked message is shown: " + t.slice(0, 900));
+  check(t.includes(LAPCODE) && !/4321|Purchase cost|AED/.test(t), "the laptop on the hub shelf is still listed, no cost");
+  await R.shot("transfer-location-8-revoked-incoming");
+});
+
+await step("Receive transfer (UI) after the revocation: the transfer is listed with the revoked message and is received; 3 cards are at the hub, owner AE, the source stays down by 3", async () => {
+  await R.go("/inventory/stock?action=transfer&mode=receive");
+  const mv = H.mv();
+  await mv.getByLabel("Which transfer arrived?").selectOption({ index: 1 });
+  await mv.getByText(new RegExp(`Owned by ${AE_NAME}`)).first().waitFor({ timeout: 10000 });
+  check((await H.text()).includes(REVOKED), "the receive form says: " + (await H.text()).slice(0, 500));
+  await H.review();
+  await mv.getByRole("button", { name: /^Confirm/ }).click();
+  await mv.getByText("Recorded").first().waitFor({ timeout: 20000 });
+  await sleep(500);
+  eq(s1(`select status from inv_transfers where id='${CTR}'`), "received", "the transfer is received");
+  eq(s1(`select company_id||'/'||qty from inv_balances where item_id='${CARD}' and holder_kind='warehouse' and location_id='${HUB}'`), `${AE}/3.000`, "3 at the hub, owner unchanged");
+  eq(s1(`select count(*) from inv_balances where holder_kind='transit' and transfer_id='${CTR}' and qty>0`), "0", "nothing left in transit");
+});
+
+await step("after receipt, still revoked: the PL operator reads '3 \u00d7 Sending card \u00b7 Owned by AE \u00b7 at the hub' and the laptop, both flagged; the owner reads the identical trace; new dispatches and the Send form are refused", async () => {
+  await R.go(`/inventory/stock?location=${HUB}`);
+  const t = await R.mainText();
+  check(/3 \u00d7 Sending card/.test(t) && new RegExp(`At ${HUB_NAME}`).test(t) && new RegExp(`Owned by ${AE_NAME}`).test(t), "counted stock at the hub, owner named: " + t.slice(0, 900));
+  check(t.includes(LAPCODE) && (t.match(new RegExp(REVOKED, "g")) ?? []).length >= 2, "both rows carry the message: " + t.slice(0, 900));
+  await R.go(`/inventory/transfers/${CTR}`);
+  check((await R.mainText()).includes(REVOKED), "the trace says it too");
+  await R.go(`/inventory/stock?unit=${LAPCODE}`);
+  check(((await R.panel().innerText()).replace(/\s+/g, " ")).includes(REVOKED), "the unit's minimal record says it");
+  await R.shot("transfer-location-9-revoked-at-hub");
+  const strip = (o) => { const c = JSON.parse(JSON.stringify(o)); delete c.transfer.sharing_revoked; return JSON.stringify(c); };
+  for (const id of [XTR, CTR]) {
+    const a = (await rpc("hr1", "inv_xshare_transfer_trace", { p_transfer_id: id })).body;
+    const b = (await rpc("polw", "inv_xshare_transfer_trace", { p_transfer_id: id })).body;
+    eq(strip(a), strip(b), "owner and receiver read the same record");
+    eq([a.transfer.sharing_revoked, b.transfer.sharing_revoked].join("/"), "false/true", "the flag is for the receiver only");
+  }
+  const refused = asDbTry(1, `select inv_transfer_dispatch('${AE}', '${DXB}', '${HUB}', '${key("qsend2")}', '[{"item_id":"${CARD}","qty":1}]'::jsonb, '${new Date(Date.now() + 3 * 86400000).toISOString()}')`);
+  check(!refused.ok && /authori[sz]e sharing/i.test(refused.out), "a new dispatch is refused: " + refused.out.slice(0, 200));
+  eq(JSON.stringify((await rpc("hr1", "inv_xshare_destinations", {})).body), "[]", "the Send form no longer offers the hub");
+  eq((await rpc("hr1", "inv_xshare_transfer_trace", { p_transfer_id: CTR })).status, 200, "the owner still traces it");
+});
+
+await step("authorising again clears the flag for the PL operator", async () => {
+  asDb(3, `select inv_set_company_sharing('${AE}', '${PL}', true, 'again')`);
+  const rows = (await rpc("polw", "inv_xshare_units", {})).body;
+  check(rows.length >= 1 && rows.every((r) => r.sharing_revoked === false), "unit flags cleared");
+  check((await rpc("polw", "inv_xshare_counted_stock", {})).body.every((r) => r.sharing_revoked === false), "counted flags cleared");
+  await R.go(`/inventory/stock?location=${HUB}`);
+  check(!(await R.mainText()).includes(REVOKED), "no message once authorised again");
 });
 
 await R.stop();

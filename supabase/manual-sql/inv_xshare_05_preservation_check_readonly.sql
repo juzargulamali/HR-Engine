@@ -24,7 +24,7 @@ before(item, value) as (
     ('__none__', '')
 ),
 mode as (select exists (select 1 from before where item <> '__none__') as compare),
-touched(name) as (values ('inv_xshare_active'), ('inv_xshare_may_handle'), ('inv_xshare_sees'), ('inv_xshare_destinations'), ('inv_xshare_transfers'), ('inv_xshare_transfer_trace'), ('inv_xshare_units'), ('inv_xshare_availability')),
+touched(name) as (values ('inv_xshare_active'), ('inv_xshare_revoked'), ('inv_xshare_may_handle'), ('inv_xshare_sees'), ('inv_xshare_transfer_revoked'), ('inv_xshare_destinations'), ('inv_xshare_transfers'), ('inv_xshare_transfer_trace'), ('inv_xshare_units'), ('inv_xshare_counted_stock'), ('inv_xshare_availability')),
 own_tables as (
   select c.oid, c.relname, c.relacl, c.relkind
   from pg_class c
@@ -72,6 +72,7 @@ grant_rows as (
   union all select 'rows:inv_company_grants' as item, count(*) || ':' || md5(coalesce(string_agg(to_jsonb(g)::text, '|' order by g.id), '')) as value from inv_company_grants g
   union all select 'rows:inv_operator_locations' as item, count(*) || ':' || md5(coalesce(string_agg(to_jsonb(g)::text, '|' order by g.id), '')) as value from inv_operator_locations g
   union all select 'rows:inv_transfers' as item, count(*) || ':' || md5(coalesce(string_agg(to_jsonb(g)::text, '|' order by g.id), '')) as value from inv_transfers g
+  union all select 'rows:inv_balances' as item, count(*) || ':' || md5(coalesce(string_agg(to_jsonb(g)::text, '|' order by g.id), '')) as value from inv_balances g
   union all select 'rows:inv_units' as item, count(*) || ':' || md5(coalesce(string_agg(to_jsonb(g)::text, '|' order by g.id), '')) as value from inv_units g
   union all select 'rows:inv_movements' as item, count(*) || ':' || md5(coalesce(string_agg(to_jsonb(g)::text, '|' order by g.id), '')) as value from inv_movements g
   union all select 'rows:inv_costs' as item, count(*) || ':' || md5(coalesce(string_agg(to_jsonb(g)::text, '|' order by g.id), '')) as value from inv_costs g
@@ -84,7 +85,7 @@ touched_fn as (
   from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('')
   union all
   select 'fnadd:' || a.name, coalesce((select md5(pg_get_functiondef(p.oid)) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = a.name limit 1), 'ABSENT')
-  from (values ('inv_xshare_active'), ('inv_xshare_may_handle'), ('inv_xshare_sees'), ('inv_xshare_destinations'), ('inv_xshare_transfers'), ('inv_xshare_transfer_trace'), ('inv_xshare_units'), ('inv_xshare_availability')) a(name) where a.name <> '__none__'
+  from (values ('inv_xshare_active'), ('inv_xshare_revoked'), ('inv_xshare_may_handle'), ('inv_xshare_sees'), ('inv_xshare_transfer_revoked'), ('inv_xshare_destinations'), ('inv_xshare_transfers'), ('inv_xshare_transfer_trace'), ('inv_xshare_units'), ('inv_xshare_counted_stock'), ('inv_xshare_availability')) a(name) where a.name <> '__none__'
 ),
 other_items as (
   select 'keep:' || k.name || ' definition (unchanged by this migration)' as item, (select md5(pg_get_functiondef(p.oid)) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = k.name limit 1) as value
@@ -120,7 +121,7 @@ select item, verdict, before_value, now_value, paste from (
         or exists (select 1 from results where item like 'fnadd:%' and verdict <> 'ADDED')
         then 'NOT APPLIED: ' || (select count(*) from results where ((item like 'fn:%' or item like 'chg:%') and verdict <> 'CHANGED') or (item like 'fnadd:%' and verdict <> 'ADDED')) || ' expected change(s) are not in place'
       else 'PASS: nothing else in the schema changed (' || (select count(*) from results where item like 'struct:%' and verdict = 'SAME') || ' fingerprints identical, '
-           || (select count(*) from results where item like 'rows:%' and verdict = 'SAME') || ' table fingerprint(s) identical), the 0 replaced and 8 added function(s) and the other named change are in place, and the replaced functions keep the same privileges'
+           || (select count(*) from results where item like 'rows:%' and verdict = 'SAME') || ' table fingerprint(s) identical), the 0 replaced and 11 added function(s) and the other named change are in place, and the replaced functions keep the same privileges'
     end, null, null, null
 ) r
 order by ord, item;

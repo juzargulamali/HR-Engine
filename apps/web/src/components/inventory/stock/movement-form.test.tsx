@@ -357,6 +357,18 @@ describe("MovementForm: receiving a transfer of equipment another company owns",
     expect(await screen.findByText(/Truss 3 m \(KSA-E-00007\) · Owned by Enginious KSA/)).toBeTruthy();
     expect(screen.getByText(/Receiving it puts it in Riyadh warehouse.*does not change who owns it/)).toBeTruthy();
   });
+  it("still lists a transfer whose sharing was revoked after it was sent, receivable as before, with the revoked message", async () => {
+    const c = withTransfer([ksaTruss]);
+    render(<MovementForm kind="receive_transfer" services={services()} context={{ ...c, transfers: c.transfers.map((t) => ({ ...t, sharingRevoked: true })) }} initial={{ transferId: "t1" }} />);
+    expect(await screen.findByText("Sharing revoked\u2014contact owner")).toBeTruthy();
+    expect(screen.getByText(/Truss 3 m \(KSA-E-00007\) · Owned by Enginious KSA/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Review" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+  it("shows no revoked message while the sharing is active", async () => {
+    render(<MovementForm kind="receive_transfer" services={services()} context={withTransfer([ksaTruss])} initial={{ transferId: "t1" }} />);
+    await screen.findByText(/Truss 3 m/);
+    expect(screen.queryByText(/Sharing revoked/)).toBeNull();
+  });
   it("adds nothing when every item is owned by the company that runs the destination", async () => {
     render(<MovementForm kind="receive_transfer" services={services()} context={withTransfer([{ ...laptop, custody: "transit", where: "In transit" }])} initial={{ transferId: "t1" }} />);
     expect(await screen.findByText(/Laptop X1 \(UAE-E-00042\)/)).toBeTruthy();

@@ -5,12 +5,18 @@
  * suppliers, notes, employees and projects are never part of them.
  */
 import { candidateBase, type Candidate, type FormLocation, type FormTransfer } from "./stock-candidates";
-import { CONDITION_WORDS, CUSTODY_WORDS } from "./words";
+import { CONDITION_WORDS, CUSTODY_WORDS, formatQty } from "./words";
 import type { InvCondition } from "@/types/inventory";
 
 export type Raw = Record<string, unknown>;
 const s = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const n = (v: unknown): number => (typeof v === "number" ? v : Number(v ?? 0) || 0);
+
+/**
+ * What the screens say when the owner has revoked the sharing authorisation for equipment that was already dispatched. The database says WHEN
+ * (sharing_revoked, false for the owner's own people); the screens never work it out. Receiving and tracking are not blocked by it.
+ */
+export const SHARING_REVOKED_TEXT = "Sharing revoked—contact owner";
 
 /** A warehouse of another company the owner has authorised, as the Send form lists it. */
 export interface XDestination { id: string; code: string; name: string; timezone: string; companyId: string; companyName: string; ownerCompanyId: string; ownerCompanyName: string }
@@ -18,14 +24,21 @@ export interface XDestination { id: string; code: string; name: string; timezone
 export interface XUnit {
   unitId: string; code: string; serial: string | null; itemId: string; itemName: string; category: string | null; condition: string; custody: "warehouse" | "transit";
   rented: boolean; ownerCompanyId: string; ownerName: string; locationId: string; locationName: string; locationCompanyId: string;
-  binId: string | null; binCode: string | null; transferId: string | null; transferCode: string | null; usableHere: boolean;
+  binId: string | null; binCode: string | null; transferId: string | null; transferCode: string | null; usableHere: boolean; sharingRevoked: boolean;
+}
+
+/** Another company's counted (quantity-tracked) stock in transit to, or on the shelf at, a warehouse the person operates: one row per condition and bin. */
+export interface XCounted {
+  itemId: string; itemName: string; category: string | null; uom: string; condition: string; qty: number; rented: boolean; custody: "warehouse" | "transit";
+  ownerCompanyId: string; ownerName: string; locationId: string; locationName: string; locationCompanyId: string;
+  binId: string | null; binCode: string | null; transferId: string | null; transferCode: string | null; sharingRevoked: boolean;
 }
 
 export interface XTransferHead {
   transferId: string; code: string; status: "in_transit" | "received" | "cancelled"; senderCompanyId: string; senderName: string;
   fromLocationId: string; fromName: string; toLocationId: string; toName: string; toCompanyId: string; toCompanyName: string;
   dispatchedAt: string; expectedAt: string | null; receivedAt: string | null; carrier: string | null; reference: string | null;
-  dispatchedBy: string | null; receivedBy: string | null; lineCount: number; stillOnTheWay: number;
+  dispatchedBy: string | null; receivedBy: string | null; lineCount: number; stillOnTheWay: number; sharingRevoked: boolean;
 }
 
 export interface XTraceUnit {
@@ -48,14 +61,21 @@ export const mapUnit = (r: Raw): XUnit => ({
   unitId: String(r.unit_id), code: String(r.code), serial: s(r.serial_number), itemId: String(r.item_id), itemName: String(r.item_name), category: s(r.category_name),
   condition: String(r.condition), custody: r.custody_kind === "transit" ? "transit" : "warehouse", rented: r.ownership === "rental", ownerCompanyId: String(r.owner_company_id),
   ownerName: s(r.owner_company_name) ?? "another company", locationId: String(r.location_id), locationName: String(r.location_name), locationCompanyId: String(r.location_company_id),
-  binId: s(r.bin_id), binCode: s(r.bin_code), transferId: s(r.transfer_id), transferCode: s(r.transfer_code), usableHere: r.usable_here === true,
+  binId: s(r.bin_id), binCode: s(r.bin_code), transferId: s(r.transfer_id), transferCode: s(r.transfer_code), usableHere: r.usable_here === true, sharingRevoked: r.sharing_revoked === true,
+});
+
+export const mapCounted = (r: Raw): XCounted => ({
+  itemId: String(r.item_id), itemName: String(r.item_name), category: s(r.category_name), uom: s(r.unit_of_measure) ?? "each", condition: String(r.condition), qty: n(r.qty), rented: r.rented === true,
+  custody: r.custody_kind === "transit" ? "transit" : "warehouse", ownerCompanyId: String(r.owner_company_id), ownerName: s(r.owner_company_name) ?? "another company",
+  locationId: String(r.location_id), locationName: String(r.location_name), locationCompanyId: String(r.location_company_id), binId: s(r.bin_id), binCode: s(r.bin_code),
+  transferId: s(r.transfer_id), transferCode: s(r.transfer_code), sharingRevoked: r.sharing_revoked === true,
 });
 
 export const mapHead = (r: Raw): XTransferHead => ({
   transferId: String(r.transfer_id), code: String(r.code), status: r.status as XTransferHead["status"], senderCompanyId: String(r.sender_company_id), senderName: s(r.sender_company_name) ?? "another company",
   fromLocationId: String(r.from_location_id), fromName: String(r.from_location_name), toLocationId: String(r.to_location_id), toName: String(r.to_location_name),
   toCompanyId: String(r.to_company_id), toCompanyName: s(r.to_company_name) ?? "another company", dispatchedAt: String(r.dispatched_at), expectedAt: s(r.expected_at), receivedAt: s(r.received_at),
-  carrier: s(r.carrier), reference: s(r.reference), dispatchedBy: s(r.dispatched_by_name), receivedBy: s(r.received_by_name), lineCount: n(r.line_count), stillOnTheWay: n(r.still_on_the_way),
+  carrier: s(r.carrier), reference: s(r.reference), dispatchedBy: s(r.dispatched_by_name), receivedBy: s(r.received_by_name), lineCount: n(r.line_count), stillOnTheWay: n(r.still_on_the_way), sharingRevoked: r.sharing_revoked === true,
 });
 
 export function mapTrace(raw: Raw): XTrace {
@@ -81,6 +101,11 @@ export function mapTrace(raw: Raw): XTrace {
 
 /** "Owned by Enginious UAE": always said for another company's equipment (it is, by definition, not the warehouse's own). */
 export const ownedByText = (ownerName: string) => `Owned by ${ownerName}`;
+
+/** "4 × HDMI cable 5 m · Owned by Enginious UAE · at Riyadh warehouse": counted stock of another company, with owner and physical place apart. */
+export function xCountedText(c: XCounted): string {
+  return `${formatQty(c.qty, c.uom)} × ${c.itemName} · ${ownedByText(c.ownerName)} · ${c.custody === "transit" ? "on the way to" : "at"} ${c.locationName}`;
+}
 
 /** What the receiving form lists for a unit that is on its way to the person's warehouse. */
 export function unitCandidate(u: XTraceUnit | XUnit, extra: { transit: boolean; locationId: string | null }): Candidate {
@@ -109,7 +134,7 @@ export function formTransferFrom(trace: XTrace, names: { from: string; to: strin
     ...trace.units.filter((u) => u.onTheWay).map((u) => unitCandidate(u, { transit: true, locationId: null })),
     ...trace.quantities.flatMap((q) => quantityCandidates(q)),
   ];
-  return { id: t.transferId, code: t.code, companyId: t.senderCompanyId, fromLocationId: t.fromLocationId, fromName: names.from, toLocationId: t.toLocationId, toName: names.to, expectedAt: t.expectedAt, carrier: t.carrier, reference: t.reference, dispatchedAt: t.dispatchedAt, held };
+  return { id: t.transferId, code: t.code, companyId: t.senderCompanyId, fromLocationId: t.fromLocationId, fromName: names.from, toLocationId: t.toLocationId, toName: names.to, expectedAt: t.expectedAt, carrier: t.carrier, reference: t.reference, dispatchedAt: t.dispatchedAt, held, sharingRevoked: t.sharingRevoked };
 }
 
 /** A destination in the Send form. `sharedFrom` is the owning company that authorised it: it is offered only when sending from that company's warehouse. */
@@ -121,7 +146,9 @@ export const formDestination = (d: XDestination): FormLocation & { sharedFrom: s
 export function xUnitStatus(u: XUnit): string {
   if (u.custody === "transit") return `On the way to ${u.locationName}${u.transferCode ? ` (${u.transferCode})` : ""}`;
   const cond = (CONDITION_WORDS as Record<string, string>)[u.condition] ?? u.condition;
-  return u.usableHere ? `Available at ${u.locationName}` : `At ${u.locationName}, held back (${cond.toLowerCase()})`;
+  if (u.usableHere) return `Available at ${u.locationName}`;
+  // not usable only because the owner's sharing was revoked: it is simply there (the screens add the revoked message)
+  return u.condition === "good" || u.condition === "fair" ? `At ${u.locationName}` : `At ${u.locationName}, held back (${cond.toLowerCase()})`;
 }
 
 export const conditionWord = (c: string | null): string => (c ? ((CONDITION_WORDS as Record<string, string>)[c as InvCondition] ?? c) : "—");

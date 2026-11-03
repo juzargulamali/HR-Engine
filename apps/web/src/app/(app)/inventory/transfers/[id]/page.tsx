@@ -9,7 +9,7 @@ import { LoadError } from "@/components/workspace/states";
 import { parseRecordId } from "@/components/workspace/url-state";
 import { getInventoryContext } from "@/lib/inventory/context";
 import { loadXTrace } from "@/lib/inventory/xshare-data";
-import { conditionWord, ownedByText, traceSteps, type XTrace } from "@/lib/inventory/xshare";
+import { SHARING_REVOKED_TEXT, conditionWord, ownedByText, traceSteps, type XTrace } from "@/lib/inventory/xshare";
 import { ConditionBadge, Section } from "../../_panel/parts";
 
 export const metadata = { title: "Transfer" };
@@ -48,6 +48,7 @@ export default async function TransferTracePage({ params }: { params: Promise<{ 
         {t.status === "received" ? <Badge variant="success">Received</Badge> : t.status === "in_transit" ? <Badge variant="warning">In transit</Badge> : <Badge variant="outline">Cancelled</Badge>}
         <Link href="/inventory/stock" className="underline underline-offset-2">Back to Stock</Link>
       </div>
+      {t.sharingRevoked ? <Alert variant="warning" role="status"><strong>{SHARING_REVOKED_TEXT}</strong>. Equipment already sent can still be received and tracked at {t.toName}; new transfers under this authorisation are not possible.</Alert> : null}
       <Alert role="status">Both companies read this same record. The equipment keeps its owner, ID and serial number whichever warehouse it is in; it becomes available at {t.toName} only once it is received there.</Alert>
       <Section title="Dispatch, in transit, receipt">
         <ol className="space-y-2 text-sm">

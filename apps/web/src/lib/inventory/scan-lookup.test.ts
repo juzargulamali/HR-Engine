@@ -47,6 +47,12 @@ describe("resolveScan", () => {
     expect(r.status === "found" && r.facts).toEqual(["On the way to Riyadh warehouse (TR-1)", "Owned by Enginious UAE"]);
     expect(rpc).toHaveBeenCalledWith("inv_xshare_units", { p_location_id: null, p_code: "UAE-E-00042" });
   });
+  it("adds the revoked message to a unit the owner has stopped sharing, which is still found (receiving and tracking are not blocked)", async () => {
+    const x = { unit_id: "u9", code: "UAE-E-00042", serial_number: "SN1", item_id: "i1", item_name: "LED panel", category_name: null, condition: "good", custody_kind: "warehouse", ownership: "owned",
+      owner_company_id: "c1", owner_company_name: "Enginious UAE", location_id: "l9", location_name: "Riyadh warehouse", location_company_id: "c2", bin_id: null, bin_code: null, transfer_id: null, transfer_code: null, usable_here: false, sharing_revoked: true };
+    const r = await resolveScan(fakeDb({}, [], [x]).db, "UAE-E-00042");
+    expect(r.status === "found" && r.facts).toEqual(["At Riyadh warehouse", "Owned by Enginious UAE", "Sharing revoked\u2014contact owner"]);
+  });
   it("treats a missing cross-company function as an unknown code, and any other failure as could-not-look-up", async () => {
     const missing = fakeDb({});
     missing.rpc.mockResolvedValueOnce({ data: null, error: { code: "PGRST202", message: "Could not find the function" } } as never);

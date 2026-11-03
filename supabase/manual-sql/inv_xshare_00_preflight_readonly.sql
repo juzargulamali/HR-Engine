@@ -17,6 +17,7 @@ select section, item, detail from (
   union all select 'B prerequisites', 201, 'table public.inv_transfers', case when to_regclass('public.inv_transfers') is not null then 'OK' else 'MISSING - install that module first (see its deployment guide)' end
   union all select 'B prerequisites', 202, 'table public.inv_units', case when to_regclass('public.inv_units') is not null then 'OK' else 'MISSING - install that module first (see its deployment guide)' end
   union all select 'B prerequisites', 203, 'table public.inv_movements', case when to_regclass('public.inv_movements') is not null then 'OK' else 'MISSING - install that module first (see its deployment guide)' end
+  union all select 'B prerequisites', 214, 'table public.inv_balances', case when to_regclass('public.inv_balances') is not null then 'OK' else 'MISSING - install that module first (see its deployment guide)' end
   union all select 'B prerequisites', 204, 'table public.inv_movement_lines', case when to_regclass('public.inv_movement_lines') is not null then 'OK' else 'MISSING - install that module first (see its deployment guide)' end
   union all select 'B prerequisites', 205, 'table public.inv_locations', case when to_regclass('public.inv_locations') is not null then 'OK' else 'MISSING - install that module first (see its deployment guide)' end
   union all select 'B prerequisites', 206, 'table public.inv_operator_locations', case when to_regclass('public.inv_operator_locations') is not null then 'OK' else 'MISSING - install that module first (see its deployment guide)' end
@@ -37,11 +38,15 @@ select section, item, detail from (
          coalesce((select 'owner ' || pg_get_userbyid(pp.proowner) || '; security definer ' || pp.prosecdef::text || '; fingerprint ' || md5(pg_get_functiondef(pp.oid)) || '; callable by signed-in users ' || has_function_privilege('authenticated', pp.oid, 'execute')::text
                           || '; by anonymous ' || has_function_privilege('anon', pp.oid, 'execute')::text
                    from pg_proc pp where pp.pronamespace = 'public'::regnamespace and pp.proname = f.name limit 1), 'not present yet (this migration adds it)')
-  from (values ('inv_xshare_active'), ('inv_xshare_may_handle'), ('inv_xshare_sees'), ('inv_xshare_destinations'), ('inv_xshare_transfers'), ('inv_xshare_transfer_trace'), ('inv_xshare_units'), ('inv_xshare_availability')) f(name)
+  from (values ('inv_xshare_active'), ('inv_xshare_revoked'), ('inv_xshare_may_handle'), ('inv_xshare_sees'), ('inv_xshare_transfer_revoked'), ('inv_xshare_destinations'), ('inv_xshare_transfers'), ('inv_xshare_transfer_trace'), ('inv_xshare_units'), ('inv_xshare_counted_stock'), ('inv_xshare_availability')) f(name)
   union all select 'C functions today', 450 + row_number() over (order by f.name), f.name || ' (unchanged by this migration)',
          coalesce((select 'fingerprint ' || md5(pg_get_functiondef(pp.oid)) from pg_proc pp where pp.pronamespace = 'public'::regnamespace and pp.proname = f.name limit 1), 'MISSING')
   from (values ('inv_transfer_receive'), ('inv_transfer_dispatch'), ('inv_check_sharing'), ('inv_availability')) f(name)
   union all select 'D what exists today', 1000, 'active sharing authorisations (owner -> company that may use / hold the equipment); information only', (select count(*)::text from inv_company_sharing where revoked_at is null)
+  union all select 'D what exists today', 1002, 'authorisations already REVOKED (information only: equipment dispatched under one stays visible to the receiving warehouse after this migration, flagged "Sharing revoked—contact owner")', (select count(*)::text from inv_company_sharing where revoked_at is not null)
+  union all select 'D what exists today', 1003, 'equipment of ANOTHER company physically at, or on its way to, a warehouse (information only): units / counted stock rows',
+         (select count(*)::text from inv_units u join inv_locations l on l.id = u.location_id where u.custody_kind = 'warehouse' and u.lifecycle = 'active' and l.company_id <> u.company_id) || ' / '
+         || (select count(*)::text from inv_balances b join inv_locations l on l.id = b.location_id where b.holder_kind = 'warehouse' and b.qty > 0 and l.company_id <> b.company_id)
   union all select 'D what exists today', 1001, 'transfers between warehouses of DIFFERENT companies, by status (information only: these are what the receiving side will be able to read and trace)',
          coalesce((select string_agg(s.status || ' ' || s.n, '; ' order by s.status) from (select t.status, count(*) as n from inv_transfers t join inv_locations a on a.id = t.from_location_id join inv_locations b on b.id = t.to_location_id where a.company_id <> b.company_id group by t.status) s), 'none')
   union all select 'E row counts', 900, 'inv_transfers', (select count(*)::text from inv_transfers)
