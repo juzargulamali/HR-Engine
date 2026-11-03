@@ -1,5 +1,6 @@
 import { LoadError } from "@/components/workspace/states";
-import { canManageHolidays } from "@enginious-hr/domain";
+import { canManageHolidays, getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
+import { StaffHolidays } from "./staff-view";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +35,21 @@ export default async function HolidaysPage() {
   if (holidaysError || countriesError) return <LoadError what="the public holidays" retryHref="/holidays" />;
   const countryName = new Map((countries ?? []).map((c) => [c.code, c.name]));
   const manageableCountries = (countries ?? []).filter((c) => canManageHolidays(session.grants, c.code));
+
+  // Staff (nobody who manages holidays) read the calendar for their own country first, without the HR explanation or controls. If the person's country cannot be
+  // read, every country is listed (nothing is hidden or guessed).
+  if (manageableCountries.length === 0) {
+    const { data: me, error: meError } = session.employeeId ? await supabase.from("employees").select("country_code").eq("id", session.employeeId).maybeSingle() : { data: null, error: null };
+    const own = meError ? null : (me?.country_code ?? null);
+    return (
+      <StaffHolidays
+        ownCountry={own}
+        ownCountryName={own ? countryName.get(own) ?? own : null}
+        today={getBusinessDateString(resolveCountryTimeZone(own))}
+        holidays={(holidays ?? []).map((h) => ({ id: h.id, country_code: h.country_code, countryName: countryName.get(h.country_code) ?? h.country_code, holiday_date: h.holiday_date, name: h.name }))}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">

@@ -19,6 +19,7 @@ import { DeactivateRecoveryWindowsForm } from "./deactivate-recovery-windows-for
 import { AddLeaveTypeForm } from "./add-leave-type-form";
 import { EmptyState } from "@/components/ui/empty-state";
 import { BackLink } from "@/components/workspace/list-memory";
+import { policyTitle, readablePayload } from "@/lib/policies/readable";
 
 export const metadata = { title: "Policy" };
 
@@ -77,6 +78,9 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   // Only an HR Admin may read the processor status; the CEO/CTO activation is still checked by the database.
   const hrCanReadScheduler = isWindowsPolicy && canEditDraftPolicyContent(session.grants, policy.country_code);
   const { data: schedulerStatus } = hrCanReadScheduler && policy.status === "draft" ? await supabase.rpc("recovery_scheduler_status") : { data: null };
+  // HR and the executives read the stored values as they are; everyone else reads them in plain words (the database already limits them to policies in force).
+  const isConsoleUser = canViewDraftPolicies(session.grants, policy.country_code);
+  const facts = readablePayload(policy.payload);
   const canDisable = isWindowsPolicy && policy.status === "active" && canViewDraftPolicies(session.grants, policy.country_code);
 
   return (
@@ -84,16 +88,18 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       <BackLink section="policies" fallback="/policies">Back to policies</BackLink>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold capitalize">{policy.policy_type.replace(/_/g, " ")}</h1>
+          <h1 className="text-2xl font-semibold">{isConsoleUser ? <span className="capitalize">{policy.policy_type.replace(/_/g, " ")}</span> : policyTitle(policy.policy_type)}</h1>
           <p className="text-muted-foreground">
-            {country?.name} · version {policy.version_no} · effective {policy.effective_from}
-            {policy.effective_to ? ` – ${policy.effective_to}` : " – open-ended"}
+            {country?.name}{isConsoleUser ? ` · version ${policy.version_no}` : ""} · {isConsoleUser ? "effective" : "in force since"} {policy.effective_from}
+            {policy.effective_to ? ` – ${policy.effective_to}` : isConsoleUser ? " – open-ended" : ""}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant={policy.status === "active" ? "default" : policy.status === "draft" ? "secondary" : "outline"}>
-            {policy.status}
-          </Badge>
+          {isConsoleUser ? (
+            <Badge variant={policy.status === "active" ? "default" : policy.status === "draft" ? "secondary" : "outline"}>
+              {policy.status}
+            </Badge>
+          ) : null}
           {canActivate && !isWindowsPolicy ? <ActivateButton policyVersionId={policy.id} /> : null}
         </div>
       </div>
@@ -196,14 +202,32 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         </>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Payload</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <pre className="overflow-x-auto rounded-md bg-secondary/60 p-4 text-sm">{JSON.stringify(policy.payload, null, 2)}</pre>
-        </CardContent>
-      </Card>
+      {isConsoleUser ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Payload</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <pre className="overflow-x-auto rounded-md bg-secondary/60 p-4 text-sm">{JSON.stringify(policy.payload, null, 2)}</pre>
+          </CardContent>
+        </Card>
+      ) : facts.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>What it says</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+              {facts.map((f) => (
+                <div key={f.label}>
+                  <dt className="text-sm text-muted-foreground">{f.label}</dt>
+                  <dd className="break-words text-sm font-medium">{f.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {policy.policy_type === "leave_rules" ? (
         <Card>

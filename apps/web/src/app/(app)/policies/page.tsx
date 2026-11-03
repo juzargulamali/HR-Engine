@@ -1,6 +1,6 @@
 import { LoadError } from "@/components/workspace/states";
 import Link from "next/link";
-import { canActivatePolicy, canDeleteDraftPolicy, canDraftPolicy } from "@enginious-hr/domain";
+import { canActivatePolicy, canDeleteDraftPolicy, canDraftPolicy, canViewDraftPolicies } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +10,7 @@ import { CreatePhase2bDraftsButton } from "./create-phase2b-drafts-button";
 import { CreateRecoveryWindowsDraftsButton } from "./create-recovery-windows-drafts-button";
 import { PolicyVersionsTable, type PolicyVersionRow } from "./policy-versions-table";
 import { RememberList } from "@/components/workspace/list-memory";
+import { StaffPolicies } from "./staff-view";
 
 export const metadata = { title: "Policies" };
 
@@ -37,6 +38,23 @@ export default async function PoliciesPage() {
   // purely to know which draft versions that applies to, so Delete can be
   // hidden for them instead of surfacing a raw DB error after the click;
   // nothing is deleted or modified by this query.
+  // Staff (nobody who may draft or review drafts) get the readable page: the rules in force, their own country first. The database already hides drafts and
+  // old versions from them; this only decides which page is drawn, so HR and the executives keep the console below exactly as it was.
+  const isConsoleUser = (countries ?? []).some((c) => canDraftPolicy(session.grants, c.code) || canViewDraftPolicies(session.grants, c.code));
+  if (!isConsoleUser) {
+    const { data: me, error: meError } = session.employeeId ? await supabase.from("employees").select("country_code").eq("id", session.employeeId).maybeSingle() : { data: null, error: null };
+    // If the person's country cannot be read, every country is listed (nothing is hidden, nothing guessed).
+    const own = meError ? null : (me?.country_code ?? null);
+    const names = new Map((countries ?? []).map((c) => [c.code, c.name]));
+    return (
+      <StaffPolicies
+        ownCountry={own}
+        ownCountryName={own ? names.get(own) ?? own : null}
+        policies={(policies ?? []).filter((p) => p.status === "active").map((p) => ({ id: p.id, country_code: p.country_code, countryName: names.get(p.country_code) ?? p.country_code, policy_type: p.policy_type, effective_from: p.effective_from }))}
+      />
+    );
+  }
+
   const policyVersionIds = (policies ?? []).map((p) => p.id);
   const { data: leaveTypeLinks } =
     policyVersionIds.length > 0
