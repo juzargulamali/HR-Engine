@@ -92,7 +92,7 @@ function ProjectFacts({ view }: { view: PbxBudgetView }) {
  * the Finance area, so both work on the same records: there is no second approval form anywhere. What each person can do is decided by the database; the
  * page only hides what it already knows is not theirs.
  */
-export function BudgetWorkspace({ view, claims, initialTab, projectHeader = false }: { view: PbxBudgetView; claims: ClaimOption[]; initialTab?: BudgetTab; projectHeader?: boolean }) {
+export function BudgetWorkspace({ view, claims, claimsFailed = false, claimsRetryHref, initialTab, projectHeader = false }: { view: PbxBudgetView; claims: ClaimOption[]; claimsFailed?: boolean; claimsRetryHref?: string; initialTab?: BudgetTab; projectHeader?: boolean }) {
   const hasBudget = !!view.budget;
   const full = view.viewer.is_full_reader;
   const tabs: BudgetTab[] = hasBudget ? (full ? ["budget", "funds", "actuals", "settlement"] : ["budget", "actuals"]) : ["budget"];
@@ -165,7 +165,7 @@ export function BudgetWorkspace({ view, claims, initialTab, projectHeader = fals
           </div>
         ) : null}
         {tab === "funds" && hasBudget ? <FundsSection view={view} /> : null}
-        {tab === "actuals" && hasBudget ? <ActualsSection view={view} claims={claims} /> : null}
+        {tab === "actuals" && hasBudget ? <ActualsSection view={view} claims={claims} claimsFailed={claimsFailed} claimsRetryHref={claimsRetryHref} /> : null}
         {tab === "settlement" && hasBudget ? <SettlementSection view={view} /> : null}
       </div>
     </div>
