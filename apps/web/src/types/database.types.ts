@@ -18,7 +18,7 @@
  * is a full peer of ceo everywhere in this system.
  */
 
-import type { PbxAuthorshipRow, PbxCompanyGrantRow, PbxJson, PbxReadOnlyTable } from "./budget";
+import type { PbxAuthorshipRow, PbxBudgetHeaderRow, PbxCompanyGrantRow, PbxJson, PbxReadOnlyTable } from "./budget";
 import type {
   CrmActivityRow, CrmApprovalRow, CrmAuditLogRow, CrmCompanyGrantRow, CrmCompanySettingsRow, CrmContactRow,
   CrmDuplicateCandidateRow, CrmFileRow, CrmFollowUpRow, CrmHandoverRow, CrmOpportunityContactRow, CrmOpportunityEventRow,
@@ -1647,6 +1647,7 @@ export interface Database {
       // Inventory (20261201000000-200): read-only to clients; every write is an inv_* function below.
       inv_company_grants: InvReadOnlyTable<InvCompanyGrantRow>;
       pbx_company_grants: PbxReadOnlyTable<PbxCompanyGrantRow>;
+      pbx_budgets: PbxReadOnlyTable<PbxBudgetHeaderRow>;
       pbx_budget_versions: PbxReadOnlyTable<PbxAuthorshipRow>;
       pbx_actual_submissions: PbxReadOnlyTable<PbxAuthorshipRow>;
       inv_audit_log: InvReadOnlyTable<InvAuditLogRow>;
@@ -1873,6 +1874,7 @@ export interface Database {
       pbx_project_access: { Args: { p_project_id: string }; Returns: PbxJson };
       pbx_budget_view: { Args: { p_project_id: string }; Returns: PbxJson };
       pbx_inbox: { Args: Record<string, never>; Returns: PbxJson };
+      pbx_decisions_waiting_count: { Args: Record<string, never>; Returns: number };
       pbx_create_budget: { Args: { p_project_id: string; p_currency: string }; Returns: string };
       pbx_save_budget_draft: { Args: { p_version_id: string; p_expected: number; p_header: PbxJson; p_rows: PbxJson }; Returns: number };
       pbx_submit_budget: { Args: { p_version_id: string; p_expected: number; p_request_id: string }; Returns: string };

@@ -85,6 +85,14 @@ export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: 
           <Link href={m.href} onClick={onNavigate} data-active={isActive ? "true" : undefined} aria-current={isActive && (!hasSub || (!open && sub === m.href)) ? "page" : undefined} className={rowClass}>
             <Icon className="h-[1.15rem] w-[1.15rem] flex-none" aria-hidden />
             {collapsed ? <span className="sr-only">{m.label}</span> : <span className="truncate">{m.label}</span>}
+            {m.waiting ? (
+              collapsed ? <span className="sr-only">, {m.waiting} waiting for your decision</span> : (
+                <span className="ml-auto flex h-5 min-w-5 flex-none items-center justify-center rounded-full bg-primary px-1.5 text-[12px] font-semibold leading-none text-primary-foreground">
+                  <span aria-hidden>{m.waiting > 99 ? "99+" : m.waiting}</span>
+                  <span className="sr-only">{m.waiting} waiting for your decision</span>
+                </span>
+              )
+            ) : null}
           </Link>
         );
         return (

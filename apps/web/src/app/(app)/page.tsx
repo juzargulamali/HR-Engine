@@ -341,14 +341,21 @@ export default async function DashboardPage() {
   // What they submitted themselves waits under "Waiting on others", never as a decision for them. A failed read is an error row, never 0.
   let budgetActionItems: ActionItem[] = [];
   let budgetWaitingItems: ActionItem[] = [];
+  let budgetQuietItems: ActionItem[] = [];
   try {
     const budgetDay = await loadBudgetDay(session.userId);
     if (budgetDay.status === "error") {
       budgetActionItems = [{ key: "budget-decisions", icon: ReceiptText, label: "Project budgets could not be loaded", count: 0, href: "/finance/project-budgets", error: true }];
     } else if (budgetDay.status === "ok") {
-      const { waitingForMe, waitingOnOthers } = budgetDay.day;
-      budgetActionItems = [{ key: "budget-decisions", icon: ReceiptText, label: "Project budgets waiting for you", count: waitingForMe.count, href: waitingForMe.href }];
-      budgetWaitingItems = [{ key: "budget-waiting", icon: ReceiptText, label: "Project budgets you submitted, waiting on others", count: waitingOnOthers, href: "/finance/project-budgets" }];
+      const { waitingForMe, waitingOnOthers, waitingOnOthersHref, returned, decidedRecently, pmReadFailed } = budgetDay.day;
+      budgetActionItems = [
+        { key: "budget-decisions", icon: ReceiptText, label: "Project budgets waiting for you", count: waitingForMe.count, href: waitingForMe.href },
+        // A Project Manager's own budgets sent back for changes: theirs to act on. Never a decision for someone else.
+        { key: "budget-returned", icon: ReceiptText, label: returned.count === 1 ? "Project budget returned to you" : "Project budgets returned to you", count: returned.count, href: returned.href },
+        ...(pmReadFailed ? [{ key: "budget-pm-error", icon: ReceiptText, label: "The budgets of your projects could not be loaded", count: 0, href: "/projects", error: true }] : []),
+      ];
+      budgetWaitingItems = [{ key: "budget-waiting", icon: ReceiptText, label: "Project budgets waiting on others", count: waitingOnOthers, href: waitingOnOthersHref }];
+      budgetQuietItems = [{ key: "budget-decided", icon: ReceiptText, label: "Budget decisions on your projects in the last 14 days", count: decidedRecently.count, href: decidedRecently.href }];
     }
   } catch (e) {
     logServerError({ route: ROUTE, operation: "load project budget decisions" }, e);
@@ -452,7 +459,7 @@ export default async function DashboardPage() {
           ) : null}
         </div>
         <div className={cn("contents xl:min-w-0", hasLeft ? "xl:flex xl:flex-col xl:gap-4" : "xl:grid xl:grid-cols-3 xl:items-start xl:gap-4")}>
-          <div className="order-1 min-w-0 xl:order-none"><DecisionsCard decisions={groups.decision} other={[...groups.other, ...quietProjectItems]} waiting={budgetWaitingItems.filter((i) => i.count > 0)} /></div>
+          <div className="order-1 min-w-0 xl:order-none"><DecisionsCard decisions={groups.decision} other={[...groups.other, ...quietProjectItems, ...budgetQuietItems.filter((i) => i.count > 0)]} waiting={budgetWaitingItems.filter((i) => i.count > 0)} /></div>
           {session.employeeId ? <div className="order-2 min-w-0 xl:order-none"><AttendanceClockCard employeeId={session.employeeId} /></div> : null}
           {showHrView && live !== null ? <div className="order-3 min-w-0 xl:order-none"><PeopleToday live={live} /></div> : null}
           {equipment !== null ? <div className="order-6 min-w-0 xl:order-none"><NextDispatch equipment={equipment} /></div> : null}

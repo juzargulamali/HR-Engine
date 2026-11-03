@@ -33,7 +33,7 @@ export function AppShell({
   projects?: { grants: readonly ProjGrant[]; salesLinked?: boolean; pendingHandovers?: boolean; managesProjects?: boolean };
   inventory?: { grants: readonly InvGrant[]; managesProjects?: boolean; isEmployee?: boolean };
   /** Project Budget & Expenses access (own grants). Absent means none: no Finance entry. */
-  budget?: { any: boolean; finance?: boolean; manageAccess?: boolean };
+  budget?: { any: boolean; finance?: boolean; manageAccess?: boolean; waiting?: number };
   children: React.ReactNode;
 }) {
   const roleLabels = roleLabelsFor(session.grants);

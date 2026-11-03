@@ -446,6 +446,12 @@ describe("Inventory navigation", () => {
   });
 
   describe("Finance (Project Budget & Expenses)", () => {
+    it("carries the waiting number only when there is one; zero or unknown adds nothing", () => {
+      const mod = (waiting?: number) => buildNavModules([grant("employee")], { budget: { any: true, finance: true, ...(waiting === undefined ? {} : { waiting }) } }).find((m) => m.id === "finance")!;
+      expect(mod(4).waiting).toBe(4);
+      expect(mod(0).waiting).toBeUndefined();
+      expect(mod().waiting).toBeUndefined();
+    });
     it("is offered only to people holding their own budget access, never from an HR role", () => {
       const hrRoles = [grant("hr_admin"), grant("finance"), grant("ceo"), grant("sys_admin")];
       expect(buildNavModules(hrRoles).find((m) => m.id === "finance")).toBeUndefined();

@@ -10,7 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "@/components/nav/app-shell";
 import { OsScope } from "@/components/os/scope";
 import { loadInventoryNavAccess } from "@/lib/inventory/context";
-import { loadBudgetNavAccess } from "@/lib/budget/data";
+import { loadBudgetNavAccess, loadBudgetWaitingCount } from "@/lib/budget/data";
 import { loadProjectsNavAccess } from "@/lib/projects/context";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -84,9 +84,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Project Budget & Expenses: the person's own Finance / view grants only. Degrades to no entry on any failure, including the module not being installed yet.
   const budget = await loadBudgetNavAccess(session.userId);
   if (projects.loadFailed || inventory.loadFailed || budget.loadFailed) menuLoadFailed = true;
+  // The Finance entry's "waiting for your decision" number: one small function (not the whole inbox), asked only of people who can decide. A failed read shows no number
+  // (never 0) and the same banner as any other menu part that could not load.
+  let budgetWaiting: number | undefined;
+  if (budget.any && budget.canDecide) {
+    const waiting = await loadBudgetWaitingCount();
+    if (waiting.state === "ok") budgetWaiting = waiting.count;
+    else if (waiting.state === "error") menuLoadFailed = true;
+  }
 
   return (
-    <AppShell session={session} clockOpenSince={clockOpenSince} clockLoadFailed={clockLoadFailed} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants} projects={projects} inventory={inventory} budget={budget}>
+    <AppShell session={session} clockOpenSince={clockOpenSince} clockLoadFailed={clockLoadFailed} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants} projects={projects} inventory={inventory} budget={{ ...budget, ...(budgetWaiting ? { waiting: budgetWaiting } : {}) }}>
       <OsScope>
         {session.loadFailed || menuLoadFailed ? (
           <div className="mb-4 space-y-3">
