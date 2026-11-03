@@ -323,11 +323,79 @@ if (process.env.OUTAGE_STOP_CMD && process.env.OUTAGE_START_CMD) {
 }
 
 // ------------------------------------------------------------------------------------------------------------------------------
+// A difference answered with "Corrected": the correcting movement's note is a NEW note that cites the old one; the old note and its history are never altered.
+const CX = requestAs(4, PRJ, HDMI, 2, 0, 3, { title: "Showroom cables", submit: true });
+asDb(1, `select inv_reserve((select id from inv_request_lines where request_id='${CX.request}' limit 1), '${DXB}', null, 2, null, null)`);
+asDb(1, `select inv_dispatch_to_project('${AE}', '${DXB}', '${PRJ}', 'notes-corr-1', '[{"item_id":"${HDMI}","qty":2}]'::jsonb, '${CX.request}', null, null)`);
+const OLD = s1("select id from inv_project_notes where kind='dispatch' order by created_at desc limit 1");
+const OLD_NO = s1(`select note_no from inv_project_notes where id='${OLD}'`);
+check(OLD_NO === "ENG-D-00002", `the cable dispatch made ${OLD_NO}`);
+await R.as("mgr");
+await step("Correction: the PM reports a difference on a second dispatch (the cable count)", async () => {
+  await R.go(`/projects/${PRJ}/equipment`);
+  const card = R.page.locator(`details[data-note-no=${OLD_NO}]`);
+  await card.getByRole("button", { name: "Report a difference" }).click();
+  await card.locator("select[name=reason]").selectOption("quantity_differs");
+  await card.locator("input[name=line]").first().check();
+  await card.locator("textarea[name=comment]").fill("Only 1 cable arrived");
+  await card.getByRole("button", { name: "Send to the warehouse" }).click();
+  await until(() => s1(`select state from inv_project_note_status where note_id='${OLD}'`) === "difference_open", 15000, "difference open");
+});
+// The warehouse records the correcting movement through an existing action (a dispatch of the missing amount: here, one more cable), then answers "Corrected".
+const FROZEN_NOTE = () => s1(`select md5(n::text) from inv_project_notes n where id='${OLD}'`);
+const EVENTS_OLD = () => s1(`select count(*)||'|'||md5(string_agg(e::text, '' order by seq)) from inv_project_note_events e where note_id='${OLD}'`);
+const noteBefore = FROZEN_NOTE(); const eventsBefore = EVENTS_OLD();
+const [evCountBefore] = eventsBefore.split("|");
+asDb(1, `select inv_dispatch_to_project('${AE}', '${DXB}', '${PRJ}', 'notes-corr-2', '[{"item_id":"${HDMI}","qty":1}]'::jsonb, null, now() + interval '3 days', null)`);
+const CORR_MOVE = s1("select code from inv_movements where kind='dispatch_project' order by recorded_at desc limit 1");
+const NEW_NO = s1(`select note_no from inv_project_notes where movement_id=(select id from inv_movements where code='${CORR_MOVE}')`);
+check(NEW_NO === "ENG-D-00003", `the correcting dispatch made ${NEW_NO}`);
+const BEFORE_CORR = custody();
+await R.as("hr1");
+await step("Correction: the warehouse answers 'Corrected' naming the movement; a NEW note cites the old one", async () => {
+  await R.go("/inventory");
+  await R.expectText(new RegExp(`${OLD_NO}: the Project Manager reports a difference`));
+  await R.page.getByRole("button", { name: /Answer the difference/ }).click();
+  await R.page.getByLabel(/Corrected: I already recorded/).check();
+  await R.page.getByLabel(/Reference of the movement/).fill(CORR_MOVE);
+  await R.page.getByLabel(/What the warehouse found/).fill("One cable was missing from the load; the missing cable was sent");
+  await R.page.getByRole("button", { name: "Save the answer" }).click();
+  await until(() => Number(s1(`select count(*) from inv_project_note_events where event='resolved_corrected' and note_id='${OLD}'`)) === 1, 15000, "resolved_corrected");
+  eq(s1(`select (select note_no from inv_project_notes where id=e.linked_note_id) from inv_project_note_events e where event='resolved_corrected' and note_id='${OLD}'`), NEW_NO, "the answer links the new note");
+  eq(s1(`select (select note_no from inv_project_notes where id=e.linked_note_id) from inv_project_note_events e where event='correction_of' and note_id=(select id from inv_project_notes where note_no='${NEW_NO}')`), OLD_NO, "the new note cites the old one");
+});
+await step("Correction: the old note is byte-for-byte unchanged and its earlier history is intact (one event appended); custody and availability unchanged by the answer", async () => {
+  eq(FROZEN_NOTE(), noteBefore, "the old note row");
+  eq(Number(EVENTS_OLD().split("|")[0]), Number(evCountBefore) + 1, "only the answer was appended to the old note's history");
+  eq(s1(`select count(*) from (select e::text from inv_project_note_events e where note_id='${OLD}' order by seq limit ${evCountBefore}) x`), evCountBefore, "earlier events are still there");
+  eq(s1(`select md5(string_agg(e::text, '' order by seq)) from (select * from inv_project_note_events where note_id='${OLD}' order by seq limit ${evCountBefore}) e`), eventsBefore.split("|")[1], "earlier events unchanged");
+  eq(s1(`select state from inv_project_note_status where note_id='${OLD}'`), "superseded", "old note state");
+  eq(custody(), BEFORE_CORR, "custody/availability after the answer");
+  // The guard trigger refuses every role, the owner of the database included.
+  const tryAsOwner = (stmt) => { try { sql(stmt); return ""; } catch (e) { return String(e.stderr ?? e.message); } };
+  check(/never edited or deleted/.test(tryAsOwner(`update inv_project_notes set project_name='x' where id='${OLD}'`)), "the old note can be edited");
+  check(/never edited or deleted/.test(tryAsOwner(`delete from inv_project_note_events where note_id='${OLD}'`)), "the old history can be deleted");
+  eq(FROZEN_NOTE(), noteBefore, "the old note row after the refused edit");
+});
+await R.as("mgr");
+await step("Correction: the PM sees the old note 'Superseded by' the new one, and the new one waits for acknowledgement", async () => {
+  await R.go(`/projects/${PRJ}/equipment`);
+  await R.expectText(new RegExp(`Superseded by ${NEW_NO}`));
+  eq(s1(`select state from inv_project_note_status where note_id=(select id from inv_project_notes where note_no='${NEW_NO}')`), "waiting_for_pm", "the new note waits for the PM");
+  eq(s1(`select n.note_no from inv_project_note_status s join inv_project_notes n on n.id = s.replaces_note_id where s.note_no='${NEW_NO}'`), OLD_NO, "the new note names what it replaces");
+  await R.page.locator(`details[data-note-no=${NEW_NO}]`).getByRole("button", { name: "Acknowledge", exact: true }).click();
+  await until(() => s1(`select state from inv_project_note_status where note_id=(select id from inv_project_notes where note_no='${NEW_NO}')`) === "acknowledged", 15000, "new note acknowledged");
+  eq(s1(`select state from inv_project_note_status where note_id='${OLD}'`), "superseded", "the old note stays superseded after the new one is acknowledged");
+});
+
+// ------------------------------------------------------------------------------------------------------------------------------
 // The switch is turned OFF: the next dispatch makes no note, and nothing new shows.
+const noteCountWithSwitchOn = noteCount();
 asDb(3, `select inv_set_project_notes('${AE}', false)`);
 const B = requestAs(4, PRJ, HDMI, 3, 1, 4, { title: "Showroom extras", submit: true });
 asDb(1, `select inv_reserve((select id from inv_request_lines where request_id='${B.request}' limit 1), '${DXB}', null, 3, null, null)`);
 await R.as("hr1");
+const dispatchesBefore = movementCount("dispatch_project");
 await step("Switch OFF: a dispatch makes no note and the success panel offers no PDF; the older notes stay readable", async () => {
   const notesBefore = noteCount();
   await R.go(`/inventory/requests/${B.request}?step=send`);
@@ -337,7 +405,7 @@ await step("Switch OFF: a dispatch makes no note and the success panel offers no
   await R.page.getByText("Check before you confirm").waitFor();
   await R.page.getByRole("button", { name: /Confirm: send 3/ }).click();
   await R.page.getByText("Recorded", { exact: true }).waitFor();
-  await until(() => movementCount("dispatch_project") === 2, 15000, "second dispatch");
+  await until(() => movementCount("dispatch_project") === dispatchesBefore + 1, 15000, "dispatch with the switch off");
   eq(noteCount(), notesBefore, "notes after a dispatch with the switch off");
   await R.expectNoText(/Dispatch note ENG-D/);
   check(!(await R.page.getByRole("link", { name: /Download PDF/ }).isVisible().catch(() => false)), "a PDF is offered with the switch off");
@@ -351,7 +419,7 @@ await step("Switch OFF: nothing new on Today, My Day or the Project Manager's pa
   await R.expectNoText(/waiting for you: Showroom refresh/);
   await R.go(`/projects/${PRJ}/equipment`);
   await R.seen(/Dispatch & return notes/);
-  eq(await R.page.locator("details[data-note-no]").count(), 2, "only the two earlier notes");
+  eq(await R.page.locator("details[data-note-no]").count(), noteCountWithSwitchOn, "only the earlier notes");
 });
 
 console.log(`(screenshots and the downloaded PDFs of this run: ${process.env.SHOTS_DIR ?? "docs/inventory-screenshots"}, ${tmp})`);
