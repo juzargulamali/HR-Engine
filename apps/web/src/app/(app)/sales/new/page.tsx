@@ -1,4 +1,5 @@
 import { canAssignOwner, canManageCrmSettings, isCrmFounder } from "@enginious-hr/domain";
+import { AskForAccess } from "@/components/os/ask-for-access";
 import { Alert } from "@/components/ui/alert";
 import { todayInDubai } from "@/components/sales/format";
 import { getCrmContext } from "@/lib/crm/context";
@@ -22,7 +23,7 @@ export default async function NewEnquiryPage() {
     return (
       <div className="space-y-6">
         {header}
-        <Alert>You do not have Sales access to any company yet, so there is nowhere to record an enquiry. Ask a founder to grant it.</Alert>
+        <Alert>You do not have Sales access to any company yet, so there is nowhere to record an enquiry. <AskForAccess module="sales" to="grant it" /></Alert>
       </div>
     );
   }

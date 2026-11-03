@@ -1,4 +1,5 @@
 import { hasProjCapability, isProjFounder } from "@enginious-hr/domain";
+import { AskForAccess } from "@/components/os/ask-for-access";
 import { Alert } from "@/components/ui/alert";
 import { Muted, PageHeader, Panel } from "@/components/projects/parts";
 import { getProjectsContext } from "@/lib/projects/context";
@@ -20,7 +21,7 @@ export default async function NewInternalProjectPage() {
     <div className="space-y-6">
       <PageHeader title="New internal project" description="For work with no client or Sales opportunity: office and showroom technology, new technology development, marketing, maintenance and improvements. No purchase order, no Sales value, no handover." />
       {companies.length === 0 ? (
-        <Alert role="status">Only a founder, or someone a founder gave Project Manager assignment to, can create an internal project. Ask a founder to create it or to give you that right.</Alert>
+        <Alert role="status">Only a founder, or someone a founder gave Project Manager assignment to, can create an internal project. <AskForAccess module="projects" to="create it or to give you that right" /></Alert>
       ) : (
         <Panel title="Project details" description="You choose who is accountable. They become the Project Manager and can then add people and plan the work.">
           <NewProjectForm companies={companies} />
