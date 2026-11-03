@@ -21,21 +21,28 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // /login before it reaches here. This only fires if that ever changes.
   if (!session) redirect("/login");
 
-  // Drives the header's attendance status (clocked in since when, or not) — a failure here should never break the whole
-  // authenticated shell, so it degrades to "not clocked in" rather than throwing.
+  // Drives the header's attendance status (clocked in since when, or not). A failure here must never break the whole authenticated
+  // shell, but it is not "not clocked in" either: the header then says the status is unknown and offers a retry.
   let clockOpenSince: string | null = null;
+  let clockLoadFailed = false;
   if (session.employeeId) {
     try {
       const supabase = await createClient();
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("attendance_sessions")
         .select("clock_in_at")
         .eq("employee_id", session.employeeId)
         .eq("status", "open")
         .maybeSingle();
-      clockOpenSince = data?.clock_in_at ?? null;
-    } catch {
-      clockOpenSince = null;
+      if (error) {
+        logServerError({ route: "layout", operation: "read my open attendance session" }, error);
+        clockLoadFailed = true;
+      } else {
+        clockOpenSince = data?.clock_in_at ?? null;
+      }
+    } catch (error) {
+      logServerError({ route: "layout", operation: "read my open attendance session" }, error);
+      clockLoadFailed = true;
     }
   }
 
@@ -79,7 +86,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (projects.loadFailed || inventory.loadFailed || budget.loadFailed) menuLoadFailed = true;
 
   return (
-    <AppShell session={session} clockOpenSince={clockOpenSince} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants} projects={projects} inventory={inventory} budget={budget}>
+    <AppShell session={session} clockOpenSince={clockOpenSince} clockLoadFailed={clockLoadFailed} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants} projects={projects} inventory={inventory} budget={budget}>
       <OsScope>
         {session.loadFailed || menuLoadFailed ? (
           <div className="mb-4 space-y-3">

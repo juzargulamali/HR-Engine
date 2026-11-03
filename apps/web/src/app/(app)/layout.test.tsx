@@ -17,7 +17,9 @@ vi.mock("@/lib/projects/context", () => ({ loadProjectsNavAccess: async () => ({
 vi.mock("@/lib/inventory/context", () => ({ loadInventoryNavAccess: async () => ({ grants: [], managesProjects: false, isEmployee: false, ...probes.inventory }) }));
 vi.mock("@/lib/budget/data", () => ({ loadBudgetNavAccess: async () => ({ any: false, finance: false, manageAccess: false, ...probes.budget }) }));
 vi.mock("@/components/nav/app-shell", () => ({
-  AppShell: ({ hasPendingApprovals, children }: { hasPendingApprovals: boolean; children: React.ReactNode }) => <div data-pending={String(hasPendingApprovals)}>{children}</div>,
+  AppShell: ({ hasPendingApprovals, clockOpenSince, clockLoadFailed, children }: { hasPendingApprovals: boolean; clockOpenSince: string | null; clockLoadFailed: boolean; children: React.ReactNode }) => (
+    <div data-pending={String(hasPendingApprovals)} data-clock-since={String(clockOpenSince)} data-clock-failed={String(clockLoadFailed)}>{children}</div>
+  ),
 }));
 
 import AppLayout from "./layout";
@@ -68,5 +70,25 @@ describe("App layout", () => {
   it.each(["projects", "inventory", "budget"])("a failed %s navigation probe is reported", async (name) => {
     probes[name] = { loadFailed: true };
     expect(await render()).toContain("Some menu items could not be loaded");
+  });
+
+  describe("header clock status", () => {
+    beforeEach(() => { session = { ...session, employeeId: "e1" }; });
+    it("healthy: open session, then no open session", async () => {
+      tables = { ...tables, attendance_sessions: { data: { clock_in_at: "2026-11-03T08:00:00Z" }, error: null } };
+      let html = await render();
+      expect(html).toContain('data-clock-since="2026-11-03T08:00:00Z"');
+      expect(html).toContain('data-clock-failed="false"');
+      tables = { ...tables, attendance_sessions: { data: null, error: null } };
+      html = await render();
+      expect(html).toContain('data-clock-since="null"');
+      expect(html).toContain('data-clock-failed="false"');
+    });
+    it("a failed read is flagged as failed, never passed on as 'no open session'", async () => {
+      tables = { ...tables, attendance_sessions: failing() };
+      const html = await render();
+      expect(html).toContain('data-clock-failed="true"');
+      expect(html).toContain("page body");
+    });
   });
 });

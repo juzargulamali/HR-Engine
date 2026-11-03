@@ -14,6 +14,7 @@ import { buildNavModules } from "./nav-groups";
 export function AppShell({
   session,
   clockOpenSince = null,
+  clockLoadFailed = false,
   hasPendingApprovals = false,
   crmGrants = [],
   projects,
@@ -24,6 +25,8 @@ export function AppShell({
   session: CurrentSession;
   /** Start of this employee's open attendance session, or null when there is none. */
   clockOpenSince?: string | null;
+  /** The attendance status could not be read: the header says it is unknown instead of "not clocked in". */
+  clockLoadFailed?: boolean;
   hasPendingApprovals?: boolean;
   crmGrants?: readonly CrmGrant[];
   /** Projects access (own grants, Sales link, waiting handover). Absent means none: the module is then not shown. */
@@ -63,6 +66,7 @@ export function AppShell({
           showAlertsLink={showAlertsLink}
           isEmployee={Boolean(session.employeeId)}
           clockOpenSince={clockOpenSince}
+          clockLoadFailed={clockLoadFailed}
           serverNowIso={new Date().toISOString()}
           fullName={fullName}
           email={session.email}
