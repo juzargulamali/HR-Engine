@@ -10,8 +10,8 @@ The written memory of the combined app after the launch-refinement release. Writ
 | `02-screens-and-navigation.md` | Every route, who can reach it, the navigation as built, direct-URL behaviour, My Day structure, failed-read convention | Written |
 | `03-roles-access-and-approvals.md` | HR roles, module grants, approval routing, People & Access | To be written |
 | `04-flows-sales-to-warehouse-and-others.md` | Enquiry to handover to project to equipment to budget, plus leave, claims, Recovery Leave | To be written |
-| `05-data-tests-and-release-ledger.md` | Data model map, test suites and what each proves, migration ledger | To be written |
-| `06-change-log.md` | One line per change to behaviour, access, navigation, flows, migrations or tests | To be written |
+| `05-data-tests-and-release-ledger.md` | Data model map, test suites and what each proves, migration ledger | Written |
+| `06-change-log.md` | One line per change to behaviour, access, navigation, flows, migrations or tests | Written |
 
 Per-module control references (`modules/*.md`) were planned in `CLAUDE.md` and are not started.
 
