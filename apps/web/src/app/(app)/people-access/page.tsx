@@ -7,6 +7,7 @@ import { CompanySettingsView } from "@/components/people-access/company-settings
 import { paHref } from "@/components/people-access/links";
 import { PersonDetail } from "@/components/people-access/person-detail";
 import { PersonList } from "@/components/people-access/person-list";
+import { UnsavedAccessGuard } from "@/components/people-access/unsaved-access-guard";
 import { loadPeopleAccess, type PaTab } from "@/lib/people-access/data";
 
 export const metadata = { title: "People & Access" };
@@ -44,6 +45,7 @@ export default async function PeopleAccessPage({ searchParams }: { searchParams:
       />
 
       {view === "company" ? <CompanySettingsView settings={data.companySettings} /> : (
+        <UnsavedAccessGuard>
         <div className="grid gap-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
           <div className="min-w-0 space-y-4">
             {data.isSysAdmin ? (
@@ -62,6 +64,7 @@ export default async function PeopleAccessPage({ searchParams }: { searchParams:
             )}
           </div>
         </div>
+        </UnsavedAccessGuard>
       )}
     </div>
   );

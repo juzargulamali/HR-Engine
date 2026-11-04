@@ -68,6 +68,8 @@ export interface PaModuleContext {
   /** Everyone holding access to this module in this company (the viewer is allowed to see this list: they manage it). */
   holders: { userId: string; capabilities: string[] }[];
   locations: { id: string; name: string; isActive: boolean }[];
+  /** The read of this module's grants (for Inventory also its locations) failed: the screen says "could not load", never "no access". */
+  readFailed: boolean;
 }
 
 export interface PaCompanySettings {
@@ -155,10 +157,12 @@ export const loadPeopleAccess = cache(async (query: PeopleAccessQuery): Promise<
   const holdersByModuleCompany = new Map<string, { userId: string; capabilities: string[] }[]>();
   const grantedByIds = new Set<string>();
   const rawGrants: { module: AccessModule; companyId: string; userId: string; capabilities: string[]; grantedAt: string; grantedBy: string | null; note: string | null }[] = [];
+  const failedModules = new Set<AccessModule>();
   await Promise.all((Object.keys(GRANT_TABLE) as AccessModule[]).map(async (module) => {
     const companyIds = managed.filter((m) => m.module === module).map((m) => m.companyId);
     if (companyIds.length === 0) return;
-    const { data } = await supabase.from(GRANT_TABLE[module]).select("user_id, company_id, capabilities, granted_at, granted_by, note").in("company_id", companyIds).is("revoked_at", null).order("granted_at");
+    const { data, error } = await supabase.from(GRANT_TABLE[module]).select("user_id, company_id, capabilities, granted_at, granted_by, note").in("company_id", companyIds).is("revoked_at", null).order("granted_at");
+    if (error) failedModules.add(module);
     for (const g of (data ?? []) as { user_id: string; company_id: string; capabilities: string[]; granted_at: string; granted_by: string | null; note: string | null }[]) {
       rawGrants.push({ module, companyId: g.company_id, userId: g.user_id, capabilities: normaliseCapabilities(module, g.capabilities), grantedAt: g.granted_at, grantedBy: g.granted_by, note: g.note });
       if (g.granted_by) grantedByIds.add(g.granted_by);
@@ -297,10 +301,11 @@ export const loadPeopleAccess = cache(async (query: PeopleAccessQuery): Promise<
   let invLocations: { id: string; company_id: string; name: string; is_active: boolean }[] = [];
   const operatorLocations: Record<string, string[]> = {};
   if (invCompanyIds.length > 0) {
-    const [{ data: locs }, { data: ops }] = await Promise.all([
+    const [{ data: locs, error: locError }, { data: ops, error: opsError }] = await Promise.all([
       supabase.from("inv_locations").select("id, company_id, name, is_active").in("company_id", invCompanyIds).order("name"),
-      selected?.userId ? supabase.from("inv_operator_locations").select("location_id, company_id").eq("user_id", selected.userId).in("company_id", invCompanyIds).is("removed_at", null) : Promise.resolve({ data: [] as { location_id: string; company_id: string }[] }),
+      selected?.userId ? supabase.from("inv_operator_locations").select("location_id, company_id").eq("user_id", selected.userId).in("company_id", invCompanyIds).is("removed_at", null) : Promise.resolve({ data: [] as { location_id: string; company_id: string }[], error: null }),
     ]);
+    if (locError || opsError) failedModules.add("inventory");
     invLocations = (locs ?? []) as typeof invLocations;
     for (const o of (ops ?? []) as { location_id: string; company_id: string }[]) operatorLocations[o.company_id] = [...(operatorLocations[o.company_id] ?? []), o.location_id];
   }
@@ -313,6 +318,7 @@ export const loadPeopleAccess = cache(async (query: PeopleAccessQuery): Promise<
       isFounder: m.isFounder,
       holders: holdersByModuleCompany.get(`${m.module}:${m.companyId}`) ?? [],
       locations: m.module === "inventory" ? invLocations.filter((l) => l.company_id === m.companyId).map((l) => ({ id: l.id, name: l.name, isActive: l.is_active })) : [],
+      readFailed: failedModules.has(m.module),
     }))
     .sort((a, b) => a.company.name.localeCompare(b.company.name) || a.module.localeCompare(b.module));
 
