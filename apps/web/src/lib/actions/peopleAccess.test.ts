@@ -102,6 +102,14 @@ describe("applyModuleAccess", () => {
     expect(r.error).toMatch(/founder/);
   });
 
+  it("a forged request for a right the viewer may not grant is still refused by the grant function, and no location is saved after a refusal", async () => {
+    rpc.mockResolvedValue({ data: null, error: { message: "Only an Inventory founder can grant founder, access-management or cost rights" } });
+    const r = await applyModuleAccess(idle, fd({ module: "inventory", userId: U, companyId: C, capabilities: ["warehouse", "view_costs"], withLocations: "1", locationIds: [] }));
+    expect(r.error).toMatch(/founder/);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).not.toHaveBeenCalledWith("inv_set_operator_locations", expect.anything());
+  });
+
   it("saves a warehouse operator's locations only when the form carried them", async () => {
     await applyModuleAccess(idle, fd({ module: "inventory", userId: U, companyId: C, capabilities: ["warehouse"] }));
     expect(rpc).toHaveBeenCalledTimes(1);
