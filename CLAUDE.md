@@ -1,29 +1,22 @@
 # ENGINIOUS OS: notes for Claude sessions
 
-## Where the app is documented today
-There is **not yet** a single written map of the whole app. It was planned (`docs/enginious-os/`: overview, screens and navigation, roles and approvals, the Sales → Projects → Inventory → Budget flow, data model, test map, migration ledger, change log) and deliberately postponed to be done later in a more practical, module-by-module way. Do not assume those files exist.
+## The app memory: `docs/enginious-os/`
+Start every session by reading `docs/enginious-os/README.md`. It indexes the written description of the whole app, verified against commit `551f615` (2026-11-04):
+* `01-overview-and-modules.md`: what the app is, modules, how they connect, built vs deferred.
+* `02-screens-and-navigation.md`: routes, navigation, My Day structure.
+* `03-roles-access-and-approvals.md`: roles and grants, scopes, what each role can do, approval routing, company isolation, known limits.
+* `04-flows-sales-to-warehouse-and-others.md`: Sales → Projects → Inventory → Budget end to end, Inventory, HR flows, approvals, scheduled work.
+* `05-data-tests-and-release-ledger.md`: data model, migration ledger, test map, coverage gaps, current state.
+* `06-change-log.md`: merged changes with PR numbers and SHAs.
+Each file marks anything it could not verify as `Unverified` and lists stale statements it found in older docs.
 
-What exists now, in `docs/`:
-* Architecture, schema, permissions, journeys: `00`–`14` (some parts predate the launch release; verify against code).
-* Per module: `projects-*`, `inventory-*`, `project-budget-expenses-*`, `people-access-*`, `recovery-windows-*`, `crm-deployment.md`, `os-my-day.md`, `os-shell-integration.md`.
-* The launch release (15 migrations, PRs #53–#56, merged at `551f615`): `launch-refinement-install-order.md` (the one authoritative migration list and sequence), `launch-refinement-hosted-checklist.md`, `launch-p*-deployment.md`, `launch-batch-install.md`.
-* Runnable flows and what each proves: `apps/web/os-shell-checks/README.md`. Local auth is an in-repo stand-in, not Supabase Auth (`docs/people-access-account-controls-verification.md`).
-* The pre-release specification (role/navigation matrix, everyday paths, dispatch design) is on branch `docs/launch-refinement-spec` only, written at `76c121b`; parts are stale.
+**Not written yet (deliberately postponed to save credits):** the per-control module references (`docs/enginious-os/modules/`: for each screen, what every tab, dropdown, filter, button and form field does, which server action and database function it triggers, who can use it, validation and failed-read behaviour). Write them one module at a time, only when about to test or change that module, starting from the existing module docs and then the code. Also not started: a bounded launch test pass (existing browser suites once on the merged build, ordinary-staff journeys, a per-role security and breakage matrix, hosted and real-phone checks by the owner), awaiting the owner's approval of its scope.
 
-## App-map task: started, stopped on 2026-11-03, to be resumed later
-Status: **attempted and stopped by the owner to save credits. Nothing from it was written** (no `docs/enginious-os/` files exist; the only output is this file).
+## Keep the app memory current (a rule, not a suggestion)
+Any change to behaviour, roles or permissions, navigation, a flow, a migration or the tests must update the relevant file(s) in `docs/enginious-os/`, add an entry to `docs/enginious-os/06-change-log.md` and refresh the "verified at commit" stamp in the README, in the same pull request. A change that is not reflected there is not finished. Evidence rules: cite the source path for every claim, mark anything not verified as `Unverified`, and record hosted-database facts as owner-reported unless Claude itself ran the check.
 
-What was planned (resume from here, do not start from zero):
-* Seven core files in `docs/enginious-os/`: `README.md` (index, "verified at commit" stamp, maintenance rule), `01-overview-and-modules.md`, `02-screens-and-navigation.md`, `03-roles-access-and-approvals.md`, `04-flows-sales-to-warehouse-and-others.md`, `05-data-tests-and-release-ledger.md`, `06-change-log.md`.
-* Per-module control references in `docs/enginious-os/modules/`: `people-and-hr.md`, `sales-and-crm.md`, `projects.md`, `inventory.md`, `budget-access-and-admin.md` (every tab, dropdown, filter, button and form field: what it does, which server action and database function it triggers, who can use it, validation, failed-read behaviour).
-* Content rules: every claim cites its source path; unknowns are marked `Unverified`; hosted facts are owner-reported; verified against the commit current at writing time (stamp it; the last full release was `551f615`).
-
-What went wrong and how to do it better next time: nine agents were run in parallel, each reading a large part of the code, which was too costly. Run **one module at a time**, only when about to test or change that module, starting from the existing docs listed above and then checking the code. Do the cross-module files (overview, roles, Sales → warehouse flow) once, one agent each, sequentially.
-
-Related plan, also not started: a bounded launch test pass (existing browser suites once on the merged build, ordinary-staff journeys, a per-role security and breakage matrix, hosted and real-phone checks by the owner), awaiting the owner's approval of its scope.
-
-## When the app map is written, keep it current
-Any change to behaviour, roles or permissions, navigation, a flow, a migration or the tests must update the relevant document and be recorded in a change log in the same pull request. Evidence rules: cite the source path for every claim, mark anything not verified as `Unverified`, and record hosted-database facts as owner-reported unless Claude itself ran the check.
+## Other documents
+Older design docs in `docs/` (`00`–`14`, module designs and deployment guides) are inputs, not authority: parts are stale (see the stale lists in the app memory). The launch release's authoritative migration list and sequence is `docs/launch-refinement-install-order.md`; runnable browser flows are listed in `apps/web/os-shell-checks/README.md`. Local auth is an in-repo stand-in, not Supabase Auth (`docs/people-access-account-controls-verification.md`). The pre-release specification is on branch `docs/launch-refinement-spec` only (written at `76c121b`, partly stale).
 
 ## Boundaries that have applied to every release so far
 * Never run SQL against the hosted database, enable the dispatch/return notes switch, activate scheduled jobs, change access, or create Production test data. The owner runs hosted SQL from the owner packs in `supabase/manual-sql` (read-only preflight / preservation / verify files are labelled; migrations and rollbacks change the database).
