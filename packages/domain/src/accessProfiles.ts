@@ -11,41 +11,68 @@ import { capabilityInfo, normaliseCapabilities, type AccessModule } from "./peop
 
 export type WarehouseScope = "chosen" | "all";
 
+/** One definition of the all-locations profile name (distinct from "Warehouse operator", which works at chosen warehouses only). */
+export const WAREHOUSE_ALL_LABEL = "Warehouse operator — all locations";
+
 export interface AccessProfile {
   id: string;
   module: AccessModule;
   label: string;
   /** What it permits, in one plain sentence. */
   description: string;
-  /** What it does NOT permit (important exclusions). */
+  /** What it does NOT permit (important exclusions), generated from `excludes`. */
   exclusions: string;
+  /** The capabilities this profile deliberately leaves out; the sentence and the final-access summary are derived from them. */
+  excludes: readonly string[];
   /** The capabilities saved when this profile is chosen. Empty: basic access to the module. */
   capabilities: readonly string[];
   /** Inventory only: the profile cannot be saved until the warehouse scope has been chosen explicitly. */
   warehouseScope?: WarehouseScope;
 }
 
-const PR = (module: AccessModule, id: string, label: string, description: string, exclusions: string, capabilities: readonly string[], warehouseScope?: WarehouseScope): AccessProfile =>
-  ({ id, module, label, description, exclusions, capabilities, ...(warehouseScope ? { warehouseScope } : {}) });
+/** What a person CANNOT do without each capability, in plain words. The only source of every "Not included" / "Does not include" text. */
+const NOT_INCLUDED: Record<AccessModule, Record<string, string>> = {
+  inventory: {
+    warehouse: "receive, issue, return, transfer or count stock", view_stock: "see every unit, quantity and movement", confirm_stock: "confirm counts or correct movements",
+    manage_catalogue: "manage the catalogue", view_costs: "see purchase costs", manage_access: "give access",
+  },
+  sales: {
+    assign_owner: "assign owners", reopen_closed: "reopen closed opportunities", manage_settings: "change Sales settings", manage_approval_rules: "change the approval policy",
+    view_audit: "read the audit trail", manage_access: "give access",
+  },
+  budget: {
+    finance: "record funds or expenses, or decide budgets", executive_approver: "decide what someone with Finance access submits", manage_access: "give access",
+  },
+  projects: { assign_pm: "assign a PM", approve_scope: "approve scope", view_commercial: "see commercial information", manage_access: "manage access" },
+};
+
+/** "Cannot a, b or c." for the capabilities in `caps` that are not held (all of them are listed in the order given). */
+const cannotText = (module: AccessModule, caps: readonly string[]) => {
+  const list = caps.map((c) => NOT_INCLUDED[module][c]).filter(Boolean);
+  return list.length === 0 ? "" : `Cannot ${list.length === 1 ? list[0] : `${list.slice(0, -1).join(", ")} or ${list[list.length - 1]}`}.`;
+};
+
+const PR = (module: AccessModule, id: string, label: string, description: string, excludes: readonly string[], capabilities: readonly string[], warehouseScope?: WarehouseScope): AccessProfile =>
+  ({ id, module, label, description, excludes, exclusions: cannotText(module, excludes), capabilities, ...(warehouseScope ? { warehouseScope } : {}) });
 
 export const ACCESS_PROFILES: Record<AccessModule, readonly AccessProfile[]> = {
   inventory: [
-    PR("inventory", "warehouse-operator", "Warehouse operator", "Receives, issues, returns, transfers and counts stock at the chosen warehouses, and reads stock there.", "Cannot confirm counts or correct movements, manage the catalogue, see purchase costs or give access.", ["warehouse"], "chosen"),
-    PR("inventory", "warehouse-lead", "Warehouse lead", "As a warehouse operator, at every location of the company, including ones added later.", "Cannot confirm counts or correct movements, manage the catalogue, see purchase costs or give access.", ["warehouse", "cross_location"], "all"),
-    PR("inventory", "stock-viewer", "Stock viewer", "Reads every unit, quantity and movement, including who holds what. Read only.", "Cannot receive, issue, transfer or count stock, and cannot see purchase costs.", ["view_stock"]),
-    PR("inventory", "equipment-viewer", "Employee equipment viewer", "Sees which company equipment each employee holds, for onboarding and exit.", "Cannot see other stock or movements, and cannot change anything.", ["view_employee_custody"]),
+    PR("inventory", "warehouse-operator", "Warehouse operator", "Receives, issues, returns, transfers and counts stock at the chosen warehouses, and reads stock there.", ["confirm_stock", "manage_catalogue", "view_costs", "manage_access"], ["warehouse"], "chosen"),
+    PR("inventory", "warehouse-lead", WAREHOUSE_ALL_LABEL, "Does everything a Warehouse operator does, but at every location of the company, including ones added later.", ["confirm_stock", "manage_catalogue", "view_costs", "manage_access"], ["warehouse", "cross_location"], "all"),
+    PR("inventory", "stock-viewer", "Stock viewer", "Reads every unit, quantity and movement, including who holds what. Read only.", ["warehouse", "view_costs"], ["view_stock"]),
+    PR("inventory", "equipment-viewer", "Employee equipment viewer", "Sees which company equipment each employee holds, for onboarding and exit.", ["view_stock", "warehouse"], ["view_employee_custody"]),
   ],
   sales: [
-    PR("sales", "sales-colleague", "Sales colleague", "Sees Sales for this company and works on their own opportunities and follow-ups.", "Cannot assign owners, reopen closed opportunities, change settings or give access.", []),
-    PR("sales", "sales-lead", "Sales lead", "Everything a Sales colleague does, and assigns and reassigns owners and reopens a won or lost opportunity with a reason.", "Cannot change Sales settings or approval policy, read the audit trail or give access.", ["assign_owner", "reopen_closed"]),
+    PR("sales", "sales-colleague", "Sales colleague", "Sees Sales for this company and works on their own opportunities and follow-ups.", ["assign_owner", "reopen_closed", "manage_settings", "manage_access"], []),
+    PR("sales", "sales-lead", "Sales lead", "Everything a Sales colleague does, and assigns and reassigns owners and reopens a won or lost opportunity with a reason.", ["manage_settings", "manage_approval_rules", "view_audit", "manage_access"], ["assign_owner", "reopen_closed"]),
   ],
   budget: [
-    PR("budget", "budget-read-only", "Read-only", "Reads the company's project budgets. Changes nothing.", "Cannot record funds or expenses, or decide budgets.", ["view"]),
-    PR("budget", "budget-finance", "Finance", "Records funds, receipts, returns and reimbursements, closes settlement, and decides budgets and final expenses submitted by Project Managers who do not hold Finance access.", "Cannot decide what someone with Finance access submits, and cannot give access.", ["finance"]),
-    PR("budget", "budget-executive", "Executive approver", "Decides budgets, additional requests and final expenses submitted by someone with Finance access, and confirms and authorises closure of that settlement (a CEO or a CTO).", "Does not record funds or expenses and cannot give access.", ["executive_approver"]),
+    PR("budget", "budget-read-only", "Read-only", "Reads the company's project budgets. Changes nothing.", ["finance"], ["view"]),
+    PR("budget", "budget-finance", "Finance", "Records funds, receipts, returns and reimbursements, closes settlement, and decides budgets and final expenses submitted by Project Managers who do not hold Finance access.", ["executive_approver", "manage_access"], ["finance"]),
+    PR("budget", "budget-executive", "Executive approver", "Decides budgets, additional requests and final expenses submitted by someone with Finance access, and confirms and authorises closure of that settlement (a CEO or a CTO).", ["finance", "manage_access"], ["executive_approver"]),
   ],
   projects: [
-    PR("projects", "project-directory-viewer", "Project directory viewer", "Sees the directory of ongoing projects. Details only where added to a project.", "Gives no project details, no PM assignment, scope approval or access management.", []),
+    PR("projects", "project-directory-viewer", "Project directory viewer", "Sees the directory of ongoing projects. Details only where added to a project.", ["view_commercial", "assign_pm", "approve_scope", "manage_access"], []),
   ],
 };
 
@@ -182,20 +209,42 @@ export interface AccessReview {
   needsScope: boolean;
   scopeMissing: boolean;
   locationsMissing: boolean;
-  /** Removals must be confirmed explicitly. */
+  /** Inventory: assigned warehouses (ids) the saved change adds and removes, from before vs after the draft. */
+  locationsAdded: string[];
+  locationsRemoved: string[];
+  /** Inventory: the warehouse list to save, or null when the assignments are not touched. */
+  locationIdsToSave: string[] | null;
+  /** Removals (rights or assigned warehouses) must be confirmed explicitly. */
   needsRemovalConfirm: boolean;
   /** Plain-language result, derived from the profile and capability definitions. */
   summary: string[];
 }
 
-/** Plain-language summary of a set of rights, from the same definitions the cards and editor use. */
+/**
+ * Plain-language summary of the FINAL set of rights, from the same definitions the cards and editor use. When the set is exactly a profile's bundle the profile's
+ * own description and exclusions are shown. Otherwise every right held is described one by one, and "Does not include" lists only what is NOT in the final set,
+ * so the text never contradicts a retained or newly ticked right.
+ */
 export function summariseAccess(module: AccessModule, caps: readonly string[]): string[] {
-  const r = recogniseAccess(module, caps);
+  const held = normaliseCapabilities(module, caps);
+  const r = recogniseAccess(module, held);
   const lines: string[] = [];
-  if (r.profile) lines.push(`${r.profile.label}: ${r.profile.description}`);
-  else if (caps.length === 0) lines.push("No rights beyond being listed for this company.");
-  for (const c of r.extras) lines.push(`${capabilityInfo(module, c).label}: ${capabilityInfo(module, c).description}`);
-  if (r.profile) lines.push(`Not included: ${r.profile.exclusions}`);
+  if (r.profile && r.extras.length === 0) {
+    lines.push(`${r.profile.label}: ${r.profile.description}`);
+    if (r.profile.exclusions) lines.push(`Not included: ${r.profile.exclusions}`);
+    return lines;
+  }
+  if (held.length === 0) return ["No rights beyond being listed for this company."];
+  if (r.profile) {
+    lines.push(`Based on ${r.profile.label}, with custom rights.`);
+    if (r.profile.capabilities.length === 0) lines.push(r.profile.description);
+  }
+  for (const c of held) lines.push(`${capabilityInfo(module, c).label}: ${capabilityInfo(module, c).description}`);
+  if (!held.includes("founder")) {
+    const candidates = r.profile ? r.profile.excludes : Object.keys(NOT_INCLUDED[module]);
+    const missing = candidates.filter((c) => !held.includes(c) && NOT_INCLUDED[module][c]);
+    if (missing.length > 0) lines.push(`Does not include: ${missing.map((c) => NOT_INCLUDED[module][c]).join("; ")}.`);
+  }
   return lines;
 }
 
@@ -209,11 +258,16 @@ export function reviewDraft(module: AccessModule, d: AccessDraft, original: read
   const needsScope = module === "inventory" && caps.includes("warehouse") && !caps.includes("founder");
   const scopeMissing = needsScope && d.scope === null;
   const locationsMissing = needsScope && d.scope === "chosen" && d.locationIds.length === 0;
-  const locationsChanged = needsScope && d.scope === "chosen" && [...d.locationIds].sort().join(",") !== [...assignedLocationIds].sort().join(",");
+  // Chosen warehouses: the list as drafted. All locations: assignments only matter for a person who had chosen warehouses, so moving to "all" clears them.
+  const originalScope = warehouseScopeOf(before);
+  const locationIdsToSave = !needsScope ? null : d.scope === "chosen" ? [...d.locationIds] : d.scope === "all" && originalScope !== "all" && assignedLocationIds.length > 0 ? [] : null;
+  const locationsAdded = locationIdsToSave ? locationIdsToSave.filter((l) => !assignedLocationIds.includes(l)) : [];
+  const locationsRemoved = locationIdsToSave ? assignedLocationIds.filter((l) => !locationIdsToSave.includes(l)) : [];
+  const locationsChanged = locationsAdded.length > 0 || locationsRemoved.length > 0;
   const changed = original === null ? (module !== "budget" || caps.length > 0) : added.length > 0 || removed.length > 0 || locationsChanged;
   return {
     caps, profile: profileById(module, d.profileId), added, removed, retained, changed, needsScope, scopeMissing, locationsMissing,
-    needsRemovalConfirm: removed.length > 0, summary: summariseAccess(module, caps),
+    locationsAdded, locationsRemoved, locationIdsToSave, needsRemovalConfirm: removed.length > 0 || locationsRemoved.length > 0, summary: summariseAccess(module, caps),
   };
 }
 
