@@ -63,6 +63,7 @@ export function ModuleAccessEditor(props: ModuleAccessEditorProps) {
   const removesLastFounder = original?.includes("founder") && founderCount <= 1;
   const removesLastApprover = module === "budget" && original?.includes("executive_approver") && approverCount <= 1;
   const visibleLocations = locations.filter((l) => l.isActive || draft.locationIds.includes(l.id));
+  const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? "Unknown warehouse";
   const set = (d: AccessDraft) => { setDraft(d); setConfirmRemoval(false); };
 
   if (locked) return <p className="text-sm text-muted-foreground">Only a founder can change this person&apos;s access.</p>;
@@ -77,8 +78,8 @@ export function ModuleAccessEditor(props: ModuleAccessEditorProps) {
         <input type="hidden" name="companyId" value={company.id} />
         <input type="hidden" name="before" value={before} />
         {review.caps.map((c) => <input key={c} type="hidden" name="capabilities" value={c} />)}
-        {review.needsScope && draft.scope === "chosen" ? <input type="hidden" name="withLocations" value="1" /> : null}
-        {review.needsScope && draft.scope === "chosen" ? draft.locationIds.map((l) => <input key={l} type="hidden" name="locationIds" value={l} />) : null}
+        {review.locationIdsToSave ? <input type="hidden" name="withLocations" value="1" /> : null}
+        {review.locationIdsToSave ? review.locationIdsToSave.map((l) => <input key={l} type="hidden" name="locationIds" value={l} />) : null}
 
         <fieldset className="space-y-2">
           <legend className="text-sm font-medium">Working profile</legend>
@@ -170,6 +171,8 @@ export function ModuleAccessEditor(props: ModuleAccessEditorProps) {
           {review.added.length > 0 ? <div className="flex flex-wrap items-center gap-1.5"><span>Rights added</span><Chips module={module} caps={review.added} tone="success" /></div> : null}
           {review.removed.length > 0 ? <div className="flex flex-wrap items-center gap-1.5"><span>Rights removed</span><Chips module={module} caps={review.removed} tone="destructive" /></div> : null}
           {review.retained.length > 0 ? <div className="flex flex-wrap items-center gap-1.5"><span>Custom rights kept</span><Chips module={module} caps={review.retained} tone="outline" /></div> : null}
+          {review.locationsAdded.length > 0 ? <p><span className="text-muted-foreground">Warehouses added:</span> {review.locationsAdded.map(locationName).join(", ")}</p> : null}
+          {review.locationsRemoved.length > 0 ? <p><span className="text-muted-foreground">Warehouses removed:</span> {review.locationsRemoved.map(locationName).join(", ")}</p> : null}
           {review.needsScope ? <p><span className="text-muted-foreground">Warehouse scope:</span> {draft.scope === null ? "not chosen yet" : worksAtWords(review.caps, draft.scope === "chosen" ? draft.locationIds : [], locations)}</p> : null}
           <div>
             <p className="text-muted-foreground">Resulting access</p>
@@ -178,7 +181,7 @@ export function ModuleAccessEditor(props: ModuleAccessEditorProps) {
           {review.needsRemovalConfirm ? (
             <label className="flex items-start gap-2" htmlFor={`${idPrefix}-confirm-removal`}>
               <input id={`${idPrefix}-confirm-removal`} type="checkbox" className="mt-0.5 h-4 w-4" checked={confirmRemoval} onChange={(e) => setConfirmRemoval(e.target.checked)} />
-              <span>I confirm these rights are removed from {person.name}.</span>
+              <span>I confirm {review.removed.length > 0 && review.locationsRemoved.length > 0 ? "these rights and warehouses are" : review.locationsRemoved.length > 0 ? "these warehouses are" : "these rights are"} removed from {person.name}.</span>
             </label>
           ) : null}
         </div>

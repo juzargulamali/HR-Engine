@@ -1,13 +1,18 @@
 /**
  * @vitest-environment jsdom
  */
+import * as React from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const actions = vi.hoisted(() => ({ applyModuleAccess: vi.fn(), revokeModuleAccess: vi.fn() }));
+const nav = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: nav.push }) }));
+vi.mock("next/link", () => ({ default: ({ href, children, ...rest }: { href: string; children: React.ReactNode } & React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a href={href} {...rest}>{children}</a> }));
 vi.mock("@/lib/actions/peopleAccess", () => actions);
 
 import { ModuleAccessPanel, defaultAccessCompany, type ModuleAccessPanelProps } from "./module-access-panel";
+import { PersonLink, UnsavedAccessGuard } from "./unsaved-access-guard";
 import type { PaGrant, PaModuleContext } from "@/lib/people-access/data";
 
 beforeEach(() => {
@@ -15,6 +20,7 @@ beforeEach(() => {
   HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) { this.removeAttribute("open"); };
   actions.applyModuleAccess.mockReset().mockResolvedValue({ error: null });
   actions.revokeModuleAccess.mockReset().mockResolvedValue({ error: null });
+  nav.push.mockReset();
 });
 afterEach(() => cleanup());
 
@@ -170,10 +176,10 @@ describe("editing is predictable", () => {
 });
 
 describe("Inventory warehouse scope is an explicit choice", () => {
-  it("Warehouse lead needs the scope chosen before save and never grants all locations silently", () => {
+  it("The all-locations profile needs the scope chosen before save and never grants all locations silently", () => {
     render(<ModuleAccessPanel {...props()} />);
     edit(/inventory access/i);
-    fireEvent.click(screen.getByRole("radio", { name: /^warehouse lead/i }));
+    fireEvent.click(screen.getByRole("radio", { name: /^warehouse operator — all locations/i }));
     expect(screen.getByText(/choose a warehouse scope before saving/i)).toBeTruthy();
     expect(save().disabled).toBe(true);
     fireEvent.click(screen.getByLabelText(/all locations of this company/i));
@@ -219,5 +225,106 @@ describe("Advanced access and who may grant what", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /confirm stock counts/i }));
     expect(save().disabled).toBe(false);
     expect(posted()).toEqual(["warehouse", "confirm_stock"]);
+  });
+});
+
+describe("switching person never carries anything over", () => {
+  const A = { userId: "u1", name: "Amina", isSelf: false, employeeCompanyId: "c1" };
+  const B = { userId: "u2", name: "Bilal", isSelf: false, employeeCompanyId: "c2" };
+  const many = { contexts: [ctx("sales"), ctx("sales", PL), ctx("inventory"), ctx("inventory", PL), ctx("budget")], operatorLocations: { c1: ["l1"], c2: [] } };
+
+  it("person B starts clean after A had a company switch, an open editor, a profile, advanced rights, warehouses and a removal tick", () => {
+    const { rerender } = render(<ModuleAccessPanel {...props({ ...many, person: A, grants: [grant("inventory", ["warehouse"])] })} />);
+    edit(/inventory access/i);
+    fireEvent.click(screen.getByRole("checkbox", { name: /confirm stock counts/i }));
+    fireEvent.click(screen.getByLabelText("Riyadh"));
+    fireEvent.click(screen.getByLabelText("Dubai"));
+    fireEvent.click(screen.getByLabelText(/i confirm these warehouses are removed/i));
+    expect(save().disabled).toBe(false);
+    // Person B is a different person with their own (different) grants.
+    rerender(<ModuleAccessPanel {...props({ ...many, person: B, grants: [{ ...grant("inventory", ["view_stock"], "c2"), userId: "u2" }] })} />);
+    expect((screen.getByLabelText("Access for company") as HTMLSelectElement).value).toBe("c2");
+    expect(screen.queryByRole("region", { name: /edit inventory access/i })).toBeNull();
+    expect(posted()).toEqual([]);
+    edit(/inventory access/i);
+    expect((screen.getByRole("radio", { name: /^stock viewer/i }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("checkbox", { name: /confirm stock counts/i }) as HTMLInputElement).checked).toBe(false);
+    expect(posted()).toEqual(["view_stock"]);
+    expect(save().disabled).toBe(true);
+    expect(screen.queryByLabelText(/i confirm these (rights|warehouses)/i)).toBeNull();
+  });
+
+  it("choosing another person with unsaved edits asks first; Keep editing keeps person A and the draft, Discard shows person B clean", () => {
+    function Page() {
+      const [person, setPerson] = React.useState(A);
+      React.useEffect(() => { nav.push.mockImplementation(() => setPerson(B)); }, []);
+      return (
+        <UnsavedAccessGuard>
+          <PersonLink href="/people-access?person=u:u2">Bilal</PersonLink>
+          <ModuleAccessPanel {...props({ person, grants: [grant("sales", ["assign_owner", "reopen_closed"])] })} />
+        </UnsavedAccessGuard>
+      );
+    }
+    render(<Page />);
+    edit(/sales & crm access/i);
+    fireEvent.click(screen.getByRole("radio", { name: /^sales colleague/i }));
+    fireEvent.click(screen.getByRole("link", { name: "Bilal" }));
+    expect(screen.getByText(/discard unsaved changes\?/i)).toBeTruthy();
+    expect(nav.push).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /keep editing/i }));
+    expect(nav.push).not.toHaveBeenCalled();
+    expect((screen.getByRole("radio", { name: /^sales colleague/i }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole("link", { name: "Bilal" }));
+    fireEvent.click(screen.getByRole("button", { name: /discard and switch/i }));
+    expect(nav.push).toHaveBeenCalledWith("/people-access?person=u:u2");
+    expect(screen.queryByRole("region", { name: /edit sales & crm access/i })).toBeNull();
+    expect(actions.applyModuleAccess).not.toHaveBeenCalled();
+  });
+
+  it("no question is asked when nothing was changed", () => {
+    render(<UnsavedAccessGuard><PersonLink href="/people-access?person=u:u2">Bilal</PersonLink><ModuleAccessPanel {...props({ grants: [grant("sales", [])] })} /></UnsavedAccessGuard>);
+    edit(/sales & crm access/i);
+    fireEvent.click(screen.getByRole("link", { name: "Bilal" }));
+    expect(screen.queryByText(/discard unsaved changes\?/i)).toBeNull();
+  });
+});
+
+describe("the review tells the truth about the final access and warehouses", () => {
+  it("a Stock viewer with the cost right ticked can see costs and is not told they cannot", () => {
+    render(<ModuleAccessPanel {...props({ contexts: [ctx("inventory", UAE, { viewerCapabilities: ["manage_access", "founder"] })], grants: [grant("inventory", ["view_stock"])] })} />);
+    edit(/inventory access/i);
+    fireEvent.click(screen.getByRole("checkbox", { name: /^see purchase costs/i }));
+    const review = screen.getByText(/review before saving/i).parentElement!;
+    expect(within(review).getByText(/see purchase costs: /i)).toBeTruthy();
+    expect(review.textContent).not.toMatch(/cannot see purchase costs/i);
+    expect(review.textContent).not.toMatch(/not included/i);
+    expect(review.textContent).not.toMatch(/does not include:[^.]*purchase costs/i);
+  });
+
+  it("shows warehouses added and removed by name and holds Save until the removal is ticked", () => {
+    render(<ModuleAccessPanel {...props({ grants: [grant("inventory", ["warehouse"])], operatorLocations: { c1: ["l1"] } })} />);
+    edit(/inventory access/i);
+    fireEvent.click(screen.getByLabelText("Riyadh"));
+    expect(screen.getByText(/warehouses added:/i).parentElement!.textContent).toContain("Riyadh");
+    expect(save().disabled).toBe(false);
+    fireEvent.click(screen.getByLabelText("Dubai"));
+    expect(screen.getByText(/warehouses removed:/i).parentElement!.textContent).toContain("Dubai");
+    expect(save().disabled).toBe(true);
+    fireEvent.click(screen.getByLabelText(/i confirm these warehouses are removed/i));
+    expect(save().disabled).toBe(false);
+    fireEvent.click(screen.getByLabelText("Dubai"));
+    expect(screen.queryByLabelText(/i confirm these warehouses are removed/i)).toBeNull();
+  });
+
+  it("moving an operator to all locations drops the assigned warehouses and needs the confirmation; Save sends an empty list", () => {
+    render(<ModuleAccessPanel {...props({ grants: [grant("inventory", ["warehouse"])], operatorLocations: { c1: ["l1"] } })} />);
+    edit(/inventory access/i);
+    fireEvent.click(screen.getByLabelText(/all locations of this company/i));
+    expect(screen.getByText(/warehouses removed:/i).parentElement!.textContent).toContain("Dubai");
+    expect(save().disabled).toBe(true);
+    fireEvent.click(screen.getByLabelText(/i confirm these warehouses are removed/i));
+    expect(save().disabled).toBe(false);
+    expect(document.querySelector('input[name="withLocations"]')).toBeTruthy();
+    expect(document.querySelectorAll('input[name="locationIds"]')).toHaveLength(0);
   });
 });

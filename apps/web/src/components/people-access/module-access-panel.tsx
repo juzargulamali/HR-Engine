@@ -8,6 +8,7 @@ import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import { ModuleAccessCard } from "./module-access-card";
 import { ModuleAccessEditor } from "./module-access-editor";
+import { useUnsavedAccessGuard } from "./unsaved-access-guard";
 
 export interface ModuleAccessPanelProps {
   person: { userId: string; name: string; isSelf: boolean; employeeCompanyId: string | null };
@@ -24,14 +25,21 @@ export function defaultAccessCompany(employeeCompanyId: string | null, companies
   return companies[0]?.id ?? null;
 }
 
+/** Module access for one person. Keyed by person, so company, editor, draft and every tick start fresh for each person and never carry over. */
+export function ModuleAccessPanel(props: ModuleAccessPanelProps) {
+  return <PersonModuleAccess key={props.person.userId} {...props} />;
+}
+
 /** Module access for one person: ONE explicit company, a compact card per module, and one editor at a time. Switching company saves nothing. */
-export function ModuleAccessPanel({ person, contexts, grants, operatorLocations, retryHref }: ModuleAccessPanelProps) {
+function PersonModuleAccess({ person, contexts, grants, operatorLocations, retryHref }: ModuleAccessPanelProps) {
+  const guard = useUnsavedAccessGuard();
   const companies = [...new Map(contexts.map((c) => [c.company.id, c.company])).values()];
   const [companyId, setCompanyId] = useState(() => defaultAccessCompany(person.employeeCompanyId, companies));
   const [editing, setEditing] = useState<AccessModule | null>(null);
   const [dirty, setDirty] = useState(false);
   const [switchTo, setSwitchTo] = useState<string | null>(null);
-  const onDirtyChange = useCallback((d: boolean) => setDirty(d), []);
+  const setGuardDirty = guard?.setDirty;
+  const onDirtyChange = useCallback((d: boolean) => { setDirty(d); setGuardDirty?.(d); }, [setGuardDirty]);
 
   const company = companies.find((c) => c.id === companyId);
   if (!company) return <p className="text-sm text-muted-foreground">There is no company whose module access you manage.</p>;
