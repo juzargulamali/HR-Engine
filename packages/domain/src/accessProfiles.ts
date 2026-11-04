@@ -146,9 +146,16 @@ export function chooseProfile(module: AccessModule, d: AccessDraft, profileId: s
   return { ...d, profileId, extras, scope };
 }
 
+/**
+ * Tick or untick one right. A right outside the profile is simply added or dropped. Unticking a right that belongs to the profile is an explicit decision to leave the
+ * standard profile: the rest of its bundle stays as custom rights (nothing else is removed).
+ */
 export function toggleExtra(module: AccessModule, d: AccessDraft, capability: string, on: boolean): AccessDraft {
   const bundle = bundleOf(module, d.profileId);
-  if (bundle.includes(capability)) return d;
+  if (bundle.includes(capability)) {
+    if (on) return d;
+    return { ...d, profileId: null, extras: normaliseCapabilities(module, [...bundle, ...d.extras].filter((c) => c !== capability)) };
+  }
   const extras = on ? [...new Set([...d.extras, capability])] : d.extras.filter((c) => c !== capability);
   return { ...d, extras: normaliseCapabilities(module, extras) };
 }

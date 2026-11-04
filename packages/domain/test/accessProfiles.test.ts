@@ -88,9 +88,11 @@ describe("draft editing", () => {
     expect(draftCapabilities("sales", d)).toContain("view_audit");
     d = toggleExtra("sales", d, "view_audit", false);
     expect(reviewDraft("sales", d, orig, []).removed).toContain("view_audit");
-    // a right that belongs to the chosen profile cannot be toggled off separately
+    // unticking a right of the chosen profile leaves the profile; the rest of its bundle stays as custom rights
     const lead = chooseProfile("sales", d, "sales-lead", orig);
-    expect(toggleExtra("sales", lead, "assign_owner", false)).toEqual(lead);
+    const custom = toggleExtra("sales", lead, "assign_owner", false);
+    expect(custom.profileId).toBeNull();
+    expect(draftCapabilities("sales", custom)).toEqual(["reopen_closed"]);
   });
 
   it("warehouse scope is a separate explicit choice; Warehouse lead never grants all locations silently", () => {

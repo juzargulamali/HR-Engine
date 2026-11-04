@@ -132,7 +132,7 @@ export function ModuleAccessEditor(props: ModuleAccessEditorProps) {
 
         <details className="rounded-md border border-border px-3 py-2">
           <summary className="cursor-pointer text-sm font-medium">Advanced access</summary>
-          <p className="mt-2 text-sm text-muted-foreground">Every right in this module, for specialist cases. Rights that belong to the chosen profile are shown ticked and change with the profile.</p>
+          <p className="mt-2 text-sm text-muted-foreground">Every right in this module, for specialist cases. Rights of the chosen profile are shown ticked; unticking one makes the access custom and keeps the rest.</p>
           <div className="mt-2 space-y-4">
             {ADVANCED_GROUPS[module].map((g) => (
               <fieldset key={g.id} className="space-y-2">
@@ -141,16 +141,16 @@ export function ModuleAccessEditor(props: ModuleAccessEditorProps) {
                   {g.capabilities.map((c) => {
                     const inProfile = (ACCESS_PROFILES[module].find((p) => p.id === draft.profileId)?.capabilities ?? []).includes(c);
                     const scopeOwned = module === "inventory" && c === "cross_location";
-                    const reason = inProfile || scopeOwned ? null : capabilityToggleBlockedReason(module, viewerCapabilities, target, review.caps, c);
+                    const reason = scopeOwned ? null : capabilityToggleBlockedReason(module, viewerCapabilities, target, review.caps, c);
                     const info = capabilityInfo(module, c);
                     return (
                       <li key={c}>
                         <label className="flex items-start gap-2 text-sm" htmlFor={`${idPrefix}-${c}`}>
-                          <input id={`${idPrefix}-${c}`} type="checkbox" className="mt-0.5 h-4 w-4" checked={review.caps.includes(c)} disabled={inProfile || scopeOwned || reason !== null}
+                          <input id={`${idPrefix}-${c}`} type="checkbox" className="mt-0.5 h-4 w-4" checked={review.caps.includes(c)} disabled={scopeOwned || reason !== null}
                             onChange={(e) => set(toggleExtra(module, draft, c, e.target.checked))} />
                           <span className="min-w-0"><span className="font-medium">{info.label}</span>
                             {reason ? <span className="text-muted-foreground"> (not available)</span> : null}
-                            {inProfile ? <span className="text-muted-foreground"> (part of the profile)</span> : null}
+                            {inProfile ? <span className="text-muted-foreground"> (part of the profile; unticking it makes the access custom)</span> : null}
                             {scopeOwned ? <span className="text-muted-foreground"> (set under Warehouse scope)</span> : null}
                             <span className="block text-muted-foreground">{info.description}</span>{reason ? <span className="block text-muted-foreground">{reason}</span> : null}</span>
                         </label>

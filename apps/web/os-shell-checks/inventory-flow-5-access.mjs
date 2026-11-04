@@ -114,7 +114,7 @@ if (run("B2")) {
     check(/Laptop 14 inch/.test(await R.mainText()), "stock table is there");
     await R.go(`/people-access?person=u:${U(5)}&tab=modules`);
     let t = await R.mainText();
-    check(!/Module access/.test(t) && (await R.page.locator("main section[aria-labelledby^='pa-']").count()) === 0, "no module access cards for an operator: " + t.slice(0, 200));
+    check(!/Module access/.test(t) && (await R.page.locator("main section[data-module]").count()) === 0, "no module access cards for an operator: " + t.slice(0, 200));
     check(!/ceo@e2e\.local|pol\.exec@/.test(await R.page.content()), "no other person's e-mail in the People & Access page HTML");
     await R.go("/inventory/manage");
     t = await R.mainText();
@@ -289,11 +289,15 @@ if (run("B4")) {
     await R.as("ceo");
     const tick = async (on) => {
       await R.go(`/people-access?person=u:${U(1)}&tab=modules`);
-      const card = R.page.locator("section[aria-labelledby^='pa-']", { has: R.page.getByRole("heading", { name: "Inventory", exact: true, level: 3 }) });
-      await card.getByText(/Choose rights one by one/).click();
-      const box = card.getByRole("checkbox", { name: /See purchase costs/i });
+      const card = R.page.locator("section[data-module='inventory']");
+      await card.getByRole("button", { name: /Edit access|Give access/ }).click();
+      const ed = R.page.getByRole("region", { name: "Edit Inventory access" });
+      await ed.getByText("Advanced access", { exact: true }).click();
+      const box = ed.getByRole("checkbox", { name: /See purchase costs/i });
       if (on) await box.check(); else await box.uncheck();
-      await card.getByRole("button", { name: "Save changes" }).click();
+      const confirm = ed.getByLabel(/I confirm these rights are removed/);
+      if (await confirm.count()) await confirm.check();
+      await ed.getByRole("button", { name: "Save changes" }).click();
     };
     await tick(true);
     await until(() => /view_costs/.test(s1(`select capabilities::text from inv_company_grants where user_id='${U(1)}' and revoked_at is null`)), 15000, "grant ");
@@ -444,11 +448,12 @@ if (run("B7")) {
   await step("B7 a founder gives hr1@ the warehouse right back at Dubai (People & Access); the operator can work again", async () => {
     await R.as("ceo");
     await R.go(`/people-access?person=u:${U(1)}&tab=modules`);
-    const card = R.page.locator("section[aria-labelledby^='pa-']", { has: R.page.getByRole("heading", { name: "Inventory", exact: true, level: 3 }) });
-    await card.locator("select").first().selectOption({ label: "Storekeeper" });
-    await card.getByRole("button", { name: "Add preset" }).click();
+    await R.page.locator("section[data-module='inventory']").getByRole("button", { name: /Edit access|Give access/ }).click();
+    const card = R.page.getByRole("region", { name: "Edit Inventory access" });
+    await card.getByRole("radio", { name: /^Warehouse operator/ }).check();
+    await card.getByLabel("Chosen warehouses only").check();
     await card.getByLabel("Dubai").check();
-    await card.getByRole("button", { name: "Give access" }).click();
+    await card.getByRole("button", { name: "Save changes" }).click();
     await until(() => s1(`select count(*) from inv_company_grants where user_id='${U(1)}' and revoked_at is null`) === "1", 15000, "regranted ");
     const ok = await rpc("hr1", "inv_receive_stock", { p_company_id: AE, p_location_id: DXB, p_key: `b7-${Date.now()}`, p_lines: [{ item_id: HDMI, qty: 1 }] });
     check(ok.status < 300, "Dubai works again: " + JSON.stringify(ok.body).slice(0, 200));
