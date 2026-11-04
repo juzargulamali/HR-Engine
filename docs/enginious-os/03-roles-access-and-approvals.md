@@ -70,6 +70,23 @@ Capability lists, exactly as defined in the domain package and presets (`package
 
 Meaning of the less obvious ones: `warehouse` operates stock **only at assigned locations** (`inv_operator_locations`) and reads stock; `cross_location` means all locations and matters only with `warehouse`; `inv_can_view_stock = warehouse or view_stock`; `confirm_stock` also lets the holder correct a movement; `view_costs` is its own table policy and only a founder can give it (`inv_costs_select` uses `view_costs`). Budget `manage_access` alone gives **no read**: reading needs `finance`, `view` or `executive_approver` (`pbx_can_view_company`). Sources: `docs/people-access-design.md` ("Capabilities checked against the code"); `20261201000100_inv_catalogue_stock_ledger.sql`; `20261210000000_pbx_access_audit_settings.sql`.
 
+### 2.2a Working profiles on People & Access (in draft PR, branch `feat/module-access-simplify`, not merged; describes that branch until merge)
+
+The Module access screen offers named working profiles. A profile only saves capabilities that already exist; the single definition (id, label, description, exclusions, bundle, warehouse-scope rule) is `packages/domain/src/accessProfiles.ts`. Who may grant what (`evaluateGrant`) and the database grant functions are unchanged.
+
+| Module | Profile | Saved capabilities | Notes |
+|---|---|---|---|
+| Inventory | Warehouse operator | `warehouse` | Scope "chosen warehouses", at least one required (`inv_can_operate`, `inv_operator_locations`) |
+| Inventory | Warehouse lead | `warehouse`, `cross_location` | Scope "all locations", must be chosen explicitly; equals the older "Stock lead (all locations)" preset. No other right is added |
+| Inventory | Stock viewer | `view_stock` | Read only |
+| Inventory | Employee equipment viewer | `view_employee_custody` | |
+| Sales | Sales colleague | none (basic) | |
+| Sales | Sales lead | `assign_owner`, `reopen_closed` | |
+| Project budgets | Read-only / Finance / Executive approver | `view` / `finance` / `executive_approver` | Approver right still only given or removed by a CEO / CTO approver (R1) |
+| Projects | Project directory viewer | none (basic) | No company-wide PM, scope-approval or founder profile; PM assignment and team membership are managed on the project or handover |
+
+Rules: current access is recognised from actual capabilities (exact profile, profile plus listed extras, or "Custom access"), never from job title. Choosing a profile changes a draft only; switching replaces only the previous profile bundle, custom rights stay and are listed, removals need an explicit confirmation, one Save sends exactly the reviewed set (the stale-edit check is unchanged). "Advanced access" (collapsed) keeps every capability in four groups: Specialist operational rights; Sensitive visibility; Configuration; Access administration and founder powers. Inventory warehouse scope (all locations vs chosen warehouses) is always an explicit choice; the older specialist presets (Sales administrator, Stock controller, Catalogue manager and others) are reachable only through Advanced access. No migration.
+
 ### 2.3 How grants are given
 
 | Topic | Rule | Source |

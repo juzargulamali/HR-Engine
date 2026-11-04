@@ -45,6 +45,8 @@ Verified at `551f615` (2026-11-04). Route list from `apps/web/src/app/(app)/**/p
 | `/ai-suggestions`, `/audit-log` | Reviewed drafts; audit trail | Page: HR Admin or System Administrator |
 | `/admin/companies` | Companies | Layout: System Administrator |
 | `/people-access` | Manage HR roles, module grants, accounts | Page + RLS: sys admin, HR Admin, module access managers |
+
+**People & Access, Module access tab (in draft PR, branch `feat/module-access-simplify`, not merged; describes that branch until merge).** After choosing a person: an "Access for company" selector (separate from the people-list company filter; defaults to the person's employment company when the viewer manages it; switching saves nothing and warns before discarding edits), then one card per module (profile or "Custom access", extra rights, assigned warehouses, Edit access). A card says "No access" only after a successful read, "Could not load ... Try again" after a failed read, and "You can't manage this module" for a module the viewer does not manage. Editing: pick a working profile (draft only), optional collapsed "Advanced access", a review (rights added / removed / custom rights kept / warehouse scope / resulting access), one "Save changes" and Cancel; "Remove all access to this module" is separate. Account, Job & department and HR roles tabs are unchanged. Sources on the branch: `apps/web/src/components/people-access/module-access-{panel,card,editor}.tsx`, `packages/domain/src/accessProfiles.ts`.
 | `/holidays`, `/policies`, `/policies/[id]` | Reference pages | Everyone read |
 | `/policies/new` | Draft a policy | Page `canDraftPolicy` (country-scoped HR/CEO) |
 

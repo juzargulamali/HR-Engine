@@ -23,6 +23,7 @@ Per-module control references (`modules/*.md`) were planned in `CLAUDE.md` and a
 | Files 01 and 02 checked against | `apps/web/src/components/nav/nav-groups.ts`, `apps/web/src/lib/my-day/attention.ts`, `apps/web/src/app/(app)/**/page.tsx` (route list), `apps/web/src/components/nav/shell-chrome.tsx`, `supabase/migrations/` file names | read at 551f615 |
 | Pre-release spec used as a starting point | branch `docs/launch-refinement-spec`, `docs/launch-refinement/specification.md`, written at `76c121b` | partly stale, flagged where found |
 | Hosted state | Migrations 1 to 15 of the launch stack applied on V2; Production Ready at 551f615; dispatch and return notes switch OFF | Owner-reported (`docs/launch-refinement-install-order.md` section 5, owner statement) |
+| Draft-branch note | `02-screens-and-navigation.md` (People & Access) and `03-roles-access-and-approvals.md` (section 2.2a) describe branch `feat/module-access-simplify` (draft PR, not merged) until it merges | `06-change-log.md` |
 | Not verified here | Anything needing a running app, a database, a phone or a hosted project | no servers or databases were started |
 
 ## Evidence conventions

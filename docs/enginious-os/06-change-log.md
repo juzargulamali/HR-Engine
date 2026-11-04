@@ -8,6 +8,12 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-04 | draft PR (not merged) | branch `feat/module-access-simplify`
+* **In draft PR, not merged.** Sections 02 (People & Access screen) and 03 (section 2.2a) describe this branch until it merges.
+* Summary: People & Access, Module access simplified: one explicit "Access for company", compact module cards (No access only after a successful read; could not load; can't manage), working profiles mapped to existing capabilities, collapsed Advanced access in four groups, draft plus review before one Save changes, explicit Inventory warehouse scope, profile labels recognised from actual capabilities. Presets replaced in the UI by the single definition `packages/domain/src/accessProfiles.ts`.
+* Migrations: none. Permissions, grant functions, approval independence, company isolation and audit unchanged.
+* Tests: `packages/domain/test/accessProfiles.test.ts`, `apps/web/src/components/people-access/module-access-panel.test.tsx`, loader and server-action tests; `people-access-flow.mjs` 52 passed on the local stack.
+
 ### 2026-11-04 | #56 | `551f61581b18ea60693cd3d7e408891b5520f39e`
 * Summary: My Day attention count; Inventory location versus ownership (equipment owned by one company can be kept in another company's warehouse); cross-company receiving (`inv_xshare_*`). Branch `feat/attention-count-and-warehouse-location`. Final commit on `main` at the time of this ledger.
 * Migrations: `20261218000100_inv_cross_company_receiving` (#15; adds eleven functions, changes no table, policy or privilege).
