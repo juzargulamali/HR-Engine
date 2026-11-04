@@ -77,7 +77,7 @@ The Module access screen offers named working profiles. A profile only saves cap
 | Module | Profile | Saved capabilities | Notes |
 |---|---|---|---|
 | Inventory | Warehouse operator | `warehouse` | Scope "chosen warehouses", at least one required (`inv_can_operate`, `inv_operator_locations`) |
-| Inventory | Warehouse lead | `warehouse`, `cross_location` | Scope "all locations", must be chosen explicitly; equals the older "Stock lead (all locations)" preset. No other right is added |
+| Inventory | Warehouse operator — all locations | `warehouse`, `cross_location` | Scope "all locations", must be chosen explicitly; equals the older "Stock lead (all locations)" preset. No other right is added |
 | Inventory | Stock viewer | `view_stock` | Read only |
 | Inventory | Employee equipment viewer | `view_employee_custody` | |
 | Sales | Sales colleague | none (basic) | |
