@@ -450,7 +450,7 @@ if (run("B7")) {
     await R.go(`/people-access?person=u:${U(1)}&tab=modules`);
     await R.page.locator("section[data-module='inventory']").getByRole("button", { name: /Edit access|Give access/ }).click();
     const card = R.page.getByRole("region", { name: "Edit Inventory access" });
-    await card.getByRole("radio", { name: /^Warehouse operator/ }).check();
+    await card.getByRole("radio", { name: /^Warehouse operator(?! — all locations)/ }).check();
     await card.getByLabel("Chosen warehouses only").check();
     await card.getByLabel("Dubai").check();
     await card.getByRole("button", { name: "Save changes" }).click();
