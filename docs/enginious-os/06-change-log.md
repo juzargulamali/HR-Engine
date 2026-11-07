@@ -8,8 +8,11 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
-### 2026-11-04 | draft PR (not merged) | branch `feat/module-access-simplify`
-* **In draft PR, not merged.** Sections 02 (People & Access screen) and 03 (section 2.2a) describe this branch until it merges.
+### 2026-11-07 | docs only | branch `docs/enginious-os-app-map`
+* Summary: app memory (README and files 01 to 06) and `CLAUDE.md` added. Clarified: direct table writes under RLS in HR-core versus function-only writes in module areas; mutable workflow records versus immutable ledgers (`audit_log` immutability `Unverified`); unit condition `fair` is available on return or receipt; Inventory Today "Sales checks"; Budget approvals separate from `/approvals`; scheduler activation deferred by owner decision with hosted status `Unverified`. No app, database or test changes.
+
+### 2026-11-04 | #57 | `28549dd90d6c234f417b31f7dabbf3900358cec0`
+* **Merged** (merge commit of `feat/module-access-simplify` into `main`, 2026-11-04). Required CI green on the PR head `2200c36` and on `main` at `28549dd` (owner/coordinator-reported; not re-run by Claude). No migration. Sections 02 (People & Access screen), 03 (section 2.2a) and this entry re-verified against the merged code at `28549dd` (2026-11-07). Vercel Production status for `28549dd`: not verified by Claude (owner to confirm).
 * Summary: People & Access, Module access simplified: one explicit "Access for company", compact module cards (No access only after a successful read; could not load; can't manage), working profiles mapped to existing capabilities, collapsed Advanced access in four groups, draft plus review before one Save changes, explicit Inventory warehouse scope, profile labels recognised from actual capabilities. Presets replaced in the UI by the single definition `packages/domain/src/accessProfiles.ts`.
 * Migrations: none. Permissions, grant functions, approval independence, company isolation and audit unchanged.
 * Tests: `packages/domain/test/accessProfiles.test.ts`, `apps/web/src/components/people-access/module-access-panel.test.tsx`, loader and server-action tests; `people-access-flow.mjs` 52 passed on the local stack.
