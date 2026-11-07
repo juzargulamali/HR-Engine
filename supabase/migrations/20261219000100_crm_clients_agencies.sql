@@ -17,6 +17,7 @@
 --   6. Inquiry pickers ignored organisation roles. The database now refuses an agency without the agency role and an end client
 --      without the end-client or direct-client role when the field is set or changed (section 6).
 --   7. A follow-up could only hang off an inquiry. It may now hang off an account instead (section 7).
+--   8. No way to assign a salesperson to re-engage or approach an ACCOUNT with no inquiry: crm_outreach + append-only crm_outreach_events (section 8).
 --
 -- Access is NOT widened: reads stay SELECT policies; every write is a SECURITY DEFINER function that re-checks the caller.
 --   * edit an organisation = same rule as crm_can_edit_contact (creator, a founder, or the owner of an open linked opportunity);
@@ -887,6 +888,252 @@ begin
 end;
 $$;
 
+-- -----------------------------------------------------------------------------
+-- 8. Pre-inquiry OUTREACH: an assigned sales worklist for an ACCOUNT, with no inquiry and no placeholder deal
+--    crm_outreach: one OPEN row per (account, company) (partial unique index); a second assignment moves that row to the new person (reassign) instead of
+--    adding another. crm_outreach_events: the append-only history (assigned, reassigned, call/email/meeting with outcome and note, status, next action,
+--    inquiry linked); a guard trigger refuses update and delete for everyone. crm_activities was NOT reused because every row requires an inquiry (and
+--    cascades with it) and the readers of that table count its rows against inquiries; outreach has its own records instead.
+--    Who: assign = the existing assign_owner capability (founder implies it); the assignee must hold an active CRM grant for the company (a person
+--    without Sales access cannot be assigned); the assignee or a holder of assign_owner logs, sets status and next action, and links an inquiry.
+--    Read: the assignee reads own rows and holders of assign_owner read the company's (nobody else). Nothing here reads or writes crm_account_profiles
+--    (the account owner), so owner and outreach are independent, and an assignment confers no read or edit right on anything else.
+--    Status: only the person (or a lead) sets it, except two automatic moves: the first logged activity moves Not started to In progress, and linking an
+--    inquiry sets Inquiry raised. A logged email or call never sets Replied/anything: the outcome 'replied' is chosen, never inferred.
+-- -----------------------------------------------------------------------------
+create table if not exists crm_outreach (
+  id               uuid primary key default gen_random_uuid(),
+  organisation_id  uuid not null references crm_organisations(id),
+  company_id       uuid not null references companies(id),
+  assigned_to      uuid not null references auth.users(id),
+  assigned_by      uuid not null references auth.users(id),
+  assigned_at      timestamptz not null default now(),
+  target_date      date not null,
+  objective        text check (objective is null or length(btrim(objective)) between 1 and 500),
+  status           text not null default 'not_started' check (status in ('not_started', 'in_progress', 'waiting_for_reply', 'meeting_booked', 'inquiry_raised', 'closed')),
+  closed_reason    text check (closed_reason is null or length(btrim(closed_reason)) between 1 and 500),
+  closed_at        timestamptz,
+  last_contact_on  date,
+  last_contact_kind text check (last_contact_kind is null or last_contact_kind in ('call', 'email', 'meeting')),
+  last_outcome     text,
+  next_action      text check (next_action is null or length(btrim(next_action)) between 1 and 300),
+  next_due         date,
+  opportunity_id   uuid references crm_opportunities(id),
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  constraint crm_outreach_closed_needs_reason check (status <> 'closed' or closed_reason is not null)
+);
+create unique index if not exists uq_crm_outreach_open on crm_outreach(organisation_id, company_id) where status <> 'closed';
+create index if not exists idx_crm_outreach_company_assignee on crm_outreach(company_id, assigned_to);
+drop trigger if exists crm_outreach_set_updated_at on crm_outreach;
+create trigger crm_outreach_set_updated_at before update on crm_outreach for each row execute function set_updated_at();
+drop trigger if exists crm_outreach_audit on crm_outreach;
+create trigger crm_outreach_audit after insert or update or delete on crm_outreach for each row execute function crm_audit_trigger();
+
+create table if not exists crm_outreach_events (
+  id              uuid primary key default gen_random_uuid(),
+  outreach_id     uuid not null references crm_outreach(id),
+  company_id      uuid not null references companies(id),
+  organisation_id uuid not null references crm_organisations(id),
+  kind            text not null check (kind in ('assigned', 'reassigned', 'call', 'email', 'meeting', 'status', 'next_action', 'inquiry_linked')),
+  occurred_on     date not null,
+  outcome         text check (outcome is null or outcome in ('no_answer', 'spoke', 'left_message', 'sent', 'replied', 'meeting_held', 'not_interested')),
+  note            text check (note is null or length(btrim(note)) between 1 and 1000),
+  from_user       uuid references auth.users(id),
+  to_user         uuid references auth.users(id),
+  from_status     text,
+  to_status       text,
+  due_on          date,
+  opportunity_id  uuid references crm_opportunities(id),
+  created_by      uuid not null references auth.users(id),
+  created_at      timestamptz not null default now()
+);
+create index if not exists idx_crm_outreach_events_outreach on crm_outreach_events(outreach_id, created_at);
+create index if not exists idx_crm_outreach_events_org on crm_outreach_events(organisation_id, company_id);
+
+create or replace function crm_outreach_events_guard() returns trigger
+language plpgsql
+as $$
+begin
+  raise exception 'Outreach history cannot be changed or deleted' using errcode = '42501';
+end;
+$$;
+drop trigger if exists crm_outreach_events_append_only on crm_outreach_events;
+create trigger crm_outreach_events_append_only before update or delete on crm_outreach_events for each row execute function crm_outreach_events_guard();
+
+alter table crm_outreach enable row level security;
+drop policy if exists crm_outreach_select on crm_outreach;
+create policy crm_outreach_select on crm_outreach for select
+  using (crm_has_access(company_id) and (assigned_to = auth.uid() or crm_has_capability(company_id, 'assign_owner')));
+alter table crm_outreach_events enable row level security;
+drop policy if exists crm_outreach_events_select on crm_outreach_events;
+create policy crm_outreach_events_select on crm_outreach_events for select
+  using (exists (select 1 from crm_outreach o where o.id = outreach_id));   -- the caller's own RLS on crm_outreach applies
+revoke all on table crm_outreach, crm_outreach_events from anon, authenticated, public;
+grant select on table crm_outreach, crm_outreach_events to authenticated;
+
+-- Assign (or reassign) outreach for one or several accounts in one call. Returns one result per account: assigned | reassigned | already | not_found.
+create or replace function crm_assign_outreach(p_company uuid, p_orgs uuid[], p_assignee uuid, p_target date, p_objective text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare v_org uuid; o crm_outreach; v_res text; v_out jsonb := '[]'::jsonb; v_obj text := nullif(btrim(p_objective), '');
+begin
+  perform crm_require_user();
+  if not crm_has_capability(p_company, 'assign_owner') then
+    raise exception 'Only a founder, or someone with the assign owners right, can assign outreach' using errcode = '42501';
+  end if;
+  if p_target is null then raise exception 'Choose a target date' using errcode = '22023'; end if;
+  if p_orgs is null or cardinality(p_orgs) = 0 then raise exception 'Choose at least one account' using errcode = '22023'; end if;
+  if cardinality(p_orgs) > 200 then raise exception 'Assign at most 200 accounts at a time' using errcode = '22023'; end if;
+  if v_obj is not null and length(v_obj) > 500 then raise exception 'The objective is too long (500 characters at most)' using errcode = '22023'; end if;
+  if p_assignee is null or not crm_user_has_company_access(p_assignee, p_company) then
+    raise exception 'The chosen person has no Sales access for this company' using errcode = '22023';
+  end if;
+  for v_org in select distinct x from unnest(p_orgs) x order by x loop
+    perform pg_advisory_xact_lock(hashtextextended('crm_outreach:' || v_org::text || ':' || p_company::text, 0));
+    if not exists (select 1 from crm_organisations g where g.id = v_org and g.archived_at is null) then
+      v_res := 'not_found';
+    else
+      select * into o from crm_outreach where organisation_id = v_org and company_id = p_company and status <> 'closed' for update;
+      if not found then
+        insert into crm_outreach (organisation_id, company_id, assigned_to, assigned_by, target_date, objective)
+        values (v_org, p_company, p_assignee, auth.uid(), p_target, v_obj) returning * into o;
+        insert into crm_outreach_events (outreach_id, company_id, organisation_id, kind, occurred_on, note, to_user, due_on, created_by)
+        values (o.id, p_company, v_org, 'assigned', (now() at time zone 'Asia/Dubai')::date, v_obj, p_assignee, p_target, auth.uid());
+        v_res := 'assigned';
+      elsif o.assigned_to = p_assignee then
+        v_res := 'already';
+      else
+        update crm_outreach set assigned_to = p_assignee, assigned_by = auth.uid(), assigned_at = now(), target_date = p_target, objective = coalesce(v_obj, objective)
+         where id = o.id;
+        insert into crm_outreach_events (outreach_id, company_id, organisation_id, kind, occurred_on, note, from_user, to_user, due_on, created_by)
+        values (o.id, p_company, v_org, 'reassigned', (now() at time zone 'Asia/Dubai')::date, v_obj, o.assigned_to, p_assignee, p_target, auth.uid());
+        v_res := 'reassigned';
+      end if;
+    end if;
+    v_out := v_out || jsonb_build_object('organisation_id', v_org, 'result', v_res);
+  end loop;
+  return v_out;
+end;
+$$;
+
+-- Loads and locks an outreach row for the person acting on it: the assignee or a holder of assign_owner, with Sales access for the company. Closed rows refuse.
+create or replace function crm_outreach_acting_on(p_outreach uuid, p_allow_closed boolean default false)
+returns crm_outreach
+language plpgsql security definer
+set search_path = public
+as $$
+declare o crm_outreach;
+begin
+  perform crm_require_user();
+  select * into o from crm_outreach where id = p_outreach for update;
+  if not found or not crm_has_access(o.company_id) then raise exception 'Outreach not found' using errcode = 'P0002'; end if;
+  if o.assigned_to <> auth.uid() and not crm_has_capability(o.company_id, 'assign_owner') then
+    raise exception 'Only the person this outreach is assigned to, or someone with the assign owners right, can change it' using errcode = '42501';
+  end if;
+  if o.status = 'closed' and not p_allow_closed then raise exception 'This outreach is closed' using errcode = '23514'; end if;
+  return o;
+end;
+$$;
+
+-- Log a call, e-mail or meeting (append-only), optionally with the next action. The first one moves Not started to In progress; nothing else moves the status,
+-- and no outcome (not even a recorded e-mail) is ever inferred as a reply.
+create or replace function crm_outreach_log(
+  p_outreach uuid, p_kind text, p_on date, p_outcome text, p_note text default null, p_next_action text default null, p_next_due date default null
+) returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare o crm_outreach; v_today date := (now() at time zone 'Asia/Dubai')::date; v_note text := nullif(btrim(p_note), ''); v_next text := nullif(btrim(p_next_action), '');
+begin
+  o := crm_outreach_acting_on(p_outreach);
+  if p_kind is null or p_kind not in ('call', 'email', 'meeting') then raise exception 'Choose call, e-mail or meeting' using errcode = '22023'; end if;
+  if p_outcome is null or p_outcome not in ('no_answer', 'spoke', 'left_message', 'sent', 'replied', 'meeting_held', 'not_interested') then
+    raise exception 'Choose an outcome' using errcode = '22023';
+  end if;
+  if p_on is null or p_on > v_today then raise exception 'Choose the date it happened (not a future date)' using errcode = '22023'; end if;
+  if v_note is not null and length(v_note) > 1000 then raise exception 'The note is too long (1000 characters at most)' using errcode = '22023'; end if;
+  if (v_next is null) <> (p_next_due is null) then raise exception 'The next action needs both what to do and a due date' using errcode = '22023'; end if;
+  if v_next is not null and length(v_next) > 300 then raise exception 'The next action is too long (300 characters at most)' using errcode = '22023'; end if;
+  insert into crm_outreach_events (outreach_id, company_id, organisation_id, kind, occurred_on, outcome, note, created_by)
+  values (o.id, o.company_id, o.organisation_id, p_kind, p_on, p_outcome, v_note, auth.uid());
+  if o.last_contact_on is null or p_on >= o.last_contact_on then
+    update crm_outreach set last_contact_on = p_on, last_contact_kind = p_kind, last_outcome = p_outcome where id = o.id;
+  end if;
+  if o.status = 'not_started' then
+    update crm_outreach set status = 'in_progress' where id = o.id;
+    insert into crm_outreach_events (outreach_id, company_id, organisation_id, kind, occurred_on, from_status, to_status, note, created_by)
+    values (o.id, o.company_id, o.organisation_id, 'status', v_today, 'not_started', 'in_progress', 'First activity logged', auth.uid());
+  end if;
+  if v_next is not null then
+    update crm_outreach set next_action = v_next, next_due = p_next_due where id = o.id;
+    insert into crm_outreach_events (outreach_id, company_id, organisation_id, kind, occurred_on, note, due_on, created_by)
+    values (o.id, o.company_id, o.organisation_id, 'next_action', v_today, v_next, p_next_due, auth.uid());
+  end if;
+end;
+$$;
+
+create or replace function crm_outreach_set_next(p_outreach uuid, p_text text, p_due date) returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare o crm_outreach; v_text text := nullif(btrim(p_text), '');
+begin
+  o := crm_outreach_acting_on(p_outreach);
+  if v_text is null or p_due is null then raise exception 'The next action needs both what to do and a due date' using errcode = '22023'; end if;
+  if length(v_text) > 300 then raise exception 'The next action is too long (300 characters at most)' using errcode = '22023'; end if;
+  update crm_outreach set next_action = v_text, next_due = p_due where id = o.id;
+  insert into crm_outreach_events (outreach_id, company_id, organisation_id, kind, occurred_on, note, due_on, created_by)
+  values (o.id, o.company_id, o.organisation_id, 'next_action', (now() at time zone 'Asia/Dubai')::date, v_text, p_due, auth.uid());
+end;
+$$;
+
+-- Set the progress status explicitly. Inquiry raised is set only by linking an inquiry; Closed needs a reason and is final (a new assignment starts a new outreach).
+create or replace function crm_outreach_set_status(p_outreach uuid, p_status text, p_reason text default null) returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare o crm_outreach; v_reason text := nullif(btrim(p_reason), '');
+begin
+  o := crm_outreach_acting_on(p_outreach);
+  if p_status is null or p_status not in ('not_started', 'in_progress', 'waiting_for_reply', 'meeting_booked', 'closed') then
+    raise exception 'Choose a status (Inquiry raised is set by linking an inquiry)' using errcode = '22023';
+  end if;
+  if p_status = 'closed' and v_reason is null then raise exception 'Say why it is closed' using errcode = '22023'; end if;
+  if v_reason is not null and length(v_reason) > 500 then raise exception 'The reason is too long (500 characters at most)' using errcode = '22023'; end if;
+  if o.status = 'inquiry_raised' and p_status <> 'closed' then raise exception 'An outreach that raised an inquiry can only be closed' using errcode = '23514'; end if;
+  if o.status = p_status then return; end if;
+  update crm_outreach set status = p_status, closed_reason = case when p_status = 'closed' then v_reason else closed_reason end,
+         closed_at = case when p_status = 'closed' then now() else closed_at end where id = o.id;
+  insert into crm_outreach_events (outreach_id, company_id, organisation_id, kind, occurred_on, from_status, to_status, note, created_by)
+  values (o.id, o.company_id, o.organisation_id, 'status', (now() at time zone 'Asia/Dubai')::date, o.status, p_status, case when p_status = 'closed' then v_reason end, auth.uid());
+end;
+$$;
+
+-- Link a REAL inquiry of this account (same company; the account is its agency or end client). Sets Inquiry raised. Creates no inquiry and no deal.
+create or replace function crm_outreach_link_inquiry(p_outreach uuid, p_opportunity uuid) returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare o crm_outreach; v_today date := (now() at time zone 'Asia/Dubai')::date;
+begin
+  o := crm_outreach_acting_on(p_outreach);
+  if not exists (select 1 from crm_opportunities x where x.id = p_opportunity and x.company_id = o.company_id
+                   and (x.agency_org_id = o.organisation_id or x.client_org_id = o.organisation_id)) then
+    raise exception 'That inquiry is not on this account for this company' using errcode = '22023';
+  end if;
+  update crm_outreach set opportunity_id = p_opportunity, status = 'inquiry_raised' where id = o.id;
+  insert into crm_outreach_events (outreach_id, company_id, organisation_id, kind, occurred_on, opportunity_id, created_by)
+  values (o.id, o.company_id, o.organisation_id, 'inquiry_linked', v_today, p_opportunity, auth.uid());
+  if o.status <> 'inquiry_raised' then
+    insert into crm_outreach_events (outreach_id, company_id, organisation_id, kind, occurred_on, from_status, to_status, created_by)
+    values (o.id, o.company_id, o.organisation_id, 'status', v_today, o.status, 'inquiry_raised', auth.uid());
+  end if;
+end;
+$$;
+
 revoke all on function
   crm_organisations_sync_kind(), crm_can_edit_organisation(uuid, uuid),
   crm_create_organisation_profile(text, text[], text, text, text, text, uuid, text, text, uuid, jsonb),
@@ -896,7 +1143,9 @@ revoke all on function
   crm_import_fingerprints(uuid, jsonb), crm_import_clean_contacts(jsonb), crm_import_apply_item(uuid, jsonb), crm_import_apply(uuid, text, jsonb),
   crm_organisation_roles(uuid), crm_opportunities_check_party_roles(),
   crm_require_account_follow_up_actor(crm_follow_ups), crm_create_account_follow_up(uuid, uuid, text, timestamptz, text, uuid),
-  crm_complete_follow_up(uuid, text, text, timestamptz, text, text, date), crm_reschedule_follow_up(uuid, timestamptz), crm_cancel_follow_up(uuid, text)
+  crm_complete_follow_up(uuid, text, text, timestamptz, text, text, date), crm_reschedule_follow_up(uuid, timestamptz), crm_cancel_follow_up(uuid, text),
+  crm_outreach_events_guard(), crm_assign_outreach(uuid, uuid[], uuid, date, text), crm_outreach_acting_on(uuid, boolean),
+  crm_outreach_log(uuid, text, date, text, text, text, date), crm_outreach_set_next(uuid, text, date), crm_outreach_set_status(uuid, text, text), crm_outreach_link_inquiry(uuid, uuid)
   from public, anon, authenticated;
 grant execute on function
   crm_can_edit_organisation(uuid, uuid),
@@ -905,10 +1154,14 @@ grant execute on function
   crm_assign_account_owner(uuid, uuid, uuid, text), crm_reassign_follow_up(uuid, uuid),
   crm_import_fingerprints(uuid, jsonb), crm_import_apply(uuid, text, jsonb),
   crm_create_account_follow_up(uuid, uuid, text, timestamptz, text, uuid),
-  crm_complete_follow_up(uuid, text, text, timestamptz, text, text, date), crm_reschedule_follow_up(uuid, timestamptz), crm_cancel_follow_up(uuid, text)
+  crm_complete_follow_up(uuid, text, text, timestamptz, text, text, date), crm_reschedule_follow_up(uuid, timestamptz), crm_cancel_follow_up(uuid, text),
+  crm_assign_outreach(uuid, uuid[], uuid, date, text), crm_outreach_log(uuid, text, date, text, text, text, date), crm_outreach_set_next(uuid, text, date),
+  crm_outreach_set_status(uuid, text, text), crm_outreach_link_inquiry(uuid, uuid)
   to authenticated;
 
 -- ROLLBACK (see supabase/manual-sql/crm_accounts_90_rollback.sql): drop the import functions, the trigger crm_opportunities_party_roles, the account follow-up
 -- function, the table crm_import_batches and the unique index uq_crm_contacts_org_email; delete account follow-ups (organisation_id not null), then drop the
 -- column and restore not-null on crm_follow_ups.opportunity_id and the three follow-up functions from 20261115000200; then drop the five functions, the table
 -- crm_account_profiles, the trigger, the three columns; restore crm_create_organisation from 20261115000200 (without roles). Export crm_account_profiles first.
+-- Pre-inquiry outreach (section 8): drop crm_assign_outreach, crm_outreach_log, crm_outreach_set_next, crm_outreach_set_status, crm_outreach_link_inquiry, crm_outreach_acting_on and
+-- crm_outreach_events_guard, then the tables crm_outreach_events and crm_outreach. Export both tables first.

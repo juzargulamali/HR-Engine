@@ -1,7 +1,8 @@
 -- READ-ONLY. Run BEFORE and again AFTER 20261219000100_crm_clients_agencies.sql, keep both results, and compare the two `paste` columns.
 -- Everything that existed before must be UNCHANGED, except: crm_create_organisation (it now also records the role), crm_complete_follow_up, crm_reschedule_follow_up
 -- and crm_cancel_follow_up (each gained one branch for a follow-up on an account with no inquiry), the organisations table (new columns), crm_follow_ups
--- (opportunity_id may be empty, organisation_id added) and crm_opportunities (one new trigger that checks organisation roles).
+-- (opportunity_id may be empty, organisation_id added)
+-- Pre-inquiry outreach (section 8) adds only NEW tables and functions and changes nothing that exists: no further difference is expected for it. and crm_opportunities (one new trigger that checks organisation roles).
 -- It creates, changes and deletes nothing. One table: item | paste.
 
 with fns as (

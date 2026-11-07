@@ -1,12 +1,12 @@
 -- READ-ONLY. Run AFTER 20261219000100_crm_clients_agencies.sql. One table (check | item | result | detail); every result must say OK (INFO is information only).
 -- A FAIL means stop and send the whole result. It checks DEFINITIONS and PRIVILEGES; behaviour is proved by packages/rls-tests/test/crm-clients-agencies.rls.test.ts.
 
-with newfns(name) as (values ('crm_can_edit_organisation'), ('crm_create_organisation_profile'), ('crm_update_organisation'), ('crm_save_account_profile'), ('crm_assign_account_owner'), ('crm_reassign_follow_up'), ('crm_import_fingerprints'), ('crm_import_apply'), ('crm_import_apply_item'), ('crm_create_account_follow_up'), ('crm_complete_follow_up'), ('crm_cancel_follow_up'), ('crm_reschedule_follow_up')),
+with newfns(name) as (values ('crm_can_edit_organisation'), ('crm_create_organisation_profile'), ('crm_update_organisation'), ('crm_save_account_profile'), ('crm_assign_account_owner'), ('crm_reassign_follow_up'), ('crm_import_fingerprints'), ('crm_import_apply'), ('crm_import_apply_item'), ('crm_create_account_follow_up'), ('crm_complete_follow_up'), ('crm_cancel_follow_up'), ('crm_reschedule_follow_up'), ('crm_assign_outreach'), ('crm_outreach_acting_on'), ('crm_outreach_log'), ('crm_outreach_set_next'), ('crm_outreach_set_status'), ('crm_outreach_link_inquiry')),
 fn as (select p.oid, p.proname, p.prosrc, p.prosecdef, p.proconfig from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in (select name from newfns)),
 checks as (
   select 1 as grp, 'function exists' as chk, n.name as item, case when f.oid is not null then 'OK' else 'FAIL' end as result, '' as detail from newfns n left join fn f on f.proname = n.name
   union all select 2, 'security definer, fixed search path', f.proname, case when f.prosecdef and coalesce(f.proconfig::text, '') like '%search_path=public%' then 'OK' else 'FAIL' end, coalesce(f.proconfig::text, 'none') from fn f
-  union all select 3, 'signed-in users can call, anonymous cannot', f.proname, case when has_function_privilege('authenticated', f.oid, 'execute') and not has_function_privilege('anon', f.oid, 'execute') then 'OK' else 'FAIL' end, '' from fn f where f.proname <> 'crm_import_apply_item'
+  union all select 3, 'signed-in users can call, anonymous cannot', f.proname, case when has_function_privilege('authenticated', f.oid, 'execute') and not has_function_privilege('anon', f.oid, 'execute') then 'OK' else 'FAIL' end, '' from fn f where f.proname not in ('crm_import_apply_item', 'crm_outreach_acting_on')
   union all select 4, 'column exists', c, case when exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'crm_organisations' and column_name = c) then 'OK' else 'FAIL' end, ''
     from unnest(array['roles', 'country_code', 'website', 'website_domain']) c
   union all select 5, 'constraint exists', c, case when exists (select 1 from pg_constraint where conname = c) then 'OK' else 'FAIL' end, '' from unnest(array['crm_organisations_roles_valid', 'crm_organisations_country_format', 'crm_account_profiles_unique']) c
@@ -42,6 +42,21 @@ checks as (
                    and exists (select 1 from pg_constraint where conname = 'crm_follow_ups_target') then 'OK' else 'FAIL' end, ''
   union all select 20, 'account follow-up never reads or writes an account owner', 'crm_create_account_follow_up',
          case when (select prosrc from fn where proname = 'crm_create_account_follow_up') not like '%crm_account_profiles%' then 'OK' else 'FAIL' end, ''
+  union all select 21, 'outreach tables: RLS on, one SELECT policy, signed-in users can only SELECT, anonymous nothing', t,
+         case when (select relrowsecurity from pg_class where oid = ('public.' || t)::regclass)
+                   and (select count(*) from pg_policies where tablename = t) = 1 and (select cmd from pg_policies where tablename = t) = 'SELECT'
+                   and has_table_privilege('authenticated', 'public.' || t, 'select') and not has_table_privilege('authenticated', 'public.' || t, 'insert, update, delete')
+                   and not has_table_privilege('anon', 'public.' || t, 'select') then 'OK' else 'FAIL' end, ''
+    from unnest(array['crm_outreach', 'crm_outreach_events']) t
+  union all select 22, 'outreach history is append-only (guard trigger) and one open outreach per account and company', 'crm_outreach_events',
+         case when exists (select 1 from pg_trigger where tgname = 'crm_outreach_events_append_only' and not tgisinternal) and exists (select 1 from pg_indexes where indexname = 'uq_crm_outreach_open') then 'OK' else 'FAIL' end, ''
+  union all select 23, 'assigning outreach needs assign_owner and a person with Sales access', 'crm_assign_outreach',
+         case when (select prosrc from fn where proname = 'crm_assign_outreach') like '%crm_has_capability(p_company, ''assign_owner'')%' and (select prosrc from fn where proname = 'crm_assign_outreach') like '%crm_user_has_company_access%' then 'OK' else 'FAIL' end, ''
+  union all select 24, 'outreach reads only for the assignee or an assign_owner holder', 'crm_outreach_select',
+         case when (select qual from pg_policies where tablename = 'crm_outreach') like '%assigned_to = auth.uid()%' and (select qual from pg_policies where tablename = 'crm_outreach') like '%assign_owner%' then 'OK' else 'FAIL' end, ''
+  union all select 25, 'outreach functions never read or write an account owner', f.proname,
+         case when f.prosrc not like '%crm_account_profiles%' then 'OK' else 'FAIL' end, '' from fn f where f.proname like 'crm\_%outreach%' escape '\'
+  union all select 26, 'outreach row counts', 'crm_outreach', 'INFO', (select count(*)::text from crm_outreach)
   union all select 13, 'row counts', 'crm_account_profiles', 'INFO', (select count(*)::text from crm_account_profiles)
 )
 select chk as check, item, result, detail from checks

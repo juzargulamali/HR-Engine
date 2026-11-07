@@ -1,9 +1,18 @@
 -- WRITES. OWNER-RUN ROLLBACK of 20261219000100_crm_clients_agencies.sql (the whole migration, including the import safety, role check and account follow-ups). Safe to run twice.
 -- READ THIS FIRST: this DELETES every account owner, lead source and exhibition recorded in crm_account_profiles, and the roles, countries and websites
 -- recorded on organisations. Export them first (select * from crm_account_profiles; select id, name, roles, country_code, website from crm_organisations).
--- It also DELETES follow-ups that hang off an account with no inquiry (export: select * from crm_follow_ups where opportunity_id is null) and the import batch
+-- It also DELETES all pre-inquiry outreach and its history (export: select * from crm_outreach; select * from crm_outreach_events) and follow-ups that hang off an account with no inquiry (export: select * from crm_follow_ups where opportunity_id is null) and the import batch
 -- records (select * from crm_import_batches). Follow-ups that were reassigned stay as they are (they are ordinary rows). Organisations keep their legacy `kind`.
 begin;
+drop function if exists crm_assign_outreach(uuid, uuid[], uuid, date, text);
+drop function if exists crm_outreach_log(uuid, text, date, text, text, text, date);
+drop function if exists crm_outreach_set_next(uuid, text, date);
+drop function if exists crm_outreach_set_status(uuid, text, text);
+drop function if exists crm_outreach_link_inquiry(uuid, uuid);
+drop function if exists crm_outreach_acting_on(uuid, boolean);
+drop table if exists crm_outreach_events;   -- the append-only guard trigger goes with it
+drop table if exists crm_outreach;
+drop function if exists crm_outreach_events_guard();
 drop trigger if exists crm_opportunities_party_roles on crm_opportunities;
 drop function if exists crm_opportunities_check_party_roles();
 drop function if exists crm_organisation_roles(uuid);
