@@ -36,8 +36,10 @@ describe("Pre-inquiry outreach", () => {
   const org = async (name: string, roles = "{agency}") => (await commit<{ id: string }>(U.founder, `select crm_create_organisation_profile(p_name => '${name}', p_roles => '${roles}', p_company_id => '${CO.uae}') as id`))[0].id;
   const assign = (user: string, orgs: string[], to: string, target = TARGET, objective = "null", company = CO.uae) =>
     commit<{ r: { organisation_id: string; result: string }[] }>(user, `select crm_assign_outreach('${company}', array[${orgs.map((o) => `'${o}'::uuid`).join(",")}], '${to}', ${target}::date, ${objective}) as r`).then((x) => x[0].r);
-  const outreachOf = async (o: string, company = CO.uae) => (await admin<{ id: string; assigned_to: string; status: string; last_outcome: string | null; opportunity_id: string | null; next_action: string | null }>(
-    `select id, assigned_to, status, last_outcome, opportunity_id, next_action from crm_outreach where organisation_id = '${o}' and company_id = '${company}' and status <> 'closed'`))[0];
+  type OutreachRow = { id: string; assigned_to: string; status: string; last_outcome: string | null; opportunity_id: string | null; next_action: string | null };
+  // undefined when the account has no open outreach (typed as present for brevity; the one test that expects none compares with undefined)
+  const outreachOf = async (o: string, company = CO.uae) => (await admin<OutreachRow>(
+    `select id, assigned_to, status, last_outcome, opportunity_id, next_action from crm_outreach where organisation_id = '${o}' and company_id = '${company}' and status <> 'closed'`))[0] as OutreachRow;
   const eventKinds = async (oid: string) => (await admin<{ kind: string }>(`select kind from crm_outreach_events where outreach_id = '${oid}' order by created_at, id`)).map((r) => r.kind);
   const today = () => "(now() at time zone 'Asia/Dubai')::date";
 
@@ -82,14 +84,14 @@ describe("Pre-inquiry outreach", () => {
     it("a second assignment reassigns the open outreach: one row, history kept; the same person again changes nothing", async () => {
       const first = await outreachOf(A);
       const r = await assign(U.founder, [A], U.omar, "'2027-02-01'");
-      expect(r[0].result).toBe("reassigned");
+      expect(r[0]?.result).toBe("reassigned");
       const open = await admin(`select 1 from crm_outreach where organisation_id = '${A}' and company_id = '${CO.uae}' and status <> 'closed'`);
       expect(open).toHaveLength(1);
       const now = await outreachOf(A);
       expect(now.id).toBe(first.id);
       expect(now.assigned_to).toBe(U.omar);
       expect(await eventKinds(first.id)).toEqual(["assigned", "reassigned"]);
-      expect((await assign(U.lead, [A], U.omar))[0].result).toBe("already");
+      expect((await assign(U.lead, [A], U.omar))[0]?.result).toBe("already");
       expect(await eventKinds(first.id)).toEqual(["assigned", "reassigned"]);
       await assign(U.lead, [A], U.sara); // back to sara for the later tests
     });
@@ -203,7 +205,7 @@ describe("Pre-inquiry outreach", () => {
       expect(await outreachOf(B)).toBeUndefined();
       await expect(commit(U.sara, `select crm_outreach_log('${o.id}', 'call', ${today()}, 'spoke')`)).rejects.toThrow(/closed/);
       // a closed outreach frees the account: a new assignment starts a new row
-      expect((await assign(U.lead, [B], U.omar))[0].result).toBe("assigned");
+      expect((await assign(U.lead, [B], U.omar))[0]?.result).toBe("assigned");
       expect(await admin(`select 1 from crm_outreach where organisation_id = '${B}'`)).toHaveLength(2);
     });
 
