@@ -154,6 +154,7 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
           links: [
             { href: "/sales/follow-ups", label: "Follow-ups", iconKey: "sales" },
             { href: "/sales/opportunities", label: "Enquiries", iconKey: "sales" },
+            { href: "/sales/accounts", label: "Clients & Agencies", iconKey: "sales" },
             { href: "/sales/reports", label: "Reports", iconKey: "sales" },
             // Reachable from Enquiries and by search; not in the menu.
             { href: "/sales/opportunities?add=1", label: "New enquiry", iconKey: "sales", secondary: true },

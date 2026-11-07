@@ -1,0 +1,95 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+const rpc = vi.fn();
+vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc }) }));
+type Grant = { companyId: string; capabilities: string[] };
+let grants: Grant[] = [];
+vi.mock("@/lib/crm/context", () => ({ getCrmContext: async () => ({ userId: "u", fullName: "U", grants, companies: [], people: [], personName: () => "x", companyName: () => "x" }) }));
+
+import { assignAccountOwner, createAccount, reassignFollowUp, saveAccountProfile } from "./clients-agencies";
+
+const CO = "11111111-1111-4111-8111-111111111111";
+const OTHER = "22222222-2222-4222-8222-222222222222";
+const ORG = "33333333-3333-4333-8333-333333333333";
+const SARA = "44444444-4444-4444-8444-444444444444";
+const OMAR = "55555555-5555-4555-8555-555555555555";
+const FU = "66666666-6666-4666-8666-666666666666";
+const fd = (o: Record<string, string | string[]>) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) for (const x of Array.isArray(v) ? v : [v]) f.append(k, x); return f; };
+
+beforeEach(() => { grants = []; rpc.mockReset().mockResolvedValue({ data: "new-id", error: null }); });
+
+describe("assigning the account owner", () => {
+  it("is refused on the server, without calling the database, for someone without the assign owners right", async () => {
+    grants = [{ companyId: CO, capabilities: [] }];
+    const r = await assignAccountOwner({ error: null }, fd({ orgId: ORG, companyId: CO, ownerId: SARA }));
+    expect(r.error).toMatch(/Only a founder/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("does not accept a right held for another company (company boundary)", async () => {
+    grants = [{ companyId: OTHER, capabilities: ["founder"] }];
+    expect((await assignAccountOwner({ error: null }, fd({ orgId: ORG, companyId: CO, ownerId: SARA }))).error).toMatch(/Only a founder/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("calls only the account-owner function (never a follow-up or inquiry-owner function) for a delegate, and Unassigned is a null owner", async () => {
+    grants = [{ companyId: CO, capabilities: ["assign_owner"] }];
+    expect(await assignAccountOwner({ error: null }, fd({ orgId: ORG, companyId: CO, ownerId: SARA }))).toEqual({ error: null });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith("crm_assign_account_owner", { p_org: ORG, p_company: CO, p_new_owner: SARA });
+    rpc.mockClear();
+    await assignAccountOwner({ error: null }, fd({ orgId: ORG, companyId: CO, ownerId: "" }));
+    expect(rpc).toHaveBeenCalledWith("crm_assign_account_owner", { p_org: ORG, p_company: CO, p_new_owner: null });
+  });
+  it("shows the database's own refusal (an ineligible person) in words", async () => {
+    grants = [{ companyId: CO, capabilities: ["founder"] }];
+    rpc.mockResolvedValue({ data: null, error: { message: "The chosen owner has no Sales access for this company" } });
+    expect((await assignAccountOwner({ error: null }, fd({ orgId: ORG, companyId: CO, ownerId: OMAR }))).error).toMatch(/no Sales access for this company/);
+  });
+});
+
+describe("reassigning a follow-up", () => {
+  it("calls only the follow-up function: the account owner is never touched", async () => {
+    grants = [{ companyId: CO, capabilities: [] }];
+    expect(await reassignFollowUp({ error: null }, fd({ followUpId: FU, assigneeId: OMAR }))).toEqual({ error: null });
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_reassign_follow_up"]);
+    expect(rpc).toHaveBeenCalledWith("crm_reassign_follow_up", { p_follow_up_id: FU, p_new_assignee: OMAR });
+  });
+  it("shows the database's refusal when the caller may not hand it to that person", async () => {
+    rpc.mockResolvedValue({ data: null, error: { message: "Only the owner or a founder can assign follow-ups to others" } });
+    expect((await reassignFollowUp({ error: null }, fd({ followUpId: FU, assigneeId: OMAR }))).error).toMatch(/Only the owner or a founder/);
+  });
+});
+
+describe("editing and creating", () => {
+  it("passes an edit to the database, which refuses someone who may not edit (shown, nothing else called)", async () => {
+    rpc.mockResolvedValue({ data: null, error: { message: "Only the person who added this organisation, a founder, or the owner of an opportunity it is on can change it" } });
+    const r = await saveAccountProfile({ error: null }, fd({ orgId: ORG, companyId: CO, name: "Fictional Aurora", roles: ["agency", "technology"], country: "AE" }));
+    expect(r.error).toMatch(/Only the person who added/);
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_update_organisation"]);
+  });
+  it("saves the shared record and this company's lead source in two steps, with several roles on the one record", async () => {
+    rpc.mockResolvedValue({ data: null, error: null });
+    const r = await saveAccountProfile({ error: null }, fd({ orgId: ORG, companyId: CO, name: "Fictional Aurora", roles: ["agency", "technology"], country: "uae", website: "aurora.example", leadSource: "exhibition", exhibition: "Gulf Expo (fictional)" }));
+    expect(r).toEqual({ error: null });
+    expect(rpc).toHaveBeenNthCalledWith(1, "crm_update_organisation", { p_org: ORG, p_patch: { name: "Fictional Aurora", roles: ["agency", "technology"], country_code: "AE", website: "aurora.example", place: null, note: null } });
+    expect(rpc).toHaveBeenNthCalledWith(2, "crm_save_account_profile", { p_org: ORG, p_company: CO, p_patch: { lead_source: "exhibition", exhibition: "Gulf Expo (fictional)" } });
+  });
+  it("rejects an unknown role or country before calling the database", async () => {
+    expect((await saveAccountProfile({ error: null }, fd({ orgId: ORG, companyId: CO, name: "X", roles: ["sponsor"] }))).error).toMatch(/roles/);
+    expect((await saveAccountProfile({ error: null }, fd({ orgId: ORG, companyId: CO, name: "X", country: "Atlantis" }))).error).toMatch(/not recognised/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("creates an account from the name alone, and refuses an owner choice from someone without the assign owners right", async () => {
+    grants = [{ companyId: CO, capabilities: [] }];
+    expect(await createAccount({ error: null }, fd({ companyId: CO, name: "Fictional Imported Co" }))).toEqual({ error: null, id: "new-id" });
+    expect(rpc).toHaveBeenCalledWith("crm_create_organisation_profile", expect.objectContaining({ p_name: "Fictional Imported Co", p_roles: [], p_owner_id: null, p_company_id: CO }));
+    rpc.mockClear();
+    expect((await createAccount({ error: null }, fd({ companyId: CO, name: "X", ownerId: SARA }))).error).toMatch(/Only a founder/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("requires a name", async () => {
+    expect((await createAccount({ error: null }, fd({ companyId: CO, name: "  " }))).error).toMatch(/name/i);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+});

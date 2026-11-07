@@ -46,18 +46,40 @@ export type CrmCompanySettingsRow = {
 }
 
 export type CrmOrganisationKind = "agency" | "client" | "direct";
+/** One organisation record can play several roles (migration 20261219000100). `kind` stays as the legacy single role. */
+export type CrmOrganisationRole = "agency" | "direct" | "client" | "technology";
 
 export type CrmOrganisationRow = {
   id: string;
   name: string;
   name_key: string;
   kind: CrmOrganisationKind;
+  roles: CrmOrganisationRole[];
+  country_code: string | null;
+  website: string | null;
+  website_domain: string | null;
   place: string | null;
   note: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
+}
+
+export type CrmLeadSource = "agency_call" | "linkedin" | "direct_client" | "whatsapp" | "instagram" | "website" | "referral" | "other" | "exhibition";
+
+/** One Enginious company's profile of an organisation: account owner (null = Unassigned), lead source, exhibition. */
+export type CrmAccountProfileRow = {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  owner_id: string | null;
+  owner_assigned_by: string | null;
+  owner_assigned_at: string | null;
+  lead_source: CrmLeadSource | null;
+  exhibition: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export type CrmContactRow = {

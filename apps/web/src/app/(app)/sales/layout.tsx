@@ -28,6 +28,7 @@ export default async function SalesLayout({ children }: { children: React.ReactN
   const tabs: SalesTab[] = [
     { href: "/sales/follow-ups", label: "Follow-ups" },
     { href: "/sales/opportunities", label: "Enquiries" },
+    { href: "/sales/accounts", label: "Clients & Agencies" },
     { href: "/sales/reports", label: "Reports" },
     ...(manageSettings || isAnyCrmFounder(ctx.grants) ? [{ href: "/sales/settings", label: "Settings" }] : []),
   ];

@@ -22,7 +22,7 @@ import type { PbxAuthorshipRow, PbxBudgetHeaderRow, PbxCompanyGrantRow, PbxJson,
 import type {
   CrmActivityRow, CrmApprovalRow, CrmAuditLogRow, CrmCompanyGrantRow, CrmCompanySettingsRow, CrmContactRow,
   CrmDuplicateCandidateRow, CrmFileRow, CrmFollowUpRow, CrmHandoverRow, CrmOpportunityContactRow, CrmOpportunityEventRow,
-  CrmOpportunityRow, CrmOrganisationRow, CrmProposalRow, CrmReadOnlyTable, CrmReminderEmailClaim, CrmReminderRow,
+  CrmAccountProfileRow, CrmOpportunityRow, CrmOrganisationRow, CrmProposalRow, CrmReadOnlyTable, CrmReminderEmailClaim, CrmReminderRow,
   CrmZohoReferenceRow, CrmClosureRow, CrmUploadIntent,
 } from "./crm";
 import type {
@@ -1714,6 +1714,7 @@ export interface Database {
       crm_audit_log: CrmReadOnlyTable<CrmAuditLogRow>;
       crm_company_settings: CrmReadOnlyTable<CrmCompanySettingsRow>;
       crm_organisations: CrmReadOnlyTable<CrmOrganisationRow>;
+      crm_account_profiles: CrmReadOnlyTable<CrmAccountProfileRow>;
       crm_contacts: CrmReadOnlyTable<CrmContactRow>;
       crm_opportunities: CrmReadOnlyTable<CrmOpportunityRow>;
       crm_opportunity_contacts: CrmReadOnlyTable<CrmOpportunityContactRow>;
@@ -1830,6 +1831,19 @@ export interface Database {
       };
       crm_link_contact: { Args: { p_opportunity_id: string; p_contact_id: string; p_role?: string | null }; Returns: undefined };
       crm_unlink_contact: { Args: { p_opportunity_id: string; p_contact_id: string }; Returns: undefined };
+      crm_create_organisation_profile: {
+        Args: {
+          p_name: string; p_roles?: string[]; p_country_code?: string | null; p_website?: string | null; p_place?: string | null; p_note?: string | null;
+          p_company_id?: string | null; p_lead_source?: string | null; p_exhibition?: string | null; p_owner_id?: string | null;
+          p_contacts?: { name: string; role_title?: string | null; email?: string | null; phone?: string | null }[];
+        };
+        Returns: string;
+      };
+      crm_update_organisation: { Args: { p_org: string; p_patch: Record<string, unknown> }; Returns: undefined };
+      crm_save_account_profile: { Args: { p_org: string; p_company: string; p_patch: Record<string, unknown> }; Returns: undefined };
+      crm_assign_account_owner: { Args: { p_org: string; p_company: string; p_new_owner: string | null; p_reason?: string | null }; Returns: undefined };
+      crm_reassign_follow_up: { Args: { p_follow_up_id: string; p_new_assignee: string }; Returns: undefined };
+      crm_can_edit_organisation: { Args: { p_org: string; p_company?: string | null }; Returns: boolean };
       crm_update_contact: { Args: { p_contact_id: string; p_patch: Record<string, unknown> }; Returns: undefined };
       crm_can_edit_contact: { Args: { p_contact_id: string }; Returns: boolean };
       crm_create_upload_intent: {
