@@ -6,6 +6,7 @@ import type { CrmContext } from "../context";
 import { deriveAccount, type AccountView, type OppLite, type ProjectLite, type Section } from "./account";
 import { buildDirectoryRows, type DirectoryRow } from "./directory";
 import type { StaffPerson } from "./staff";
+import type { SummaryInputs } from "./import/export";
 
 /** A failed query must surface as an error (the page says "could not load"), never as "no data". */
 function ok(...results: { error?: { message: string } | null }[]): void {
@@ -107,4 +108,44 @@ export async function loadAccount(ctx: CrmContext, companyId: string, orgId: str
     orgId, companyId, now, opportunities: opps, proposals: proposals.data ?? [], zoho: zoho.data ?? [], activities: activities.data ?? [], followUps: followUps.data ?? [], projects, handovers,
   });
   return { org: orgRes.data, contacts: contactsRes.data ?? [], profile: profileRes.data ?? null, view, orgNames: new Map((others.data ?? []).map((o) => [o.id, o.name])) };
+}
+
+/** Reads a table page by page (the data service returns at most 1000 rows per request). Throws when any page fails. */
+async function readAll<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += 1000) {
+    const r = await page(from, from + 999);
+    ok(r);
+    out.push(...(r.data ?? []));
+    if ((r.data ?? []).length < 1000) return out;
+  }
+}
+
+/**
+ * Everything the export's Summary sheet needs to count inquiries, quotes and completed projects the way the account page does, for every
+ * organisation at once. Inquiries, quotes and replies fail the whole load; projects fail softly into "could not load" cells.
+ */
+export async function loadSummaryInputs(companyId: string): Promise<SummaryInputs> {
+  const supabase = await createClient();
+  const [opportunities, proposals, zoho, activities] = await Promise.all([
+    readAll<OppLite>((a, b) => supabase.from("crm_opportunities").select("id, company_id, reference, title, stage, agency_org_id, client_org_id, owner_id, currency, value, closed_at, created_at").eq("company_id", companyId).order("id").range(a, b)),
+    readAll((a, b) => supabase.from("crm_proposals").select("id, opportunity_id, version, status, sent_on").order("id").range(a, b)),
+    readAll((a, b) => supabase.from("crm_zoho_references").select("opportunity_id, quote_ref, quote_sent_on").order("opportunity_id").range(a, b)),
+    readAll((a, b) => supabase.from("crm_activities").select("id, opportunity_id, kind, occurred_at").eq("kind", "client_response").order("id").range(a, b)),
+  ]);
+  const won = new Set(opportunities.filter((o) => o.stage === "won").map((o) => o.id));
+  let projects: Section<ProjectLite[]> = { status: "ok", data: [] };
+  if (won.size) {
+    const all: ProjectLite[] = [];
+    for (let from = 0; projects.status === "ok"; from += 1000) {
+      const r = await supabase.from("proj_projects").select("id, reference, name, status, completed_at, crm_opportunity_id").not("crm_opportunity_id", "is", null).order("id").range(from, from + 999);
+      if (isNotInstalled(r.error)) break;
+      // Any other failure is "could not load" in the sheet, never zero.
+      if (r.error) { projects = { status: "error" }; break; }
+      all.push(...(r.data ?? []));
+      if ((r.data ?? []).length < 1000) break;
+    }
+    if (projects.status === "ok") projects = { status: "ok", data: all.filter((p) => p.crm_opportunity_id && won.has(p.crm_opportunity_id)) };
+  }
+  return { companyId, opportunities, proposals, zoho, activities, projects };
 }

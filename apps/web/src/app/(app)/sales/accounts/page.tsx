@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Building2 } from "lucide-react";
+import { Building2, Download, Upload } from "lucide-react";
 import { hasCrmCapability } from "@enginious-hr/domain";
 import { OsBadge } from "@/components/os/pills";
 import { Alert } from "@/components/ui/alert";
@@ -49,13 +49,23 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
   const shown = filterDirectory(rows, filters);
   const page = shown.slice(0, PAGE_LIMIT);
   const countries = [...new Set(rows.map((r) => r.org.country_code).filter((c): c is string => !!c))].sort((a, b) => countryLabel(a).localeCompare(countryLabel(b)));
+  const exportQuery = (scope: "filtered" | "all") => {
+    const q = new URLSearchParams({ company: company.id, scope });
+    for (const [k, v] of Object.entries(filters)) if (v) q.set(k, v);
+    return q.toString();
+  };
   const here = (extra = "") => `/sales/accounts?company=${company.id}${extra}`;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         {heading}
-        <AddAccountButton companyId={company.id} ownerChoices={canAssign ? people.map((p) => ({ id: p.userId, name: p.name })) : null} />
+        <div className="flex flex-wrap gap-2">
+          <AddAccountButton companyId={company.id} ownerChoices={canAssign ? people.map((p) => ({ id: p.userId, name: p.name })) : null} />
+          <Link href={`/sales/accounts/import?company=${company.id}`} className={buttonVariants({ variant: "outline" })}><Upload className="h-4 w-4" aria-hidden /> Import from Excel</Link>
+          <a href={`/api/sales/accounts/export?${exportQuery("filtered")}`} className={buttonVariants({ variant: "outline" })}><Download className="h-4 w-4" aria-hidden /> Export filtered results</a>
+          <a href={`/api/sales/accounts/export?company=${company.id}&scope=all`} className={buttonVariants({ variant: "outline" })}><Download className="h-4 w-4" aria-hidden /> Export all accounts</a>
+        </div>
       </div>
 
       <form method="get" role="search" aria-label="Filter accounts" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
