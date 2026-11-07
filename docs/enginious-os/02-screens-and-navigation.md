@@ -57,6 +57,7 @@ Verified at `551f615` (2026-11-04). Route list from `apps/web/src/app/(app)/**/p
 | `/sales`, `/sales/follow-ups` | Follow-ups (entry point) | Menu |
 | `/sales/opportunities`, `/sales/opportunities/[id]` | Enquiries; enquiry detail (tab `commercial` for approvals) | Menu / Ctx |
 | `/sales/opportunities/[id]/close`, `.../handover` | Close as won/lost; handover to Projects | Ctx |
+| `/sales/accounts`, `/sales/accounts/[id]` | Clients & Agencies: directory (role, country, account owner, lead source, exhibition) and account page (profile, contacts, inquiries direct or through an agency, quotes, follow-ups). Control reference: `modules/sales-clients-and-agencies.md` | Menu |
 | `/sales/new` | Full new-enquiry form (`/sales/opportunities?add=1` also) | Secondary |
 | `/sales/clients`, `/sales/proposals`, `/sales/pipeline` | Shared contacts, proposals search, pipeline board | Secondary |
 | `/sales/reports` | Reports | Menu |
@@ -100,7 +101,7 @@ Source: `buildNavModules` in `nav-groups.ts`. Order is as listed. "Always" = no 
 |---|---|---|
 | My Day | `/` | Always |
 | Approvals | `/approvals` | Role `line_manager`, `hr_admin`, `finance`, `ceo` or `cto` in any scope, **or** something is currently waiting on the person (`hasPendingApprovals`, e.g. a project lead's Recovery Leave step) |
-| Sales & CRM | Follow-ups, Enquiries, Reports; Manage: Settings | Any Sales grant. Settings: `manage_settings` capability or Sales founder. Secondary (search only): New enquiry, Clients & contacts, Proposals & quotes, Pipeline board |
+| Sales & CRM | Follow-ups, Enquiries, Clients & Agencies, Reports; Manage: Settings | Any Sales grant. Settings: `manage_settings` capability or Sales founder. Secondary (search only): New enquiry, Clients & contacts, Proposals & quotes, Pipeline board |
 | Me | My Profile, My Attendance Clock, My Attendance, My Leave, My Reimbursements, My Letters, My Equipment, My Performance | Always. My Attendance and My Letters hidden for HR Admin (they move to People & HR). My Equipment only if the person has a linked employee record |
 | People & HR | People: Employees, Attendance register. Workflow: Alerts, Letters, Payroll. Organisation: Assets, Companies. Insights: AI Suggestions, Audit Log. Access: People & Access | Group appears if any section has a row. Employees: role line_manager/hr_admin/finance/ceo/cto/sys_admin **or** any direct report. Attendance register and Letters: HR Admin. Alerts: `canViewHrAlerts`. Payroll: HR/Finance/CEO/CTO. Assets: HR or Finance. Companies: System Administrator. Insights: HR Admin or sys admin. People & Access: `canUsePeopleAccess` (sys admin, HR Admin, or a module access manager in Sales/Projects/Inventory/Budget) |
 | Projects & Tasks | My Work, Projects, Calendar; Manage: Handovers; secondary: New internal project | Any Projects grant, or linked to a project as Sales (then only "Projects"). Lands on `/projects/work` unless founder, `assign_pm` or manages projects. Handovers: `assign_pm` or a handover is waiting. New internal project: `assign_pm` |

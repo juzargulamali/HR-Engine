@@ -8,6 +8,12 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-07 | Clients & Agencies, in draft PR | branch `feat/clients-agencies` (not merged)
+* Summary: new Sales tab "Clients & Agencies" (`/sales/accounts`, `/sales/accounts/[id]`): editable directory with role (several roles on one organisation record), country, account owner (incl. Unassigned), lead source and exhibition filters; account page with direct versus through-agency work, won inquiries apart from completed projects, quotes ("Awaiting reply" only where recorded data supports it), follow-ups and last activity; account owner and follow-up assignee are separate. Shared server-side helpers for the Part 2 Excel import. Part 2 (import/export) is not in this entry.
+* Migrations: `20261219000100_crm_clients_agencies` (additive: columns `roles`, `country_code`, `website`, `website_domain` on `crm_organisations`; table `crm_account_profiles`; six functions; `crm_create_organisation` re-defined with the same signature). Owner pack `supabase/manual-sql/crm_accounts_*`; not applied to any hosted project.
+* Access: no access widened; account owner confers no right (`modules/sales-clients-and-agencies.md` section 5).
+* Tests: `packages/rls-tests/test/crm-clients-agencies.rls.test.ts`, `apps/web/src/lib/crm/clients-agencies/*.test.ts`, `apps/web/src/lib/actions/clients-agencies.test.ts`, `nav-groups.test.ts`.
+
 ### 2026-11-07 | docs only | branch `docs/enginious-os-app-map`
 * Summary: app memory (README and files 01 to 06) and `CLAUDE.md` added. Clarified: direct table writes under RLS in HR-core versus function-only writes in module areas; mutable workflow records versus immutable ledgers (`audit_log` immutability `Unverified`); unit condition `fair` is available on return or receipt; Inventory Today "Sales checks"; Budget approvals separate from `/approvals`; scheduler activation deferred by owner decision with hosted status `Unverified`. No app, database or test changes.
 
