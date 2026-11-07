@@ -1,7 +1,8 @@
 -- READ-ONLY. Run in the SQL Editor of "Enginious HR Engine_V2" BEFORE the migration 20261219000100_crm_clients_agencies.sql.
 -- Run the WHOLE file; it returns ONE result table (section | item | detail). It creates, changes and deletes nothing. Send the full result.
---   A  who is running this     B  prerequisites and "not applied yet"     C  what exists today (information only)
--- HOW TO READ IT: every section B row must say OK and the last one must say the change is NOT yet applied.
+--   A  who is running this     B  prerequisites and "not applied yet"     C  what exists today (information only)     D  contact e-mails held twice (must be none)
+-- HOW TO READ IT: every section B row must say OK and the last one must say the change is NOT yet applied. Section D must say OK: the migration adds a rule
+-- "one contact e-mail once per organisation" and stops (changing nothing) if an organisation already holds the same e-mail twice; the rows are listed so you can tidy them first.
 
 select section, item, detail from (
   select 'A session' as section, 1 as ord, 'running as' as item, current_user::text as detail
@@ -21,5 +22,11 @@ select section, item, detail from (
   union all select 'C what exists today', 1002, 'contacts', (select count(*)::text from crm_contacts)
   union all select 'C what exists today', 1003, 'open follow-ups', (select count(*)::text from crm_follow_ups where status = 'open')
   union all select 'C what exists today', 1004, 'people holding assign_owner or founder (active grants)', (select count(*)::text from crm_company_grants where revoked_at is null and ('founder' = any (capabilities) or 'assign_owner' = any (capabilities)))
+  union all select 'D duplicate contact e-mails', 2000, 'organisations holding one e-mail twice',
+         case when n = 0 then 'OK - none' else 'FIX FIRST - ' || n || ' e-mail(s) held twice in one organisation; archive or edit the repeats, then run again' end
+    from (select count(*) n from (select 1 from crm_contacts where organisation_id is not null and email_key is not null and archived_at is null group by organisation_id, email_key having count(*) > 1) d) x
+  union all select 'D duplicate contact e-mails', 2001 + (row_number() over (order by o.name, d.email_key)), o.name || ' (' || o.id || ')', d.email_key || ' x ' || d.n
+    from (select organisation_id, email_key, count(*) n from crm_contacts where organisation_id is not null and email_key is not null and archived_at is null group by organisation_id, email_key having count(*) > 1) d
+    join crm_organisations o on o.id = d.organisation_id
 ) r
 order by section, ord, item;
