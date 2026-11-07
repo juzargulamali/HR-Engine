@@ -1843,6 +1843,9 @@ export interface Database {
       crm_save_account_profile: { Args: { p_org: string; p_company: string; p_patch: Record<string, unknown> }; Returns: undefined };
       crm_assign_account_owner: { Args: { p_org: string; p_company: string; p_new_owner: string | null; p_reason?: string | null }; Returns: undefined };
       crm_reassign_follow_up: { Args: { p_follow_up_id: string; p_new_assignee: string }; Returns: undefined };
+      crm_import_fingerprints: { Args: { p_company: string; p_items: Record<string, unknown>[] }; Returns: Record<string, string> };
+      crm_import_apply: { Args: { p_company: string; p_batch_key: string; p_items: Record<string, unknown>[] }; Returns: Record<string, unknown> };
+      crm_create_account_follow_up: { Args: { p_org: string; p_company: string; p_title: string; p_due_at: string; p_kind?: string; p_assigned_to?: string | null }; Returns: string };
       crm_can_edit_organisation: { Args: { p_org: string; p_company?: string | null }; Returns: boolean };
       crm_update_contact: { Args: { p_contact_id: string; p_patch: Record<string, unknown> }; Returns: undefined };
       crm_can_edit_contact: { Args: { p_contact_id: string }; Returns: boolean };

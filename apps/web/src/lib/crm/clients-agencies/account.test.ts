@@ -110,15 +110,27 @@ describe("history, last activity and follow-ups", () => {
         { id: "b", opportunity_id: "2", kind: "meeting", occurred_at: "2026-11-05T10:00:00Z" },
       ],
       followUps: [
-        { id: "f1", opportunity_id: "1", title: "Overdue", due_at: "2026-11-08T05:00:00Z", status: "open", assigned_to: "omar" },
-        { id: "f2", opportunity_id: "1", title: "Today", due_at: "2026-11-10T09:00:00Z", status: "open", assigned_to: "omar" },
-        { id: "f3", opportunity_id: "1", title: "Later", due_at: "2026-11-20T09:00:00Z", status: "open", assigned_to: "sara" },
-        { id: "f4", opportunity_id: "1", title: "Done", due_at: "2026-11-01T09:00:00Z", status: "done", assigned_to: "omar" },
-        { id: "f5", opportunity_id: "elsewhere", title: "Not this account", due_at: "2026-11-01T09:00:00Z", status: "open", assigned_to: "omar" },
+        { id: "f1", opportunity_id: "1", organisation_id: null, created_by: "omar", company_id: CO, title: "Overdue", due_at: "2026-11-08T05:00:00Z", status: "open", assigned_to: "omar" },
+        { id: "f2", opportunity_id: "1", organisation_id: null, created_by: "omar", company_id: CO, title: "Today", due_at: "2026-11-10T09:00:00Z", status: "open", assigned_to: "omar" },
+        { id: "f3", opportunity_id: "1", organisation_id: null, created_by: "omar", company_id: CO, title: "Later", due_at: "2026-11-20T09:00:00Z", status: "open", assigned_to: "sara" },
+        { id: "f4", opportunity_id: "1", organisation_id: null, created_by: "omar", company_id: CO, title: "Done", due_at: "2026-11-01T09:00:00Z", status: "done", assigned_to: "omar" },
+        { id: "f5", opportunity_id: "elsewhere", organisation_id: null, created_by: "omar", company_id: CO, title: "Not this account", due_at: "2026-11-01T09:00:00Z", status: "open", assigned_to: "omar" },
       ],
     });
     expect(v.lastActivity).toMatchObject({ kind: "meeting", opp: { id: "2" } });
     expect(v.followUps.map((f) => [f.followUp.title, f.state])).toEqual([["Overdue", "overdue"], ["Today", "today"], ["Later", "upcoming"]]);
     expect(v.counts).toMatchObject({ openFollowUps: 3, overdueFollowUps: 1 });
+  });
+
+  it("follow-ups placed on the account itself (no inquiry) are listed and counted with the others, for this account and company only", () => {
+    const fu = (id: string, over: Record<string, unknown>) => ({ id, opportunity_id: null, organisation_id: CLIENT, title: id, due_at: "2026-11-20T09:00:00Z", status: "open", assigned_to: "omar", created_by: "sara", company_id: CO, ...over }) as FollowUpLite;
+    const v = deriveAccount({
+      ...base, orgId: CLIENT, opportunities: [],
+      followUps: [fu("late", { due_at: "2026-11-08T05:00:00Z" }), fu("later", {}), fu("closed", { status: "done" }), fu("other-account", { organisation_id: "someone-else" }), fu("other-company", { company_id: OTHER_CO })],
+    });
+    expect(v.hasHistory).toBe(false);          // still an account with no inquiry: the history card and its wording are unchanged
+    expect(v.followUps).toEqual([]);
+    expect(v.accountFollowUps.map((f) => [f.followUp.title, f.state])).toEqual([["late", "overdue"], ["later", "upcoming"]]);
+    expect(v.counts).toMatchObject({ openFollowUps: 2, overdueFollowUps: 1, inquiries: 0 });
   });
 });

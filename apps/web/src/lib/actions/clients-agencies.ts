@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { hasCrmCapability } from "@enginious-hr/domain";
+import { dubaiDateTimeToIso, hasCrmCapability } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import { getCrmContext } from "@/lib/crm/context";
 import { friendlyCrmError } from "@/lib/crm/errors";
@@ -107,6 +107,32 @@ export async function reassignFollowUp(_prev: ActionState, formData: FormData): 
   if (!p.success) return { error: "Choose who the follow-up is for." };
   const supabase = await createClient();
   const { error } = await supabase.rpc("crm_reassign_follow_up", { p_follow_up_id: p.data.followUpId, p_new_assignee: p.data.assigneeId });
+  if (error) return fail(error.message);
+  refresh();
+  return { error: null };
+}
+
+const accountFollowUpSchema = z.object({
+  orgId: uuid, companyId: uuid, title: z.string().trim().min(1, "Say what to do").max(300), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a date"), time: text(5),
+  kind: z.enum(["call", "email", "meeting", "proposal", "other"]).default("other"), assignedTo: optionalUuid,
+});
+
+/**
+ * A dated follow-up on an ACCOUNT that has no inquiry, for whoever should do it. Same rule as a follow-up on an inquiry: anyone with Sales access for the
+ * company may add one for themselves; giving it to someone else needs the assign owners right (the database checks it, and that the assignee has Sales
+ * access for this company). It never changes the account owner, and changing the account owner never changes it.
+ */
+export async function createAccountFollowUp(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const p = accountFollowUpSchema.safeParse(Object.fromEntries(formData));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const d = p.data;
+  const due = dubaiDateTimeToIso(d.date, d.time && /^\d{2}:\d{2}$/.test(d.time) ? d.time : "09:00");
+  if (!due) return { error: "Enter a valid date and time." };
+  const ctx = await getCrmContext();
+  if (!ctx || ctx.loadFailed) return { error: "Could not check your Sales access. Nothing was saved." };
+  if (d.assignedTo && d.assignedTo !== ctx.userId && !hasCrmCapability(ctx.grants, d.companyId, "assign_owner")) return { error: "Only a founder, or someone they delegated, can give a follow-up to someone else." };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("crm_create_account_follow_up", { p_org: d.orgId, p_company: d.companyId, p_title: d.title, p_due_at: due, p_kind: d.kind, p_assigned_to: d.assignedTo ?? null });
   if (error) return fail(error.message);
   refresh();
   return { error: null };

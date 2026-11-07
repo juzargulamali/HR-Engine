@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { updateOpportunity } from "@/lib/actions/crm";
+import { useEffect, useRef, useState } from "react";
+import { loadInquiryOrganisations, updateOpportunity } from "@/lib/actions/crm";
+import { FIELD_NOUN, offeredFor, type InquiryField } from "@/lib/crm/organisation-roles";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +14,8 @@ import { Modal } from "@/components/sales/modal";
 export interface EditableOpportunity {
   id: string;
   version: number;
+  agencyOrgId: string | null;
+  clientOrgId: string | null;
   title: string;
   brief: string | null;
   currency: string;
@@ -60,6 +63,35 @@ function TechnologiesEditor({ initial }: { initial: { name: string; qty: number 
   );
 }
 
+type PartyOrganisation = { id: string; name: string; kind: string; roles: string[]; place: string | null };
+
+/**
+ * Agency and end client of the inquiry. Each list offers only organisations that hold that role: one recorded as both an agency and an end
+ * client is in both; one recorded as neither is in neither. Saving a role the organisation lacks is also refused by the database.
+ */
+function PartyFields({ agencyOrgId, clientOrgId }: { agencyOrgId: string | null; clientOrgId: string | null }) {
+  const [orgs, setOrgs] = useState<PartyOrganisation[] | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [initial] = useState<Record<InquiryField, string>>({ agency: agencyOrgId ?? "", client: clientOrgId ?? "" });
+  const [value, setValue] = useState<Record<InquiryField, string>>(initial);
+  useEffect(() => {
+    let live = true;
+    loadInquiryOrganisations().then((r) => { if (!live) return; if (r.ok) setOrgs(r.organisations); else setFailed(r.error); }).catch(() => { if (live) setFailed("Could not load the organisations. Close this and try again."); });
+    return () => { live = false; };
+  }, []);
+  if (failed) return <Alert variant="destructive">{failed}</Alert>;
+  const pick = (field: InquiryField, label: string, name: string, id: string) => (
+    <Field label={label} htmlFor={id} hint={orgs ? `Organisations recorded as ${FIELD_NOUN[field]}.` : "Loading…"}>
+      {/* Posted only when changed, so saving other details never rewrites (or logs a change to) the agency or end client. */}
+      <Select id={id} name={value[field] !== initial[field] ? name : undefined} value={value[field]} disabled={!orgs} onChange={(e) => setValue((v) => ({ ...v, [field]: e.target.value }))}>
+        <option value="">None</option>
+        {offeredFor(orgs ?? [], field, value[field]).map((o) => <option key={o.id} value={o.id}>{o.name}{o.place ? ` (${o.place})` : ""}</option>)}
+      </Select>
+    </Field>
+  );
+  return <div className="grid gap-3 sm:grid-cols-2">{pick("agency", "Agency", "agency_org_id", "ed-agency")}{pick("client", "End client", "client_org_id", "ed-client")}</div>;
+}
+
 export interface EditDetailsProps { data: EditableOpportunity; mode: "full" | "value"; availabilityWillNeedRecheck: boolean }
 
 /**
@@ -75,6 +107,7 @@ export function EditDetailsDialog({ open, onClose, data, mode, availabilityWillN
         {mode === "full" ? (
           <>
             {availabilityWillNeedRecheck ? <Alert variant="warning">Equipment availability was checked for the current dates and quantities. Changing the installation or show dates, or the technologies, means the check must be repeated.</Alert> : null}
+            <PartyFields agencyOrgId={data.agencyOrgId} clientOrgId={data.clientOrgId} />
             <Field label="Title" htmlFor="ed-title"><Input id="ed-title" name="title" required defaultValue={data.title} maxLength={200} /></Field>
             <Field label="Brief" htmlFor="ed-brief"><Textarea id="ed-brief" name="brief" rows={3} defaultValue={data.brief ?? ""} /></Field>
           </>

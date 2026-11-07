@@ -49,7 +49,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
   const scoped = items.filter((i) => !company || i.opp.company_id === company);
   const opps: ReportOpp[] = scoped.map((i) => ({ ...i.opp, value: i.value }));
-  const scopedFollowUps = followUps.filter((f) => !company || f.opportunity.company_id === company);
+  const scopedFollowUps = followUps.filter((f) => !company || f.followUp.company_id === company);
 
   const stages = openPipelineByStage(opps);
   const owners = openPipelineByOwner(opps);

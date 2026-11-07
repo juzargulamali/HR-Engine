@@ -45,7 +45,7 @@ export default async function NewEnquiryPage() {
       {header}
       <NewEnquiryForm
         companies={companies}
-        organisations={organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, place: o.place }))}
+        organisations={organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, roles: o.roles, place: o.place }))}
         contacts={organisations.flatMap((o) => o.contacts.map((c) => ({ id: c.id, name: c.name, organisationId: c.organisation_id, roleTitle: c.role_title })))}
         currentUserId={ctx.userId}
         currentUserName={ctx.fullName ?? "Me"}

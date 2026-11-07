@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { listTable } from "@/components/workspace/list-table";
 import { Bell } from "lucide-react";
-import { canActOnFollowUp, isCrmActive } from "@enginious-hr/domain";
+import { canActOnAccountFollowUp, canActOnFollowUp, isCrmActive } from "@enginious-hr/domain";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -80,7 +80,11 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
 
   // "Only open" must be judged on every open follow-up the person can see, not just the filtered ones.
   const openByOpp = new Map<string, number>();
-  for (const f of loaded.open) openByOpp.set(f.opportunity.id, (openByOpp.get(f.opportunity.id) ?? 0) + 1);
+  for (const f of loaded.open) if (f.opportunity) openByOpp.set(f.opportunity.id, (openByOpp.get(f.opportunity.id) ?? 0) + 1);
+  /** Where a row leads: an inquiry opens in the side panel; a follow-up on an account with no inquiry opens that account. */
+  const target = (f: FollowUpListItem) => f.opportunity
+    ? { href: open(f.opportunity.id), panel: true, selected: openId === f.opportunity.id }
+    : { href: `/sales/accounts/${f.account!.id}?company=${f.account!.companyId}`, panel: false, selected: false };
   const keep = (f: FollowUpListItem) => who === "all" || f.followUp.assigned_to === ctx.userId;
   const groups = groupOpenFollowUps(loaded.open.filter(keep));
   const doneRows = loaded.done.filter(keep);
@@ -159,11 +163,11 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
               </TableHeader>
               <TableBody>
                 {doneRows.map((f) => (
-                  <ClickableRow key={f.followUp.id} href={open(f.opportunity.id)} panel selected={openId === f.opportunity.id} className="align-top">
+                  <ClickableRow key={f.followUp.id} {...target(f)} className="align-top">
                     <TableCell className="min-w-[10rem] font-medium">{f.followUp.title}</TableCell>
                     <TableCell data-label="Enquiry" className="min-w-[12rem]">
-                      <PanelLink href={open(f.opportunity.id)} className="underline-offset-2 hover:underline">{f.opportunity.title}</PanelLink>
-                      <div className="text-sm text-muted-foreground">{f.party}</div>
+                      {f.opportunity ? <PanelLink href={open(f.opportunity.id)} className="underline-offset-2 hover:underline">{f.opportunity.title}</PanelLink> : <Link href={target(f).href} className="underline-offset-2 hover:underline">{f.account!.name}</Link>}
+                      <div className="text-sm text-muted-foreground">{f.opportunity ? f.party : "Account follow-up (no inquiry)"}</div>
                     </TableCell>
                     <TableCell data-label="Completed" className="whitespace-nowrap">{formatDateTime(f.followUp.completed_at)}<div className="text-sm text-muted-foreground">{f.assigneeName}</div></TableCell>
                     <TableCell data-label="What happened" className="text-sm">{f.followUp.outcome || <span className="text-muted-foreground">No outcome recorded</span>}</TableCell>
@@ -200,14 +204,26 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                   <TableBody>
                     {rows.map((f) => {
                       const fu = f.followUp;
-                      const isOnlyOpen = fu.status === "open" && isCrmActive(f.opportunity.stage) && (openByOpp.get(f.opportunity.id) ?? 0) === 1;
-                      const canAct = canActOnFollowUp(ctx.grants, { assignedTo: fu.assigned_to }, { companyId: f.opportunity.company_id, ownerId: f.opportunity.owner_id }, ctx.userId);
+                      const opp = f.opportunity;
+                      const isOnlyOpen = !!opp && fu.status === "open" && isCrmActive(opp.stage) && (openByOpp.get(opp.id) ?? 0) === 1;
+                      const canAct = opp
+                        ? canActOnFollowUp(ctx.grants, { assignedTo: fu.assigned_to }, { companyId: opp.company_id, ownerId: opp.owner_id }, ctx.userId)
+                        : canActOnAccountFollowUp(ctx.grants, { assignedTo: fu.assigned_to, createdBy: fu.created_by, companyId: fu.company_id }, ctx.userId);
                       return (
-                        <ClickableRow key={fu.id} href={open(f.opportunity.id)} panel selected={openId === f.opportunity.id} className="align-top">
+                        <ClickableRow key={fu.id} {...target(f)} className="align-top">
                           <TableCell className="min-w-[9rem]"><div className="break-words font-medium">{fu.title}</div><div className="text-sm text-muted-foreground">{KIND_LABEL[fu.kind] ?? fu.kind}</div></TableCell>
                           <TableCell data-label="Enquiry" className="min-w-[10rem]">
-                            <PanelLink href={open(f.opportunity.id)} className="break-words underline-offset-2 hover:underline">{f.opportunity.title}</PanelLink>
-                            <div className="font-mono text-sm text-muted-foreground">{f.opportunity.reference}</div>
+                            {opp ? (
+                              <>
+                                <PanelLink href={open(opp.id)} className="break-words underline-offset-2 hover:underline">{opp.title}</PanelLink>
+                                <div className="font-mono text-sm text-muted-foreground">{opp.reference}</div>
+                              </>
+                            ) : (
+                              <>
+                                <Link href={target(f).href} className="break-words underline-offset-2 hover:underline">{f.account!.name}</Link>
+                                <div className="text-sm text-muted-foreground">Account follow-up (no inquiry)</div>
+                              </>
+                            )}
                           </TableCell>
                           <TableCell data-label="Client" className="min-w-[7rem] break-words">{f.party}</TableCell>
                           <TableCell data-label="Due"><DueText dueAt={fu.due_at} className="whitespace-normal" /></TableCell>
@@ -216,7 +232,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                             {canAct ? (
                               <FollowUpRowActions followUp={{ id: fu.id, title: fu.title, opportunityId: fu.opportunity_id, isOnlyOpen }} />
                             ) : (
-                              <span className="text-sm text-muted-foreground">Only the assignee, the owner ({ctx.personName(f.opportunity.owner_id)}) or a founder can change this.</span>
+                              <span className="text-sm text-muted-foreground">{opp ? `Only the assignee, the owner (${ctx.personName(opp.owner_id)}) or a founder can change this.` : "Only the assignee, the person who added it or a founder can change this."}</span>
                             )}
                           </TableCell>
                         </ClickableRow>

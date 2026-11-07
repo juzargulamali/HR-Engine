@@ -6,9 +6,9 @@ const rpc = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc }) }));
 type Grant = { companyId: string; capabilities: string[] };
 let grants: Grant[] = [];
-vi.mock("@/lib/crm/context", () => ({ getCrmContext: async () => ({ userId: "u", fullName: "U", grants, companies: [], people: [], personName: () => "x", companyName: () => "x" }) }));
+vi.mock("@/lib/crm/context", () => ({ getCrmContext: async () => ({ userId: "44444444-4444-4444-8444-444444444444", fullName: "U", grants, companies: [], people: [], personName: () => "x", companyName: () => "x" }) }));
 
-import { assignAccountOwner, createAccount, reassignFollowUp, saveAccountProfile } from "./clients-agencies";
+import { assignAccountOwner, createAccount, createAccountFollowUp, reassignFollowUp, saveAccountProfile } from "./clients-agencies";
 
 const CO = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
@@ -91,5 +91,34 @@ describe("editing and creating", () => {
   it("requires a name", async () => {
     expect((await createAccount({ error: null }, fd({ companyId: CO, name: "  " }))).error).toMatch(/name/i);
     expect(rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("a dated follow-up on an account with no inquiry", () => {
+  const form = (over: Record<string, string> = {}) => fd({ orgId: ORG, companyId: CO, title: "Call the account", date: "2026-12-01", time: "10:30", ...over });
+  it("calls only the account follow-up function (never an owner function), with a Dubai due time, for the selected company", async () => {
+    grants = [{ companyId: CO, capabilities: [] }];
+    expect(await createAccountFollowUp({ error: null }, form({ assignedTo: SARA }))).toEqual({ error: null });   // SARA is the signed-in test user: their own list
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_create_account_follow_up"]);
+    expect(rpc).toHaveBeenCalledWith("crm_create_account_follow_up", { p_org: ORG, p_company: CO, p_title: "Call the account", p_due_at: "2026-12-01T06:30:00.000Z", p_kind: "other", p_assigned_to: SARA });
+  });
+  it("giving it to someone else is refused on the server without the assign owners right, and not with a right held for another company", async () => {
+    grants = [{ companyId: CO, capabilities: [] }];
+    expect((await createAccountFollowUp({ error: null }, form({ assignedTo: OMAR }))).error).toMatch(/Only a founder/);
+    grants = [{ companyId: OTHER, capabilities: ["founder"] }];
+    expect((await createAccountFollowUp({ error: null }, form({ assignedTo: OMAR }))).error).toMatch(/Only a founder/);
+    expect(rpc).not.toHaveBeenCalled();
+    grants = [{ companyId: CO, capabilities: ["assign_owner"] }];
+    expect(await createAccountFollowUp({ error: null }, form({ assignedTo: OMAR }))).toEqual({ error: null });
+    expect(rpc).toHaveBeenCalledWith("crm_create_account_follow_up", expect.objectContaining({ p_assigned_to: OMAR }));
+  });
+  it("needs a title and a date, and shows the database's refusals in words (company boundary, ineligible assignee)", async () => {
+    grants = [{ companyId: CO, capabilities: ["assign_owner"] }];
+    expect((await createAccountFollowUp({ error: null }, form({ title: " " }))).error).toMatch(/Say what to do/);
+    expect((await createAccountFollowUp({ error: null }, form({ date: "" }))).error).toMatch(/Choose a date/);
+    rpc.mockResolvedValue({ data: null, error: { message: "You do not have Sales access for this company" } });
+    expect((await createAccountFollowUp({ error: null }, form())).error).toMatch(/Sales access for this company/);
+    rpc.mockResolvedValue({ data: null, error: { message: "The assignee has no Sales access for this company" } });
+    expect((await createAccountFollowUp({ error: null }, form({ assignedTo: OMAR }))).error).toMatch(/assignee has no Sales access/);
   });
 });

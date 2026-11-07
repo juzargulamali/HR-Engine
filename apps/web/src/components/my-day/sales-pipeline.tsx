@@ -14,7 +14,7 @@ function FollowUpRow({ item }: { item: AttentionItem }) {
   return (
     <li className="flex flex-wrap items-center justify-between gap-x-4 gap-y-0.5 py-2 text-sm">
       <div className="min-w-0">
-        <Link href={`/sales/opportunities/${item.opportunityId}`} className="break-words font-medium underline-offset-2 hover:underline">{item.title}</Link>
+        <Link href={item.account ? `/sales/accounts/${item.account.id}?company=${item.account.companyId}` : `/sales/opportunities/${item.opportunityId}`} className="break-words font-medium underline-offset-2 hover:underline">{item.title}</Link>
         <p className="text-[13px] text-muted-foreground">{item.reference} · {item.detail}</p>
       </div>
       <div className="text-right text-[13px]">

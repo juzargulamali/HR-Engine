@@ -24,7 +24,8 @@ function KindSelect({ id, defaultValue = "other" }: { id: string; defaultValue?:
 export interface FollowUpRef {
   id: string;
   title: string;
-  opportunityId: string;
+  /** Null for a follow-up on an account with no inquiry: there is no stage to protect, so no hold option and completing it never forces a next step. */
+  opportunityId: string | null;
   /** True when this is the only open follow-up on an active opportunity: completing it then needs a next step or a hold. */
   isOnlyOpen: boolean;
 }
@@ -40,7 +41,7 @@ function CompleteBody({ followUp, onClose }: { followUp: FollowUpRef; onClose: (
   return (
     <ActionForm action={completeFollowUp} submitLabel="Complete" onDone={onClose} secondary={<Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>}>
       <input type="hidden" name="followUpId" value={followUp.id} />
-      <input type="hidden" name="opportunityId" value={followUp.opportunityId} />
+      <input type="hidden" name="opportunityId" value={followUp.opportunityId ?? ""} />
       <Field label="What happened?" htmlFor={`outcome-${followUp.id}`}>
         <Textarea id={`outcome-${followUp.id}`} name="outcome" required rows={3} placeholder="e.g. Called Hana; she will confirm dates on Thursday." />
       </Field>
@@ -50,7 +51,7 @@ function CompleteBody({ followUp, onClose }: { followUp: FollowUpRef; onClose: (
           <label className="flex items-center gap-2 text-sm"><input type="radio" name="next" value="none" checked={next === "none"} onChange={() => setNext("none")} /> Nothing more now (another follow-up is already planned)</label>
         ) : null}
         <label className="flex items-center gap-2 text-sm"><input type="radio" name="next" value="follow_up" checked={next === "follow_up"} onChange={() => setNext("follow_up")} /> Add the next follow-up</label>
-        <label className="flex items-center gap-2 text-sm"><input type="radio" name="next" value="hold" checked={next === "hold"} onChange={() => setNext("hold")} /> Put the opportunity on hold</label>
+        {followUp.opportunityId ? <label className="flex items-center gap-2 text-sm"><input type="radio" name="next" value="hold" checked={next === "hold"} onChange={() => setNext("hold")} /> Put the opportunity on hold</label> : null}
       </fieldset>
       {next === "follow_up" ? (
         <div className="space-y-3 rounded-md border border-border p-3">
@@ -100,7 +101,7 @@ export function RescheduleFollowUpDialog({ open, onClose, followUp }: { open: bo
     <Modal open={open} onClose={onClose} title="Reschedule follow-up" description={followUp.title}>
       <ActionForm action={rescheduleFollowUp} submitLabel="Reschedule" onDone={onClose}>
         <input type="hidden" name="followUpId" value={followUp.id} />
-        <input type="hidden" name="opportunityId" value={followUp.opportunityId} />
+        <input type="hidden" name="opportunityId" value={followUp.opportunityId ?? ""} />
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="New date" htmlFor={`rd-${followUp.id}`}><Input id={`rd-${followUp.id}`} name="date" type="date" required min={todayInDubai()} /></Field>
           <Field label="Time (Dubai)" htmlFor={`rt-${followUp.id}`}><Input id={`rt-${followUp.id}`} name="time" type="time" defaultValue="10:00" /></Field>
@@ -125,7 +126,7 @@ export function CancelFollowUpDialog({ open, onClose, followUp }: { open: boolea
     <Modal open={open} onClose={onClose} title="Cancel follow-up" description={followUp.title}>
       <ActionForm action={cancelFollowUp} submitLabel="Cancel follow-up" variant="destructive" onDone={onClose}>
         <input type="hidden" name="followUpId" value={followUp.id} />
-        <input type="hidden" name="opportunityId" value={followUp.opportunityId} />
+        <input type="hidden" name="opportunityId" value={followUp.opportunityId ?? ""} />
         <Field label="Why is it no longer needed?" htmlFor={`cr-${followUp.id}`}><Input id={`cr-${followUp.id}`} name="reason" required /></Field>
         <p className="text-sm text-muted-foreground">The only next action of an active opportunity cannot be cancelled. Complete it with a new next action instead.</p>
       </ActionForm>

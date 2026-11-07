@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  canActOnFollowUp, canAssignOwner, canChangeOpportunityContacts, canEditContactRecord, canReopenClosed, CRM_CAPABILITIES, canConfirmAvailability, canDecideApproval, canEditOpportunity, canGrantFounderRights,
+  canActOnAccountFollowUp, canActOnFollowUp, canAssignOwner, canChangeOpportunityContacts, canEditContactRecord, canReopenClosed, CRM_CAPABILITIES, canConfirmAvailability, canDecideApproval, canEditOpportunity, canGrantFounderRights,
   canManageApprovalRules, canManageCrmAccess, canRemoveFile, canViewCrmAudit, crmCompanyIds, hasCrmAccess, hasCrmCapability,
   isCrmFounder, isHrAdmin, type CrmGrant,
 } from "../src";
@@ -63,6 +63,14 @@ describe("CRM permissions (mirror the SQL)", () => {
     expect(canActOnFollowUp(uaeOnly, fu, opp, "amira")).toBe(true);
     expect(canActOnFollowUp(uaeOnly, fu, opp, "daniel")).toBe(false);
     expect(canActOnFollowUp(founder, fu, opp, "juzar")).toBe(true);
+  });
+  it("lets the assignee, the person who added it or a founder act on a follow-up that has no inquiry; never another company's people", () => {
+    const fu = { assignedTo: "lena", createdBy: "amira", companyId: UAE };
+    expect(canActOnAccountFollowUp(uaeOnly, fu, "lena")).toBe(true);
+    expect(canActOnAccountFollowUp(uaeOnly, fu, "amira")).toBe(true);
+    expect(canActOnAccountFollowUp(uaeOnly, fu, "daniel")).toBe(false);
+    expect(canActOnAccountFollowUp(founder, fu, "juzar")).toBe(true);
+    expect(canActOnAccountFollowUp([{ companyId: KSA, capabilities: ["founder"] }], fu, "juzar")).toBe(false);
   });
   it("lets the uploader, owner or founder remove a file", () => {
     const opp = { companyId: UAE, ownerId: "amira" };

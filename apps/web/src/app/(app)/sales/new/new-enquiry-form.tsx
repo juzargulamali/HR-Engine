@@ -15,8 +15,9 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/sales/action-form";
 import { cn } from "@/lib/utils";
+import { FIELD_NOUN, offeredFor, type InquiryField } from "@/lib/crm/organisation-roles";
 import {
-  AddContactDialog, AddOrganisationDialog, ORGANISATION_KIND_LABEL,
+  AddContactDialog, AddOrganisationDialog,
   type CreatedContact, type CreatedOrganisation, type OrganisationKind,
 } from "../clients/entity-dialogs";
 import { parseTechnologyRows, type TechnologyRow } from "./technologies";
@@ -38,6 +39,8 @@ export interface EnquiryOrganisation {
   id: string;
   name: string;
   kind: OrganisationKind;
+  /** Every role the record holds (agency, direct, client, technology). Empty = none recorded: it reads as its `kind`. */
+  roles?: readonly string[];
   place: string | null;
 }
 
@@ -68,9 +71,12 @@ function Section({ title, description, children }: { title: string; description?
   );
 }
 
-/** A plain select with a small search box above it (the list of organisations gets long). */
+/**
+ * A plain select with a small search box above it (the list of organisations gets long). It offers only organisations that hold the role this
+ * field needs: an organisation recorded as both an agency and an end client appears in BOTH pickers, one recorded as neither does not appear.
+ */
 export function OrganisationPicker({
-  id, name, label, hint, value, onChange, organisations, preferredKinds, onAdd,
+  id, name, label, hint, value, onChange, organisations, field, onAdd,
 }: {
   id: string;
   name: string;
@@ -79,15 +85,14 @@ export function OrganisationPicker({
   value: string;
   onChange: (id: string) => void;
   organisations: EnquiryOrganisation[];
-  preferredKinds: OrganisationKind[];
+  field: InquiryField;
   onAdd: () => void;
 }) {
   const [search, setSearch] = useState("");
   const needle = search.trim().toLowerCase();
-  const matching = organisations.filter((o) => needle === "" || `${o.name} ${o.place ?? ""}`.toLowerCase().includes(needle));
-  const visible = organisations.filter((o) => o.id === value || matching.includes(o));
-  const preferred = visible.filter((o) => preferredKinds.includes(o.kind));
-  const others = visible.filter((o) => !preferredKinds.includes(o.kind));
+  const offered = offeredFor(organisations, field, value);
+  const matching = offered.filter((o) => needle === "" || `${o.name} ${o.place ?? ""}`.toLowerCase().includes(needle));
+  const visible = offered.filter((o) => o.id === value || matching.includes(o));
   const option = (o: EnquiryOrganisation) => <option key={o.id} value={o.id}>{o.name}{o.place ? ` (${o.place})` : ""}</option>;
   return (
     <div className="min-w-0 space-y-1.5">
@@ -95,10 +100,9 @@ export function OrganisationPicker({
       <Input aria-label={`Search ${label.toLowerCase()}`} type="search" placeholder="Type to narrow the list" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }} />
       <Select id={id} name={name} value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">None</option>
-        {preferred.length > 0 ? <optgroup label={preferredKinds.map((k) => ORGANISATION_KIND_LABEL[k]).join(" / ")}>{preferred.map(option)}</optgroup> : null}
-        {others.length > 0 ? <optgroup label="Other organisations">{others.map(option)}</optgroup> : null}
+        {visible.map(option)}
       </Select>
-      {needle !== "" && matching.length === 0 ? <p className="text-sm text-muted-foreground">Nothing matches “{search.trim()}”. Add it as a new organisation below.</p> : null}
+      {needle !== "" && matching.length === 0 ? <p className="text-sm text-muted-foreground">Nothing recorded as {FIELD_NOUN[field]} matches “{search.trim()}”. Add it as a new organisation below, or give an existing one that role on its account page.</p> : null}
       <p className="text-sm text-muted-foreground">{hint}</p>
       <Button type="button" size="sm" variant="ghost" onClick={onAdd}><Plus className="h-4 w-4" aria-hidden /> Add organisation</Button>
     </div>
@@ -255,7 +259,7 @@ export function NewEnquiryForm({
   }
 
   function addOrganisation(side: "agency" | "client", org: CreatedOrganisation) {
-    setAddedOrgs((prev) => [...prev, { id: org.id, name: org.name, kind: org.kind, place: org.place }]);
+    setAddedOrgs((prev) => [...prev, { id: org.id, name: org.name, kind: org.kind, roles: [org.kind], place: org.place }]);
     if (side === "agency") setAgencyId(org.id); else setClientId(org.id);
   }
 
@@ -295,11 +299,11 @@ export function NewEnquiryForm({
               <div className="grid gap-4 sm:grid-cols-2">
                 <OrganisationPicker
                   id="enq-agency" name="agencyOrgId" label="Agency" hint="The agency that sent the brief, if there is one."
-                  value={agencyId} onChange={setAgencyId} organisations={organisations} preferredKinds={["agency"]} onAdd={() => setOrgDialog("agency")}
+                  value={agencyId} onChange={setAgencyId} organisations={organisations} field="agency" onAdd={() => setOrgDialog("agency")}
                 />
                 <OrganisationPicker
                   id="enq-client" name="clientOrgId" label="End client" hint="The brand or company the work is for."
-                  value={clientId} onChange={setClientId} organisations={organisations} preferredKinds={["client", "direct"]} onAdd={() => setOrgDialog("client")}
+                  value={clientId} onChange={setClientId} organisations={organisations} field="client" onAdd={() => setOrgDialog("client")}
                 />
               </div>
               {!agencyId && !clientId ? <p className="text-sm text-muted-foreground">Required: choose at least one of agency or end client.</p> : null}

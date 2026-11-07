@@ -14,7 +14,7 @@ import { selectCompany } from "@/lib/crm/clients-agencies/company";
 import { countryLabel, LEAD_SOURCE_LABEL, ROLE_LABEL } from "@/lib/crm/clients-agencies/normalise";
 import { eligibleStaff, type StaffPerson } from "@/lib/crm/clients-agencies/staff";
 import { AddAccountContactButton, EditAccountButton, EditAccountContactButton } from "../account-forms";
-import { AddFollowUpButton, AssignOwnerButton, ReassignFollowUpButton } from "../owner-and-follow-ups";
+import { AddAccountFollowUpButton, AddFollowUpButton, AssignOwnerButton, ReassignFollowUpButton } from "../owner-and-follow-ups";
 
 export const metadata = { title: "Account" };
 
@@ -63,6 +63,44 @@ export default async function AccountPageRoute({ params, searchParams }: { param
   const c = view.counts;
   const openInquiries = view.inquiries.filter((i) => i.opp.stage !== "won" && i.opp.stage !== "lost");
   const formValues = { name: org.name, roles: org.roles, country: org.country_code ?? "", website: org.website ?? "", place: org.place ?? "", note: org.note ?? "", leadSource: profile?.lead_source ?? "", exhibition: profile?.exhibition ?? "" } as const;
+
+  const followUpsCard = (
+      <Card>
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle>Follow-ups ({c.openFollowUps} open{c.overdueFollowUps ? `, ${c.overdueFollowUps} overdue` : ""})</CardTitle>
+          {openInquiries.length > 0
+            ? <AddFollowUpButton inquiries={openInquiries.map((i) => ({ id: i.opp.id, label: `${i.opp.reference}: ${i.opp.title}` }))} people={people} defaultAssigneeId={ctx.userId} />
+            : <AddAccountFollowUpButton orgId={org.id} companyId={company.id} people={people} currentUserId={ctx.userId} canAssign={canAssign} />}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {view.followUps.length === 0 && view.accountFollowUps.length === 0 ? <p className="text-sm text-muted-foreground">No open follow-ups.</p> : (
+          <ul className="divide-y divide-border">
+            {view.followUps.map(({ followUp: f, opp }) => {
+              const mayHandOver = f.assigned_to === ctx.userId || opp.owner_id === ctx.userId || canAssign || founder;
+              return (
+                <li key={f.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                  <span className="min-w-0 break-words"><span className="font-medium">{f.title}</span><span className="text-muted-foreground"> · {opp.reference} · {nameOf(f.assigned_to) ?? "Former colleague"} · </span><DueText dueAt={f.due_at} /></span>
+                  {mayHandOver ? <ReassignFollowUpButton followUpId={f.id} assigneeId={f.assigned_to} people={people} title={f.title} /> : null}
+                </li>
+              );
+            })}
+            {view.accountFollowUps.map(({ followUp: f }) => {
+              const mayHandOver = f.assigned_to === ctx.userId || f.created_by === ctx.userId || canAssign || founder;
+              return (
+                <li key={f.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                  <span className="min-w-0 break-words"><span className="font-medium">{f.title}</span><span className="text-muted-foreground"> · Account follow-up · {nameOf(f.assigned_to) ?? "Former colleague"} · </span><DueText dueAt={f.due_at} /></span>
+                  {mayHandOver ? <ReassignFollowUpButton followUpId={f.id} assigneeId={f.assigned_to} people={people} title={f.title} /> : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <p className="text-sm text-muted-foreground">Follow-ups belong to an inquiry, or to the account itself when it has none. Each has its own person and due date; the account owner above is not changed by them.</p>
+      </CardContent>
+    </Card>
+  );
 
   return (
     <div className="space-y-6">
@@ -163,13 +201,16 @@ export default async function AccountPageRoute({ params, searchParams }: { param
       </Card>
 
       {!view.hasHistory ? (
-        <Card>
-          <CardHeader className="pb-2"><CardTitle>History</CardTitle></CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p>{NO_ACTIVITY}</p>
-            <p className="text-muted-foreground">No inquiry, quote, project or follow-up is linked to this account for {company.name} yet. <Link className="underline underline-offset-2" href="/sales/opportunities?add=1">Record an enquiry</Link> to start its history.</p>
-          </CardContent>
-        </Card>
+        <>
+          <Card>
+            <CardHeader className="pb-2"><CardTitle>History</CardTitle></CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <p>{NO_ACTIVITY}</p>
+              <p className="text-muted-foreground">No inquiry, quote{view.accountFollowUps.length === 0 ? ", project or follow-up" : " or project"} is linked to this account for {company.name} yet. <Link className="underline underline-offset-2" href="/sales/opportunities?add=1">Record an enquiry</Link> to start its history.</p>
+            </CardContent>
+          </Card>
+          {followUpsCard}
+        </>
       ) : (
         <>
           <Card>
@@ -215,30 +256,7 @@ export default async function AccountPageRoute({ params, searchParams }: { param
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <CardTitle>Follow-ups ({c.openFollowUps} open{c.overdueFollowUps ? `, ${c.overdueFollowUps} overdue` : ""})</CardTitle>
-                {openInquiries.length > 0 ? <AddFollowUpButton inquiries={openInquiries.map((i) => ({ id: i.opp.id, label: `${i.opp.reference}: ${i.opp.title}` }))} people={people} defaultAssigneeId={ctx.userId} /> : null}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {view.followUps.length === 0 ? <p className="text-sm text-muted-foreground">No open follow-ups.</p> : (
-                <ul className="divide-y divide-border">
-                  {view.followUps.map(({ followUp: f, opp }) => {
-                    const mayHandOver = f.assigned_to === ctx.userId || opp.owner_id === ctx.userId || canAssign || founder;
-                    return (
-                      <li key={f.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-                        <span className="min-w-0 break-words"><span className="font-medium">{f.title}</span><span className="text-muted-foreground"> · {opp.reference} · {nameOf(f.assigned_to) ?? "Former colleague"} · </span><DueText dueAt={f.due_at} /></span>
-                        {mayHandOver ? <ReassignFollowUpButton followUpId={f.id} assigneeId={f.assigned_to} people={people} title={f.title} /> : null}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              <p className="text-sm text-muted-foreground">Follow-ups belong to an inquiry. Each has its own person and due date; the account owner above is not changed by them.</p>
-            </CardContent>
-          </Card>
+          {followUpsCard}
         </>
       )}
     </div>

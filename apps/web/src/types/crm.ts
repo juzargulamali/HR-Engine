@@ -188,7 +188,9 @@ export type CrmActivityRow = {
 
 export type CrmFollowUpRow = {
   id: string;
-  opportunity_id: string;
+  /** Null for a follow-up on an account that has no inquiry (then organisation_id is set). */
+  opportunity_id: string | null;
+  organisation_id: string | null;
   company_id: string;
   assigned_to: string;
   title: string;

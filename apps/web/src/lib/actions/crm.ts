@@ -7,6 +7,8 @@ import { dubaiDateTimeToIso, findLikelyDuplicates, validateCrmLink, type Duplica
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
 import { friendlyCrmError } from "@/lib/crm/errors";
+import { getCrmContext } from "@/lib/crm/context";
+import { loadOrganisations } from "@/lib/crm/data";
 
 /**
  * Sales & CRM server actions. Every one is a thin wrapper over a crm_* database function: the function (not this file)
@@ -118,6 +120,21 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
   refresh();
   // The quick-add dialog asks to land on the list with the new enquiry open in the side panel; anything else keeps the full page.
   redirect(formData.get("after") === "panel" ? `/sales/opportunities?open=${data}` : `/sales/opportunities/${data}`);
+}
+
+/** The organisations the edit form's agency and end-client pickers choose from (read through the person's own session). A failed read says so; it is never an empty list. */
+export async function loadInquiryOrganisations(): Promise<
+  { ok: true; organisations: { id: string; name: string; kind: "agency" | "client" | "direct"; roles: string[]; place: string | null }[] } | { ok: false; error: string }
+> {
+  const ctx = await getCrmContext();
+  if (!ctx || ctx.loadFailed || ctx.companies.length === 0) return { ok: false, error: "You do not have Sales access." };
+  try {
+    const { organisations } = await loadOrganisations();
+    return { ok: true, organisations: organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, roles: o.roles, place: o.place })) };
+  } catch (e) {
+    console.error("[crm] edit: organisations load failed", e);
+    return { ok: false, error: "Could not load the organisations. Close this and try again." };
+  }
 }
 
 const patchFields = {

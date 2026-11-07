@@ -7,7 +7,7 @@ export type Section<T> = { status: "ok"; data: T } | { status: "error" };
 export type OppLite = Pick<CrmOpportunityRow, "id" | "company_id" | "reference" | "title" | "stage" | "agency_org_id" | "client_org_id" | "owner_id" | "currency" | "value" | "closed_at" | "created_at">;
 export type ProjectLite = { id: string; reference: string; name: string; status: string; completed_at: string | null; crm_opportunity_id: string | null };
 export type ActivityLite = Pick<CrmActivityRow, "id" | "opportunity_id" | "kind" | "occurred_at">;
-export type FollowUpLite = Pick<CrmFollowUpRow, "id" | "opportunity_id" | "title" | "due_at" | "status" | "assigned_to">;
+export type FollowUpLite = Pick<CrmFollowUpRow, "id" | "opportunity_id" | "organisation_id" | "title" | "due_at" | "status" | "assigned_to" | "created_by" | "company_id">;
 export type ProposalLite = Pick<CrmProposalRow, "id" | "opportunity_id" | "version" | "status" | "sent_on">;
 export type ZohoLite = Pick<CrmZohoReferenceRow, "opportunity_id" | "quote_ref" | "quote_sent_on">;
 
@@ -96,6 +96,8 @@ export interface AccountView {
   inquiries: InquiryRow[];
   quotes: QuoteRow[];
   followUps: { followUp: FollowUpLite; opp: OppLite; state: "overdue" | "today" | "upcoming" }[];
+  /** Open follow-ups placed on the account itself because it has no inquiry (they belong to no opportunity). Counted with the others. */
+  accountFollowUps: { followUp: FollowUpLite; state: "overdue" | "today" | "upcoming" }[];
   lastActivity: { at: string; kind: string; opp: OppLite } | null;
   hasHistory: boolean;
   counts: {
@@ -156,19 +158,22 @@ export function deriveAccount(input: {
   const acts = input.activities.filter((a) => oppIds.has(a.opportunity_id)).sort((a, b) => b.occurred_at.localeCompare(a.occurred_at));
   const lastActivity = acts[0] ? { at: acts[0].occurred_at, kind: acts[0].kind, opp: oppBy.get(acts[0].opportunity_id)! } : null;
   const todayDubai = dubaiDate(input.now.toISOString());
+  const stateOf = (dueAt: string) => { const day = dubaiDate(dueAt); return (day < todayDubai ? "overdue" : day === todayDubai ? "today" : "upcoming") as "overdue" | "today" | "upcoming"; };
   const followUps = input.followUps
-    .filter((f) => f.status === "open" && oppIds.has(f.opportunity_id))
+    .filter((f) => f.status === "open" && f.opportunity_id !== null && oppIds.has(f.opportunity_id))
     .sort((a, b) => a.due_at.localeCompare(b.due_at))
-    .map((f) => {
-      const day = dubaiDate(f.due_at);
-      return { followUp: f, opp: oppBy.get(f.opportunity_id)!, state: (day < todayDubai ? "overdue" : day === todayDubai ? "today" : "upcoming") as "overdue" | "today" | "upcoming" };
-    });
+    .map((f) => ({ followUp: f, opp: oppBy.get(f.opportunity_id!)!, state: stateOf(f.due_at) }));
+  const accountFollowUps = input.followUps
+    .filter((f) => f.status === "open" && f.opportunity_id === null && f.organisation_id === input.orgId && f.company_id === input.companyId)
+    .sort((a, b) => a.due_at.localeCompare(b.due_at))
+    .map((f) => ({ followUp: f, state: stateOf(f.due_at) }));
   const count = (route: Route) => inquiries.filter((i) => i.route === route).length;
   const completed = input.projects.status === "ok" ? new Set([...projectBy.values()].filter((p) => p.status === "completed" || p.completed_at !== null).map((p) => p.id)).size : null;
   return {
     inquiries,
     quotes,
     followUps,
+    accountFollowUps,
     lastActivity,
     hasHistory: inquiries.length > 0,
     counts: {
@@ -179,8 +184,8 @@ export function deriveAccount(input: {
       direct: count("direct"), throughAgency: count("through_agency"), asAgency: count("as_agency"),
       completedProjects: completed, projectsNotVisible,
       inquiriesAwaitingReply: new Set(quotes.filter((q) => q.awaitingReply).map((q) => q.opportunityId)).size,
-      openFollowUps: followUps.length,
-      overdueFollowUps: followUps.filter((f) => f.state === "overdue").length,
+      openFollowUps: followUps.length + accountFollowUps.length,
+      overdueFollowUps: [...followUps, ...accountFollowUps].filter((f) => f.state === "overdue").length,
     },
   };
 }

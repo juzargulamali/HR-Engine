@@ -68,7 +68,9 @@ export async function loadAccount(ctx: CrmContext, companyId: string, orgId: str
     ids.length ? supabase.from("crm_proposals").select("id, opportunity_id, version, status, sent_on").in("opportunity_id", ids) : none,
     ids.length ? supabase.from("crm_zoho_references").select("opportunity_id, quote_ref, quote_sent_on").in("opportunity_id", ids) : none,
     ids.length ? supabase.from("crm_activities").select("id, opportunity_id, kind, occurred_at").in("opportunity_id", ids) : none,
-    ids.length ? supabase.from("crm_follow_ups").select("id, opportunity_id, title, due_at, status, assigned_to").in("opportunity_id", ids).eq("status", "open") : none,
+    // The inquiries' open follow-ups, and the ones placed on this account itself (no inquiry), for the selected company only.
+    supabase.from("crm_follow_ups").select("id, opportunity_id, organisation_id, title, due_at, status, assigned_to, created_by, company_id").eq("company_id", companyId).eq("status", "open")
+      .or(ids.length ? `opportunity_id.in.(${ids.join(",")}),and(opportunity_id.is.null,organisation_id.eq.${orgId})` : `and(opportunity_id.is.null,organisation_id.eq.${orgId})`),
     (() => {
       const other = [...new Set(opps.flatMap((o) => [o.agency_org_id, o.client_org_id]).filter((x): x is string => !!x && x !== orgId))];
       return other.length ? supabase.from("crm_organisations").select("id, name").in("id", other) : none;

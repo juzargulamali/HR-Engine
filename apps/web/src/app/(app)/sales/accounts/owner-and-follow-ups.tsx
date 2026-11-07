@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { CalendarPlus } from "lucide-react";
-import { assignAccountOwner, reassignFollowUp } from "@/lib/actions/clients-agencies";
+import { assignAccountOwner, createAccountFollowUp, reassignFollowUp } from "@/lib/actions/clients-agencies";
 import { createFollowUp } from "@/lib/actions/crm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,6 +69,34 @@ export function AddFollowUpButton({ inquiries, people, defaultAssigneeId }: { in
             <Field label="Time (Dubai)" htmlFor="fu-time"><Input id="fu-time" name="time" type="time" defaultValue="09:00" /></Field>
           </div>
           <Field label="Follow-up for" htmlFor="fu-assignee"><Select id="fu-assignee" name="assignedTo" defaultValue={defaultAssigneeId}>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
+        </ActionForm>
+      </Modal>
+    </>
+  );
+}
+
+/**
+ * A dated follow-up on this account when it has no inquiry to hang one on. The person chosen must have Sales access for this company (the list holds only
+ * them) and only someone with the assign owners right may choose anyone but themselves (`canAssign`; the database checks it again). The account owner is untouched.
+ */
+export function AddAccountFollowUpButton({ orgId, companyId, people, currentUserId, canAssign }: { orgId: string; companyId: string; people: PersonOption[]; currentUserId: string; canAssign: boolean }) {
+  const [open, setOpen] = useState(false);
+  const choices = canAssign ? people : people.filter((p) => p.id === currentUserId);
+  return (
+    <>
+      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}><CalendarPlus className="h-4 w-4" aria-hidden /> Add follow-up</Button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Add follow-up" description="A dated task on this account, which has no inquiry yet. It does not change the account owner.">
+        <ActionForm action={createAccountFollowUp} submitLabel="Add follow-up" onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
+          <input type="hidden" name="orgId" value={orgId} />
+          <input type="hidden" name="companyId" value={companyId} />
+          <Field label="What to do" htmlFor="afu-title"><Input id="afu-title" name="title" required autoComplete="off" placeholder="e.g. Send our portfolio and ask for a meeting" /></Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Due date" htmlFor="afu-date"><Input id="afu-date" name="date" type="date" required defaultValue={todayInDubai()} /></Field>
+            <Field label="Time (Dubai)" htmlFor="afu-time"><Input id="afu-time" name="time" type="time" defaultValue="09:00" /></Field>
+          </div>
+          <Field label="Follow-up for" htmlFor="afu-assignee" hint={canAssign ? "Only people with Sales access for this company are listed." : "Only a founder, or someone they delegated, can give a follow-up to someone else."}>
+            <Select id="afu-assignee" name="assignedTo" defaultValue={currentUserId}>{choices.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
+          </Field>
         </ActionForm>
       </Modal>
     </>
