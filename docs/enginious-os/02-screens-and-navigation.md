@@ -54,12 +54,12 @@ Verified at `551f615` (2026-11-04). Route list from `apps/web/src/app/(app)/**/p
 
 | Path | Shows | Menu |
 |---|---|---|
-| `/sales`, `/sales/follow-ups` | Follow-ups (entry point) | Menu |
-| `/sales/opportunities`, `/sales/opportunities/[id]` | Enquiries; enquiry detail (tab `commercial` for approvals) | Menu / Ctx |
+| `/sales`, `/sales/follow-ups` | Follow-ups (entry point); also lists dated follow-ups placed on an account that has no inquiry (row opens the account) | Menu |
+| `/sales/opportunities`, `/sales/opportunities/[id]` | Enquiries; enquiry detail (tab `commercial` for approvals); Edit details has role-aware Agency and End client pickers | Menu / Ctx |
 | `/sales/opportunities/[id]/close`, `.../handover` | Close as won/lost; handover to Projects | Ctx |
-| `/sales/accounts`, `/sales/accounts/[id]` | Clients & Agencies: directory (role, country, account owner, lead source, exhibition; buttons Import from Excel, Export filtered results, Export all accounts) and account page (profile, contacts, inquiries direct or through an agency, quotes, follow-ups). Control reference: `modules/sales-clients-and-agencies.md` | Menu |
+| `/sales/accounts`, `/sales/accounts/[id]` | Clients & Agencies: directory (role, country, account owner, lead source, exhibition; buttons Import from Excel, Export filtered results, Export all accounts) and account page (profile, contacts, inquiries direct or through an agency, quotes, follow-ups on its inquiries or on the account itself when it has none). Import confirm checks the preview is still current ("preview is out of date" then "Run a fresh preview"). Control reference: `modules/sales-clients-and-agencies.md` | Menu |
 | `/sales/accounts/import` | Guided Excel import: Upload, Preview, Confirm, Result (template download). Routes `/api/sales/accounts/import`, `/api/sales/accounts/import/template`, `/api/sales/accounts/export` | Any Sales grant for the company; changes need the existing organisation edit rules |
-| `/sales/new` | Full new-enquiry form (`/sales/opportunities?add=1` also) | Secondary |
+| `/sales/new` | Full new-enquiry form (`/sales/opportunities?add=1` also); Agency and End client pickers offer only organisations holding that role | Secondary |
 | `/sales/clients`, `/sales/proposals`, `/sales/pipeline` | Shared contacts, proposals search, pipeline board | Secondary |
 | `/sales/reports` | Reports | Menu |
 | `/sales/settings` | Sales settings | Menu (Manage), settings capability or founder |

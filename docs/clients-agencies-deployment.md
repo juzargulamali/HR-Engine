@@ -1,16 +1,20 @@
-# Clients & Agencies (part 1): deployment
+# Clients & Agencies: deployment
 
-One migration, applied by the owner in the SQL Editor of the hosted project. Claude runs no hosted SQL. Additive and idempotent (safe to run twice).
+One migration, applied by the owner in the SQL Editor of the hosted project. Claude runs no hosted SQL. Additive and idempotent (safe to run twice). It was corrected in place for the three corrections of this PR (import safety, organisation roles on inquiries, follow-ups on accounts with no inquiry) because it is applied on no hosted database, so there is still ONE migration and ONE pack. If it had already been applied anywhere, a second migration would be needed instead.
 
 | Order | File | Kind |
 |---|---|---|
-| 1 | `supabase/manual-sql/crm_accounts_00_preflight_readonly.sql` | read-only: prerequisites; last section B row must say "not applied yet" |
+| 1 | `supabase/manual-sql/crm_accounts_00_preflight_readonly.sql` | read-only: prerequisites; last section B row must say "not applied yet"; section D must say OK (no organisation holds one contact e-mail twice: the migration stops without changing anything if one does) |
 | 2 | `supabase/manual-sql/crm_accounts_05_preservation_check_readonly.sql` | read-only: keep the whole `paste` column |
 | 3 | `supabase/migrations/20261219000100_crm_clients_agencies.sql` | the change (writes) |
-| 4 | `supabase/manual-sql/crm_accounts_05_preservation_check_readonly.sql` again | compare: only `crm_create_organisation` and the `crm_organisations` columns may differ; `grant:crm_account_profiles` must read `SELECT` only on the hosted project |
+| 4 | `supabase/manual-sql/crm_accounts_05_preservation_check_readonly.sql` again | compare: only `crm_create_organisation`, `crm_complete_follow_up`, `crm_reschedule_follow_up`, `crm_cancel_follow_up` (one added branch each), the `crm_organisations`, `crm_follow_ups` and `crm_opportunities` definitions may differ; `grant:crm_account_profiles` must read `SELECT` only on the hosted project |
 | 5 | `supabase/manual-sql/crm_accounts_20_verify_readonly.sql` | read-only: last row must say `OK ... 0 failing` |
-| rollback | `supabase/manual-sql/crm_accounts_90_rollback.sql` | writes; deletes account owners, lead sources, roles, countries, websites: export first |
+| rollback | `supabase/manual-sql/crm_accounts_90_rollback.sql` | writes; deletes account owners, lead sources, roles, countries, websites, follow-ups on accounts with no inquiry and import batch records: export first |
 
 What the migration adds (and why nothing smaller works): `crm_organisations.roles` (one record, several roles; `kind` stays and is derived), `country_code`, `website`, `website_domain`; the per-company table `crm_account_profiles` (account owner, lead source, exhibition); and six functions: `crm_can_edit_organisation`, `crm_create_organisation_profile`, `crm_update_organisation`, `crm_save_account_profile`, `crm_assign_account_owner`, `crm_reassign_follow_up`. It also re-defines `crm_create_organisation` (same signature) so organisations made the old way record their role.
 
+The corrections add (all in the same file): **changing** — the database import function `crm_import_apply` with helpers and `crm_import_fingerprints`, the table `crm_import_batches` (no policy, no direct access), the unique index `uq_crm_contacts_org_email`; the trigger `crm_opportunities_party_roles` (an inquiry's agency must hold the agency role and its end client the end-client or direct-client role, checked on create and when the field changes); `crm_follow_ups.opportunity_id` made nullable plus `organisation_id`, the function `crm_create_account_follow_up`, and `crm_complete_follow_up`, `crm_reschedule_follow_up`, `crm_cancel_follow_up`, `crm_reassign_follow_up` with one added branch each. **Read-only** — pack files 00, 05 and 20 only select; 90 (rollback) writes.
+
 No access is widened. Reads of the new table need a CRM grant for that company. Editing an organisation follows the existing contact rule; assigning an account owner needs the existing `assign_owner` capability (founder implies it) in that company. Being account owner or follow-up assignee confers no extra right. Tests: `packages/rls-tests/test/crm-clients-agencies.rls.test.ts`. Control reference: `docs/enginious-os/modules/sales-clients-and-agencies.md`.
+
+What to expect after applying: nothing visible changes for existing inquiries (the role check applies only when a field is set or changed); the import confirm applies in one database call and refuses a stale preview; an account with no inquiry can take a dated follow-up. Account follow-ups do not generate reminders or e-mails (reminders are tied to an inquiry). Tests: `packages/rls-tests/test/crm-clients-agencies.rls.test.ts`, `packages/rls-tests/test/crm-import-safety.rls.test.ts` (separate database sessions for the concurrent cases).
