@@ -14,10 +14,29 @@ export const OUTREACH_SETTABLE_STATUSES: readonly CrmOutreachStatus[] = ["not_st
 
 export const OUTREACH_KINDS: readonly CrmOutreachKind[] = ["call", "email", "meeting"];
 export const OUTREACH_KIND_LABEL: Record<string, string> = { call: "Call", email: "Email", meeting: "Meeting" };
-export const OUTREACH_OUTCOMES: readonly CrmOutreachOutcome[] = ["no_answer", "spoke", "left_message", "sent", "replied", "meeting_held", "not_interested"];
+/**
+ * The outcomes a person may choose for each kind of activity: the ONE definition used by the form, the server action and (as the same lists, kept in step by a test)
+ * the database function crm_outreach_log. "Replied" exists only for e-mail and "Spoke" only for calls; nothing is ever inferred from a recorded activity.
+ */
+export const OUTREACH_OUTCOMES_BY_KIND: Record<CrmOutreachKind, readonly CrmOutreachOutcome[]> = {
+  call: ["no_answer", "left_message", "spoke", "call_back_requested", "not_interested"],
+  email: ["sent", "replied", "bounced", "not_interested"],
+  meeting: ["meeting_booked", "meeting_held", "rescheduled", "no_show", "not_interested"],
+};
+/** Every value that may be stored: the lists above plus the outcomes of the original single list, which stay readable on rows already recorded. */
+export const OUTREACH_OUTCOMES: readonly CrmOutreachOutcome[] = [
+  "no_answer", "spoke", "left_message", "sent", "replied", "meeting_held", "not_interested", "call_back_requested", "bounced", "meeting_booked", "rescheduled", "no_show",
+];
 export const OUTREACH_OUTCOME_LABEL: Record<CrmOutreachOutcome, string> = {
   no_answer: "No answer", spoke: "Spoke", left_message: "Left message", sent: "Sent", replied: "Replied", meeting_held: "Meeting held", not_interested: "Not interested",
+  call_back_requested: "Call back requested", bounced: "Bounced / wrong address", meeting_booked: "Meeting booked", rescheduled: "Rescheduled", no_show: "No show",
 };
+/** The choices for a kind (empty for an unknown kind). */
+export const outcomesForKind = (kind: string): readonly CrmOutreachOutcome[] => OUTREACH_OUTCOMES_BY_KIND[kind as CrmOutreachKind] ?? [];
+/** A NEW entry's outcome must fit its kind. Rows already stored are never checked against this: they display as they are. */
+export const isOutcomeValidForKind = (kind: string, outcome: string): boolean => (outcomesForKind(kind) as readonly string[]).includes(outcome);
+/** Keeps the chosen outcome when it fits the (new) kind, else clears it so the person must choose again. */
+export const outcomeAfterKindChange = (kind: string, outcome: string): string => (isOutcomeValidForKind(kind, outcome) ? outcome : "");
 export const OUTREACH_EVENT_LABEL: Record<CrmOutreachEventRow["kind"], string> = {
   assigned: "Assigned", reassigned: "Reassigned", call: "Call", email: "Email", meeting: "Meeting", status: "Status", next_action: "Next action", inquiry_linked: "Inquiry linked",
 };

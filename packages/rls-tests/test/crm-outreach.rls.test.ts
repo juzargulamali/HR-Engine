@@ -242,6 +242,119 @@ describe("Pre-inquiry outreach", () => {
     });
   });
 
+  describe("outcomes per kind", () => {
+    const ok: [string, string][] = [["call", "no_answer"], ["call", "left_message"], ["call", "spoke"], ["call", "call_back_requested"], ["call", "not_interested"],
+      ["email", "sent"], ["email", "replied"], ["email", "bounced"], ["email", "not_interested"],
+      ["meeting", "meeting_booked"], ["meeting", "meeting_held"], ["meeting", "rescheduled"], ["meeting", "no_show"], ["meeting", "not_interested"]];
+    const bad: [string, string][] = [["call", "replied"], ["call", "sent"], ["call", "bounced"], ["call", "meeting_held"], ["call", "no_show"],
+      ["email", "spoke"], ["email", "no_answer"], ["email", "meeting_booked"], ["email", "call_back_requested"],
+      ["meeting", "replied"], ["meeting", "spoke"], ["meeting", "sent"], ["meeting", "no_answer"]];
+    it("accepts every valid kind and outcome pair, and an outcome never moves the status beyond the first-activity rule", async () => {
+      const F = await org("Fictional Outcomes F");
+      await assign(U.lead, [F], U.sara);
+      const o = await outreachOf(F);
+      for (const [kind, outcome] of ok) await commit(U.sara, `select crm_outreach_log('${o.id}', '${kind}', ${today()}, '${outcome}')`);
+      const stored = await admin<{ n: string }>(`select count(*) n from crm_outreach_events where outreach_id = '${o.id}' and kind in ('call', 'email', 'meeting')`);
+      expect(Number(stored[0].n)).toBe(ok.length);
+      expect((await outreachOf(F)).status).toBe("in_progress");
+    });
+    it("rejects an outcome that does not fit its kind, in words, and stores nothing", async () => {
+      const o = await outreachOf(await org("Fictional Outcomes G").then(async (g) => { await assign(U.lead, [g], U.sara); return g; }));
+      for (const [kind, outcome] of bad) {
+        await expect(commit(U.sara, `select crm_outreach_log('${o.id}', '${kind}', ${today()}, '${outcome}')`), `${kind}/${outcome}`).rejects.toThrow(/That outcome does not fit a .*Choose one of/);
+      }
+      await expect(commit(U.sara, `select crm_outreach_log('${o.id}', 'call', ${today()}, '')`)).rejects.toThrow(/Choose an outcome/);
+      await expect(commit(U.sara, `select crm_outreach_log('${o.id}', 'call', ${today()}, null)`)).rejects.toThrow(/Choose an outcome/);
+      expect(await admin(`select 1 from crm_outreach_events where outreach_id = '${o.id}' and kind in ('call', 'email', 'meeting')`)).toHaveLength(0);
+      expect((await outreachOf((await admin<{ organisation_id: string }>(`select organisation_id from crm_outreach where id = '${o.id}'`))[0].organisation_id)).status).toBe("not_started");
+    });
+    it("outcomes recorded under the original single list stay valid and readable, unchanged", async () => {
+      const H = await org("Fictional Outcomes H");
+      await assign(U.lead, [H], U.sara);
+      const o = await outreachOf(H);
+      // rows as the original single list allowed them, including pairs the per-kind lists no longer offer (a call that "replied", an e-mail that was "spoke")
+      const legacy: [string, string][] = [["call", "replied"], ["email", "spoke"], ["call", "meeting_held"], ["email", "left_message"], ["meeting", "sent"], ["call", "sent"], ["meeting", "no_answer"]];
+      for (const [kind, outcome] of legacy) {
+        await admin(`insert into crm_outreach_events (outreach_id, company_id, organisation_id, kind, occurred_on, outcome, created_by)
+          values ('${o.id}', '${CO.uae}', '${H}', '${kind}', ${today()}, '${outcome}', '${U.sara}')`);
+      }
+      await admin(`update crm_outreach set last_outcome = 'meeting_held', last_contact_kind = 'call', last_contact_on = ${today()} where id = '${o.id}'`);   // old row shape: allowed, not rewritten
+      const asAssignee = await q<{ kind: string; outcome: string }>(U.sara, `select kind, outcome from crm_outreach_events where outreach_id = '${o.id}' and outcome is not null order by created_at, id`);
+      expect(asAssignee.map((r) => [r.kind, r.outcome])).toEqual(legacy);
+      expect((await q<{ last_outcome: string }>(U.lead, `select last_outcome from crm_outreach where id = '${o.id}'`))[0].last_outcome).toBe("meeting_held");
+      await expect(commit(U.sara, `select crm_outreach_log('${o.id}', 'call', ${today()}, 'replied')`)).rejects.toThrow(/does not fit a call/);   // NEW entries are checked
+      await commit(U.sara, `select crm_outreach_log('${o.id}', 'call', ${today()}, 'spoke')`);   // and logging on after the old rows works
+      await expect(admin(`insert into crm_outreach_events (outreach_id, company_id, organisation_id, kind, occurred_on, outcome, created_by)
+        values ('${o.id}', '${CO.uae}', '${H}', 'call', ${today()}, 'liked', '${U.sara}')`)).rejects.toThrow();   // the table still refuses unknown values
+    });
+  });
+
+  describe("reassignment and who can read the history", () => {
+    const log = (user: string, oid: string, kind: string, outcome: string, note: string) => commit(user, `select crm_outreach_log('${oid}', '${kind}', ${today()}, '${outcome}', '${note}')`);
+    type Ev = { id: string; kind: string; outcome: string | null; note: string | null; created_by: string; created_at: string };
+    const events = (user: string, oid: string) => q<Ev>(user, `select id, kind, outcome, note, created_by, created_at::text from crm_outreach_events where outreach_id = '${oid}' order by created_at, id`);
+    const allEvents = (oid: string) => admin<Ev>(`select id, kind, outcome, note, created_by, created_at::text from crm_outreach_events where outreach_id = '${oid}' order by created_at, id`);
+
+    it("after a reassignment the new assignee reads the FULL history, the former assignee reads nothing, and the history is unchanged and records the move", async () => {
+      const F = await org("Fictional Reassign F");
+      await assign(U.lead, [F], U.sara);
+      const o = await outreachOf(F);
+      await log(U.sara, o.id, "call", "left_message", "Sara rang");
+      await log(U.lead, o.id, "email", "sent", "Lead sent the deck");
+      await log(U.sara, o.id, "email", "replied", "They answered");
+      await commit(U.sara, `select crm_outreach_set_next('${o.id}', 'Book a meeting', '2027-02-01')`);
+      const before = await allEvents(o.id);
+      expect(await events(U.sara, o.id)).toEqual(before);   // the first assignee reads all of it
+      expect((await q(U.omar, `select 1 from crm_outreach where id = '${o.id}'`))).toHaveLength(0);
+
+      expect((await assign(U.founder, [F], U.omar))[0]?.result).toBe("reassigned");
+
+      // history intact and append-only: every earlier event is still there, byte for byte, in order; one event was added and it names the move
+      const after = await allEvents(o.id);
+      expect(after.slice(0, before.length)).toEqual(before);
+      expect(after.slice(before.length).map((e) => e.kind)).toEqual(["reassigned"]);
+      const [move] = await admin<{ from_user: string; to_user: string; created_by: string }>(`select from_user, to_user, created_by from crm_outreach_events where outreach_id = '${o.id}' and kind = 'reassigned'`);
+      expect(move).toEqual({ from_user: U.sara, to_user: U.omar, created_by: U.founder });
+
+      // the NEW assignee reads everything, including what the former assignee and a lead logged before the move
+      const asOmar = await events(U.omar, o.id);
+      expect(asOmar).toEqual(after);
+      expect(new Set(asOmar.map((e) => e.created_by))).toEqual(new Set([U.lead, U.sara, U.founder]));
+      expect(asOmar.map((e) => e.note)).toEqual(expect.arrayContaining(["Sara rang", "Lead sent the deck", "They answered"]));
+      expect((await q(U.omar, `select 1 from crm_outreach where id = '${o.id}' and assigned_to = '${U.omar}'`))).toHaveLength(1);   // "My outreach" lists it
+      await log(U.omar, o.id, "meeting", "meeting_booked", "Omar booked it");
+      expect((await events(U.omar, o.id)).length).toBe(after.length + 1);
+
+      // the FORMER assignee: no row, no events, no "My outreach", cannot act (the database refuses, hiding is not what protects it)
+      expect(await q(U.sara, `select 1 from crm_outreach where id = '${o.id}'`)).toHaveLength(0);
+      expect(await q(U.sara, `select 1 from crm_outreach where assigned_to = '${U.sara}' and organisation_id = '${F}'`)).toHaveLength(0);
+      expect(await q(U.sara, `select 1 from crm_outreach_events where outreach_id = '${o.id}'`)).toHaveLength(0);
+      expect(await q(U.sara, `select 1 from crm_outreach_events where organisation_id = '${F}'`)).toHaveLength(0);
+      await expect(log(U.sara, o.id, "call", "spoke", "still here?")).rejects.toThrow(/assigned to/);
+      await expect(commit(U.sara, `select crm_outreach_set_next('${o.id}', 'x', ${today()})`)).rejects.toThrow(/assigned to/);
+
+      // append-only holds through reassignment for everyone, including the lead and the new assignee
+      await expect(admin(`update crm_outreach_events set note = 'edited' where outreach_id = '${o.id}'`)).rejects.toThrow(/cannot be changed/);
+      await expect(admin(`delete from crm_outreach_events where outreach_id = '${o.id}'`)).rejects.toThrow(/cannot be changed/);
+      expect((await allEvents(o.id)).slice(0, before.length)).toEqual(before);
+    });
+
+    it("a former assignee who is separately authorised (assign_owner) still reads the outreach and its whole history", async () => {
+      const G = await org("Fictional Reassign G");
+      await assign(U.founder, [G], U.lead);   // the lead holds assign_owner and is the first assignee
+      const o = await outreachOf(G);
+      await log(U.lead, o.id, "call", "spoke", "Lead spoke");
+      await assign(U.founder, [G], U.omar);
+      const history = await allEvents(o.id);
+      expect(history.map((e) => e.kind)).toEqual(["assigned", "call", "status", "reassigned"]);
+      expect(await events(U.lead, o.id)).toEqual(history);
+      expect(await events(U.omar, o.id)).toEqual(history);
+      expect(await q(U.lead, `select 1 from crm_outreach where id = '${o.id}'`)).toHaveLength(1);
+      // and a former assignee without that right is out, even on the same outreach, in the same company
+      expect(await events(U.sara, o.id)).toHaveLength(0);
+    });
+  });
+
   describe("owner pack", () => {
     it("the read-only verify file passes on the migrated schema", async () => {
       const sql = readFileSync(fileURLToPath(new URL("../../../supabase/manual-sql/crm_accounts_20_verify_readonly.sql", import.meta.url)), "utf8");

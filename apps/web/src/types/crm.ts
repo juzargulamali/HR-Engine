@@ -70,7 +70,8 @@ export type CrmLeadSource = "agency_call" | "linkedin" | "direct_client" | "what
 
 export type CrmOutreachStatus = "not_started" | "in_progress" | "waiting_for_reply" | "meeting_booked" | "inquiry_raised" | "closed";
 export type CrmOutreachKind = "call" | "email" | "meeting";
-export type CrmOutreachOutcome = "no_answer" | "spoke" | "left_message" | "sent" | "replied" | "meeting_held" | "not_interested";
+/** Every outcome that can be stored: the seven of the original single list (kept readable as they are) plus the five added with the per-kind lists. */
+export type CrmOutreachOutcome = "no_answer" | "spoke" | "left_message" | "sent" | "replied" | "meeting_held" | "not_interested" | "call_back_requested" | "bounced" | "meeting_booked" | "rescheduled" | "no_show";
 
 /** A salesperson's assigned outreach to an account (no inquiry needed). One open row per account and company. */
 export type CrmOutreachRow = {

@@ -937,7 +937,10 @@ create table if not exists crm_outreach_events (
   organisation_id uuid not null references crm_organisations(id),
   kind            text not null check (kind in ('assigned', 'reassigned', 'call', 'email', 'meeting', 'status', 'next_action', 'inquiry_linked')),
   occurred_on     date not null,
-  outcome         text check (outcome is null or outcome in ('no_answer', 'spoke', 'left_message', 'sent', 'replied', 'meeting_held', 'not_interested')),
+  -- A superset on purpose: the first seven values are the original single list (rows already stored with them stay valid and readable even where they no
+  -- longer fit their kind); the last five were added with the per-kind lists. Only crm_outreach_log validates a NEW entry against its kind.
+  outcome         text check (outcome is null or outcome in ('no_answer', 'spoke', 'left_message', 'sent', 'replied', 'meeting_held', 'not_interested',
+                                                             'call_back_requested', 'bounced', 'meeting_booked', 'rescheduled', 'no_show')),
   note            text check (note is null or length(btrim(note)) between 1 and 1000),
   from_user       uuid references auth.users(id),
   to_user         uuid references auth.users(id),
@@ -948,6 +951,9 @@ create table if not exists crm_outreach_events (
   created_by      uuid not null references auth.users(id),
   created_at      timestamptz not null default now()
 );
+alter table crm_outreach_events drop constraint if exists crm_outreach_events_outcome_check;
+alter table crm_outreach_events add constraint crm_outreach_events_outcome_check check (outcome is null or outcome in
+  ('no_answer', 'spoke', 'left_message', 'sent', 'replied', 'meeting_held', 'not_interested', 'call_back_requested', 'bounced', 'meeting_booked', 'rescheduled', 'no_show'));
 create index if not exists idx_crm_outreach_events_outreach on crm_outreach_events(outreach_id, created_at);
 create index if not exists idx_crm_outreach_events_org on crm_outreach_events(organisation_id, company_id);
 
@@ -1050,8 +1056,18 @@ declare o crm_outreach; v_today date := (now() at time zone 'Asia/Dubai')::date;
 begin
   o := crm_outreach_acting_on(p_outreach);
   if p_kind is null or p_kind not in ('call', 'email', 'meeting') then raise exception 'Choose call, e-mail or meeting' using errcode = '22023'; end if;
-  if p_outcome is null or p_outcome not in ('no_answer', 'spoke', 'left_message', 'sent', 'replied', 'meeting_held', 'not_interested') then
-    raise exception 'Choose an outcome' using errcode = '22023';
+  if p_outcome is null or btrim(p_outcome) = '' then raise exception 'Choose an outcome' using errcode = '22023'; end if;
+  -- The outcomes that fit each kind (the same lists as OUTREACH_OUTCOMES_BY_KIND in the app). 'replied' is for e-mail only and 'spoke' for calls only.
+  if not (p_outcome = any (case p_kind
+      when 'call' then array['no_answer', 'left_message', 'spoke', 'call_back_requested', 'not_interested']
+      when 'email' then array['sent', 'replied', 'bounced', 'not_interested']
+      when 'meeting' then array['meeting_booked', 'meeting_held', 'rescheduled', 'no_show', 'not_interested']
+    end)) then
+    raise exception 'That outcome does not fit a %. %', p_kind, case p_kind
+      when 'call' then 'Choose one of: No answer, Left message, Spoke, Call back requested, Not interested'
+      when 'email' then 'Choose one of: Sent, Replied, Bounced / wrong address, Not interested'
+      when 'meeting' then 'Choose one of: Meeting booked, Meeting held, Rescheduled, No show, Not interested'
+    end using errcode = '22023';
   end if;
   if p_on is null or p_on > v_today then raise exception 'Choose the date it happened (not a future date)' using errcode = '22023'; end if;
   if v_note is not null and length(v_note) > 1000 then raise exception 'The note is too long (1000 characters at most)' using errcode = '22023'; end if;

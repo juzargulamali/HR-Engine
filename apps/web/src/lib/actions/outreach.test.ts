@@ -68,6 +68,18 @@ describe("logging, status, next action and linking", () => {
     expect(await logOutreachActivity({ error: null }, fd({ ...base, outcome: "sent" }))).toEqual({ error: null });
     expect(rpc).toHaveBeenCalledWith("crm_outreach_log", { p_outreach: OUT, p_kind: "email", p_on: "2026-11-06", p_outcome: "sent", p_note: "Sent portfolio", p_next_action: null, p_next_due: null });
   });
+  it("the outcome must fit the kind: Replied only for e-mail, Spoke only for a call; valid pairs are passed on, invalid ones never reach the database", async () => {
+    const log = (kind: string, outcome: string) => logOutreachActivity({ error: null }, fd({ outreachId: OUT, kind, on: "2026-11-06", outcome }));
+    for (const [kind, outcome] of [["call", "replied"], ["call", "sent"], ["email", "spoke"], ["email", "no_show"], ["meeting", "replied"], ["meeting", "no_answer"], ["call", "no_show"]]) {
+      expect((await log(kind, outcome)).error, `${kind}/${outcome}`).toMatch(/does not fit a/);
+    }
+    expect((await log("call", "replied")).error).toMatch(/Choose one of: No answer, Left message, Spoke, Call back requested, Not interested/);
+    expect(rpc).not.toHaveBeenCalled();
+    for (const [kind, outcome] of [["call", "call_back_requested"], ["call", "spoke"], ["email", "replied"], ["email", "bounced"], ["meeting", "meeting_booked"], ["meeting", "rescheduled"], ["meeting", "not_interested"]]) {
+      expect(await log(kind, outcome), `${kind}/${outcome}`).toEqual({ error: null });
+    }
+    expect(rpc).toHaveBeenCalledTimes(7);
+  });
   it("a next action needs both its words and its date", async () => {
     const base = { outreachId: OUT, kind: "call", on: "2026-11-06", outcome: "spoke" };
     expect((await logOutreachActivity({ error: null }, fd({ ...base, nextAction: "Call back" }))).error).toMatch(/both/);

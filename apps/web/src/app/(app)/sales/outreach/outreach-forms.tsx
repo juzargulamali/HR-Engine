@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { ClipboardPen, Link2, Plus } from "lucide-react";
 import { linkOutreachInquiry, logOutreachActivity, setOutreachNextAction, setOutreachStatus } from "@/lib/actions/outreach";
-import { OUTREACH_KIND_LABEL, OUTREACH_KINDS, OUTREACH_OUTCOME_LABEL, OUTREACH_OUTCOMES, OUTREACH_SETTABLE_STATUSES, OUTREACH_STATUS_LABEL } from "@/lib/crm/clients-agencies/outreach";
+import { OUTREACH_KIND_LABEL, OUTREACH_KINDS, OUTREACH_OUTCOME_LABEL, OUTREACH_SETTABLE_STATUSES, OUTREACH_STATUS_LABEL, outcomeAfterKindChange, outcomesForKind } from "@/lib/crm/clients-agencies/outreach";
 import type { CrmOutreachStatus } from "@/types/crm";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,30 @@ import { todayInDubai } from "@/components/sales/format";
 
 /** The salesperson's controls on one outreach (account page, section Outreach). The database checks who may act on every one of them again. */
 
+/** What / Date / Outcome. The outcome choices follow the chosen kind, and changing the kind clears an outcome that does not fit the new one. */
+export function KindOutcomeFields({ id }: { id: string }) {
+  const [kind, setKind] = useState<string>("call");
+  const [outcome, setOutcome] = useState("");
+  return (
+    <>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="What" htmlFor={`${id}-kind`}>
+          <Select id={`${id}-kind`} name="kind" required value={kind} onChange={(e) => { setKind(e.target.value); setOutcome(outcomeAfterKindChange(e.target.value, outcome)); }}>
+            {OUTREACH_KINDS.map((k) => <option key={k} value={k}>{OUTREACH_KIND_LABEL[k]}</option>)}
+          </Select>
+        </Field>
+        <Field label="Date it happened" htmlFor={`${id}-on`}><Input id={`${id}-on`} name="on" type="date" required max={todayInDubai()} defaultValue={todayInDubai()} /></Field>
+      </div>
+      <Field label="Outcome" htmlFor={`${id}-outcome`}>
+        <Select id={`${id}-outcome`} name="outcome" required value={outcome} onChange={(e) => setOutcome(e.target.value)}>
+          <option value="" disabled>Choose an outcome…</option>
+          {outcomesForKind(kind).map((o) => <option key={o} value={o}>{OUTREACH_OUTCOME_LABEL[o]}</option>)}
+        </Select>
+      </Field>
+    </>
+  );
+}
+
 export function LogActivityButton({ outreachId, accountName }: { outreachId: string; accountName: string }) {
   const [open, setOpen] = useState(false);
   const id = `lg-${outreachId}`;
@@ -25,18 +49,7 @@ export function LogActivityButton({ outreachId, accountName }: { outreachId: str
       <Modal open={open} onClose={() => setOpen(false)} title="Log activity" description={`A call, email or meeting with ${accountName}. The entry is kept in the history and cannot be edited. Choosing an outcome is how you record a reply: nothing is assumed.`}>
         <ActionForm action={logOutreachActivity} submitLabel="Log activity" onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
           <input type="hidden" name="outreachId" value={outreachId} />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="What" htmlFor={`${id}-kind`}>
-              <Select id={`${id}-kind`} name="kind" required defaultValue="call">{OUTREACH_KINDS.map((k) => <option key={k} value={k}>{OUTREACH_KIND_LABEL[k]}</option>)}</Select>
-            </Field>
-            <Field label="Date it happened" htmlFor={`${id}-on`}><Input id={`${id}-on`} name="on" type="date" required max={todayInDubai()} defaultValue={todayInDubai()} /></Field>
-          </div>
-          <Field label="Outcome" htmlFor={`${id}-outcome`}>
-            <Select id={`${id}-outcome`} name="outcome" required defaultValue="">
-              <option value="" disabled>Choose an outcome…</option>
-              {OUTREACH_OUTCOMES.map((o) => <option key={o} value={o}>{OUTREACH_OUTCOME_LABEL[o]}</option>)}
-            </Select>
-          </Field>
+          <KindOutcomeFields id={id} />
           <Field label="Note (optional)" htmlFor={`${id}-note`}><Textarea id={`${id}-note`} name="note" rows={2} maxLength={1000} /></Field>
           <fieldset className="space-y-3 rounded-md border border-border p-3">
             <legend className="px-1 text-sm font-medium">Next action (optional here)</legend>

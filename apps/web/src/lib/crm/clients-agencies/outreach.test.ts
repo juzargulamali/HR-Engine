@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CrmOutreachEventRow, CrmOutreachRow } from "@/types/crm";
-import { describeEvent, filterOutreach, isOverdue, outreachFiltersFromParams, OUTREACH_OUTCOMES, OUTREACH_SETTABLE_STATUSES, summariseAssignResults } from "./outreach";
+import { readFileSync } from "node:fs";
+import { describeEvent, filterOutreach, isOutcomeValidForKind, isOverdue, outcomeAfterKindChange, outcomesForKind, outreachFiltersFromParams, OUTREACH_OUTCOME_LABEL, OUTREACH_OUTCOMES, OUTREACH_OUTCOMES_BY_KIND, OUTREACH_SETTABLE_STATUSES, summariseAssignResults } from "./outreach";
 
 const TODAY = "2026-11-07";
 const row = (o: Partial<CrmOutreachRow> & { id: string }): CrmOutreachRow => ({
@@ -43,9 +44,43 @@ describe("filters and sort", () => {
 });
 
 describe("definitions", () => {
-  it("offers exactly the seven outcomes and never lets a person pick Inquiry raised by hand", () => {
-    expect([...OUTREACH_OUTCOMES]).toEqual(["no_answer", "spoke", "left_message", "sent", "replied", "meeting_held", "not_interested"]);
+  it("offers the outcome lists per kind, with Replied only for e-mail and Spoke only for calls, and never lets a person pick Inquiry raised by hand", () => {
+    expect(OUTREACH_OUTCOMES_BY_KIND.call).toEqual(["no_answer", "left_message", "spoke", "call_back_requested", "not_interested"]);
+    expect(OUTREACH_OUTCOMES_BY_KIND.email).toEqual(["sent", "replied", "bounced", "not_interested"]);
+    expect(OUTREACH_OUTCOMES_BY_KIND.meeting).toEqual(["meeting_booked", "meeting_held", "rescheduled", "no_show", "not_interested"]);
+    expect(isOutcomeValidForKind("email", "replied")).toBe(true);
+    expect(isOutcomeValidForKind("call", "replied")).toBe(false);
+    expect(isOutcomeValidForKind("meeting", "replied")).toBe(false);
+    expect(isOutcomeValidForKind("call", "spoke")).toBe(true);
+    expect(isOutcomeValidForKind("email", "spoke")).toBe(false);
+    expect(outcomesForKind("sms")).toEqual([]);
     expect(OUTREACH_SETTABLE_STATUSES).not.toContain("inquiry_raised");
+  });
+  it("keeps every outcome of the original single list readable (stored value set and labels), even where it no longer fits its kind", () => {
+    for (const legacy of ["no_answer", "spoke", "left_message", "sent", "replied", "meeting_held", "not_interested"] as const) {
+      expect(OUTREACH_OUTCOMES).toContain(legacy);
+      expect(OUTREACH_OUTCOME_LABEL[legacy]).toBeTruthy();
+    }
+    for (const kind of ["call", "email", "meeting"] as const) for (const o of OUTREACH_OUTCOMES_BY_KIND[kind]) expect(OUTREACH_OUTCOMES).toContain(o);
+    const legacyRow = { id: "e", outreach_id: "o", company_id: "c", organisation_id: "g", kind: "call", occurred_on: "2026-11-01", outcome: "replied", note: null, from_user: null, to_user: null, from_status: null, to_status: null, due_on: null, opportunity_id: null, created_by: "u", created_at: "" } as const;
+    expect(describeEvent(legacyRow, () => "x", () => "i")).toBe("Call · Replied");   // shown as stored, not rewritten or hidden
+  });
+  it("changing the kind keeps an outcome that still fits and clears one that does not", () => {
+    expect(outcomeAfterKindChange("email", "not_interested")).toBe("not_interested");
+    expect(outcomeAfterKindChange("email", "spoke")).toBe("");
+    expect(outcomeAfterKindChange("meeting", "sent")).toBe("");
+    expect(outcomeAfterKindChange("call", "")).toBe("");
+  });
+  it("the database function lists the same outcomes per kind as the app (one definition kept in step)", () => {
+    const sql = readFileSync(new URL("../../../../../../supabase/migrations/20261219000100_crm_clients_agencies.sql", import.meta.url), "utf8");
+    const fn = sql.slice(sql.indexOf("create or replace function crm_outreach_log("));
+    for (const kind of ["call", "email", "meeting"] as const) {
+      const m = fn.match(new RegExp(`when '${kind}' then array\\[([^\\]]*)\\]`));
+      expect(m, kind).not.toBeNull();
+      expect([...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1])).toEqual([...OUTREACH_OUTCOMES_BY_KIND[kind]]);
+    }
+    const check = sql.match(/crm_outreach_events_outcome_check check \(outcome is null or outcome in\s*\(([^)]*)\)/);
+    expect([...check![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort()).toEqual([...OUTREACH_OUTCOMES].sort());
   });
   it("counts bulk results per kind", () => {
     expect(summariseAssignResults([{ organisation_id: "a", result: "assigned" }, { organisation_id: "b", result: "assigned" }, { organisation_id: "c", result: "already" }])).toEqual({ assigned: 2, already: 1 });

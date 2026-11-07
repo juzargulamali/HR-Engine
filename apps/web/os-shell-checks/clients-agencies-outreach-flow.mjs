@@ -81,7 +81,10 @@ await step("the assignee logs a call and an email: status In progress, never Rep
   const log = async (kind, outcome, note) => {
     await emp.getByRole("button", { name: "Log activity" }).first().click();
     const d = emp.locator("dialog[open]"); await d.waitFor();
-    await d.getByLabel("What", { exact: true }).selectOption(kind); await d.getByLabel("Outcome").selectOption(outcome); await d.getByLabel("Note (optional)").fill(note);
+    await d.getByLabel("What", { exact: true }).selectOption(kind);
+    const offered = await d.getByLabel("Outcome").locator("option").evaluateAll((os) => os.map((o) => o.value).filter(Boolean));
+    if (offered.includes("replied") !== (kind === "email") || offered.includes("spoke") !== (kind === "call")) throw new Error(`outcome choices do not follow the kind ${kind}: ${offered}`);
+    await d.getByLabel("Outcome").selectOption(outcome); await d.getByLabel("Note (optional)").fill(note);
     await d.getByRole("button", { name: "Log activity" }).click(); await d.waitFor({ state: "hidden", timeout: 15000 });
   };
   await log("call", "no_answer", "Rang the studio twice");

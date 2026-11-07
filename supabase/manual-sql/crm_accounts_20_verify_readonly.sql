@@ -56,6 +56,11 @@ checks as (
          case when (select qual from pg_policies where tablename = 'crm_outreach') like '%assigned_to = auth.uid()%' and (select qual from pg_policies where tablename = 'crm_outreach') like '%assign_owner%' then 'OK' else 'FAIL' end, ''
   union all select 25, 'outreach functions never read or write an account owner', f.proname,
          case when f.prosrc not like '%crm_account_profiles%' then 'OK' else 'FAIL' end, '' from fn f where f.proname like 'crm\_%outreach%' escape '\'
+  union all select 27, 'a new outreach activity must use an outcome that fits its kind (e-mail: Replied; call: Spoke); stored outcomes of the original list stay allowed', 'crm_outreach_log',
+         case when (select prosrc from fn where proname = 'crm_outreach_log') like '%call_back_requested%' and (select prosrc from fn where proname = 'crm_outreach_log') like '%bounced%'
+                   and (select prosrc from fn where proname = 'crm_outreach_log') like '%no_show%' and (select prosrc from fn where proname = 'crm_outreach_log') like '%does not fit a%'
+                   and (select pg_get_constraintdef(oid) from pg_constraint where conname = 'crm_outreach_events_outcome_check') like all (array['%no_answer%', '%spoke%', '%left_message%', '%sent%', '%replied%', '%meeting_held%', '%not_interested%', '%call_back_requested%', '%bounced%', '%meeting_booked%', '%rescheduled%', '%no_show%'])
+              then 'OK' else 'FAIL' end, ''
   union all select 26, 'outreach row counts', 'crm_outreach', 'INFO', (select count(*)::text from crm_outreach)
   union all select 13, 'row counts', 'crm_account_profiles', 'INFO', (select count(*)::text from crm_account_profiles)
 )

@@ -6,7 +6,7 @@ import { hasCrmCapability } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import { getCrmContext } from "@/lib/crm/context";
 import { friendlyCrmError } from "@/lib/crm/errors";
-import { OUTREACH_KINDS, OUTREACH_OUTCOMES, OUTREACH_SETTABLE_STATUSES } from "@/lib/crm/clients-agencies/outreach";
+import { isOutcomeValidForKind, OUTREACH_KINDS, OUTREACH_OUTCOME_LABEL, OUTREACH_OUTCOMES, OUTREACH_OUTCOMES_BY_KIND, OUTREACH_SETTABLE_STATUSES } from "@/lib/crm/clients-agencies/outreach";
 import type { ActionState } from "./companies";
 
 /**
@@ -50,6 +50,12 @@ const logSchema = z.object({
   outreachId: uuid, kind: z.enum(OUTREACH_KINDS as unknown as [string, ...string[]], { message: "Choose call, email or meeting" }),
   on: date, outcome: z.enum(OUTREACH_OUTCOMES as unknown as [string, ...string[]], { message: "Choose an outcome" }),
   note: optText(1000), nextAction: optText(300), nextDue: optDate,
+}).superRefine((d, ctx) => {
+  // the outcome must fit the kind (the database function checks the same lists again)
+  if (!isOutcomeValidForKind(d.kind, d.outcome)) {
+    const fit = OUTREACH_OUTCOMES_BY_KIND[d.kind as keyof typeof OUTREACH_OUTCOMES_BY_KIND].map((o) => OUTREACH_OUTCOME_LABEL[o]).join(", ");
+    ctx.addIssue({ code: "custom", path: ["outcome"], message: `That outcome does not fit a ${d.kind}. Choose one of: ${fit}` });
+  }
 });
 
 /** Log a call, email or meeting with its date, outcome and a short note, and optionally the next action. Outcome is chosen, never inferred. */
