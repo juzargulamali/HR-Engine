@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { ACCESS_MODULE_LABELS, ROLE_LABELS } from "@enginious-hr/domain";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -6,6 +5,7 @@ import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import type { PaCompany, PaPerson } from "@/lib/people-access/data";
 import { paHref, type PaParams } from "./links";
+import { PersonLink } from "./unsaved-access-guard";
 
 /** The left column: search, a company filter, and everyone this viewer is entitled to see. A plain GET form, so it works before any script loads. */
 export function PersonList({ people, total, companies, params, companyNames, showRoles }: {
@@ -37,7 +37,7 @@ export function PersonList({ people, total, companies, params, companyNames, sho
             const company = p.employeeCompanyId ? companyNames.get(p.employeeCompanyId) : null;
             return (
               <li key={p.key}>
-                <Link href={paHref({ ...params, person: p.key, tab: undefined })} aria-current={selected ? "true" : undefined}
+                <PersonLink href={paHref({ ...params, person: p.key, tab: undefined })} aria-current={selected ? "true" : undefined}
                   className={`block space-y-1 px-3 py-2.5 text-sm hover:bg-muted/50 ${selected ? "bg-muted/60" : ""}`}>
                   <span className="block break-words font-medium">{p.name}</span>
                   {p.email ? <span className="block break-all text-muted-foreground">{p.email}</span> : null}
@@ -48,7 +48,7 @@ export function PersonList({ people, total, companies, params, companyNames, sho
                     {showRoles ? [...new Set(p.roles.map((r) => r.role))].map((r) => <Badge key={r} variant="secondary">{ROLE_LABELS[r]}</Badge>) : null}
                     {[...new Set(p.grants.map((g) => g.module))].map((m) => <Badge key={m} variant="outline">{ACCESS_MODULE_LABELS[m]}</Badge>)}
                   </span>
-                </Link>
+                </PersonLink>
               </li>
             );
           })}

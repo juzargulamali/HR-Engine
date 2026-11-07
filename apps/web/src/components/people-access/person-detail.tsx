@@ -8,7 +8,7 @@ import { AccountStatusBadge, AccountStatusControls } from "./account-status-cont
 import { AssignRoleForm } from "./assign-role-form";
 import { DeleteUserButton } from "./delete-user-button";
 import { JobPanel } from "./job-panel";
-import { ModuleAccessCard } from "./module-access-card";
+import { ModuleAccessPanel } from "./module-access-panel";
 import { paHref, type PaParams } from "./links";
 import { ResendInviteButton } from "./resend-invite-button";
 import { RevokeRoleButton } from "./revoke-role-button";
@@ -99,30 +99,10 @@ export function PersonDetail({ data, tab, params }: { data: PeopleAccessData; ta
           {active === "modules" && p.userId ? (
             <div className="space-y-4">
               <Alert role="status">Module access is separate from HR roles and job titles. Nobody gets it automatically: it is given to a named person, for one company, by someone allowed to give it. Every change is recorded.</Alert>
-              {[...new Set(data.moduleContexts.map((m) => m.company.id))].map((companyId) => {
-                const here = data.moduleContexts.filter((m) => m.company.id === companyId);
-                return (
-                  <Panel key={companyId} title={here[0]!.company.name}>
-                    <div className="space-y-4">
-                      {here.map((m) => {
-                        const g = p.grants.find((x) => x.module === m.module && x.companyId === m.company.id) ?? null;
-                        const assigned = data.operatorLocations[m.company.id] ?? [];
-                        return (
-                          <ModuleAccessCard
-                            key={`${m.module}-${m.company.id}-${p.userId}-${g ? g.capabilities.join(",") || "-" : "none"}-${assigned.join(",")}`}
-                            module={m.module} company={m.company} viewerCapabilities={m.viewerCapabilities} person={{ userId: p.userId as string, name: p.name, isSelf }}
-                            grant={g ? { capabilities: g.capabilities, grantedAt: g.grantedAt, grantedByName: g.grantedByName, note: g.note } : null}
-                            accessManagerCount={m.holders.filter((h) => h.capabilities.includes("manage_access")).length}
-                            founderCount={m.holders.filter((h) => h.capabilities.includes("founder")).length}
-                            approverCount={m.holders.filter((h) => h.capabilities.includes("executive_approver")).length}
-                            locations={m.locations} assignedLocationIds={assigned}
-                          />
-                        );
-                      })}
-                    </div>
-                  </Panel>
-                );
-              })}
+              <ModuleAccessPanel
+                person={{ userId: p.userId as string, name: p.name, isSelf, employeeCompanyId: p.employeeCompanyId }}
+                contexts={data.moduleContexts} grants={p.grants} operatorLocations={data.operatorLocations} retryHref={paHref({ ...params, person: p.key, tab: "modules" })}
+              />
             </div>
           ) : null}
         </>

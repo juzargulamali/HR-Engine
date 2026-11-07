@@ -6,6 +6,7 @@ type Row = Record<string, unknown>;
 let tables: Record<string, Row[]> = {};
 let rpcs: Record<string, unknown> = {};
 let rpcErrors: Record<string, boolean> = {};
+let failingTables = new Set<string>();
 let calls: string[] = [];
 let session: { userId: string; email: string | null; fullName: string | null; grants: { role: string; companyId: string | null; countryCode: string | null }[]; employeeId: string | null } | null = null;
 
@@ -23,7 +24,7 @@ function from(table: string) {
     is: (k: string, v: unknown) => { filters.push((r) => (r[k] ?? null) === v); return q; },
     in: (k: string, v: unknown[]) => { filters.push((r) => v.includes(r[k])); return q; },
     maybeSingle: async () => ({ data: (tables[table] ?? []).filter((r) => filters.every((f) => f(r)))[0] ?? null, error: null }),
-    then: (resolve: (v: { data: Row[]; error: null }) => unknown) => resolve({ data: (tables[table] ?? []).filter((r) => filters.every((f) => f(r))), error: null }),
+    then: (resolve: (v: { data: Row[] | null; error: { message: string } | null }) => unknown) => resolve(failingTables.has(table) ? { data: null, error: { message: "down" } } : { data: (tables[table] ?? []).filter((r) => filters.every((f) => f(r))), error: null }),
   };
   return q;
 }
@@ -46,6 +47,7 @@ const ok = async (query = {}): Promise<PeopleAccessData> => {
 };
 
 beforeEach(() => {
+  failingTables = new Set();
   calls = [];
   session = { userId: ME, email: null, fullName: "Me", grants: [], employeeId: null };
   rpcs = {};
@@ -220,6 +222,14 @@ describe("module access managers", () => {
     const d = await ok();
     expect(d.moduleContexts.map((m) => `${m.module}:${m.company.name}`)).toEqual(["sales:Enginious A", "inventory:Enginious B"]);
     expect(d.companies.map((c) => c.name)).toEqual(["Enginious A", "Enginious B"]);
+  });
+
+  it("marks a module whose read failed, so the screen says 'could not load' and never 'no access'", async () => {
+    tables.crm_company_grants = [{ user_id: ME, company_id: CA, capabilities: ["founder"], revoked_at: null, granted_at: "2026-10-01", granted_by: null, note: null }];
+    tables.inv_company_grants = [{ user_id: ME, company_id: CA, capabilities: ["manage_access"], revoked_at: null, granted_at: "2026-10-01", granted_by: null, note: null }];
+    failingTables.add("inv_locations");
+    const d = await ok();
+    expect(d.moduleContexts.map((m) => `${m.module}:${m.readFailed}`)).toEqual(["inventory:true", "sales:false"]);
   });
 
   it("someone who is both HR Admin and an access manager gets both sets of tabs, for exactly what they are entitled to", async () => {
