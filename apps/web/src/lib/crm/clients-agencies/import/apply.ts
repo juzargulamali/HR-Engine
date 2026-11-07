@@ -1,7 +1,6 @@
+import { createHash } from "node:crypto";
 import type { createClient } from "@/lib/supabase/server";
 import { friendlyCrmError } from "../../errors";
-import { createOrganisationWithContacts, updateOrganisationEmptyFields } from "../write";
-import type { DirectoryRow } from "../directory";
 import type { ImportPlan, OrgPlan } from "./plan";
 
 type Db = Pick<Awaited<ReturnType<typeof createClient>>, "rpc">;
@@ -16,58 +15,55 @@ export interface ApplyResult {
   failed: { name: string; rows: number[]; message: string }[];
 }
 
-const CONCURRENCY = 4;
+/** One organisation as the database function receives it. The database decides what is safe: it never trusts a plan's action. */
+interface ImportItem {
+  key: string; name: string; website: string | null; roles: string[]; country_code: string | null; note: string | null;
+  lead_source: string | null; exhibition: string | null; owner_id: string | null; contacts: object[]; fingerprint?: string;
+}
+
+export type Fingerprints = Record<string, string>;
+export type ConfirmOutcome =
+  | { status: "applied"; result: ApplyResult; repeated: boolean }
+  | { status: "preview_stale"; staleCount: number }
+  | { status: "error"; error: string };
+
+const toItem = (o: OrgPlan): ImportItem => ({
+  key: o.key, name: o.name, website: o.incoming.website, roles: o.roles, country_code: o.incoming.country_code, note: o.incoming.note,
+  lead_source: o.incoming.lead_source, exhibition: o.incoming.exhibition, owner_id: o.incomingOwnerId, contacts: o.fileContacts,
+});
+
+/** What each row was planned against, as the database reads it right now. Recorded by the preview and compared by the confirm. */
+export async function fingerprintPlan(db: Db, plan: ImportPlan, companyId: string): Promise<Fingerprints> {
+  const items = plan.orgs.map((o) => ({ key: o.key, name: o.name, website: o.incoming.website }));
+  const { data, error } = await db.rpc("crm_import_fingerprints", { p_company: companyId, p_items: items as never });
+  if (error || !data || typeof data !== "object" || Array.isArray(data)) throw new Error(error?.message ?? "No fingerprints returned");
+  return data as Fingerprints;
+}
+
+/** The same preview of the same file always has the same key, so a repeated confirm is recognised by the database and does nothing. */
+export function batchKeyFor(companyId: string, fileHash: string, fingerprints: Fingerprints): string {
+  const body = Object.keys(fingerprints).sort().map((k) => `${k}=${fingerprints[k]}`).join("\n");
+  return createHash("sha256").update(`${companyId}\n${fileHash}\n${body}`).digest("hex");
+}
 
 /**
- * Applies ONLY the safe actions of a plan: create what is new, fill what is empty, add contacts that do not exist, assign a verified
- * owner to an unassigned account. Conflicts and ambiguous matches are never touched. Every write goes through part 1's functions, so
- * the database decides who may do what; a refusal is reported against that organisation and the rest continue.
+ * Hands the whole plan to the database in ONE call. The database function takes the locks, re-checks every match, applies only fill-only
+ * writes, and refuses the whole batch ('preview_stale') if anything a row was planned against has changed since the preview. Nothing here
+ * decides what is safe; a forged request gets the same answers.
  */
-export async function applyPlan(db: Db, plan: ImportPlan, companyId: string, directory: readonly DirectoryRow[]): Promise<ApplyResult> {
-  const result: ApplyResult = { created: 0, updated: 0, contactsAdded: 0, ownersAssigned: 0, untouched: 0, failed: [] };
-  const fail = (o: OrgPlan, message: string) => result.failed.push({ name: o.name, rows: o.rows, message });
-
-  async function one(o: OrgPlan) {
-    if (o.kind === "ambiguous" || !o.hasChanges) { result.untouched++; return; }
-    try {
-      if (o.kind === "new") {
-        const r = await createOrganisationWithContacts(db, {
-          name: o.name, roles: o.roles, country_code: o.incoming.country_code, website: o.incoming.website, note: o.incoming.note,
-          companyId, lead_source: o.incoming.lead_source, exhibition: o.incoming.exhibition, ownerId: o.assignOwnerId, contacts: o.contactsToAdd,
-        });
-        if (!r.ok) return fail(o, r.error);
-        result.created++;
-        result.contactsAdded += o.contactsToAdd.length;
-        if (o.assignOwnerId) result.ownersAssigned++;
-        return;
-      }
-      const existing = directory.find((d) => d.org.id === o.match!.id)?.org;
-      if (!existing) return fail(o, "The organisation is no longer available.");
-      if (Object.keys(o.orgPatch).length > 0) {
-        const u = await updateOrganisationEmptyFields(db, existing, o.orgPatch);
-        if (!u.ok) return fail(o, u.error);
-      }
-      if (Object.keys(o.profilePatch).length > 0) {
-        const { error } = await db.rpc("crm_save_account_profile", { p_org: existing.id, p_company: companyId, p_patch: o.profilePatch });
-        if (error) return fail(o, friendlyCrmError(error.message));
-      }
-      if (o.assignOwnerId) {
-        const { error } = await db.rpc("crm_assign_account_owner", { p_org: existing.id, p_company: companyId, p_new_owner: o.assignOwnerId });
-        if (error) return fail(o, friendlyCrmError(error.message));
-        result.ownersAssigned++;
-      }
-      for (const c of o.contactsToAdd) {
-        const { error } = await db.rpc("crm_create_contact", { p_organisation_id: existing.id, p_name: c.name, p_role_title: c.role_title ?? null, p_email: c.email ?? null, p_phone: c.phone ?? null });
-        if (error) return fail(o, `${friendlyCrmError(error.message)} (contact ${c.name})`);
-        result.contactsAdded++;
-      }
-      result.updated++;
-    } catch (e) {
-      fail(o, friendlyCrmError(e instanceof Error ? e.message : "Could not save."));
-    }
-  }
-
-  const queue = [...plan.orgs];
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => { for (let o = queue.shift(); o; o = queue.shift()) await one(o); }));
-  return result;
+export async function applyPlan(db: Db, plan: ImportPlan, companyId: string, fingerprints: Fingerprints, batchKey: string): Promise<ConfirmOutcome> {
+  const items = plan.orgs.map((o) => { const i = toItem(o); const f = fingerprints[o.key]; return f ? { ...i, fingerprint: f } : i; });
+  const { data, error } = await db.rpc("crm_import_apply", { p_company: companyId, p_batch_key: batchKey, p_items: items as never });
+  if (error) return { status: "error", error: friendlyCrmError(error.message) };
+  const r = data as { status?: string; stale_count?: number; created?: number; updated?: number; contacts_added?: number; owners_assigned?: number; untouched?: number; failed?: { key: string; message: string }[]; repeated?: boolean } | null;
+  if (r?.status === "preview_stale") return { status: "preview_stale", staleCount: r.stale_count ?? 0 };
+  if (r?.status !== "applied") return { status: "error", error: "The import did not return a result. Check the accounts list, then run the preview again." };
+  const byKey = new Map(plan.orgs.map((o) => [o.key, o]));
+  return {
+    status: "applied", repeated: r.repeated === true,
+    result: {
+      created: r.created ?? 0, updated: r.updated ?? 0, contactsAdded: r.contacts_added ?? 0, ownersAssigned: r.owners_assigned ?? 0, untouched: r.untouched ?? 0,
+      failed: (r.failed ?? []).map((f) => ({ name: byKey.get(f.key)?.name ?? f.key, rows: byKey.get(f.key)?.rows ?? [], message: friendlyCrmError(f.message) })),
+    },
+  };
 }

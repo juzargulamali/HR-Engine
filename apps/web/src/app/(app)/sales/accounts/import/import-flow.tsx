@@ -79,6 +79,8 @@ export function ImportFlow({ companyId, companyName }: { companyId: string; comp
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<Ok<"preview"> | null>(null);
   const [result, setResult] = useState<Ok<"confirm"> | null>(null);
+  /** The database said the records changed after the preview: nothing was imported and a fresh preview is needed. */
+  const [stale, setStale] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const inFlight = useRef(false);
 
@@ -89,16 +91,18 @@ export function ImportFlow({ companyId, companyName }: { companyId: string; comp
     try {
       const body = new FormData();
       body.set("file", file); body.set("companyId", companyId); body.set("mode", mode);
+      if (mode === "confirm" && preview) body.set("fingerprints", JSON.stringify(preview.fingerprints));
       const res = await fetch("/api/sales/accounts/import", { method: "POST", body });
-      const json = (await res.json().catch(() => null)) as ImportResponse | { error?: string } | null;
+      const json = (await res.json().catch(() => null)) as ImportResponse | { error?: string; code?: string } | null;
+      if (res.status === 409 && json && "code" in json && json.code === "preview_stale") { setStale(true); setError(("error" in json && json.error) || "This preview is out of date. Run a fresh preview."); return; }
       if (!res.ok || !json || !("ok" in json)) { setError((json && "error" in json && json.error) || "Could not read the response. Nothing was changed; check the accounts list before trying again."); return; }
-      if (json.ok && json.mode === "preview") { setPreview(json); setStep("preview"); }
+      if (json.ok && json.mode === "preview") { setPreview(json); setStale(false); setStep("preview"); }
       else if (json.ok) { setResult(json); setStep("result"); }
     } catch {
       setError(mode === "confirm" ? "The connection dropped. Check Clients & Agencies to see whether the import went through, then run the preview again." : "Could not reach the server. Nothing was changed; try again.");
     } finally { inFlight.current = false; setBusy(false); }
   }
-  const reset = () => { setStep("upload"); setFile(null); setPreview(null); setResult(null); setError(null); if (input.current) input.current.value = ""; };
+  const reset = () => { setStep("upload"); setFile(null); setPreview(null); setResult(null); setError(null); setStale(false); if (input.current) input.current.value = ""; };
   const s = preview?.summary;
   const back = `/sales/accounts?company=${companyId}`;
 
@@ -178,9 +182,13 @@ export function ImportFlow({ companyId, companyName }: { companyId: string; comp
           <Card>
             <CardHeader><CardTitle>3. Confirm</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              <p className="text-sm">Confirming will create {s.newOrganisations} new organisation{s.newOrganisations === 1 ? "" : "s"}, fill empty fields on {s.existingWithFills} existing one{s.existingWithFills === 1 ? "" : "s"}, and add {s.contactsToAdd} new contact{s.contactsToAdd === 1 ? "" : "s"}. Conflicts, ambiguous matches and flagged owners are left alone. The file is checked again against the latest records when you confirm.</p>
+              <p className="text-sm">Confirming will create {s.newOrganisations} new organisation{s.newOrganisations === 1 ? "" : "s"}, fill empty fields on {s.existingWithFills} existing one{s.existingWithFills === 1 ? "" : "s"}, and add {s.contactsToAdd} new contact{s.contactsToAdd === 1 ? "" : "s"}. Conflicts, ambiguous matches and flagged owners are left alone. The records are checked again when you confirm: if anything changed since this preview, nothing is imported and you are asked to preview again.</p>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" onClick={() => send("confirm")} disabled={busy || s.safeActions === 0}>{busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null} {s.safeActions === 0 ? "Nothing to apply" : "Confirm import"}</Button>
+                {stale ? (
+                  <Button type="button" onClick={() => send("preview")} disabled={busy}>{busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null} Run a fresh preview</Button>
+                ) : (
+                  <Button type="button" onClick={() => send("confirm")} disabled={busy || s.safeActions === 0}>{busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null} {s.safeActions === 0 ? "Nothing to apply" : "Confirm import"}</Button>
+                )}
                 <Button type="button" variant="outline" onClick={reset} disabled={busy}>Choose another file</Button>
               </div>
             </CardContent>
@@ -193,6 +201,7 @@ export function ImportFlow({ companyId, companyName }: { companyId: string; comp
           <Card>
             <CardHeader><CardTitle>4. Result</CardTitle></CardHeader>
             <CardContent className="space-y-4">
+              {result.repeated ? <Alert>This file had already been imported from this preview, so nothing new was done. The figures below are from the first run.</Alert> : null}
               {result.result.failed.length === 0 ? <Alert variant="success">The import finished.</Alert> : <Alert variant="warning">The import finished, but {result.result.failed.length} organisation{result.result.failed.length === 1 ? "" : "s"} could not be saved. Nothing else was affected.</Alert>}
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                 <Stat label="Organisations created" value={result.result.created} />

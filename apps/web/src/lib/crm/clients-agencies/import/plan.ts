@@ -25,6 +25,10 @@ export interface OrgPlan {
   /** A verified, eligible person to assign as account owner; null = leave as it is. */
   assignOwnerId: string | null;
   assignOwnerName: string | null;
+  /** The verified, eligible person the file names as owner (whatever the match): the database assigns it only if the account has no owner. */
+  incomingOwnerId: string | null;
+  /** Every contact the file names for this organisation; the database adds only those not already there. */
+  fileContacts: ContactInput[];
   contactsToAdd: ContactInput[];
   contactsExisting: number;
   conflicts: Conflict[];
@@ -93,6 +97,7 @@ function planOne(o: ParsedOrg, ctx: PlanContext, nameOf: (id: string | null) => 
   const base = {
     key: o.key, name: o.name, rows: o.rows, roles: o.roles, flags, conflicts: [] as Conflict[], contactsToAdd: [] as ContactInput[], contactsExisting: 0,
     orgPatch: {} as OrgPlan["orgPatch"], profilePatch: {} as OrgPlan["profilePatch"], assignOwnerId: null as string | null, assignOwnerName: null as string | null,
+    incomingOwnerId: eligible?.id ?? null, fileContacts: o.contacts,
     incoming: { country_code: o.countryCode, website: o.website, note: o.note, lead_source: o.leadSource, exhibition: o.exhibition },
   };
   const brief = (m: (typeof matches)[number]) => ({ id: m.organisation.id, name: m.organisation.name, reasons: m.reasons });

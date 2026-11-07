@@ -8,7 +8,8 @@ import type { StaffPerson } from "../staff";
 import { organisationsTable, summaryTable, buildExportWorkbook, type SummaryInputs } from "./export";
 import { legacyWorkbook, makeWorkbook, parseBytes, planFor, TEMPLATE_ROW_HEADERS } from "./test-fixtures";
 import { IMPORT_LIMITS, TEMPLATE_HEADERS, buildTemplateWorkbook, neutraliseCell, readImportSheet } from "./xlsx";
-import { runImport, type ImportDeps } from "./service";
+import { batchKeyFor } from "./apply";
+import { PREVIEW_STALE_MESSAGE, runImport, type ImportDeps } from "./service";
 
 const CO = "11111111-1111-4111-8111-111111111111";
 const OTHER_CO = "22222222-2222-4222-8222-222222222222";
@@ -212,53 +213,26 @@ describe("upload limits and untrusted content", () => {
   });
 });
 
-// A small in-memory stand-in for the part 1 database functions, used to run the whole import twice and concurrently.
-function makeStore(opts: { refuseUpdates?: boolean } = {}) {
-  const orgs: DirectoryRow[] = [];
-  const calls: { fn: string; args: Record<string, unknown> }[] = [];
+// The database boundary: the import hands the whole batch to ONE function (crm_import_apply) and reads fingerprints with another. What those
+// functions do (locks, fill-only writes, the stale check, the batch key) is proved against a real Postgres in
+// packages/rls-tests/test/crm-import-safety.rls.test.ts; here we prove what the application sends, and how it reads each answer.
+type Call = { fn: string; args: Record<string, unknown> };
+function makeDb(answer: (args: Record<string, unknown>) => { data: unknown; error: { message: string } | null } = () => ({ data: { status: "applied", created: 0, updated: 0, contacts_added: 0, owners_assigned: 0, untouched: 0, failed: [] }, error: null })) {
+  const calls: Call[] = [];
   const rpc = async (fn: string, args: Record<string, unknown>) => {
     calls.push({ fn, args });
-    await new Promise((r) => setTimeout(r, 1));
-    const find = (id: unknown) => orgs.find((o) => o.org.id === id)!;
-    switch (fn) {
-      case "crm_create_organisation_profile": {
-        const r = dirRow(String(args.p_name), { roles: args.p_roles as string[], country: args.p_country_code as string | null, website: args.p_website as string | null, note: args.p_note as string | null, lead: args.p_lead_source as string | null, exhibition: args.p_exhibition as string | null, owner: args.p_owner_id as string | null });
-        r.profile ??= { organisation_id: r.org.id, company_id: args.p_company_id, lead_source: null, exhibition: null, owner_id: null } as never;
-        r.contacts = (args.p_contacts as { name: string; email: string | null }[]).map((c, i) => ({ id: `${r.org.id}-n${i}`, name: c.name, email: c.email, organisation_id: r.org.id, archived_at: null })) as never;
-        orgs.push(r);
-        return { data: r.org.id, error: null };
-      }
-      case "crm_update_organisation": {
-        if (opts.refuseUpdates) return { data: null, error: { message: "Only the person who added this organisation, a founder, or the owner of an opportunity it is on can change it" } };
-        Object.assign(find(args.p_org).org, args.p_patch as object);
-        return { data: null, error: null };
-      }
-      case "crm_save_account_profile": {
-        const o = find(args.p_org);
-        o.profile = { ...(o.profile ?? { organisation_id: o.org.id, company_id: args.p_company, lead_source: null, exhibition: null, owner_id: null }), ...(args.p_patch as object) } as never;
-        return { data: null, error: null };
-      }
-      case "crm_assign_account_owner": {
-        const o = find(args.p_org);
-        o.profile = { ...(o.profile ?? { organisation_id: o.org.id, company_id: args.p_company, lead_source: null, exhibition: null }), owner_id: args.p_new_owner } as never;
-        return { data: null, error: null };
-      }
-      case "crm_create_contact": {
-        const o = find(args.p_organisation_id);
-        o.contacts = [...o.contacts, { id: `${o.org.id}-x${o.contacts.length}`, name: args.p_name, email: args.p_email, organisation_id: o.org.id, archived_at: null } as never];
-        return { data: "contact", error: null };
-      }
-      default: return { data: null, error: { message: `unexpected ${fn}` } };
-    }
+    if (fn === "crm_import_fingerprints") return { data: Object.fromEntries((args.p_items as { key: string }[]).map((i) => [i.key, `fp-${i.key}`])), error: null };
+    if (fn === "crm_import_apply") return answer(args);
+    return { data: null, error: { message: `unexpected ${fn}` } };
   };
-  return { orgs, calls, rpc };
+  return { calls, rpc };
 }
 
-function deps(store: ReturnType<typeof makeStore>, over: Partial<ImportDeps> = {}): ImportDeps {
+function deps(db: ReturnType<typeof makeDb>, over: Partial<ImportDeps> = {}): ImportDeps {
   return {
-    db: { rpc: store.rpc } as never,
+    db: { rpc: db.rpc } as never,
     ctx: { grants: [{ companyId: CO, capabilities: ["assign_owner"] }], companies: [{ id: CO }] },
-    loadDirectory: async () => store.orgs.map((o) => ({ ...o })),
+    loadDirectory: async () => [],
     loadStaff: async () => [sara],
     ...over,
   };
@@ -268,91 +242,101 @@ const SAMPLE = () => template([
   ["Fixture One", null, null, null, "Ben Two", null, "ben@fixture.example", null, null, null, null],
   ["Fixture Two", "Qatar", "Direct client", null, null, null, null, null, null, null, "nobody@fixture.example"],
 ]);
-const req = (bytes: Uint8Array, mode: "preview" | "confirm", companyId = CO) => ({ companyId, fileName: "f.xlsx", bytes, mode });
+const req = (bytes: Uint8Array, mode: "preview" | "confirm", companyId = CO, fingerprints?: Record<string, string>) => ({ companyId, fileName: "f.xlsx", bytes, mode, ...(fingerprints ? { fingerprints } : {}) });
+const FPS = { fixtureone: "fp-fixtureone", fixturetwo: "fp-fixturetwo" };
+const writes = (db: ReturnType<typeof makeDb>) => db.calls.filter((c) => c.fn !== "crm_import_fingerprints");
 
 describe("running the import end to end", () => {
   it("refuses the signed-out, refuses a company without a grant, and touches nothing", async () => {
-    const store = makeStore();
+    const db = makeDb();
     const loadDirectory = vi.fn(async () => []);
     const bytes = await SAMPLE();
-    expect(await runImport(deps(store, { ctx: null, loadDirectory }), req(bytes, "confirm"))).toMatchObject({ ok: false, status: 401 });
-    expect(await runImport(deps(store, { loadDirectory }), req(bytes, "confirm", OTHER_CO))).toMatchObject({ ok: false, status: 403 });
-    expect(await runImport(deps(store, { ctx: { grants: [{ companyId: OTHER_CO, capabilities: ["founder"] }], companies: [{ id: CO }] }, loadDirectory }), req(bytes, "confirm"))).toMatchObject({ ok: false, status: 403 });
-    expect(await runImport(deps(store, { ctx: { grants: [], companies: [], loadFailed: true }, loadDirectory }), req(bytes, "preview"))).toMatchObject({ ok: false, status: 503 });
+    expect(await runImport(deps(db, { ctx: null, loadDirectory }), req(bytes, "confirm", CO, FPS))).toMatchObject({ ok: false, status: 401 });
+    expect(await runImport(deps(db, { loadDirectory }), req(bytes, "confirm", OTHER_CO, FPS))).toMatchObject({ ok: false, status: 403 });
+    expect(await runImport(deps(db, { ctx: { grants: [{ companyId: OTHER_CO, capabilities: ["founder"] }], companies: [{ id: CO }] }, loadDirectory }), req(bytes, "confirm", CO, FPS))).toMatchObject({ ok: false, status: 403 });
+    expect(await runImport(deps(db, { ctx: { grants: [], companies: [], loadFailed: true }, loadDirectory }), req(bytes, "preview"))).toMatchObject({ ok: false, status: 503 });
     expect(loadDirectory).not.toHaveBeenCalled();
-    expect(store.calls).toHaveLength(0);
+    expect(db.calls).toHaveLength(0);
   });
 
-  it("a preview writes nothing; a failed read says it could not load and never imports", async () => {
-    const store = makeStore();
+  it("a preview writes nothing (it only reads fingerprints); a failed read says it could not load and never imports", async () => {
+    const db = makeDb();
     const bytes = await SAMPLE();
-    const r = await runImport(deps(store), req(bytes, "preview"));
-    expect(r).toMatchObject({ ok: true, mode: "preview", summary: { newOrganisations: 2, contactsToAdd: 2, ownersToAssign: 1 } });
-    expect(store.calls).toHaveLength(0);
+    const r = await runImport(deps(db), req(bytes, "preview"));
+    expect(r).toMatchObject({ ok: true, mode: "preview", fingerprints: FPS, summary: { newOrganisations: 2, contactsToAdd: 2, ownersToAssign: 1 } });
+    expect(db.calls.map((c) => c.fn)).toEqual(["crm_import_fingerprints"]);
+    expect(db.calls[0]!.args).toMatchObject({ p_company: CO, p_items: [{ key: "fixtureone", name: "Fixture One", website: "one.example" }, { key: "fixturetwo", name: "Fixture Two", website: null }] });
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const bad = await runImport(deps(store, { loadDirectory: async () => { throw new Error("down"); } }), req(bytes, "confirm"));
+    const bad = await runImport(deps(db, { loadDirectory: async () => { throw new Error("down"); } }), req(bytes, "confirm", CO, FPS));
     expect(bad).toMatchObject({ ok: false, status: 503, error: expect.stringMatching(/Could not/) });
-    expect(store.calls).toHaveLength(0);
+    expect(writes(db)).toHaveLength(0);
   });
 
-  it("confirm creates the organisations once, only through the CRM functions, only for the selected company, and never creates a user", async () => {
-    const store = makeStore();
-    const r = await runImport(deps(store), req(await SAMPLE(), "confirm"));
-    expect(r).toMatchObject({ ok: true, mode: "confirm", result: { created: 2, contactsAdded: 2, ownersAssigned: 1, failed: [] } });
-    expect(store.orgs.map((o) => o.org.name).sort()).toEqual(["Fixture One", "Fixture Two"]);
-    expect(store.orgs.find((o) => o.org.name === "Fixture One")!.profile?.owner_id).toBe(SARA);
-    expect(store.orgs.find((o) => o.org.name === "Fixture Two")!.profile?.owner_id ?? null).toBeNull(); // unknown owner e-mail: left Unassigned
-    expect(new Set(store.calls.map((c) => c.fn))).toEqual(new Set(["crm_create_organisation_profile"]));
-    expect(store.calls.every((c) => c.args.p_company_id === CO)).toBe(true);
-    const two = r.ok && r.mode === "confirm" ? r.review.review.map((i) => i.name) : [];
-    expect(two).toEqual(["Fixture Two"]); // reported as "owner could not be verified"
+  it("a confirm without the preview's fingerprints is refused before anything is sent", async () => {
+    const db = makeDb();
+    expect(await runImport(deps(db), req(await SAMPLE(), "confirm"))).toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/preview first/i) });
+    expect(await runImport(deps(db), req(await SAMPLE(), "confirm", CO, {}))).toMatchObject({ ok: false, status: 400 });
+    expect(db.calls).toHaveLength(0);
   });
 
-  it("re-importing the same file is safe: all existing, nothing to change, nothing created", async () => {
-    const store = makeStore();
-    const bytes = await SAMPLE();
-    await runImport(deps(store), req(bytes, "confirm"));
-    const before = store.calls.length;
-    const pv = await runImport(deps(store), req(bytes, "preview"));
-    expect(pv).toMatchObject({ ok: true, summary: { newOrganisations: 0, existingMatches: 2, existingNoChange: 2, existingWithFills: 0, conflictFields: 0, contactsToAdd: 0, safeActions: 0 } });
-    const again = await runImport(deps(store), req(bytes, "confirm"));
-    expect(again).toMatchObject({ ok: true, result: { created: 0, updated: 0, contactsAdded: 0, untouched: 2 } });
-    expect(store.calls.length).toBe(before);
-    expect(store.orgs).toHaveLength(2);
+  it("confirm is ONE call to the database function, carrying the company, a batch key, every row and the preview's fingerprints; no other write exists", async () => {
+    const db = makeDb(() => ({ data: { status: "applied", created: 2, updated: 0, contacts_added: 2, owners_assigned: 1, untouched: 0, failed: [] }, error: null }));
+    const r = await runImport(deps(db), req(await SAMPLE(), "confirm", CO, FPS));
+    expect(r).toMatchObject({ ok: true, mode: "confirm", repeated: false, result: { created: 2, contactsAdded: 2, ownersAssigned: 1, failed: [] } });
+    expect(db.calls.map((c) => c.fn)).toEqual(["crm_import_apply"]);
+    const a = db.calls[0]!.args as { p_company: string; p_batch_key: string; p_items: Record<string, unknown>[] };
+    expect(a.p_company).toBe(CO);
+    expect(a.p_batch_key).toMatch(/^[0-9a-f]{64}$/);
+    expect(a.p_items).toHaveLength(2);
+    expect(a.p_items[0]).toMatchObject({
+      key: "fixtureone", name: "Fixture One", roles: ["agency"], country_code: "AE", website: "one.example", lead_source: "referral", owner_id: SARA, fingerprint: "fp-fixtureone",
+      contacts: [{ name: "Ana One", email: "ana@fixture.example" }, { name: "Ben Two", email: "ben@fixture.example" }],
+    });
+    expect(a.p_items[1]).toMatchObject({ key: "fixturetwo", roles: ["direct"], country_code: "QA", owner_id: null, fingerprint: "fp-fixturetwo" }); // unknown owner e-mail: no owner sent
+    const flagged = r.ok && r.mode === "confirm" ? r.review.review.map((i) => i.name) : [];
+    expect(flagged).toEqual(["Fixture Two"]); // reported as "owner could not be verified"
   });
 
-  it("a double-click on Confirm cannot create anything twice", async () => {
-    const store = makeStore();
-    const bytes = await SAMPLE();
-    const [a, b] = await Promise.all([runImport(deps(store), req(bytes, "confirm"), "u1"), runImport(deps(store), req(bytes, "confirm"), "u1")]);
-    expect(store.orgs).toHaveLength(2);
-    const created = [a, b].map((x) => (x.ok && x.mode === "confirm" ? x.result.created : -1));
-    expect(created.sort()).toEqual([0, 2]);
+  it("existing and ambiguous rows are sent too: the database, not the application, decides what is safe for each", async () => {
+    const db = makeDb();
+    const dir = [dirRow("Fixture One", { roles: ["direct"], country: "QA" }), dirRow("Fixture Twin"), dirRow("Fixture Twin.")];
+    const bytes = await template([["Fixture One", "UAE", "Agency"], ["Fixture Twin", "UAE", "Agency"]]);
+    await runImport(deps(db, { loadDirectory: async () => dir }), req(bytes, "confirm", CO, { fixtureone: "x", fixturetwin: "y" }));
+    expect((db.calls[0]!.args.p_items as { name: string }[]).map((i) => i.name)).toEqual(["Fixture One", "Fixture Twin"]);
   });
 
-  it("existing records: empty fields filled, new contacts added, conflicts left exactly as recorded", async () => {
-    const store = makeStore();
-    store.orgs.push(dirRow("Fixture One", { roles: ["direct"], country: "QA", contacts: [{ name: "Ana One", email: "ana@fixture.example" }] }));
-    const r = await runImport(deps(store), req(await SAMPLE(), "confirm"));
-    expect(r).toMatchObject({ ok: true, result: { created: 1, updated: 1, contactsAdded: 1 } }); // Ben added to One; Fixture Two created
-    const one = store.orgs.find((o) => o.org.name === "Fixture One")!;
-    expect(one.org).toMatchObject({ roles: ["direct"], country_code: "QA", website: "one.example" });
-    expect(one.profile).toMatchObject({ lead_source: "referral", owner_id: SARA });
-    expect(one.contacts.map((c) => c.name)).toEqual(["Ana One", "Ben Two"]);
-    expect(r.ok && r.mode === "confirm" ? r.totals.conflicts : 0).toBe(1);
-    expect(store.calls.some((c) => c.fn === "crm_update_organisation" && "country_code" in (c.args.p_patch as object))).toBe(false);
+  it("the batch key is the same for the same preview of the same file, and different when the file, the company or what was planned against differs", () => {
+    const k = (co: string, hash: string, fp: Record<string, string>) => batchKeyFor(co, hash, fp);
+    expect(k(CO, "h", { a: "1", b: "2" })).toBe(k(CO, "h", { b: "2", a: "1" }));
+    expect(new Set([k(CO, "h", { a: "1" }), k(CO, "h2", { a: "1" }), k(OTHER_CO, "h", { a: "1" }), k(CO, "h", { a: "2" })]).size).toBe(4);
   });
 
-  it("a refusal by the database is reported against that organisation and the rest still go ahead", async () => {
-    const store = makeStore({ refuseUpdates: true });
-    store.orgs.push(dirRow("Fixture One"));
-    const r = await runImport(deps(store), req(await SAMPLE(), "confirm"));
-    expect(r).toMatchObject({ ok: true, result: { created: 1, failed: [{ name: "Fixture One", message: expect.stringMatching(/Only the person who added/) }] } });
+  it("a stale preview applies nothing and says to run a fresh preview", async () => {
+    const db = makeDb(() => ({ data: { status: "preview_stale", stale_count: 1, stale: ["fixtureone"] }, error: null }));
+    const r = await runImport(deps(db), req(await SAMPLE(), "confirm", CO, FPS));
+    expect(r).toMatchObject({ ok: false, status: 409, code: "preview_stale", error: PREVIEW_STALE_MESSAGE });
+    expect(PREVIEW_STALE_MESSAGE).toMatch(/Nothing was imported\. Run a fresh preview/);
+  });
+
+  it("a repeated confirm shows the first result and says so; a refusal for one row is reported against that organisation", async () => {
+    const repeated = makeDb(() => ({ data: { status: "applied", repeated: true, created: 2, updated: 0, contacts_added: 2, owners_assigned: 1, untouched: 0, failed: [] }, error: null }));
+    expect(await runImport(deps(repeated), req(await SAMPLE(), "confirm", CO, FPS))).toMatchObject({ ok: true, repeated: true, result: { created: 2 } });
+    const refused = makeDb(() => ({ data: { status: "applied", created: 1, updated: 0, contacts_added: 0, owners_assigned: 0, untouched: 0, failed: [{ key: "fixtureone", message: "Only the person who added this organisation, a founder, or the owner of an opportunity it is on can change it" }] }, error: null }));
+    expect(await runImport(deps(refused), req(await SAMPLE(), "confirm", CO, FPS))).toMatchObject({ ok: true, result: { created: 1, failed: [{ name: "Fixture One", rows: [2, 3], message: expect.stringMatching(/Only the person who added/) }] } });
+  });
+
+  it("the database's own refusals reach the person in plain words and nothing is reported as imported", async () => {
+    const denied = makeDb(() => ({ data: null, error: { message: "You do not have Sales access for this company" } }));
+    expect(await runImport(deps(denied), req(await SAMPLE(), "confirm", CO, FPS))).toMatchObject({ ok: false, status: 503, error: "You do not have Sales access for this company" });
+    const odd = makeDb(() => ({ data: null, error: null }));
+    expect(await runImport(deps(odd), req(await SAMPLE(), "confirm", CO, FPS))).toMatchObject({ ok: false, status: 503, error: expect.stringMatching(/did not return a result/) });
   });
 
   it("rejects a non-xlsx upload with a 400 and no reads", async () => {
-    const store = makeStore();
-    expect(await runImport(deps(store), { companyId: CO, fileName: "f.csv", bytes: new Uint8Array([1, 2, 3]), mode: "preview" })).toMatchObject({ ok: false, status: 400 });
+    const db = makeDb();
+    const loadDirectory = vi.fn(async () => []);
+    expect(await runImport(deps(db, { loadDirectory }), { companyId: CO, fileName: "f.csv", bytes: new Uint8Array([1, 2, 3]), mode: "preview" })).toMatchObject({ ok: false, status: 400 });
+    expect(loadDirectory).not.toHaveBeenCalled();
   });
 });
 
