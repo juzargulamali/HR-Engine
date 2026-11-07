@@ -398,10 +398,10 @@ describe("simplified Sales & CRM menu", () => {
   const plain = buildNavModules([], { crmGrants: [{ companyId: "c1", capabilities: [] }] });
 
   it("lists four destinations for an ordinary salesperson, and nothing for settings or access", () => {
-    expect(menuLabels(plain, "sales")).toEqual(["Follow-ups", "Enquiries", "Clients & Agencies", "Reports"]);
+    expect(menuLabels(plain, "sales")).toEqual(["Follow-ups", "Enquiries", "Clients & Agencies", "Outreach", "Reports"]);
   });
   it("puts Settings under its own Manage heading, only for those who may use it (access is under People & Access)", () => {
-    expect(menuLabels(founder, "sales")).toEqual(["Follow-ups", "Enquiries", "Clients & Agencies", "Reports", "Settings"]);
+    expect(menuLabels(founder, "sales")).toEqual(["Follow-ups", "Enquiries", "Clients & Agencies", "Outreach", "Reports", "Settings"]);
     const manage = founder.find((m) => m.id === "sales")?.sections.find((s) => s.label === "Manage");
     expect(manage?.links.map((l) => l.href)).toEqual(["/sales/settings"]);
     expect(plain.find((m) => m.id === "sales")?.sections.some((s) => s.label === "Manage")).toBe(false);
@@ -410,7 +410,7 @@ describe("simplified Sales & CRM menu", () => {
     const secondary = founder.find((m) => m.id === "sales")!.sections.flatMap((s) => s.links.filter((l) => l.secondary).map((l) => l.href));
     expect(secondary).toEqual(expect.arrayContaining(["/sales/clients", "/sales/proposals", "/sales/pipeline", "/sales/opportunities?add=1"]));
     const palette = navGroupsFromModules(founder).find((g) => g.label === "Sales & CRM")!.links.map((l) => l.label);
-    expect(palette).toEqual(expect.arrayContaining(["Follow-ups", "Enquiries", "Clients & Agencies", "Reports", "Clients & contacts", "Proposals & quotes", "Pipeline board", "New enquiry", "Settings"]));
+    expect(palette).toEqual(expect.arrayContaining(["Follow-ups", "Enquiries", "Clients & Agencies", "Outreach", "Reports", "Clients & contacts", "Proposals & quotes", "Pipeline board", "New enquiry", "Settings"]));
   });
 });
 

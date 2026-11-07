@@ -29,6 +29,7 @@ export default async function SalesLayout({ children }: { children: React.ReactN
     { href: "/sales/follow-ups", label: "Follow-ups" },
     { href: "/sales/opportunities", label: "Enquiries" },
     { href: "/sales/accounts", label: "Clients & Agencies" },
+    { href: "/sales/outreach", label: "Outreach" },
     { href: "/sales/reports", label: "Reports" },
     ...(manageSettings || isAnyCrmFounder(ctx.grants) ? [{ href: "/sales/settings", label: "Settings" }] : []),
   ];

@@ -9,6 +9,9 @@ import { StageBadge, DueText } from "@/components/sales/badges";
 import { formatDate, formatDateTime } from "@/components/sales/format";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadAccount, loadStaff, type AccountPage } from "@/lib/crm/clients-agencies/data";
+import { loadAccountOutreach, type AccountOutreach } from "@/lib/crm/clients-agencies/outreach-data";
+import { OutreachSection } from "../../outreach/outreach-section";
+import { todayInDubai } from "@/components/sales/format";
 import { COUNT_DEFINITIONS, type InquiryRow } from "@/lib/crm/clients-agencies/account";
 import { selectCompany } from "@/lib/crm/clients-agencies/company";
 import { countryLabel, LEAD_SOURCE_LABEL, ROLE_LABEL } from "@/lib/crm/clients-agencies/normalise";
@@ -37,7 +40,7 @@ function projectText(p: InquiryRow["project"]): string {
   }
 }
 
-export default async function AccountPageRoute({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ company?: string }> }) {
+export default async function AccountPageRoute({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ company?: string; outreach_link?: string }> }) {
   const ctx = await getCrmContext();
   if (!ctx) return null;
   const [{ id }, sp] = await Promise.all([params, searchParams]);
@@ -54,6 +57,8 @@ export default async function AccountPageRoute({ params, searchParams }: { param
     return <div className="space-y-4">{back}<LoadError what="this account" retryHref={`/sales/accounts/${id}?company=${company.id}`} /></div>;
   }
   if (!data) notFound();
+  // Outreach fails softly into its own "could not load" section; the rest of the account still shows.
+  const outreach: AccountOutreach[] | "error" = await loadAccountOutreach(company.id, id).catch((e) => { console.error("[clients-agencies] outreach failed", e); return "error" as const; });
   const { org, contacts, profile, view, orgNames } = data;
   const people = eligibleStaff(staff, company.id).map((p) => ({ id: p.userId, name: p.name }));
   const nameOf = (uid: string | null) => (uid ? (staff.find((p) => p.userId === uid)?.name ?? ctx.personName(uid)) : null);
@@ -102,9 +107,17 @@ export default async function AccountPageRoute({ params, searchParams }: { param
     </Card>
   );
 
+  const outreachSection = (
+    <OutreachSection
+      items={outreach} orgId={org.id} orgName={org.name} companyId={company.id} today={todayInDubai()} canAssign={canAssign}
+      nameOf={(uid) => nameOf(uid) ?? "Former colleague"} inquiries={view.inquiries.map((i) => ({ id: i.opp.id, label: `${i.opp.reference}: ${i.opp.title}` }))}
+    />
+  );
+
   return (
     <div className="space-y-6">
       {back}
+      {sp.outreach_link === "failed" ? <Alert variant="warning" role="alert">The inquiry was created, but it could not be linked to the outreach. Use Link an inquiry in the Outreach section below.</Alert> : null}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-2">
           <h1 className="break-words text-2xl font-semibold">{org.name}</h1>
@@ -210,6 +223,7 @@ export default async function AccountPageRoute({ params, searchParams }: { param
             </CardContent>
           </Card>
           {followUpsCard}
+          {outreachSection}
         </>
       ) : (
         <>
@@ -257,6 +271,7 @@ export default async function AccountPageRoute({ params, searchParams }: { param
           </Card>
 
           {followUpsCard}
+          {outreachSection}
         </>
       )}
     </div>

@@ -118,6 +118,13 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
   });
   if (error) return fail(error.message);
   refresh();
+  // Raised from an outreach ("Create inquiry" on the account's Outreach section): link it, which sets Inquiry raised. The inquiry exists either way; if the
+  // link is refused the person lands on the account, where the Outreach section says so and offers "Link an inquiry".
+  const fromOutreach = uuid.safeParse(formData.get("outreachId"));
+  if (fromOutreach.success) {
+    const link = await supabase.rpc("crm_outreach_link_inquiry", { p_outreach: fromOutreach.data, p_opportunity: data });
+    if (link.error) redirect(`/sales/accounts/${d.clientOrgId ?? d.agencyOrgId}?company=${d.companyId}&outreach_link=failed`);
+  }
   // The quick-add dialog asks to land on the list with the new enquiry open in the side panel; anything else keeps the full page.
   redirect(formData.get("after") === "panel" ? `/sales/opportunities?open=${data}` : `/sales/opportunities/${data}`);
 }

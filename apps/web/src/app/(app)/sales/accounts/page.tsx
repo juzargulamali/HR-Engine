@@ -17,6 +17,7 @@ import { selectCompany } from "@/lib/crm/clients-agencies/company";
 import { eligibleStaff, type StaffPerson } from "@/lib/crm/clients-agencies/staff";
 import { cn } from "@/lib/utils";
 import { AddAccountButton } from "./account-forms";
+import { AssignBar, SelectBox, SelectionProvider } from "./outreach-select";
 
 export const metadata = { title: "Clients & Agencies" };
 const PAGE_LIMIT = 100;
@@ -129,7 +130,9 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
       ) : shown.length === 0 ? (
         <EmptyState icon={Building2} title="Nothing matches" description="Clear a filter or search for something else." action={<Link href={here()} className={buttonVariants({ variant: "outline", size: "sm" })}>Clear filters</Link>} />
       ) : (
-        <>
+        <SelectionProvider>
+          {/* Only people with the assign owners right get the selection boxes and the bar; the action and the database check the right again. */}
+          {canAssign ? <AssignBar companyId={company.id} shown={page.map((r) => ({ id: r.org.id, name: r.org.name }))} people={people.map((p) => ({ id: p.userId, name: p.name }))} /> : null}
           <ul className="space-y-3">
             {page.map((r) => {
               const owner = nameOf(r.profile?.owner_id ?? null);
@@ -138,9 +141,12 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
                   <Card>
                     <CardHeader className="pb-2">
                       <div className="flex flex-wrap items-start justify-between gap-2">
-                        <CardTitle className="min-w-0 break-words leading-snug">
-                          <Link href={`/sales/accounts/${r.org.id}?company=${company.id}`} className="underline-offset-2 hover:underline">{r.org.name}</Link>
-                        </CardTitle>
+                        <div className="flex min-w-0 items-start gap-2">
+                          {canAssign ? <SelectBox id={r.org.id} name={r.org.name} /> : null}
+                          <CardTitle className="min-w-0 break-words leading-snug">
+                            <Link href={`/sales/accounts/${r.org.id}?company=${company.id}`} className="underline-offset-2 hover:underline">{r.org.name}</Link>
+                          </CardTitle>
+                        </div>
                         <div className="flex flex-wrap gap-1.5">
                           {r.org.roles.length === 0 ? <OsBadge tone="quiet">Role not recorded</OsBadge> : r.org.roles.map((role) => <OsBadge key={role} tone={role === "agency" ? "blue" : role === "technology" ? "cyan" : "neutral"} className="whitespace-nowrap">{ROLE_LABEL[role]}</OsBadge>)}
                         </div>
@@ -167,7 +173,7 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
             })}
           </ul>
           {shown.length > page.length ? <Alert>Showing the first {PAGE_LIMIT} of {shown.length} accounts. Search or filter to narrow the list.</Alert> : null}
-        </>
+        </SelectionProvider>
       )}
     </div>
   );

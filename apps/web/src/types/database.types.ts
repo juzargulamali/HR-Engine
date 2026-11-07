@@ -22,7 +22,7 @@ import type { PbxAuthorshipRow, PbxBudgetHeaderRow, PbxCompanyGrantRow, PbxJson,
 import type {
   CrmActivityRow, CrmApprovalRow, CrmAuditLogRow, CrmCompanyGrantRow, CrmCompanySettingsRow, CrmContactRow,
   CrmDuplicateCandidateRow, CrmFileRow, CrmFollowUpRow, CrmHandoverRow, CrmOpportunityContactRow, CrmOpportunityEventRow,
-  CrmAccountProfileRow, CrmOpportunityRow, CrmOrganisationRow, CrmProposalRow, CrmReadOnlyTable, CrmReminderEmailClaim, CrmReminderRow,
+  CrmAccountProfileRow, CrmOutreachEventRow, CrmOutreachRow, CrmOpportunityRow, CrmOrganisationRow, CrmProposalRow, CrmReadOnlyTable, CrmReminderEmailClaim, CrmReminderRow,
   CrmZohoReferenceRow, CrmClosureRow, CrmUploadIntent,
 } from "./crm";
 import type {
@@ -1715,6 +1715,8 @@ export interface Database {
       crm_company_settings: CrmReadOnlyTable<CrmCompanySettingsRow>;
       crm_organisations: CrmReadOnlyTable<CrmOrganisationRow>;
       crm_account_profiles: CrmReadOnlyTable<CrmAccountProfileRow>;
+      crm_outreach: CrmReadOnlyTable<CrmOutreachRow>;
+      crm_outreach_events: CrmReadOnlyTable<CrmOutreachEventRow>;
       crm_contacts: CrmReadOnlyTable<CrmContactRow>;
       crm_opportunities: CrmReadOnlyTable<CrmOpportunityRow>;
       crm_opportunity_contacts: CrmReadOnlyTable<CrmOpportunityContactRow>;
@@ -1842,6 +1844,11 @@ export interface Database {
       crm_update_organisation: { Args: { p_org: string; p_patch: Record<string, unknown> }; Returns: undefined };
       crm_save_account_profile: { Args: { p_org: string; p_company: string; p_patch: Record<string, unknown> }; Returns: undefined };
       crm_assign_account_owner: { Args: { p_org: string; p_company: string; p_new_owner: string | null; p_reason?: string | null }; Returns: undefined };
+      crm_assign_outreach: { Args: { p_company: string; p_orgs: string[]; p_assignee: string; p_target: string; p_objective?: string | null }; Returns: { organisation_id: string; result: string }[] };
+      crm_outreach_log: { Args: { p_outreach: string; p_kind: string; p_on: string; p_outcome: string; p_note?: string | null; p_next_action?: string | null; p_next_due?: string | null }; Returns: undefined };
+      crm_outreach_set_next: { Args: { p_outreach: string; p_text: string; p_due: string }; Returns: undefined };
+      crm_outreach_set_status: { Args: { p_outreach: string; p_status: string; p_reason?: string | null }; Returns: undefined };
+      crm_outreach_link_inquiry: { Args: { p_outreach: string; p_opportunity: string }; Returns: undefined };
       crm_reassign_follow_up: { Args: { p_follow_up_id: string; p_new_assignee: string }; Returns: undefined };
       crm_import_fingerprints: { Args: { p_company: string; p_items: Record<string, unknown>[] }; Returns: Record<string, string> };
       crm_import_apply: { Args: { p_company: string; p_batch_key: string; p_items: Record<string, unknown>[] }; Returns: Record<string, unknown> };

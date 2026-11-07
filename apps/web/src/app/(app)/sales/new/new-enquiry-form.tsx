@@ -15,7 +15,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/sales/action-form";
 import { cn } from "@/lib/utils";
-import { FIELD_NOUN, offeredFor, type InquiryField } from "@/lib/crm/organisation-roles";
+import { FIELD_NOUN, hasRoleFor, offeredFor, type InquiryField } from "@/lib/crm/organisation-roles";
 import {
   AddContactDialog, AddOrganisationDialog,
   type CreatedContact, type CreatedOrganisation, type OrganisationKind,
@@ -149,7 +149,7 @@ export function DuplicateWarning({ matches, onDismiss, checkFailed = false }: { 
 }
 
 export function NewEnquiryForm({
-  companies, organisations: serverOrganisations, contacts: serverContacts, currentUserId, currentUserName, today,
+  companies, organisations: serverOrganisations, contacts: serverContacts, currentUserId, currentUserName, today, prefill,
 }: {
   companies: EnquiryCompany[];
   organisations: EnquiryOrganisation[];
@@ -158,12 +158,14 @@ export function NewEnquiryForm({
   currentUserName: string;
   /** Today's date in Dubai (YYYY-MM-DD), decided on the server so the page does not differ between server and browser. */
   today: string;
+  /** From an account's Outreach section: the account, its company and the outreach to link once saved. */
+  prefill?: { companyId: string; org: { id: string; kind: string; roles?: readonly string[] | null }; outreachId: string } | null;
 }) {
   const [state, formAction, pending] = useActionState(createOpportunity, initialState);
   const [clientError, setClientError] = useState<string | null>(null);
   const errorRef = useRef<HTMLDivElement>(null);
 
-  const [companyId, setCompanyId] = useState((companies.find((c) => c.hasSettings) ?? companies[0])?.id ?? "");
+  const [companyId, setCompanyId] = useState(prefill?.companyId ?? (companies.find((c) => c.hasSettings) ?? companies[0])?.id ?? "");
   const company = companies.find((c) => c.id === companyId) ?? null;
 
   // Organisations / contacts added from this page are kept locally until the server data catches up.
@@ -179,8 +181,10 @@ export function NewEnquiryForm({
   }, [serverContacts, addedContacts]);
 
   const [title, setTitle] = useState("");
-  const [agencyId, setAgencyId] = useState("");
-  const [clientId, setClientId] = useState("");
+  // The account is put in the picker its role fits (end client first; an agency-only account goes in Agency). The pickers stay editable.
+  const prefillField = prefill ? (hasRoleFor(prefill.org, "client") || !hasRoleFor(prefill.org, "agency") ? "client" : "agency") : null;
+  const [agencyId, setAgencyId] = useState(prefill && prefillField === "agency" ? prefill.org.id : "");
+  const [clientId, setClientId] = useState(prefill && prefillField === "client" ? prefill.org.id : "");
   const [checkedContacts, setCheckedContacts] = useState<Set<string>>(new Set());
   const [eventStart, setEventStart] = useState("");
   const [installStart, setInstallStart] = useState("");
@@ -268,6 +272,7 @@ export function NewEnquiryForm({
   return (
     <>
       <form onSubmit={onSubmit} className="grid gap-6 lg:grid-cols-3">
+        {prefill ? <input type="hidden" name="outreachId" value={prefill.outreachId} /> : null}
         <div className="min-w-0 space-y-6 lg:col-span-2">
           {company && !company.hasSettings ? (
             <Alert variant="warning">
