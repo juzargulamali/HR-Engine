@@ -8,6 +8,7 @@ Verified at `551f615` (main, merge of PR #56), 2026-11-04. Read-only inspection 
 
 * Every module table carries a `company_id` (the owning company) unless a row says otherwise; RLS is enabled on every module table (e.g. `supabase/migrations/20261201000100_inv_catalogue_stock_ledger.sql` enables it in a loop).
 * Table lists below are taken from `create table` statements in the migrations (grep), not from `schema/schema.sql`. RLS summaries are one-line paraphrases of the migration headers: **the policy SQL is the authority**; read it before relying on a summary.
+* **Write paths differ by area.** Sales, Projects, Inventory and Budget tables take no direct writes (SELECT policies only; writes are SECURITY DEFINER functions). HR-core tables accept some direct writes from the signed-in user under RLS policies, triggers and column privileges: for example `reimbursement_claims` (owner insert as `draft`, update while draft, cancel, delete draft) and `policy_versions` (insert/update guarded by `guard_policy_version_update()`). Always read the table's policies before assuming either.
 * Module access is a per-company grant row (`crm_company_grants`, `proj_company_grants`, `inv_company_grants`, `pbx_company_grants`), written only through `*_grant_access` / `*_revoke_access` SECURITY DEFINER functions (`20261215000000_access_grant_rules.sql` and the four `*_access_audit_settings` migrations). Each module also has `*_company_settings`, `*_audit_log`, `*_reference_counters`.
 
 ### A.1 HR core (phases 0 to 6, `20260922000000` to `20261114000000`)
@@ -42,6 +43,8 @@ RLS: grant row per company; project members, Project Manager and founders see de
 
 ### A.4 Inventory (`20261201000000` to `…0900`, `20261216000100`, `20261217000100`, `20261218000100`)
 
+**Condition and availability (as coded).** Individual units may be `good, fair, needs_inspection, damaged, unserviceable` (`inv_valid_condition`); counted balances only `good, needs_inspection, damaged`. A unit returned or received as **good or fair** is reported `available`; the other conditions are held, and counted stock is available only when `good` (`inv_return_from_project`, `inv_transfer_receive`; `20261201000300_inv_stock_functions.sql`). `inv_movements` and `inv_movement_lines` are immutable (A.6); `inv_requests`, `inv_transfers` and `inv_units` status/condition columns are mutable workflow state.
+
 | Table | Purpose | Ownership column | RLS summary |
 |---|---|---|---|
 | `inv_items`, `inv_categories`, `inv_technologies`, `inv_technology_components`, `inv_kit_contents` | Catalogue | `company_id` | Browse for anyone with access; edits guarded (`inv_items_guard`) |
@@ -65,6 +68,8 @@ RLS: grant row per company plus per-record read helpers (`pbx_can_read_budget`, 
 
 ### A.6 Frozen and append-only tables, and their guards
 
+Two kinds of record exist: **immutable ledgers and histories** (rows below with a guard trigger or revoked UPDATE/DELETE) and **mutable workflow records** whose status or decision columns change by design (for example `approvals`, `leave_requests`, `reimbursement_claims`, `inv_requests`, `proj_handovers` before submit, `inv_transfers.status`, budget versions). Only the tables listed below were verified as guarded.
+
 | Table | Guard | Source |
 |---|---|---|
 | `inv_project_notes` | Trigger `inv_project_notes_frozen_row` (before update or delete) and `…_frozen_truncate` run `inv_project_notes_frozen()`: every column frozen, truncate refused | `20261217000100_inv_project_notes.sql` lines 121 to 136 |
@@ -72,7 +77,9 @@ RLS: grant row per company plus per-record read helpers (`pbx_can_read_budget`, 
 | `inv_movements`, `inv_movement_lines` | Triggers `inv_movements_immutable`, `inv_movement_lines_immutable` (before update or delete) run `inv_ledger_immutable()` | `20261201000100_inv_catalogue_stock_ledger.sql` lines 349 to 360 |
 | `proj_handovers` | Trigger `proj_handovers_frozen` (before update) runs `proj_handover_frozen()` | `20261120000100_proj_core_tables.sql` line 315 to 328 |
 | `proj_task_events` | Append-only history by design (comment in the migration) | `20261120000100_proj_core_tables.sql` line 251 |
-| `leave_ledger`, `comp_day_ledger`, `approvals` | Append-only by design; privileges hardened (TRUNCATE, TRIGGER, REFERENCES, anon removed) | `20261113000000_ledger_privilege_hardening.sql`, `20261114000000_public_privilege_hardening.sql` |
+| `leave_ledger`, `comp_day_ledger` | Append-only by privilege, not by trigger: UPDATE and DELETE revoked from `authenticated`; TRUNCATE, TRIGGER, REFERENCES and `anon` access removed | `20261113000000_ledger_privilege_hardening.sql` (header), `20260926000000_phase3_leave_and_approvals.sql` |
+| `audit_log` | No insert, update or delete policy; rows are written only by trigger function `write_audit_log()` (SECURITY DEFINER). No guard trigger against update or delete was found in the migrations, so immutability for the service role and for hosted privileges is **Unverified** | `20260929000000_phase6_letters_payroll_audit_ai_drafts.sql` lines 574 to 657 |
+| `approvals` | **Not immutable.** A mutable workflow record: `decide_leave_approval` and its siblings `update approvals set decision, decided_at, comments` once. No guard trigger was found. Do not treat it as a ledger (see `03-roles-access-and-approvals.md` section 4.7) | `20260926000000_phase3_leave_and_approvals.sql:293` |
 
 ### A.7 Storage buckets
 
@@ -269,13 +276,13 @@ Module roles of these personas in the Sales, Projects and Budget seeds are as de
 * Dispatch and return notes: verified locally only; no hosted run (switch off).
 * The browser flow scripts were **not re-run on the final merged commit `551f615`** (they are local-only and manual); the last full-run commit is not recorded in this repo (Unverified).
 * Broader user and security testing is planned separately and is **not done**.
-* Dormant or deferred items have no hosted tests: scheduled jobs, Recovery Leave scheduler.
+* Deferred items have no hosted tests: scheduled jobs and the Recovery Leave scheduler (activation deferred by owner decision; hosted status `Unverified`).
 
 ## D. Current-state snapshot (at `551f615`)
 
-* **Built and merged:** HR core, Recovery Leave windows (scheduler dormant), Sales & CRM, Projects & Tasks, Inventory (including cross-company receiving and location versus ownership), Project Budget & Expenses, People & Access with grant rules, My Day with the attention count, the launch-refinement correctness, usability and dispatch/return packages. Module detail in `01-overview-and-modules.md`.
+* **Built and merged:** HR core, Recovery Leave windows (scheduler activation deferred by owner decision; hosted status `Unverified`), Sales & CRM, Projects & Tasks, Inventory (including cross-company receiving and location versus ownership), Project Budget & Expenses, People & Access with grant rules, My Day with the attention count, the launch-refinement correctness, usability and dispatch/return packages. Module detail in `01-overview-and-modules.md`.
 * **Hosted (owner-reported):** launch migrations 1 to 15 applied and verified on V2; Production Ready at `551f615`.
-* **Deferred or off:** dispatch and return notes switch OFF for every company; scheduled jobs (leave accrual, comp-day expiry, document expiry, balance discrepancy, recovery scheduler, Vercel crons) not activated or changed by this stack; `deact_30` unrun.
+* **Deferred or off:** dispatch and return notes switch OFF for every company; scheduled jobs (leave accrual, comp-day expiry, document expiry, balance discrepancy, recovery scheduler, Vercel crons) activation deferred by owner decision and not changed by this stack; hosted scheduler status `Unverified` (owner to check Vercel cron and `pg_cron` histories); `deact_30` unrun.
 * **Known limits:** `docs/02-database-schema.md` is stale (A.8); browser flows are local only; hosted evidence is thin where listed in C.9; no staff checklist results are stored.
 * **Open owner decisions:**
   1. Duplicate "Dubai" locations: run the read-only review and decide (`docs/inventory-location-review.md`, `supabase/manual-sql/inv_locations_review_readonly.sql`). Code cannot tell separate facilities from duplicates.

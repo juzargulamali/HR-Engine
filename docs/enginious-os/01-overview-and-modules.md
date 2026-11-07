@@ -15,7 +15,7 @@ One web application for a small group of companies (AE, SA, PL; three entities i
 |---|---|---|
 | Web app | Next.js (App Router, TypeScript), server components and server actions, in `apps/web` | `docs/01-architecture.md` section 1.3 (the "14+" version number there is not re-checked) |
 | Shared logic | `packages/domain`: permissions, leave/claims/budget rules, date logic, pure functions with tests | `packages/domain/src/index.ts` |
-| Database | Supabase Postgres. Every business table has row-level security; every write that matters is a SECURITY DEFINER function, tables are read-only to the browser | `docs/01-architecture.md`; spec 4.3.3 |
+| Database | Supabase Postgres. Every business table has row-level security; in the four module areas (Sales, Projects, Inventory, Budget) tables have SELECT policies only and every write is a SECURITY DEFINER function; HR-core tables also take some direct table writes from the signed-in user under RLS, triggers and column privileges (see `03-roles-access-and-approvals.md` section 1) | `docs/01-architecture.md`; spec 4.3.3 |
 | Hosting | Vercel (deploys `main`; previews also use the live V2 database); Vercel cron calls `/api/cron/*` | `vercel.json`; `docs/launch-refinement-install-order.md` |
 | Auth | Supabase Auth in hosted environments; **locally an in-repo stand-in** | `docs/people-access-account-controls-verification.md` |
 
@@ -29,7 +29,7 @@ One web application for a small group of companies (AE, SA, PL; three entities i
 | `apps/web/src/components/nav/` | Shell: `nav-groups.ts` (who sees which menu row), `shell-chrome.tsx` (header, drawer, phone bar), `command-palette.tsx` |
 | `apps/web/src/lib/` | Server logic per module: `my-day`, `crm`, `projects`, `inventory`, `budget`, `recovery`, `people-access`, `approvals`, `leave`, `attendance`... |
 | `packages/domain` | Pure rules shared by app and tests |
-| `packages/rls-tests`, `e2e-tests`, `e2e-account-security` | Database policy tests and browser suites (detail in file 05, to be written) |
+| `packages/rls-tests`, `e2e-tests`, `e2e-account-security` | Database policy tests and browser suites (detail in `05-data-tests-and-release-ledger.md`) |
 | `supabase/migrations/` | Install order = file-name order. Latest launch ones 20261216... to 20261218000100 |
 | `supabase/manual-sql/` | Owner packs run by hand on hosted: read-only preflight/verify, migrations, rollbacks, optional writes |
 | `docs/` | Design and deployment docs per module; `apps/web/os-shell-checks/` runnable flow checks |
@@ -42,7 +42,7 @@ One web application for a small group of companies (AE, SA, PL; three entities i
 | V2 (hosted) | Live Supabase + Vercel used by previews. Launch migrations 1 to 15 applied | Owner-reported |
 | Production | Ready at `551f615` | Owner-reported |
 | Dispatch/return notes | Per-company switch `inv_company_settings.project_notes_enabled`, default false; kept **OFF** on hosted | `supabase/migrations/20261217000100_inv_project_notes.sql`; owner-reported |
-| Scheduled jobs | Listed in `vercel.json`; only `/api/cron/crm-reminders` passes the sign-in proxy (`apps/web/src/proxy.ts` PUBLIC_PATHS), so activation is deferred (spec D-01, status after launch: `Unverified`) | `vercel.json`; `proxy.ts` |
+| Scheduled jobs | Listed in `vercel.json`; only `/api/cron/crm-reminders` passes the sign-in proxy (`apps/web/src/proxy.ts` PUBLIC_PATHS), and scheduler activation is deferred by owner decision (spec D-01); hosted Vercel cron and `pg_cron` status is `Unverified` (owner to check both histories) | `vercel.json`; `proxy.ts` |
 
 ## 5. Module inventory
 
