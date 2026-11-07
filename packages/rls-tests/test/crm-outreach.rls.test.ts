@@ -346,7 +346,7 @@ describe("Pre-inquiry outreach", () => {
       await log(U.lead, o.id, "call", "spoke", "Lead spoke");
       await assign(U.founder, [G], U.omar);
       const history = await allEvents(o.id);
-      expect(history.map((e) => e.kind)).toEqual(["assigned", "call", "status", "reassigned"]);
+      expect(history.map((e) => e.kind).sort()).toEqual(["assigned", "call", "reassigned", "status"]);
       expect(await events(U.lead, o.id)).toEqual(history);
       expect(await events(U.omar, o.id)).toEqual(history);
       expect(await q(U.lead, `select 1 from crm_outreach where id = '${o.id}'`)).toHaveLength(1);

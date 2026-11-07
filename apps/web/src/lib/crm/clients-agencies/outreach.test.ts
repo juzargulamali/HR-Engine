@@ -77,10 +77,11 @@ describe("definitions", () => {
     for (const kind of ["call", "email", "meeting"] as const) {
       const m = fn.match(new RegExp(`when '${kind}' then array\\[([^\\]]*)\\]`));
       expect(m, kind).not.toBeNull();
-      expect([...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1])).toEqual([...OUTREACH_OUTCOMES_BY_KIND[kind]]);
+      expect([...(m?.[1] ?? "").matchAll(/'([a-z_]+)'/g)].map((x) => x[1])).toEqual([...OUTREACH_OUTCOMES_BY_KIND[kind]]);
     }
     const check = sql.match(/crm_outreach_events_outcome_check check \(outcome is null or outcome in\s*\(([^)]*)\)/);
-    expect([...check![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort()).toEqual([...OUTREACH_OUTCOMES].sort());
+    expect(check).not.toBeNull();
+    expect([...(check?.[1] ?? "").matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort()).toEqual([...OUTREACH_OUTCOMES].sort());
   });
   it("counts bulk results per kind", () => {
     expect(summariseAssignResults([{ organisation_id: "a", result: "assigned" }, { organisation_id: "b", result: "assigned" }, { organisation_id: "c", result: "already" }])).toEqual({ assigned: 2, already: 1 });

@@ -70,12 +70,12 @@ describe("logging, status, next action and linking", () => {
   });
   it("the outcome must fit the kind: Replied only for e-mail, Spoke only for a call; valid pairs are passed on, invalid ones never reach the database", async () => {
     const log = (kind: string, outcome: string) => logOutreachActivity({ error: null }, fd({ outreachId: OUT, kind, on: "2026-11-06", outcome }));
-    for (const [kind, outcome] of [["call", "replied"], ["call", "sent"], ["email", "spoke"], ["email", "no_show"], ["meeting", "replied"], ["meeting", "no_answer"], ["call", "no_show"]]) {
+    for (const [kind, outcome] of [["call", "replied"], ["call", "sent"], ["email", "spoke"], ["email", "no_show"], ["meeting", "replied"], ["meeting", "no_answer"], ["call", "no_show"]] as [string, string][]) {
       expect((await log(kind, outcome)).error, `${kind}/${outcome}`).toMatch(/does not fit a/);
     }
     expect((await log("call", "replied")).error).toMatch(/Choose one of: No answer, Left message, Spoke, Call back requested, Not interested/);
     expect(rpc).not.toHaveBeenCalled();
-    for (const [kind, outcome] of [["call", "call_back_requested"], ["call", "spoke"], ["email", "replied"], ["email", "bounced"], ["meeting", "meeting_booked"], ["meeting", "rescheduled"], ["meeting", "not_interested"]]) {
+    for (const [kind, outcome] of [["call", "call_back_requested"], ["call", "spoke"], ["email", "replied"], ["email", "bounced"], ["meeting", "meeting_booked"], ["meeting", "rescheduled"], ["meeting", "not_interested"]] as [string, string][]) {
       expect(await log(kind, outcome), `${kind}/${outcome}`).toEqual({ error: null });
     }
     expect(rpc).toHaveBeenCalledTimes(7);
