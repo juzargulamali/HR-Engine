@@ -378,7 +378,7 @@ describe("template and export", () => {
   });
 
   const summaryInputs = (opps: SummaryInputs["opportunities"]): SummaryInputs => ({ companyId: CO, opportunities: opps, proposals: [], zoho: [], activities: [], projects: { status: "ok", data: [] } });
-  const opp = (id: string, agency: string | null, client: string | null, stage = "new") => ({ id, company_id: CO, reference: id, title: id, stage, agency_org_id: agency, client_org_id: client, owner_id: null, currency: "AED", value: 1, closed_at: null, created_at: "2026-01-01T00:00:00Z" });
+  const opp = (id: string, agency: string | null, client: string | null, stage: SummaryInputs["opportunities"][number]["stage"] = "new") => ({ id, company_id: CO, reference: id, title: id, stage, agency_org_id: agency, client_org_id: client, owner_id: FOUNDER, currency: "AED", value: 1, closed_at: null, created_at: "2026-01-01T00:00:00Z" });
 
   it("sheet 1: one row per contact, organisations without contacts get one row, e-mail only for a person who may see e-mails", () => {
     const a = dirRow("Fixture A", { roles: ["agency", "technology"], country: "AE", lead: "referral", exhibition: "Sample Expo", owner: SARA, contacts: [{ name: "Ana", email: "ana@fixture.example" }, { name: "Ben" }] });
