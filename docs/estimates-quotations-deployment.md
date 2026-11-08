@@ -47,7 +47,15 @@ Result:
 * This branch (`f90c915`): logo and item-photo upload to real Storage, quotation built, approval requested and given, issued; PDF and Excel downloaded through the buttons. The pinned copies in `quotation-assets` have SHA-256 values matching the snapshot and the source files. After the company logo was replaced, re-exporting the same revision still showed the **original logo and item photo** in both files. **Totals match** in the PDF, the Excel file and the snapshot (4,800.50, VAT 240.03, total 5,040.53). The internal-notes marker is absent from both files.
 * **Deleting a pinned asset is refused**: service role single delete, bulk delete and move: HTTP 500 with database code 55000; a signed-in user's single delete: 400 AccessDenied; a signed-in user's bulk delete: 200 with an empty list (nothing deleted); a SQL delete or update: "A pinned quotation asset cannot be renamed or deleted". Both pinned objects stayed with their hashes intact.
 
-Still needs hosted verification (owner, after applying the migration): who owns `storage.objects` on hosted V2 and that the verify pack's INFO row says the guard was installed; Supabase Auth and e-mail behaviour (the local check used admin-created users); the hosted Postgres major version (the local stack ran 17); the approval-policy screen in Sales settings (the policy was set by SQL locally, the screen was not exercised).
+At the time of this local check these still needed hosted verification. Per the owner the migration is now applied on hosted V2, the verification rows were OK and the guard is installed (see "Hosted V2 result (migration `20261220000100`)" below). Still open: Supabase Auth and e-mail behaviour (the local check used admin-created users); the hosted Postgres major version (the local stack ran 17); the approval-policy screen in Sales settings (the policy was set by SQL locally, the screen was not exercised).
+
+## Hosted V2 result (migration `20261220000100`, owner-reported; Claude ran no hosted SQL)
+
+The owner applied `20261220000100_crm_estimates_quotations.sql` on hosted V2 using the owner pack in the order above and reported (2026-11-08): **all five preservation fingerprints matched** (step 4 identical to step 2), **every verification row was `OK`**, and **the pinned-asset delete guard on `storage.objects` is installed**. The result rows themselves were not pasted into the repository and were not re-read by Claude. This is distinct from the local release check above, which Claude ran on an isolated Supabase stack.
+
+PR #62 was merged at its pinned head `6c29dfe8108e2c6b6acfe8b2e7b1235b9f49191e` (merge commit `37796fd9e7759fbc413c71179646820cd225ea91`) after required CI (`lint-typecheck-test`, `rls-policies`) was green on that exact head. Nothing was deployed by Claude and no quotation was issued or sent. Vercel Production status for this merge, or for any later commit, is not verified by Claude.
+
+Still not verified by any run: Supabase Auth and e-mail behaviour of a hosted journey, the approval-policy screen in Sales settings on hosted V2, and a real issued estimate with a logo and item photo on hosted Storage (the issue, export and delete-refusal journey was tested only on the isolated local stack).
 
 ## Estimates-only change (branch `feat/estimates-only`)
 
