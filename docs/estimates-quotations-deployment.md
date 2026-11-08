@@ -76,7 +76,7 @@ Evidence: unit and export tests (header, footer on every page, omissions, multi-
 |---|---|
 | Legal name | `Enginious LLC FZ` |
 | Tax registration number (TRN) | `100613846300003` |
-| Address (a multi-line box; Enter starts a new line, line breaks are kept) | two lines: `Business Center 1, The Meydan Hotel / Nad Al Sheba,` then `Dubai 00000, U.A.E.` |
+| Address (a multi-line box; Enter starts a new line, line breaks are kept) | two lines: `Business Center 1, The Meydan Hotel` then `Nad Al Sheba, Dubai 00000, U.A.E.` |
 | Phone | `+971 50 7247728` |
 | Email | `sales@enginious.ae` |
 | Website | `https://www.enginious.ae` |
