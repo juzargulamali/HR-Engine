@@ -8,7 +8,9 @@ import { NewEnquiryForm, type EnquiryCompany } from "./new-enquiry-form";
 
 export const metadata = { title: "New enquiry" };
 
-export default async function NewEnquiryPage() {
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export default async function NewEnquiryPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await getCrmContext();
   if (!ctx) return null;
 
@@ -29,6 +31,13 @@ export default async function NewEnquiryPage() {
   }
 
   const { organisations } = await loadOrganisations();
+  // Opened from an account's Outreach section: the organisation and company are pre-filled and the outreach is linked when the enquiry is saved.
+  const sp = await searchParams;
+  const one = (k: string) => (typeof sp[k] === "string" && UUID.test(sp[k] as string) ? (sp[k] as string) : "");
+  const fromOrg = organisations.find((o) => o.id === one("org"));
+  const prefill = fromOrg && ctx.companies.some((c) => c.id === one("company"))
+    ? { companyId: one("company"), org: { id: fromOrg.id, name: fromOrg.name, kind: fromOrg.kind, roles: fromOrg.roles }, outreachId: one("outreach") }
+    : null;
 
   const companies: EnquiryCompany[] = ctx.companies.map((c) => ({
     id: c.id,
@@ -45,11 +54,12 @@ export default async function NewEnquiryPage() {
       {header}
       <NewEnquiryForm
         companies={companies}
-        organisations={organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, place: o.place }))}
+        organisations={organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, roles: o.roles, place: o.place }))}
         contacts={organisations.flatMap((o) => o.contacts.map((c) => ({ id: c.id, name: c.name, organisationId: c.organisation_id, roleTitle: c.role_title })))}
         currentUserId={ctx.userId}
         currentUserName={ctx.fullName ?? "Me"}
         today={todayInDubai()}
+        prefill={prefill}
       />
     </div>
   );

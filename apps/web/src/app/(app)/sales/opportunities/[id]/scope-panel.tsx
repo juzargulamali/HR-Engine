@@ -10,7 +10,7 @@ const NOT_SET = <span className="text-muted-foreground">Not recorded</span>;
 export function toEditable(view: OppView): EditableOpportunity {
   const { opp, detail } = view;
   return {
-    id: opp.id, version: opp.version, title: opp.title, brief: opp.brief, currency: opp.currency, value: detail.item.value, budgetNote: opp.budget_note,
+    id: opp.id, version: opp.version, agencyOrgId: opp.agency_org_id, clientOrgId: opp.client_org_id, title: opp.title, brief: opp.brief, currency: opp.currency, value: detail.item.value, budgetNote: opp.budget_note,
     paymentTerms: opp.payment_terms, eventStart: opp.event_start, eventEnd: opp.event_end, installStart: opp.install_start, location: opp.location,
     scope: opp.scope, exclusions: opp.exclusions, waitingOn: opp.waiting_on, technologies: opp.technologies, risks: opp.risks,
   };

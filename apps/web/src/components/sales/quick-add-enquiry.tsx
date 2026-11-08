@@ -31,7 +31,7 @@ export async function QuickAddEnquiry() {
         canOpenSettings: isCrmFounder(ctx.grants, c.id) || canManageCrmSettings(ctx.grants, c.id),
         people: ctx.people.filter((p) => p.companyIds.includes(c.id)).map((p) => ({ id: p.id, name: p.name })),
       }))}
-      organisations={organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, place: o.place }))}
+      organisations={organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, roles: o.roles, place: o.place }))}
       currentUserId={ctx.userId}
       currentUserName={ctx.fullName ?? "Me"}
       today={todayInDubai()}

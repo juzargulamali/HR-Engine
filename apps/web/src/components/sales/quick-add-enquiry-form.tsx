@@ -82,8 +82,8 @@ function QuickForm({ companies, organisations: serverOrganisations, currentUserI
         <fieldset className="space-y-2">
           <legend className="sr-only">Who is it from? One is enough.</legend>
           <div className="grid gap-3 sm:grid-cols-2">
-            <OrganisationPicker id="qa-agency" name="agencyOrgId" label="Agency" hint="One of agency or end client is enough." value={agencyId} onChange={setAgencyId} organisations={organisations} preferredKinds={["agency"]} onAdd={() => setOrgDialog("agency")} />
-            <OrganisationPicker id="qa-client" name="clientOrgId" label="End client" hint="The brand the work is for." value={clientId} onChange={setClientId} organisations={organisations} preferredKinds={["client", "direct"]} onAdd={() => setOrgDialog("client")} />
+            <OrganisationPicker id="qa-agency" name="agencyOrgId" label="Agency" hint="One of agency or end client is enough." value={agencyId} onChange={setAgencyId} organisations={organisations} field="agency" onAdd={() => setOrgDialog("agency")} />
+            <OrganisationPicker id="qa-client" name="clientOrgId" label="End client" hint="The brand the work is for." value={clientId} onChange={setClientId} organisations={organisations} field="client" onAdd={() => setOrgDialog("client")} />
           </div>
         </fieldset>
 
@@ -146,7 +146,7 @@ function QuickForm({ companies, organisations: serverOrganisations, currentUserI
         open={orgDialog !== null}
         onClose={() => setOrgDialog(null)}
         defaultKind={orgDialog === "agency" ? "agency" : "client"}
-        onCreated={(org: CreatedOrganisation) => { setAddedOrgs((prev) => [...prev, { id: org.id, name: org.name, kind: org.kind, place: org.place }]); if (orgDialog === "agency") setAgencyId(org.id); else setClientId(org.id); }}
+        onCreated={(org: CreatedOrganisation) => { setAddedOrgs((prev) => [...prev, { id: org.id, name: org.name, kind: org.kind, roles: [org.kind], place: org.place }]); if (orgDialog === "agency") setAgencyId(org.id); else setClientId(org.id); }}
         onUseExisting={(org) => { if (orgDialog === "agency") setAgencyId(org.id); else setClientId(org.id); }}
       />
     </>

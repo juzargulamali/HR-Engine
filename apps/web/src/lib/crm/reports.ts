@@ -306,6 +306,8 @@ export interface AttentionItem {
   at: string | null;
   /** The follow-up this row is about (overdue / due today rows), so the same follow-up is never listed twice. */
   followUpId?: string;
+  /** A follow-up on an account with no inquiry: the row is about this account (opportunityId is empty and reference says "Account"). */
+  account?: { id: string; companyId: string };
 }
 
 const RANK: Record<AttentionKind, number> = { overdue: 0, due_today: 1, hold_review: 2, no_next_action: 3, no_first_response: 4 };
@@ -317,7 +319,9 @@ interface AttentionOpp {
 
 interface AttentionFollowUp {
   followUp: { id?: string; assigned_to: string; title: string; due_at: string; status: string };
-  opportunity: { id: string; reference: string; title: string };
+  /** Null for a follow-up on an account with no inquiry; then `account` names it. */
+  opportunity: { id: string; reference: string; title: string } | null;
+  account?: { id: string; name: string; companyId: string } | null;
 }
 
 /**
@@ -336,7 +340,11 @@ export function attentionItems(
     if (f.followUp.status !== "open" || (mineOnly && f.followUp.assigned_to !== input.userId)) continue;
     const t = followUpTiming(f.followUp.due_at, now);
     if (t === "upcoming") continue;
-    out.push({ kind: t === "overdue" ? "overdue" : "due_today", opportunityId: f.opportunity.id, reference: f.opportunity.reference, title: f.opportunity.title, detail: f.followUp.title, at: f.followUp.due_at, ...(f.followUp.id ? { followUpId: f.followUp.id } : {}) });
+    const target = f.opportunity
+      ? { opportunityId: f.opportunity.id, reference: f.opportunity.reference, title: f.opportunity.title }
+      : f.account ? { opportunityId: "", reference: "Account", title: f.account.name, account: { id: f.account.id, companyId: f.account.companyId } } : null;
+    if (!target) continue;
+    out.push({ kind: t === "overdue" ? "overdue" : "due_today", ...target, detail: f.followUp.title, at: f.followUp.due_at, ...(f.followUp.id ? { followUpId: f.followUp.id } : {}) });
   }
   for (const { opp, openFollowUps } of input.opportunities) {
     if (mineOnly && opp.owner_id !== input.userId) continue;

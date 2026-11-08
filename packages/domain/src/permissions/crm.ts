@@ -87,6 +87,11 @@ export function canActOnFollowUp(grants: readonly CrmGrant[], followUp: { assign
   return hasCrmAccess(grants, opp.companyId) && (followUp.assignedTo === userId || opp.ownerId === userId || isCrmFounder(grants, opp.companyId));
 }
 
+/** crm_require_account_follow_up_actor (a follow-up on an account with no inquiry): the assignee, the person who added it, or a founder. */
+export function canActOnAccountFollowUp(grants: readonly CrmGrant[], followUp: { assignedTo: string; createdBy: string; companyId: string }, userId: string): boolean {
+  return hasCrmAccess(grants, followUp.companyId) && (followUp.assignedTo === userId || followUp.createdBy === userId || isCrmFounder(grants, followUp.companyId));
+}
+
 /** crm_remove_file: the uploader, the owner or a founder. */
 export function canRemoveFile(grants: readonly CrmGrant[], file: { uploadedBy: string }, opp: CrmOpportunityRef, userId: string): boolean {
   return hasCrmAccess(grants, opp.companyId) && (file.uploadedBy === userId || opp.ownerId === userId || isCrmFounder(grants, opp.companyId));

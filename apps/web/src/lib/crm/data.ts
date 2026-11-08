@@ -47,6 +47,7 @@ export async function loadOpportunities(ctx: CrmContext): Promise<OpportunityLis
   const nextBy = new Map<string, CrmFollowUpRow>();
   const countBy = new Map<string, number>();
   for (const f of followUps ?? []) {
+    if (!f.opportunity_id) continue;   // a follow-up on an account with no inquiry belongs to no opportunity
     if (!nextBy.has(f.opportunity_id)) nextBy.set(f.opportunity_id, f);
     countBy.set(f.opportunity_id, (countBy.get(f.opportunity_id) ?? 0) + 1);
   }
@@ -147,13 +148,15 @@ export async function loadOpportunityDetail(ctx: CrmContext, id: string): Promis
 
 export interface FollowUpListItem {
   followUp: CrmFollowUpRow;
-  opportunity: Pick<CrmOpportunityRow, "id" | "reference" | "title" | "stage" | "company_id" | "owner_id">;
+  /** Null for a follow-up on an account with no inquiry (then `account` names the account). */
+  opportunity: Pick<CrmOpportunityRow, "id" | "reference" | "title" | "stage" | "company_id" | "owner_id"> | null;
+  account: { id: string; name: string; companyId: string } | null;
   assigneeName: string;
-  /** "Agency for Client", or whichever exists (same wording as the enquiry list). */
+  /** "Agency for Client", or whichever exists (same wording as the enquiry list); the account's name for an account follow-up. */
   party: string;
 }
 
-/** Open follow-ups across everything the user can see, soonest first, plus the most recent completed ones. */
+/** Open follow-ups across everything the user can see, soonest first, plus the most recent completed ones. Follow-ups on accounts with no inquiry are listed alongside. */
 export async function loadFollowUps(ctx: CrmContext): Promise<{ open: FollowUpListItem[]; done: FollowUpListItem[] }> {
   const supabase = await createClient();
   const [openRes, doneRes] = await Promise.all([
@@ -164,22 +167,28 @@ export async function loadFollowUps(ctx: CrmContext): Promise<{ open: FollowUpLi
   const open = openRes.data;
   const done = doneRes.data;
   const all = [...(open ?? []), ...(done ?? [])];
-  const oppIds = [...new Set(all.map((f) => f.opportunity_id))];
+  const oppIds = [...new Set(all.map((f) => f.opportunity_id).filter((x): x is string => !!x))];
   type OppBits = Pick<CrmOpportunityRow, "id" | "reference" | "title" | "stage" | "company_id" | "owner_id" | "agency_org_id" | "client_org_id">;
   const { data: opps } = oppIds.length
     ? await supabase.from("crm_opportunities").select("id, reference, title, stage, company_id, owner_id, agency_org_id, client_org_id").in("id", oppIds)
     : { data: [] as OppBits[] };
-  const orgIds = [...new Set((opps ?? []).flatMap((o) => [o.agency_org_id, o.client_org_id]).filter((x): x is string => !!x))];
+  const accountIds = all.filter((f) => !f.opportunity_id).map((f) => f.organisation_id).filter((x): x is string => !!x);
+  const orgIds = [...new Set([...(opps ?? []).flatMap((o) => [o.agency_org_id, o.client_org_id]), ...accountIds].filter((x): x is string => !!x))];
   const { data: orgRows } = orgIds.length ? await supabase.from("crm_organisations").select("id, name").in("id", orgIds) : { data: [] as { id: string; name: string }[] };
   const orgName = new Map((orgRows ?? []).map((o) => [o.id, o.name]));
   const oppBy = new Map((opps ?? []).map((o) => [o.id, o]));
   const wrap = (f: CrmFollowUpRow): FollowUpListItem | null => {
+    if (!f.opportunity_id) {
+      const name = f.organisation_id ? orgName.get(f.organisation_id) : undefined;
+      if (!f.organisation_id || !name) return null;
+      return { followUp: f, opportunity: null, account: { id: f.organisation_id, name, companyId: f.company_id }, assigneeName: ctx.personName(f.assigned_to), party: name };
+    }
     const o = oppBy.get(f.opportunity_id);
     if (!o) return null;
     const agency = o.agency_org_id ? (orgName.get(o.agency_org_id) ?? null) : null;
     const client = o.client_org_id ? (orgName.get(o.client_org_id) ?? null) : null;
     const { agency_org_id: _a, client_org_id: _c, ...opportunity } = o;
-    return { followUp: f, opportunity, assigneeName: ctx.personName(f.assigned_to), party: organisationLabel({ agency: agency ? { name: agency } : null, client: client ? { name: client } : null }) };
+    return { followUp: f, opportunity, account: null, assigneeName: ctx.personName(f.assigned_to), party: organisationLabel({ agency: agency ? { name: agency } : null, client: client ? { name: client } : null }) };
   };
   return {
     open: (open ?? []).map(wrap).filter((x): x is FollowUpListItem => !!x),

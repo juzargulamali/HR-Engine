@@ -46,18 +46,88 @@ export type CrmCompanySettingsRow = {
 }
 
 export type CrmOrganisationKind = "agency" | "client" | "direct";
+/** One organisation record can play several roles (migration 20261219000100). `kind` stays as the legacy single role. */
+export type CrmOrganisationRole = "agency" | "direct" | "client" | "technology";
 
 export type CrmOrganisationRow = {
   id: string;
   name: string;
   name_key: string;
   kind: CrmOrganisationKind;
+  roles: CrmOrganisationRole[];
+  country_code: string | null;
+  website: string | null;
+  website_domain: string | null;
   place: string | null;
   note: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
+}
+
+export type CrmLeadSource = "agency_call" | "linkedin" | "direct_client" | "whatsapp" | "instagram" | "website" | "referral" | "other" | "exhibition";
+
+export type CrmOutreachStatus = "not_started" | "in_progress" | "waiting_for_reply" | "meeting_booked" | "inquiry_raised" | "closed";
+export type CrmOutreachKind = "call" | "email" | "meeting";
+/** Every outcome that can be stored: the seven of the original single list (kept readable as they are) plus the five added with the per-kind lists. */
+export type CrmOutreachOutcome = "no_answer" | "spoke" | "left_message" | "sent" | "replied" | "meeting_held" | "not_interested" | "call_back_requested" | "bounced" | "meeting_booked" | "rescheduled" | "no_show";
+
+/** A salesperson's assigned outreach to an account (no inquiry needed). One open row per account and company. */
+export type CrmOutreachRow = {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  assigned_to: string;
+  assigned_by: string;
+  assigned_at: string;
+  target_date: string;
+  objective: string | null;
+  status: CrmOutreachStatus;
+  closed_reason: string | null;
+  closed_at: string | null;
+  last_contact_on: string | null;
+  last_contact_kind: CrmOutreachKind | null;
+  last_outcome: CrmOutreachOutcome | null;
+  next_action: string | null;
+  next_due: string | null;
+  opportunity_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** The append-only history of one outreach. */
+export type CrmOutreachEventRow = {
+  id: string;
+  outreach_id: string;
+  company_id: string;
+  organisation_id: string;
+  kind: "assigned" | "reassigned" | CrmOutreachKind | "status" | "next_action" | "inquiry_linked";
+  occurred_on: string;
+  outcome: CrmOutreachOutcome | null;
+  note: string | null;
+  from_user: string | null;
+  to_user: string | null;
+  from_status: string | null;
+  to_status: string | null;
+  due_on: string | null;
+  opportunity_id: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+/** One Enginious company's profile of an organisation: account owner (null = Unassigned), lead source, exhibition. */
+export type CrmAccountProfileRow = {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  owner_id: string | null;
+  owner_assigned_by: string | null;
+  owner_assigned_at: string | null;
+  lead_source: CrmLeadSource | null;
+  exhibition: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export type CrmContactRow = {
@@ -166,7 +236,9 @@ export type CrmActivityRow = {
 
 export type CrmFollowUpRow = {
   id: string;
-  opportunity_id: string;
+  /** Null for a follow-up on an account that has no inquiry (then organisation_id is set). */
+  opportunity_id: string | null;
+  organisation_id: string | null;
   company_id: string;
   assigned_to: string;
   title: string;

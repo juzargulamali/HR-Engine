@@ -236,6 +236,15 @@ describe("needs attention", () => {
     );
     expect(items.map((i) => [i.kind, i.opportunityId])).toEqual([["overdue", "b"], ["due_today", "a"]]);
   });
+  it("an overdue or due-today follow-up on an account with no inquiry is listed for its assignee (My Day, Follow-ups) and points at the account", () => {
+    const acct = (assigned: string, dueAt: string, status = "open") => ({ followUp: { id: `fu-${assigned}-${dueAt}`, assigned_to: assigned, title: "Call the account", due_at: dueAt, status }, opportunity: null, account: { id: "org1", name: "Fictional Account", companyId: "co1" } });
+    const items = attentionItems(
+      { userId: "me", scope: "mine", opportunities: [], followUps: [acct("me", "2026-10-10T05:00:00Z"), acct("other", "2026-10-10T05:00:00Z"), acct("me", "2026-10-30T05:00:00Z"), acct("me", "2026-10-01T05:00:00Z", "done"), fu("a", "me", "2026-10-19T10:00:00Z")] },
+      NOW,
+    );
+    expect(items.map((i) => [i.kind, i.title, i.account?.id ?? null])).toEqual([["overdue", "Fictional Account", "org1"], ["due_today", "Opp a", null]]);
+    expect(items[0]).toMatchObject({ reference: "Account", opportunityId: "", detail: "Call the account" });
+  });
   it("flags active opportunities without a next action, arrived holds and missing first responses", () => {
     const items = attentionItems(
       {
