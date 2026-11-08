@@ -52,7 +52,7 @@ await step("import a fictional prospect from an in-memory workbook (no file on d
 await step("a Sales lead selects the prospect and assigns outreach to a salesperson: no inquiry, no deal, owner untouched", async () => {
   page = ceo; await ceo.goto(`${BASE}/sales/accounts?company=${CO}`, { waitUntil: "networkidle" });
   await ceo.getByLabel(`Select ${NAME} for outreach`).check();
-  if (!/1 account selected/.test(await main(ceo))) throw new Error("the selection count is not shown");
+  if (!/1 selected of \d+ shown/.test(await main(ceo))) throw new Error("the selection count is not shown");
   await ceo.getByRole("button", { name: "Assign outreach" }).click();
   const d = ceo.locator("dialog[open]"); await d.waitFor();
   await d.locator("#oa-who").selectOption(U.emp); await d.locator("#oa-target").fill("2027-01-15");

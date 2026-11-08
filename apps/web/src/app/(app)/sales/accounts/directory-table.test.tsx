@@ -14,8 +14,8 @@ import { DirectoryTable, ENQUIRIES_NOTE, PhoneSort, QuickFilters, RelationshipBa
 
 const CO = "aaaaaaaa-0000-4000-8000-000000000001";
 const org = (id: string, name: string, extra: Partial<CrmOrganisationRow> = {}) => ({ id, name, roles: ["agency", "client"], country_code: "AE", archived_at: null, ...extra }) as unknown as CrmOrganisationRow;
-const opp = (id: string, o: string, stage: string, created_at: string) => ({ id, company_id: CO, agency_org_id: null, client_org_id: o, stage, created_at });
-const build = (opportunities: ReturnType<typeof opp>[] | null): DirectoryRow[] => buildDirectoryRows({
+const opp = (id: string, o: string, stage: string, created_at: string) => ({ id, company_id: CO, agency_org_id: null, client_org_id: o, stage, created_at }) as never;
+const build = (opportunities: never[] | null): DirectoryRow[] => buildDirectoryRows({
   organisations: [org("a", "Fictional Alpha"), org("b", "Fictional Beta", { roles: [], country_code: null })], contacts: [], companyId: CO, now: new Date("2026-11-08T08:00:00Z"),
   profiles: [{ organisation_id: "a", company_id: CO, owner_id: "u1", lead_source: null, exhibition: null }] as never, opportunities,
 });

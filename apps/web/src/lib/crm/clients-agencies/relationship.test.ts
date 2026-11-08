@@ -55,7 +55,7 @@ describe("relationship badge: the four outcomes and their precedence", () => {
 });
 
 describe("counts: this company only, once per enquiry", () => {
-  const opps = [
+  const opps: Parameters<typeof enquiryStats>[0] = [
     { id: "1", company_id: CO, agency_org_id: "a", client_org_id: "a", stage: "won", created_at: "2026-10-01T08:00:00Z" },   // same account in two roles: ONE enquiry
     { id: "2", company_id: CO, agency_org_id: "a", client_org_id: "c", stage: "new", created_at: "2026-10-05T08:00:00Z" },
     { id: "3", company_id: OTHER, agency_org_id: "a", client_org_id: null, stage: "won", created_at: "2026-10-09T08:00:00Z" }, // another company's: never counted
@@ -73,7 +73,7 @@ describe("counts: this company only, once per enquiry", () => {
 
 const org = (id: string, name: string, extra: Partial<CrmOrganisationRow> = {}) => ({ id, name, roles: ["client"], country_code: null, archived_at: null, ...extra }) as unknown as CrmOrganisationRow;
 const orgs = [org("n", "Fictional None"), org("w", "Fictional Won", { country_code: "AE", roles: ["agency"] }), org("p", "Fictional Pending", { country_code: "SA" }), org("d", "Fictional Dormant", { country_code: "AE" }), org("w2", "Fictional Won Two", { country_code: "QA" })];
-const opp = (id: string, o: string, stage: string, created_at: string) => ({ id, company_id: CO, agency_org_id: null, client_org_id: o, stage, created_at });
+const opp = (id: string, o: string, stage: string, created_at: string) => ({ id, company_id: CO, agency_org_id: null, client_org_id: o, stage, created_at }) as never;
 const rows = buildDirectoryRows({
   organisations: orgs, contacts: [], companyId: CO, now: NOW,
   profiles: [{ organisation_id: "w", company_id: CO, owner_id: "u2", lead_source: null, exhibition: null }, { organisation_id: "p", company_id: CO, owner_id: "u1", lead_source: null, exhibition: null }] as never,

@@ -90,7 +90,7 @@ export function DirectoryTable({ rows, sort, hrefFor, accountHref, canSelect, ow
   const shown = rows.map((r) => ({ id: r.org.id, name: r.org.name }));
   const head = (key: SortKey, note?: boolean) => <SortHead sortKey={key} label={SORT_LABELS[key]} sort={sort} hrefFor={hrefFor} note={note} />;
   return (
-    <Table stack aria-label="Clients and agencies" className="[&_td]:align-middle">
+    <Table stack aria-label="Clients and agencies" className="[&_td]:align-middle md:[&_td]:px-2 md:[&_th]:px-2">
       <TableHeader>
         <TableRow>
           <TableHead aria-sort={sort.key === "name" ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
@@ -116,14 +116,14 @@ export function DirectoryTable({ rows, sort, hrefFor, accountHref, canSelect, ow
           return (
             <TableRow key={r.org.id}>
               <TableCell>
-                <span className="flex items-start gap-2.5">
+                <span className="flex items-center gap-2.5 md:-my-2.5">
                   {canSelect ? <SelectBox id={r.org.id} name={r.org.name} /> : null}
-                  <Link href={accountHref(r.org.id)} className="min-w-0 break-words font-medium underline-offset-2 hover:underline">{r.org.name}</Link>
+                  <Link href={accountHref(r.org.id)} className="inline-flex min-h-10 min-w-0 items-center break-words md:min-w-[9.5rem] font-medium underline-offset-2 hover:underline">{r.org.name}</Link>
                 </span>
               </TableCell>
-              <TableCell>{r.org.country_code ? countryLabel(r.org.country_code) : <span className="text-muted-foreground">Not recorded</span>}</TableCell>
+              <TableCell className="md:min-w-[7rem]">{r.org.country_code ? countryLabel(r.org.country_code) : <span className="text-muted-foreground">Not recorded</span>}</TableCell>
               <TableCell>
-                <span className="flex flex-wrap gap-1.5 md:max-w-[14rem]">
+                <span className="flex flex-wrap gap-1.5 md:max-w-[12rem]">
                   {r.org.roles.length === 0 ? <OsBadge tone="quiet">Role not recorded</OsBadge> : r.org.roles.map((role) => <OsBadge key={role} tone={role === "agency" ? "blue" : role === "technology" ? "cyan" : "neutral"} className="whitespace-nowrap">{ROLE_LABEL[role]}</OsBadge>)}
                 </span>
               </TableCell>
