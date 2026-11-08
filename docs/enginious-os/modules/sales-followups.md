@@ -1,0 +1,58 @@
+# Sales: Follow-ups (standalone page, reminders, complete, reschedule, cancel, reassign)
+
+Status: written from the code at `main` `d4a9dc325dc669990e146ebb15eeb0cc3d2c11d4` (`../README.md` stamp row "Sales & CRM app map completed"). **Code read only; nothing was run.** Conventions as in `../README.md`. Follow-ups on an enquiry are created and completed here and in [`sales-enquiries.md`](./sales-enquiries.md); follow-ups on an account with no enquiry, reassignment and the "owner, assignee and outreach are independent" rule are documented in [`sales-clients-and-agencies.md`](./sales-clients-and-agencies.md) (sections 2.2, 5, 9.3 and 10); catalogue entries in [`sales-action-catalogue.md`](./sales-action-catalogue.md).
+
+## 1. Route and who sees what
+
+`/sales/follow-ups` (`apps/web/src/app/(app)/sales/follow-ups/page.tsx`) is the landing page of Sales: `/sales` redirects here (`sales/page.tsx`), the Sales menu entry, the phone bottom bar "Sales" and the module's own row point here (`nav-groups.ts`, `shell-chrome.tsx`). Any Sales grant reads every open follow-up of its companies (RLS: `crm_has_access(company_id)`, `20261115000100_crm_core_tables.sql`); a person acts on a follow-up only as in section 3.
+
+Data (`loadFollowUps`, `apps/web/src/lib/crm/data.ts`): up to 1000 open `crm_follow_ups` (soonest first) and the 30 most recently completed (`status = done`), with the enquiry (`id, reference, title, stage, company_id, owner_id`, agency, client) or, for a follow-up with no enquiry, the account. Rows whose enquiry or account name cannot be read are dropped (`wrap` returns null). The page also loads the person's unread reminders (`loadMyReminders`, up to 50), all enquiries (`loadOpportunities`) and the handover attention rows (`loadHandoverRows`, `lib/crm/handover-attention-data.ts`).
+
+## 2. Page controls
+
+| Control | What it does | Who | Success / failure | Behind it | Tests |
+|---|---|---|---|---|---|
+| Page | Title "Follow-ups" and the Add enquiry button | Any Sales grant | Failed read of follow-ups, reminders or enquiries: "Could not load follow-ups" with Try again (never an empty list). The handover card has its own failure message ("Could not check the handover" style, never silent) | `FollowUpsPage`, `LoadError` | `apps/web/src/lib/crm/follow-up-groups.test.ts`; page itself `Unverified` (needs a running app) |
+| Views: "To do (N)" / "Recently completed" | `view=done` shows the 30 most recently completed | Any Sales grant | Empty: "Nothing to follow up" or "No completed follow-ups yet" (says "This shows follow-ups assigned to you. Choose Everyone ..." when on Mine) | `groupOpenFollowUps` | `follow-up-groups.test.ts` |
+| Whose: "Mine" (default) / "Everyone" | `who=all`. Mine = assigned to the person. It filters this page's lists and the "Needs attention" card. **It does not filter by account owner or enquiry owner**: the follow-up's own assignee is the only test (`keep` in `page.tsx`) | same | | `keep` | |
+| To do groups | Overdue (red), Today, Upcoming; each soonest first; judged by Dubai calendar day (`followUpTiming`, `packages/domain`). Table columns: Next action (with kind: Call, Email, Meeting, Proposal work, Other), Enquiry (title and reference, or the account name with "Account follow-up (no inquiry)"), Agency / client, Due (relative text), Responsible (assignee), actions | same | At most 1000 open follow-ups are loaded; the page says "Showing the first 1,000 open follow-ups." | `groupOpenFollowUps` (`lib/crm/follow-up-groups.ts`) | `follow-up-groups.test.ts` |
+| Row click | A follow-up on an enquiry opens the side panel of that enquiry (`?open=<id>`); an account follow-up opens `/sales/accounts/<id>?company=<id>` | same | | `target` in `page.tsx` | |
+| Reminders card | Unread in-app reminders: kind (Follow-up due, Follow-up overdue, Hold review due, No next action), title, enquiry link, date; "Dismiss" per row and "Mark all read". "Internal reminders only; nothing is sent to clients. They are created once a day and refreshed when someone opens this page, so they are not instant alerts." | The person's own reminders only (`crm_reminders.user_id`) | | `MarkRemindersReadButton` -> `markRemindersRead` -> `crm_mark_reminder_read` | `lib/crm/reminders.test.ts` |
+| Handover card | Won enquiries without a submitted handover, a Project Manager's question, accepted ones | per `lib/crm/handover-attention.ts` | | `HandoverAttention` | `handover-attention.test.ts`, `handover-attention-data.test.ts` |
+| "Needs attention" card | Enquiries (owned by the person on Mine, everyone's on Everyone) that need someone without a late follow-up: no next action, a hold review that has arrived, no first response; at most 8 shown, then "Showing 8 of N" | same | | `attentionItems` (`lib/crm/reports.ts`) | `reports.test.ts` |
+| Complete | Dialog "Complete follow-up": What happened (required), then Nothing more now / Add the next follow-up (title, date, time Dubai, type) / Put the enquiry on hold (reason, review date; enquiries only). If it is the only open follow-up of an active enquiry the dialog requires one of the last two | The assignee, the enquiry owner or a Sales founder (enquiry follow-ups); the assignee, the person who added it or a founder (account follow-ups). Others see "Only the assignee, the owner (X) or a founder can change this." | See section 3 | `completeFollowUp` -> `crm_complete_follow_up` | `crm.test.ts` |
+| More > Reschedule | New date and time (Dubai, default 10:00) | same | | `rescheduleFollowUp` -> `crm_reschedule_follow_up` | |
+| More > Cancel follow-up | A reason is required. **Not offered** for the only open follow-up of an active enquiry | same | | `cancelFollowUp` -> `crm_cancel_follow_up` | |
+| Add enquiry | Quick add dialog | Any Sales grant | | [`sales-enquiries.md`](./sales-enquiries.md) section 3.1 | |
+
+Not on this page: Reassign (assignee change) and Add follow-up. Add follow-up is on the enquiry page (Overview > Follow-ups, the "No next action" warning, the side panel's "Schedule next action") and on the account page; Reassign is on the **account page only**, for the follow-ups of that account's enquiries and for account follow-ups alike (`ReassignFollowUpButton`, `apps/web/src/app/(app)/sales/accounts/[id]/page.tsx` lines 90 and 99, `reassignFollowUp` -> `crm_reassign_follow_up`; `sales-clients-and-agencies.md` section 2.2). There is no Reassign on the enquiry page or on this page. The assignee is otherwise chosen when the follow-up is created, and changing the enquiry owner moves the previous owner's open follow-ups (`crm_assign_owner`).
+
+## 3. Rules and failures of each action
+
+| Action | Starting state | Rules (function) | Notable failures |
+|---|---|---|---|
+| Create (enquiry page: Add follow-up) | Enquiry not Won/Lost ("A closed opportunity has no follow-ups") | `crm_create_follow_up`: any Sales grant for the company; "Assigned to" defaults to the person; for someone other than the person or the owner you must be the owner or hold `assign_owner`; the assignee must hold an active grant for the company | "Only the owner or a founder can assign follow-ups to others"; "The assignee has no Sales access for this company" |
+| Complete | Follow-up `open` | Inquiry branch (`20261219000100_crm_clients_agencies.sql`, unchanged text from the original in `20261115000200_crm_workflow_functions.sql`): marks `done` (`completed_at`, `completed_by`, `outcome`); if the enquiry is active and no open follow-up remains: a next follow-up is **assigned to the enquiry owner** (not necessarily the person completing it) or the enquiry is put on hold; otherwise refused; always logs an internal note "Follow-up done: <title>. <outcome>" | "Record the outcome of this follow-up"; "Add a next action or put the opportunity on hold before completing the last follow-up"; "This follow-up is already closed" |
+| Reschedule | Follow-up `open` | Updates `due_at`; **deletes the reminders already generated for it** so the new date creates a fresh one (`crm_reminders where follow_up_id`) | "This follow-up is already closed" |
+| Cancel | Follow-up `open` | Reason required; refused when it is the only open follow-up of an active enquiry | "Say why this follow-up is being cancelled"; "This is the only next action. Complete it with a new next action, or put the opportunity on hold." |
+
+Won and Lost cancel every open follow-up of the enquiry (`crm_mark_won`, `crm_mark_lost`); reopening requires a new one (`crm_reopen_opportunity`).
+
+## 4. Assignee, account owner, outreach and enquiry owner: four independent things
+
+Verified against the SQL and documented with RLS evidence in `sales-clients-and-agencies.md` section 5: the **follow-up assignee** may complete, reschedule, cancel and reassign that follow-up only (no right on the enquiry or account); the **enquiry owner** edits, moves and closes the enquiry and may assign its follow-ups; the **account owner** is a label with an audit trail and confers no right; **outreach** (pre-enquiry) has its own tables and is not a follow-up. Reassigning a follow-up never changes the owner of the enquiry or account (`crm_reassign_follow_up`), and changing the enquiry owner moves only the previous owner's open follow-ups (`crm_assign_owner`).
+
+## 5. Reminders: who creates them and what leaves the system
+
+| Part | What | Where |
+|---|---|---|
+| In-app reminders | Four kinds: a follow-up has fallen due (to the assignee), a follow-up more than 24 hours overdue (to the enquiry owner), a hold whose review date has arrived (owner), an active enquiry with no open follow-up (owner, once a day). Unique `dedupe_key`, so a repeat run creates nothing new | `crm_generate_reminders` (`20261115000300_crm_proposals_files_reminders.sql`); recipients must still hold an active grant. Follow-ups on accounts with no enquiry get no reminder (the function joins `crm_opportunities`) |
+| When it runs | A daily sweep `GET /api/cron/crm-reminders` (`apps/web/src/app/api/cron/crm-reminders/route.ts`, Bearer `CRON_SECRET`; the only cron path the sign-in proxy lets through, `proxy.ts`) and, best-effort and throttled to once per 5 minutes per server process, when someone opens Follow-ups (`generateRemindersThrottled`, service role, never sends e-mail, never throws). **Scheduler activation is an owner decision and hosted cron status is `Unverified`** (`../README.md`) | |
+| E-mail to staff (outbound communication, **internal staff only, never clients**) | Only when BOTH the environment switch `CRM_REMINDER_EMAILS=on` with `CRM_REMINDER_FROM_EMAIL` set AND the company setting "Email reminders to owners" (`crm_company_settings.owner_email_enabled`) are on. Rows are claimed (next attempt pushed forward) before sending so overlapping runs cannot double-send; failed sends retry at 15 min, 1 h, 4 h, 12 h, then stop | `runCrmReminders` (`lib/crm/reminders.ts`, Microsoft Graph via `lib/email/graph`), `crm_claim_reminder_emails`, `crm_finish_reminder_email`. Whether it is on in the hosted environment: `Unverified` (hosted only) |
+| Upload clean-up | The same daily job deletes expired private-upload leftovers | `purgeExpiredUploads` (`lib/crm/upload-cleanup.ts`) |
+
+These functions are internal (service role only); listed in the catalogue's "Internal functions (not tools)" section.
+
+## 6. Tests
+
+`apps/web/src/lib/crm/follow-up-groups.test.ts`, `reminders.test.ts`, `next-working-day.test.ts`, `reports.test.ts`, `apps/web/src/lib/actions/crm.test.ts`, `apps/web/src/lib/actions/clients-agencies.test.ts`; RLS `packages/rls-tests/test/crm.rls.test.ts`, `crm-clients-agencies.rls.test.ts`, `crm-import-safety.rls.test.ts`. Not run in this pass; what each asserts was not re-read (`Unverified`).
