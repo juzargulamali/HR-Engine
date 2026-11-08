@@ -32,6 +32,12 @@ describe("recording a proposal version as sent (the existing Zoho / proposal wor
     expect(r.error).toMatch(/Could not check/);
     expect(rpc).not.toHaveBeenCalled();
   });
+  it("if the database itself refuses (it also guards estimates), its message is shown unchanged and nothing is refreshed", async () => {
+    const message = "An estimate cannot be marked as sent. Send official quotations from the Zoho Books workflow.";
+    rpc.mockResolvedValue({ data: null, error: { message, code: "EST01" } });
+    const r = await setProposalStatus({ error: null }, fd({ proposalId: P, opportunityId: O, status: "sent", sentOn: "2026-11-01" }));
+    expect(r.error).toBe(message);
+  });
   it("withdrawing an estimate (Mark superseded) and the other statuses are unchanged", async () => {
     estimateRow = { data: { proposal_id: P }, error: null };
     expect(await setProposalStatus({ error: null }, fd({ proposalId: P, opportunityId: O, status: "superseded" }))).toEqual({ error: null });
