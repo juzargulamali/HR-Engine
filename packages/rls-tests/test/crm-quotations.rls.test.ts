@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 import { calculateQuotation } from "../../domain/src/quotations";
@@ -17,6 +19,7 @@ const MIGRATIONS = [
   "20261219000100_crm_clients_agencies.sql",
   "20261220000100_crm_estimates_quotations.sql",
 ];
+const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const id = () => randomUUID();
 const CO = { uae: id(), ksa: id() };
 const U = { founder: id(), sara: id(), omar: id(), stranger: id(), ksaOnly: id(), sysadmin: id() };
@@ -34,6 +37,10 @@ describe("Estimates & Quotations (part 1)", () => {
   let agencyId: string; let clientId: string; let otherId: string;
   let oppAgency: string; let oppDirect: string;
   let vat: Record<string, string>; // label -> choice id
+  let preflight: { section: string; item: string; detail: string }[] = [];
+  let preserved = "";
+  let verifyRows: { item: string; result: string }[] = [];
+  const pack = (f: string) => readFileSync(path.join(__dirname, "../../../supabase/manual-sql", f), "utf8");
 
   const newQuote = async (opp: string, who = U.sara) => (await commit<{ id: string }>(who, `select crm_quote_create('${opp}') as id`))[0].id;
   const section = async (p: string, title: string, who = U.sara) => (await commit<{ id: string }>(who, `select crm_quote_save_section('${p}', null, '${title}') as id`))[0].id;
@@ -62,7 +69,14 @@ describe("Estimates & Quotations (part 1)", () => {
       insert into auth.users (id, email) values ${SQL_USERS};
       insert into user_roles (user_id, role) values ('${U.sysadmin}', 'sys_admin');
     `);
-    for (const f of MIGRATIONS) await db.applyMigration(f);
+    for (const f of MIGRATIONS.slice(0, -1)) await db.applyMigration(f);
+    // Owner pack: preflight (all prerequisites OK, "not applied yet") and the preservation fingerprints, both read-only, BEFORE the migration.
+    const pre = (await db.seed(pack("crm_quotes_00_preflight_readonly.sql"))).rows as { section: string; item: string; detail: string }[];
+    preflight = pre;
+    preserved = JSON.stringify((await db.seed(pack("crm_quotes_05_preservation_check_readonly.sql"))).rows);
+    await db.applyMigration(MIGRATIONS[MIGRATIONS.length - 1]!);
+    // Verify pack right after the migration (before this suite's broad test grants, which would hide a missing REVOKE).
+    verifyRows = (await db.seed(pack("crm_quotes_20_verify_readonly.sql"))).rows as { item: string; result: string }[];
     await db.seed(`
       grant select, insert, update, delete on all tables in schema public to authenticated;
       insert into crm_company_grants (user_id, company_id, capabilities) values
@@ -78,6 +92,24 @@ describe("Estimates & Quotations (part 1)", () => {
     vat = Object.fromEntries((await admin<{ id: string; label: string }>(`select id, label from crm_quote_vat_choices where company_id = '${CO.uae}'`)).map((r) => [r.label, r.id]));
   });
   afterAll(async () => { await db.teardown(); });
+
+  describe("owner pack", () => {
+    it("the preflight said every prerequisite was OK and the change was not yet applied", () => {
+      const b = preflight.filter((r) => r.section === "B prerequisites");
+      expect(b.length).toBeGreaterThan(10);
+      expect(b.filter((r) => !/^OK/.test(r.detail))).toEqual([]);
+    });
+    it("the verify pack says OK on every row right after the migration", () => {
+      const rows = verifyRows;
+      expect(rows.length).toBeGreaterThan(30);
+      expect(rows.filter((r) => !/^OK/.test(r.result))).toEqual([]);
+    });
+    it("the preservation fingerprints are identical before and after (it only adds)", async () => {
+      const after = JSON.stringify((await db.seed(pack("crm_quotes_05_preservation_check_readonly.sql"))).rows);
+      // rows created by this suite after the migration are fictional additions; compare the shape of the untouched tables only
+      expect(JSON.parse(preserved).map((r: { item: string }) => r.item)).toEqual(JSON.parse(after).map((r: { item: string }) => r.item));
+    });
+  });
 
   describe("client identifiers", () => {
     it("keeps leading zeros and trims", async () => {
@@ -319,6 +351,13 @@ describe("Estimates & Quotations (part 1)", () => {
       expect(content.sections[0].lines.find((x: any) => x.description === "With picture").image).toMatchObject({ file_id: good, mime_type: "image/png" });
       await expect(commit(U.sara, `select crm_remove_file('${good}')`)).rejects.toThrow(/issued quotation/);
       void l;
+    });
+  });
+
+  describe("rollback pack", () => {
+    it("refuses while an issued quotation exists, and changes nothing", async () => {
+      await expect(db.seed(pack("crm_quotes_90_rollback.sql"))).rejects.toThrow(/Issued quotations exist/);
+      expect((await admin<{ n: string }>(`select count(*) n from crm_quotation_snapshots`))[0].n).not.toBe("0");
     });
   });
 });

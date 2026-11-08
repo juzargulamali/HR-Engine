@@ -1,0 +1,30 @@
+# Estimates & Quotations (part 1): deployment
+
+One migration, applied by the owner in the SQL Editor of the hosted project. Claude runs no hosted SQL. Additive and idempotent (safe to run twice). It needs the Clients & Agencies migration (`20261219000100`) first, because it replaces five of that migration's functions (same behaviour plus the two identifier columns). Part 2 (PDF and Excel export) is a separate change and needs no database change: it renders `crm_quotation_snapshots.content`.
+
+| Order | File | Kind |
+|---|---|---|
+| 1 | `supabase/manual-sql/crm_quotes_00_preflight_readonly.sql` | read-only: every section B row must say OK, the last one "not applied yet". Section C is information (companies without Sales settings cannot start an estimate; companies with no legal name cannot issue) |
+| 2 | `supabase/manual-sql/crm_quotes_05_preservation_check_readonly.sql` | read-only: keep the result |
+| 3 | `supabase/migrations/20261220000100_crm_estimates_quotations.sql` | the change (writes) |
+| 4 | `supabase/manual-sql/crm_quotes_05_preservation_check_readonly.sql` again | read-only: identical to step 2 (the migration only adds; it changes no proposal, approval, file, organisation or company value) |
+| 5 | `supabase/manual-sql/crm_quotes_20_verify_readonly.sql` | read-only: every row must say OK (RLS on, no write grants for signed-in users, functions present, guard triggers present, private logo bucket, every company has standard terms and VAT choices) |
+| rollback | `supabase/manual-sql/crm_quotes_90_rollback.sql` | writes; refuses while any issued quotation exists; keeps the identifier and issuer columns and the replaced functions (see the header of the file) |
+
+## What it adds, and why a new table is needed
+
+The quotation is not a second record: **every quotation is a `crm_proposals` row** (its version number, its status `draft/sent/superseded/accepted`, its commercial approval and its recorded "sent" fact are the existing ones). A proposal row can hold only a note and a file, so it cannot hold a priced bill of quantities (sections, lines, currency, VAT, bill-to, milestones, terms). `crm_quotations` is therefore a 1:1 extension of the proposal row, with `crm_quotation_sections`, `crm_quotation_lines` and the frozen `crm_quotation_snapshots`.
+
+* **Client identifiers**: `crm_organisations.vat_trn`, `trade_licence_no` (text, trimmed, leading zeros kept, at most 40 characters). Replaced functions: `crm_create_organisation_profile` (two trailing arguments, old signature dropped), `crm_update_organisation`, `crm_import_fingerprint`, `crm_import_apply_item` (fill-only for the two columns).
+* **Issuer details**: `companies.trn`, `address`, `phone`, `email`, `website`, `logo_path` (the legal name already existed); private bucket `company-logos`; `crm_set_company_logo` (System Administrator only). Edited on Admin, Companies (existing `companies_write` policy: System Administrator).
+* **Estimates**: tables above plus `crm_quote_counters` (reference `QUO-<company code>-<year>-<nnnn>`, same pattern as the enquiry counter), `crm_quote_vat_choices` (seeded per company: Out of scope, 0%, 5%, 15%, 23%; nothing is a default), `crm_quote_terms_templates` (seeded per company with the six working-draft clauses). Functions: `crm_quote_create`, `crm_quote_save_header`, `crm_quote_save_section`, `crm_quote_delete_section`, `crm_quote_save_line`, `crm_quote_delete_line`, `crm_quote_reorder`, `crm_quote_issue`, `crm_quote_create_revision`, `crm_save_vat_choice`, `crm_save_terms_template`, and `crm_remove_file` (one added refusal: a picture used by an issued quotation cannot be removed).
+
+## Rules (all enforced in the database)
+
+* Edit, create, reorder and issue: the enquiry owner or a Sales founder (`crm_require_owner_or_founder`, the existing proposal rule), company scoped. Others are refused by the functions; tables are SELECT-only for people with a grant for that company.
+* Issue needs: issuer legal name, currency, VAT choice, bill-to organisation, at least one item and no empty section, a validity date not in the past if given, consistent milestones (percentages add to 100 or amounts to the total incl. VAT). A draft can be saved incomplete.
+* Approval: the existing commercial approval. With the company policy `required`, an approval for this proposal decided `approved` **after the last edit** must exist; `not_required` and `not_configured` do not gate issuing (they never gated proposals).
+* Freeze: issuing builds the client-facing snapshot inside the database. Guard triggers refuse any change to the snapshot (even by a table owner) and to the header, sections and lines of an issued quotation. A revision is a new draft (same reference, revision + 1); issuing it marks earlier draft or sent revisions `superseded` without altering them.
+* Internal notes live only in `crm_quotations.internal_notes`; they are never copied to the snapshot. There is no costing, supplier price or margin anywhere.
+
+Tests: `packages/rls-tests/test/crm-quotations.rls.test.ts` (also runs pack files 00, 05, 20 and refuses the rollback while issued quotations exist), `packages/domain/test/quotations.test.ts`, `apps/web/src/lib/crm/quotations/model.test.ts`, `apps/web/src/lib/actions/quotations.test.ts`. Control reference: `docs/enginious-os/modules/sales-estimates-and-quotations.md`.
