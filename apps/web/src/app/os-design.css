@@ -16,8 +16,8 @@
  */
 
 /* The status colours used by the shared pills and badges, with defaults for pages that have not been migrated. */
-:root { --os-info: 213 92% 72%; --os-amber: 38 94% 62%; --os-red: 6 88% 72%; --os-green: 152 55% 58%; }
-:root[data-theme="light"] { --os-info: 213 80% 40%; --os-amber: 30 95% 24%; --os-red: 355 68% 40%; --os-green: 152 62% 26%; }
+:root { --os-info: 213 92% 72%; --os-amber: 38 94% 62%; --os-red: 6 88% 72%; --os-green: 152 55% 58%; --os-purple: 268 80% 80%; }
+:root[data-theme="light"] { --os-info: 213 80% 40%; --os-amber: 30 95% 24%; --os-red: 355 68% 40%; --os-green: 152 62% 26%; --os-purple: 268 55% 32%; }
 
 /* ------------------------------------------------------------------ v2 tokens (only while a migrated page is shown) */
 html:not([data-theme="light"]):has(.os-v2) {
@@ -58,6 +58,7 @@ html:not([data-theme="light"]):has(.os-v2) {
   --os-amber: 38 94% 62%;
   --os-red: 6 88% 72%;
   --os-green: 152 55% 58%;
+  --os-purple: 268 80% 80%;
   --os-card-bg: linear-gradient(180deg, hsl(195 40% 13%), hsl(195 42% 10.5%));
   --os-card-shadow: inset 0 1px 0 hsl(180 50% 90% / 0.05), 0 8px 24px -14px hsl(195 80% 2% / 0.8);
   --os-warm: 34 36% 13.5%;
@@ -101,6 +102,7 @@ html[data-theme="light"]:has(.os-v2) {
   --os-amber: 30 95% 24%;
   --os-red: 355 68% 40%;
   --os-green: 152 62% 26%;
+  --os-purple: 268 55% 32%;
   --os-card-bg: linear-gradient(180deg, hsl(195 32% 98.8%), hsl(195 28% 97%));
   --os-card-shadow: 0 1px 2px hsl(200 40% 20% / 0.06), 0 6px 18px -10px hsl(200 40% 20% / 0.18);
   --os-warm: 38 92% 94%;
@@ -137,6 +139,7 @@ html:not([data-theme="light"]):has(.os-v2) body {
   --os-amber: 38 94% 62%;
   --os-red: 6 88% 72%;
   --os-green: 152 55% 58%;
+  --os-purple: 268 80% 80%;
   --brand-deep: 176 66% 42%;
   --brand-glow: 178 70% 50%;
   background: linear-gradient(180deg, hsl(195 46% 8.5%), hsl(195 46% 6.5%));
@@ -213,13 +216,28 @@ html[data-theme="light"] .os-card.os-cool { background: linear-gradient(180deg, 
   .os-badge[data-tone="amber"] { background: hsl(var(--os-amber) / 0.16); color: hsl(var(--os-amber)); }
   .os-badge[data-tone="red"] { background: hsl(var(--os-red) / 0.14); color: hsl(var(--os-red)); }
   .os-badge[data-tone="green"] { background: hsl(var(--os-green) / 0.14); color: hsl(var(--os-green)); }
+  .os-badge[data-tone="purple"] { background: hsl(var(--os-purple) / 0.16); color: hsl(var(--os-purple)); }
   .os-badge[data-tone="quiet"] { background: transparent; color: hsl(var(--muted-foreground)); padding-left: 0; padding-right: 0; }
+  /* Relationship quick filters (Clients & Agencies): a tinted chip with words and an icon; the chip that is ON also gets a heavier edge and weight, so colour is never the only signal. */
+  .os-quick { color: hsl(var(--foreground)); border-color: hsl(var(--foreground) / 0.25); background: hsl(var(--foreground) / 0.05); }
+  .os-quick:hover { background: hsl(var(--foreground) / 0.12); }
+  .os-quick[data-tone="green"] { color: hsl(var(--os-green)); border-color: hsl(var(--os-green) / 0.55); background: hsl(var(--os-green) / 0.1); }
+  .os-quick[data-tone="amber"] { color: hsl(var(--os-amber)); border-color: hsl(var(--os-amber) / 0.55); background: hsl(var(--os-amber) / 0.1); }
+  .os-quick[data-tone="purple"] { color: hsl(var(--os-purple)); border-color: hsl(var(--os-purple) / 0.55); background: hsl(var(--os-purple) / 0.1); }
+  .os-quick[data-tone="green"]:hover { background: hsl(var(--os-green) / 0.2); }
+  .os-quick[data-tone="amber"]:hover { background: hsl(var(--os-amber) / 0.2); }
+  .os-quick[data-tone="purple"]:hover { background: hsl(var(--os-purple) / 0.2); }
+  .os-quick.os-quick-on { border-width: 2px; font-weight: 700; background: hsl(var(--foreground) / 0.14); }
+  .os-quick.os-quick-on[data-tone="green"] { background: hsl(var(--os-green) / 0.28); }
+  .os-quick.os-quick-on[data-tone="amber"] { background: hsl(var(--os-amber) / 0.28); }
+  .os-quick.os-quick-on[data-tone="purple"] { background: hsl(var(--os-purple) / 0.28); }
   .os-dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; flex: none; background: hsl(var(--subtle)); }
   .os-dot[data-tone="cyan"] { background: hsl(var(--primary)); }
   .os-dot[data-tone="blue"] { background: hsl(var(--os-info)); }
   .os-dot[data-tone="amber"] { background: hsl(var(--os-amber)); }
   .os-dot[data-tone="red"] { background: hsl(var(--os-red)); }
   .os-dot[data-tone="green"] { background: hsl(var(--os-green)); }
+  .os-dot[data-tone="purple"] { background: hsl(var(--os-purple)); }
 
   /* A status pill: a coloured dot and the words, never colour alone. It is also a button where the value can be changed in place. */
   .os-pill {
