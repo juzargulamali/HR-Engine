@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCrmContext } from "@/lib/crm/context";
 import { friendlyCrmError } from "@/lib/crm/errors";
 import { createOrganisationWithContacts } from "@/lib/crm/clients-agencies/write";
-import { cleanText, LEAD_SOURCES, normaliseCountry, normaliseWebsite, ORGANISATION_ROLES } from "@/lib/crm/clients-agencies/normalise";
+import { cleanIdentifier, cleanText, IDENTIFIER_MAX, IDENTIFIER_TOO_LONG, LEAD_SOURCES, normaliseCountry, normaliseWebsite, ORGANISATION_ROLES } from "@/lib/crm/clients-agencies/normalise";
 import type { ActionState } from "./companies";
 
 /**
@@ -22,6 +22,7 @@ const fail = (message: string): ActionState => ({ error: friendlyCrmError(messag
 const firstIssue = (e: z.ZodError) => e.issues[0]?.message ?? "Invalid input.";
 const refresh = () => revalidatePath("/sales", "layout");
 const text = (max = 500) => z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().trim().max(max).optional());
+const identifier = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().trim().max(IDENTIFIER_MAX, IDENTIFIER_TOO_LONG).optional());
 const optionalUuid = z.preprocess((v) => (v === "" || v == null ? undefined : v), uuid.optional());
 const rolesFrom = (fd: FormData) => fd.getAll("roles").map(String);
 const leadSource = z.preprocess((v) => (v === "" || v == null ? undefined : v), z.enum(LEAD_SOURCES).optional());
@@ -32,7 +33,7 @@ async function mayAssign(companyId: string): Promise<boolean> {
 }
 
 const createSchema = z.object({
-  companyId: uuid, name: z.string().trim().min(1, "Enter the name").max(200), country: text(80), website: text(300), place: text(200), note: text(2000),
+  companyId: uuid, name: z.string().trim().min(1, "Enter the name").max(200), country: text(80), website: text(300), vatTrn: identifier, tradeLicence: identifier, place: text(200), note: text(2000),
   leadSource, exhibition: text(200), ownerId: optionalUuid,
   contactName: text(200), contactRole: text(200), contactEmail: text(200), contactPhone: text(80),
 });
@@ -46,7 +47,7 @@ export async function createAccount(_prev: ActionState & { id?: string }, formDa
   const supabase = await createClient();
   const r = await createOrganisationWithContacts(supabase, {
     name: d.name, roles: rolesFrom(formData).filter((x): x is (typeof ORGANISATION_ROLES)[number] => (ORGANISATION_ROLES as readonly string[]).includes(x)),
-    country_code: d.country, website: d.website, place: d.place, note: d.note, companyId: d.companyId, lead_source: d.leadSource, exhibition: d.exhibition, ownerId: d.ownerId,
+    country_code: d.country, website: d.website, vat_trn: d.vatTrn, trade_licence_no: d.tradeLicence, place: d.place, note: d.note, companyId: d.companyId, lead_source: d.leadSource, exhibition: d.exhibition, ownerId: d.ownerId,
     contacts: d.contactName ? [{ name: d.contactName, role_title: d.contactRole, email: d.contactEmail, phone: d.contactPhone }] : [],
   });
   if (!r.ok) return { error: r.error };
@@ -55,7 +56,7 @@ export async function createAccount(_prev: ActionState & { id?: string }, formDa
 }
 
 const profileSchema = z.object({
-  orgId: uuid, companyId: uuid, name: z.string().trim().min(1, "Enter the name").max(200), country: text(80), website: text(300), place: text(200), note: text(2000),
+  orgId: uuid, companyId: uuid, name: z.string().trim().min(1, "Enter the name").max(200), country: text(80), website: text(300), vatTrn: identifier, tradeLicence: identifier, place: text(200), note: text(2000),
   leadSource, exhibition: text(200),
 });
 
@@ -73,7 +74,7 @@ export async function saveAccountProfile(_prev: ActionState, formData: FormData)
   if (roles.some((r) => !(ORGANISATION_ROLES as readonly string[]).includes(r))) return { error: "One of the roles is not allowed." };
   const supabase = await createClient();
   const org = await supabase.rpc("crm_update_organisation", {
-    p_org: d.orgId, p_patch: { name: d.name, roles, country_code: country, website: normaliseWebsite(d.website).website, place: cleanText(d.place), note: cleanText(d.note) },
+    p_org: d.orgId, p_patch: { name: d.name, roles, country_code: country, website: normaliseWebsite(d.website).website, place: cleanText(d.place), note: cleanText(d.note), vat_trn: cleanIdentifier(d.vatTrn), trade_licence_no: cleanIdentifier(d.tradeLicence) },
   });
   if (org.error) return fail(org.error.message);
   const profile = await supabase.rpc("crm_save_account_profile", { p_org: d.orgId, p_company: d.companyId, p_patch: { lead_source: d.leadSource ?? null, exhibition: cleanText(d.exhibition) } });

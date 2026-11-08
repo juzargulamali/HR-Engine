@@ -98,3 +98,11 @@ export function normaliseRoles(input: readonly string[] | string | null | undefi
 
 /** Trim; empty becomes null. */
 export const cleanText = (v: string | null | undefined): string | null => { const t = (v ?? "").trim(); return t === "" ? null : t; };
+
+/** A client identifier (VAT registration number / TRN, trade licence number) as stored: trimmed, internal spacing and leading zeros untouched. Blank = null. */
+export function cleanIdentifier(value: string | null | undefined): string | null {
+  const v = (value ?? "").trim();
+  return v === "" ? null : v;
+}
+export const IDENTIFIER_MAX = 40;
+export const IDENTIFIER_TOO_LONG = `An identifier can be at most ${IDENTIFIER_MAX} characters.`;

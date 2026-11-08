@@ -1,5 +1,5 @@
 import type { CrmLeadSource, CrmOrganisationRole } from "@/types/crm";
-import { cleanText, LEAD_SOURCES, LEAD_SOURCE_LABEL, normaliseCountry, normaliseEmail, normaliseName, normaliseRoles, normaliseWebsite, ORGANISATION_ROLES, ROLE_LABEL } from "../normalise";
+import { cleanIdentifier, cleanText, IDENTIFIER_MAX, LEAD_SOURCES, LEAD_SOURCE_LABEL, normaliseCountry, normaliseEmail, normaliseName, normaliseRoles, normaliseWebsite, ORGANISATION_ROLES, ROLE_LABEL } from "../normalise";
 import type { ContactInput } from "../write";
 import { IMPORT_LIMITS, isExampleName, unneutralise } from "./xlsx";
 
@@ -8,7 +8,7 @@ import { IMPORT_LIMITS, isExampleName, unneutralise } from "./xlsx";
  * a serial-number column and any other column is ignored). Pure: nothing here reads or writes the database.
  */
 
-export type Field = "name" | "country" | "type" | "website" | "contactName" | "contactTitle" | "contactEmail" | "contactPhone" | "lead" | "notes" | "ownerEmail";
+export type Field = "name" | "country" | "type" | "website" | "contactName" | "contactTitle" | "contactEmail" | "contactPhone" | "lead" | "notes" | "ownerEmail" | "vatTrn" | "tradeLicence";
 
 const alias = (field: Field, ...names: string[]) => names.map((n) => [normaliseName(n), field] as const);
 const HEADER_FIELDS = new Map<string, Field>([
@@ -22,6 +22,8 @@ const HEADER_FIELDS = new Map<string, Field>([
   ...alias("contactPhone", "Contact phone"),
   ...alias("lead", "Lead source / exhibition", "Lead source", "Exhibition"),
   ...alias("notes", "Notes", "Note"),
+  ...alias("vatTrn", "VAT registration number / TRN", "VAT registration number", "VAT registration no", "VAT number", "VAT no", "TRN", "Tax registration number"),
+  ...alias("tradeLicence", "Trade licence number", "Trade license number", "Trade licence", "Trade license", "Trade licence no", "Licence number", "License number"),
   ...alias("ownerEmail", "Account owner work email", "Account owner work email (optional)", "Account owner email"),
 ]);
 
@@ -35,6 +37,8 @@ export interface ParsedRow {
   leadText: string;
   notes: string;
   ownerEmail: string;
+  vatTrn: string;
+  tradeLicence: string;
 }
 
 export interface Flag { row: number; kind: "type" | "country" | "website" | "owner" | "file"; message: string }
@@ -48,6 +52,8 @@ export interface ParsedOrg {
   roles: CrmOrganisationRole[];
   countryCode: string | null;
   website: string | null;
+  vatTrn: string | null;
+  tradeLicence: string | null;
   note: string | null;
   leadSource: CrmLeadSource | null;
   exhibition: string | null;
@@ -144,7 +150,7 @@ export function parseRows(rows: string[][]): ParseOutcome {
     parsed.push({
       rowNumber, name, countryText: get("country"), typeText: get("type"), website: get("website"),
       contact: { name: get("contactName"), title: get("contactTitle"), email: get("contactEmail"), phone: get("contactPhone") },
-      leadText: get("lead"), notes: get("notes"), ownerEmail: get("ownerEmail"),
+      leadText: get("lead"), notes: get("notes"), ownerEmail: get("ownerEmail"), vatTrn: get("vatTrn"), tradeLicence: get("tradeLicence"),
     });
   }
 
@@ -156,7 +162,7 @@ export function parseRows(rows: string[][]): ParseOutcome {
     const key = normaliseName(r.name);
     let org = byKey.get(key);
     if (!org) {
-      org = { key, name: r.name, rows: [], roles: [], countryCode: null, website: null, note: null, leadSource: null, exhibition: null, ownerEmail: null, contacts: [], flags: [] };
+      org = { key, name: r.name, rows: [], roles: [], countryCode: null, website: null, vatTrn: null, tradeLicence: null, note: null, leadSource: null, exhibition: null, ownerEmail: null, contacts: [], flags: [] };
       byKey.set(key, org);
     } else duplicateRows.push({ row: r.rowNumber, name: org.name });
     org.rows.push(r.rowNumber);
@@ -181,6 +187,15 @@ export function parseRows(rows: string[][]): ParseOutcome {
     if (site.website) {
       if (!site.domain) flag("website", `Website "${site.website.slice(0, 60)}" does not look like a web address and was not used.`);
       else if (!org.website) org.website = site.website.slice(0, 300);
+    }
+
+    // Identifiers are kept exactly as typed (text, leading zeros); the first value for an organisation wins and a different later one is flagged.
+    for (const [field, label, raw] of [["vatTrn", "VAT registration number / TRN", r.vatTrn], ["tradeLicence", "Trade licence number", r.tradeLicence]] as const) {
+      const v = cleanIdentifier(raw);
+      if (!v) continue;
+      if (v.length > IDENTIFIER_MAX) flag("file", `${label} "${v.slice(0, 20)}..." is longer than ${IDENTIFIER_MAX} characters and was not used.`);
+      else if (!org[field]) org[field] = v;
+      else if (org[field] !== v) differs(label, org[field]!, v);
     }
 
     const notes = cleanText(r.notes);

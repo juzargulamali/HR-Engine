@@ -59,7 +59,7 @@ async function rejectUpload(intentId: string, quarantinePath: string, reason: st
   return { error: reason };
 }
 
-export async function finalizeCrmUpload(intentId: string): Promise<ActionState> {
+export async function finalizeCrmUpload(intentId: string): Promise<ActionState & { fileId?: string }> {
   if (!z.string().uuid().safeParse(intentId).success) return { error: "Missing upload." };
   const supabase = await createClient();
   const { data: rows } = await supabase.rpc("crm_get_upload_intent", { p_intent_id: intentId });
@@ -92,14 +92,14 @@ export async function finalizeCrmUpload(intentId: string): Promise<ActionState> 
   }
   await admin.storage.from(QUARANTINE).remove([intent.quarantine_path]);
 
-  const { error } = await supabase.rpc("crm_register_uploaded_file", { p_intent_id: intent.id });
+  const { data: registeredId, error } = await supabase.rpc("crm_register_uploaded_file", { p_intent_id: intent.id });
   if (error) {
     await admin.storage.from(BUCKET).remove([intent.final_path]); // validated but could not be registered: leave nothing behind
     return { error: friendlyCrmError(error.message) };
   }
   revalidatePath(`/sales/opportunities/${intent.opportunity_id}`);
   revalidatePath("/sales", "layout");
-  return { error: null };
+  return { error: null, ...(typeof registeredId === "string" ? { fileId: registeredId } : {}) };
 }
 
 export async function removeCrmFile(fileId: string): Promise<ActionState> {

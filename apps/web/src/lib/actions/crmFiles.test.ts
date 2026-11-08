@@ -104,7 +104,7 @@ describe("finalizeCrmUpload (a file becomes available only after the server has 
 
   it("validates, then moves into the real bucket, marks validated, clears quarantine, and only then registers", async () => {
     arrives(PDF);
-    expect(await finalizeCrmUpload(INTENT)).toEqual({ error: null });
+    expect(await finalizeCrmUpload(INTENT)).toEqual({ error: null, fileId: "file-id" });
     expect(bucket("crm-files").upload).toHaveBeenCalledWith(FPATH, expect.any(Uint8Array), { contentType: "application/pdf", upsert: false });
     expect(calls.filter((c) => /^(upload|remove|admin\.rpc|user\.rpc:crm_register)/.test(c))).toEqual([
       "upload:crm-files", "admin.rpc:crm_mark_upload_intent:validated", "remove:crm-quarantine", "user.rpc:crm_register_uploaded_file",

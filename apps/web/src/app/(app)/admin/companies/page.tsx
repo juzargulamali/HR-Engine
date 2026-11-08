@@ -1,17 +1,19 @@
 import { LoadError } from "@/components/workspace/states";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CreateCompanyForm } from "./create-company-form";
+import { IssuerDetailsButton } from "./issuer-details-button";
 import { DeactivateOrRestoreCompanyButton } from "./deactivate-or-restore-company-button";
 import { EmptyState } from "@/components/ui/empty-state";
 
 export const metadata = { title: "Companies" };
 
 export default async function CompaniesPage() {
-  const supabase = await createClient();
+  const supabase = (await createClient()) as unknown as SupabaseClient;
   const [{ data: companies, error: companiesError }, { data: countries, error: countriesError }] = await Promise.all([
-    supabase.from("companies").select("id, legal_name, country_code, default_currency, is_active, deleted_at").order("legal_name"),
+    supabase.from("companies").select("id, legal_name, country_code, default_currency, is_active, deleted_at, trn, address, phone, email, website, logo_path").order("legal_name"),
     supabase.from("countries").select("code, name").order("name"),
   ]);
   // A failed read is not "No companies yet".
@@ -56,7 +58,10 @@ export default async function CompaniesPage() {
                   <TableCell>{c.default_currency}</TableCell>
                   <TableCell>{c.deleted_at ? "Deactivated" : "Active"}</TableCell>
                   <TableCell>
-                    <DeactivateOrRestoreCompanyButton companyId={c.id} deactivated={Boolean(c.deleted_at)} />
+                    <div className="flex flex-wrap items-start gap-2">
+                      <IssuerDetailsButton company={c} />
+                      <DeactivateOrRestoreCompanyButton companyId={c.id} deactivated={Boolean(c.deleted_at)} />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

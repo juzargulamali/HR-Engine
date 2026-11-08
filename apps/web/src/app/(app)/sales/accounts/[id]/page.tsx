@@ -67,7 +67,7 @@ export default async function AccountPageRoute({ params, searchParams }: { param
   const owner = nameOf(profile?.owner_id ?? null);
   const c = view.counts;
   const openInquiries = view.inquiries.filter((i) => i.opp.stage !== "won" && i.opp.stage !== "lost");
-  const formValues = { name: org.name, roles: org.roles, country: org.country_code ?? "", website: org.website ?? "", place: org.place ?? "", note: org.note ?? "", leadSource: profile?.lead_source ?? "", exhibition: profile?.exhibition ?? "" } as const;
+  const formValues = { name: org.name, roles: org.roles, country: org.country_code ?? "", website: org.website ?? "", vatTrn: org.vat_trn ?? "", tradeLicence: org.trade_licence_no ?? "", place: org.place ?? "", note: org.note ?? "", leadSource: profile?.lead_source ?? "", exhibition: profile?.exhibition ?? "" } as const;
 
   const followUpsCard = (
       <Card>
@@ -162,6 +162,8 @@ export default async function AccountPageRoute({ params, searchParams }: { param
                 ["Country", org.country_code ? countryLabel(org.country_code) : null],
                 ["Place", org.place],
                 ["Website", org.website],
+                ["VAT registration number / TRN", org.vat_trn],
+                ["Trade licence number", org.trade_licence_no],
                 ["Lead source", profile?.lead_source ? LEAD_SOURCE_LABEL[profile.lead_source] : null],
                 ["Exhibition", profile?.exhibition ?? null],
                 ["Relationship notes", org.note],
