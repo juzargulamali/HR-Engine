@@ -12,3 +12,4 @@ export * from "./directory";
 export * from "./account";
 export * from "./company";
 export * from "./outreach";
+export * from "./relationship";

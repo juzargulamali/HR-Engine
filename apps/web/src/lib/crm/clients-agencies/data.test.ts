@@ -8,7 +8,7 @@ let rpcs: Record<string, Result> = {};
 // A query builder that answers like Supabase's: every filter returns itself and awaiting it gives the table's canned result.
 const builder = (res: Result) => {
   const b: Record<string, unknown> = {};
-  for (const m of ["select", "eq", "is", "in", "or", "order", "limit"]) b[m] = () => b;
+  for (const m of ["select", "eq", "is", "in", "or", "order", "limit", "range"]) b[m] = () => b;
   b.maybeSingle = async () => ({ data: Array.isArray(res.data) ? (res.data[0] ?? null) : res.data, error: res.error });
   b.then = (resolve: (r: Result) => unknown) => resolve(res);
   return b;
@@ -31,11 +31,24 @@ const boom = { data: null, error: { message: "connection reset" } };
 beforeEach(() => { tables = {}; rpcs = {}; });
 
 describe("a failed read is an error, never an empty or zero page", () => {
-  it("the directory throws when any of its reads fails", async () => {
-    for (const t of ["crm_organisations", "crm_contacts", "crm_account_profiles", "crm_opportunities"]) {
+  it("the directory throws when the organisations, contacts or profiles cannot be read", async () => {
+    for (const t of ["crm_organisations", "crm_contacts", "crm_account_profiles"]) {
       tables = good({ [t]: boom });
       await expect(loadDirectory(CO), t).rejects.toThrow(/could not be loaded/);
     }
+  });
+  it("when only the enquiries cannot be read the rows load WITHOUT figures or a badge (never zero)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    tables = good({ crm_opportunities: boom });
+    const rows = await loadDirectory(CO);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ stats: null, relationship: null });
+    expect(rows[0]!.org.name).toBe("Fictional Co");
+  });
+  it("with the enquiries read, the directory counts them the way the account page does", async () => {
+    tables = good();
+    const rows = await loadDirectory(CO, new Date("2026-11-08T08:00:00Z"));
+    expect(rows[0]).toMatchObject({ stats: { total: 1, won: 1, open: 0 } });
   });
   it("the account page throws when the organisation or the inquiries cannot be read", async () => {
     tables = good({ crm_opportunities: boom });

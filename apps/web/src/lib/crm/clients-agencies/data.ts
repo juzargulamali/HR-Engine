@@ -13,18 +13,27 @@ function ok(...results: { error?: { message: string } | null }[]): void {
   for (const r of results) if (r.error) throw new Error(`Clients & Agencies could not be loaded: ${r.error.message}`);
 }
 
-/** The shared organisations with the selected company's profiles, contacts and inquiry counts. Throws when any read fails. */
-export async function loadDirectory(companyId: string): Promise<DirectoryRow[]> {
+/**
+ * The shared organisations with the selected company's profiles, contacts and enquiry figures. Throws when the organisations, contacts or profiles
+ * cannot be read. When only the ENQUIRIES cannot be read, the rows still load with `stats: null`, which the page shows as "Could not load" (never zero,
+ * never a badge).
+ */
+export async function loadDirectory(companyId: string, now: Date = new Date()): Promise<DirectoryRow[]> {
   const supabase = await createClient();
   const [orgs, contacts, profiles, opps] = await Promise.all([
     supabase.from("crm_organisations").select("*").is("archived_at", null).order("name"),
     supabase.from("crm_contacts").select("*").is("archived_at", null).order("name"),
     supabase.from("crm_account_profiles").select("*").eq("company_id", companyId),
-    supabase.from("crm_opportunities").select("company_id, agency_org_id, client_org_id, stage").eq("company_id", companyId),
+    readAll<DirectoryOpp>((a, b) => supabase.from("crm_opportunities").select("id, company_id, agency_org_id, client_org_id, stage, created_at").eq("company_id", companyId).order("id").range(a, b)).catch((e) => {
+      console.error("[clients-agencies] enquiries could not be read for the directory", e);
+      return null;
+    }),
   ]);
-  ok(orgs, contacts, profiles, opps);
-  return buildDirectoryRows({ organisations: orgs.data ?? [], contacts: contacts.data ?? [], profiles: profiles.data ?? [], opportunities: opps.data ?? [], companyId });
+  ok(orgs, contacts, profiles);
+  return buildDirectoryRows({ organisations: orgs.data ?? [], contacts: contacts.data ?? [], profiles: profiles.data ?? [], opportunities: opps, companyId, now });
 }
+
+type DirectoryOpp = Pick<OppLite, "id" | "company_id" | "agency_org_id" | "client_org_id" | "stage" | "created_at">;
 
 /** Every person with CRM access in companies the caller can access (crm_people). E-mail addresses are filled only for a Sales founder. Throws on failure. */
 export async function loadStaff(): Promise<StaffPerson[]> {

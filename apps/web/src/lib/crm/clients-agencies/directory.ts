@@ -1,5 +1,7 @@
 import type { CrmAccountProfileRow, CrmContactRow, CrmLeadSource, CrmOrganisationRole, CrmOrganisationRow } from "@/types/crm";
-import { LEAD_SOURCES, ORGANISATION_ROLES } from "./normalise";
+import { LEAD_SOURCES, ORGANISATION_ROLES, countryLabel } from "./normalise";
+import { dubaiDate, enquiryStats, type EnquiryStats, type OppLite } from "./account";
+import { RELATIONSHIPS, RELATIONSHIP_RANK, relationshipOf, type Relationship } from "./relationship";
 
 export const UNASSIGNED = "unassigned";
 export const NOT_RECORDED = "none";
@@ -10,8 +12,10 @@ export interface DirectoryRow {
   contacts: CrmContactRow[];
   /** The selected company's profile of this organisation; null = nothing recorded yet, which reads as "Unassigned". */
   profile: CrmAccountProfileRow | null;
-  inquiryCount: number;
-  openCount: number;
+  /** This company's enquiries linked to the account (counted once each); null = the enquiries could not be read (never shown as zero). */
+  stats: EnquiryStats | null;
+  /** The ONE relationship badge; null exactly when `stats` is null. */
+  relationship: Relationship | null;
 }
 
 export interface DirectoryFilters {
@@ -24,9 +28,11 @@ export interface DirectoryFilters {
   /** "" = any; "none" = not recorded; or a lead source. */
   source: "" | CrmLeadSource | typeof NOT_RECORDED;
   exhibition: string;
+  /** "" = all; otherwise the one relationship badge to show. */
+  rel: "" | Relationship;
 }
 
-export const EMPTY_FILTERS: DirectoryFilters = { q: "", role: "", country: "", owner: "", source: "", exhibition: "" };
+export const EMPTY_FILTERS: DirectoryFilters = { q: "", role: "", country: "", owner: "", source: "", exhibition: "", rel: "" };
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
 /** Reads the filters from the page address. Anything not recognised is ignored (never trusted). */
@@ -41,6 +47,7 @@ export function filtersFromParams(sp: Record<string, string | string[] | undefin
     owner: one(sp.owner).trim(),
     source: (LEAD_SOURCES as readonly string[]).includes(source) || source === NOT_RECORDED ? (source as DirectoryFilters["source"]) : "",
     exhibition: one(sp.exhibition).trim(),
+    rel: (RELATIONSHIPS as readonly string[]).includes(one(sp.rel)) ? (one(sp.rel) as Relationship) : "",
   };
 }
 
@@ -52,6 +59,7 @@ export function filterDirectory(rows: readonly DirectoryRow[], f: DirectoryFilte
   const needle = f.q.toLowerCase();
   const ex = f.exhibition.toLowerCase();
   return rows.filter((r) => {
+    if (f.rel && r.relationship !== f.rel) return false;
     if (f.role === NOT_RECORDED ? r.org.roles.length > 0 : f.role !== "" && !r.org.roles.includes(f.role)) return false;
     if (f.country && r.org.country_code !== f.country) return false;
     const owner = r.profile?.owner_id ?? null;
@@ -65,29 +73,85 @@ export function filterDirectory(rows: readonly DirectoryRow[], f: DirectoryFilte
   });
 }
 
-/** Joins the shared organisations with the selected company's profiles and inquiry counts (an inquiry that names the organisation twice counts once). */
+/** Joins the shared organisations with the selected company's profiles and enquiry figures (`enquiryStats`: an inquiry naming the organisation in two roles counts once). `opportunities` null = they could not be read. */
 export function buildDirectoryRows(input: {
   organisations: readonly CrmOrganisationRow[];
   contacts: readonly CrmContactRow[];
   profiles: readonly CrmAccountProfileRow[];
-  opportunities: readonly { company_id: string; agency_org_id: string | null; client_org_id: string | null; stage: string }[];
+  opportunities: readonly Pick<OppLite, "id" | "company_id" | "agency_org_id" | "client_org_id" | "stage" | "created_at">[] | null;
   companyId: string;
+  now?: Date;
 }): DirectoryRow[] {
   const contactsBy = new Map<string, CrmContactRow[]>();
   for (const c of input.contacts) if (c.organisation_id && !c.archived_at) contactsBy.set(c.organisation_id, [...(contactsBy.get(c.organisation_id) ?? []), c]);
   const profileBy = new Map(input.profiles.filter((p) => p.company_id === input.companyId).map((p) => [p.organisation_id, p]));
-  const total = new Map<string, number>();
-  const open = new Map<string, number>();
-  for (const o of input.opportunities) {
+  const byOrg = new Map<string, NonNullable<typeof input.opportunities>[number][]>();
+  for (const o of input.opportunities ?? []) {
     if (o.company_id !== input.companyId) continue;
-    for (const orgId of new Set([o.agency_org_id, o.client_org_id])) {
-      if (!orgId) continue;
-      total.set(orgId, (total.get(orgId) ?? 0) + 1);
-      if (o.stage !== "won" && o.stage !== "lost") open.set(orgId, (open.get(orgId) ?? 0) + 1);
-    }
+    for (const orgId of new Set([o.agency_org_id, o.client_org_id])) if (orgId) byOrg.set(orgId, [...(byOrg.get(orgId) ?? []), o]);
   }
+  const today = dubaiDate((input.now ?? new Date()).toISOString());
   return input.organisations
     .filter((o) => !o.archived_at)
-    .map((org) => ({ org, contacts: contactsBy.get(org.id) ?? [], profile: profileBy.get(org.id) ?? null, inquiryCount: total.get(org.id) ?? 0, openCount: open.get(org.id) ?? 0 }))
+    .map((org) => {
+      const stats = input.opportunities === null ? null : enquiryStats(byOrg.get(org.id) ?? [], org.id, input.companyId);
+      return { org, contacts: contactsBy.get(org.id) ?? [], profile: profileBy.get(org.id) ?? null, stats, relationship: stats ? relationshipOf(stats, today) : null };
+    })
     .sort((a, b) => a.org.name.localeCompare(b.org.name));
+}
+
+/** Relationship filtering and counts need the enquiries: with any row's figures missing they are unavailable (and are not applied). */
+export const relationshipAvailable = (rows: readonly DirectoryRow[]) => rows.every((r) => r.stats !== null);
+
+/** How many accounts carry each badge, among the rows given (the caller passes the rows after search and the other filters, before the badge filter). */
+export function relationshipCounts(rows: readonly DirectoryRow[]): Record<Relationship, number> {
+  const out: Record<Relationship, number> = { won: 0, no_wins: 0, none: 0, dormant: 0 };
+  for (const r of rows) if (r.relationship) out[r.relationship]++;
+  return out;
+}
+
+// ---------------------------------------------------------------------------------------------------------------- sorting
+export const SORT_KEYS = ["name", "country", "enquiries", "won", "last", "owner", "badge"] as const;
+export type SortKey = (typeof SORT_KEYS)[number];
+export type SortDir = "asc" | "desc";
+export interface DirectorySort { key: SortKey; dir: SortDir }
+export const DEFAULT_SORT: DirectorySort = { key: "name", dir: "asc" };
+/** The direction a column starts in when first clicked: counts and dates show the biggest / newest first. */
+export const firstDir = (key: SortKey): SortDir => (key === "enquiries" || key === "won" || key === "last" ? "desc" : "asc");
+
+export function sortFromParams(sp: Record<string, string | string[] | undefined>): DirectorySort {
+  const key = one(sp.sort);
+  if (!(SORT_KEYS as readonly string[]).includes(key)) return DEFAULT_SORT;
+  const dir = one(sp.dir);
+  return { key: key as SortKey, dir: dir === "asc" || dir === "desc" ? dir : firstDir(key as SortKey) };
+}
+
+/** What a click on a column heading does: the active column flips direction, another column starts in its first direction. */
+export const nextSort = (current: DirectorySort, key: SortKey): DirectorySort =>
+  current.key === key ? { key, dir: current.dir === "asc" ? "desc" : "asc" } : { key, dir: firstDir(key) };
+
+/**
+ * Sorts a copy. A missing value (no date, unknown figures, no country, Unassigned) is ALWAYS last, in both directions. Ties fall back to name A to Z
+ * then id, so the order is stable and the same on every load.
+ */
+export function sortDirectory(rows: readonly DirectoryRow[], sort: DirectorySort, ownerName: (id: string | null) => string | null): DirectoryRow[] {
+  const sign = sort.dir === "asc" ? 1 : -1;
+  const value = (r: DirectoryRow): string | number | null => {
+    switch (sort.key) {
+      case "name": return r.org.name.toLowerCase();
+      case "country": return r.org.country_code ? countryLabel(r.org.country_code).toLowerCase() : null;
+      case "enquiries": return r.stats?.total ?? null;
+      case "won": return r.stats?.won ?? null;
+      case "last": return r.stats ? r.stats.lastEnquiryOn : null;
+      case "owner": return ownerName(r.profile?.owner_id ?? null)?.toLowerCase() ?? null;
+      case "badge": return r.relationship ? RELATIONSHIP_RANK[r.relationship] : null;
+    }
+  };
+  return [...rows].sort((a, b) => {
+    const x = value(a); const y = value(b);
+    if (x === null && y !== null) return 1;
+    if (y === null && x !== null) return -1;
+    if (x !== null && y !== null && x !== y) return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y))) * sign;
+    return a.org.name.localeCompare(b.org.name) || a.org.id.localeCompare(b.org.id);
+  });
 }
