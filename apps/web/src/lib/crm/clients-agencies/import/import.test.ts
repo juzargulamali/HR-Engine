@@ -5,10 +5,11 @@ vi.mock("server-only", () => ({}));
 
 import type { DirectoryRow } from "../directory";
 import type { StaffPerson } from "../staff";
-import { organisationsTable, summaryTable, buildExportWorkbook, type SummaryInputs } from "./export";
+import { organisationsTable, summaryTable, buildExportWorkbook, OWNER_NAME_HEADER, type SummaryInputs } from "./export";
 import { legacyWorkbook, makeWorkbook, parseBytes, planFor, TEMPLATE_ROW_HEADERS } from "./test-fixtures";
-import { IMPORT_LIMITS, TEMPLATE_HEADERS, buildTemplateWorkbook, neutraliseCell, readImportSheet } from "./xlsx";
-import { batchKeyFor } from "./apply";
+import { IMPORT_LIMITS, TEMPLATE_HEADERS, buildTemplateWorkbook, buildWorkbook, neutraliseCell, readImportSheet } from "./xlsx";
+import { buildPlan, type PlanContext } from "./plan";
+import { applyPlan, batchKeyFor } from "./apply";
 import { PREVIEW_STALE_MESSAGE, runImport, type ImportDeps } from "./service";
 
 const CO = "11111111-1111-4111-8111-111111111111";
@@ -19,10 +20,10 @@ const sara: StaffPerson = { userId: SARA, name: "Sara Fixture", email: "sara@fix
 const outsider: StaffPerson = { userId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", name: "Omar Elsewhere", email: "omar@fixture.example", companyIds: [OTHER_CO] };
 
 let seq = 0;
-function dirRow(name: string, o: { roles?: string[]; country?: string | null; website?: string | null; note?: string | null; lead?: string | null; exhibition?: string | null; owner?: string | null; contacts?: { name: string; email?: string | null }[] } = {}): DirectoryRow {
+function dirRow(name: string, o: { roles?: string[]; country?: string | null; website?: string | null; note?: string | null; lead?: string | null; exhibition?: string | null; owner?: string | null; contacts?: { name: string; email?: string | null }[]; vat?: string | null; licence?: string | null } = {}): DirectoryRow {
   const id = `00000000-0000-4000-8000-${String(++seq).padStart(12, "0")}`;
   return {
-    org: { id, name, roles: o.roles ?? [], country_code: o.country ?? null, website: o.website ?? null, website_domain: null, place: null, note: o.note ?? null, archived_at: null } as never,
+    org: { id, name, roles: o.roles ?? [], country_code: o.country ?? null, website: o.website ?? null, website_domain: null, vat_trn: o.vat ?? null, trade_licence_no: o.licence ?? null, place: null, note: o.note ?? null, archived_at: null } as never,
     contacts: (o.contacts ?? []).map((c, i) => ({ id: `${id}-c${i}`, name: c.name, email: c.email ?? null, organisation_id: id, archived_at: null })) as never,
     profile: o.lead || o.exhibition || o.owner ? ({ organisation_id: id, company_id: CO, lead_source: o.lead ?? null, exhibition: o.exhibition ?? null, owner_id: o.owner ?? null } as never) : null,
     stats: null, relationship: null,
@@ -368,7 +369,7 @@ describe("template and export", () => {
     const a = dirRow("Fixture A", { roles: ["agency", "technology"], country: "AE", lead: "referral", exhibition: "Sample Expo", owner: SARA, contacts: [{ name: "Ana", email: "ana@fixture.example" }, { name: "Ben" }] });
     const b = dirRow("Fixture B");
     const founderView = organisationsTable([a, b], [sara]);
-    expect(founderView.headers.slice(0, 11)).toEqual([...TEMPLATE_HEADERS]);
+    expect(founderView.headers.slice(0, 13)).toEqual([...TEMPLATE_HEADERS]);
     expect(founderView.rows).toHaveLength(3);
     expect(founderView.rows[0]!.slice(0, 4)).toEqual(["Fixture A", "United Arab Emirates", "Agency, Technology company", ""]);
     expect(founderView.rows[0]![10]).toBe("sara@fixture.example");
@@ -417,5 +418,68 @@ describe("template and export", () => {
 
   it("template headers appear in the same order in the export", () => {
     expect(organisationsTable([], []).headers.slice(0, 10)).toEqual(TEMPLATE_HEADERS.slice(0, 10));
+  });
+});
+
+describe("client identifiers (VAT registration number / TRN, trade licence number)", () => {
+  const H = [...TEMPLATE_ROW_HEADERS, "VAT registration number / TRN", "Trade licence number"];
+  const ctx = (directory: DirectoryRow[]): PlanContext => ({ companyId: CO, directory, staff: [sara], canAssignOwner: true } as never);
+
+  it("reads both columns as text and keeps leading zeros, trims and keeps the first value", async () => {
+    const f = await parseBytes(await makeWorkbook([{ name: "Organisations", rows: [H,
+      ["Fixture Ids", null, null, null, null, null, null, null, null, null, null, "  0001234  ", "0098"],
+      ["Fixture Ids", null, null, null, null, null, null, null, null, null, null, "999", null]] }]));
+    expect(f.orgs[0]).toMatchObject({ vatTrn: "0001234", tradeLicence: "0098" });
+    expect(f.orgs[0]!.flags.some((x) => /VAT registration number/.test(x.message))).toBe(true);
+  });
+
+  it("a legacy upload without the columns still works and fills nothing", async () => {
+    const f = await parseBytes(await template([["Fixture Legacy", "United Arab Emirates", "Agency", null, null, null, null, null, null, null, null]]));
+    expect(f.orgs[0]).toMatchObject({ vatTrn: null, tradeLicence: null });
+    const plan = buildPlan(f, ctx([]));
+    expect(plan.orgs[0]!.incoming).toMatchObject({ vat_trn: null, trade_licence_no: null });
+  });
+
+  it("fills empty identifiers; a different existing value is a conflict and is never part of the patch", async () => {
+    const f = await parseBytes(await makeWorkbook([{ name: "Organisations", rows: [H,
+      ["Fixture Has Both", null, null, null, null, null, null, null, null, null, null, "0000777", "0000888"],
+      ["Fixture Has Empty", null, null, null, null, null, null, null, null, null, null, "0000555", "0000666"],
+      ["Fixture Same", null, null, null, null, null, null, null, null, null, null, "0000111", null]] }]));
+    const plan = buildPlan(f, ctx([dirRow("Fixture Has Both", { vat: "123", licence: "0000888" }), dirRow("Fixture Has Empty"), dirRow("Fixture Same", { vat: "0000111" })]));
+    const [both, empty, same] = plan.orgs;
+    expect(both!.conflicts).toEqual([{ field: "VAT registration number / TRN", existing: "123", file: "0000777" }]);
+    expect(both!.orgPatch).toEqual({});
+    expect(empty!.orgPatch).toEqual({ vat_trn: "0000555", trade_licence_no: "0000666" });
+    expect(empty!.conflicts).toEqual([]);
+    expect(same!.hasChanges).toBe(false);
+  });
+
+  it("the items sent to the database carry the identifiers exactly as typed", async () => {
+    const f = await parseBytes(await makeWorkbook([{ name: "Organisations", rows: [H, ["Fixture New", null, null, null, null, null, null, null, null, null, null, "007", "0042"]] }]));
+    const rpc = vi.fn().mockResolvedValue({ data: { status: "applied", created: 1 }, error: null });
+    await applyPlan({ rpc } as never, buildPlan(f, ctx([])), CO, { [f.orgs[0]!.key]: "x" }, "batch");
+    const items = rpc.mock.calls[0]![1].p_items as { vat_trn: string; trade_licence_no: string }[];
+    expect(items[0]).toMatchObject({ vat_trn: "007", trade_licence_no: "0042" });
+  });
+
+  it("export carries both columns after the owner column, and an export of a record with identifiers re-imports as 'nothing to change'", async () => {
+    const rows = [dirRow("Fixture Round Trip", { vat: "00123", licence: "0045" })];
+    const table = organisationsTable(rows, []);
+    expect(table.headers.slice(0, TEMPLATE_HEADERS.length)).toEqual([...TEMPLATE_HEADERS].map((h) => (h === "Account owner work email" ? OWNER_NAME_HEADER : h)));
+    expect(table.rows[0]!.slice(11, 13)).toEqual(["00123", "0045"]);
+    const bytes = await buildWorkbook([table]);
+    const parsed = await parseBytes(bytes);
+    expect(parsed.orgs[0]).toMatchObject({ vatTrn: "00123", tradeLicence: "0045" });
+    const plan = buildPlan(parsed, ctx(rows));
+    expect(plan.orgs[0]!.hasChanges).toBe(false);
+    expect(plan.orgs[0]!.conflicts).toEqual([]);
+  });
+
+  it("the template has the two columns, text formatted", async () => {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load((await buildTemplateWorkbook()) as never);
+    const ws = wb.getWorksheet("Organisations")!;
+    expect([ws.getCell("L1").value, ws.getCell("M1").value]).toEqual(["VAT registration number / TRN", "Trade licence number"]);
+    expect(ws.getColumn(12).numFmt).toBe("@");
   });
 });

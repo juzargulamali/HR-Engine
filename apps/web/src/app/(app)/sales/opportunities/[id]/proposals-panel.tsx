@@ -21,7 +21,7 @@ export function ProposalsPanel({ view }: { view: OppView }) {
   const latestSentId = detail.proposals.find((p) => sentOrAccepted(p.status))?.id ?? null;
   return (
     <div className="space-y-6">
-      <Panel title="Proposal versions" description="Newest first. The version number is assigned automatically.">
+      <Panel title="Proposal versions" description="Newest first. The version number is assigned automatically. Estimates built in the app also appear under Estimates & Quotations.">
         {detail.proposals.length === 0 ? (
           <Muted>No proposal recorded yet.{canEdit && isOpen ? " Add the first version below once you have the document." : ""}</Muted>
         ) : (

@@ -2,7 +2,7 @@ import type { CrmOrganisationRole } from "@/types/crm";
 import type { createClient } from "@/lib/supabase/server";
 import { friendlyCrmError } from "../errors";
 import { planEmptyFieldUpdate, type IncomingOrganisationFields, type OrganisationLike } from "./match";
-import { cleanText, normaliseCountry, normaliseEmail, normaliseName, normaliseWebsite, ORGANISATION_ROLES } from "./normalise";
+import { cleanIdentifier, cleanText, IDENTIFIER_MAX, IDENTIFIER_TOO_LONG, normaliseCountry, normaliseEmail, normaliseName, normaliseWebsite, ORGANISATION_ROLES } from "./normalise";
 
 type Db = Pick<Awaited<ReturnType<typeof createClient>>, "rpc">;
 
@@ -18,6 +18,9 @@ export interface NewOrganisationInput {
   website?: string | null;
   place?: string | null;
   note?: string | null;
+  /** VAT registration number / TRN and trade licence number (optional text; leading zeros kept). */
+  vat_trn?: string | null;
+  trade_licence_no?: string | null;
   /** The Enginious company the profile fields below are for. Required when any of them is given. */
   companyId?: string | null;
   lead_source?: string | null;
@@ -40,6 +43,9 @@ export function prepareNewOrganisation(input: NewOrganisationInput): WriteResult
     country = normaliseCountry(input.country_code);
     if (!country) return { ok: false, error: "That country is not recognised. Use its name or two-letter code." };
   }
+  const vat = cleanIdentifier(input.vat_trn);
+  const licence = cleanIdentifier(input.trade_licence_no);
+  if ((vat?.length ?? 0) > IDENTIFIER_MAX || (licence?.length ?? 0) > IDENTIFIER_MAX) return { ok: false, error: IDENTIFIER_TOO_LONG };
   const contacts: Record<string, string | null>[] = [];
   const seenEmails = new Set<string>();
   for (const c of input.contacts ?? []) {
@@ -57,7 +63,7 @@ export function prepareNewOrganisation(input: NewOrganisationInput): WriteResult
     ok: true,
     args: {
       p_name: name, p_roles: roles, p_country_code: country, p_website: normaliseWebsite(input.website).website, p_place: cleanText(input.place), p_note: cleanText(input.note),
-      p_company_id: input.companyId ?? null, p_lead_source: cleanText(input.lead_source), p_exhibition: cleanText(input.exhibition), p_owner_id: input.ownerId ?? null, p_contacts: contacts,
+      p_company_id: input.companyId ?? null, p_lead_source: cleanText(input.lead_source), p_exhibition: cleanText(input.exhibition), p_owner_id: input.ownerId ?? null, p_contacts: contacts, p_vat_trn: vat, p_trade_licence_no: licence,
     },
   };
 }

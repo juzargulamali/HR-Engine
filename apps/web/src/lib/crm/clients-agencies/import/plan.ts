@@ -20,7 +20,7 @@ export interface OrgPlan {
   match: { id: string; name: string; reasons: ("name" | "website")[] } | null;
   candidates: { id: string; name: string; reasons: ("name" | "website")[] }[];
   /** Fields of the shared record that are empty today and would be filled (only after confirm). */
-  orgPatch: { roles?: CrmOrganisationRole[]; country_code?: string; website?: string; note?: string };
+  orgPatch: { roles?: CrmOrganisationRole[]; country_code?: string; website?: string; note?: string; vat_trn?: string; trade_licence_no?: string };
   profilePatch: { lead_source?: CrmLeadSource; exhibition?: string };
   /** A verified, eligible person to assign as account owner; null = leave as it is. */
   assignOwnerId: string | null;
@@ -35,7 +35,7 @@ export interface OrgPlan {
   /** Things a person must look at: they are never applied. */
   flags: Flag[];
   /** The new organisation's own values (kind = new). */
-  incoming: { country_code: string | null; website: string | null; note: string | null; lead_source: CrmLeadSource | null; exhibition: string | null };
+  incoming: { country_code: string | null; website: string | null; vat_trn: string | null; trade_licence_no: string | null; note: string | null; lead_source: CrmLeadSource | null; exhibition: string | null };
   hasChanges: boolean;
 }
 
@@ -98,7 +98,7 @@ function planOne(o: ParsedOrg, ctx: PlanContext, nameOf: (id: string | null) => 
     key: o.key, name: o.name, rows: o.rows, roles: o.roles, flags, conflicts: [] as Conflict[], contactsToAdd: [] as ContactInput[], contactsExisting: 0,
     orgPatch: {} as OrgPlan["orgPatch"], profilePatch: {} as OrgPlan["profilePatch"], assignOwnerId: null as string | null, assignOwnerName: null as string | null,
     incomingOwnerId: eligible?.id ?? null, fileContacts: o.contacts,
-    incoming: { country_code: o.countryCode, website: o.website, note: o.note, lead_source: o.leadSource, exhibition: o.exhibition },
+    incoming: { country_code: o.countryCode, website: o.website, vat_trn: o.vatTrn, trade_licence_no: o.tradeLicence, note: o.note, lead_source: o.leadSource, exhibition: o.exhibition },
   };
   const brief = (m: (typeof matches)[number]) => ({ id: m.organisation.id, name: m.organisation.name, reasons: m.reasons });
 
@@ -116,10 +116,12 @@ function planOne(o: ParsedOrg, ctx: PlanContext, nameOf: (id: string | null) => 
   const conflicts: Conflict[] = [];
   const incomingWebsite = o.website && websiteDomain(existing.website) === websiteDomain(o.website) ? null : o.website;
   const incomingNote = o.note && (existing.note ?? "").includes(o.note) ? null : o.note;
-  const { patch, skipped } = planEmptyFieldUpdate(existing, { roles: o.roles, country_code: o.countryCode, website: incomingWebsite, note: incomingNote });
+  const { patch, skipped } = planEmptyFieldUpdate(existing, { roles: o.roles, country_code: o.countryCode, website: incomingWebsite, note: incomingNote, vat_trn: o.vatTrn, trade_licence_no: o.tradeLicence });
   for (const f of skipped) {
     if (f === "country_code") conflicts.push({ field: "Country", existing: countryLabel(existing.country_code), file: countryLabel(o.countryCode) });
     else if (f === "website") conflicts.push({ field: "Website", existing: existing.website ?? "", file: o.website ?? "" });
+    else if (f === "vat_trn") conflicts.push({ field: "VAT registration number / TRN", existing: existing.vat_trn ?? "", file: o.vatTrn ?? "" });
+    else if (f === "trade_licence_no") conflicts.push({ field: "Trade licence number", existing: existing.trade_licence_no ?? "", file: o.tradeLicence ?? "" });
     else if (f === "note") conflicts.push({ field: "Notes", existing: existing.note ?? "", file: o.note ?? "" });
     else if (f === "roles") conflicts.push({ field: "Type", existing: rolesText(existing.roles), file: rolesText(o.roles) });
   }

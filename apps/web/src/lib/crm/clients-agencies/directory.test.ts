@@ -9,7 +9,7 @@ const SARA = "11111111-0000-4000-8000-000000000001";
 const OMAR = "11111111-0000-4000-8000-000000000002";
 
 const org = (id: string, name: string, extra: Partial<CrmOrganisationRow> = {}): CrmOrganisationRow => ({
-  id, name, name_key: name.toLowerCase(), kind: "client", roles: [], country_code: null, website: null, website_domain: null, place: null, note: null,
+  id, name, name_key: name.toLowerCase(), kind: "client", roles: [], country_code: null, website: null, website_domain: null, vat_trn: null, trade_licence_no: null, place: null, note: null,
   created_by: null, created_at: "", updated_at: "", archived_at: null, ...extra,
 });
 const profile = (organisation_id: string, company_id: string, extra: Partial<CrmAccountProfileRow> = {}): CrmAccountProfileRow => ({

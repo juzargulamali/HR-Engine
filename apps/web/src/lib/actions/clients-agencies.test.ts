@@ -72,8 +72,16 @@ describe("editing and creating", () => {
     rpc.mockResolvedValue({ data: null, error: null });
     const r = await saveAccountProfile({ error: null }, fd({ orgId: ORG, companyId: CO, name: "Fictional Aurora", roles: ["agency", "technology"], country: "uae", website: "aurora.example", leadSource: "exhibition", exhibition: "Gulf Expo (fictional)" }));
     expect(r).toEqual({ error: null });
-    expect(rpc).toHaveBeenNthCalledWith(1, "crm_update_organisation", { p_org: ORG, p_patch: { name: "Fictional Aurora", roles: ["agency", "technology"], country_code: "AE", website: "aurora.example", place: null, note: null } });
+    expect(rpc).toHaveBeenNthCalledWith(1, "crm_update_organisation", { p_org: ORG, p_patch: { name: "Fictional Aurora", roles: ["agency", "technology"], country_code: "AE", website: "aurora.example", place: null, note: null, vat_trn: null, trade_licence_no: null } });
     expect(rpc).toHaveBeenNthCalledWith(2, "crm_save_account_profile", { p_org: ORG, p_company: CO, p_patch: { lead_source: "exhibition", exhibition: "Gulf Expo (fictional)" } });
+  });
+  it("saves identifiers trimmed, with leading zeros kept, and refuses one that is too long before calling the database", async () => {
+    rpc.mockResolvedValue({ data: null, error: null });
+    await saveAccountProfile({ error: null }, fd({ orgId: ORG, companyId: CO, name: "Fictional Aurora", vatTrn: "  00123456  ", tradeLicence: "0045" }));
+    expect(rpc).toHaveBeenNthCalledWith(1, "crm_update_organisation", { p_org: ORG, p_patch: expect.objectContaining({ vat_trn: "00123456", trade_licence_no: "0045" }) });
+    rpc.mockClear();
+    expect((await saveAccountProfile({ error: null }, fd({ orgId: ORG, companyId: CO, name: "Fictional Aurora", vatTrn: "9".repeat(41) }))).error).toMatch(/at most 40/);
+    expect(rpc).not.toHaveBeenCalled();
   });
   it("rejects an unknown role or country before calling the database", async () => {
     expect((await saveAccountProfile({ error: null }, fd({ orgId: ORG, companyId: CO, name: "X", roles: ["sponsor"] }))).error).toMatch(/roles/);

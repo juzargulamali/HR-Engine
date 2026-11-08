@@ -59,10 +59,12 @@ function describe(o: OrgPlan): PlanItem {
     adds.push("New organisation");
     if (o.incoming.country_code) adds.push("country");
     if (o.incoming.website) adds.push("website");
+    if (o.incoming.vat_trn) adds.push("VAT / TRN");
+    if (o.incoming.trade_licence_no) adds.push("trade licence");
     if (o.incoming.lead_source) adds.push("lead source");
     if (o.assignOwnerName) adds.push(`owner ${o.assignOwnerName}`);
   } else {
-    const filled = [...Object.keys(o.orgPatch).map((k) => ({ country_code: "country", roles: "type", website: "website", note: "notes" })[k as "note"] ?? k), ...Object.keys(o.profilePatch).map((k) => (k === "lead_source" ? "lead source" : "exhibition"))];
+    const filled = [...Object.keys(o.orgPatch).map((k) => ({ country_code: "country", roles: "type", website: "website", note: "notes", vat_trn: "VAT / TRN", trade_licence_no: "trade licence" })[k as "note"] ?? k), ...Object.keys(o.profilePatch).map((k) => (k === "lead_source" ? "lead source" : "exhibition"))];
     if (filled.length) adds.push(`fill empty: ${filled.join(", ")}`);
     if (o.assignOwnerName) adds.push(`assign owner ${o.assignOwnerName}`);
   }

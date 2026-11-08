@@ -1,5 +1,5 @@
 import type { CrmOrganisationRole } from "@/types/crm";
-import { cleanText, normaliseName, normaliseWebsite, websiteDomain } from "./normalise";
+import { cleanIdentifier, cleanText, normaliseName, normaliseWebsite, websiteDomain } from "./normalise";
 
 /** The fields of an organisation the matcher and the empty-field updater read. */
 export interface OrganisationLike {
@@ -10,6 +10,8 @@ export interface OrganisationLike {
   website: string | null;
   place: string | null;
   note: string | null;
+  vat_trn?: string | null;
+  trade_licence_no?: string | null;
   archived_at?: string | null;
 }
 
@@ -48,6 +50,8 @@ export interface IncomingOrganisationFields {
   website?: string | null;
   place?: string | null;
   note?: string | null;
+  vat_trn?: string | null;
+  trade_licence_no?: string | null;
 }
 
 /**
@@ -71,6 +75,14 @@ export function planEmptyFieldUpdate(
   take("website", incoming.website);
   take("place", incoming.place);
   take("note", incoming.note);
+  // Identifiers: fill-only, compared exactly (leading zeros matter); an existing different value is never replaced.
+  for (const field of ["vat_trn", "trade_licence_no"] as const) {
+    const v = cleanIdentifier(incoming[field]);
+    if (v == null) continue;
+    const have = cleanIdentifier(existing[field]);
+    if (have == null) patch[field] = v;
+    else if (have !== v) skipped.push(field);
+  }
   if (incoming.roles && incoming.roles.length > 0) {
     if (existing.roles.length === 0) patch.roles = [...incoming.roles];
     else if (incoming.roles.some((r) => !existing.roles.includes(r))) skipped.push("roles");
