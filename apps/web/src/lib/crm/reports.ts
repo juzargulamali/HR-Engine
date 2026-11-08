@@ -5,6 +5,7 @@
  */
 import {
   CRM_PIPELINE_STAGES,
+  crmSourceLabel,
   crmToday,
   followUpTiming,
   isCrmActive,
@@ -158,12 +159,16 @@ export function reopenedClosures(closures: readonly Pick<CrmClosureRow, "outcome
   return { won, lost: hit.length - won, total: hit.length };
 }
 
-/** Enquiries logged in the period, by source (free text as entered, grouped case-insensitively). */
+/**
+ * Enquiries logged in the period, by source. The stored value is a source id (`agency_call`) or older free text; the row carries the READABLE name
+ * (`crmSourceLabel`: "Agency call (outbound)"; free text stays as entered) and rows that read the same are grouped case-insensitively.
+ */
 export function enquiriesBySource(opps: readonly ReportOpp[], period: Period): { source: string; count: number }[] {
   const by = new Map<string, { source: string; count: number }>();
   for (const o of opps) {
     if (!inPeriod(o.created_at, period)) continue;
-    const label = o.source?.trim() || "Not recorded";
+    const stored = o.source?.trim();
+    const label = stored ? crmSourceLabel(stored) : "Not recorded";
     const key = label.toLowerCase();
     const cur = by.get(key);
     if (cur) cur.count++;

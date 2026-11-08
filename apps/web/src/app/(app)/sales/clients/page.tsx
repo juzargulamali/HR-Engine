@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { LoadError } from "@/components/workspace/states";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadOrganisations } from "@/lib/crm/data";
 import { createClient } from "@/lib/supabase/server";
@@ -56,10 +57,28 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
   const kind: KindFilter = (KIND_FILTERS as readonly string[]).includes(sp.kind ?? "") ? (sp.kind as KindFilter) : "all";
 
   const supabase = await createClient();
-  const [{ organisations }, { data: looseContacts }] = await Promise.all([
-    loadOrganisations(),
-    supabase.from("crm_contacts").select("*").is("organisation_id", null).is("archived_at", null).order("name"),
-  ]);
+  let organisations: Awaited<ReturnType<typeof loadOrganisations>>["organisations"];
+  let loose: { data: CrmContactRow[] | null; error: { message: string } | null };
+  try {
+    const [orgs, contacts] = await Promise.all([
+      loadOrganisations(),
+      supabase.from("crm_contacts").select("*").is("organisation_id", null).is("archived_at", null).order("name"),
+    ]);
+    organisations = orgs.organisations;
+    loose = contacts;
+  } catch (e) {
+    console.error("[crm] clients load failed", e);
+    return (
+      <div className="space-y-6">
+        <h1 className="text-2xl font-semibold">Clients &amp; contacts</h1>
+        <LoadError what="clients and contacts" retryHref="/sales/clients" />
+      </div>
+    );
+  }
+  // A failed read of the contacts without an organisation is its own message: it is never shown as "none", and nothing below claims the list is complete.
+  const looseFailed = !!loose.error;
+  if (loose.error) console.error("[crm] contacts without an organisation could not be loaded", loose.error.message);
+  const looseContacts = loose.data;
 
   const filtered = organisations.filter((o) => {
     if (kind !== "all" && o.kind !== kind) return false;
@@ -77,7 +96,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
         <div>
           <h1 className="text-2xl font-semibold">Clients &amp; contacts</h1>
           <p className="text-muted-foreground">
-            Agencies, end clients and the people at them. {organisations.length} {organisations.length === 1 ? "organisation" : "organisations"} · {contactTotal} {contactTotal === 1 ? "contact" : "contacts"}.
+            Agencies, end clients and the people at them. {organisations.length} {organisations.length === 1 ? "organisation" : "organisations"} · {contactTotal} {contactTotal === 1 ? "contact" : "contacts"}{looseFailed ? " at organisations (the contacts without an organisation could not be counted)" : ""}.
           </p>
         </div>
         <ClientsToolbarActions organisations={organisations.map((o) => ({ id: o.id, name: o.name }))} />
@@ -101,14 +120,16 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
         {filtering ? <Link href="/sales/clients" className={cn(buttonVariants({ variant: "ghost" }))}>Clear</Link> : null}
       </form>
 
-      {organisations.length === 0 && (looseContacts ?? []).length === 0 ? (
+      {organisations.length === 0 && looseFailed ? (
+        <LoadError what="the contacts without an organisation" retryHref="/sales/clients" note="No organisations are recorded, but the contacts that have none could not be read, so this is not an empty list." />
+      ) : organisations.length === 0 && (looseContacts ?? []).length === 0 ? (
         <EmptyState
           icon={Building2}
           title="No clients yet"
           description="Agencies, end clients and contacts are created as you record enquiries, or you can add them here."
         />
       ) : filtered.length === 0 && unattached.length === 0 ? (
-        <EmptyState icon={Building2} title="Nothing matches your search" description="Try a shorter search, or clear the type filter." />
+        <EmptyState icon={Building2} title={looseFailed ? "No organisation matches your search" : "Nothing matches your search"} description="Try a shorter search, or clear the type filter." />
       ) : (
         <>
           {filtering ? <p className="text-sm text-muted-foreground" role="status">Showing {filtered.length} of {organisations.length} organisations.</p> : null}
@@ -147,6 +168,8 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
           {filtered.length > shown.length ? <Alert>Showing the first {PAGE_LIMIT} of {filtered.length} organisations. Search to narrow the list.</Alert> : null}
         </>
       )}
+
+      {looseFailed && organisations.length > 0 ? <LoadError what="the contacts without an organisation" retryHref="/sales/clients" note="The organisations above are complete; contacts that belong to none are missing from this page." /> : null}
 
       {unattached.length > 0 ? (
         <Card>

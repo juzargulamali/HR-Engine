@@ -5,7 +5,8 @@ import { DueText } from "@/components/sales/badges";
 import { formatDateTime } from "@/components/sales/format";
 import { isOnlyOpenFollowUp } from "./helpers";
 import { Muted, Panel } from "./parts";
-import type { OppView } from "./view";
+import { LoadError } from "@/components/workspace/states";
+import { anyFailed, type OppView } from "./view";
 
 const KIND_LABEL = { call: "Call", email: "Email", meeting: "Meeting", proposal: "Proposal work", other: "Other" } as const;
 
@@ -14,6 +15,10 @@ export function FollowUpsPanel({ view }: { view: OppView }) {
   const { detail, ctx, opp, isOpen, isActive } = view;
   const ref = { companyId: opp.company_id, ownerId: opp.owner_id };
   const open = view.openFollowUps;
+  // A failed read is not "No open follow-up": say so and offer no follow-up action (Add, Complete, Reschedule, Cancel all depend on this list).
+  if (anyFailed(view, "followUps")) {
+    return <Panel title="Follow-ups" description="What happens next, and who does it."><LoadError what="the follow-ups" retryHref={`/sales/opportunities/${opp.id}`} note="Nothing can be added or changed here until they load." /></Panel>;
+  }
   const closed = detail.followUps.filter((f) => f.status !== "open").sort((a, b) => (b.completed_at ?? b.updated_at).localeCompare(a.completed_at ?? a.updated_at));
   return (
     <Panel

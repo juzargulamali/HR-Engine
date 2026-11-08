@@ -471,6 +471,14 @@ describe("Sales & CRM write rules", () => {
     });
   });
 
+  describe("8. Sales settings hint: references are not generated differently (the hint only names the prefix)", () => {
+    it("a new enquiry reference is OPP-<company code>-<year>-<4 digits>, from the same generator as before this change", async () => {
+      const opp = await newOpp("Reference prefix enquiry");
+      const [{ reference }] = await admin<{ reference: string }>(`select reference from crm_opportunities where id = '${opp}'`);
+      expect(reference).toMatch(/^OPP-UAE-\d{4}-\d{4}$/);
+    });
+  });
+
   describe("rollback pack", () => {
     it("restores the EXACT previous function bodies, drops the new function, keeps the grants, changes no row, runs twice, and the migration re-applies", async () => {
       const dataBefore = await world(legacy.opp);

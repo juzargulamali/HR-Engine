@@ -7,7 +7,7 @@ import { LoadError } from "@/components/workspace/states";
 import { AvailabilityBadge, StageBadge } from "@/components/sales/badges";
 import { formatDate, formatDateTime, formatMoney } from "@/components/sales/format";
 import { displayNameFor, getCrmContext } from "@/lib/crm/context";
-import { loadOpportunityDetail } from "@/lib/crm/data";
+import { loadOpportunityDetailResult } from "@/lib/crm/data";
 import { createClient } from "@/lib/supabase/server";
 import { HANDOVER_REOPENED_NOTICE } from "../closure-helpers";
 import { ContactsPanel } from "../contacts-panel";
@@ -25,10 +25,26 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const ctx = await getCrmContext();
   if (!ctx) return null;
-  const detail = await loadOpportunityDetail(ctx, id);
-  if (!detail) notFound();
-  const view = buildOppView(ctx, detail);
+  const result = await loadOpportunityDetailResult(ctx, id);
+  if (result.kind === "not_found") notFound();
+  // The handover page is built from the enquiry: when it could not be read nothing is shown or offered (no save, no submit). Not "not found", not "no access".
+  if (result.kind !== "ok") {
+    return (
+      <div className="space-y-5">
+        <Link href={`/sales/opportunities/${id}`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Back to the enquiry
+        </Link>
+        <h1 className="text-2xl font-semibold">Handover package</h1>
+        {result.kind === "denied"
+          ? <Alert variant="destructive" role="alert">You do not have access to this enquiry, so its handover cannot be shown.</Alert>
+          : <LoadError what="this enquiry" retryHref={`/sales/opportunities/${id}/handover`} note="The handover cannot be prepared or submitted from here until it loads. Nothing was changed." />}
+      </div>
+    );
+  }
+  const { detail, failed } = result;
+  const view = buildOppView(ctx, detail, failed);
   const { opp, canEdit } = view;
+  const retry = `/sales/opportunities/${opp.id}/handover`;
   const back = (
     <Link href={`/sales/opportunities/${opp.id}`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
       <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Back to {opp.reference}
@@ -37,7 +53,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
 
   if (!view.isWon) {
     // A handover that was prepared before the opportunity was reopened is kept exactly as it was: explain, show it read-only, never redo it.
-    const kept = detail.handover;
+    const kept = failed.has("handover") ? null : detail.handover;
     const keptPm = kept?.pm_user_id ? ctx.personName(kept.pm_user_id) : null;
     return (
       <div className="space-y-5">
@@ -66,6 +82,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
             A handover package can only be prepared once the opportunity is Won, with a purchase order or authorised email on record. {opp.reference} is currently <StageBadge stage={opp.stage} />.
           </Alert>
         )}
+        {failed.has("handover") ? <LoadError what="the earlier handover record" retryHref={retry} note="If one was prepared before this enquiry was reopened it cannot be shown until it loads." /> : null}
       </div>
     );
   }
@@ -82,7 +99,9 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
     staffFailed = !!staffError;
     staff = (data ?? []).map((p) => ({ id: p.user_id, name: displayNameFor(p) }));
   }
-  const handover = detail.handover;
+  const handoverFailed = failed.has("handover");
+  const packageFailed = failed.has("proposals") || failed.has("files") || failed.has("contacts");
+  const handover = handoverFailed ? null : detail.handover;
   const pmId = handover?.pm_user_id ?? null;
   const pmName = pmId ? (staff.find((p) => p.id === pmId)?.name ?? ctx.personName(pmId)) : null;
   const status = handover?.status ?? "draft";
@@ -99,7 +118,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
   // Only used when Projects & Tasks is not installed in this environment (the older, Sales-side record is then the only handover there is).
   const steps = [
     { label: "Commercially won", done: true, detail: `${pkg.evidenceLabel ?? "Evidence"} ${pkg.evidenceReference ?? ""}, dated ${formatDate(pkg.evidenceDate)}` },
-    { label: "Handover package", done: status !== "draft", detail: HANDOVER_STATUS_LABELS[status] ?? status },
+    { label: "Handover package", done: !handoverFailed && status !== "draft", detail: handoverFailed ? "Could not load" : (HANDOVER_STATUS_LABELS[status] ?? status) },
   ];
 
   return (
@@ -118,7 +137,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
         )}
       </header>
 
-      {projectHandover.installed ? (
+      {projectHandover.installed && projectHandover.failed ? null : projectHandover.installed ? (
         <HandoverProcess status={projectHandover.status?.status ?? null} />
       ) : (
         <ol className="grid gap-3 sm:grid-cols-2" aria-label="Handover progress">
@@ -134,7 +153,9 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
         </ol>
       )}
 
-      {pkg.gaps.length > 0 ? (
+      {packageFailed ? (
+        <LoadError what="the checklist of gaps" retryHref={retry} note="The proposals, files or contacts it is built from could not be read, so it is not shown as complete or as having no gaps." />
+      ) : pkg.gaps.length > 0 ? (
         <Alert variant="warning">
           <p className="font-medium">{pkg.gaps.length} {pkg.gaps.length === 1 ? "gap" : "gaps"} to resolve before this is complete</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-5">{pkg.gaps.map((g) => <li key={g}>{g}</li>)}</ul>
@@ -146,7 +167,9 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
           title="Project Manager and status"
           description={handover?.prepared_at ? `Prepared ${formatDateTime(handover.prepared_at)}${handover.prepared_by ? ` by ${ctx.personName(handover.prepared_by)}` : ""}.${handover.handed_over_at ? ` Handed over ${formatDateTime(handover.handed_over_at)}.` : ""}` : "Not marked ready yet."}
         >
-          {canEdit && staffFailed ? (
+          {handoverFailed ? (
+            <LoadError what="the Sales-side handover record" retryHref={retry} note="The Project Manager and status cannot be changed until it loads." />
+          ) : canEdit && staffFailed ? (
             // The form's Project Manager choice comes from the directory: withheld rather than offered with nobody to choose, and the chosen name is not guessed.
             <LoadError what="the staff names" retryHref={`/sales/opportunities/${opp.id}/handover`} note="The Project Manager cannot be chosen until they load." />
           ) : canEdit ? (
@@ -173,6 +196,8 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
         }}
       />
 
+      {projectHandover.installed && handoverFailed ? <LoadError what="the earlier Sales-side handover record" retryHref={retry} /> : null}
+
       {projectHandover.installed && earlierRecord ? (
         <details className="rounded-lg border border-border bg-card px-4 py-3">
           <summary className="cursor-pointer text-sm font-medium">Earlier Sales-side handover record (kept for history)</summary>
@@ -197,7 +222,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
           {pkg.exclusions ? <p className="whitespace-pre-wrap break-words text-sm">{pkg.exclusions}</p> : <Muted>None recorded.</Muted>}
         </Panel>
         <Panel title="Accepted proposal">
-          {pkg.acceptedProposal ? (
+          {failed.has("proposals") || failed.has("files") ? <LoadError what="the proposal versions" retryHref={retry} note="Whether one was accepted is not known until they load." /> : pkg.acceptedProposal ? (
             <div className="space-y-1 text-sm">
               <p className="font-medium">Version {pkg.acceptedProposal.version} <Badge variant="success">Accepted</Badge></p>
               {pkg.acceptedProposal.sent_on ? <p className="text-sm text-muted-foreground">Sent {formatDate(pkg.acceptedProposal.sent_on)}</p> : null}
@@ -212,7 +237,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
           <div className="space-y-1 text-sm">
             <p className="font-medium">{pkg.evidenceLabel ?? "Evidence"}: {pkg.evidenceReference}</p>
             <p className="text-sm text-muted-foreground">Dated {formatDate(pkg.evidenceDate)}</p>
-            {pkg.evidenceFiles.length > 0 ? (
+            {failed.has("files") ? <LoadError what="the files and links" retryHref={retry} note="Whether a document is attached is not known until they load." /> : pkg.evidenceFiles.length > 0 ? (
               <ul className="mt-2 list-disc space-y-0.5 pl-5">{pkg.evidenceFiles.map((f) => <li key={f.id} className="break-words">{fileDisplayName(f)}</li>)}</ul>
             ) : <p className="text-sm text-muted-foreground">No document attached under Files.</p>}
           </div>
@@ -239,11 +264,11 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
             <Fact label="Confirmed value">{formatMoney(detail.item.value, opp.currency)}</Fact>
             <Fact label="Payment terms">{opp.payment_terms ?? "Not recorded"}</Fact>
             <Fact label="Zoho Books references (entered by hand)">
-              {zoho && (zoho.quote_ref || zoho.invoice_ref) ? [zoho.quote_ref ? `Quote ${zoho.quote_ref}` : null, zoho.invoice_ref ? `Invoice ${zoho.invoice_ref}` : null].filter(Boolean).join(" · ") : "None recorded"}
+              {failed.has("zoho") ? <span className="text-destructive">Could not load</span> : zoho && (zoho.quote_ref || zoho.invoice_ref) ? [zoho.quote_ref ? `Quote ${zoho.quote_ref}` : null, zoho.invoice_ref ? `Invoice ${zoho.invoice_ref}` : null].filter(Boolean).join(" · ") : "None recorded"}
             </Fact>
           </dl>
         </Panel>
-        <Panel title="Contacts" className="md:col-span-2"><ContactsPanel contacts={detail.contacts} /></Panel>
+        <Panel title="Contacts" className="md:col-span-2">{failed.has("contacts") ? <LoadError what="the contacts" retryHref={retry} /> : <ContactsPanel contacts={detail.contacts} />}</Panel>
         <Panel title="Unresolved risks" className="md:col-span-2">
           {opp.risks.length === 0 ? <Muted>None recorded.</Muted> : <ul className="list-disc space-y-1 pl-5 text-sm">{opp.risks.map((r, i) => <li key={`${i}-${r}`} className="break-words">{r}</li>)}</ul>}
         </Panel>

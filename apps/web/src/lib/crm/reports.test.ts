@@ -111,6 +111,17 @@ describe("enquiries by source", () => {
   });
 });
 
+describe("enquiries by source: readable names", () => {
+  it("prints the label of a stored source id, keeps free text as entered, and merges an id with its label", () => {
+    const rows = enquiriesBySource(
+      [opp({ source: "agency_call" }), opp({ source: "agency_call" }), opp({ source: "Agency call (outbound)" }), opp({ source: "website" }), opp({ source: "Trade fair" }), opp({ source: null as unknown as string })],
+      PERIOD,
+    );
+    expect(rows).toEqual([{ source: "Agency call (outbound)", count: 3 }, { source: "Not recorded", count: 1 }, { source: "Trade fair", count: 1 }, { source: "Website enquiry", count: 1 }]);
+    expect(rows.some((r) => r.source.includes("_"))).toBe(false);
+  });
+});
+
 describe("follow-up counts", () => {
   it("splits open follow-ups into overdue, due today and upcoming and ignores closed ones", () => {
     const counts = followUpCounts(

@@ -23,21 +23,25 @@ const opp = {
   currency: "SAR", closed_at: "2026-11-20T10:00:00Z", availability_by: null, availability_at: null, availability_notes: null,
 };
 let handover: Record<string, unknown> | null = null;
+let outcome: { kind: "ok" | "not_found" | "denied" | "error" } = { kind: "ok" };
+let failedSections: string[] = [];
 vi.mock("@/lib/crm/data", () => ({
-  loadOpportunityDetail: async () => ({ item: { opp, companyName: "Enginious KSA", value: 100000, availability: "confirmed" }, handover, proposals: [], files: [], contacts: [{ id: "k1" }], zoho: null }),
+  loadOpportunityDetailResult: async () => (outcome.kind === "ok"
+    ? { kind: "ok", failed: new Set(failedSections), detail: { item: { opp, companyName: "Enginious KSA", value: 100000, availability: "confirmed" }, handover, proposals: [], files: [], contacts: [{ id: "k1" }], zoho: null } }
+    : outcome),
 }));
 vi.mock("../view", () => ({ buildOppView: () => ({ opp, canEdit, isWon: true, ownerName: "Sales Owner" }) }));
 vi.mock("../contacts-panel", () => ({ ContactsPanel: () => null }));
 let projectState: { installed: boolean; status: Record<string, unknown> | null; row: unknown };
 vi.mock("./project-handover", () => ({
   loadProjectHandover: async () => projectState,
-  ProjectHandoverPanel: ({ defaults }: { defaults: { siteTimezone: string; siteTimezoneNote?: string } }) => <div data-testid="brief" data-tz={defaults.siteTimezone}>{defaults.siteTimezoneNote}</div>,
+  ProjectHandoverPanel: ({ defaults, state }: { defaults: { siteTimezone: string; siteTimezoneNote?: string }; state: { failed?: boolean } }) => <div data-testid="brief" data-tz={defaults.siteTimezone} data-failed={String(!!state.failed)}>{defaults.siteTimezoneNote}</div>,
 }));
 
 import HandoverPage from "./page";
 
 const render = async () => renderToStaticMarkup(await HandoverPage({ params: Promise.resolve({ id: "o1" }) }));
-beforeEach(() => { directoryFails = false; canEdit = true; handover = null; projectState = { installed: true, status: null, row: null }; });
+beforeEach(() => { directoryFails = false; canEdit = true; handover = null; outcome = { kind: "ok" }; failedSections = []; projectState = { installed: true, status: null, row: null }; });
 
 describe("Sales handover page", () => {
   it("shows ONE process, Prepare brief to Project created, and no second PM or status form", async () => {
@@ -103,5 +107,56 @@ describe("Sales handover page", () => {
     expect(html).toContain("Could not load the staff names");
     expect(html).toContain("The Project Manager cannot be chosen until they load");
     expect(html).not.toContain("Save handover");
+  });
+
+  describe("a failed read is not 'not found', 'no access' or an empty handover", () => {
+    it("the enquiry itself could not be read: 'Could not load' with a retry, and NO save, submit or process step", async () => {
+      outcome = { kind: "error" };
+      const html = await render();
+      expect(html).toContain("Could not load this enquiry");
+      expect(html).toContain("Try again");
+      expect(html).toContain('href="/sales/opportunities/o1/handover"');
+      for (const absent of ["Save handover", "Handover process", "Prepare brief", "Submit", "Project handover", "not found", "do not have access", "Accepted scope"]) expect(html).not.toContain(absent);
+    });
+    it("a missing enquiry is the not-found page, not the load error", async () => {
+      outcome = { kind: "not_found" };
+      await expect(render()).rejects.toThrow("notFound");
+    });
+    it("a refused read says there is no access, not 'could not load'", async () => {
+      outcome = { kind: "denied" };
+      const html = await render();
+      expect(html).toContain("You do not have access to this enquiry");
+      expect(html).not.toContain("Could not load");
+      expect(html).not.toContain("Save handover");
+    });
+    it("a successful read with nothing recorded is the ordinary page (empty is not an error)", async () => {
+      const html = await render();
+      expect(html).toContain("Handover process");
+      expect(html).not.toContain("Could not load");
+    });
+    it("failed sections show their own 'Could not load' and the checklist of gaps is NOT shown as complete", async () => {
+      failedSections = ["proposals", "files", "contacts", "zoho"];
+      const html = await render();
+      expect(html).toContain("Could not load the checklist of gaps");
+      expect(html).toContain("Could not load the proposal versions");
+      expect(html).toContain("Could not load the files and links");
+      expect(html).toContain("Could not load the contacts");
+      expect(html).toMatch(/Zoho Books references[\s\S]*Could not load/);
+      expect(html).not.toContain("No proposal is recorded as accepted");
+    });
+    it("a failed Sales-side handover row withholds the older Sales form (Projects not installed) and says so", async () => {
+      failedSections = ["handover"];
+      projectState = { installed: false, status: null, row: null };
+      const html = await render();
+      expect(html).toContain("Could not load the Sales-side handover record");
+      expect(html).not.toContain("Save handover");
+    });
+    it("a failed read of the project handover hides the process steps and is passed to the panel as failed (the panel itself says 'Could not load', see project-handover.test.tsx)", async () => {
+      projectState = { installed: true, failed: true, status: null, row: null } as never;
+      const html = await render();
+      expect(html).toContain('data-failed="true"');
+      expect(html).not.toContain("Handover process");
+      expect(html).not.toContain("not installed");
+    });
   });
 });

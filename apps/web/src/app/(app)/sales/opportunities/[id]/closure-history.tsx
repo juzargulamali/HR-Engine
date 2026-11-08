@@ -3,7 +3,8 @@ import { formatDate, formatDateTime } from "@/components/sales/format";
 import { cn } from "@/lib/utils";
 import { describeClosures } from "./closure-helpers";
 import { Panel } from "./parts";
-import type { OppView } from "./view";
+import { LoadError } from "@/components/workspace/states";
+import { anyFailed, type OppView } from "./view";
 
 /**
  * Every time this opportunity was closed, newest first. A closure that was later reopened is kept, marked "Reopened"
@@ -11,6 +12,7 @@ import type { OppView } from "./view";
  */
 export function ClosureHistory({ view }: { view: OppView }) {
   const { detail, ctx } = view;
+  if (anyFailed(view, "closures")) return <Panel title="Closure history"><LoadError what="the closure history" retryHref={`/sales/opportunities/${view.opp.id}?tab=activity`} /></Panel>;
   const closures = describeClosures(detail.closures, ctx.personName, formatDate);
   if (closures.length === 0) return null;
   return (

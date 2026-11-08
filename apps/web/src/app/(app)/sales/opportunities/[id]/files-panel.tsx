@@ -6,12 +6,16 @@ import { AddFileForms } from "./file-forms";
 import { fileDisplayName, filePurposeLabel, filePurposeNote, isHttpsUrl } from "./helpers";
 import { Muted, Panel } from "./parts";
 import { OpenFileButton, RemoveFileButton } from "./quick-actions";
-import type { OppView } from "./view";
+import { LoadError } from "@/components/workspace/states";
+import { anyFailed, type OppView } from "./view";
 
 /** Files and links on this opportunity. Files are private: opening one asks for a short-lived link each time. */
 export function FilesPanel({ view }: { view: OppView }) {
   const { detail, ctx, opp, isLost } = view;
   const ref = { companyId: opp.company_id, ownerId: opp.owner_id };
+  if (anyFailed(view, "files", "proposals")) {
+    return <Panel title="Files and links" description="Proposals, purchase orders, authorised emails and the client's brief."><LoadError what="the files and links" retryHref={`/sales/opportunities/${opp.id}?tab=proposals`} note="This is not an empty list, and nothing can be added or removed here until it loads." /></Panel>;
+  }
   const proposalFileIds = new Map(detail.proposals.filter((p) => p.file_id).map((p) => [p.file_id as string, p.version]));
   return (
     <Panel title="Files and links" description="Proposals, purchase orders, authorised emails and the client's brief.">

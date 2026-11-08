@@ -9,7 +9,7 @@ import { DueText, StageBadge } from "@/components/sales/badges";
 import { formatDate, formatMoney, todayInDubai } from "@/components/sales/format";
 import { NewFollowUpButton } from "@/components/sales/follow-up-dialogs";
 import { getCrmContext } from "@/lib/crm/context";
-import { loadOpportunityDetail, loadOrganisations } from "@/lib/crm/data";
+import { loadOpportunityDetailResult, loadOrganisations, type DetailSection } from "@/lib/crm/data";
 import { cn } from "@/lib/utils";
 import { ActivityPanel } from "./activity-panel";
 import { AssignOwnerButton } from "./assign-owner";
@@ -27,6 +27,7 @@ import { ReopenButton } from "./reopen-dialog";
 import { ScopePanel, toEditable } from "./scope-panel";
 import { HoldButton, MoveStageButton, ResumeButton } from "./stage-actions";
 import { buildOppView } from "./view";
+import { LoadError } from "@/components/workspace/states";
 
 export const metadata = { title: "Opportunity" };
 
@@ -37,13 +38,32 @@ export default async function OpportunityPage({ params, searchParams }: { params
   const [{ id }, { tab }] = await Promise.all([params, searchParams]);
   const ctx = await getCrmContext();
   if (!ctx) return null;
-  const detail = await loadOpportunityDetail(ctx, id);
-  if (!detail) notFound();
-
-  const view = buildOppView(ctx, detail);
+  const result = await loadOpportunityDetailResult(ctx, id);
+  if (result.kind === "not_found") notFound();
+  // A failed read is not "not found" and not "no access": it says it could not load, offers a retry, and shows no action (nothing here is known to be safe to offer).
+  if (result.kind !== "ok") {
+    return (
+      <div className="space-y-5">
+        <BackLink section="enquiries" fallback="/sales/opportunities">Enquiries</BackLink>
+        <h1 className="text-2xl font-semibold">Enquiry</h1>
+        {result.kind === "denied"
+          ? <Alert variant="destructive" role="alert">You do not have access to this enquiry. If you think you should, ask the owner or a Sales founder.</Alert>
+          : <LoadError what="this enquiry" retryHref={`/sales/opportunities/${id}`} note="Nothing is shown or offered, because the enquiry could not be read. This is not a missing enquiry." />}
+      </div>
+    );
+  }
+  const { detail } = result;
+  const failed = new Set<DetailSection>(result.failed);
+  // Everyone who could be added as a contact is loaded only for people who may change contacts (saves the query for everyone else). A failed read is the contacts' own "could not load".
+  let organisations: Awaited<ReturnType<typeof loadOrganisations>> | null = null;
+  if (buildOppView(ctx, detail).canChangeContacts) {
+    try { organisations = await loadOrganisations(); } catch (e) { console.error("[crm] organisations read failed", e); failed.add("contacts"); }
+  }
+  const view = buildOppView(ctx, detail, failed);
   const { item } = detail;
   const { opp, canEdit, isActive, isHold, isWon, isLost, isOpen } = view;
   const next = view.nextFollowUp;
+  const needsGateFacts = failed.has("proposals") || failed.has("zoho");
   const hasSentProposal = detail.proposals.some((p) => p.status === "sent" || p.status === "accepted");
   const hasQuoteRef = !!detail.zoho?.quote_ref?.trim();
   const moveOptions = crmAllowedMoves(opp.stage).map((to) => ({ id: to, label: crmStageLabel(to), requirement: stageMoveRequirement(to, { hasSentProposal, hasQuoteRef }) }));
@@ -51,14 +71,10 @@ export default async function OpportunityPage({ params, searchParams }: { params
   const partyLabel = item.client ? "Client" : item.agency ? "Agency" : "Client";
   const clientLine = item.client && item.agency ? `${item.client.name} via ${item.agency.name}` : (item.client?.name ?? item.agency?.name ?? "No client recorded");
 
-  // Everyone who could be added as a contact is loaded only for people who may change contacts (saves the query for everyone else).
-  const picker = view.canChangeContacts
-    ? await (async () => {
-        const all = await loadOrganisations();
-        return buildContactPicker(all.organisations, detail.contacts.map((c) => c.contact.id), item.agency?.id ?? item.client?.id ?? null, all.unassignedContacts);
-      })()
+  const picker = organisations
+    ? buildContactPicker(organisations.organisations, detail.contacts.map((c) => c.contact.id), item.agency?.id ?? item.client?.id ?? null, organisations.unassignedContacts)
     : null;
-  const handoverKeptAfterReopen = !!detail.handover && opp.stage !== "won";
+  const handoverKeptAfterReopen = !failed.has("handover") && !!detail.handover && opp.stage !== "won";
   const reopenNote = !view.canReopen ? REOPEN_NOT_ALLOWED_NOTE : null;
 
   const tabs: DetailTab[] = [
@@ -88,7 +104,7 @@ export default async function OpportunityPage({ params, searchParams }: { params
             <div className="min-w-0">
               <dt className="text-sm text-muted-foreground">Next action</dt>
               <dd className="break-words">
-                {next ? <>{next.title} <span className="block text-sm"><DueText dueAt={next.due_at} /></span></> : <span className="text-muted-foreground">{isOpen ? (isHold ? "None (on hold)" : "None scheduled") : "Closed"}</span>}
+                {failed.has("followUps") ? <span className="text-destructive">Could not load</span> : next ? <>{next.title} <span className="block text-sm"><DueText dueAt={next.due_at} /></span></> : <span className="text-muted-foreground">{isOpen ? (isHold ? "None (on hold)" : "None scheduled") : "Closed"}</span>}
               </dd>
             </div>
           </dl>
@@ -96,7 +112,7 @@ export default async function OpportunityPage({ params, searchParams }: { params
           <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4" role="group" aria-label="Opportunity actions">
             {canEdit && isActive ? (
               <>
-                <MoveStageButton opportunityId={opp.id} version={opp.version} stage={opp.stage} options={moveOptions} />
+                {needsGateFacts ? <span className="text-sm text-muted-foreground">Stage moves are not offered because the proposals or Zoho references could not be loaded.</span> : <MoveStageButton opportunityId={opp.id} version={opp.version} stage={opp.stage} options={moveOptions} />}
                 <HoldButton opportunityId={opp.id} version={opp.version} />
               </>
             ) : null}
@@ -108,7 +124,8 @@ export default async function OpportunityPage({ params, searchParams }: { params
             ) : null}
             {view.editMode ? <EditDetailsButton data={toEditable(view)} mode={view.editMode} availabilityWillNeedRecheck={item.availability === "confirmed" || item.availability === "unavailable"} /> : null}
             {view.canAssign && isOpen ? <AssignOwnerButton opportunityId={opp.id} currentOwnerId={opp.owner_id} currentOwnerName={view.ownerName} people={view.people} /> : null}
-            {view.canReopen ? <ReopenButton opportunityId={opp.id} version={opp.version} outcome={isWon ? "won" : "lost"} stageBeforeClose={opp.stage_before_close} hasHandover={!!detail.handover} /> : null}
+            {view.canReopen && failed.has("handover") ? <span className="text-sm text-muted-foreground">Reopen is not offered because the handover record could not be loaded.</span> : null}
+            {view.canReopen && !failed.has("handover") ? <ReopenButton opportunityId={opp.id} version={opp.version} outcome={isWon ? "won" : "lost"} stageBeforeClose={opp.stage_before_close} hasHandover={!!detail.handover} /> : null}
             {isWon ? <Link href={`/sales/opportunities/${opp.id}/handover`} className={LINK_OUTLINE}>Handover package</Link> : null}
           </div>
         </div>
@@ -138,7 +155,7 @@ export default async function OpportunityPage({ params, searchParams }: { params
             <p className="mt-1"><Link href={`/sales/opportunities/${opp.id}/handover`} className="font-medium underline">See the handover record as it was</Link></p>
           </Alert>
         ) : null}
-        {isActive && !next ? (
+        {isActive && !failed.has("followUps") && !next ? (
           <Alert variant="warning">
             <p><strong>No next action is scheduled.</strong> Every active opportunity needs one, so it is not forgotten.</p>
             <div className="mt-2"><NewFollowUpButton opportunityId={opp.id} people={view.people} canAssign={canEdit || view.canAssign} currentUserId={ctx.userId} /></div>

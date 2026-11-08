@@ -6,7 +6,8 @@ import { ConfirmAvailabilityButton, DecideApprovalButton, ZohoForm } from "./com
 import { dateRangeText } from "./helpers";
 import { Fact, Muted, Panel } from "./parts";
 import { RequestApprovalButton, RequestAvailabilityButton } from "./quick-actions";
-import type { OppView } from "./view";
+import { LoadError } from "@/components/workspace/states";
+import { anyFailed, type OppView } from "./view";
 
 const AVAILABILITY_RESULT = { confirmed: "Available for the dates and quantities it covered", unavailable: "Not available", awaiting: "", unverified: "" } as const;
 const APPROVAL_STATE = { pending: "Waiting for a founder's decision", approved: "Approved", changes_requested: "Changes requested" } as const;
@@ -72,6 +73,14 @@ function ApprovalSection({ view }: { view: OppView }) {
   const latest = detail.approvals[0] ?? null;
   const pending = detail.approvals.find((a) => a.state === "pending") ?? null;
   const latestProposal = detail.proposals[0] ?? null;
+  if (anyFailed(view, "approvals", "proposals")) {
+    // Request and Decide depend on the approval history and the newest proposal version: neither is offered when they could not be read.
+    return (
+      <Panel title="Commercial approval" description="An internal decision by a founder. Sending a proposal is a separate fact and never counts as approval.">
+        <LoadError what="the approval history" retryHref={`/sales/opportunities/${opp.id}?tab=commercial`} note="Nobody can request or decide an approval here until it loads." />
+      </Panel>
+    );
+  }
   const versionOf = (proposalId: string | null) => detail.proposals.find((p) => p.id === proposalId)?.version;
   return (
     <Panel title="Commercial approval" description="An internal decision by a founder. Sending a proposal is a separate fact and never counts as approval.">
@@ -124,6 +133,13 @@ function ApprovalSection({ view }: { view: OppView }) {
 function ZohoSection({ view }: { view: OppView }) {
   const { detail, opp, canEdit, isLost } = view;
   const z = detail.zoho;
+  if (anyFailed(view, "zoho")) {
+    return (
+      <Panel title="Zoho Books references" description="References entered by hand. Zoho Books remains the accounting record: this system does not read from it or write to it.">
+        <LoadError what="the Zoho Books references" retryHref={`/sales/opportunities/${opp.id}?tab=commercial`} note="They are not blank: they could not be read, so the form is not offered." />
+      </Panel>
+    );
+  }
   const paid = z?.paid_amount == null ? null : Number(z.paid_amount);
   const values = {
     quoteRef: z?.quote_ref ?? null, quoteSentOn: z?.quote_sent_on ?? null, invoiceRef: z?.invoice_ref ?? null,

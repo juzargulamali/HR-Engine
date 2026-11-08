@@ -91,7 +91,7 @@ export function SettingsForm({
       <fieldset className="space-y-4">
         <legend className="text-sm font-semibold">Enquiry references and currency</legend>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Reference code" htmlFor={id("code")} hint="2 to 5 capital letters, unique across companies. Enquiries are numbered with it, for example UAE-2026-0042.">
+          <Field label="Reference code" htmlFor={id("code")} hint="2 to 5 capital letters, unique across companies. Enquiries are numbered with it, for example OPP-UAE-2026-0042 (the OPP- prefix is added for you).">
             <Input id={id("code")} name="referenceCode" required minLength={2} maxLength={5} pattern="[A-Za-z]{2,5}" defaultValue={initial.referenceCode} autoCapitalize="characters" autoComplete="off" />
           </Field>
           <Field label="Default quote currency" htmlFor={id("currency")} hint="New enquiries start with this currency. Any enquiry can use another.">

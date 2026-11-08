@@ -9,7 +9,7 @@ import { loadQuotationList, type QuotationListItem } from "@/lib/crm/quotations/
 import { QUOTATION_STATE_LABEL, quotationState } from "@/lib/crm/quotations/model";
 import { Muted, Panel } from "./parts";
 import { money } from "./quotations/[proposalId]/money";
-import type { OppView } from "./view";
+import { anyFailed, type OppView } from "./view";
 
 /**
  * "Estimates": priced bills of quantities built in the app. Each one IS a proposal row (its approval and numbering are the existing ones) but never an
@@ -17,6 +17,8 @@ import type { OppView } from "./view";
  */
 export async function QuotationsPanel({ view }: { view: OppView }) {
   const { detail, opp, canEdit, isOpen } = view;
+  // The list is built from this enquiry's proposal versions and shows which are waiting for approval: either failing is "could not load" (never "No estimate yet").
+  if (anyFailed(view, "proposals", "approvals")) return <LoadError what="the estimates" retryHref={`/sales/opportunities/${opp.id}?tab=quotations`} note="Nothing can be started or opened here until the proposal versions load." />;
   let items: QuotationListItem[];
   try {
     items = await loadQuotationList(opp.id, detail.proposals);
