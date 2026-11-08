@@ -1,5 +1,7 @@
 # Clients & Agencies: deployment
 
+> **Hosted status (owner-reported, 2026-11-08): the migration is applied on hosted V2 and verified.** The owner ran the preflight (all prerequisites OK, not applied yet, no duplicate contact e-mails), the preservation snapshot, the migration, the verify file (**90 checks passed, 0 failed**) and the preservation comparison (**PASS**). Claude ran none of it and did not independently check it; this is the owner's report. PR #59 (merge commit `2fef1f17c8941e8de98ea02537f00476a0f5bfde`) was merged after the migration. The real workbook has not been imported.
+
 One migration (corrected in place a fourth time for pre-inquiry outreach, section 8, because it is still applied on no hosted database), applied by the owner in the SQL Editor of the hosted project. Claude runs no hosted SQL. Additive and idempotent (safe to run twice). It was corrected in place for the three corrections of this PR (import safety, organisation roles on inquiries, follow-ups on accounts with no inquiry) because it is applied on no hosted database, so there is still ONE migration and ONE pack. If it had already been applied anywhere, a second migration would be needed instead.
 
 | Order | File | Kind |
