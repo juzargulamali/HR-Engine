@@ -243,6 +243,21 @@ describe("photos: large enough to inspect, never stretched", () => {
     expect(dims).toHaveLength(2);
     expect(dims.map(([w, h]) => Math.round((w! / h!) * 100) / 100).sort()).toEqual([0.75, 1.33]);
   });
+  it("a section heading is never left alone at the bottom of a page (it keeps with the first tall photo row)", async () => {
+    if (!hasPdftotext) return;
+    // Two tall photo items first, then the sections: the first section heading lands near the bottom of page one.
+    const a = await png("#cc3322", ...photoSizes.landscape); const b = await png("#2233cc", ...photoSizes.portrait);
+    const snap = snapshotFixture({ loose: true, withImages: [{ lineNumber: "1", sha: sha256(a) }, { lineNumber: "2", sha: sha256(b) }] });
+    stored.set(`quotation-assets/${snap.sections[0]!.lines[0]!.image!.storage_path}`, a);
+    stored.set(`quotation-assets/${snap.sections[0]!.lines[1]!.image!.storage_path}`, b);
+    bundle = bundleFixture({ snapshot: snap });
+    const pages = pdfPages(await buf(await run("pdf")));
+    expect(pages.length).toBeGreaterThan(1);
+    for (const p of pages) {
+      const body = p.split("\n").map((l) => l.trim()).filter(Boolean).filter((l) => !/Page \d+ of \d+/.test(l) && !/Sales enquiries/.test(l));
+      expect(body[body.length - 1]).not.toMatch(/^\d+\s+[A-Za-z][A-Za-z ]*$/);
+    }
+  });
   it("PDF rendering: each photo is drawn in its own aspect ratio inside the box (measured on the rendered page, so stretching would show)", async () => {
     if (!hasPdftotext) return;
     await twoPhotoEstimate();

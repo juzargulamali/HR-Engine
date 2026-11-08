@@ -168,7 +168,7 @@ describe("an issued revision's export is frozen", () => {
     bundle = bundleFixture({ snapshot: rev2 });
     const next = await dump();
     expect(next.cells.join("\n")).toContain("RENAMED Account");
-    expect(next.cells.join("\n")).toContain("TRN 123");
+    expect(next.cells.join("\n")).toContain("TRN: 123");
   });
   it("a superseded revision exports from its own snapshot, labelled with its revision", async () => {
     bundle = bundleFixture({ snapshot: snapshotFixture({ revision: 1 }) });

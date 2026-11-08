@@ -92,7 +92,7 @@ const issuerSchema = z.object({
   companyId: z.string().uuid(),
   legalName: z.string().trim().min(1, "Legal name is required").max(200),
   trn: z.string().trim().max(40, "The TRN can be at most 40 characters"),
-  address: z.string().trim().max(500, "The address is too long"),
+  address: z.string().trim().max(500, "The address is too long").transform((v) => v.replace(/\r\n?/g, "\n")),   // a browser submits a textarea with CRLF: keep one plain line break
   phone: z.string().trim().max(60, "The phone number is too long"),
   email: z.string().trim().max(200, "The email is too long").refine((v) => v === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "That email address does not look right"),
   website: z.string().trim().max(300, "The website is too long"),
