@@ -20,11 +20,11 @@ export function organisationsTable(rows: readonly DirectoryRow[], staff: readonl
     const owner = person(r.profile?.owner_id ?? null);
     const ownerCell = mayShowEmails ? owner?.email ?? "" : owner?.name ?? (r.profile?.owner_id ? "Former colleague" : "");
     const org = [r.org.name, countryLabel(r.org.country_code), rolesText(r.org.roles), r.org.website ?? ""];
-    const tail = [exportLeadText(r.profile?.lead_source ?? null, r.profile?.exhibition ?? null), r.org.note ?? "", ownerCell, r.org.place ?? ""];
+    const tail = [exportLeadText(r.profile?.lead_source ?? null, r.profile?.exhibition ?? null), r.org.note ?? "", ownerCell, r.org.vat_trn ?? "", r.org.trade_licence_no ?? "", r.org.place ?? ""];
     if (r.contacts.length === 0) out.push([...org, "", "", "", "", ...tail]);
     for (const c of r.contacts) out.push([...org, c.name, c.role_title ?? "", c.email ?? "", c.phone ?? "", ...tail]);
   }
-  return { name: ORGANISATIONS_SHEET, headers: [...headers, PLACE_HEADER], rows: out, widths: [34, 20, 20, 24, 22, 20, 30, 18, 26, 34, 32, 20] };
+  return { name: ORGANISATIONS_SHEET, headers: [...headers, PLACE_HEADER], rows: out, widths: [34, 20, 20, 24, 22, 20, 30, 18, 26, 34, 32, 26, 22, 20] };
 }
 
 export interface SummaryInputs {

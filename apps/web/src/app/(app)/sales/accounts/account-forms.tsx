@@ -21,12 +21,14 @@ export interface AccountFormValues {
   roles: readonly CrmOrganisationRole[];
   country: string;
   website: string;
+  vatTrn: string;
+  tradeLicence: string;
   place: string;
   note: string;
   leadSource: CrmLeadSource | "";
   exhibition: string;
 }
-const BLANK: AccountFormValues = { name: "", roles: [], country: "", website: "", place: "", note: "", leadSource: "", exhibition: "" };
+const BLANK: AccountFormValues = { name: "", roles: [], country: "", website: "", vatTrn: "", tradeLicence: "", place: "", note: "", leadSource: "", exhibition: "" };
 
 function ProfileFields({ values, withOwner }: { values: AccountFormValues; withOwner?: PersonOption[] | null }) {
   return (
@@ -49,6 +51,10 @@ function ProfileFields({ values, withOwner }: { values: AccountFormValues; withO
         <Field label="City or place (optional)" htmlFor="acc-place"><Input id="acc-place" name="place" defaultValue={values.place} autoComplete="off" /></Field>
       </div>
       <Field label="Website (optional)" htmlFor="acc-website"><Input id="acc-website" name="website" type="text" inputMode="url" defaultValue={values.website} autoComplete="off" placeholder="example.com" /></Field>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="VAT registration number / TRN (optional)" htmlFor="acc-vat" hint="Printed on quotations billed to this organisation. Kept exactly as typed, including leading zeros."><Input id="acc-vat" name="vatTrn" defaultValue={values.vatTrn} autoComplete="off" maxLength={40} inputMode="text" /></Field>
+        <Field label="Trade licence number (optional)" htmlFor="acc-licence" hint="Kept exactly as typed, including leading zeros."><Input id="acc-licence" name="tradeLicence" defaultValue={values.tradeLicence} autoComplete="off" maxLength={40} inputMode="text" /></Field>
+      </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Lead source (optional)" htmlFor="acc-source">
           <Select id="acc-source" name="leadSource" defaultValue={values.leadSource}>

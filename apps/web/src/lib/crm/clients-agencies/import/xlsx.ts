@@ -10,7 +10,7 @@ export const IMPORT_LIMITS = { maxBytes: 4 * 1024 * 1024, maxRows: 2000, maxColu
 
 export const TEMPLATE_HEADERS = [
   "Organisation name", "Country", "Organisation type", "Website", "Contact name", "Contact title", "Contact email", "Contact phone",
-  "Lead source / exhibition", "Notes", "Account owner work email",
+  "Lead source / exhibition", "Notes", "Account owner work email", "VAT registration number / TRN", "Trade licence number",
 ] as const;
 export const ORGANISATIONS_SHEET = "Organisations";
 export const SUMMARY_SHEET = "Summary (read-only)";
@@ -119,10 +119,13 @@ export async function buildTemplateWorkbook(): Promise<Uint8Array> {
   wb.creator = "ENGINIOUS OS";
   const ws = wb.addWorksheet(ORGANISATIONS_SHEET);
   ws.addRow([...TEMPLATE_HEADERS]);
-  ws.addRow([`${EXAMPLE_PREFIX} - Northwind Events (fictional)`, "United Arab Emirates", "Agency", "northwind.example", "Sample Person One", "Producer", "person.one@northwind.example", "+971 50 000 0001", "Exhibition: Sample Expo", "Delete the three example rows before uploading.", ""]);
-  ws.addRow([`${EXAMPLE_PREFIX} - Northwind Events (fictional)`, "United Arab Emirates", "Agency", "northwind.example", "Sample Person Two", "Account manager", "person.two@northwind.example", "", "", "", ""]);
-  ws.addRow([`${EXAMPLE_PREFIX} - Contoso Direct (fictional)`, "Saudi Arabia", "Direct client", "", "", "", "", "", "Referral", "", "colleague@your-company.example"]);
-  styleHeader(ws, [34, 20, 20, 24, 22, 20, 30, 18, 26, 34, 32]);
+  ws.addRow([`${EXAMPLE_PREFIX} - Northwind Events (fictional)`, "United Arab Emirates", "Agency", "northwind.example", "Sample Person One", "Producer", "person.one@northwind.example", "+971 50 000 0001", "Exhibition: Sample Expo", "Delete the three example rows before uploading.", "", "0001234567", "0098765"]);
+  ws.addRow([`${EXAMPLE_PREFIX} - Northwind Events (fictional)`, "United Arab Emirates", "Agency", "northwind.example", "Sample Person Two", "Account manager", "person.two@northwind.example", "", "", "", "", "", ""]);
+  ws.addRow([`${EXAMPLE_PREFIX} - Contoso Direct (fictional)`, "Saudi Arabia", "Direct client", "", "", "", "", "", "Referral", "", "colleague@your-company.example", "", ""]);
+  styleHeader(ws, [34, 20, 20, 24, 22, 20, 30, 18, 26, 34, 32, 26, 22]);
+  // Identifiers are text: leading zeros must survive (an Excel number column would drop them).
+  ws.getColumn(12).numFmt = "@";
+  ws.getColumn(13).numFmt = "@";
   for (let r = 2; r <= 500; r++) ws.getCell(`C${r}`).dataValidation = { type: "list", allowBlank: true, formulae: ['"Agency,Direct client,End client,Technology Company"'], showErrorMessage: false };
   const help = wb.addWorksheet(INSTRUCTIONS_SHEET);
   const lines = [
@@ -133,6 +136,7 @@ export async function buildTemplateWorkbook(): Promise<Uint8Array> {
     "4. Country: a country name or two-letter code. A country that is not recognised is kept in the notes and flagged for review.",
     "5. Lead source / exhibition: a source (Agency call, LinkedIn, Direct client, WhatsApp, Instagram, Website, Referral, Exhibition, Other) or the name of the show.",
     "6. Account owner work email (optional): must be the work email of a colleague with Sales access to the company you import into. It is applied only when it can be verified; otherwise the account stays Unassigned and the row is flagged. No user account is ever created from this file.",
+    "6b. VAT registration number / TRN and Trade licence number (optional): kept as text, exactly as typed, with any leading zeros. Importing only fills them when the organisation has none; a different existing number is shown as a conflict and never replaced.",
     "7. Delete the three EXAMPLE ONLY rows. Rows that start with EXAMPLE ONLY are ignored.",
     "8. Upload the file on Clients & Agencies, Import. You see a preview first; nothing is saved until you confirm.",
     "9. Importing only fills EMPTY fields and adds new contacts. Anything that differs from what is already recorded is shown to you and is never overwritten. Importing the same file again changes nothing.",

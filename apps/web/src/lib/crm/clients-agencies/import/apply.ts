@@ -17,7 +17,7 @@ export interface ApplyResult {
 
 /** One organisation as the database function receives it. The database decides what is safe: it never trusts a plan's action. */
 interface ImportItem {
-  key: string; name: string; website: string | null; roles: string[]; country_code: string | null; note: string | null;
+  key: string; name: string; website: string | null; roles: string[]; country_code: string | null; note: string | null; vat_trn: string | null; trade_licence_no: string | null;
   lead_source: string | null; exhibition: string | null; owner_id: string | null; contacts: object[]; fingerprint?: string;
 }
 
@@ -28,7 +28,7 @@ export type ConfirmOutcome =
   | { status: "error"; error: string };
 
 const toItem = (o: OrgPlan): ImportItem => ({
-  key: o.key, name: o.name, website: o.incoming.website, roles: o.roles, country_code: o.incoming.country_code, note: o.incoming.note,
+  key: o.key, name: o.name, website: o.incoming.website, roles: o.roles, country_code: o.incoming.country_code, note: o.incoming.note, vat_trn: o.incoming.vat_trn, trade_licence_no: o.incoming.trade_licence_no,
   lead_source: o.incoming.lead_source, exhibition: o.incoming.exhibition, owner_id: o.incomingOwnerId, contacts: o.fileContacts,
 });
 

@@ -58,6 +58,9 @@ export type CrmOrganisationRow = {
   country_code: string | null;
   website: string | null;
   website_domain: string | null;
+  /** VAT registration number / TRN and trade licence number: text, leading zeros kept (migration 20261220000100). */
+  vat_trn: string | null;
+  trade_licence_no: string | null;
   place: string | null;
   note: string | null;
   created_by: string | null;
