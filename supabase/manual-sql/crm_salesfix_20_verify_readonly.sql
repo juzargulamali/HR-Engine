@@ -8,7 +8,7 @@ select item, result from (
                               and prosrc like '%p_fields ? ''quote_ref'' then%else z.quote_ref end%') then 'OK' else 'WRONG TEXT' end
   union all select 3, 'crm_save_zoho_reference refuses a lost enquiry and a stale field (definition text)',
          case when exists (select 1 from pg_proc where proname = 'crm_save_zoho_reference' and pronamespace = 'public'::regnamespace
-                              and prosrc like '%v.stage = ''lost''%' and prosrc like '%errcode = ''40001''%') then 'OK' else 'WRONG TEXT' end
+                              and prosrc like '%v.stage = ''lost''%' and prosrc like '%Someone else changed % since you opened this form%') then 'OK' else 'WRONG TEXT' end
   union all select 4, 'grants: signed-in users can call crm_save_zoho_reference, anon and public cannot',
          case when to_regprocedure('public.crm_save_zoho_reference(uuid, jsonb, jsonb)') is not null
                 and has_function_privilege('authenticated', to_regprocedure('public.crm_save_zoho_reference(uuid, jsonb, jsonb)')::oid, 'execute')

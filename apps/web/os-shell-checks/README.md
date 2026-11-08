@@ -17,6 +17,13 @@ node os-shell-checks/sales-actions.mjs                       # the real Sales op
 node os-shell-checks/sales-workspace.mjs                     # the simplified Sales workspace (needs the sample scenario below, reseed before each run): Follow-ups groups, completing a
                                                              # follow-up never marks Won, Enquiries table (search, filters, sort, Columns), Table/Board, side panel (?open=, Back, unsaved
                                                              # prompt, stale edit), Board moves and refusals, Quick Add, owner picker, authorisation boundaries
+node os-shell-checks/sales-crm-readiness-flow.mjs           # Sales & CRM staff-readiness walk-through (needs `seed/sales-readiness.sh`, reseed before each run; writes to the database it drives; fictional data, nothing sent, no Zoho; SHOTS_DIR, light, 1440x900):
+                                                             # ONE enquiry from creation to a project with SEPARATE accounts: emp@ creates it, My Day's "due today" link lands on the Follow-ups Today view; an estimate is built and finalised (freezes only);
+                                                             # an ordinary proposal is recorded as sent (an estimate cannot, EST01), replacement and the superseded starting statuses; the Zoho form with two people saving DIFFERENT fields at once
+                                                             # (both kept), a stale edit of the SAME field refused, an intentional clear, Quote sent refused without the reference and allowed with it; Mark Won (the date limit is the Dubai day, the database
+                                                             # refuses a future date with no side effect); handover: emp@ saves and submits, the founder assigns, a colleague and even the founder cannot accept, only mgr@ (the assigned PM) accepts, ONE project
+                                                             # after a double click and a repeat call; Reports (readable source names); then failed reads provoked on the local database (a read policy that raises, a revoked read) on the Enquiry, Close and
+                                                             # Handover pages, one enquiry section and one Reports card: "Could not load", no dependent action, and normal again afterwards
 node os-shell-checks/projects-flow.mjs                      # Projects & Tasks end to end through the simplified screens (needs the Projects seed: see below; reseed before each run): Sales handover,
                                                              # PM acceptance, team, milestones (Plan menu), Add task, in-place status and review rules, due-date change with dependents, Plan (Delivery / Site,
                                                              # List / Calendar / Timeline, legacy addresses), site bookings and overlaps, Quick Add internal project, calendars, summary-only access,
@@ -75,7 +82,7 @@ enquiries owned by emp@ (one overdue, one due today, two upcoming), a Won enquir
 Programming team, tasks (one overdue, one waiting for review) and a short discussion. `sales-actions.mjs` instead starts from the Sales grants
 only (an empty Sales database). Both write to the database they drive: reseed before every run.
 
-`seed/sales.sh` is the Sales-only start of `sales-actions.mjs` (grants for ceo@, mgr@, emp@ and the UAE settings). `seed/base.sh` is the Projects seed (Sales and Projects grants and one Won
+`seed/sales-readiness.sh` is the start of `sales-crm-readiness-flow.mjs` (Sales and Projects grants for separate people, one fictional client, no enquiry). `seed/sales.sh` is the Sales-only start of `sales-actions.mjs` (grants for ceo@, mgr@, emp@ and the UAE settings). `seed/base.sh` is the Projects seed (Sales and Projects grants and one Won
 enquiry). `seed/scenario.sh` builds the whole sample scenario above through the real functions as the real people (it runs `seed/base.sh` first). `seed/inventory.sh` is the Inventory
 scenario (it also runs `seed/base.sh`). Each of them resets the database, so run exactly one before a check.
 

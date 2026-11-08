@@ -120,7 +120,7 @@ Who can reach: "Sales grant" = any active `crm_company_grants` row (`sales/layou
 | 66 | `/sales/contacts` | **Does not exist.** There is no route, redirect or rewrite for it anywhere in the repository (search for the string finds nothing). A signed-in person gets the app's not-found page (`(app)/not-found.tsx`); a signed-out person is sent to the login page first (`proxy.ts`). Contacts are reached on the enquiry page, the account page, and the contact list inside `/sales/clients` | file list under `sales/`, `next.config.ts`, repo-wide search |
 | 67 | `/sales/access` | Temporary (non-permanent) redirect to `/people-access` | `apps/web/next.config.ts` `redirects()` |
 | 68 | `/sales/opportunities?mine=1` | Still accepted: treated as Owner = Mine | `EnquiriesPage` (`ownerRaw`) |
-| 69 | `/sales/follow-ups?view=today` | The link target used by My Day (`lib/my-day`) is not a value the page understands (only `view=done` is); the page ignores it and shows To do | `follow-ups/page.tsx` (`showDone`), `lib/my-day/*` |
+| 69 | `/sales/follow-ups?view=today` | The link target used by My Day ("N due today"). **Fixed 2026-11-08**: the page now honours it and shows the Today group only, with "Show all to-do" (it used to ignore the value and show To do) | `follow-ups/page.tsx` (`todayOnly`), `follow-ups/page.test.tsx`, `components/my-day/sales-pipeline.test.tsx`, `os-shell-checks/sales-crm-readiness-flow.mjs` |
 
 The Sales overview that `/sales` used to show is gone; its parts live on Follow-ups, the Enquiries board and Reports (comment in `sales/page.tsx`).
 
@@ -135,3 +135,19 @@ The Sales overview that `/sales` used to show is gone; its parts live on Follow-
 **70 rows** are the reachable surface: menu and shell (4), follow-ups (9), enquiries (17), stages, proposals and commercial controls (8), close, reopen and handover (7), estimates (3), accounts, import, export and outreach (10), reports, settings and company (4), older and redirecting routes (7) and the scheduled route (1). Of these, **64 are `Documented`** and **6 are `Documented, with named verification gap`**: rows 30 (Inventory's stock-check card), 38 (the Zoho Books side), 43 (Projects-side handover steps), 46 (estimate photo upload and storage-backed export not re-verified), 62 (Admin Companies screen beyond the two estimate controls) and 70 (hosted cron schedule and e-mail switch). **Every reachable Sales & CRM screen has a detailed reference or a named gap; none is undocumented.** Row counts and gaps are repeated in `../README.md`, `../06-change-log.md` and the pass report.
 
 **Not Sales screens and not covered here**: People & Access grants (`../03-roles-access-and-approvals.md`), the Projects pages reached after acceptance, Inventory pages, My Day.
+
+## 4. Gaps fixed since the baseline (2026-11-08, branch `fix/sales-crm-staff-readiness`; hosted: not applied)
+
+The six named verification gaps (rows 30, 38, 43, 46, 62 and 70, see the count under section 3) are **unchanged**: row 38's gap is the Zoho Books side, which is still outside the app and unverifiable here. These reported code observations are fixed, each with a test, and recorded in `../06-change-log.md`:
+
+| Row | What was wrong | Now |
+|---|---|---|
+| 18, 39, 42 (enquiry, close, handover pages) | A failed detail read landed on the generic error page | "Could not load this enquiry" with Try again, distinct from not found, no access and an empty result; no dependent action is offered; per-section "Could not load" ([E section 4](./sales-enquiries.md), [H sections 1 and 2](./sales-close-and-handover.md)) |
+| 38 (Zoho references) | The save overwrote every field | Field-level merge, intentional clear, row lock, stale-field refusal, Lost read-only (migration `20261222000100`, [Z section 2.3](./sales-proposals-and-zoho.md)). **Decision still open:** whether the quote reference may be emptied after Quote sent |
+| 34 (Mark superseded) | The database accepted any starting status | Only draft or sent (same migration) |
+| 39 (Won date) | The no-future-date rule was only in the form | `crm_mark_won` refuses a date after the Dubai day (same migration) |
+| 59 (Reports) | Stored source ids shown; a failed closures read ignored; failed reads looked like zeros | Readable names; per-card "Could not load" and an "incomplete" notice ([R sections 3, 4 and 6](./sales-reports.md)) |
+| 65 (`/sales/clients`) | The loose-contacts read error was ignored | "Could not load the contacts without an organisation"; the route and the successful page are unchanged (still no redirect) |
+| 69 (`?view=today`) | The page ignored the value My Day links to | The Today view ([F section 2](./sales-followups.md)) |
+| 60 (Settings) | The reference-code hint omitted `OPP-` | Hint names the prefix; the generator is unchanged ([S section 6](./sales-settings.md)) |
+

@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("notFound"); }, useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/sales/follow-ups", useSearchParams: () => new URLSearchParams() }));
@@ -25,10 +25,11 @@ const row = (id: string, title: string, dueOffsetHours: number, assignedTo = "u1
   account: null, assigneeName: "Sales Owner", party: "Zeta Media",
 });
 let open: ReturnType<typeof row>[] = [];
+let reminders: unknown[] = [];
 let failed = false;
 vi.mock("@/lib/crm/data", () => ({
   loadFollowUps: async () => { if (failed) throw new Error("down"); return { open, done: [] }; },
-  loadMyReminders: async () => [],
+  loadMyReminders: async () => reminders,
   loadOpportunities: async () => [],
 }));
 
@@ -36,10 +37,15 @@ import FollowUpsPage from "./page";
 const render = async (sp: Record<string, string> = {}) => renderToStaticMarkup(await FollowUpsPage({ searchParams: Promise.resolve(sp) }));
 
 beforeEach(() => {
-  failed = false;
+  // A fixed clock (10:00 in Dubai): a follow-up is "due today" only while its moment is still to come on today's Dubai date, so rows are set a couple of hours ahead.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-09T06:00:00Z"));
+  failed = false; reminders = [];
   // one overdue, one due now (today in Dubai), one upcoming; a fourth belonging to a colleague and also due today
-  open = [row("1", "Overdue call", -48), row("2", "Today call", 0), row("3", "Upcoming call", 72), row("4", "Colleague today call", 0, "u2")];
+  open = [row("1", "Overdue call", -48), row("2", "Today call", 2), row("3", "Upcoming call", 72), row("4", "Colleague today call", 2, "u2")];
 });
+
+afterEach(() => { vi.useRealTimers(); });
 
 describe("Follow-ups page and the My Day link ?view=today", () => {
   it("My Day links to /sales/follow-ups?view=today (the address this page must honour)", async () => {
@@ -67,6 +73,15 @@ describe("Follow-ups page and the My Day link ?view=today", () => {
     expect(html).toMatch(/href="\/sales\/follow-ups"[^>]*>Show all to-do/);
     expect(html).toContain("Today <span");
     expect(html).not.toMatch(/>Overdue <span/);
+  });
+
+  it("?view=today leaves out the whole-list cards (reminders, needs attention) that the ordinary page shows, so the landing is the Today rows only", async () => {
+    reminders = [{ id: "r1", kind: "follow_up_due", title: "Overdue chase", opportunity_id: "o-1", due_at: null, created_at: new Date().toISOString() }];
+    const ordinary = await render();
+    expect(ordinary).toContain("Reminders (1 unread)");
+    const today = await render({ view: "today" });
+    expect(today).not.toContain("Reminders (");
+    expect(today).toContain("Today call");
   });
 
   it("?view=today with who=all keeps the Everyone choice and includes a colleague's follow-up due today", async () => {

@@ -213,13 +213,13 @@ describe("Sales & CRM write rules", () => {
       await Promise.all([save(U.sara, opp2, { quote_ref: "QT-4000" }), save(U.founder, opp2, { invoice_ref: "INV-4000" }), save(U.sara, opp2, { paid_amount: 4 })]);
       expect(await zoho(opp2)).toMatchObject({ quote_ref: "QT-4000", invoice_ref: "INV-4000", paid_amount: "4.00" });
     });
-    it("a stale edit of the SAME field is refused (40001) and changes nothing; an edit of another field with its own seen value is accepted", async () => {
+    it("a stale edit of the SAME field is refused at once (23514, never the retried 40001) and changes nothing; an edit of another field with its own seen value is accepted", async () => {
       const opp = await newOpp("Zoho stale enquiry");
       await save(U.sara, opp, { quote_ref: "QT-5000", invoice_ref: "INV-5000" });
       await save(U.founder, opp, { quote_ref: "QT-5000-B" });                                   // someone else changed the quote reference
       const w0 = await world(opp);
       const e = await rejection(save(U.sara, opp, { quote_ref: "QT-MINE" }, { quote_ref: "QT-5000" })); // I still saw the old value
-      expect(e.code, e.message).toBe("40001");
+      expect(e.code, e.message).toBe("23514");
       expect(e.message).toMatch(/changed the quote reference since you opened this form/);
       expect(await world(opp)).toEqual(w0);
       // my edit of a different field (seen value unchanged) merges

@@ -22,7 +22,9 @@ export interface ZohoValues {
 /** References typed in by hand. Zoho Books stays the accounting record; nothing here is read from or sent to it. */
 export function ZohoForm({ opportunityId, values, currency }: { opportunityId: string; values: ZohoValues; currency: string }) {
   return (
-    <ActionForm action={saveZohoReference} submitLabel="Save references" className="space-y-4">
+    // The key makes the form start again from the stored values whenever they change (after this person's own save, or a reload showing a colleague's): the fields
+    // on screen and the "seen" values below always come from the SAME read, so a field the person never touched is never mistaken for one they emptied.
+    <ActionForm key={JSON.stringify(values)} action={saveZohoReference} submitLabel="Save references" className="space-y-4">
       <input type="hidden" name="id" value={opportunityId} />
       {/* What was on screen when the form opened: only a field that differs from it is saved, and the database refuses a stale edit of the same field. */}
       {ZOHO_FIELDS.map((f) => {

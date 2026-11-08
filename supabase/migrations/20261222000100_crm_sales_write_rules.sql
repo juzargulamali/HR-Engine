@@ -7,7 +7,7 @@
 --      follows the proj_save_handover merge pattern: a key that is PRESENT in p_fields is set (JSON null or '' = an intentional clear), a key that is ABSENT
 --      keeps the stored value. The opportunity row is locked first (so two saves are applied one after the other, each merging into the other's result) and
 --      p_expected (optional) carries the values the person SAW for the fields they changed: if any of those fields changed meanwhile the save is refused
---      (SQLSTATE 40001, the same code crm_check_version uses) instead of silently overwriting. A Lost enquiry's references are read-only (the screen already
+--      (SQLSTATE 23514, answered at once; not 40001, which PostgREST retries until the call times out) instead of silently overwriting. A Lost enquiry's references are read-only (the screen already
 --      hides the form on Lost; every sibling function refuses a closed enquiry; Won stays editable because invoice and payment references follow a win).
 --      The OLD signature crm_upsert_zoho_reference(uuid, text, date, text, date, date, numeric) is KEPT (same grants) and now delegates to the new function with
 --      NULL meaning "leave as it is", so an old caller can no longer wipe a field it did not mean to touch (it cannot clear one either: clearing needs the new function).
@@ -65,7 +65,9 @@ begin
     if p_fields ? 'payment_received_on' and p_expected ? 'payment_received_on' and nullif(btrim(p_expected->>'payment_received_on'), '')::date is distinct from z.payment_received_on then v_changed := array_append(v_changed, 'the payment date'::text); end if;
     if p_fields ? 'paid_amount' and p_expected ? 'paid_amount' and nullif(btrim(p_expected->>'paid_amount'), '')::numeric is distinct from z.paid_amount then v_changed := array_append(v_changed, 'the amount paid'::text); end if;
     if array_length(v_changed, 1) is not null then
-      raise exception 'Someone else changed % since you opened this form. Reload to see their change, then try again.', array_to_string(v_changed, ', ') using errcode = '40001';
+      -- Not 40001: PostgREST retries a transaction that fails with 40001 and, when the check fails again every time, never answers (the app bounds that, but the
+      -- person would still wait for the timeout). 23514 is refused at once and says what happened.
+      raise exception 'Someone else changed % since you opened this form. Reload to see their change, then try again.', array_to_string(v_changed, ', ') using errcode = '23514';
     end if;
   end if;
 

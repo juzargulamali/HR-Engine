@@ -47,7 +47,8 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
   if (ctx.grants.length === 0) return null;
   const view = firstParam(sp, "view");
   const showDone = view === "done";
-  // My Day links here with ?view=today ("N due today"): the to-do list narrowed to its Today group. Any other value is the ordinary to-do view.
+  // My Day links here with ?view=today ("N due today"): the to-do list narrowed to its Today group (the reminder, handover and needs-attention cards belong to the whole list
+  // and stay one click away behind "Show all to-do"). Any other value is the ordinary to-do view.
   const todayOnly = view === "today";
   const who: "mine" | "all" = firstParam(sp, "who") === "all" ? "all" : "mine";
   const openId = parseRecordId(firstParam(sp, "open"));
@@ -116,7 +117,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
         </nav>
       </div>
 
-      {!showDone && reminders.length > 0 ? (
+      {!showDone && !todayOnly && reminders.length > 0 ? (
         <Card>
           <CardContent className="space-y-2 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -145,9 +146,9 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
         </Card>
       ) : null}
 
-      {!showDone ? <HandoverAttention check={handover} /> : null}
+      {!showDone && !todayOnly ? <HandoverAttention check={handover} /> : null}
 
-      {!showDone && needs.length > 0 ? <NeedsAttention items={needs} open={open} who={who} /> : null}
+      {!showDone && !todayOnly && needs.length > 0 ? <NeedsAttention items={needs} open={open} who={who} /> : null}
 
       {showDone ? (
         doneRows.length === 0 ? (

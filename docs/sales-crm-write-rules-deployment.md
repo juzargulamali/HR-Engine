@@ -1,0 +1,39 @@
+# Sales & CRM write rules: deployment guide (owner-run)
+
+Migration `supabase/migrations/20261222000100_crm_sales_write_rules.sql`, owner pack `supabase/manual-sql/crm_salesfix_*`. **Nothing here has been applied to any hosted project (V2 or Production) and no hosted SQL was run by Claude.** Everything below was rehearsed only on a throwaway local database (RLS suite `packages/rls-tests/test/crm-sales-write-rules.rls.test.ts`) and the isolated local stack (`apps/web/os-shell-checks/sales-crm-readiness-flow.mjs`). The migration is additive and idempotent (`create or replace`), **changes no stored row**, and edits no applied migration.
+
+## What it changes (three database rules)
+
+| Rule | Before | After |
+|---|---|---|
+| **Zoho Books references** (`crm_upsert_zoho_reference`) | Overwrote every field with what the form sent: a stale form, or two people editing different fields at the same time, lost data; a blank could not be told apart from "not sent" | New `crm_save_zoho_reference(opportunity, fields jsonb, expected jsonb)` (pattern of `proj_save_handover`): a key that is **present** is set (JSON null or blank = an intentional clear), a key that is **absent** keeps the stored value. The opportunity row is locked first, so two saves apply one after the other and the second merges into the first's result. `expected` carries the value the person saw for each field they changed; if that field changed meanwhile the save is refused at once (SQLSTATE `23514`, "Someone else changed the quote reference since you opened this form..."; not `40001`, which PostgREST retries until the call times out). A **Lost** enquiry's references are read-only (the screen already hid the form on Lost; every sibling function refuses a closed enquiry); Won stays editable (invoice and payment references follow a win). The old 7-argument `crm_upsert_zoho_reference` is **kept with the same grants** and now delegates: a NULL argument means "leave as it is" |
+| **Proposal superseding** (`crm_set_proposal_status`) | `superseded` was accepted from any starting status (an accepted version could be superseded by a direct call) | `superseded` is allowed only from `draft` or `sent` (what `crm_quote_issue` supersedes and the only statuses the proposals panel offers); `accepted` and already `superseded` are refused (`23514`). The proposal is re-read after the opportunity lock, so a concurrent "accepted" cannot be overwritten. The `sent` and `accepted` rules, the closed-enquiry rule and the estimate-sent guard (`EST01`, trigger `crm_proposals_estimate_sent_guard`) are untouched |
+| **Won evidence date** (`crm_mark_won`) | The no-future-date rule existed only in the form | A date after `crm_today_dubai()` is refused (`22023`) before any write. Boundary: the **Dubai calendar day**, exactly the form's `max` (`todayInDubai()`); today is accepted. A refused call leaves the enquiry (stage, version, columns), `crm_closures`, follow-ups, the handover row and the timeline unchanged. Stored Won rows are not touched |
+
+**Decision still needed (not guessed, not implemented): may the Zoho quote reference be cleared once the enquiry is at or past Quote sent?** The gate that moves an enquiry to Quote sent (`crm_move_stage`) is checked only at the moment of the move; nothing says what a later clear should do, and no document or screen defines it. Today (unchanged) a person who may edit can empty the quote reference at any stage. Options: (A) leave it allowed, as now; (B) **recommended**: refuse emptying the quote reference when the stage is `quote_sent`, `negotiation` or `won` (a correction to another non-blank value stays allowed), which keeps the evidence that unlocked the stage; (C) allow it only to a founder. The same decision covers whether Lost-enquiry references should stay read-only (implemented as read-only because the screen already hides the form; confirm).
+
+## Order (SQL Editor of the V2 project; only the migration and the rollback change the database)
+
+| Order | File | Kind and what it must say |
+|---|---|---|
+| 1 | `supabase/manual-sql/crm_salesfix_00_preflight_readonly.sql` | read-only. Every section B row must say OK and "applied already?" must say "OK - not applied yet"; the three "still the old function" rows must say OK. Section C is information about existing data (proposals by status, Zoho rows, enquiries at or past Quote sent without a quote reference, Won enquiries whose evidence date is in the future, accepted proposals, Lost enquiries with references): the migration changes none of it |
+| 2 | `supabase/manual-sql/crm_salesfix_05_preservation_check_readonly.sql` | read-only. Keep the result |
+| 3 | `supabase/migrations/20261222000100_crm_sales_write_rules.sql` | **CHANGES the database** (replaces three functions, adds one). Safe to run twice |
+| 4 | `supabase/manual-sql/crm_salesfix_05_preservation_check_readonly.sql` again | read-only. Compare with step 2 row by row: identical EXCEPT the four rows marked `INTENDED TO CHANGE` (`crm_upsert_zoho_reference`, `crm_set_proposal_status`, `crm_mark_won`, and `crm_save_zoho_reference` going from 0 to 1). Every other function fingerprint and the hashes and counts of proposals, Zoho references, enquiries, closures, handovers, follow-ups and timeline events must be identical |
+| 5 | `supabase/manual-sql/crm_salesfix_20_verify_readonly.sql` | read-only. All 14 rows must say OK |
+| rollback | `supabase/manual-sql/crm_salesfix_90_rollback.sql` | **CHANGES the database.** Restores the exact previous bodies of the three functions (copied from the applied migrations) and drops `crm_save_zoho_reference`. Grants unchanged; no row changed. Safe to run twice |
+
+**Send back:** the full results of steps 1, 4 (with step 2) and 5, and the rollback if you run it. The older `crm_estguard_05_preservation_check_readonly.sql` lists `crm_set_proposal_status` and `crm_upsert_zoho_reference`: after this migration their fingerprints legitimately differ from that older pack's snapshot (compare against the snapshot of step 2 here).
+
+## Release order with the app
+
+The app works against **both** databases, so there is no required order.
+
+* **App first, database later (recommended).** The app sends only the fields the person changed to `crm_save_zoho_reference`. If that function does not exist yet (PostgREST `PGRST202` / Postgres `42883`) it falls back to the old function with the stored values filled in for every field that did not change and makes the same stale-field check itself (a narrower race than the database lock, but nothing the person did not touch is overwritten, and an intentional clear still clears). The Won date limit and the supersede button rules were already in the screens.
+* **Database first, old app still running.** Safe for data: an old screen that sends its whole form can no longer wipe a field it did not mean to touch. The one visible difference: through the old signature a blank field is "leave as it is", so a person who empties a Zoho field on the OLD screen sees "saved" but the value stays. The new app clears correctly. Deploy the app soon after.
+
+## Rehearsal on a throwaway local database (what the RLS suite does)
+
+Earlier Sales and Estimates migrations applied; a real legacy estimate finalised and recorded as sent with the old functions; preflight (all OK); snapshot; **verify run before the migration (it fails, as it must)**; migration applied; verify (14 of 14 OK); snapshot compared (only the four intended rows differ); migration applied a second time (nothing changes); rollback run twice (the three function fingerprints equal the pre-migration ones, `crm_save_zoho_reference` gone, no row changed, grants unchanged, and the old behaviours are back: overwrite-all, supersede from accepted, a future Won date); re-applied; verify OK.
+
+**Hosted V2: not applied, not verified.** Not verified by any run: the behaviour of these functions on hosted data, Vercel Production.
