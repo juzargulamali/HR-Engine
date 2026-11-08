@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { Building2, Download, Upload } from "lucide-react";
+import { nextSort, relationshipAvailable, relationshipCounts, sortDirectory, sortFromParams, DEFAULT_SORT, type SortKey } from "@/lib/crm/clients-agencies/directory";
 import { hasCrmCapability } from "@enginious-hr/domain";
-import { OsBadge } from "@/components/os/pills";
 import { Alert } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -17,7 +16,8 @@ import { selectCompany } from "@/lib/crm/clients-agencies/company";
 import { eligibleStaff, type StaffPerson } from "@/lib/crm/clients-agencies/staff";
 import { cn } from "@/lib/utils";
 import { AddAccountButton } from "./account-forms";
-import { AssignBar, SelectBox, SelectionProvider } from "./outreach-select";
+import { DirectoryTable, ENQUIRIES_NOTE, ENQUIRIES_NOTE_ID, PhoneSort, QuickFilters } from "./directory-table";
+import { AssignBar, SelectionProvider } from "./outreach-select";
 
 export const metadata = { title: "Clients & Agencies" };
 const PAGE_LIMIT = 100;
@@ -47,8 +47,14 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
   const people = eligibleStaff(staff, company.id);
   const nameOf = (id: string | null) => (id ? (people.find((p) => p.userId === id)?.name ?? staff.find((p) => p.userId === id)?.name ?? "Former colleague") : null);
   const canAssign = hasCrmCapability(ctx.grants, company.id, "assign_owner");
-  const shown = filterDirectory(rows, filters);
+  // Enquiry figures failed to load: the names, countries, types and owners still show, the figures and badges say "Could not load", and the badge filter is not applied.
+  const relOk = relationshipAvailable(rows);
+  const effective = relOk ? filters : { ...filters, rel: "" as const };
+  const sort = sortFromParams(sp);
+  const matching = filterDirectory(rows, effective);
+  const shown = sortDirectory(matching, sort, nameOf);
   const page = shown.slice(0, PAGE_LIMIT);
+  const counts = relOk ? relationshipCounts(filterDirectory(rows, { ...effective, rel: "" })) : null;
   const countries = [...new Set(rows.map((r) => r.org.country_code).filter((c): c is string => !!c))].sort((a, b) => countryLabel(a).localeCompare(countryLabel(b)));
   const exportQuery = (scope: "filtered" | "all") => {
     const q = new URLSearchParams({ company: company.id, scope });
@@ -56,6 +62,17 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
     return q.toString();
   };
   const here = (extra = "") => `/sales/accounts?company=${company.id}${extra}`;
+  // A link that keeps every filter and the sort, changing only what is given.
+  const linkWith = (over: { rel?: string; sort?: SortKey }) => {
+    const q = new URLSearchParams({ company: company.id });
+    for (const [k, v] of Object.entries({ ...filters, rel: over.rel ?? filters.rel })) if (v) q.set(k, v);
+    const s = over.sort ? nextSort(sort, over.sort) : sort;
+    if (s.key !== DEFAULT_SORT.key || s.dir !== DEFAULT_SORT.dir) { q.set("sort", s.key); q.set("dir", s.dir); }
+    return `/sales/accounts?${q.toString()}`;
+  };
+  const moreActive = [filters.country, filters.source, filters.exhibition].filter(Boolean).length;
+  // Changing the company, a filter, the search or the sort starts an empty selection (see outreach-select.tsx).
+  const viewKey = JSON.stringify([company.id, effective, sort]);
 
   return (
     <div className="space-y-6">
@@ -69,60 +86,79 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
         </div>
       </div>
 
-      <form method="get" role="search" aria-label="Filter accounts" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {ctx.companies.length > 1 ? (
-          <div className="space-y-1.5">
-            <label htmlFor="ca-company" className="text-sm font-medium leading-none">Company</label>
-            <Select id="ca-company" name="company" defaultValue={company.id}>{ctx.companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
+      <form method="get" role="search" aria-label="Filter accounts" className="space-y-3">
+        {sort.key !== DEFAULT_SORT.key || sort.dir !== DEFAULT_SORT.dir ? <><input type="hidden" name="sort" value={sort.key} /><input type="hidden" name="dir" value={sort.dir} /></> : null}
+        {filters.rel ? <input type="hidden" name="rel" value={filters.rel} /> : null}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {ctx.companies.length > 1 ? (
+            <div className="space-y-1.5">
+              <label htmlFor="ca-company" className="text-sm font-medium leading-none">Company</label>
+              <Select id="ca-company" name="company" defaultValue={company.id}>{ctx.companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
+            </div>
+          ) : <input type="hidden" name="company" value={company.id} />}
+          <div className="space-y-1.5 sm:col-span-2">
+            <label htmlFor="ca-q" className="text-sm font-medium leading-none">Search</label>
+            <Input id="ca-q" name="q" type="search" defaultValue={filters.q} placeholder="Name, website, place, notes, contact or email" />
           </div>
-        ) : <input type="hidden" name="company" value={company.id} />}
-        <div className="space-y-1.5 sm:col-span-2">
-          <label htmlFor="ca-q" className="text-sm font-medium leading-none">Search</label>
-          <Input id="ca-q" name="q" type="search" defaultValue={filters.q} placeholder="Name, website, place, notes, contact or email" />
+          <div className="space-y-1.5">
+            <label htmlFor="ca-role" className="text-sm font-medium leading-none">Role</label>
+            <Select id="ca-role" name="role" defaultValue={filters.role}>
+              <option value="">Any role</option>
+              {ORGANISATION_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+              <option value={NOT_RECORDED}>Role not recorded</option>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="ca-owner" className="text-sm font-medium leading-none">Account owner</label>
+            <Select id="ca-owner" name="owner" defaultValue={filters.owner}>
+              <option value="">Anyone</option>
+              <option value={UNASSIGNED}>Unassigned</option>
+              {people.map((p) => <option key={p.userId} value={p.userId}>{p.name}</option>)}
+            </Select>
+          </div>
+          <div className="flex items-end gap-2">
+            <Button type="submit" variant="secondary" className="min-h-10">Apply</Button>
+            {hasFilters(filters) ? <Link href={here()} className={cn(buttonVariants({ variant: "ghost" }), "min-h-10")}>Clear</Link> : null}
+          </div>
         </div>
-        <div className="space-y-1.5">
-          <label htmlFor="ca-role" className="text-sm font-medium leading-none">Role</label>
-          <Select id="ca-role" name="role" defaultValue={filters.role}>
-            <option value="">Any role</option>
-            {ORGANISATION_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-            <option value={NOT_RECORDED}>Role not recorded</option>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <label htmlFor="ca-country" className="text-sm font-medium leading-none">Country</label>
-          <Select id="ca-country" name="country" defaultValue={filters.country}>
-            <option value="">Any country</option>
-            {countries.map((c) => <option key={c} value={c}>{countryLabel(c)}</option>)}
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <label htmlFor="ca-owner" className="text-sm font-medium leading-none">Account owner</label>
-          <Select id="ca-owner" name="owner" defaultValue={filters.owner}>
-            <option value="">Anyone</option>
-            <option value={UNASSIGNED}>Unassigned</option>
-            {people.map((p) => <option key={p.userId} value={p.userId}>{p.name}</option>)}
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <label htmlFor="ca-source" className="text-sm font-medium leading-none">Lead source</label>
-          <Select id="ca-source" name="source" defaultValue={filters.source}>
-            <option value="">Any source</option>
-            {LEAD_SOURCES.map((s) => <option key={s} value={s}>{LEAD_SOURCE_LABEL[s]}</option>)}
-            <option value={NOT_RECORDED}>Not recorded</option>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <label htmlFor="ca-exhibition" className="text-sm font-medium leading-none">Exhibition</label>
-          <Input id="ca-exhibition" name="exhibition" defaultValue={filters.exhibition} placeholder="Part of the show name" />
-        </div>
-        <div className="flex items-end gap-2">
-          <Button type="submit" variant="secondary">Apply</Button>
-          {hasFilters(filters) ? <Link href={here()} className={cn(buttonVariants({ variant: "ghost" }))}>Clear</Link> : null}
-        </div>
+        <details className="rounded-md border border-border px-3 py-1" open={moreActive > 0}>
+          <summary className="flex min-h-10 cursor-pointer items-center gap-2 text-sm font-medium">
+            More filters
+            {moreActive > 0 ? <span className="rounded-full bg-primary px-2 text-xs font-semibold text-primary-foreground" aria-label={`${moreActive} more ${moreActive === 1 ? "filter" : "filters"} active`}>{moreActive} active</span> : null}
+          </summary>
+          <div className="grid gap-3 pb-3 pt-2 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="space-y-1.5">
+              <label htmlFor="ca-country" className="text-sm font-medium leading-none">Country</label>
+              <Select id="ca-country" name="country" defaultValue={filters.country}>
+                <option value="">Any country</option>
+                {countries.map((c) => <option key={c} value={c}>{countryLabel(c)}</option>)}
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="ca-source" className="text-sm font-medium leading-none">Lead source</label>
+              <Select id="ca-source" name="source" defaultValue={filters.source}>
+                <option value="">Any source</option>
+                {LEAD_SOURCES.map((s) => <option key={s} value={s}>{LEAD_SOURCE_LABEL[s]}</option>)}
+                <option value={NOT_RECORDED}>Not recorded</option>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="ca-exhibition" className="text-sm font-medium leading-none">Exhibition</label>
+              <Input id="ca-exhibition" name="exhibition" defaultValue={filters.exhibition} placeholder="Part of the show name" />
+            </div>
+          </div>
+        </details>
       </form>
 
+      <QuickFilters active={effective.rel} counts={counts} available={relOk} hrefFor={(rel) => linkWith({ rel })} />
+      {!relOk ? (
+        <Alert variant="destructive" role="alert">
+          Could not load the enquiry figures. Names, countries, types and owners are shown below; the enquiry columns and relationship badges say &ldquo;Could not load&rdquo;, and the relationship filter is not applied{filters.rel ? " (the one in the address was ignored)" : ""}. Reload to try again.
+        </Alert>
+      ) : null}
+
       <p className="text-sm text-muted-foreground" role="status">
-        For {company.name}. {hasFilters(filters) ? `Showing ${shown.length} of ${rows.length} accounts.` : `${rows.length} ${rows.length === 1 ? "account" : "accounts"}.`} Inquiry counts are this company&apos;s only; owner, lead source and exhibition are recorded per company.
+        For {company.name}. {hasFilters(effective) ? `Showing ${shown.length} of ${rows.length} accounts.` : `${rows.length} ${rows.length === 1 ? "account" : "accounts"}.`} Enquiry counts are this company&apos;s only; owner, lead source and exhibition are recorded per company.
       </p>
 
       {rows.length === 0 ? (
@@ -130,48 +166,12 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
       ) : shown.length === 0 ? (
         <EmptyState icon={Building2} title="Nothing matches" description="Clear a filter or search for something else." action={<Link href={here()} className={buttonVariants({ variant: "outline", size: "sm" })}>Clear filters</Link>} />
       ) : (
-        <SelectionProvider>
+        <SelectionProvider key={viewKey}>
           {/* Only people with the assign owners right get the selection boxes and the bar; the action and the database check the right again. */}
           {canAssign ? <AssignBar companyId={company.id} shown={page.map((r) => ({ id: r.org.id, name: r.org.name }))} people={people.map((p) => ({ id: p.userId, name: p.name }))} /> : null}
-          <ul className="space-y-3">
-            {page.map((r) => {
-              const owner = nameOf(r.profile?.owner_id ?? null);
-              return (
-                <li key={r.org.id}>
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div className="flex min-w-0 items-start gap-2">
-                          {canAssign ? <SelectBox id={r.org.id} name={r.org.name} /> : null}
-                          <CardTitle className="min-w-0 break-words leading-snug">
-                            <Link href={`/sales/accounts/${r.org.id}?company=${company.id}`} className="underline-offset-2 hover:underline">{r.org.name}</Link>
-                          </CardTitle>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {r.org.roles.length === 0 ? <OsBadge tone="quiet">Role not recorded</OsBadge> : r.org.roles.map((role) => <OsBadge key={role} tone={role === "agency" ? "blue" : role === "technology" ? "cyan" : "neutral"} className="whitespace-nowrap">{ROLE_LABEL[role]}</OsBadge>)}
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-1 text-sm">
-                      <p className="text-muted-foreground">
-                        {[r.org.country_code ? countryLabel(r.org.country_code) : null, r.org.place].filter(Boolean).join(" · ") || "Country not recorded"}
-                        {r.org.website_domain ? ` · ${r.org.website_domain}` : ""}
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">Account owner: </span>
-                        {owner ? <span className="font-medium">{owner}</span> : <OsBadge tone="amber">Unassigned</OsBadge>}
-                        <span className="text-muted-foreground"> · Lead source: </span>
-                        {r.profile?.lead_source ? `${LEAD_SOURCE_LABEL[r.profile.lead_source]}${r.profile.exhibition ? ` (${r.profile.exhibition})` : ""}` : "not recorded"}
-                      </p>
-                      <p className="text-muted-foreground">
-                        {r.inquiryCount} {r.inquiryCount === 1 ? "inquiry" : "inquiries"}{r.inquiryCount ? ` (${r.openCount} open)` : ""} · {r.contacts.length} {r.contacts.length === 1 ? "contact" : "contacts"}
-                      </p>
-                    </CardContent>
-                  </Card>
-                </li>
-              );
-            })}
-          </ul>
+          <PhoneSort sort={sort} hrefFor={(key) => linkWith({ sort: key })} />
+          <DirectoryTable rows={page} sort={sort} hrefFor={(key) => linkWith({ sort: key })} accountHref={(id) => `/sales/accounts/${id}?company=${company.id}`} canSelect={canAssign} ownerName={nameOf} />
+          <p id={ENQUIRIES_NOTE_ID} className="text-xs text-muted-foreground"><span className="font-medium">Enquiries:</span> {ENQUIRIES_NOTE}. Won enquiries are enquiries recorded as won (not projects in progress). An enquiry linked to the same account twice (for example as agency and as end client) counts once.</p>
           {shown.length > page.length ? <Alert>Showing the first {PAGE_LIMIT} of {shown.length} accounts. Search or filter to narrow the list.</Alert> : null}
         </SelectionProvider>
       )}

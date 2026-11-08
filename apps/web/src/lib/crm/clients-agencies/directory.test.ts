@@ -34,11 +34,12 @@ const rows = buildDirectoryRows({
     profile("o2", CO_A, { lead_source: "referral" }),  // profile with no owner = Unassigned
   ],
   opportunities: [
-    { company_id: CO_A, agency_org_id: "o1", client_org_id: "o2", stage: "new" },
-    { company_id: CO_A, agency_org_id: "o4", client_org_id: "o4", stage: "won" },   // both fields the same organisation: counted once
-    { company_id: CO_B, agency_org_id: "o1", client_org_id: null, stage: "new" },    // another company's inquiry: ignored
+    { id: "e1", created_at: "2026-10-01T08:00:00Z", company_id: CO_A, agency_org_id: "o1", client_org_id: "o2", stage: "new" },
+    { id: "e2", created_at: "2026-10-01T08:00:00Z", company_id: CO_A, agency_org_id: "o4", client_org_id: "o4", stage: "won" },   // both fields the same organisation: counted once
+    { id: "e3", created_at: "2026-10-01T08:00:00Z", company_id: CO_B, agency_org_id: "o1", client_org_id: null, stage: "new" },    // another company's inquiry: ignored
   ],
   companyId: CO_A,
+  now: new Date("2026-11-08T08:00:00Z"),
 });
 const names = (f: Partial<typeof EMPTY_FILTERS>) => filterDirectory(rows, { ...EMPTY_FILTERS, ...f }).map((r) => r.org.name);
 
@@ -46,9 +47,9 @@ describe("directory rows", () => {
   it("shows only the selected company's profile, owner and inquiry counts", () => {
     const a = rows.find((r) => r.org.id === "o1")!;
     expect(a.profile?.owner_id).toBe(SARA);
-    expect(a.inquiryCount).toBe(1);
+    expect(a.stats?.total).toBe(1);
     expect(a.contacts).toHaveLength(2);
-    expect(rows.find((r) => r.org.id === "o4")).toMatchObject({ inquiryCount: 1, openCount: 0 });
+    expect(rows.find((r) => r.org.id === "o4")).toMatchObject({ stats: { total: 1, open: 0, won: 1 } });
   });
 });
 

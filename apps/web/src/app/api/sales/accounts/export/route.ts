@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadDirectory, loadStaff, loadSummaryInputs } from "@/lib/crm/clients-agencies/data";
-import { filterDirectory, filtersFromParams } from "@/lib/crm/clients-agencies/directory";
+import { filterDirectory, filtersFromParams, relationshipAvailable } from "@/lib/crm/clients-agencies/directory";
 import { buildExportWorkbook } from "@/lib/crm/clients-agencies/import/export";
 
 export const maxDuration = 120;
@@ -20,7 +20,12 @@ export async function GET(request: Request) {
   const scope = url.searchParams.get("scope") === "filtered" ? "filtered" : "all";
   try {
     const [directory, staff, summary] = await Promise.all([loadDirectory(company.id), loadStaff(), loadSummaryInputs(company.id)]);
-    const rows = scope === "filtered" ? filterDirectory(directory, filtersFromParams(Object.fromEntries(url.searchParams))) : directory;
+    const filters = filtersFromParams(Object.fromEntries(url.searchParams));
+    // The same filtering path as the page. A relationship filter cannot be honoured when the enquiries could not be read: say so instead of exporting a wrong list.
+    if (scope === "filtered" && filters.rel && !relationshipAvailable(directory)) {
+      return NextResponse.json({ error: "Could not load the enquiries, so the relationship filter cannot be applied. Nothing was exported; try again." }, { status: 503 });
+    }
+    const rows = scope === "filtered" ? filterDirectory(directory, filters) : directory;
     const bytes = await buildExportWorkbook(rows, staff, summary);
     const slug = company.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "company";
     return new NextResponse(Buffer.from(bytes), {

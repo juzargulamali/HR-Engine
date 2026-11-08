@@ -26,7 +26,7 @@ function dirRow(name: string, o: { roles?: string[]; country?: string | null; we
     org: { id, name, roles: o.roles ?? [], country_code: o.country ?? null, website: o.website ?? null, website_domain: null, vat_trn: o.vat ?? null, trade_licence_no: o.licence ?? null, place: null, note: o.note ?? null, archived_at: null } as never,
     contacts: (o.contacts ?? []).map((c, i) => ({ id: `${id}-c${i}`, name: c.name, email: c.email ?? null, organisation_id: id, archived_at: null })) as never,
     profile: o.lead || o.exhibition || o.owner ? ({ organisation_id: id, company_id: CO, lead_source: o.lead ?? null, exhibition: o.exhibition ?? null, owner_id: o.owner ?? null } as never) : null,
-    inquiryCount: 0, openCount: 0,
+    stats: null, relationship: null,
   };
 }
 

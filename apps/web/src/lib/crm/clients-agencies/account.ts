@@ -31,8 +31,44 @@ export function inquiryRoute(opp: Pick<OppLite, "agency_org_id" | "client_org_id
   return null;
 }
 
+/** An inquiry is open until it is won or lost (On hold counts as open). The account page and the directory both use this. */
+export const isOpenStage = (stage: string) => stage !== "won" && stage !== "lost";
+/** A recorded win is an inquiry in stage Won. It is not a project in progress and not a completed project. */
+export const isWonStage = (stage: string) => stage === "won";
+
+/**
+ * THE definition of "an account's inquiries": the selected company's inquiries that name the account as agency or end client, each counted ONCE
+ * (an inquiry naming the account in both roles is one inquiry). The account page, the directory table and the export all count through this.
+ */
+export function linkedInquiries<T extends Pick<OppLite, "id" | "company_id" | "agency_org_id" | "client_org_id">>(opps: readonly T[], orgId: string, companyId: string): { opp: T; route: Route; counterpartId: string | null }[] {
+  const seen = new Set<string>();
+  const out: { opp: T; route: Route; counterpartId: string | null }[] = [];
+  for (const opp of opps) {
+    if (opp.company_id !== companyId || seen.has(opp.id)) continue;
+    const r = inquiryRoute(opp, orgId);
+    if (!r) continue;
+    seen.add(opp.id);
+    out.push({ opp, route: r.route, counterpartId: r.counterpartId });
+  }
+  return out;
+}
+
+/** What the directory shows per account (this company only). `lastEnquiryOn` is the Dubai calendar day the newest linked inquiry was recorded; null when there is none. */
+export interface EnquiryStats { total: number; open: number; won: number; lastEnquiryOn: string | null }
+
+export function enquiryStats(opps: readonly (Pick<OppLite, "id" | "company_id" | "agency_org_id" | "client_org_id" | "stage" | "created_at">)[], orgId: string, companyId: string): EnquiryStats {
+  const linked = linkedInquiries(opps, orgId, companyId).map((i) => i.opp);
+  const newest = linked.map((o) => o.created_at).filter((d) => !!d && !Number.isNaN(Date.parse(d))).sort().at(-1);
+  return {
+    total: linked.length,
+    open: linked.filter((o) => isOpenStage(o.stage)).length,
+    won: linked.filter((o) => isWonStage(o.stage)).length,
+    lastEnquiryOn: newest ? dubaiDate(newest) : null,
+  };
+}
+
 export const OPEN_STAGES_FOR_REPLY = new Set(["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation"]);
-const dubaiDate = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: "Asia/Dubai" });
+export const dubaiDate = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: "Asia/Dubai" });
 
 /** First client response recorded on or after the day the quote was sent (a date, or null when none is recorded). */
 export function replyRecordedOn(oppId: string, sentOn: string, activities: readonly ActivityLite[]): string | null {
@@ -132,15 +168,8 @@ export function deriveAccount(input: {
   /** Handover status per won inquiry id (from the Sales-readable handover check); absent = none recorded. Only consulted when no readable project exists. */
   handovers: Section<ReadonlyMap<string, string>>;
 }): AccountView {
-  const seen = new Set<string>();
-  const inquiries: InquiryRow[] = [];
-  for (const opp of input.opportunities) {
-    if (opp.company_id !== input.companyId || seen.has(opp.id)) continue;
-    const r = inquiryRoute(opp, input.orgId);
-    if (!r) continue;
-    seen.add(opp.id);
-    inquiries.push({ opp, route: r.route, counterpartId: r.counterpartId, project: { kind: "none" } });
-  }
+  const inquiries: InquiryRow[] = linkedInquiries(input.opportunities, input.orgId, input.companyId).map((i) => ({ ...i, project: { kind: "none" } as ProjectInfo }));
+  const seen = new Set(inquiries.map((i) => i.opp.id));
   const projectBy = new Map<string, ProjectLite>();
   if (input.projects.status === "ok") for (const p of input.projects.data) if (p.crm_opportunity_id && seen.has(p.crm_opportunity_id)) projectBy.set(p.crm_opportunity_id, p);
   let projectsNotVisible = 0;
@@ -178,8 +207,8 @@ export function deriveAccount(input: {
     hasHistory: inquiries.length > 0,
     counts: {
       inquiries: inquiries.length,
-      open: inquiries.filter((i) => i.opp.stage !== "won" && i.opp.stage !== "lost").length,
-      won: inquiries.filter((i) => i.opp.stage === "won").length,
+      open: inquiries.filter((i) => isOpenStage(i.opp.stage)).length,
+      won: inquiries.filter((i) => isWonStage(i.opp.stage)).length,
       lost: inquiries.filter((i) => i.opp.stage === "lost").length,
       direct: count("direct"), throughAgency: count("through_agency"), asAgency: count("as_agency"),
       completedProjects: completed, projectsNotVisible,
