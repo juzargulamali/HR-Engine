@@ -10,6 +10,7 @@ import type { ActionState } from "./companies";
 import { friendlyCrmError } from "@/lib/crm/errors";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadOrganisations } from "@/lib/crm/data";
+import { diffZohoForm, staleFields, ZOHO_FIELDS, ZOHO_FORM_NAMES, ZOHO_LABELS } from "@/lib/crm/zoho-save";
 
 /**
  * Sales & CRM server actions. Every one is a thin wrapper over a crm_* database function: the function (not this file)
@@ -576,20 +577,48 @@ export async function addLink(_prev: ActionState, formData: FormData): Promise<A
   return { error: null };
 }
 
-const zohoSchema = z.object({
-  id: uuid, quoteRef: optionalText, quoteSentOn: optionalDate, invoiceRef: optionalText, invoiceIssuedOn: optionalDate, paymentReceivedOn: optionalDate, paidAmount: optionalNumber,
-});
+const zohoSchema = z.object({ id: uuid });
+const numberOrBlank = z.string().trim().refine((v) => v === "" || (Number.isFinite(Number(v)) && Number(v) >= 0), "Amount paid must be zero or more");
+const dateOrBlank = z.string().trim().refine((v) => v === "" || /^\d{4}-\d{2}-\d{2}$/.test(v), "Use a valid date");
+
+/** The database has not got the merge function yet (the app was released before the migration): PostgREST says so with PGRST202, Postgres with 42883. */
+const isMissingFunction = (e: { code?: string; message?: string }) => e.code === "PGRST202" || e.code === "42883" || /Could not find the function/i.test(e.message ?? "");
+
+/**
+ * Saves only what the person CHANGED (see `lib/crm/zoho-save.ts`): an untouched field is left out, an emptied field is an intentional clear, and the
+ * value seen travels with each changed field so a stale edit of the same field is refused. The database merges under a row lock
+ * (`crm_save_zoho_reference`). Against a database without it (old release order) the previous function is used with the stored values filled in for the fields
+ * that did not change, and the same stale check is made here, so nothing the person did not touch is overwritten there either.
+ */
 export async function saveZohoReference(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const p = zohoSchema.safeParse(Object.fromEntries(formData));
+  const raw = Object.fromEntries(formData);
+  const p = zohoSchema.safeParse(raw);
   if (!p.success) return { error: firstIssue(p.error) };
-  const d = p.data;
+  for (const f of ZOHO_FIELDS) {
+    const v = String(raw[ZOHO_FORM_NAMES[f]] ?? "");
+    const check = (f === "paid_amount" ? numberOrBlank : f.endsWith("_on") ? dateOrBlank : z.string()).safeParse(v);
+    if (!check.success) return { error: firstIssue(check.error) };
+  }
+  const change = diffZohoForm(raw);
+  if (!change) return { error: null, warning: "Nothing was changed, so nothing was saved." };
   const supabase = await createClient();
-  const { error } = await supabase.rpc("crm_upsert_zoho_reference", {
-    p_opportunity_id: d.id, p_quote_ref: d.quoteRef ?? null, p_quote_sent_on: d.quoteSentOn ?? null, p_invoice_ref: d.invoiceRef ?? null,
-    p_invoice_issued_on: d.invoiceIssuedOn ?? null, p_payment_received_on: d.paymentReceivedOn ?? null, p_paid_amount: d.paidAmount ?? null,
-  });
-  if (error) return fail(error.message);
-  refresh(d.id);
+  const { error } = await supabase.rpc("crm_save_zoho_reference", { p_opportunity_id: p.data.id, p_fields: change.fields, p_expected: change.expected });
+  if (error && !isMissingFunction(error)) return fail(error.message);
+  if (error) {
+    // Old database: read the stored row, refuse a stale edit of the same field, then overwrite only what changed.
+    const current = await supabase.from("crm_zoho_references").select("*").eq("opportunity_id", p.data.id).maybeSingle();
+    if (current.error) return fail("Could not read the stored references, so nothing was saved. Try again.");
+    const stale = staleFields(change, current.data);
+    if (stale.length > 0) return { error: `Someone else changed ${stale.map((f) => ZOHO_LABELS[f]).join(", ")} since you opened this form. Reload to see their change, then try again.` };
+    const merged = { ...(current.data ?? {}), ...change.fields };
+    const legacy = await supabase.rpc("crm_upsert_zoho_reference", {
+      p_opportunity_id: p.data.id, p_quote_ref: (merged.quote_ref as string | null) ?? null, p_quote_sent_on: (merged.quote_sent_on as string | null) ?? null,
+      p_invoice_ref: (merged.invoice_ref as string | null) ?? null, p_invoice_issued_on: (merged.invoice_issued_on as string | null) ?? null,
+      p_payment_received_on: (merged.payment_received_on as string | null) ?? null, p_paid_amount: merged.paid_amount == null ? null : Number(merged.paid_amount),
+    });
+    if (legacy.error) return fail(legacy.error.message);
+  }
+  refresh(p.data.id);
   return { error: null };
 }
 
