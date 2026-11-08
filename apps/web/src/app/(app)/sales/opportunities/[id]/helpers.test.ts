@@ -19,6 +19,12 @@ describe("buildTimeline", () => {
 });
 
 describe("describeEvent", () => {
+  it("shows the estimate events the database writes as estimate events, and ordinary proposal events unchanged", () => {
+    expect(describeEvent(ev("1", "t", "proposal", null, "v1 estimate draft"), names)).toBe("Estimate v1 drafted.");
+    expect(describeEvent(ev("1", "t", "proposal", null, "QUO-UAE-2026-0001 rev 1 issued"), names)).toBe("Estimate QUO-UAE-2026-0001 revision 1 finalised.");
+    expect(describeEvent(ev("1", "t", "proposal", null, "EST-UAE-2026-0001 rev 2 draft"), names)).toBe("Estimate EST-UAE-2026-0001 revision 2 drafted.");
+    expect(describeEvent(ev("1", "t", "proposal", "draft", "v2 sent"), names)).toBe("Proposal v2 sent (was draft).");
+  });
   it("names stages with their labels", () => expect(describeEvent(ev("1", "t"), names)).toBe("Stage changed from New enquiry to Qualified."));
   it("resolves owners to names", () => expect(describeEvent(ev("1", "t", "owner_changed", "u1", "u2", "Holiday cover"), names)).toBe("Owner changed from Juzar to Rafi. Reason: Holiday cover."));
   it("translates changed field names", () => expect(describeEvent(ev("1", "t", "details_changed", null, "event_start, technologies"), names)).toBe("Details changed: show start date, technologies and quantities."));

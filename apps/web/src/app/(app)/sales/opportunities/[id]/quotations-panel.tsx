@@ -12,8 +12,8 @@ import { money } from "./quotations/[proposalId]/money";
 import type { OppView } from "./view";
 
 /**
- * "Estimates & Quotations": priced bills of quantities built in the app. Each one IS a proposal version (same status, same approval, same
- * numbering), shown here with its reference and revision. Only the enquiry owner or a founder can start or edit one.
+ * "Estimates": priced bills of quantities built in the app. Each one IS a proposal row (its approval and numbering are the existing ones) but never an
+ * official quotation: finalising only freezes it. Shown here with its reference and revision. Only the enquiry owner or a founder can start or edit one.
  */
 export async function QuotationsPanel({ view }: { view: OppView }) {
   const { detail, opp, canEdit, isOpen } = view;
@@ -26,7 +26,7 @@ export async function QuotationsPanel({ view }: { view: OppView }) {
   const pendingBy = new Set(detail.approvals.filter((a) => a.state === "pending").map((a) => a.proposal_id));
   return (
     <div className="space-y-6">
-      <Panel title="Estimates & Quotations" description="Build the priced estimate here, then issue it. Issuing makes a frozen copy; nothing is sent to the client from this screen.">
+      <Panel title="Estimates" description="Build the priced estimate here, then finalise it. Finalising makes a frozen copy; nothing is sent to the client from this screen, and nothing is reserved or promised.">
         {items.length === 0 ? <Muted>No estimate yet.{canEdit && isOpen ? " Start one below." : ""}</Muted> : (
           <ul className="divide-y divide-border/70">
             {items.map(({ header, proposal, totalGross }) => {
@@ -38,7 +38,7 @@ export async function QuotationsPanel({ view }: { view: OppView }) {
                   <Badge variant={state === "issued" ? "success" : state === "superseded" ? "secondary" : "warning"}>{QUOTATION_STATE_LABEL[state]}</Badge>
                   {proposal.status === "sent" || proposal.status === "accepted" ? <Badge variant="outline">{proposal.status === "sent" ? "Recorded as sent" : "Accepted"}</Badge> : null}
                   <span className="text-sm text-muted-foreground">
-                    {header.issue_date ? `issued ${formatDate(header.issue_date)}` : `updated ${formatDate(header.content_changed_at)}`}{totalGross && header.currency ? ` · ${money(totalGross, header.currency)} incl. VAT` : ""}
+                    {header.issue_date ? `finalised ${formatDate(header.issue_date)}` : `updated ${formatDate(header.content_changed_at)}`}{totalGross && header.currency ? ` · ${money(totalGross, header.currency)} incl. VAT` : ""}
                   </span>
                 </li>
               );
@@ -47,7 +47,7 @@ export async function QuotationsPanel({ view }: { view: OppView }) {
         )}
       </Panel>
       {canEdit && isOpen ? (
-        <Panel title="New estimate" description="Starts a draft with a new reference and your company's standard terms. Everything can stay incomplete until you issue it.">
+        <Panel title="New estimate" description="Starts a draft with a new reference. Everything can stay incomplete until you finalise it.">
           <ActionForm action={createQuotation} submitLabel="Create draft estimate" pendingLabel="Creating…">
             <input type="hidden" name="opportunityId" value={opp.id} />
           </ActionForm>

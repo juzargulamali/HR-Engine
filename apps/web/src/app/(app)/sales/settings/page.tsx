@@ -8,7 +8,7 @@ import { formatDate } from "@/components/sales/format";
 import { LoadError } from "@/components/workspace/states";
 import { getCrmContext, type CrmCompanyInfo, type CrmContext } from "@/lib/crm/context";
 import { createClient } from "@/lib/supabase/server";
-import { TermsTemplateForm, VatChoices, type TermsView, type VatChoiceView } from "./quotation-defaults";
+import { VatChoices, type VatChoiceView } from "./quotation-defaults";
 import { APPROVAL_POLICY_EXPLANATION, APPROVAL_POLICY_LABEL, SettingsForm, type SettingsInitial } from "./settings-form";
 
 export const metadata = { title: "Sales settings" };
@@ -80,17 +80,13 @@ export default async function SalesSettingsPage() {
   const legalCurrency = new Map((companyRows ?? []).map((c) => [c.id, c.default_currency]));
 
   const raw = supabase as unknown as SupabaseClient; // the quotation tables are not in the generated types
-  // Quotation defaults (VAT choices, standard terms). A failed read says so; it never shows an empty list.
-  const [vatRes, termsRes] = ctx.companies.length > 0
-    ? await Promise.all([
-        raw.from("crm_quote_vat_choices").select("id, company_id, label, kind, rate, active").in("company_id", ctx.companies.map((c) => c.id)).order("position"),
-        raw.from("crm_quote_terms_templates").select("company_id, label, clauses").in("company_id", ctx.companies.map((c) => c.id)).order("company_id"),
-      ])
-    : [{ data: [], error: null }, { data: [], error: null }];
-  const defaultsFailed = !!vatRes.error || !!termsRes.error;
+  // Estimate defaults (the VAT choices). A failed read says so; it never shows an empty list. The old standard terms are kept in the database but no longer used.
+  const vatRes = ctx.companies.length > 0
+    ? await raw.from("crm_quote_vat_choices").select("id, company_id, label, kind, rate, active").in("company_id", ctx.companies.map((c) => c.id)).order("position")
+    : { data: [], error: null };
+  const defaultsFailed = !!vatRes.error;
   const vatBy = new Map<string, VatChoiceView[]>();
   for (const v of (vatRes.data ?? []) as (VatChoiceView & { company_id: string })[]) vatBy.set(v.company_id, [...(vatBy.get(v.company_id) ?? []), { ...v, rate: v.rate == null ? null : String(v.rate) }]);
-  const termsBy = new Map(((termsRes.data ?? []) as (TermsView & { company_id: string })[]).map((t) => [t.company_id, t]));
   const editable = (id: string) => isCrmFounder(ctx.grants, id) || canManageCrmSettings(ctx.grants, id);
   const missing = ctx.companies.filter((c) => !c.settings);
 
@@ -143,18 +139,13 @@ export default async function SalesSettingsPage() {
       {ctx.companies.map((c) => (
         <Card key={`q-${c.id}`} id={`quotations-${c.id}`}>
           <CardHeader>
-            <CardTitle className="break-words">{c.name}: Estimates &amp; Quotations</CardTitle>
-            <CardDescription>The VAT choices Sales can pick from, and the standard terms copied into each new estimate. Changing the terms never changes an estimate that was already created or issued.</CardDescription>
+            <CardTitle className="break-words">{c.name}: Estimates</CardTitle>
+            <CardDescription>The VAT choices Sales can pick from on an estimate. Estimates do not print standard terms.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            {defaultsFailed ? <LoadError what="the quotation defaults" retryHref="/sales/settings" /> : (
+            {defaultsFailed ? <LoadError what="the estimate defaults" retryHref="/sales/settings" /> : (
               <>
                 <section aria-label="VAT choices" className="space-y-2"><h3 className="text-sm font-semibold">VAT choices</h3><VatChoices companyId={c.id} choices={vatBy.get(c.id) ?? []} canEdit={editable(c.id)} /></section>
-                <section aria-label="Standard terms" className="space-y-2"><h3 className="text-sm font-semibold">Standard terms</h3>
-                  {termsBy.get(c.id) ? (editable(c.id) ? <TermsTemplateForm companyId={c.id} terms={termsBy.get(c.id)!} /> : (
-                    <div className="text-sm"><p className="font-medium">{termsBy.get(c.id)!.label}</p><ol className="mt-1 list-decimal space-y-1 pl-5">{termsBy.get(c.id)!.clauses.map((t) => <li key={t.title}><strong>{t.title}.</strong> {t.body}</li>)}</ol></div>
-                  )) : <p className="text-sm text-muted-foreground">No standard terms recorded for this company yet.</p>}
-                </section>
               </>
             )}
           </CardContent>

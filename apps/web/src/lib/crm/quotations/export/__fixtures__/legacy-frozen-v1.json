@@ -1,0 +1,1326 @@
+{
+ "note": "Fictional frozen v1 snapshot saved from the code BEFORE the estimates-only change. Golden outputs are what that code produced.",
+ "snapshot": {
+  "schema_version": 1,
+  "reference": "QUO-FIX-2026-0001",
+  "revision": 1,
+  "issue_date": "2026-11-02",
+  "validity_date": "2026-12-31",
+  "enquiry": {
+   "reference": "ENQ-FIX-2026-0007",
+   "title": "Fictional direct fit-out"
+  },
+  "issuer": {
+   "company_id": "22222222-2222-4222-8222-222222222222",
+   "legal_name": "Fictional Enginious UAE LLC",
+   "trn": "100200300400003",
+   "address": "Fictional Tower, Dubai",
+   "phone": "+971 4 000 0000",
+   "email": "quotes@fictional.example",
+   "website": "fictional.example",
+   "logo": {
+    "bucket": "quotation-assets",
+    "storage_path": "11111111-1111-4111-8111-111111111111/logo-4e4dd66fde68c5ad10f681bcb53efc14354e769d8cdc55d8290882aff3f94232.png",
+    "sha256": "4e4dd66fde68c5ad10f681bcb53efc14354e769d8cdc55d8290882aff3f94232",
+    "mime_type": "image/png"
+   },
+   "country_code": "AE"
+  },
+  "bill_to": {
+   "organisation_id": "org-1",
+   "name": "Fictional Harbour Client",
+   "address": "Fictional Quay 1, Dubai",
+   "country_code": "AE",
+   "vat_trn": "000123450001",
+   "trade_licence_no": "0045"
+  },
+  "currency": "EUR",
+  "minor_units": 2,
+  "vat": {
+   "kind": "rate",
+   "label": "5%",
+   "rate": "5"
+  },
+  "sections": [
+   {
+    "number": "1",
+    "title": "Fabrication",
+    "lines": [
+     {
+      "number": "1.1",
+      "description": "Custom stage deck in powder-coated aluminium with integrated cable management, rigging points and a printed fascia, delivered, installed and struck on site. Custom stage deck in powder-coated aluminium with integrated cable management, rigging points and a printed fascia, delivered, installed and struck on site. Custom stage deck in powder-coated aluminium with integrated cable management, rigging points and a printed fascia, delivered, installed and struck on site. Custom stage deck in powder-coated aluminium with integrated cable management, rigging points and a printed fascia, delivered, installed and struck on site. Custom stage deck in powder-coated aluminium with integrated cable management, rigging points and a printed fascia, delivered, installed and struck on site. Custom stage deck in powder-coated aluminium with integrated cable management, rigging points and a printed fascia, delivered, installed and struck on site.",
+      "unit": "m2",
+      "quantity": "3",
+      "unit_price": "33.33",
+      "image": {
+       "bucket": "quotation-assets",
+       "storage_path": "11111111-1111-4111-8111-111111111111/line-1.1-3c97724e7bd092b453b167e5f68c30dcfa7356d187e5270e973c931ff08cc349.png",
+       "sha256": "3c97724e7bd092b453b167e5f68c30dcfa7356d187e5270e973c931ff08cc349",
+       "mime_type": "image/png",
+       "file_id": "file-1.1",
+       "original_name": "photo.png",
+       "size_bytes": 100
+      },
+      "vat": {
+       "kind": "rate",
+       "label": "5%",
+       "rate": "5"
+      },
+      "amount_net": "99.99",
+      "vat_amount": "5.00",
+      "amount_gross": "104.99"
+     },
+     {
+      "number": "1.2",
+      "description": "Fascia panels",
+      "unit": "m2",
+      "quantity": "1.5",
+      "unit_price": "19.99",
+      "image": null,
+      "vat": {
+       "kind": "rate",
+       "label": "15%",
+       "rate": "15"
+      },
+      "amount_net": "29.99",
+      "vat_amount": "4.50",
+      "amount_gross": "34.49"
+     }
+    ],
+    "subtotal_net": "129.98",
+    "subtotal_vat": "9.50",
+    "subtotal_gross": "139.48"
+   },
+   {
+    "number": "2",
+    "title": "AV",
+    "lines": [
+     {
+      "number": "2.1",
+      "description": "LED wall",
+      "unit": "m2",
+      "quantity": "7",
+      "unit_price": "0.35",
+      "image": {
+       "bucket": "quotation-assets",
+       "storage_path": "11111111-1111-4111-8111-111111111111/line-2.1-9c96ad158584ffe20725052a56ef8ed9ff8978612f0c2132df790994b9d8620e.png",
+       "sha256": "9c96ad158584ffe20725052a56ef8ed9ff8978612f0c2132df790994b9d8620e",
+       "mime_type": "image/png",
+       "file_id": "file-2.1",
+       "original_name": "photo.png",
+       "size_bytes": 100
+      },
+      "vat": {
+       "kind": "out_of_scope",
+       "label": "Out of scope",
+       "rate": null
+      },
+      "amount_net": "2.45",
+      "vat_amount": "0.00",
+      "amount_gross": "2.45"
+     }
+    ],
+    "subtotal_net": "2.45",
+    "subtotal_vat": "0.00",
+    "subtotal_gross": "2.45"
+   }
+  ],
+  "totals": {
+   "net": "132.43",
+   "vat": "9.50",
+   "gross": "141.93"
+  },
+  "milestones": [
+   {
+    "label": "Deposit",
+    "kind": "percent",
+    "value": "40",
+    "due": "On acceptance",
+    "amount": "56.77"
+   },
+   {
+    "label": "Balance",
+    "kind": "percent",
+    "value": "60",
+    "due": "On completion",
+    "amount": "85.16"
+   }
+  ],
+  "exclusions": [
+   {
+    "title": "Civil works",
+    "body": "Civil and MEPFS works are not included."
+   }
+  ],
+  "terms": {
+   "label": "Standard terms (working draft, pending legal review)",
+   "clauses": [
+    {
+     "title": "Changes",
+     "body": "Changes to scope may affect the price."
+    },
+    {
+     "title": "Confidentiality",
+     "body": "Provided for evaluation only."
+    }
+   ]
+  }
+ },
+ "assets": {
+  "11111111-1111-4111-8111-111111111111/line-1.1-3c97724e7bd092b453b167e5f68c30dcfa7356d187e5270e973c931ff08cc349.png": "iVBORw0KGgoAAAANSUhEUgAAADwAAAAoCAIAAAAt2Q6oAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAY0lEQVRYhe2SAQ3AQAyEqgUL9e/gRE3G9TMSBBDCZHmOqRtEaepF4x5YGvfYo0zdIEpTLxr3wNK4xx5l6gZRmnrRuAeWxj32KFM3iNLUi8Y9sDTusUeZukGUpl407oGl+cUeH11BlfeEYT7JAAAAAElFTkSuQmCC",
+  "11111111-1111-4111-8111-111111111111/line-2.1-9c96ad158584ffe20725052a56ef8ed9ff8978612f0c2132df790994b9d8620e.png": "iVBORw0KGgoAAAANSUhEUgAAACgAAAA8CAIAAACb22+3AAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAW0lEQVRYhe3YQQkAIBREQbNshe3fYEMZQw8D3gVRh/9Ouifr2LiOOi7XPKf6QOLLHCSKxWGxWAwWh8ViMVg0Lc5gXiki4svkpgpskRQnogaLw2KxGCwOi/2PxQvFCJX3sqmh5QAAAABJRU5ErkJggg==",
+  "11111111-1111-4111-8111-111111111111/logo-4e4dd66fde68c5ad10f681bcb53efc14354e769d8cdc55d8290882aff3f94232.png": "iVBORw0KGgoAAAANSUhEUgAAAHgAAABQCAIAAABd+SbeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAABHklEQVR4nO3UQW0EARTD0KEwWExyYZdAr918VU8KAsvx836y9+8hPCi/X1EN6IDuP72N0QHdXENGNwcnHd2cRgd0cw0Z3RycdHRzGh3QzTVkdHNw0tHNaXRAN9eQ0c3BSUc3p9EB3VxDRjcHJx3dnEYHdHMNGd0cnHR0cxod0M01ZHRzcNLRzWl0QDfXkNHNwUlHN6fRAd1cQ0Y3Bycd3ZxGB3RzDRndHJx0dHMaHdDNNWR0c3DS0c1pdEA315DRzcFJRzen0QHdXENGNwcnHd2cRgd0cw0Z3RycdHRzGh3QzTVkdHNw0tHNaXRAN9eQ0c3BSUc3p9EB3VxDRjcHJx3dnEYHdHMNGd0cnHR0cxod0M01ZHRzcNLRnOmv+wEO/uO0CgU+lwAAAABJRU5ErkJggg=="
+ },
+ "golden": {
+  "pdfText": "                                                                                                                                                                                Quotation\n                                                                                                                                                                               QUO-FIX-2026-0001\n                                                                                                                                                                                                 Revision 1\n                                                                                                                                                                                   Issue date: 2026-11-02\n                                                                                                                                                                                   Valid until: 2026-12-31\nFictional Enginious UAE LLC\nTRN 100200300400003\nFictional Tower, Dubai\n+971 4 000 0000 · quotes@fictional.example · fictional.example\n\n\nB I L L TO                                                                                                 PROJECT / ENQUIRY\nFictional Harbour Client                                                                                   Fictional direct fit-out\nFictional Quay 1, Dubai, United Arab Emirates                                                              Enquiry ENQ-FIX-2026-0007\nVAT registration number / TRN: 000123450001                                                                All amounts in EUR\nTrade licence number: 0045\n\n\n#            Description                                                                           Image   Unit           Qty          Unit price   Excl. VAT   VAT rate   VAT amount            Incl. VAT\n 1 Fabrication\n1.1          Custom stage deck in powder-coated aluminium with integrated cable                            m2               3              33.33       99.99        5%           5.00             104.99\n             management, rigging points and a printed fascia, delivered, installed and struck\n             on site. Custom stage deck in powder-coated aluminium with integrated cable\n             management, rigging points and a printed fascia, delivered, installed and struck\n             on site. Custom stage deck in powder-coated aluminium with integrated cable\n             management, rigging points and a printed fascia, delivered, installed and struck\n             on site. Custom stage deck in powder-coated aluminium with integrated cable\n             management, rigging points and a printed fascia, delivered, installed and struck\n             on site. Custom stage deck in powder-coated aluminium with integrated cable\n             management, rigging points and a printed fascia, delivered, installed and struck\n             on site. Custom stage deck in powder-coated aluminium with integrated cable\n             management, rigging points and a printed fascia, delivered, installed and struck on\n             site.\n1.2          Fascia panels                                                                                 m2             1.5              19.99       29.99       15%           4.50               34.49\n\n                                                                                                                        Subtotal: 1 Fabrication      129.98                      9.50             139.48\n 2 AV\n2.1          LED wall                                                                                      m2               7               0.35        2.45     Out of          0.00                2.45\n                                                                                                                                                                 scope\n\n\n\n\nFictional Enginious UAE LLC · QUO-FIX-2026-0001 · Revision 1                                                                                                                                    Page 1 of 3\n\f#        Description                                           Image   Unit   Qty       Unit price          Excl. VAT   VAT rate   VAT amount       Incl. VAT\n                                                                                    Subtotal: 2 AV               2.45                    0.00           2.45\n\n\n                                                                                               Total excl. VAT                                    EUR 132.43\n                                                                                               VAT                                                  EUR 9.50\n\n                                                                                               Total incl. VAT                                  EUR 141.93\nThis quotation is valid until 2026-12-31.\n\n\n\n\nFictional Enginious UAE LLC · QUO-FIX-2026-0001 · Revision 1                                                                                       Page 2 of 3\n\fPayment milestones\nMilestone                                                      Due             Share   Amount incl. VAT\nDeposit                                                        On acceptance    40%          EUR 56.77\n\nBalance                                                        On completion    60%          EUR 85.16\n\n\nExclusions\n1. Civil works\nCivil and MEPFS works are not included.\n\n\n\nTerms and conditions\nStandard terms (working draft, pending legal review)\n1. Changes\nChanges to scope may affect the price.\n\n\n2. Confidentiality\nProvided for evaluation only.\n\n\n\n\nFictional Enginious UAE LLC · QUO-FIX-2026-0001 · Revision 1                                              Page 3 of 3\n\f",
+  "pdfPages": 3,
+  "contentDisposition": {
+   "pdf": "attachment; filename=\"QUO-FIX-2026-0001-rev1.pdf\"",
+   "xlsx": "attachment; filename=\"QUO-FIX-2026-0001-rev1.xlsx\""
+  },
+  "xlsx": {
+   "sheetName": "Quotation",
+   "cells": [
+    [
+     1,
+     24,
+     [
+      [
+       1,
+       "Fictional Enginious UAE LLC"
+      ],
+      [
+       2,
+       "Fictional Enginious UAE LLC"
+      ],
+      [
+       6,
+       "Quotation"
+      ],
+      [
+       7,
+       "Quotation"
+      ],
+      [
+       8,
+       "Quotation"
+      ],
+      [
+       9,
+       "Quotation"
+      ],
+      [
+       10,
+       "Quotation"
+      ]
+     ]
+    ],
+    [
+     2,
+     16,
+     [
+      [
+       1,
+       "TRN 100200300400003"
+      ],
+      [
+       2,
+       "TRN 100200300400003"
+      ],
+      [
+       6,
+       "Reference: QUO-FIX-2026-0001"
+      ],
+      [
+       7,
+       "Reference: QUO-FIX-2026-0001"
+      ],
+      [
+       8,
+       "Reference: QUO-FIX-2026-0001"
+      ],
+      [
+       9,
+       "Reference: QUO-FIX-2026-0001"
+      ],
+      [
+       10,
+       "Reference: QUO-FIX-2026-0001"
+      ]
+     ]
+    ],
+    [
+     3,
+     16,
+     [
+      [
+       1,
+       "Fictional Tower, Dubai"
+      ],
+      [
+       2,
+       "Fictional Tower, Dubai"
+      ],
+      [
+       6,
+       "Revision: 1"
+      ],
+      [
+       7,
+       "Revision: 1"
+      ],
+      [
+       8,
+       "Revision: 1"
+      ],
+      [
+       9,
+       "Revision: 1"
+      ],
+      [
+       10,
+       "Revision: 1"
+      ]
+     ]
+    ],
+    [
+     4,
+     16,
+     [
+      [
+       1,
+       "'+971 4 000 0000  ·  quotes@fictional.example  ·  fictional.example"
+      ],
+      [
+       2,
+       "'+971 4 000 0000  ·  quotes@fictional.example  ·  fictional.example"
+      ],
+      [
+       6,
+       "Issue date: 2026-11-02"
+      ],
+      [
+       7,
+       "Issue date: 2026-11-02"
+      ],
+      [
+       8,
+       "Issue date: 2026-11-02"
+      ],
+      [
+       9,
+       "Issue date: 2026-11-02"
+      ],
+      [
+       10,
+       "Issue date: 2026-11-02"
+      ]
+     ]
+    ],
+    [
+     5,
+     16,
+     [
+      [
+       6,
+       "Valid until: 2026-12-31"
+      ],
+      [
+       7,
+       "Valid until: 2026-12-31"
+      ],
+      [
+       8,
+       "Valid until: 2026-12-31"
+      ],
+      [
+       9,
+       "Valid until: 2026-12-31"
+      ],
+      [
+       10,
+       "Valid until: 2026-12-31"
+      ]
+     ]
+    ],
+    [
+     7,
+     null,
+     [
+      [
+       1,
+       "BILL TO"
+      ],
+      [
+       2,
+       "BILL TO"
+      ],
+      [
+       6,
+       "PROJECT / ENQUIRY"
+      ],
+      [
+       7,
+       "PROJECT / ENQUIRY"
+      ],
+      [
+       8,
+       "PROJECT / ENQUIRY"
+      ],
+      [
+       9,
+       "PROJECT / ENQUIRY"
+      ],
+      [
+       10,
+       "PROJECT / ENQUIRY"
+      ]
+     ]
+    ],
+    [
+     8,
+     null,
+     [
+      [
+       1,
+       "Fictional Harbour Client"
+      ],
+      [
+       2,
+       "Fictional Harbour Client"
+      ],
+      [
+       6,
+       "Fictional direct fit-out"
+      ],
+      [
+       7,
+       "Fictional direct fit-out"
+      ],
+      [
+       8,
+       "Fictional direct fit-out"
+      ],
+      [
+       9,
+       "Fictional direct fit-out"
+      ],
+      [
+       10,
+       "Fictional direct fit-out"
+      ]
+     ]
+    ],
+    [
+     9,
+     null,
+     [
+      [
+       1,
+       "Fictional Quay 1, Dubai, United Arab Emirates"
+      ],
+      [
+       2,
+       "Fictional Quay 1, Dubai, United Arab Emirates"
+      ],
+      [
+       6,
+       "Enquiry ENQ-FIX-2026-0007"
+      ],
+      [
+       7,
+       "Enquiry ENQ-FIX-2026-0007"
+      ],
+      [
+       8,
+       "Enquiry ENQ-FIX-2026-0007"
+      ],
+      [
+       9,
+       "Enquiry ENQ-FIX-2026-0007"
+      ],
+      [
+       10,
+       "Enquiry ENQ-FIX-2026-0007"
+      ]
+     ]
+    ],
+    [
+     10,
+     null,
+     [
+      [
+       1,
+       "VAT registration number / TRN: 000123450001"
+      ],
+      [
+       2,
+       "VAT registration number / TRN: 000123450001"
+      ],
+      [
+       6,
+       "All amounts in EUR"
+      ],
+      [
+       7,
+       "All amounts in EUR"
+      ],
+      [
+       8,
+       "All amounts in EUR"
+      ],
+      [
+       9,
+       "All amounts in EUR"
+      ],
+      [
+       10,
+       "All amounts in EUR"
+      ]
+     ]
+    ],
+    [
+     11,
+     null,
+     [
+      [
+       1,
+       "Trade licence number: 0045"
+      ],
+      [
+       2,
+       "Trade licence number: 0045"
+      ]
+     ]
+    ],
+    [
+     13,
+     20,
+     [
+      [
+       1,
+       "#"
+      ],
+      [
+       2,
+       "Description"
+      ],
+      [
+       3,
+       "Image"
+      ],
+      [
+       4,
+       "Unit"
+      ],
+      [
+       5,
+       "Qty"
+      ],
+      [
+       6,
+       "Unit price"
+      ],
+      [
+       7,
+       "Excl. VAT"
+      ],
+      [
+       8,
+       "VAT rate"
+      ],
+      [
+       9,
+       "VAT amount"
+      ],
+      [
+       10,
+       "Incl. VAT"
+      ]
+     ]
+    ],
+    [
+     14,
+     20,
+     [
+      [
+       1,
+       "1 Fabrication"
+      ],
+      [
+       2,
+       "1 Fabrication"
+      ],
+      [
+       3,
+       "1 Fabrication"
+      ],
+      [
+       4,
+       "1 Fabrication"
+      ],
+      [
+       5,
+       "1 Fabrication"
+      ],
+      [
+       6,
+       "1 Fabrication"
+      ],
+      [
+       7,
+       "1 Fabrication"
+      ],
+      [
+       8,
+       "1 Fabrication"
+      ],
+      [
+       9,
+       "1 Fabrication"
+      ],
+      [
+       10,
+       "1 Fabrication"
+      ]
+     ]
+    ],
+    [
+     15,
+     289,
+     [
+      [
+       1,
+       "1.1"
+      ],
+      [
+       2,
+       "Custom stage deck in powder-coated aluminium with integrated cable management, rigging points and a printed fascia, delivered, installed and struck on site. Custom stage deck in powder-coated aluminium with integrated cable management, rigging points and a printed fascia, delivered, installed and struck on site. Custom stage deck in powder-coated aluminium with integrated cable management, rigging points and a printed fascia, delivered, installed and struck on site. Custom stage deck in powder-coated aluminium with integrated cable management, rigging points and a printed fascia, delivered, installed and struck on site. Custom stage deck in powder-coated aluminium with integrated cable management, rigging points and a printed fascia, delivered, installed and struck on site. Custom stage deck in powder-coated aluminium with integrated cable management, rigging points and a printed fascia, delivered, installed and struck on site."
+      ],
+      [
+       4,
+       "m2"
+      ],
+      [
+       5,
+       3
+      ],
+      [
+       6,
+       33.33
+      ],
+      [
+       7,
+       99.99
+      ],
+      [
+       8,
+       0.05
+      ],
+      [
+       9,
+       5
+      ],
+      [
+       10,
+       104.99
+      ]
+     ]
+    ],
+    [
+     16,
+     20,
+     [
+      [
+       1,
+       "1.2"
+      ],
+      [
+       2,
+       "Fascia panels"
+      ],
+      [
+       4,
+       "m2"
+      ],
+      [
+       5,
+       1.5
+      ],
+      [
+       6,
+       19.99
+      ],
+      [
+       7,
+       29.99
+      ],
+      [
+       8,
+       0.15
+      ],
+      [
+       9,
+       4.5
+      ],
+      [
+       10,
+       34.49
+      ]
+     ]
+    ],
+    [
+     17,
+     20,
+     [
+      [
+       2,
+       "Subtotal: 1 Fabrication"
+      ],
+      [
+       7,
+       129.98
+      ],
+      [
+       9,
+       9.5
+      ],
+      [
+       10,
+       139.48
+      ]
+     ]
+    ],
+    [
+     18,
+     20,
+     [
+      [
+       1,
+       "2 AV"
+      ],
+      [
+       2,
+       "2 AV"
+      ],
+      [
+       3,
+       "2 AV"
+      ],
+      [
+       4,
+       "2 AV"
+      ],
+      [
+       5,
+       "2 AV"
+      ],
+      [
+       6,
+       "2 AV"
+      ],
+      [
+       7,
+       "2 AV"
+      ],
+      [
+       8,
+       "2 AV"
+      ],
+      [
+       9,
+       "2 AV"
+      ],
+      [
+       10,
+       "2 AV"
+      ]
+     ]
+    ],
+    [
+     19,
+     68,
+     [
+      [
+       1,
+       "2.1"
+      ],
+      [
+       2,
+       "LED wall"
+      ],
+      [
+       4,
+       "m2"
+      ],
+      [
+       5,
+       7
+      ],
+      [
+       6,
+       0.35
+      ],
+      [
+       7,
+       2.45
+      ],
+      [
+       8,
+       "Out of scope"
+      ],
+      [
+       9,
+       0
+      ],
+      [
+       10,
+       2.45
+      ]
+     ]
+    ],
+    [
+     20,
+     20,
+     [
+      [
+       2,
+       "Subtotal: 2 AV"
+      ],
+      [
+       7,
+       2.45
+      ],
+      [
+       9,
+       0
+      ],
+      [
+       10,
+       2.45
+      ]
+     ]
+    ],
+    [
+     22,
+     null,
+     [
+      [
+       6,
+       "Total excl. VAT"
+      ],
+      [
+       7,
+       "Total excl. VAT"
+      ],
+      [
+       8,
+       "Total excl. VAT"
+      ],
+      [
+       9,
+       "Total excl. VAT"
+      ],
+      [
+       10,
+       132.43
+      ]
+     ]
+    ],
+    [
+     23,
+     null,
+     [
+      [
+       6,
+       "VAT"
+      ],
+      [
+       7,
+       "VAT"
+      ],
+      [
+       8,
+       "VAT"
+      ],
+      [
+       9,
+       "VAT"
+      ],
+      [
+       10,
+       9.5
+      ]
+     ]
+    ],
+    [
+     24,
+     null,
+     [
+      [
+       6,
+       "Total incl. VAT"
+      ],
+      [
+       7,
+       "Total incl. VAT"
+      ],
+      [
+       8,
+       "Total incl. VAT"
+      ],
+      [
+       9,
+       "Total incl. VAT"
+      ],
+      [
+       10,
+       141.93
+      ]
+     ]
+    ],
+    [
+     26,
+     null,
+     [
+      [
+       1,
+       "Payment milestones"
+      ],
+      [
+       2,
+       "Payment milestones"
+      ],
+      [
+       3,
+       "Payment milestones"
+      ],
+      [
+       4,
+       "Payment milestones"
+      ],
+      [
+       5,
+       "Payment milestones"
+      ],
+      [
+       6,
+       "Payment milestones"
+      ],
+      [
+       7,
+       "Payment milestones"
+      ],
+      [
+       8,
+       "Payment milestones"
+      ],
+      [
+       9,
+       "Payment milestones"
+      ],
+      [
+       10,
+       "Payment milestones"
+      ]
+     ]
+    ],
+    [
+     27,
+     null,
+     [
+      [
+       2,
+       "Milestone"
+      ],
+      [
+       3,
+       "Due"
+      ],
+      [
+       4,
+       "Due"
+      ],
+      [
+       5,
+       "Due"
+      ],
+      [
+       6,
+       "Share"
+      ],
+      [
+       7,
+       "Amount incl. VAT"
+      ]
+     ]
+    ],
+    [
+     28,
+     20,
+     [
+      [
+       2,
+       "Deposit"
+      ],
+      [
+       3,
+       "On acceptance"
+      ],
+      [
+       4,
+       "On acceptance"
+      ],
+      [
+       5,
+       "On acceptance"
+      ],
+      [
+       6,
+       0.4
+      ],
+      [
+       7,
+       56.77
+      ]
+     ]
+    ],
+    [
+     29,
+     20,
+     [
+      [
+       2,
+       "Balance"
+      ],
+      [
+       3,
+       "On completion"
+      ],
+      [
+       4,
+       "On completion"
+      ],
+      [
+       5,
+       "On completion"
+      ],
+      [
+       6,
+       0.6
+      ],
+      [
+       7,
+       85.16
+      ]
+     ]
+    ],
+    [
+     31,
+     null,
+     [
+      [
+       1,
+       "Exclusions"
+      ],
+      [
+       2,
+       "Exclusions"
+      ],
+      [
+       3,
+       "Exclusions"
+      ],
+      [
+       4,
+       "Exclusions"
+      ],
+      [
+       5,
+       "Exclusions"
+      ],
+      [
+       6,
+       "Exclusions"
+      ],
+      [
+       7,
+       "Exclusions"
+      ],
+      [
+       8,
+       "Exclusions"
+      ],
+      [
+       9,
+       "Exclusions"
+      ],
+      [
+       10,
+       "Exclusions"
+      ]
+     ]
+    ],
+    [
+     32,
+     34,
+     [
+      [
+       1,
+       "1. Civil works\nCivil and MEPFS works are not included."
+      ],
+      [
+       2,
+       "1. Civil works\nCivil and MEPFS works are not included."
+      ],
+      [
+       3,
+       "1. Civil works\nCivil and MEPFS works are not included."
+      ],
+      [
+       4,
+       "1. Civil works\nCivil and MEPFS works are not included."
+      ],
+      [
+       5,
+       "1. Civil works\nCivil and MEPFS works are not included."
+      ],
+      [
+       6,
+       "1. Civil works\nCivil and MEPFS works are not included."
+      ],
+      [
+       7,
+       "1. Civil works\nCivil and MEPFS works are not included."
+      ],
+      [
+       8,
+       "1. Civil works\nCivil and MEPFS works are not included."
+      ],
+      [
+       9,
+       "1. Civil works\nCivil and MEPFS works are not included."
+      ],
+      [
+       10,
+       "1. Civil works\nCivil and MEPFS works are not included."
+      ]
+     ]
+    ],
+    [
+     34,
+     null,
+     [
+      [
+       1,
+       "Terms and conditions"
+      ],
+      [
+       2,
+       "Terms and conditions"
+      ],
+      [
+       3,
+       "Terms and conditions"
+      ],
+      [
+       4,
+       "Terms and conditions"
+      ],
+      [
+       5,
+       "Terms and conditions"
+      ],
+      [
+       6,
+       "Terms and conditions"
+      ],
+      [
+       7,
+       "Terms and conditions"
+      ],
+      [
+       8,
+       "Terms and conditions"
+      ],
+      [
+       9,
+       "Terms and conditions"
+      ],
+      [
+       10,
+       "Terms and conditions"
+      ]
+     ]
+    ],
+    [
+     35,
+     null,
+     [
+      [
+       1,
+       "Standard terms (working draft, pending legal review)"
+      ],
+      [
+       2,
+       "Standard terms (working draft, pending legal review)"
+      ],
+      [
+       3,
+       "Standard terms (working draft, pending legal review)"
+      ],
+      [
+       4,
+       "Standard terms (working draft, pending legal review)"
+      ],
+      [
+       5,
+       "Standard terms (working draft, pending legal review)"
+      ],
+      [
+       6,
+       "Standard terms (working draft, pending legal review)"
+      ],
+      [
+       7,
+       "Standard terms (working draft, pending legal review)"
+      ],
+      [
+       8,
+       "Standard terms (working draft, pending legal review)"
+      ],
+      [
+       9,
+       "Standard terms (working draft, pending legal review)"
+      ],
+      [
+       10,
+       "Standard terms (working draft, pending legal review)"
+      ]
+     ]
+    ],
+    [
+     36,
+     34,
+     [
+      [
+       1,
+       "1. Changes\nChanges to scope may affect the price."
+      ],
+      [
+       2,
+       "1. Changes\nChanges to scope may affect the price."
+      ],
+      [
+       3,
+       "1. Changes\nChanges to scope may affect the price."
+      ],
+      [
+       4,
+       "1. Changes\nChanges to scope may affect the price."
+      ],
+      [
+       5,
+       "1. Changes\nChanges to scope may affect the price."
+      ],
+      [
+       6,
+       "1. Changes\nChanges to scope may affect the price."
+      ],
+      [
+       7,
+       "1. Changes\nChanges to scope may affect the price."
+      ],
+      [
+       8,
+       "1. Changes\nChanges to scope may affect the price."
+      ],
+      [
+       9,
+       "1. Changes\nChanges to scope may affect the price."
+      ],
+      [
+       10,
+       "1. Changes\nChanges to scope may affect the price."
+      ]
+     ]
+    ],
+    [
+     37,
+     34,
+     [
+      [
+       1,
+       "2. Confidentiality\nProvided for evaluation only."
+      ],
+      [
+       2,
+       "2. Confidentiality\nProvided for evaluation only."
+      ],
+      [
+       3,
+       "2. Confidentiality\nProvided for evaluation only."
+      ],
+      [
+       4,
+       "2. Confidentiality\nProvided for evaluation only."
+      ],
+      [
+       5,
+       "2. Confidentiality\nProvided for evaluation only."
+      ],
+      [
+       6,
+       "2. Confidentiality\nProvided for evaluation only."
+      ],
+      [
+       7,
+       "2. Confidentiality\nProvided for evaluation only."
+      ],
+      [
+       8,
+       "2. Confidentiality\nProvided for evaluation only."
+      ],
+      [
+       9,
+       "2. Confidentiality\nProvided for evaluation only."
+      ],
+      [
+       10,
+       "2. Confidentiality\nProvided for evaluation only."
+      ]
+     ]
+    ]
+   ],
+   "imageCount": 3,
+   "pageSetup": {
+    "fitToPage": true,
+    "margins": {
+     "left": 0.4,
+     "right": 0.4,
+     "top": 0.5,
+     "bottom": 0.5,
+     "header": 0.2,
+     "footer": 0.2
+    },
+    "paperSize": 9,
+    "orientation": "landscape",
+    "horizontalDpi": 4294967295,
+    "verticalDpi": 4294967295,
+    "pageOrder": "downThenOver",
+    "blackAndWhite": false,
+    "draft": false,
+    "cellComments": "None",
+    "errors": "displayed",
+    "scale": 100,
+    "fitToWidth": 1,
+    "fitToHeight": 0,
+    "firstPageNumber": 1,
+    "useFirstPageNumber": false,
+    "usePrinterDefaults": false,
+    "copies": 1,
+    "printTitlesRow": "13:13"
+   }
+  }
+ }
+}

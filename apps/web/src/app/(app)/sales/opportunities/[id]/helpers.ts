@@ -61,7 +61,14 @@ export function describeEvent(e: Pick<CrmOpportunityEventRow, "kind" | "from_val
       return fields.length ? `Details changed: ${fields.join(", ")}.` : "Details changed.";
     }
     case "file": return `File or link recorded: ${e.to_value ?? ""}.`;
-    case "proposal": return e.from_value ? `Proposal ${e.to_value ?? ""} (was ${e.from_value}).` : `Proposal ${e.to_value ?? ""}.`;
+    case "proposal": {
+      // The estimate functions write "v1 estimate draft", "<ref> rev 2 draft" and "<ref> rev 2 issued" (migration 20261220000100, unchanged): shown as estimate events.
+      const est = /^(v\d+) estimate draft$/.exec(e.to_value ?? "");
+      if (est) return `Estimate ${est[1]} drafted.`;
+      const rev = /^(\S+) rev (\d+) (issued|draft)$/.exec(e.to_value ?? "");
+      if (rev) return `Estimate ${rev[1]} revision ${rev[2]} ${rev[3] === "issued" ? "finalised" : "drafted"}.`;
+      return e.from_value ? `Proposal ${e.to_value ?? ""} (was ${e.from_value}).` : `Proposal ${e.to_value ?? ""}.`;
+    }
     case "availability": return `Equipment availability: ${AVAILABILITY_EVENT_WORDS[e.to_value ?? ""] ?? e.to_value ?? ""}.${reason}`;
     case "approval": return `Commercial ${APPROVAL_EVENT_WORDS[e.to_value ?? ""] ?? e.to_value ?? ""}.${reason}`;
     case "handover": return `Handover status: ${HANDOVER_STATUS_LABELS[e.to_value ?? ""] ?? e.to_value ?? ""}.`;

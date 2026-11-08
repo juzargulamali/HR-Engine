@@ -22,7 +22,9 @@ export const readFromStorage: StorageReader = async (bucket, path) => {
   return new Uint8Array(await data.arrayBuffer());
 };
 
-const THUMB = 240;
+/** Longest side in pixels of an embedded picture. Legacy documents keep the small thumbnail they always had; an estimate prints photos large enough to inspect. */
+export const THUMB_LEGACY = 240;
+export const THUMB_ESTIMATE = 640;
 
 /** PNG / JPEG / WebP by the bytes themselves (never by file name or claimed type). */
 export function detectImage(bytes: Uint8Array): "png" | "jpg" | "webp" | null {
@@ -34,7 +36,7 @@ export function detectImage(bytes: Uint8Array): "png" | "jpg" | "webp" | null {
 }
 
 /** Converts WebP and shrinks to a thumbnail when the image library is present. Null = cannot be embedded. */
-export async function normaliseImage(bytes: Uint8Array): Promise<ExportImage | null> {
+export async function normaliseImage(bytes: Uint8Array, max: number = THUMB_LEGACY): Promise<ExportImage | null> {
   const b = Buffer.from(bytes);
   const kind = detectImage(b);
   if (!kind) return null;
@@ -43,7 +45,7 @@ export async function normaliseImage(bytes: Uint8Array): Promise<ExportImage | n
   try {
     // `sharp` ships with Next.js for image optimisation; it is optional here: without it PNG and JPEG are embedded as stored and WebP is left out.
     const sharp = (await import("sharp")).default;
-    const img = sharp(b, { failOn: "error" }).rotate().resize({ width: THUMB, height: THUMB, fit: "inside", withoutEnlargement: true });
+    const img = sharp(b, { failOn: "error" }).rotate().resize({ width: max, height: max, fit: "inside", withoutEnlargement: true });
     if (isJpg) return { data: await img.jpeg({ quality: 82 }).toBuffer(), format: "jpg" };
     return { data: await img.png().toBuffer(), format: "png" };
   } catch {
@@ -62,17 +64,18 @@ export async function loadExportAssets(model: QuotationDocModel, read: StorageRe
   const wantedSha = new Map<string, string | null>();
   for (const s of model.sections) for (const l of s.lines) if (l.image && !wanted.has(l.image.key)) { wanted.set(l.image.key, l.image.storagePath); wantedBucket.set(l.image.key, l.image.bucket); wantedSha.set(l.image.key, l.image.sha256); }
   let missing = 0;
+  const max = model.format === "estimate" ? THUMB_ESTIMATE : THUMB_LEGACY;
   await Promise.all([...wanted].map(async ([key, path]) => {
     try {
       const raw = await read(wantedBucket.get(key)!, path);
-      const img = raw && intact(raw, wantedSha.get(key) ?? null) ? await normaliseImage(raw) : null;
+      const img = raw && intact(raw, wantedSha.get(key) ?? null) ? await normaliseImage(raw, max) : null;
       if (img) images.set(key, img); else missing += 1;
     } catch { missing += 1; }
   }));
   let logo: ExportImage | null = null;
   const lg = model.issuer.logo;
   if (lg) {
-    try { const raw = await read(lg.bucket, lg.storagePath); logo = raw && intact(raw, lg.sha256) ? await normaliseImage(raw) : null; } catch { logo = null; }
+    try { const raw = await read(lg.bucket, lg.storagePath); logo = raw && intact(raw, lg.sha256) ? await normaliseImage(raw, THUMB_LEGACY) : null; } catch { logo = null; }
   }
   return { images, logo, missing };
 }

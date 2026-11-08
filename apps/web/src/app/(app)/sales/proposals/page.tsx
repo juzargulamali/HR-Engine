@@ -10,6 +10,7 @@ import { getCrmContext } from "@/lib/crm/context";
 import { loadProposals } from "@/lib/crm/data";
 import { cn } from "@/lib/utils";
 import type { CrmProposalRow } from "@/types/crm";
+import { estimateNoteText } from "@/lib/crm/quotations/wording";
 import { OpenFileButton } from "./proposal-file-link";
 
 export const metadata = { title: "Proposals" };
@@ -29,7 +30,9 @@ const STATUS_HELP: Record<Status, string> = {
 };
 
 const STATUS_TONE: Record<Status, OsTone> = { draft: "neutral", sent: "blue", accepted: "green", superseded: "quiet" };
-function StatusBadge({ status }: { status: Status }) {
+function StatusBadge({ status, estimate }: { status: Status; estimate?: { finalised: boolean } | null }) {
+  // An estimate is a budgetary document, not an official quotation sent to the client: it is labelled as an estimate, never as Draft / Sent proposal.
+  if (estimate && status === "draft") return <OsBadge tone={estimate.finalised ? "green" : "neutral"} dot className="whitespace-nowrap">{estimate.finalised ? "Estimate, finalised" : "Estimate, draft"}</OsBadge>;
   return <OsBadge tone={STATUS_TONE[status]} dot={status !== "superseded"} className="whitespace-nowrap">{STATUSES.find((s) => s.id === status)?.label ?? status}</OsBadge>;
 }
 
@@ -46,7 +49,7 @@ function FileCell({ row }: { row: Row }) {
   return <span className="break-words">{label}</span>;
 }
 
-const sentText = (p: CrmProposalRow) => (p.sent_on ? formatDate(p.sent_on) : p.status === "draft" ? "Not sent yet" : "Date not recorded");
+const sentText = (p: CrmProposalRow, estimate?: { finalised: boolean } | null) => (estimate && p.status === "draft" ? "Estimates are not recorded as sent" : p.sent_on ? formatDate(p.sent_on) : p.status === "draft" ? "Not sent yet" : "Date not recorded");
 
 export default async function ProposalsPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
   const ctx = await getCrmContext();
@@ -117,11 +120,11 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
                           <p className="text-sm text-muted-foreground">{r.opportunity.opp.reference}{showCompany ? ` · ${r.opportunity.companyName}` : ""}</p>
                         </>
                       ) : <span className="text-muted-foreground">Opportunity not available</span>}
-                      {r.proposal.note ? <p className="mt-1 break-words text-sm text-muted-foreground">{r.proposal.note}</p> : null}
+                      {r.proposal.note ? <p className="mt-1 break-words text-sm text-muted-foreground">{r.estimate ? estimateNoteText(r.proposal.note) : r.proposal.note}</p> : null}
                     </TableCell>
                     <TableCell className="whitespace-nowrap">v{r.proposal.version}</TableCell>
-                    <TableCell><StatusBadge status={r.proposal.status} /></TableCell>
-                    <TableCell className="whitespace-nowrap">{sentText(r.proposal)}</TableCell>
+                    <TableCell><StatusBadge status={r.proposal.status} estimate={r.estimate} /></TableCell>
+                    <TableCell className="whitespace-nowrap">{sentText(r.proposal, r.estimate)}</TableCell>
                     <TableCell className="max-w-xs"><FileCell row={r} /></TableCell>
                     <TableCell>{r.opportunity?.ownerName ?? "—"}</TableCell>
                   </ClickableRow>
@@ -137,12 +140,12 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
                   {r.opportunity ? (
                     <Link href={`/sales/opportunities/${r.opportunity.opp.id}`} className="min-w-0 break-words font-medium underline-offset-2 hover:underline">{r.opportunity.opp.title}</Link>
                   ) : <span className="text-muted-foreground">Opportunity not available</span>}
-                  <StatusBadge status={r.proposal.status} />
+                  <StatusBadge status={r.proposal.status} estimate={r.estimate} />
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  {r.opportunity ? `${r.opportunity.opp.reference} · ` : ""}v{r.proposal.version} · Sent: {sentText(r.proposal)}{r.opportunity ? ` · Owner ${r.opportunity.ownerName}` : ""}
+                  {r.opportunity ? `${r.opportunity.opp.reference} · ` : ""}v{r.proposal.version} · Sent: {sentText(r.proposal, r.estimate)}{r.opportunity ? ` · Owner ${r.opportunity.ownerName}` : ""}
                 </p>
-                {r.proposal.note ? <p className="break-words text-sm text-muted-foreground">{r.proposal.note}</p> : null}
+                {r.proposal.note ? <p className="break-words text-sm text-muted-foreground">{r.estimate ? estimateNoteText(r.proposal.note) : r.proposal.note}</p> : null}
                 <div className="text-sm"><FileCell row={r} /></div>
               </ClickableCard>
             ))}

@@ -14,6 +14,7 @@
  *     sections or lines can never change a total.
  *   - Negative or non-numeric input is refused (quantity above zero, price zero or more; at most 3 and 4 decimals).
  */
+import { estimateNumbering } from "./estimates";
 
 /** The allowed currencies: one per quotation, always chosen explicitly (never inferred from the client's country). */
 export const QUOTATION_CURRENCIES = ["AED", "SAR", "PLN", "EUR", "USD"] as const;
@@ -34,7 +35,7 @@ export interface QuotationLineInput {
   /** Per-line override as selected; null/undefined = the quotation's VAT. */
   vat?: QuotationVat | null;
 }
-export interface QuotationSectionInput { id?: string; title: string; lines: QuotationLineInput[] }
+export interface QuotationSectionInput { id?: string; title: string; /** The hidden default section of items that sit outside any section (see `estimates.ts`): numbered 1, 2, 3, never printed as a section. */ unsectioned?: boolean; lines: QuotationLineInput[] }
 export interface QuotationInput {
   currency: string | null;
   /** The quotation's VAT selection; null = not chosen yet (draft only: nothing is charged or shown as chosen). */
@@ -53,7 +54,7 @@ export interface CalculatedLine {
   vatAmount: string;
   gross: string;
 }
-export interface CalculatedSection { id?: string; title: string; lines: CalculatedLine[]; net: string; vat: string; gross: string }
+export interface CalculatedSection { id?: string; title: string; /** True for the hidden default section (items outside any section). */ unsectioned?: boolean; lines: CalculatedLine[]; net: string; vat: string; gross: string }
 export interface CalculatedQuotation {
   currency: string | null;
   minorUnits: number;
@@ -67,7 +68,8 @@ export interface CalculatedQuotation {
 /**
  * THE display numbering of a BOQ, used by the builder, the SQL snapshot (`crm_quote_build_content` mirrors it), the PDF and the XLSX so they cannot drift.
  * Sections are numbered 1, 2, 3 in order; a line is `<section number>.<position within its section>`. Every line belongs to a section (the table requires
- * it), so there are no unsectioned lines. Zero-based indexes in, text out (never a number: "1.10" must stay "1.10").
+ * it); an item the user adds outside any section lives in a hidden default section numbered by `estimateNumbering` (estimates.ts), which is identical to this
+ * when there is no such section. Zero-based indexes in, text out (never a number: "1.10" must stay "1.10").
  */
 export const sectionDisplayNumber = (sectionIndex: number): string => String(sectionIndex + 1);
 export const lineDisplayNumber = (sectionIndex: number, lineIndex: number): string => `${sectionIndex + 1}.${lineIndex + 1}`;
@@ -118,6 +120,8 @@ export function calculateQuotation(input: QuotationInput): CalculatedQuotation {
   const f = (n: bigint) => formatMinor(n, minorUnits);
   let totalNet = 0n;
   let totalVat = 0n;
+  // Numbering: with no unsectioned section this is exactly lineDisplayNumber (1.1, 1.2, 2.1); items outside any section are 1, 2, 3 (estimateNumbering).
+  const numbering = estimateNumbering(input.sections.map((s) => ({ unsectioned: !!s.unsectioned, lineCount: s.lines.length })));
   const sections = input.sections.map((s, si): CalculatedSection => {
     let sNet = 0n;
     let sVat = 0n;
@@ -127,11 +131,11 @@ export function calculateQuotation(input: QuotationInput): CalculatedQuotation {
       sNet += net;
       sVat += v;
       const norm = (x: string | number) => String(x).trim().replace(/^0+(?=\d)/, "").replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
-      return { ...(l.id ? { id: l.id } : {}), number: lineDisplayNumber(si, li), quantity: norm(l.quantity), unitPrice: norm(l.unitPrice), vat, net: f(net), vatAmount: f(v), gross: f(net + v) };
+      return { ...(l.id ? { id: l.id } : {}), number: numbering.lines[si]![li]!, quantity: norm(l.quantity), unitPrice: norm(l.unitPrice), vat, net: f(net), vatAmount: f(v), gross: f(net + v) };
     });
     totalNet += sNet;
     totalVat += sVat;
-    return { ...(s.id ? { id: s.id } : {}), title: s.title, lines, net: f(sNet), vat: f(sVat), gross: f(sNet + sVat) };
+    return { ...(s.id ? { id: s.id } : {}), title: s.title, ...(s.unsectioned ? { unsectioned: true } : {}), lines, net: f(sNet), vat: f(sVat), gross: f(sNet + sVat) };
   });
   return { currency: input.currency, minorUnits, vatChosen: input.vat !== null, sections, net: f(totalNet), vat: f(totalVat), gross: f(totalNet + totalVat) };
 }
