@@ -165,6 +165,12 @@ describe("Estimates & Quotations (part 1)", () => {
       const p = await newQuote(oppDirect);
       await expect(header(p, { currency: "GBP" })).rejects.toThrow(/AED, SAR, PLN, EUR or USD/);
     });
+    it("a company created later gets the standard terms and VAT choices too", async () => {
+      const c = id();
+      await admin(`insert into companies (id, legal_name, country_code, default_currency) values ('${c}', 'Fictional New Branch', 'AE', 'AED')`);
+      expect((await admin<{ n: string }>(`select count(*) n from crm_quote_vat_choices where company_id = '${c}'`))[0].n).toBe("5");
+      expect((await admin<{ n: number }>(`select jsonb_array_length(clauses) n from crm_quote_terms_templates where company_id = '${c}'`))[0].n).toBe(6);
+    });
     it("rejects negative or malformed quantities and prices in the database", async () => {
       const p = await newQuote(oppDirect); const s = await section(p, "A");
       for (const bad of [{ quantity: "-1" }, { quantity: "0" }, { quantity: "1e3" }, { unit_price: "-0.01" }, { unit_price: "abc" }])

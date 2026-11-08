@@ -351,6 +351,24 @@ cross join (values ('Out of scope', 'out_of_scope', null::numeric, 0), ('0%', 'r
                    ('15%', 'rate', 15::numeric, 3), ('23%', 'rate', 23::numeric, 4)) as v(label, kind, rate, pos)
 on conflict do nothing;
 
+-- A company created later gets the same starting lists (the statements above cover the companies that exist today).
+create or replace function crm_quote_seed_company() returns trigger
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  insert into crm_quote_terms_templates (company_id, clauses) values (new.id, crm_quote_default_terms()) on conflict (company_id) do nothing;
+  insert into crm_quote_vat_choices (company_id, label, kind, rate, position)
+  select new.id, v.label, v.kind, v.rate, v.pos
+    from (values ('Out of scope', 'out_of_scope', null::numeric, 0), ('0%', 'rate', 0::numeric, 1), ('5%', 'rate', 5::numeric, 2),
+                 ('15%', 'rate', 15::numeric, 3), ('23%', 'rate', 23::numeric, 4)) as v(label, kind, rate, pos)
+  on conflict do nothing;
+  return new;
+end;
+$$;
+drop trigger if exists companies_quote_seed on companies;
+create trigger companies_quote_seed after insert on companies for each row execute function crm_quote_seed_company();
+
 create table if not exists crm_quotations (
   proposal_id          uuid primary key references crm_proposals(id),
   opportunity_id       uuid not null references crm_opportunities(id),
@@ -997,7 +1015,7 @@ $$;
 revoke all on function
   crm_create_organisation_profile(text, text[], text, text, text, text, uuid, text, text, uuid, jsonb, text, text),
   crm_quotation_frozen(), crm_quotation_guard(), crm_quotation_body_guard(), crm_quote_load_editable(uuid), crm_quote_touch(uuid),
-  crm_quote_default_terms(), crm_quote_minor_units(text), crm_quote_build_content(uuid, date), crm_import_apply_item(uuid, jsonb),
+  crm_quote_default_terms(), crm_quote_minor_units(text), crm_quote_build_content(uuid, date), crm_quote_seed_company(), crm_import_apply_item(uuid, jsonb),
   crm_import_fingerprint(uuid, text, text)
   from public, anon, authenticated;
 revoke all on function

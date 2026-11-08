@@ -27,7 +27,7 @@ describe("estimate actions", () => {
     expect((await saveQuotationLine({ error: null }, line())).error).toMatch(/Only the owner/);
   });
   it("refuses a negative, zero or malformed quantity or price before calling the database", async () => {
-    for (const bad of [{ quantity: "-1" }, { quantity: "0" }, { quantity: "1e3" }, { unitPrice: "-5" }, { unitPrice: "abc" }]) {
+    for (const bad of [{ quantity: "-1" }, { quantity: "0" }, { quantity: "1e3" }, { unitPrice: "-5" }, { unitPrice: "abc" }] as Record<string, string>[]) {
       expect((await saveQuotationLine({ error: null }, line(bad))).error).toBeTruthy();
     }
     expect(rpc).not.toHaveBeenCalled();

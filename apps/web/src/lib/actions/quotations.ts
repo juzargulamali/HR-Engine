@@ -19,7 +19,7 @@ const uuid = z.string().uuid();
 const fail = (message: string): ActionState => ({ error: friendlyCrmError(message) });
 const firstIssue = (e: z.ZodError) => e.issues[0]?.message ?? "Invalid input.";
 const db = async () => (await createClient()) as unknown as SupabaseClient;
-const blankToNull = (v: unknown) => (typeof v === "string" && v.trim() === "" ? null : v);
+const blankToNull = (v: unknown) => (v === undefined || (typeof v === "string" && v.trim() === "") ? null : v);
 const nullable = <T extends z.ZodTypeAny>(t: T) => z.preprocess(blankToNull, t.nullable());
 
 function refresh(opportunityId: string, proposalId?: string) {

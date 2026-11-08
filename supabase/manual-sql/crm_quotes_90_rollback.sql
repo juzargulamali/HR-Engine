@@ -35,6 +35,8 @@ drop function if exists crm_save_terms_template(uuid, text, jsonb);
 drop function if exists crm_quote_build_content(uuid, date);
 drop function if exists crm_quote_load_editable(uuid);
 drop function if exists crm_quote_touch(uuid);
+drop trigger if exists companies_quote_seed on companies;
+drop function if exists crm_quote_seed_company();
 drop function if exists crm_quote_default_terms();
 drop function if exists crm_quote_minor_units(text);
 drop table if exists crm_quotation_snapshots;
