@@ -64,7 +64,7 @@ Verified at `551f615` (2026-11-04). Route list from `apps/web/src/app/(app)/**/p
 | `/sales/clients`, `/sales/proposals`, `/sales/pipeline` | Shared contacts, proposals search, pipeline board | Secondary |
 | `/sales/reports` | Reports | Menu |
 | `/sales/settings` | Sales settings (now also per company: VAT choices and standard terms for estimates) | Menu (Manage), settings capability or founder |
-| `/sales/opportunities/[id]` tab "Estimates & Quotations", `/sales/opportunities/[id]/quotations/[proposalId]` | Estimates: list on the enquiry; builder (details, sections and items, totals, milestones, terms), Issue, frozen read-only view, Create revision. Control reference: `modules/sales-estimates-and-quotations.md` | Any Sales grant reads; owner or founder changes (database) |
+| `/sales/opportunities/[id]` tab "Estimates & Quotations", `/sales/opportunities/[id]/quotations/[proposalId]` | Estimates: list on the enquiry; builder (details, sections and items numbered 1.1, totals, milestones, Exclusions, terms), Review for approval (founder), Issue, frozen read-only view, Create revision, Download PDF / Download Excel (`/api/sales/quotations/[proposalId]/pdf` and `/xlsx`). Control reference: `modules/sales-estimates-and-quotations.md` | Any Sales grant reads; owner or founder changes (database) |
 
 ### Projects and tasks (`projects/layout.tsx`: "You do not have Projects access...")
 

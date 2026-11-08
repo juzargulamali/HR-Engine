@@ -6,7 +6,12 @@ vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw new Error(
 const rpc = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc }) }));
 
-import { createQuotation, issueQuotation, saveQuotationDetails, saveQuotationLine, saveQuotationTerms, saveTermsTemplate } from "./quotations";
+let bundle: unknown;
+vi.mock("@/lib/crm/quotations/data", () => ({ loadQuotation: async () => bundle }));
+const pinAssets = vi.fn();
+vi.mock("@/lib/crm/quotations/pin-assets", () => ({ pinAssets: (...a: unknown[]) => pinAssets(...a) }));
+
+import { createQuotation, decideQuotationApproval, issueQuotation, requestQuotationApproval, saveQuotationDetails, saveQuotationLine, saveQuotationTerms, saveTermsTemplate } from "./quotations";
 
 const OPP = "11111111-1111-4111-8111-111111111111";
 const P = "22222222-2222-4222-8222-222222222222";
@@ -15,7 +20,11 @@ const CO = "44444444-4444-4444-8444-444444444444";
 const fd = (o: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) f.append(k, v); return f; };
 const line = (o: Record<string, string> = {}) => fd({ opportunityId: OPP, proposalId: P, sectionId: S, lineId: "", description: "Stage deck", unit: "m2", quantity: "3", unitPrice: "33.33", vatChoiceId: "", ...o });
 
-beforeEach(() => { rpc.mockReset().mockResolvedValue({ data: P, error: null }); });
+beforeEach(() => {
+  rpc.mockReset().mockResolvedValue({ data: P, error: null });
+  bundle = { header: { opportunity_id: OPP }, sections: [], lines: [], files: [], issuer: { logo_path: null } };
+  pinAssets.mockReset().mockResolvedValue({ assets: { logo: null, lines: {} } });
+});
 
 describe("estimate actions", () => {
   it("creating a draft calls the database function and opens its editor", async () => {
@@ -53,7 +62,20 @@ describe("estimate actions", () => {
     rpc.mockResolvedValue({ data: null, error: { message: "Choose the VAT treatment before issuing" } });
     expect((await issueQuotation(OPP, P)).error).toBe("Choose the VAT treatment before issuing");
     expect(rpc).toHaveBeenCalledTimes(1);
-    expect(rpc).toHaveBeenCalledWith("crm_quote_issue", { p_proposal: P });
+    expect(rpc).toHaveBeenCalledWith("crm_quote_issue", { p_proposal: P, p_assets: { logo: null, lines: {} } });
+  });
+  it("issuing pins the pictures first and issues nothing when one cannot be pinned", async () => {
+    pinAssets.mockResolvedValue({ error: "The picture of item 1.1 could not be read from storage, so nothing was issued." });
+    expect((await issueQuotation(OPP, P)).error).toMatch(/item 1\.1/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("approval is requested for THIS version and decided with the hash the screen was rendered with", async () => {
+    await requestQuotationApproval(OPP, P);
+    expect(rpc).toHaveBeenCalledWith("crm_quote_request_approval", { p_proposal: P });
+    await decideQuotationApproval(OPP, P, S, "approved", " ", "abc123");
+    expect(rpc).toHaveBeenCalledWith("crm_quote_decide_approval", { p_approval: S, p_state: "approved", p_instruction: null, p_seen_hash: "abc123" });
+    rpc.mockResolvedValue({ data: null, error: { message: "This quotation changed after you opened it. Review the latest version" } });
+    expect((await decideQuotationApproval(OPP, P, S, "approved", "", "old")).error).toMatch(/changed after you opened it/);
   });
   it("the company terms template needs at least one clause", async () => {
     expect((await saveTermsTemplate({ error: null }, fd({ companyId: CO, label: "x", clauses: "[]" }))).error).toMatch(/at least one/);
