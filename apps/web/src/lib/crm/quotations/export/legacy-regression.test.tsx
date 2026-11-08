@@ -36,7 +36,10 @@ const text = (b: Buffer) => { const d = mkdtempSync(path.join(os.tmpdir(), "leg-
 beforeEach(() => {
   const stored = new Map(Object.entries(fx.assets).map(([p, b64]) => [`quotation-assets/${p}`, Buffer.from(b64, "base64") as Uint8Array]));
   exportSeams.storage = async (bk, p) => stored.get(`${bk}/${p}`) ?? null;
-  bundle = bundleFixture({ snapshot: structuredClone(fx.snapshot) });
+  // The live profile now has a website, a new address and contact details: none of it may reach a document that was issued before issuer branding existed.
+  const b = bundleFixture({ snapshot: structuredClone(fx.snapshot), liveIssuerName: "LIVE Name", liveTrn: "1" }) as unknown as { issuer: Record<string, string | null> };
+  Object.assign(b.issuer, { address: "LIVE address", website: "www.live.example", phone: "+1", email: "live@live.example" });
+  bundle = b;
 });
 
 describe("a quotation issued before the estimates-only change", () => {
@@ -55,7 +58,9 @@ describe("a quotation issued before the estimates-only change", () => {
     expect(text(b)).toBe(fx.golden.pdfText);
     expect((b.toString("latin1").match(/\/Type \/Page\b(?!s)/g) ?? []).length).toBe(fx.golden.pdfPages);
     for (const needle of ["Quotation", "Valid until: 2026-12-31", "Terms and conditions", "Standard terms (working draft, pending legal review)", "Payment milestones", "On acceptance"]) expect(text(b)).toContain(needle);
-    expect(text(b)).not.toMatch(/budgetary estimate|Estimate|Review pricing/i);
+    expect(text(b)).not.toMatch(/budgetary estimate|Estimate|Review pricing|Sales enquiries|live\.example/i);
+    expect(text(b)).not.toContain("LIVE");
+    expect(b.toString("latin1")).not.toMatch(/\/URI|\/Subtype \/Link/);
   });
   it("the Excel file has exactly the cells, row heights, sheet name, picture count and file name it had when issued", async () => {
     const r = await quotationExport(PROPOSAL, "xlsx");
@@ -68,6 +73,9 @@ describe("a quotation issued before the estimates-only change", () => {
     expect(cells).toEqual(fx.golden.xlsx.cells);
     expect(ws.getImages().length).toBe(fx.golden.xlsx.imageCount);
     expect(ws.views[0]).toMatchObject({ state: "frozen" });
+    // the print footer is the pre-change one (reference and page number only), and no hyperlink or sales row exists
+    expect(ws.headerFooter.oddFooter).toBe(`&L${fx.snapshot.reference} rev ${fx.snapshot.revision}&RPage &P of &N`);
+    ws.eachRow((row) => row.eachCell((c) => { expect(typeof c.value === "object" && c.value && "hyperlink" in c.value).toBe(false); expect(String(c.value)).not.toMatch(/Sales enquiries|LIVE/); }));
   });
   it("exporting never alters the frozen snapshot", async () => {
     const before = JSON.stringify(fx.snapshot);

@@ -1,10 +1,10 @@
 import "server-only";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { Document, Page, View, Text, Image, StyleSheet, Font } from "@react-pdf/renderer";
+import { Document, Page, View, Text, Image, Link, StyleSheet, Font } from "@react-pdf/renderer";
 import type { ReactNode } from "react";
 import { NOTE_HEADINGS, reviewPricingSentence } from "@enginious-hr/domain";
-import { docTitle, groupMoney, milestoneValueText, vatRateText, type DocLine, type QuotationDocModel } from "@/lib/crm/quotations/export/doc-model";
+import { docTitle, groupMoney, issuerHeaderLines, milestoneValueText, vatRateText, type DocLine, type QuotationDocModel } from "@/lib/crm/quotations/export/doc-model";
 import type { ExportAssets } from "@/lib/crm/quotations/export/images";
 
 /**
@@ -71,6 +71,23 @@ const s = StyleSheet.create({
   banner: { position: "absolute", top: 10, left: 30, right: 30, textAlign: "center", fontSize: 9, fontWeight: "bold", color: C.draft },
   watermark: { position: "absolute", top: 190, left: 150, width: 560, textAlign: "center", fontSize: 130, fontWeight: "bold", color: "#E9B5B0", opacity: 0.35, transform: "rotate(-24deg)" },
   footer: { position: "absolute", bottom: 18, left: 30, right: 30, flexDirection: "row", justifyContent: "space-between", fontSize: 8.5, color: C.muted, borderTopWidth: 0.5, borderColor: C.line, paddingTop: 5 },
+});
+
+/** Issuer branding layout (estimate-format:2 and drafts): logo left, issuer block right-aligned with the estimate title block under it; one footer band with a rule. */
+const B = StyleSheet.create({
+  head: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 },
+  logo: { width: 150, height: 74, objectFit: "contain", objectPosition: "left top" },
+  right: { alignItems: "flex-end", maxWidth: 420 },
+  name: { fontSize: 12, fontWeight: "bold", textAlign: "right" },
+  addr: { fontSize: 9, color: C.muted, textAlign: "right" },
+  trn: { fontSize: 8.5, textAlign: "right" },
+  titleBlock: { alignItems: "flex-end", marginTop: 6 },
+  title: { fontSize: 18, fontWeight: "bold", color: C.brand },
+  footer: { position: "absolute", bottom: 18, left: 30, right: 30, flexDirection: "row", alignItems: "flex-start", fontSize: 8, color: C.muted, borderTopWidth: 0.5, borderColor: C.line, paddingTop: 5 },
+  fLeft: { width: 235 },
+  fMid: { flex: 1, textAlign: "center" },
+  fRight: { width: 70, textAlign: "right" },
+  link: { color: C.brand, textDecoration: "underline" },
 });
 
 const money = (v: string) => groupMoney(v);
@@ -279,6 +296,62 @@ function EstimateMarks({ model }: { model: QuotationDocModel }): ReactNode {
   );
 }
 
+/** The sales enquiries line: the fixed label, then phone, email and website as stored; the website is a real link only when it normalises to an https URL. */
+function SalesLine({ model }: { model: QuotationDocModel }): ReactNode {
+  const c = model.salesContact;
+  if (!c) return null;
+  return (
+    <Text style={B.fMid}>
+      {c.label}{" "}
+      {c.parts.map((p, i) => (
+        <Text key={p.kind}>
+          {i > 0 ? " · " : ""}
+          {p.href ? <Link src={p.href} style={B.link}>{p.text}</Link> : p.text}
+        </Text>
+      ))}
+    </Text>
+  );
+}
+
+function BrandedMarks({ model }: { model: QuotationDocModel }): ReactNode {
+  return (
+    <>
+      {model.draft ? <Text style={s.banner} fixed>DRAFT, NOT FINALISED. This estimate has not been finalised and must not be sent to the client.</Text> : null}
+      {model.draft ? <Text style={s.watermark} fixed>DRAFT</Text> : null}
+      <View style={B.footer} fixed>
+        <Text style={B.fLeft}>{model.issuer.legalName} · Estimate {model.reference} · Revision {model.revision}{model.draft ? " · DRAFT" : ""}</Text>
+        {model.salesContact ? <SalesLine model={model} /> : <Text style={B.fMid}> </Text>}
+        <Text style={B.fRight} render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
+      </View>
+    </>
+  );
+}
+
+/** The top band of a branded estimate: the profile's logo on the left (nothing when the profile has none), the issuer block right-aligned, the estimate title block under it. */
+function BrandedHead({ model, assets }: QuotationDocumentProps) {
+  const h = issuerHeaderLines(model);
+  return (
+    <View style={B.head}>
+      <View>
+        {/* eslint-disable-next-line jsx-a11y/alt-text -- react-pdf's own Image primitive (renders into a PDF, not the DOM); it has no alt prop. */}
+        {assets.logo ? <Image src={{ data: assets.logo.data, format: assets.logo.format }} style={B.logo} /> : null}
+      </View>
+      <View style={B.right}>
+        <Text style={B.name}>{h.name}</Text>
+        {h.address.map((l, i) => <Text key={i} style={B.addr}>{l}</Text>)}
+        {h.trn ? <Text style={B.trn}>{h.trn}</Text> : null}
+        <View style={B.titleBlock}>
+          <Text style={B.title}>{model.draft ? "Estimate (DRAFT)" : "Estimate"}</Text>
+          <Text style={s.ref}>{model.reference}</Text>
+          <Text>Revision {model.revision}</Text>
+          <Text style={s.muted}>{model.issueDate ? `Finalised on: ${model.issueDate}` : "Not finalised yet"}</Text>
+          {model.validityDate ? <Text style={s.muted}>Review pricing after: {model.validityDate}</Text> : null}
+        </View>
+      </View>
+    </View>
+  );
+}
+
 function EstimateRow({ l, images }: { l: DocLine; images: ExportAssets["images"] }) {
   const img = l.image ? images.get(l.image.key) : undefined;
   return (
@@ -326,17 +399,19 @@ function EstimateDocument({ model, assets }: QuotationDocumentProps) {
   return (
     <Document title={docTitle(model)} author={model.issuer.legalName} subject={model.enquiryTitle}>
       <Page size="A4" orientation="landscape" style={s.page}>
-        <EstimateMarks model={model} />
-        <View style={s.head}>
-          <IssuerBlock model={model} assets={assets} />
-          <View style={s.headRight}>
-            <Text style={s.title}>{model.draft ? "Estimate (DRAFT)" : "Estimate"}</Text>
-            <Text style={s.ref}>{model.reference}</Text>
-            <Text>Revision {model.revision}</Text>
-            <Text style={s.muted}>{model.issueDate ? `Finalised on: ${model.issueDate}` : "Not finalised yet"}</Text>
-            {model.validityDate ? <Text style={s.muted}>Review pricing after: {model.validityDate}</Text> : null}
+        {model.branded ? <BrandedMarks model={model} /> : <EstimateMarks model={model} />}
+        {model.branded ? <BrandedHead model={model} assets={assets} /> : (
+          <View style={s.head}>
+            <IssuerBlock model={model} assets={assets} />
+            <View style={s.headRight}>
+              <Text style={s.title}>{model.draft ? "Estimate (DRAFT)" : "Estimate"}</Text>
+              <Text style={s.ref}>{model.reference}</Text>
+              <Text>Revision {model.revision}</Text>
+              <Text style={s.muted}>{model.issueDate ? `Finalised on: ${model.issueDate}` : "Not finalised yet"}</Text>
+              {model.validityDate ? <Text style={s.muted}>Review pricing after: {model.validityDate}</Text> : null}
+            </View>
           </View>
-        </View>
+        )}
         <View style={s.boxes}>
           <View style={s.box}>
             <Text style={s.boxTitle}>Prepared for</Text>

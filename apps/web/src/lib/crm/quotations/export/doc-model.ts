@@ -1,6 +1,6 @@
 import {
-  BUDGETARY_NOTICE, ESTIMATE_NOTICES, calculateQuotation, clausesToNotes, estimateFormatVersion, estimateNumbering, isUnsectionedTitle, milestoneAmounts, noteParagraphs,
-  unsectionedFirst, type CalculatedQuotation, type PaymentMilestone, type QuotationSnapshot,
+  BUDGETARY_NOTICE, ESTIMATE_NOTICES, ISSUER_BRANDING_FROM_VERSION, addressLines, calculateQuotation, clausesToNotes, estimateFormatVersion, estimateNumbering, isUnsectionedTitle, milestoneAmounts, noteParagraphs,
+  salesContact, unsectionedFirst, type CalculatedQuotation, type SalesContact, type PaymentMilestone, type QuotationSnapshot,
 } from "@enginious-hr/domain";
 import { countryLabel } from "@/lib/crm/clients-agencies/normalise";
 import { calcInput, type QuotationHeader, type QuotationLineRow, type QuotationSectionRow } from "../model";
@@ -13,6 +13,10 @@ import { calcInput, type QuotationHeader, type QuotationLineRow, type QuotationS
  * Two formats, decided per document, never per wording flag:
  *   - "estimate": every draft, and every snapshot finalised after the estimates-only change (its `terms.label` carries the server-set format marker). It prints the
  *     mandatory budgetary notice, "Estimate" wording, "Review pricing after", optional client notes and an indicative payment schedule, and none of the old terms.
+ *     Within it, `branded` says which PAGE LAYOUT: every draft and every snapshot marked `estimate-format:2` or later is branded (issuer block with the profile logo,
+ *     "TRN: <value>", multi-line address, and the sales enquiries line in the footer of every page / below the Excel table). A snapshot marked `estimate-format:1`
+ *     (finalised before issuer branding) keeps the original header (contact details in the header, no sales line) so it re-exports exactly as it was finalised.
+ *     Branding is read from the FROZEN issuer fields of the snapshot, never back-filled from the live company profile.
  *   - "legacy": a snapshot WITHOUT the marker (a quotation issued before the change). It renders exactly as it was issued: same wording, same numbering stored in
  *     the snapshot, same terms. Historical documents are never rewritten.
  */
@@ -35,6 +39,12 @@ export interface QuotationDocModel {
   notice: string | null;
   /** Optional client notes as paragraphs (estimate format only). Empty = the heading is not printed at all. */
   clientNotes: { assumptions: string[]; nextSteps: string[] };
+  /** Issuer branding layout (see above). False for a legacy quotation and for an estimate-format:1 snapshot. */
+  branded: boolean;
+  /** The sales enquiries line (branded documents only; null when the issuer has no phone, email or website, or the document is not branded). */
+  salesContact: SalesContact | null;
+  /** The issuer address as stored, line breaks kept (branded documents print these lines). */
+  addressLines: string[];
   /** True only for an unfinalised draft: every export of it is marked Draft. */
   draft: boolean;
   reference: string;
@@ -83,7 +93,7 @@ export function modelFromSnapshot(s: QuotationSnapshot): QuotationDocModel {
   if (version === null) {
     // A quotation issued before the estimates-only change: exactly as issued (stored numbers, stored terms, "Quotation" wording).
     return {
-      ...base, format: "legacy", notice: null, clientNotes: { assumptions: [], nextSteps: [] }, draft: false,
+      ...base, format: "legacy", branded: false, salesContact: null, addressLines: [], notice: null, clientNotes: { assumptions: [], nextSteps: [] }, draft: false,
       sections: s.sections.map((sec) => ({
         number: sec.number, title: sec.title, lines: sec.lines.map((l) => line(l, l.number)),
         subtotalNet: sec.subtotal_net, subtotalVat: sec.subtotal_vat, subtotalGross: sec.subtotal_gross,
@@ -95,8 +105,10 @@ export function modelFromSnapshot(s: QuotationSnapshot): QuotationDocModel {
   const ordered = unsectionedFirst(s.sections);
   const num = estimateNumbering(ordered.map((sec) => ({ unsectioned: isUnsectionedTitle(sec.title), lineCount: sec.lines.length })));
   const notes = clausesToNotes(s.terms.clauses);
+  const branded = version >= ISSUER_BRANDING_FROM_VERSION;
   return {
-    ...base, format: "estimate", notice: ESTIMATE_NOTICES[version]!, draft: false,
+    ...base, format: "estimate", branded, salesContact: branded ? salesContact(s.issuer) : null, addressLines: branded ? addressLines(s.issuer.address) : [],
+    notice: ESTIMATE_NOTICES[version]!, draft: false,
     clientNotes: { assumptions: noteParagraphs(notes.assumptions), nextSteps: noteParagraphs(notes.nextSteps) },
     sections: ordered.map((sec, si) => {
       const loose = isUnsectionedTitle(sec.title);
@@ -147,6 +159,9 @@ export function modelFromDraft(d: DraftSource): QuotationDocModel {
   const notes = clausesToNotes(h.terms);
   return {
     format: "estimate",
+    branded: true,
+    salesContact: salesContact(d.issuer),
+    addressLines: addressLines(d.issuer.address),
     notice: BUDGETARY_NOTICE,
     clientNotes: { assumptions: noteParagraphs(notes.assumptions), nextSteps: noteParagraphs(notes.nextSteps) },
     draft: true,
@@ -190,6 +205,11 @@ export function vatRateText(l: Pick<DocLine, "vatRate" | "vatLabel">): string {
 
 export function milestoneValueText(m: DocMilestone, currency: string | null): string {
   return m.kind === "percent" ? `${m.value.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "")}%` : `${currency ? `${currency} ` : ""}${groupMoney(m.amount)}`;
+}
+
+/** The branded issuer header as lines of text (one source for the PDF and the Excel sheet): legal name, the address lines as stored, then `TRN: <value>` only when there is one. */
+export function issuerHeaderLines(m: Pick<QuotationDocModel, "issuer" | "addressLines">): { name: string; address: string[]; trn: string | null } {
+  return { name: m.issuer.legalName, address: m.addressLines, trn: m.issuer.trn ? `TRN: ${m.issuer.trn}` : null };
 }
 
 /** Visible identifiers of the document, in order, for a text search in tests and for the title line. */

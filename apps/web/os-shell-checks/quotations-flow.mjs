@@ -7,6 +7,10 @@
 //   3. FINALISING ONLY FREEZES: the proposal status stays as it was, the enquiry stage is unchanged, and no follow-up, reminder, booking, reservation, Zoho
 //      reference or other row appears; the existing "record as sent" path still works for an ordinary proposal and is not offered for an estimate;
 //   4. the client files say Estimate (notice on page one, no terms, no acceptance wording, no internal notes); a draft download is marked Draft;
+//   4b. ISSUER BRANDING: the System Administrator enters the issuer details of the fictional company on Admin -> Companies; the finalised files carry the header
+//      (legal name, address lines, "TRN: ...") and, on every page, the "Sales enquiries: phone · email · website" footer with the website as a link; editing the
+//      profile afterwards leaves the finalised revision's files unchanged while a NEW revision picks the new profile up. (The local stack has no object storage,
+//      so the logo itself is covered by the unit tests, not here.)
 //   5. a quotation frozen BEFORE the change (created through the unchanged database functions, exactly as the old app did) still shows and exports with its
 //      original wording, its snapshot is byte-identical after everything else ran, and its revision becomes an estimate.
 // Screenshots (light theme, 1440 x 900): SHOTS_DIR (default /tmp/q-shots).
@@ -40,7 +44,7 @@ const shot = (name) => page.screenshot({ path: `${SHOTS}/${name}.png` });
 const download = async (name) => { const [d] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name }).first().click()]); const f = `${OUT}/${d.suggestedFilename()}`; await d.saveAs(f); return { file: f, name: d.suggestedFilename() }; };
 const pdfText = (f) => spawnSync("pdftotext", ["-layout", f, "-"], { encoding: "utf8" }).stdout;
 const pdfRaw = (f) => spawnSync("pdftotext", ["-raw", f, "-"], { encoding: "utf8" }).stdout;
-const cells = async (f) => { const wb = new ExcelJS.Workbook(); await wb.xlsx.readFile(f); const ws = wb.worksheets[0]; const out = []; ws.eachRow((r) => r.eachCell((c) => { if (c.type !== ExcelJS.ValueType.Merge) out.push(typeof c.value === "object" && c.value && "richText" in c.value ? c.value.richText.map((t) => t.text).join("") : String(c.value ?? "")); })); return { name: ws.name, all: out.join("\n"), images: ws.getImages().length, ws }; };
+const cells = async (f) => { const wb = new ExcelJS.Workbook(); await wb.xlsx.readFile(f); const ws = wb.worksheets[0]; const out = []; ws.eachRow((r) => r.eachCell((c) => { if (c.type !== ExcelJS.ValueType.Merge) out.push(typeof c.value === "object" && c.value && "richText" in c.value ? c.value.richText.map((t) => t.text).join("") : typeof c.value === "object" && c.value && "hyperlink" in c.value ? c.value.text : String(c.value ?? "")); })); return { name: ws.name, all: out.join("\n"), images: ws.getImages().length, ws }; };
 const goStep = (label) => page.locator('nav[aria-label="Estimate steps"] button', { hasText: label }).click();
 const saveDraft = async () => { await page.getByRole("button", { name: "Save draft" }).click(); };
 const saveState = () => page.getByTestId("save-state");
@@ -56,6 +60,34 @@ const oppBoth = enq("Fictional agency gala", agency);
 const oppDirect = enq("Fictional direct fit-out", null);
 const oppLegacy = enq("Fictional legacy hall", null);
 sql(`update crm_opportunities set currency='EUR' where id='${oppBoth}'`);
+
+// ---- Admin -> Companies: the owner enters the issuer details through the existing screen (fictional values; nothing is seeded or hard-coded) ----
+const ISSUER_1 = { trn: "100000000000003", address: "Fictional Tower, Level 4\nFictional Bay, Dubai 00000", phone: "+000 11 222 3333", email: "sales@fictional.example", website: "www.fictional.example" };
+const ISSUER_2 = { trn: "200000000000009", address: "New Fictional Plaza\nNew Fictional Bay", phone: "+000 99 888 7777", email: "new@fictional.example", website: "https://www.new-fictional.example" };
+const adminPage = await newPage(browser, { width: 1440, height: 900 }, "light", { deviceScaleFactor: 2 });
+await login(adminPage, "admin@e2e.local");
+const editIssuer = async (v, shotName) => {
+  await adminPage.goto(`${BASE}/admin/companies`, { waitUntil: "networkidle" });
+  await adminPage.getByRole("button", { name: /Issuer details for Fictional Enginious UAE LLC/ }).click();
+  const dlg = adminPage.getByRole("dialog"); await dlg.waitFor();
+  await adminPage.locator(`#iss-trn-${CO}`).fill(v.trn); await adminPage.locator(`#iss-addr-${CO}`).fill(v.address);
+  await adminPage.locator(`#iss-phone-${CO}`).fill(v.phone); await adminPage.locator(`#iss-email-${CO}`).fill(v.email); await adminPage.locator(`#iss-web-${CO}`).fill(v.website);
+  if (shotName) await adminPage.screenshot({ path: `${SHOTS}/${shotName}.png` });
+  await dlg.getByRole("button", { name: "Save details" }).click();
+  await dlg.waitFor({ state: "detached" });
+  const row = sql(`select trn || '|' || replace(address, E'\n', '/') || '|' || phone || '|' || email || '|' || website from companies where id='${CO}'`);
+  if (row !== `${v.trn}|${v.address.replace("\n", "/")}|${v.phone}|${v.email}|${v.website}`) throw new Error(`stored issuer details: ${row}`);
+};
+await step("Admin -> Companies: the issuer-details dialog holds legal name, TRN, a multi-line address, phone, email and website; saving stores them exactly", async () => {
+  await adminPage.goto(`${BASE}/admin/companies`, { waitUntil: "networkidle" });
+  await adminPage.getByRole("button", { name: /Issuer details for Fictional Enginious UAE LLC/ }).click();
+  const t = flat(await adminPage.getByRole("dialog").innerText());
+  for (const need of ["Issuer details", "Legal name", "Tax registration number (TRN)", "Address", "Phone", "Email", "Website", "Logo"]) if (!t.includes(need)) throw new Error(`the dialog lacks ${need}`);
+  if (/quotation/i.test(t)) throw new Error("the dialog still says quotation");
+  if ((await adminPage.locator(`#iss-addr-${CO}`).evaluate((e) => e.tagName)) !== "TEXTAREA") throw new Error("the address is not multi-line");
+  await adminPage.keyboard.press("Escape");
+  await editIssuer(ISSUER_1, "issuer-dialog-light");
+});
 
 await login(page, "emp@e2e.local");
 let quoteUrl = ""; let proposalId = "";
@@ -74,7 +106,7 @@ await step("a new estimate: Details first, three clear steps, estimate wording, 
   if ((await page.locator('nav[aria-label="Estimate steps"] [aria-current="step"]').innerText()).indexOf("Details") < 0) throw new Error("Details is not the active step");
   const issuer = page.locator('section[aria-label="Prepared by"]');
   await issuer.waitFor(); const t = flat(await issuer.innerText());
-  if (!/Fictional Enginious UAE LLC/.test(t) || !/TRN 100000000000003/.test(t) || !/Fictional Tower, Dubai/.test(t)) throw new Error(`issuer summary: ${t}`);
+  if (!/Fictional Enginious UAE LLC/.test(t) || !/TRN 100000000000003/.test(t) || !/Fictional Tower, Level 4/.test(t)) throw new Error(`issuer summary: ${t}`);
   if (await issuer.locator("input, textarea, select").count()) throw new Error("the issuer summary has form fields");
   await hasNot(/Standard terms|Terms and conditions|working draft|pending legal review|Issue quotation|Quotation/i, "old wording on the Details step");
   const cur = await page.locator("#est-currency").inputValue(); if (cur !== "EUR") throw new Error(`currency not prefilled from the enquiry: ${cur}`);
@@ -103,7 +135,7 @@ await step("More options: internal notes, Assumptions, Exclusions, Next steps, p
   await has(/Review pricing after/, "Review pricing after label"); await hasNot(/Valid until|valid until/, "Valid until label");
   await shot("4-more-options-light");
   await saveDraft(); await waitSaved();
-  const db = sql(`select count(*) from crm_quotations where proposal_id='${proposalId}' and internal_notes like '${SECRET}%' and terms_label='estimate-format:1' and validity_date='2099-12-31' and bill_to_org_id='${client}'`);
+  const db = sql(`select count(*) from crm_quotations where proposal_id='${proposalId}' and internal_notes like '${SECRET}%' and terms_label='estimate-format:2' and validity_date='2099-12-31' and bill_to_org_id='${client}'`);
   if (db !== "1") throw new Error("details were not saved");
   const terms = sql(`select string_agg(t->>'title', ',') from crm_quotations q, jsonb_array_elements(q.terms) t where proposal_id='${proposalId}'`);
   if (terms !== "Assumptions,Next steps") throw new Error(`stored terms: ${terms}`);
@@ -250,6 +282,36 @@ await step("client files of the FINALISED estimate: Estimate title, notice on pa
   if (noticeRow !== 1) throw new Error(`the notice is on row ${noticeRow}, not the top row`);
   if (execFileSync("sh", ["-c", `unzip -p '${xlsx.file}' | grep -c '${SECRET}' || true`]).toString().trim() !== "0") throw new Error("internal notes inside the xlsx package");
 });
+let rev1 = null;
+const pdfLinks = (f) => [...new Set([...(execFileSync("sh", ["-c", `cat '${f}'`], { maxBuffer: 1 << 28 }).toString("latin1")).matchAll(/\/URI \(([^)]*)\)/g)].map((m) => m[1]))];
+const pdfPageCount = (f) => (execFileSync("pdfinfo", [f]).toString().match(/Pages:\s+(\d+)/) ?? [])[1];
+const xlsxLinks = (ws) => { const out = []; ws.eachRow((r) => r.eachCell((c) => { if (typeof c.value === "object" && c.value && "hyperlink" in c.value) out.push(c.value.hyperlink); })); return [...new Set(out)]; };   // merged cells repeat their master's value
+const exportBoth = async () => { const pdf = await download("Download PDF"); const xlsx = await download("Download Excel (.xlsx)"); const c = await cells(xlsx.file); return { pdf, xlsx, text: pdfText(pdf.file), pages: pdfPageCount(pdf.file), links: pdfLinks(pdf.file), c, footer: c.ws.headerFooter.oddFooter, xlinks: xlsxLinks(c.ws) }; };
+const SALES1 = "Sales enquiries: +000 11 222 3333 · sales@fictional.example · www.fictional.example";
+await step("ISSUER BRANDING: the finalised files carry the header block and, on every page, the sales enquiries footer with the website as a link; Excel matches", async () => {
+  await page.goto(quoteUrl, { waitUntil: "networkidle" });
+  rev1 = await exportBoth();
+  const lines = rev1.text.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines[0] !== "Fictional Enginious UAE LLC" || lines[1] !== "Fictional Tower, Level 4" || lines[2] !== "Fictional Bay, Dubai 00000" || lines[3] !== "TRN: 100000000000003") throw new Error(`header lines: ${lines.slice(0, 5).join(" | ")}`);
+  const pages = rev1.text.split("\f").filter((p) => p.trim());
+  pages.forEach((p, n) => { const last = flat(p.split("\n").filter((l) => l.trim()).at(-1)); if (!last.includes(SALES1) || !last.includes(`Page ${n + 1} of ${pages.length}`)) throw new Error(`footer of page ${n + 1}: ${last}`); });
+  if (rev1.links.join() !== "https://www.fictional.example") throw new Error(`PDF links ${rev1.links}`);
+  if (rev1.xlinks.join() !== "https://www.fictional.example") throw new Error(`Excel links ${rev1.xlinks}`);
+  const xs = rev1.c.all.split("\n"); const k = xs.findIndex((t) => t.startsWith("Sales enquiries:"));
+  if (`${xs[k]} ${xs[k + 1]}` !== SALES1 || !rev1.footer.includes(SALES1)) throw new Error("Excel footer line differs from the PDF");
+  if (!xs.includes("TRN: 100000000000003") || !xs.includes("Fictional Bay, Dubai 00000")) throw new Error("Excel header lines");
+  await shot("6-finalised-page-light");
+});
+await step("the company profile is edited AFTER finalising: the same revision re-exports unchanged (PDF text, pages, Excel cells, link, footer)", async () => {
+  const frozen = sql(`select md5(content::text) from crm_quotation_snapshots where proposal_id='${proposalId}'`);
+  await editIssuer(ISSUER_2);
+  await page.goto(quoteUrl, { waitUntil: "networkidle" });
+  const again = await exportBoth();
+  if (again.text !== rev1.text || again.pages !== rev1.pages) throw new Error("the PDF of the finalised revision changed after the profile edit");
+  if (again.c.all !== rev1.c.all || again.footer !== rev1.footer || again.links.join() !== rev1.links.join() || again.xlinks.join() !== rev1.xlinks.join()) throw new Error("the Excel of the finalised revision changed after the profile edit");
+  if (/New Fictional|200000000000009|new-fictional/.test(again.text + again.c.all)) throw new Error("new profile values leaked into the finalised revision");
+  if (sql(`select md5(content::text) from crm_quotation_snapshots where proposal_id='${proposalId}'`) !== frozen) throw new Error("the snapshot changed");
+});
 await step("a DRAFT download is marked Draft in the file name, the PDF and the Excel sheet; it never prints the old terms or the internal notes", async () => {
   await page.getByRole("button", { name: "Create revision" }).click();
   await page.waitForURL((u) => u.pathname.includes("/quotations/") && u.toString() !== quoteUrl);
@@ -261,6 +323,24 @@ await step("a DRAFT download is marked Draft in the file name, the PDF and the E
   const c = await cells(xlsx.file);
   if (c.name !== "Estimate DRAFT" || !/^DRAFT, NOT FINALISED/.test(c.all) || !c.all.includes(NOTICE)) throw new Error("draft XLSX is not marked");
   if (raw.includes(SECRET) || c.all.includes(SECRET)) throw new Error("internal text in a draft export");
+});
+await step("a NEW revision picks the new profile up: its draft shows it, finalising freezes it, and revision 1 still shows the old one", async () => {
+  const rev2Url = page.url();
+  const d = await exportBoth();
+  if (!d.text.includes("TRN: 200000000000009") || !d.text.includes("New Fictional Bay") || d.links.join() !== "https://www.new-fictional.example" || !/DRAFT, NOT FINALISED/.test(d.text.replace(/\s+/g, " "))) throw new Error("the draft of the new revision does not show the live profile");
+  sql(`update crm_company_settings set approval_policy='not_required' where company_id='${CO}'`);
+  await page.reload({ waitUntil: "networkidle" }); await goStep("Preview & finalise");
+  await page.getByLabel(/I have checked who this estimate is addressed to/).check();
+  await page.getByRole("button", { name: "Finalise estimate" }).click();
+  await page.getByTestId("issued-snapshot").waitFor();
+  const f = await exportBoth();
+  if (/DRAFT/.test(f.text) || !f.text.includes("TRN: 200000000000009") || !f.text.includes("Sales enquiries: +000 99 888 7777 · new@fictional.example · https://www.new-fictional.example") || f.links.join() !== "https://www.new-fictional.example") throw new Error("the finalised new revision does not carry the new profile");
+  if (f.xlinks.join() !== "https://www.new-fictional.example") throw new Error("Excel link of the new revision");
+  if (sql(`select content->'issuer'->>'trn' || '|' || (content->'issuer'->>'website') from crm_quotation_snapshots where proposal_id='${rev2Url.split("/").pop()}'`) !== "200000000000009|https://www.new-fictional.example") throw new Error("the new snapshot does not hold the new issuer fields");
+  await page.goto(quoteUrl, { waitUntil: "networkidle" });
+  const old = await exportBoth();
+  if (old.text !== rev1.text || old.c.all !== rev1.c.all) throw new Error("revision 1 changed once revision 2 was finalised");
+  await shot("7-revision-2-light");
 });
 await step("an enquiry with ONE linked party: it is suggested with the reason but not saved until the person saves; VAT stays unselected; a non-owner is refused", async () => {
   sql(`update crm_company_settings set approval_policy='not_required' where company_id='${CO}'`);
@@ -299,10 +379,10 @@ await step("a quotation frozen BEFORE this change keeps its wording on screen an
   await has(/Revision 2/, "revision 2");
   await page.getByRole("button", { name: "Save draft" }).click(); await waitSaved();
   const terms = sql(`select coalesce((select string_agg(t->>'title', ',') from jsonb_array_elements(q.terms) t), '') || '|' || q.terms_label from crm_quotations q where proposal_id='${rev}'`);
-  if (terms !== "|estimate-format:1") throw new Error(`the revision still holds the old terms: ${terms}`);
+  if (terms !== "|estimate-format:2") throw new Error(`the revision still holds the old terms: ${terms}`);
   asDb(5, `select crm_quote_issue('${rev}')`);
   if (snap(q) !== hashBefore) throw new Error("the legacy snapshot changed after its revision was finalised");
-  if (sql(`select content->'terms'->>'label' from crm_quotation_snapshots where proposal_id='${rev}'`) !== "estimate-format:1") throw new Error("the revision snapshot is not in the estimate format");
+  if (sql(`select content->'terms'->>'label' from crm_quotation_snapshots where proposal_id='${rev}'`) !== "estimate-format:2") throw new Error("the revision snapshot is not in the current estimate format");
 });
 await step("Sales settings no longer offer standard terms", async () => {
   await page.goto(`${BASE}/sales/settings`, { waitUntil: "networkidle" });

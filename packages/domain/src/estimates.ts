@@ -13,8 +13,12 @@
  * from there. A snapshot WITHOUT the marker is a historical quotation: it keeps rendering exactly as it was issued.
  */
 
-/** Increase when the notice wording changes: an estimate keeps the notice of the version it was finalised under. */
-export const ESTIMATE_FORMAT_VERSION = 1;
+/**
+ * Increase when the notice wording or the page layout changes: an estimate keeps the notice AND the layout of the version it was finalised under.
+ *   1: the estimates-only release (issuer contact line in the page header, no sales footer line).
+ *   2: issuer branding: logo and issuer block at the top, "TRN: <value>", the multi-line address, and the sales enquiries line in the footer of every page.
+ */
+export const ESTIMATE_FORMAT_VERSION = 2;
 /** Stored in `terms_label` of the estimate and copied into the snapshot's `terms.label`. Not a user field: the server sets it. */
 export const ESTIMATE_FORMAT_MARKER = `estimate-format:${ESTIMATE_FORMAT_VERSION}`;
 
@@ -23,7 +27,9 @@ export const BUDGETARY_NOTICE_V1 =
   "This is a budgetary estimate for planning purposes only. It is not a quotation or an offer, does not reserve any equipment, stock or dates, and is not an agreement to supply. Prices and availability are subject to review and written confirmation.";
 
 /** Notice wording by format version (an older estimate re-exports with the wording it was finalised under). */
-export const ESTIMATE_NOTICES: Readonly<Record<number, string>> = { 1: BUDGETARY_NOTICE_V1 };
+export const ESTIMATE_NOTICES: Readonly<Record<number, string>> = { 1: BUDGETARY_NOTICE_V1, 2: BUDGETARY_NOTICE_V1 };
+/** First format version whose exports carry the issuer branding layout (header block + sales enquiries footer). Version 1 renders exactly as it was finalised. */
+export const ISSUER_BRANDING_FROM_VERSION = 2;
 /** The notice for NEW estimates. */
 export const BUDGETARY_NOTICE = ESTIMATE_NOTICES[ESTIMATE_FORMAT_VERSION]!;
 
@@ -113,4 +119,52 @@ export function estimateNumbering(sections: readonly { unsectioned: boolean; lin
     }
   }
   return { section, lines };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// Issuer branding: the sales enquiries line and the website link
+// ---------------------------------------------------------------------------------------------------------------------------------
+/** Fixed label in code (not a company value) of the footer line. */
+export const SALES_ENQUIRIES_LABEL = "Sales enquiries:";
+export const CONTACT_SEPARATOR = " \u00b7 ";
+
+/**
+ * The website of the issuer as an absolute https URL, or null when it must not become a link. `www.example.ae` and `https://www.example.ae` both give
+ * `https://www.example.ae`; `http://` is upgraded to https. Only http(s) is ever linked: any other scheme (javascript:, data:, file:, mailto:, ftp: ...),
+ * a protocol-relative `//host`, embedded spaces or control characters, credentials in the URL, or a host without a dot give null (the text is then printed plain).
+ */
+export function normaliseWebsiteUrl(value: string | null | undefined): string | null {
+  const v = (value ?? "").trim();
+  if (!v || v.length > 300 || /[\s\u0000-\u001f\u007f<>"'`\\]/.test(v) || v.startsWith("//")) return null;
+  // A scheme is `name:` that is not `host:port`.
+  const scheme = /^([a-z][a-z0-9+.-]*):(?!\d+(?:[/?#]|$))/i.exec(v);
+  let candidate = v;
+  if (scheme) {
+    if (!/^https?$/i.test(scheme[1]!)) return null;
+    if (!/^https?:\/\//i.test(v)) return null;
+    candidate = v.replace(/^http:\/\//i, "https://").replace(/^https:\/\//i, "https://");
+  } else candidate = `https://${v}`;
+  let u: URL;
+  try { u = new URL(candidate); } catch { return null; }
+  if (u.protocol !== "https:" || u.username || u.password || !u.hostname.includes(".") || u.hostname.startsWith(".") || u.hostname.endsWith(".")) return null;
+  return candidate;
+}
+
+export interface ContactPart { kind: "phone" | "email" | "website"; text: string; /** absolute https URL, website only, null when it must not be linked */ href: string | null }
+export interface SalesContact { label: string; parts: ContactPart[]; /** The whole line as plain text: `Sales enquiries: <phone> · <email> · <website>`. */ text: string }
+
+/** The sales enquiries line from the issuer's phone, email and website, exactly as stored. A missing part and its separator are omitted; null when all three are missing. */
+export function salesContact(i: { phone?: string | null; email?: string | null; website?: string | null }): SalesContact | null {
+  const clean = (v: string | null | undefined) => (v ?? "").trim();
+  const parts: ContactPart[] = [];
+  if (clean(i.phone)) parts.push({ kind: "phone", text: clean(i.phone), href: null });
+  if (clean(i.email)) parts.push({ kind: "email", text: clean(i.email), href: null });
+  if (clean(i.website)) parts.push({ kind: "website", text: clean(i.website), href: normaliseWebsiteUrl(i.website) });
+  if (parts.length === 0) return null;
+  return { label: SALES_ENQUIRIES_LABEL, parts, text: `${SALES_ENQUIRIES_LABEL} ${parts.map((p) => p.text).join(CONTACT_SEPARATOR)}` };
+}
+
+/** Address lines as stored: line breaks kept, each line trimmed, empty lines dropped. */
+export function addressLines(address: string | null | undefined): string[] {
+  return (address ?? "").split(/\r\n|\r|\n/).map((l) => l.trim()).filter(Boolean);
 }

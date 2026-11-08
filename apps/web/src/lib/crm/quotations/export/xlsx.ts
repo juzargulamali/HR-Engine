@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { NOTE_HEADINGS, reviewPricingSentence } from "@enginious-hr/domain";
-import { exportBaseName, groupMoney, milestoneValueText, type DocLine, type QuotationDocModel } from "./doc-model";
+import { exportBaseName, groupMoney, issuerHeaderLines, milestoneValueText, type DocLine, type QuotationDocModel } from "./doc-model";
 import { imageSize, type ExportAssets } from "./images";
 
 /**
@@ -77,7 +77,14 @@ export async function buildQuotationWorkbook(model: QuotationDocModel, assets: E
   const top = r;
   const i = model.issuer;
   const b = model.billTo;
-  const left: [string, Partial<ExcelJS.Style>][] = [
+  // Branded layout (drafts and estimate-format:2): the same lines as the PDF header, from the same helper: legal name, the address one stored line per row, "TRN: <value>"
+  // (no row when absent); the contact details go to the sales enquiries line at the bottom. The older layouts keep their header exactly as it was.
+  const hdr = issuerHeaderLines(model);
+  const left: [string, Partial<ExcelJS.Style>][] = model.branded ? [
+    [hdr.name, { font: { bold: true, size: 13 } }],
+    ...hdr.address.map((l) => [l, {}] as [string, Partial<ExcelJS.Style>]),
+    ...(hdr.trn ? ([[hdr.trn, {}]] as [string, Partial<ExcelJS.Style>][]) : []),
+  ] : [
     [i.legalName, { font: { bold: true, size: 13 } }],
     ...(i.trn ? ([[`TRN ${i.trn}`, {}]] as [string, Partial<ExcelJS.Style>][]) : []),
     ...(i.address ? ([[i.address, {}]] as [string, Partial<ExcelJS.Style>][]) : []),
@@ -293,10 +300,44 @@ export async function buildQuotationWorkbook(model: QuotationDocModel, assets: E
     });
   }
 
+  // The sales enquiries line (branded layout): the LAST row of the sheet, visible on screen and in print, with the website as a real hyperlink cell when it normalises to an
+  // https URL. A hyperlink belongs to a whole cell, so the line is split at the website: the label, phone and email in a right-aligned block, the website beside it.
+  // Without a linkable website the whole line is one plain cell. The same line is also in the print footer (a print footer cannot hold a link).
+  const sales = model.branded ? model.salesContact : null;
+  if (sales) {
+    r += 2;
+    const web = sales.parts.find((p) => p.kind === "website");
+    const rule = { top: THIN };
+    if (web?.href) {
+      const before = sales.text.slice(0, sales.text.length - web.text.length).trimEnd();
+      ws.mergeCells(r, 1, r, 5);
+      const a = text(r, 1, before, { font: { size: 10, color: { argb: "FF4A5D66" } }, alignment: { horizontal: "right", vertical: "middle", wrapText: false } });
+      a.border = rule;
+      ws.mergeCells(r, 6, r, LAST);
+      const b2 = ws.getCell(r, 6);
+      b2.value = { text: neutralise(web.text), hyperlink: web.href };
+      b2.font = { size: 10, underline: true, color: { argb: "FF1C5C6B" } };
+      b2.alignment = { horizontal: "left", vertical: "middle", wrapText: false, indent: 1 };
+      b2.border = rule;
+    } else {
+      ws.mergeCells(r, 1, r, LAST);
+      const a = text(r, 1, sales.text, { font: { size: 10, color: { argb: "FF4A5D66" } }, alignment: { horizontal: "center", vertical: "middle", wrapText: false } });
+      a.border = rule;
+    }
+    ws.getRow(r).height = 20;
+    r += 1;
+  }
+
   // A legacy sheet freezes its header rows. An estimate does not: its mandatory notice and header block are tall, and freezing them would leave no room to scroll.
   ws.views = est ? [{ showGridLines: false }] : [{ state: "frozen", ySplit: headerRow, showGridLines: false }];
   ws.pageSetup = { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: `${headerRow}:${headerRow}`, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
-  ws.headerFooter = { oddFooter: `&L${model.draft ? "DRAFT  " : ""}${est ? "Estimate " : ""}${model.reference.replace(/&/g, "&&")} rev ${model.revision}&RPage &P of &N` };
+  const footLeft = `${model.draft ? "DRAFT  " : ""}${est ? "Estimate " : ""}${model.reference.replace(/&/g, "&&")} rev ${model.revision}`;
+  if (sales) {
+    // Left: the estimate reference; centre: the sales enquiries line; right: the page number. A header/footer holds 255 characters in all: when the line is too long the reference is dropped, never the sales line.
+    const centre = sales.text.replace(/&/g, "&&");
+    const full = `&L&8${footLeft}&C&8${centre}&R&8Page &P of &N`;
+    ws.headerFooter = { oddFooter: full.length <= 250 ? full : `&C&8${centre}&R&8Page &P of &N` };
+  } else ws.headerFooter = { oddFooter: `&L${footLeft}&RPage &P of &N` };
   return new Uint8Array(await wb.xlsx.writeBuffer());
 }
 
