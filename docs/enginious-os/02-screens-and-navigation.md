@@ -43,7 +43,7 @@ Verified at `551f615` (2026-11-04). Route list from `apps/web/src/app/(app)/**/p
 | `/payroll`, `/payroll/[id]` | Payroll runs | Page: HR Admin, Finance, CEO, CTO |
 | `/assets` | Asset register | Page: HR Admin, Finance |
 | `/ai-suggestions`, `/audit-log` | Reviewed drafts; audit trail | Page: HR Admin or System Administrator |
-| `/admin/companies` | Companies | Layout: System Administrator |
+| `/admin/companies` | Companies (now with "Quotation details": legal name, TRN, address, contacts, logo of the issuer) | Layout: System Administrator |
 | `/people-access` | Manage HR roles, module grants, accounts | Page + RLS: sys admin, HR Admin, module access managers |
 
 **People & Access, Module access tab (PR #57, merged at `28549dd`; re-verified at `28549dd`, 2026-11-07).** After choosing a person: an "Access for company" selector (separate from the people-list company filter; defaults to the person's employment company when the viewer manages it; switching saves nothing and, with unsaved edits, asks "Discard unsaved changes?" before switching; choosing another person in the list is guarded the same way and shows the other person only after Discard; only one module editor is open at a time), then one card per module (profile or "Custom access", extra rights, assigned warehouses, Edit access). A card says "No access" only after a successful read, "Could not load ... Try again" after a failed read, and "You can't manage this module" for a module the viewer does not manage. Editing: pick a working profile (draft only), optional collapsed "Advanced access", a review (rights added / removed / custom rights kept / warehouse scope / resulting access), one "Save changes" and Cancel; "Remove all access to this module" is separate. Account, Job & department and HR roles tabs are unchanged. Sources: `apps/web/src/components/people-access/module-access-{panel,card,editor}.tsx`, `unsaved-access-guard.tsx`, `packages/domain/src/accessProfiles.ts` (`28549dd`).
@@ -63,7 +63,8 @@ Verified at `551f615` (2026-11-04). Route list from `apps/web/src/app/(app)/**/p
 | `/sales/new` | Full new-enquiry form (`/sales/opportunities?add=1` also); Agency and End client pickers offer only organisations holding that role | Secondary |
 | `/sales/clients`, `/sales/proposals`, `/sales/pipeline` | Shared contacts, proposals search, pipeline board | Secondary |
 | `/sales/reports` | Reports | Menu |
-| `/sales/settings` | Sales settings | Menu (Manage), settings capability or founder |
+| `/sales/settings` | Sales settings (now also per company: VAT choices and standard terms for estimates) | Menu (Manage), settings capability or founder |
+| `/sales/opportunities/[id]` tab "Estimates & Quotations", `/sales/opportunities/[id]/quotations/[proposalId]` | Estimates: list on the enquiry; builder (details, sections and items, totals, milestones, terms), Issue, frozen read-only view, Create revision. Control reference: `modules/sales-estimates-and-quotations.md` | Any Sales grant reads; owner or founder changes (database) |
 
 ### Projects and tasks (`projects/layout.tsx`: "You do not have Projects access...")
 

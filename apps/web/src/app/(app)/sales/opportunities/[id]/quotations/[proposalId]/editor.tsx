@@ -286,7 +286,7 @@ export function TermsEditor({ ids, header }: { ids: Ids; header: QuotationHeader
       </fieldset>
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium">{header.terms_label ?? "Terms, assumptions and exclusions"}</legend>
-        <p className="text-sm text-muted-foreground">Copied from your company's standard terms when this estimate was created. Edit freely here; the company template is changed under Sales settings.</p>
+        <p className="text-sm text-muted-foreground">Copied from your company&apos;s standard terms when this estimate was created. Edit freely here; the company template is changed under Sales settings.</p>
         {cl.map((c, i) => (
           <div key={i} className="space-y-1.5 rounded-md border border-border p-2">
             <div className="flex gap-2">
@@ -325,7 +325,7 @@ export function IssueBar({ ids, blockers, needsApproval, approvalPending, canReq
         ) : null}
         <Button type="button" disabled={pending || blockers.length > 0} onClick={() => { if (confirm("Issue this quotation? A frozen copy is made and this draft becomes read-only. Nothing is sent to anyone.")) run(() => issueQuotation(ids.opportunityId, ids.proposalId)); }}>Issue quotation</Button>
       </div>
-      {nonApproval.length === 0 && needsApproval && blockers.length > 0 ? <p className="text-sm text-muted-foreground">Issuing needs the founder's approval first; editing the draft after approval asks for it again.</p> : null}
+      {nonApproval.length === 0 && needsApproval && blockers.length > 0 ? <p className="text-sm text-muted-foreground">Issuing needs the founder&apos;s approval first; editing the draft after approval asks for it again.</p> : null}
     </div>
   );
 }
