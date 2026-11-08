@@ -5,7 +5,8 @@
 //      Saved only when everything saved and says it could not save (and never claims saved) when a write fails;
 //   2. a company that requires approval: finalising is blocked until the version is approved, a stale approval screen cannot approve;
 //   3. FINALISING ONLY FREEZES: the proposal status stays as it was, the enquiry stage is unchanged, and no follow-up, reminder, booking, reservation, Zoho
-//      reference or other row appears; the existing "record as sent" path still works for an ordinary proposal and is not offered for an estimate;
+//      reference or other row appears; the existing "record as sent" path still works for an ordinary proposal and is not offered for an estimate, and the
+//      DATABASE refuses an estimate as sent even for a direct call by the owner or a founder (migration 20261221000100);
 //   4. the client files say Estimate (notice on page one, no terms, no acceptance wording, no internal notes); a draft download is marked Draft;
 //   4b. ISSUER BRANDING: the System Administrator enters the issuer details of the fictional company on Admin -> Companies; the finalised files carry the header
 //      (legal name, address lines, "TRN: ...") and, on every page, the "Sales enquiries: phone · email · website" footer with the website as a link; editing the
@@ -100,7 +101,7 @@ await step("a new estimate: Details first, three clear steps, estimate wording, 
   await page.goto(`${BASE}/sales/opportunities/${oppBoth}?tab=quotations`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Create draft estimate" }).click();
   await page.waitForURL(/\/quotations\//); quoteUrl = page.url(); proposalId = quoteUrl.split("/").pop();
-  await has(/Estimate QUO-UAE-\d{4}-0001/, "reference"); await has(/Revision 1/, "revision"); await has(/This is a DRAFT estimate/, "draft banner");
+  await has(/Estimate EST-UAE-\d{4}-0001/, "reference"); await has(/Revision 1/, "revision"); await has(/This is a DRAFT estimate/, "draft banner");
   const steps = await page.locator('nav[aria-label="Estimate steps"] button').allInnerTexts();
   if (steps.map((s) => s.replace(/\s+/g, " ").replace(/^\d /, "")).join("|") !== "Details|BOQ|Preview & finalise") throw new Error(`steps ${steps}`);
   if ((await page.locator('nav[aria-label="Estimate steps"] [aria-current="step"]').innerText()).indexOf("Details") < 0) throw new Error("Details is not the active step");
@@ -234,7 +235,7 @@ await step("FINALISE: freezes only. Status, stage, follow-ups, reminders, bookin
   await page.getByLabel(/I have checked who this estimate is addressed to/).check();
   await page.getByRole("button", { name: "Finalise estimate" }).click();
   await page.getByTestId("issued-snapshot").waitFor();
-  await has(/Finalised on /, "banner"); await has(/frozen and read-only/, "frozen"); await has(/Estimate QUO-UAE/, "title");
+  await has(/Finalised on /, "banner"); await has(/frozen and read-only/, "frozen"); await has(/Estimate EST-UAE/, "title");
   const after = tablesNow();
   if (after.counts !== before.counts) throw new Error(`rows changed: ${before.counts} -> ${after.counts}`);
   if (after.stage !== before.stage) throw new Error(`stage/version changed: ${before.stage} -> ${after.stage}`);
@@ -262,11 +263,17 @@ await step("the Proposal versions list calls it an estimate; an estimate has no 
   await li.getByText(/recorded as sent/i).waitFor();
   const st = sql(`select string_agg(status, ',' order by version) from crm_proposals where opportunity_id='${oppBoth}'`);
   if (st !== "draft,sent") throw new Error(`statuses after recording the proposal as sent: ${st} (the estimate must stay draft and untouched)`);
+  // The database refuses it too (direct call as the owner and as a founder): nothing is superseded, the ordinary proposal stays sent.
+  for (const who of [5, 3]) {
+    const direct = asDbTry(who, `select crm_set_proposal_status('${proposalId}', 'sent', current_date)`);
+    if (direct.ok || !/An estimate cannot be marked as sent/.test(direct.out)) throw new Error(`the database allowed (or mis-worded) an estimate as sent: ${direct.out}`);
+  }
+  if (sql(`select string_agg(status, ',' order by version) from crm_proposals where opportunity_id='${oppBoth}'`) !== "draft,sent") throw new Error("a database refusal changed a proposal status");
 });
 await step("client files of the FINALISED estimate: Estimate title, notice on page one above the BOQ, no terms, no acceptance wording, no internal notes", async () => {
   await page.goto(quoteUrl, { waitUntil: "networkidle" });
   const pdf = await download("Download PDF"); const xlsx = await download("Download Excel (.xlsx)");
-  if (!/^QUO-UAE-\d{4}-0001-rev1\.pdf$/.test(pdf.name) || !/^QUO-UAE-\d{4}-0001-rev1\.xlsx$/.test(xlsx.name)) throw new Error(`file names ${pdf.name} / ${xlsx.name}`);
+  if (!/^EST-UAE-\d{4}-0001-rev1\.pdf$/.test(pdf.name) || !/^EST-UAE-\d{4}-0001-rev1\.xlsx$/.test(xlsx.name)) throw new Error(`file names ${pdf.name} / ${xlsx.name}`);
   const raw = flat(pdfRaw(pdf.file)); const layout = pdfText(pdf.file);
   const p1 = flat(spawnSync("pdftotext", ["-raw", "-f", "1", "-l", "1", pdf.file, "-"], { encoding: "utf8" }).stdout);
   if (!p1.includes(NOTICE) || p1.indexOf(NOTICE) > p1.indexOf("# Description")) throw new Error("the notice is not on page one above the BOQ");

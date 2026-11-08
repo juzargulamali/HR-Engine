@@ -53,9 +53,9 @@ Fifteen migrations: 11 in package 1 (#53), 2 in package 2 (#54), 1 in package 3 
 ## 4. How this was checked (reproducible)
 
 ```bash
-# file names strictly increasing, no duplicate timestamps, exactly 15 from 20261216 on (all four branches merged)
+# file names strictly increasing, no duplicate timestamps, exactly 15 from 20261216 to 20261218 (all four branches merged; later migrations are section 6)
 ls supabase/migrations | sort -c && ls supabase/migrations | cut -c1-14 | sort | uniq -d   # prints nothing
-ls supabase/migrations | awk '$0>="20261216"' | wc -l                                         # 15
+ls supabase/migrations | awk '$0>="20261216" && $0<"20261219"' | wc -l                       # 15
 # every .sql file a launch guide names exists, and no package guide still says that the order does not matter
 grep -rn -i "any ord[e]r" docs/launch-p*.md                                                     # prints nothing
 ```
@@ -73,3 +73,13 @@ These are the owner's own runs and the owner's reported results. They were **not
 | #15 (cross-company receiving, pack `inv_xshare_*`) | Applied. Verify: **69 checks, 0 failing**. Preservation compare: **PASS**. All 9 schema fingerprints and 8 checked table fingerprints unchanged. All 6 protected existing functions unchanged. **Exactly 11 functions added.** |
 
 Not part of any of these results, and still not done: the dispatch / return notes switch (`inv_notes_30`) stays **off**; `deact_30_align_deactivated_accounts_OPTIONAL_writes.sql` is unrun; no scheduled job was activated; the broader user and security testing is planned separately after this release and is **not** recorded here as completed.
+
+## 6. Later, separate changes (not part of the 15, not applied unless the owner says so)
+
+Applied after the 15, each with its own owner pack and guide. Row order is install order.
+
+| # | Migration | Pack prefix | PR | Guide | Hosted state |
+|---|---|---|---|---|---|
+| 16 | `20261219000100_crm_clients_agencies.sql` | `crm_accounts_*` | #61 | `docs/clients-agencies-deployment.md` | not recorded here |
+| 17 | `20261220000100_crm_estimates_quotations.sql` | `crm_quotes_*` | #62 | `docs/estimates-quotations-deployment.md` | applied on V2 per the owner (not verified by Claude); never edited |
+| 18 | `20261221000100_crm_estimates_only_guards.sql` | `crm_estguard_*` | #64 | `docs/estimates-quotations-deployment.md` "Estimates-only database guard (owner-run)" | **not applied**; needs #17. Safe in either order with the app: refuses an estimate as `sent` in the database, new estimates `EST-`. Rollback pack included |
