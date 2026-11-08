@@ -450,12 +450,21 @@ function EstimateDocument({ model, assets }: QuotationDocumentProps) {
           </View>
           {model.sections.map((sec, si) => (
             <View key={si}>
-              {sec.title !== null ? (
+              {sec.title !== null && model.branded ? (
+                /* Branded layout (estimate-format:2 and drafts): the heading and the FIRST item are one unbreakable group, so a section heading never ends a page.
+                   estimate-format:1 documents keep their original pagination (they must re-export exactly as finalised). */
+                <View wrap={false}>
+                  <View style={s.secRow}>
+                    <Text style={[s.cDesc, s.bold, { paddingLeft: 6 }]}>{sec.number} {sec.title}</Text>
+                  </View>
+                  {sec.lines.slice(0, 1).map((l) => <EstimateRow key={l.number} l={l} images={assets.images} />)}
+                </View>
+              ) : sec.title !== null ? (
                 <View style={s.secRow} wrap={false} minPresenceAhead={60}>
                   <Text style={[s.cDesc, s.bold, { paddingLeft: 6 }]}>{sec.number} {sec.title}</Text>
                 </View>
               ) : null}
-              {sec.lines.map((l) => <EstimateRow key={l.number} l={l} images={assets.images} />)}
+              {sec.lines.slice(sec.title !== null && model.branded ? 1 : 0).map((l) => <EstimateRow key={l.number} l={l} images={assets.images} />)}
               {sec.title !== null ? (
                 <View style={s.subRow} wrap={false}>
                   <Text style={[s.cDesc, s.bold, { textAlign: "right" }]}>Subtotal: {sec.number} {sec.title}</Text>
