@@ -54,3 +54,40 @@ Still needs hosted verification (owner, after applying the migration): who owns 
 **No migration is needed and no owner SQL pack changes.** The applied migration `20261220000100_crm_estimates_quotations.sql` is untouched; deploy the app only. What changed: the wording (Estimate everywhere), a simpler three-step builder, the mandatory budgetary notice in both files, no standard terms or acceptance wording in client files, larger aspect-preserving photos, a boxed totals block, and "record as sent" refused for estimate rows in the app. Existing `QUO-` quotations and their frozen snapshots are not rewritten and export exactly as issued (a snapshot without the server-written marker `estimate-format:1` is treated as historical). New estimates are still numbered `QUO-...`.
 
 Evidence at `158740c`: unit and export tests including a pre-change frozen fixture, and a local-stack browser flow (`apps/web/os-shell-checks/quotations-flow.mjs`) proving that finalising writes no booking, reservation, follow-up, reminder or Zoho row and changes no status or stage. **Not verified:** any hosted behaviour of this change, Vercel, real object storage for this change. Optional later migrations (owner decision, not required): `EST-` reference prefix (`create or replace function crm_quote_create`), and a database-level refusal of `crm_set_proposal_status('sent')` for a version that has a `crm_quotations` row.
+
+## Issuer branding in estimate exports (branch `feat/estimate-issuer-branding`)
+
+**No migration is needed and no owner SQL pack changes.** The Admin → Companies "Issuer details" screen already holds every field (legal name, TRN, a multi-line address, phone, email, website, logo), and the frozen snapshot already froze all of them, with the logo pinned by path and SHA-256 (`crm_quote_build_content`, applied migration `20261220000100`). Deploy the app only. What changed:
+
+* **Header (PDF page one):** the profile logo on the left; legal name, the address lines as stored and `TRN: <value>` (omitted when empty) right-aligned on the right, with the estimate title, reference, revision and dates under that block. A profile with no logo prints no logo (the bundled ENGINIOUS logo is not used for estimates).
+* **Footer (every PDF page):** a thin rule, then the estimate reference on the left, one centred line `Sales enquiries: <phone> · <email> · <website>` and `Page x of y` at the far right. "Sales enquiries:" is a fixed label in code; a missing part and its separator are omitted, and the whole line is omitted when all three are missing. The website is a real link to the stored value normalised to an absolute https URL (`www.example.ae` and `https://www.example.ae` both link to `https://www.example.ae`). Any other scheme (javascript:, data:, file:, ftp: and so on), a `//host` value, spaces or credentials are printed as plain text and never linked.
+* **Excel:** the same header lines at the top and the same sales line as the last visible row of the sheet (label, phone and email in one cell, the website beside it as a real hyperlink cell; one plain cell when the website is not linkable), and the same line in the print footer (centre; a print footer cannot hold a link; the reference is dropped before the sales line if the 255-character footer limit would be exceeded).
+* **How old documents stay as they were:** the format marker. Estimates now carry `estimate-format:2` (set by the server when a draft is saved, sent for approval or finalised). A snapshot marked `estimate-format:1` (finalised by the Estimates-only release) and a snapshot with no marker (a quotation issued earlier) render exactly as before: the old header with the contact line, no sales footer line, no link, and no value is ever read from the live company profile for a finalised revision. Tests: `export/legacy-regression.test.tsx` (pre-change legacy fixture) and `export/issuer-branding.test.tsx` with the new pre-change fixture `export/__fixtures__/estimate-frozen-v1.json` (PDF text, page count, Excel cells, print footer, file names identical). A draft that carries the `estimate-format:1` marker is moved to `2` when it is next saved, sent for approval or finalised; if it was already approved, the approval is bound to the old version and has to be requested again (the same rule as any edit).
+* **Freeze:** nothing new is stored. A finalised revision reads the issuer fields from its own snapshot; editing the company profile afterwards changes nothing in its PDF or Excel, and the next revision picks the new profile up. Drafts show the live profile and stay marked Draft.
+* The Admin → Companies button and dialog are now called "Issuer details" (they still said quotation).
+
+Evidence: unit and export tests (header, footer on every page, omissions, multi-line address, link annotation and Excel hyperlink, unsafe schemes, freeze after a profile edit, new revision, legacy and format-1 regressions), and the local-stack browser flow `apps/web/os-shell-checks/quotations-flow.mjs` (Admin → Companies edit, finalise, edit again, re-export unchanged, new revision changed). **Not verified:** any hosted behaviour, Vercel, and logo upload and pinning against real object storage for this change (the local stack has none; the logo path is covered by tests with a storage seam, and earlier hosted-style Storage evidence is in "Local release check" above).
+
+### Issuer details to enter (owner, on hosted V2, after the app is deployed)
+
+**Claude entered nothing on hosted V2, seeded nothing for any entity and added no migration or SQL that writes these values.** Until you enter them, the exports show only what the profile holds (finalising still needs a non-blank legal name, the existing rule). Sign in as a System Administrator, open **Admin → Companies**, find the row **Enginious LLC FZ** (the exact name in the Companies list) and press **Issuer details**. Type exactly:
+
+| Form field | Value |
+|---|---|
+| Legal name | `Enginious LLC FZ` |
+| Tax registration number (TRN) | `100613846300003` |
+| Address (a multi-line box; Enter starts a new line, line breaks are kept) | two lines: `Business Center 1, The Meydan Hotel / Nad Al Sheba,` then `Dubai 00000, U.A.E.` |
+| Phone | `+971 50 7247728` |
+| Email | `sales@enginious.ae` |
+| Website | `https://www.enginious.ae` |
+| Logo | in the same dialog, the second form "Upload logo": choose the official Enginious logo file (PNG, JPEG or WebP, under 900 KB). No logo file is committed with this change. |
+
+Press **Save details**, then upload the logo. A revision finalised afterwards freezes these values; revisions finalised before keep what they were finalised with.
+
+Optional read-only check (a SELECT, no writes; run it in the SQL editor to see what the profile holds):
+
+```sql
+select legal_name, trn, address, phone, email, website, logo_path is not null as has_logo
+from companies
+where legal_name = 'Enginious LLC FZ';
+```
