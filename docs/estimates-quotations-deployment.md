@@ -82,6 +82,10 @@ Evidence at `158740c` (app): unit and export tests including a pre-change frozen
 
 Evidence at `158740c`: unit and export tests including a pre-change frozen fixture, and a local-stack browser flow (`apps/web/os-shell-checks/quotations-flow.mjs`) proving that finalising writes no booking, reservation, follow-up, reminder or Zoho row and changes no status or stage. **Not verified:** any hosted behaviour of this change, Vercel, real object storage for this change. Optional later migrations (owner decision, not required): `EST-` reference prefix (`create or replace function crm_quote_create`), and a database-level refusal of `crm_set_proposal_status('sent')` for a version that has a `crm_quotations` row.
 
+### Hosted V2 result (owner-reported; Claude ran no hosted SQL)
+
+The owner ran this pack on hosted V2 (2026-11-08) and reported: the preservation comparison passed and **all 14 verification checks were OK**. The result rows were not pasted into the repository and were not re-read by Claude, and the rollback was not run. PR #64 was merged at its pinned head `64682cd76056fb60b541b23c9d28fcdc0c68492b` (merge commit `02fe2df2a6238184e493ffe8322660045a055a22`) after required CI (`lint-typecheck-test`, `rls-policies`) was green on that exact head. Still not verified by any hosted run: the refusal itself (an estimate marked sent through the app or a direct call), `EST-` numbering of a newly created estimate on hosted data, and Vercel Production for this merge.
+
 ## Issuer branding in estimate exports (branch `feat/estimate-issuer-branding`)
 
 **No migration is needed and no owner SQL pack changes.** The Admin → Companies "Issuer details" screen already holds every field (legal name, TRN, a multi-line address, phone, email, website, logo), and the frozen snapshot already froze all of them, with the logo pinned by path and SHA-256 (`crm_quote_build_content`, applied migration `20261220000100`). Deploy the app only. What changed:
