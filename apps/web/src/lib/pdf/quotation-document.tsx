@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Document, Page, View, Text, Image, StyleSheet, Font } from "@react-pdf/renderer";
 import type { ReactNode } from "react";
+import { NOTE_HEADINGS, reviewPricingSentence } from "@enginious-hr/domain";
 import { docTitle, groupMoney, milestoneValueText, vatRateText, type DocLine, type QuotationDocModel } from "@/lib/crm/quotations/export/doc-model";
 import type { ExportAssets } from "@/lib/crm/quotations/export/images";
 
@@ -25,6 +26,8 @@ Font.register({
   ],
 });
 
+/** Photo area of an estimate row, in PDF points (1 pt = 0.3528 mm): 120 x 88 pt = 42.3 x 31.0 mm, above the 40 x 30 mm target, inside a 128 pt column. */
+export const ESTIMATE_PHOTO = { column: 128, width: 120, height: 88, row: 96 } as const;
 const C = { brand: "#1C5C6B", ink: "#0A202A", muted: "#4A5D66", line: "#C9D3D7", band: "#EEF3F4", section: "#DCE8EB", draft: "#B42318" };
 const W = { no: 30, image: 56, unit: 38, qty: 40, price: 64, net: 68, rate: 46, vat: 62, gross: 72 };
 
@@ -127,7 +130,12 @@ function Row({ l, images }: { l: DocLine; images: ExportAssets["images"] }) {
 
 export interface QuotationDocumentProps { model: QuotationDocModel; assets: ExportAssets }
 
+/** A legacy (pre-estimates) snapshot renders exactly as it was issued; everything else is an estimate. */
 export function QuotationDocument({ model, assets }: QuotationDocumentProps) {
+  return model.format === "legacy" ? <LegacyDocument model={model} assets={assets} /> : <EstimateDocument model={model} assets={assets} />;
+}
+
+function LegacyDocument({ model, assets }: QuotationDocumentProps) {
   const cur = model.currency;
   const b = model.billTo;
   const hasBack = model.milestones.length > 0 || model.terms.clauses.length > 0 || model.exclusions.length > 0;
@@ -240,6 +248,190 @@ export function QuotationDocument({ model, assets }: QuotationDocumentProps) {
           ) : null}
         </Page>
       ) : null}
+    </Document>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// Estimate format
+// ---------------------------------------------------------------------------------------------------------------------------------
+const E = StyleSheet.create({
+  notice: { borderWidth: 1, borderColor: "#C7A24B", backgroundColor: "#FBF5E3", padding: 7, marginBottom: 9 },
+  noticeTitle: { fontSize: 9, fontWeight: "bold", color: "#6B4F0A", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 2 },
+  noticeText: { fontSize: 9.5, lineHeight: 1.3 },
+  cImg: { width: ESTIMATE_PHOTO.column, padding: 4, alignItems: "center", justifyContent: "center" },
+  photo: { width: ESTIMATE_PHOTO.width, height: ESTIMATE_PHOTO.height, objectFit: "contain" },
+  totalsBox: { alignSelf: "flex-end", width: 290, marginTop: 10, borderWidth: 1, borderColor: C.brand, backgroundColor: C.band, paddingHorizontal: 9, paddingVertical: 6 },
+  review: { fontSize: 9, color: C.muted, marginTop: 5, alignSelf: "flex-end" },
+  para: { fontSize: 9.5, lineHeight: 1.3, marginBottom: 4 },
+});
+
+function EstimateMarks({ model }: { model: QuotationDocModel }): ReactNode {
+  return (
+    <>
+      {model.draft ? <Text style={s.banner} fixed>DRAFT, NOT FINALISED. This estimate has not been finalised and must not be sent to the client.</Text> : null}
+      {model.draft ? <Text style={s.watermark} fixed>DRAFT</Text> : null}
+      <View style={s.footer} fixed>
+        <Text>{model.issuer.legalName} · Estimate {model.reference} · Revision {model.revision}{model.draft ? " · DRAFT" : ""}</Text>
+        <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
+      </View>
+    </>
+  );
+}
+
+function EstimateRow({ l, images }: { l: DocLine; images: ExportAssets["images"] }) {
+  const img = l.image ? images.get(l.image.key) : undefined;
+  return (
+    <View style={[s.tr, img ? { minHeight: ESTIMATE_PHOTO.row } : {}]} wrap={false}>
+      <Text style={s.cNo}>{l.number}</Text>
+      <Text style={s.cDesc}>{l.description}</Text>
+      <View style={E.cImg}>
+        {img ? (
+          // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf's own Image primitive (renders into a PDF, not the DOM); it has no alt prop.
+          <Image src={{ data: img.data, format: img.format }} style={E.photo} />
+        ) : null}
+      </View>
+      <Text style={s.cUnit}>{l.unit ?? ""}</Text>
+      <Text style={s.cQty}>{qty(l.quantity)}</Text>
+      <Text style={s.cPrice}>{money(l.unitPrice)}</Text>
+      <Text style={s.cNet}>{money(l.net)}</Text>
+      <Text style={s.cRate}>{vatRateText(l)}</Text>
+      <Text style={s.cVat}>{money(l.vatAmount)}</Text>
+      <Text style={s.cGross}>{money(l.gross)}</Text>
+    </View>
+  );
+}
+
+/**
+ * A heading with its text: the heading and the FIRST paragraph are one unbreakable group, so a heading never ends a page; the other paragraphs wrap naturally
+ * (orphans and widows kept at two lines). An empty block prints nothing, not even its heading.
+ */
+function NoteBlock({ heading, paragraphs }: { heading: string; paragraphs: string[] }): ReactNode {
+  const [first, ...rest] = paragraphs;
+  if (first === undefined) return null;
+  return (
+    <View>
+      <View wrap={false}>
+        <Text style={s.h2}>{heading}</Text>
+        <Text style={E.para} orphans={2} widows={2}>{first}</Text>
+      </View>
+      {rest.map((p, i) => <Text key={i} style={E.para} orphans={2} widows={2}>{p}</Text>)}
+    </View>
+  );
+}
+
+function EstimateDocument({ model, assets }: QuotationDocumentProps) {
+  const cur = model.currency;
+  const b = model.billTo;
+  return (
+    <Document title={docTitle(model)} author={model.issuer.legalName} subject={model.enquiryTitle}>
+      <Page size="A4" orientation="landscape" style={s.page}>
+        <EstimateMarks model={model} />
+        <View style={s.head}>
+          <IssuerBlock model={model} assets={assets} />
+          <View style={s.headRight}>
+            <Text style={s.title}>{model.draft ? "Estimate (DRAFT)" : "Estimate"}</Text>
+            <Text style={s.ref}>{model.reference}</Text>
+            <Text>Revision {model.revision}</Text>
+            <Text style={s.muted}>{model.issueDate ? `Finalised on: ${model.issueDate}` : "Not finalised yet"}</Text>
+            {model.validityDate ? <Text style={s.muted}>Review pricing after: {model.validityDate}</Text> : null}
+          </View>
+        </View>
+        <View style={s.boxes}>
+          <View style={s.box}>
+            <Text style={s.boxTitle}>Prepared for</Text>
+            <Text style={s.boxName}>{b.name}</Text>
+            {[b.place, b.country].filter(Boolean).length ? <Text style={s.muted}>{[b.place, b.country].filter(Boolean).join(", ")}</Text> : null}
+            {b.vatTrn ? <Text>VAT registration number / TRN: {b.vatTrn}</Text> : null}
+            {b.tradeLicence ? <Text>Trade licence number: {b.tradeLicence}</Text> : null}
+          </View>
+          <View style={s.box}>
+            <Text style={s.boxTitle}>Project / enquiry</Text>
+            <Text style={s.boxName}>{model.enquiryTitle}</Text>
+            <Text style={s.muted}>Enquiry {model.enquiryReference}</Text>
+            <Text style={s.muted}>{cur ? `All amounts in ${cur}` : "Currency not chosen yet"}</Text>
+          </View>
+        </View>
+
+        {/* The mandatory notice: a constant of the domain package, in the page flow BEFORE the BOQ, so it is on page one however long the BOQ is. No editor can remove it. */}
+        <View style={E.notice} wrap={false}>
+          <Text style={E.noticeTitle}>Budgetary estimate</Text>
+          <Text style={E.noticeText}>{model.notice}</Text>
+        </View>
+
+        {/* The header row is `fixed` inside the table's own View, so it repeats on every page the BOQ spans and nowhere else. */}
+        <View>
+          <View style={s.th} fixed>
+            <Text style={s.cNo}>#</Text>
+            <Text style={s.cDesc}>Description</Text>
+            <Text style={[E.cImg, { textAlign: "center" }]}>Photo</Text>
+            <Text style={s.cUnit}>Unit</Text>
+            <Text style={s.cQty}>Qty</Text>
+            <Text style={s.cPrice}>Unit price</Text>
+            <Text style={s.cNet}>Excl. VAT</Text>
+            <Text style={s.cRate}>VAT rate</Text>
+            <Text style={s.cVat}>VAT amount</Text>
+            <Text style={s.cGross}>Incl. VAT</Text>
+          </View>
+          {model.sections.map((sec, si) => (
+            <View key={si}>
+              {sec.title !== null ? (
+                <View style={s.secRow} wrap={false} minPresenceAhead={60}>
+                  <Text style={[s.cDesc, s.bold, { paddingLeft: 6 }]}>{sec.number} {sec.title}</Text>
+                </View>
+              ) : null}
+              {sec.lines.map((l) => <EstimateRow key={l.number} l={l} images={assets.images} />)}
+              {sec.title !== null ? (
+                <View style={s.subRow} wrap={false}>
+                  <Text style={[s.cDesc, s.bold, { textAlign: "right" }]}>Subtotal: {sec.number} {sec.title}</Text>
+                  <Text style={[s.cNet, s.bold]}>{money(sec.subtotalNet)}</Text>
+                  <Text style={s.cRate}></Text>
+                  <Text style={[s.cVat, s.bold]}>{money(sec.subtotalVat)}</Text>
+                  <Text style={[s.cGross, s.bold]}>{money(sec.subtotalGross)}</Text>
+                </View>
+              ) : null}
+            </View>
+          ))}
+        </View>
+
+        {/* The totals: boxed, directly after the BOQ, kept together on one page. */}
+        <View style={E.totalsBox} wrap={false}>
+          <View style={s.totalRow}><Text>Total excl. VAT</Text><Text>{cur ? `${cur} ` : ""}{money(model.totals.net)}</Text></View>
+          <View style={s.totalRow}><Text>VAT</Text><Text>{cur ? `${cur} ` : ""}{money(model.totals.vat)}</Text></View>
+          <View style={[s.totalRow, { borderTopWidth: 1, borderColor: C.brand, marginTop: 3, paddingTop: 4 }]}><Text style={s.totalBig}>Total incl. VAT</Text><Text style={s.totalBig}>{cur ? `${cur} ` : ""}{money(model.totals.gross)}</Text></View>
+        </View>
+        {model.validityDate ? <Text style={E.review}>{reviewPricingSentence(model.validityDate)}</Text> : null}
+
+        {model.milestones.length > 0 ? (
+          <View wrap={false}>
+            <Text style={s.h2}>Indicative payment schedule</Text>
+            <View style={[s.th, { width: 560 }]}>
+              <Text style={[s.cDesc, { flex: 3 }]}>Item</Text><Text style={[s.cDesc, { flex: 2 }]}>Timing</Text><Text style={[s.cNet, { width: 80 }]}>Share</Text><Text style={[s.cGross, { width: 110 }]}>Amount incl. VAT</Text>
+            </View>
+            {model.milestones.map((m, i) => (
+              <View key={i} style={[s.tr, { width: 560 }]} wrap={false}>
+                <Text style={[s.cDesc, { flex: 3 }]}>{m.label}</Text><Text style={[s.cDesc, { flex: 2 }]}>{m.due ?? ""}</Text>
+                <Text style={[s.cNet, { width: 80 }]}>{m.kind === "percent" ? milestoneValueText(m, cur) : ""}</Text>
+                <Text style={[s.cGross, { width: 110 }]}>{cur ? `${cur} ` : ""}{money(m.amount)}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        <NoteBlock heading={NOTE_HEADINGS.assumptions} paragraphs={model.clientNotes.assumptions} />
+        {model.exclusions.length > 0 ? (
+          <View>
+            {model.exclusions.map((c, i) => (
+              <View key={i} wrap={false}>
+                {i === 0 ? <Text style={s.h2}>{NOTE_HEADINGS.exclusions}</Text> : null}
+                <Text style={s.clauseTitle}>{i + 1}. {c.title}</Text>
+                <Text style={s.clauseBody} orphans={2} widows={2}>{c.body}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+        <NoteBlock heading={NOTE_HEADINGS.nextSteps} paragraphs={model.clientNotes.nextSteps} />
+      </Page>
     </Document>
   );
 }

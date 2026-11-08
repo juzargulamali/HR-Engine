@@ -66,7 +66,7 @@ export default async function OpportunityPage({ params, searchParams }: { params
     { id: "scope", label: "Scope & dates", content: <ScopePanel view={view} /> },
     { id: "activity", label: "Activity & history", content: <ActivityPanel view={view} /> },
     { id: "proposals", label: "Proposals & files", content: <div className="space-y-6"><ProposalsPanel view={view} /><FilesPanel view={view} /></div> },
-    { id: "quotations", label: "Estimates & Quotations", content: <QuotationsPanel view={view} /> },
+    { id: "quotations", label: "Estimates", content: <QuotationsPanel view={view} /> },
     { id: "commercial", label: "Commercial", content: <CommercialPanel view={view} /> },
   ];
 

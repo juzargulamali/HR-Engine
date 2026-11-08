@@ -45,6 +45,8 @@ export interface QuotationBundle {
   files: CrmFileRow[];
   /** line image file id -> short-lived signed address (best effort; missing = show the file name only). */
   imageUrls: Record<string, string>;
+  /** Short-lived signed address of the issuer's logo for the read-only issuer summary (best effort; null = show the name only). */
+  logoUrl: string | null;
   approvals: ApprovalLite[];
   /** The version fingerprint of the client-facing content as it is now (crm_quote_content_hash): the reviewer screen carries it back when approving. Null for an issued quotation or when it could not be computed. */
   contentHash: string | null;
@@ -97,10 +99,15 @@ export async function loadQuotation(proposalId: string): Promise<QuotationBundle
       (data ?? []).forEach((r, i) => { if (r.signedUrl) imageUrls[wanted[i]!.id] = r.signedUrl; });
     } catch { /* thumbnails are optional */ }
   }
+  let logoUrl: string | null = null;
+  const logoPath = (co.data as IssuerLite | null)?.logo_path;
+  if (logoPath) {
+    try { logoUrl = (await createAdminClient().storage.from("company-logos").createSignedUrl(logoPath, 600)).data?.signedUrl ?? null; } catch { /* the logo thumbnail is optional */ }
+  }
   return {
     header, proposal: p.data as CrmProposalRow, sections: (sec.data ?? []) as QuotationSectionRow[], lines, vatChoices: (vat.data ?? []) as VatChoiceRow[],
     issuer: co.data as IssuerLite, organisations, billTo: organisations.find((o) => o.id === header.bill_to_org_id) ?? null,
-    files: fileRows, imageUrls, approvals: (appr.data ?? []) as ApprovalLite[], contentHash,
+    files: fileRows, imageUrls, logoUrl, approvals: (appr.data ?? []) as ApprovalLite[], contentHash,
     snapshot: (snap.data as QuotationBundle["snapshot"]) ?? null,
     revisions: chainIds.map((c) => ({ proposal_id: c.proposal_id, revision: c.revision, issued: !!c.issued_at, status: statusBy.get(c.proposal_id) ?? "draft" })),
   };

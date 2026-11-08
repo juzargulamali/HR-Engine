@@ -1,6 +1,7 @@
 import "server-only";
 import { availabilityDisplay, type AvailabilityDisplay } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   CrmActivityRow, CrmApprovalRow, CrmClosureRow, CrmContactRow, CrmFileRow, CrmFollowUpRow, CrmHandoverRow, CrmOpportunityEventRow,
   CrmOpportunityRow, CrmOrganisationRow, CrmProposalRow, CrmReminderRow, CrmZohoReferenceRow,
@@ -228,7 +229,15 @@ export async function loadOrganisations(): Promise<{
   };
 }
 
-export async function loadProposals(ctx: CrmContext): Promise<{ proposal: CrmProposalRow; opportunity: OpportunityListItem | null; file: CrmFileRow | null }[]> {
+/** Which of these proposal versions are ESTIMATES built in the app (and whether each is finalised). A failed read throws: it must never look like "none are estimates". */
+export async function loadEstimateMarks(proposalIds: readonly string[]): Promise<Map<string, { finalised: boolean }>> {
+  if (proposalIds.length === 0) return new Map();
+  const res = await ((await createClient()) as unknown as SupabaseClient).from("crm_quotations").select("proposal_id, issued_at").in("proposal_id", [...proposalIds]);
+  if (res.error) throw new Error(`Estimates could not be loaded: ${res.error.message}`);
+  return new Map(((res.data ?? []) as { proposal_id: string; issued_at: string | null }[]).map((r) => [r.proposal_id, { finalised: !!r.issued_at }]));
+}
+
+export async function loadProposals(ctx: CrmContext): Promise<{ proposal: CrmProposalRow; opportunity: OpportunityListItem | null; file: CrmFileRow | null; estimate: { finalised: boolean } | null }[]> {
   const supabase = await createClient();
   const [propsRes, items, filesRes] = await Promise.all([
     supabase.from("crm_proposals").select("*").order("created_at", { ascending: false }).limit(500),
@@ -238,9 +247,10 @@ export async function loadProposals(ctx: CrmContext): Promise<{ proposal: CrmPro
   ok(propsRes, filesRes);
   const props = propsRes.data;
   const files = filesRes.data;
+  const estimates = await loadEstimateMarks((props ?? []).map((p) => p.id));
   const oppBy = new Map(items.map((i) => [i.opp.id, i]));
   const fileBy = new Map((files ?? []).map((f) => [f.id, f]));
-  return (props ?? []).map((p) => ({ proposal: p, opportunity: oppBy.get(p.opportunity_id) ?? null, file: p.file_id ? (fileBy.get(p.file_id) ?? null) : null }));
+  return (props ?? []).map((p) => ({ proposal: p, opportunity: oppBy.get(p.opportunity_id) ?? null, file: p.file_id ? (fileBy.get(p.file_id) ?? null) : null, estimate: estimates.get(p.id) ?? null }));
 }
 
 export async function loadMyReminders(): Promise<CrmReminderRow[]> {

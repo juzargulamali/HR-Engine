@@ -47,7 +47,7 @@ beforeEach(() => { ctx = granted; bundle = bundleFixture({ snapshot: snapshotFix
 
 describe("totals agree everywhere (direct client and agency billed)", () => {
   for (const agency of [false, true]) {
-    it(`${agency ? "agency-billed" : "direct-client"}: PDF and XLSX show the snapshot's totals, section subtotals, numbering and Exclusions before Terms`, async () => {
+    it(`${agency ? "agency-billed" : "direct-client"}: PDF and XLSX show the snapshot's totals, section subtotals, numbering, the payment schedule and the notes, and no terms`, async () => {
       const snap = snapshotFixture({ agency });
       bundle = bundleFixture({ snapshot: snap });
       const [pdf, xlsx] = [await buf(await run("pdf")), await buf(await run("xlsx"))];
@@ -61,16 +61,18 @@ describe("totals agree everywhere (direct client and agency billed)", () => {
       }
       expect(cellText(ws)).toEqual(expect.arrayContaining(["1.1", "1.2", "2.1", snap.bill_to.name]));
       const t = cellText(ws);
-      expect(t.indexOf("Exclusions")).toBeGreaterThan(t.indexOf("Payment milestones"));
-      expect(t.indexOf("Terms and conditions")).toBeGreaterThan(t.indexOf("Exclusions"));
+      expect(t.indexOf("Exclusions")).toBeGreaterThan(t.indexOf("Indicative payment schedule"));
+      expect(t.indexOf("Next steps")).toBeGreaterThan(t.indexOf("Exclusions"));
+      expect(t).not.toContain("Terms and conditions");
       if (hasPdftotext) {
         const text = pdfText(pdf);
         for (const v of [snap.totals.net, snap.totals.vat, snap.totals.gross, ...snap.sections.flatMap((s) => [s.subtotal_net, s.subtotal_vat, s.subtotal_gross])]) expect(text).toContain(v.replace(/\B(?=(\d{3})+(?!\d))/g, ","));
         expect(text).toContain(snap.bill_to.name);
         expect(text).toMatch(/1\.1\s+Stage deck/);
-        expect(text.indexOf("Exclusions")).toBeGreaterThan(text.indexOf("Payment milestones"));
-        expect(text.indexOf("Terms and conditions")).toBeGreaterThan(text.indexOf("Exclusions"));
-        expect(text).toMatch(/Page 1 of 2/);
+        expect(text.indexOf("Exclusions")).toBeGreaterThan(text.indexOf("Indicative payment schedule"));
+        expect(text.indexOf("Next steps")).toBeGreaterThan(text.indexOf("Exclusions"));
+        expect(text).not.toContain("Terms and conditions");
+        expect(text).toMatch(/Page 1 of \d/);
       }
     });
   }
@@ -120,15 +122,15 @@ describe("draft marking and file names", () => {
     expect(dx.headers.get("content-disposition")).toBe('attachment; filename="QUO-FIX-2026-0001-rev1-DRAFT.xlsx"');
     const [pdf, xlsx] = [await buf(dp), await buf(dx)];
     const wb = await sheet(xlsx);
-    expect(wb.worksheets[0]!.name).toBe("Quotation DRAFT");
-    expect(String(wb.worksheets[0]!.getCell(1, 1).value)).toMatch(/^DRAFT, NOT ISSUED/);
-    if (hasPdftotext) { const t = pdfText(pdf); expect(t).toMatch(/DRAFT, NOT ISSUED/); expect(t).toContain("Quotation (DRAFT)"); }
+    expect(wb.worksheets[0]!.name).toBe("Estimate DRAFT");
+    expect(String(wb.worksheets[0]!.getCell(1, 1).value)).toMatch(/^DRAFT, NOT FINALISED/);
+    if (hasPdftotext) { const t = pdfText(pdf); expect(t).toMatch(/DRAFT, NOT FINALISED/); expect(t).toContain("Estimate (DRAFT)"); expect(t).not.toMatch(/Quotation/); }
     bundle = bundleFixture({ snapshot: snapshotFixture({ revision: 3 }) });
     const [ip, ix] = [await run("pdf"), await run("xlsx")];
     expect(ip.headers.get("content-disposition")).toBe('attachment; filename="QUO-FIX-2026-0001-rev3.pdf"');
     expect(ix.headers.get("content-disposition")).toBe('attachment; filename="QUO-FIX-2026-0001-rev3.xlsx"');
     const iwb = await sheet(await buf(ix));
-    expect(iwb.worksheets[0]!.name).toBe("Quotation");
+    expect(iwb.worksheets[0]!.name).toBe("Estimate");
     expect(cellText(iwb.worksheets[0]!).some((t) => /DRAFT/.test(t))).toBe(false);
     if (hasPdftotext) expect(pdfText(await buf(ip))).not.toMatch(/DRAFT/);
     expect(ix.headers.get("cache-control")).toBe("private, no-store");
@@ -193,7 +195,7 @@ describe("pagination", () => {
     const ws = (await sheet(await buf(await run("xlsx")))).worksheets[0]!;
     expect(ws.pageSetup).toMatchObject({ orientation: "landscape", fitToWidth: 1, fitToHeight: 0 });
     expect(ws.pageSetup.printTitlesRow).toMatch(/^\d+:\d+$/);
-    expect(ws.views[0]).toMatchObject({ state: "frozen" });
+    expect(ws.views[0]!.state).not.toBe("frozen");   // an estimate's notice and header are tall: freezing them would leave no room to scroll (a legacy sheet still freezes: legacy-regression.test.tsx)
     const long = rowWith(ws, /Item 6 Custom stage deck/)!;
     expect(long.height).toBeGreaterThan(60);   // a long description gets a taller row
   });

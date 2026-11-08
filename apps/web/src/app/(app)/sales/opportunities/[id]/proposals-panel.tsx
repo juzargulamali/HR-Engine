@@ -1,6 +1,10 @@
+import Link from "next/link";
 import { FileText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { LoadError } from "@/components/workspace/states";
 import { formatDate } from "@/components/sales/format";
+import { loadEstimateMarks } from "@/lib/crm/data";
+import { estimateNoteText } from "@/lib/crm/quotations/wording";
 import { fileDisplayName, PROPOSAL_STATUS_LABELS, proposalActions } from "./helpers";
 import { Muted, Panel } from "./parts";
 import { AddProposalForm, ProposalStatusButton } from "./proposal-forms";
@@ -10,8 +14,11 @@ import type { OppView } from "./view";
  * Proposal versions: built elsewhere (Canva, Word…) and kept here as a recorded file or link. "Sent" is a dated fact
  * entered by the owner, never an approval; "accepted" is the client's acceptance, never the win itself.
  */
-export function ProposalsPanel({ view }: { view: OppView }) {
+export async function ProposalsPanel({ view }: { view: OppView }) {
   const { detail, ctx, opp, canEdit, isOpen, policy } = view;
+  // Estimates built in the app appear here as versions, but an estimate is never an official quotation sent to the client: it carries its own label and no "Record as sent".
+  let estimates: Awaited<ReturnType<typeof loadEstimateMarks>>;
+  try { estimates = await loadEstimateMarks(detail.proposals.map((p) => p.id)); } catch { return <LoadError what="the proposal versions" retryHref={`/sales/opportunities/${opp.id}?tab=proposals`} />; }
   const filesById = new Map(detail.files.map((f) => [f.id, f]));
   const latestApproval = detail.approvals[0] ?? null;
   const nextVersion = (detail.proposals[0]?.version ?? 0) + 1; // newest first
@@ -21,23 +28,27 @@ export function ProposalsPanel({ view }: { view: OppView }) {
   const latestSentId = detail.proposals.find((p) => sentOrAccepted(p.status))?.id ?? null;
   return (
     <div className="space-y-6">
-      <Panel title="Proposal versions" description="Newest first. The version number is assigned automatically. Estimates built in the app also appear under Estimates & Quotations.">
+      <Panel title="Proposal versions" description="Newest first. The version number is assigned automatically. Estimates built in the app also appear under Estimates.">
         {detail.proposals.length === 0 ? (
           <Muted>No proposal recorded yet.{canEdit && isOpen ? " Add the first version below once you have the document." : ""}</Muted>
         ) : (
           <ul className="divide-y divide-border/70">
             {detail.proposals.map((p) => {
               const file = p.file_id ? filesById.get(p.file_id) : undefined;
-              const actions = canEdit ? proposalActions(p, opp.stage) : { send: false, accept: false, supersede: false };
+              const estimate = estimates.get(p.id) ?? null;
+              const base = canEdit ? proposalActions(p, opp.stage) : { send: false, accept: false, supersede: false };
+              const actions = estimate ? { ...base, send: false } : base;
               const unapproved = policy === "required" && p.id === latestSentId && latestApproval?.state !== "approved";
               return (
                 <li key={p.id} className="space-y-1.5 py-3 first:pt-0 last:pb-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="flex items-center gap-1.5 text-sm font-semibold"><FileText className="h-4 w-4" aria-hidden /> Version {p.version}</p>
-                    <Badge variant={p.status === "accepted" ? "success" : p.status === "superseded" ? "secondary" : "outline"}>{PROPOSAL_STATUS_LABELS[p.status]}</Badge>
+                    {estimate && p.status === "draft" ? <Badge variant={estimate.finalised ? "success" : "outline"}>{estimate.finalised ? "Estimate, finalised" : "Estimate, draft"}</Badge>
+                      : <Badge variant={p.status === "accepted" ? "success" : p.status === "superseded" ? "secondary" : "outline"}>{PROPOSAL_STATUS_LABELS[p.status]}</Badge>}
                     {p.id === latestSentId ? <Badge variant="outline">Latest sent</Badge> : null}
                   </div>
-                  {p.note ? <p className="break-words text-sm">{p.note}</p> : null}
+                  {p.note ? <p className="break-words text-sm">{estimate ? estimateNoteText(p.note) : p.note}</p> : null}
+                  {estimate ? <p className="text-sm"><Link href={`/sales/opportunities/${opp.id}/quotations/${p.id}`} className="underline-offset-2 hover:underline">Open the estimate</Link> <span className="text-muted-foreground">· an estimate is not recorded as sent</span></p> : null}
                   <p className="break-words text-sm text-muted-foreground">
                     {file ? `Document: ${fileDisplayName(file)}` : "No document linked"} · added by {ctx.personName(p.created_by)} on {formatDate(p.created_at)}
                     {p.sent_on ? ` · recorded as sent on ${formatDate(p.sent_on)}` : ""}

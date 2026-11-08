@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { dubaiDateTimeToIso, findLikelyDuplicates, validateCrmLink, type DuplicateCandidate, type DuplicateMatch, CRM_CAPABILITIES } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
@@ -549,6 +550,13 @@ export async function setProposalStatus(_prev: ActionState, formData: FormData):
   const p = proposalStatusSchema.safeParse(Object.fromEntries(formData));
   if (!p.success) return { error: firstIssue(p.error) };
   const supabase = await createClient();
+  if (p.data.status === "sent") {
+    // An estimate is a budgetary document, never an "official quotation sent" fact: recording it as sent would also replace the proposal really sent to the client
+    // (the database supersedes the previously sent version) and could unlock the Proposal sent stage. Fail closed when the check itself cannot be made.
+    const est = await (supabase as unknown as SupabaseClient).from("crm_quotations").select("proposal_id").eq("proposal_id", p.data.proposalId).maybeSingle();
+    if (est.error) return { error: "Could not check whether this version is an estimate, so nothing was recorded. Try again." };
+    if (est.data) return { error: "This version is an estimate. An estimate is never recorded as sent. Record the proposal you actually sent to the client instead." };
+  }
   const { error } = await supabase.rpc("crm_set_proposal_status", { p_proposal_id: p.data.proposalId, p_status: p.data.status, p_sent_on: p.data.sentOn ?? null });
   if (error) return fail(error.message);
   refresh(p.data.opportunityId);
