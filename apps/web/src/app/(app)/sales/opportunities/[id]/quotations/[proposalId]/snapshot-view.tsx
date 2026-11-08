@@ -18,7 +18,7 @@ export function SnapshotView({ s }: { s: QuotationSnapshot }) {
       </dl>
       {s.sections.map((sec) => (
         <section key={sec.title} aria-label={sec.title} className="overflow-x-auto rounded-lg border border-border">
-          <h3 className="border-b border-border bg-secondary/40 px-3 py-2 font-semibold">{sec.title}</h3>
+          <h3 className="border-b border-border bg-secondary/40 px-3 py-2 font-semibold">{sec.number} {sec.title}</h3>
           <table className="w-full min-w-[40rem] text-left">
             <thead className="text-muted-foreground"><tr><th className="px-3 py-1.5">#</th><th>Description</th><th>Unit</th><th className="text-right">Qty</th><th className="text-right">Unit price</th><th className="text-right">Excl. VAT</th><th className="text-right">VAT</th><th className="px-3 text-right">Incl. VAT</th></tr></thead>
             <tbody>
@@ -44,8 +44,12 @@ export function SnapshotView({ s }: { s: QuotationSnapshot }) {
         <div><h3 className="font-semibold">Payment milestones</h3>
           <ul className="mt-1 space-y-0.5">{s.milestones.map((m) => <li key={m.label}>{m.label}: {m.kind === "percent" ? `${m.value}% = ` : ""}{money(m.amount, cur)}{m.due ? ` · ${m.due}` : ""}</li>)}</ul></div>
       ) : null}
+      {s.exclusions?.length ? (
+        <div><h3 className="font-semibold">Exclusions</h3>
+          <ol className="mt-1 list-decimal space-y-1 pl-5">{s.exclusions.map((c) => <li key={c.title}><strong>{c.title}.</strong> {c.body}</li>)}</ol></div>
+      ) : null}
       {s.terms.clauses.length ? (
-        <div><h3 className="font-semibold">{s.terms.label ?? "Terms"}</h3>
+        <div><h3 className="font-semibold">{s.terms.label ?? "Terms and conditions"}</h3>
           <ol className="mt-1 list-decimal space-y-1 pl-5">{s.terms.clauses.map((c) => <li key={c.title}><strong>{c.title}.</strong> {c.body}</li>)}</ol></div>
       ) : null}
     </div>

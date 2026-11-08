@@ -387,6 +387,7 @@ create table if not exists crm_quotations (
   milestones           jsonb not null default '[]'::jsonb check (jsonb_typeof(milestones) = 'array'),
   terms_label          text,
   terms                jsonb not null default '[]'::jsonb check (jsonb_typeof(terms) = 'array'),
+  exclusions           jsonb not null default '[]'::jsonb check (jsonb_typeof(exclusions) = 'array'),   -- its own block before the terms; empty by default (nothing seeded)
   internal_notes       text check (internal_notes is null or length(internal_notes) <= 4000),   -- INTERNAL ONLY: never in the snapshot or any export
   content_changed_at   timestamptz not null default now(),
   issued_at            timestamptz,
@@ -435,6 +436,9 @@ create table if not exists crm_quotation_snapshots (
   issued_at      timestamptz not null default now(),
   unique (company_id, reference, revision)
 );
+
+-- Approval of the EXACT version reviewed: a quotation approval is bound to a content hash (see crm_quote_content_hash).
+alter table crm_approvals add column if not exists quote_content_hash text;
 
 -- Guards -----------------------------------------------------------------------
 create or replace function crm_quotation_frozen() returns trigger
@@ -564,7 +568,7 @@ language plpgsql security definer
 set search_path = public
 as $$
 declare q crm_quotations; k text; ch crm_quote_vat_choices; v_cur text; m jsonb; v_kind text;
-  v_allowed text[] := array['currency', 'vat_choice_id', 'bill_to_org_id', 'validity_date', 'internal_notes', 'milestones', 'terms', 'terms_label'];
+  v_allowed text[] := array['currency', 'vat_choice_id', 'bill_to_org_id', 'validity_date', 'internal_notes', 'milestones', 'terms', 'terms_label', 'exclusions'];
 begin
   q := crm_quote_load_editable(p_proposal);
   if p_patch is null or jsonb_typeof(p_patch) <> 'object' or p_patch = '{}'::jsonb then raise exception 'Nothing to change' using errcode = '22023'; end if;
@@ -611,6 +615,17 @@ begin
     end loop;
     update crm_quotations set terms = (select coalesce(jsonb_agg(jsonb_build_object('title', btrim(e->>'title'), 'body', btrim(e->>'body'))), '[]'::jsonb)
                                          from jsonb_array_elements(p_patch->'terms') e) where proposal_id = p_proposal;
+  end if;
+  if p_patch ? 'exclusions' then
+    if jsonb_typeof(p_patch->'exclusions') <> 'array' or jsonb_array_length(p_patch->'exclusions') > 40 then raise exception 'Exclusions must be a list of at most 40 items' using errcode = '22023'; end if;
+    for m in select * from jsonb_array_elements(p_patch->'exclusions') loop
+      if jsonb_typeof(m) <> 'object' or length(btrim(coalesce(m->>'title', ''))) = 0 or length(btrim(coalesce(m->>'body', ''))) = 0
+         or length(m->>'title') > 120 or length(m->>'body') > 3000 then
+        raise exception 'Every exclusion needs a title and text' using errcode = '22023';
+      end if;
+    end loop;
+    update crm_quotations set exclusions = (select coalesce(jsonb_agg(jsonb_build_object('title', btrim(e->>'title'), 'body', btrim(e->>'body'))), '[]'::jsonb)
+                                              from jsonb_array_elements(p_patch->'exclusions') e) where proposal_id = p_proposal;
   end if;
   if p_patch ? 'milestones' then
     if jsonb_typeof(p_patch->'milestones') <> 'array' or jsonb_array_length(p_patch->'milestones') > 20 then raise exception 'Payment milestones must be a list of at most 20' using errcode = '22023'; end if;
@@ -788,14 +803,15 @@ $$;
 create or replace function crm_quote_minor_units(p_currency text) returns integer
 language sql immutable as $$ select 2 $$;
 
--- Builds the client-facing content from the tables (internal_notes is never read). Used by issuing only.
-create or replace function crm_quote_build_content(p_proposal uuid, p_issue_date date) returns jsonb
+-- Builds the client-facing content from the tables (internal_notes is never read). Used by issuing (with the PINNED assets, p_assets) and by the content
+-- hash (p_assets null, p_issue_date null). Display numbers: section n, line n.m (mirrors lineDisplayNumber in packages/domain).
+create or replace function crm_quote_build_content(p_proposal uuid, p_issue_date date, p_assets jsonb default null) returns jsonb
 language plpgsql stable security definer
 set search_path = public
 as $$
 declare
   q crm_quotations; co companies; org crm_organisations; opp crm_opportunities; s record; l record;
-  v_minor integer; v_num integer := 0; v_lines jsonb; v_sections jsonb := '[]'::jsonb;
+  v_minor integer; v_si integer := 0; v_li integer; v_pin jsonb; v_logo jsonb; v_lines jsonb; v_sections jsonb := '[]'::jsonb;
   v_net numeric; v_vat numeric; v_rate numeric; v_kind text; v_label text;
   s_net numeric; s_vat numeric; t_net numeric := 0; t_vat numeric := 0; v_img jsonb; f crm_files; v_ms jsonb; m jsonb; v_amount numeric;
 begin
@@ -805,9 +821,9 @@ begin
   select * into opp from crm_opportunities where id = q.opportunity_id;
   v_minor := crm_quote_minor_units(q.currency);
   for s in select * from crm_quotation_sections where proposal_id = p_proposal order by position, id loop
-    v_lines := '[]'::jsonb; s_net := 0; s_vat := 0;
+    v_lines := '[]'::jsonb; s_net := 0; s_vat := 0; v_si := v_si + 1; v_li := 0;
     for l in select * from crm_quotation_lines where section_id = s.id order by position, id loop
-      v_num := v_num + 1;
+      v_li := v_li + 1;
       v_kind := coalesce(l.vat_kind, q.vat_kind); v_label := coalesce(l.vat_label, q.vat_label);
       v_rate := case when v_kind = 'rate' then coalesce(l.vat_rate, q.vat_rate) else null end;
       v_net := round(l.quantity * l.unit_price, v_minor);
@@ -816,20 +832,35 @@ begin
       v_img := null;
       if l.image_file_id is not null then
         select * into f from crm_files where id = l.image_file_id;
-        v_img := jsonb_build_object('file_id', f.id, 'storage_path', f.storage_path, 'mime_type', f.mime_type, 'original_name', f.original_name, 'size_bytes', f.size_bytes);
+        if p_assets is not null then
+          v_pin := p_assets->'lines'->(l.id::text);
+          v_img := jsonb_build_object('file_id', f.id, 'bucket', 'quotation-assets', 'storage_path', v_pin->>'path', 'sha256', v_pin->>'sha256',
+                                      'mime_type', v_pin->>'mime_type', 'original_name', f.original_name, 'size_bytes', f.size_bytes);
+        else
+          v_img := jsonb_build_object('file_id', f.id, 'bucket', 'crm-files', 'storage_path', f.storage_path, 'sha256', null,
+                                      'mime_type', f.mime_type, 'original_name', f.original_name, 'size_bytes', f.size_bytes);
+        end if;
       end if;
       v_lines := v_lines || jsonb_build_object(
-        'number', v_num, 'description', l.description, 'image', v_img, 'unit', l.unit,
+        'number', v_si || '.' || v_li, 'description', l.description, 'image', v_img, 'unit', l.unit,
         'quantity', trim_scale(l.quantity)::text, 'unit_price', trim_scale(l.unit_price)::text,
         'vat', jsonb_build_object('kind', v_kind, 'label', v_label, 'rate', case when v_rate is null then null else trim_scale(v_rate)::text end),
         'amount_net', to_char(v_net, 'FM999999999999990.00'), 'vat_amount', to_char(v_vat, 'FM999999999999990.00'),
         'amount_gross', to_char(v_net + v_vat, 'FM999999999999990.00'));
     end loop;
     t_net := t_net + s_net; t_vat := t_vat + s_vat;
-    v_sections := v_sections || jsonb_build_object('title', s.title, 'lines', v_lines,
+    v_sections := v_sections || jsonb_build_object('number', v_si::text, 'title', s.title, 'lines', v_lines,
       'subtotal_net', to_char(s_net, 'FM999999999999990.00'), 'subtotal_vat', to_char(s_vat, 'FM999999999999990.00'),
       'subtotal_gross', to_char(s_net + s_vat, 'FM999999999999990.00'));
   end loop;
+  if p_assets is not null then
+    v_logo := p_assets->'logo';
+    if v_logo is not null and jsonb_typeof(v_logo) = 'object' and co.logo_path is not null then
+      v_logo := jsonb_build_object('bucket', 'quotation-assets', 'storage_path', v_logo->>'path', 'sha256', v_logo->>'sha256', 'mime_type', v_logo->>'mime_type');
+    else v_logo := null; end if;
+  elsif co.logo_path is not null then
+    v_logo := jsonb_build_object('bucket', 'company-logos', 'storage_path', co.logo_path, 'sha256', null, 'mime_type', null);
+  end if;
   v_ms := '[]'::jsonb;
   for m in select * from jsonb_array_elements(q.milestones) loop
     v_amount := case when m->>'kind' = 'percent' then round((t_net + t_vat) * (m->>'value')::numeric / 100, v_minor) else (m->>'value')::numeric end;
@@ -841,7 +872,7 @@ begin
     'reference', q.reference, 'revision', q.revision, 'issue_date', p_issue_date, 'validity_date', q.validity_date,
     'enquiry', jsonb_build_object('reference', opp.reference, 'title', opp.title),
     'issuer', jsonb_build_object('company_id', co.id, 'legal_name', co.legal_name, 'trn', co.trn, 'address', co.address, 'phone', co.phone,
-                                 'email', co.email, 'website', co.website, 'logo_path', co.logo_path, 'country_code', co.country_code),
+                                 'email', co.email, 'website', co.website, 'logo', v_logo, 'country_code', co.country_code),
     'bill_to', jsonb_build_object('organisation_id', org.id, 'name', org.name, 'address', org.place, 'country_code', org.country_code,
                                   'vat_trn', org.vat_trn, 'trade_licence_no', org.trade_licence_no),
     'currency', q.currency, 'minor_units', v_minor,
@@ -850,18 +881,135 @@ begin
     'totals', jsonb_build_object('net', to_char(t_net, 'FM999999999999990.00'), 'vat', to_char(t_vat, 'FM999999999999990.00'),
                                  'gross', to_char(t_net + t_vat, 'FM999999999999990.00')),
     'milestones', v_ms,
+    'exclusions', q.exclusions,
     'terms', jsonb_build_object('label', q.terms_label, 'clauses', q.terms));
 end;
 $$;
 
+-- Private bucket for the pinned copies of logos and item pictures. No policy for any signed-in role: only the server (service role) reads or writes it.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('quotation-assets', 'quotation-assets', false, 6291456, array['image/png', 'image/jpeg', 'image/webp'])
+on conflict (id) do update
+  set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+-- A pinned asset is content-addressed: <proposal>/<logo | line-<line id>>-<sha256>.<ext>. It must exist in storage when the quotation is issued.
+create or replace function crm_quote_check_asset(p_proposal uuid, a jsonb, p_name text, p_what text) returns void
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  if a is null or jsonb_typeof(a) <> 'object' then raise exception '% must be pinned to this quotation before it can be issued', p_what using errcode = '23514'; end if;
+  if coalesce(a->>'sha256', '') !~ '^[0-9a-f]{64}$' or coalesce(a->>'mime_type', '') not in ('image/png', 'image/jpeg', 'image/webp')
+     or coalesce(a->>'path', '') !~ ('^' || p_proposal::text || '/' || p_name || '-' || coalesce(a->>'sha256', '') || '\.(png|jpg|webp)$') then
+    raise exception '% was not pinned correctly', p_what using errcode = '22023';
+  end if;
+  if not exists (select 1 from storage.objects where bucket_id = 'quotation-assets' and name = a->>'path') then
+    raise exception '% was not found in the quotation store', p_what using errcode = 'P0002';
+  end if;
+end;
+$$;
+
+-- The version fingerprint of everything client-facing (bill-to, currency, VAT, sections, lines, prices, pictures, totals, milestones, exclusions, terms,
+-- validity; never internal notes). Same value for the same content on any day: the issue date is not part of it.
+create or replace function crm_quote_content_hash(p_proposal uuid) returns text
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare q crm_quotations;
+begin
+  perform crm_require_user();
+  select * into q from crm_quotations where proposal_id = p_proposal;
+  if not found or not crm_has_access(q.company_id) then raise exception 'Quotation not found' using errcode = 'P0002'; end if;
+  return encode(sha256(convert_to(crm_quote_build_content(p_proposal, null, null)::text, 'UTF8')), 'hex');
+end;
+$$;
+
+-- Request approval of THIS version. A waiting request bound to an older version of the same quotation is withdrawn first (the quotation changed).
+create or replace function crm_quote_request_approval(p_proposal uuid) returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare q crm_quotations; v_hash text; v_id uuid;
+begin
+  q := crm_quote_load_editable(p_proposal);
+  v_hash := crm_quote_content_hash(p_proposal);
+  update crm_approvals set state = 'changes_requested', decided_by = auth.uid(), decided_at = now(),
+         instruction = 'Withdrawn automatically: the quotation changed after approval was requested'
+   where proposal_id = p_proposal and state = 'pending' and quote_content_hash is distinct from v_hash;
+  v_id := crm_request_approval(q.opportunity_id, p_proposal);
+  update crm_approvals set quote_content_hash = v_hash where id = v_id;
+  return v_id;
+end;
+$$;
+
+-- Decide a quotation approval from the quotation page. Approving needs the hash the reviewer's screen was rendered with, equal to the current hash and to
+-- the one the request was bound to; otherwise nothing is recorded.
+create or replace function crm_quote_decide_approval(p_approval uuid, p_state text, p_instruction text, p_seen_hash text) returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare a crm_approvals; v_hash text;
+begin
+  perform crm_require_user();
+  select * into a from crm_approvals where id = p_approval;
+  if not found or not crm_has_access(a.company_id) then raise exception 'Approval request not found' using errcode = 'P0002'; end if;
+  if a.quote_content_hash is null or a.proposal_id is null then raise exception 'This approval is not tied to a quotation version' using errcode = '23514'; end if;
+  if p_state = 'approved' then
+    v_hash := crm_quote_content_hash(a.proposal_id);
+    if p_seen_hash is distinct from v_hash or a.quote_content_hash is distinct from v_hash then
+      raise exception 'This quotation changed after you opened it. Review the latest version; a fresh approval request is needed' using errcode = '23514';
+    end if;
+  end if;
+  perform set_config('enginious.quote_decide', '1', true);
+  perform crm_decide_approval(p_approval, p_state, p_instruction);
+  perform set_config('enginious.quote_decide', '', true);
+end;
+$$;
+
+-- A quotation approval can only become 'approved' through crm_quote_decide_approval (the generic decide path would not check the version).
+create or replace function crm_approval_quote_guard() returns trigger
+language plpgsql
+as $$
+begin
+  if old.quote_content_hash is not null and new.state = 'approved' and old.state <> 'approved' and coalesce(current_setting('enginious.quote_decide', true), '') <> '1' then
+    raise exception 'A quotation is approved from its own page, where the version you review is checked' using errcode = '23514';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists crm_approvals_quote_guard on crm_approvals;
+create trigger crm_approvals_quote_guard before update on crm_approvals for each row execute function crm_approval_quote_guard();
+
+-- Pinned assets are never deleted while their revision exists. Created only where the migration role may add triggers to storage.objects.
+create or replace function crm_quotation_assets_guard() returns trigger
+language plpgsql
+as $$
+begin
+  if old.bucket_id = 'quotation-assets' and exists (select 1 from public.crm_quotation_snapshots where proposal_id::text = split_part(old.name, '/', 1)) then
+    raise exception 'A pinned quotation asset cannot be renamed or deleted while its quotation revision exists' using errcode = '55000';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+do $$
+begin
+  drop trigger if exists crm_quotation_assets_guard_del on storage.objects;
+  drop trigger if exists crm_quotation_assets_guard_upd on storage.objects;
+  create trigger crm_quotation_assets_guard_del before delete on storage.objects for each row execute function crm_quotation_assets_guard();
+  create trigger crm_quotation_assets_guard_upd before update on storage.objects for each row
+    when (old.name is distinct from new.name or old.bucket_id is distinct from new.bucket_id) execute function crm_quotation_assets_guard();
+exception when others then
+  raise notice 'Could not add the pinned-asset delete guard on storage.objects (%). The bucket still has no policy for signed-in roles.', sqlerrm;
+end $$;
+
 -- Issue: validates, requires the existing commercial approval when the policy is 'required', freezes the snapshot, supersedes older revisions.
-create or replace function crm_quote_issue(p_proposal uuid) returns void
+create or replace function crm_quote_issue(p_proposal uuid, p_assets jsonb default null) returns void
 language plpgsql security definer
 set search_path = public
 as $$
 declare
   q crm_quotations; co companies; v_policy text; v_today date := crm_today_dubai(); v_content jsonb; v_gross numeric; v_sum numeric; m jsonb;
-  v_bad integer;
+  v_bad integer; v_hash text; ln record;
 begin
   q := crm_quote_load_editable(p_proposal);
   select * into co from companies where id = q.company_id;
@@ -875,11 +1023,19 @@ begin
   end if;
   if q.validity_date is not null and q.validity_date < v_today then raise exception 'The validity date is in the past' using errcode = '23514'; end if;
   select approval_policy into v_policy from crm_company_settings where company_id = q.company_id;
+  -- The approval must be bound to the EXACT content as it is now (an edit after the request or after the decision changes the hash and voids it).
+  v_hash := crm_quote_content_hash(p_proposal);
   if coalesce(v_policy, 'not_configured') = 'required' and not exists (
-       select 1 from crm_approvals a where a.proposal_id = p_proposal and a.state = 'approved' and a.decided_at >= q.content_changed_at) then
-    raise exception 'This quotation needs a founder''s approval, given after the last change, before it can be issued. Request approval first' using errcode = '23514';
+       select 1 from crm_approvals a where a.proposal_id = p_proposal and a.state = 'approved' and a.quote_content_hash = v_hash) then
+    raise exception 'This quotation needs a founder''s approval of this exact version (it changed since the last approval, or none was requested from this page). Request approval first' using errcode = '23514';
   end if;
-  v_content := crm_quote_build_content(p_proposal, v_today);
+  -- Pictures are PINNED: the company logo and every line picture must have an immutable copy owned by this revision (made by the server before this call).
+  if p_assets is not null and jsonb_typeof(p_assets) <> 'object' then raise exception 'Invalid pinned assets' using errcode = '22023'; end if;
+  if co.logo_path is not null then perform crm_quote_check_asset(p_proposal, p_assets->'logo', 'logo', 'The company logo'); end if;
+  for ln in select id from crm_quotation_lines where proposal_id = p_proposal and image_file_id is not null loop
+    perform crm_quote_check_asset(p_proposal, p_assets->'lines'->(ln.id::text), 'line-' || ln.id::text, 'An item picture');
+  end loop;
+  v_content := crm_quote_build_content(p_proposal, v_today, coalesce(p_assets, '{}'::jsonb));
   v_gross := (v_content->'totals'->>'gross')::numeric;
   if jsonb_array_length(q.milestones) > 0 then
     if (q.milestones->0->>'kind') = 'percent' then
@@ -924,9 +1080,9 @@ begin
   insert into crm_proposals (opportunity_id, company_id, version, note, created_by)
   values (v.id, v.company_id, v_next, 'Revision ' || v_rev || ' of ' || q.reference, auth.uid()) returning id into v_id;
   insert into crm_quotations (proposal_id, opportunity_id, company_id, reference, revision, previous_proposal_id, currency, vat_choice_id, vat_kind,
-                              vat_label, vat_rate, bill_to_org_id, validity_date, milestones, terms_label, terms, internal_notes)
+                              vat_label, vat_rate, bill_to_org_id, validity_date, milestones, terms_label, terms, exclusions, internal_notes)
   values (v_id, q.opportunity_id, q.company_id, q.reference, v_rev, q.proposal_id, q.currency, q.vat_choice_id, q.vat_kind, q.vat_label, q.vat_rate,
-          q.bill_to_org_id, null, q.milestones, q.terms_label, q.terms, q.internal_notes);
+          q.bill_to_org_id, null, q.milestones, q.terms_label, q.terms, q.exclusions, q.internal_notes);
   for s in select * from crm_quotation_sections where proposal_id = q.proposal_id order by position, id loop
     insert into crm_quotation_sections (proposal_id, company_id, position, title) values (v_id, s.company_id, s.position, s.title) returning id into v_new;
     insert into crm_quotation_lines (proposal_id, section_id, company_id, position, description, image_file_id, unit, quantity, unit_price, vat_choice_id, vat_kind, vat_label, vat_rate)
@@ -1015,19 +1171,19 @@ $$;
 revoke all on function
   crm_create_organisation_profile(text, text[], text, text, text, text, uuid, text, text, uuid, jsonb, text, text),
   crm_quotation_frozen(), crm_quotation_guard(), crm_quotation_body_guard(), crm_quote_load_editable(uuid), crm_quote_touch(uuid),
-  crm_quote_default_terms(), crm_quote_minor_units(text), crm_quote_build_content(uuid, date), crm_quote_seed_company(), crm_import_apply_item(uuid, jsonb),
+  crm_quote_default_terms(), crm_quote_minor_units(text), crm_quote_build_content(uuid, date, jsonb), crm_quote_check_asset(uuid, jsonb, text, text), crm_quotation_assets_guard(), crm_approval_quote_guard(), crm_quote_seed_company(), crm_import_apply_item(uuid, jsonb),
   crm_import_fingerprint(uuid, text, text)
   from public, anon, authenticated;
 revoke all on function
   crm_quote_create(uuid), crm_quote_save_header(uuid, jsonb), crm_quote_save_section(uuid, uuid, text), crm_quote_delete_section(uuid),
-  crm_quote_save_line(uuid, uuid, uuid, jsonb), crm_quote_delete_line(uuid), crm_quote_reorder(uuid, text, uuid, uuid[]), crm_quote_issue(uuid),
+  crm_quote_save_line(uuid, uuid, uuid, jsonb), crm_quote_delete_line(uuid), crm_quote_reorder(uuid, text, uuid, uuid[]), crm_quote_issue(uuid, jsonb), crm_quote_content_hash(uuid), crm_quote_request_approval(uuid), crm_quote_decide_approval(uuid, text, text, text),
   crm_quote_create_revision(uuid), crm_save_vat_choice(uuid, uuid, text, text, numeric, boolean), crm_save_terms_template(uuid, text, jsonb),
   crm_set_company_logo(uuid, text), crm_remove_file(uuid)
   from public, anon;
 grant execute on function
   crm_create_organisation_profile(text, text[], text, text, text, text, uuid, text, text, uuid, jsonb, text, text),
   crm_quote_create(uuid), crm_quote_save_header(uuid, jsonb), crm_quote_save_section(uuid, uuid, text), crm_quote_delete_section(uuid),
-  crm_quote_save_line(uuid, uuid, uuid, jsonb), crm_quote_delete_line(uuid), crm_quote_reorder(uuid, text, uuid, uuid[]), crm_quote_issue(uuid),
+  crm_quote_save_line(uuid, uuid, uuid, jsonb), crm_quote_delete_line(uuid), crm_quote_reorder(uuid, text, uuid, uuid[]), crm_quote_issue(uuid, jsonb), crm_quote_content_hash(uuid), crm_quote_request_approval(uuid), crm_quote_decide_approval(uuid, text, text, text),
   crm_quote_create_revision(uuid), crm_save_vat_choice(uuid, uuid, text, text, numeric, boolean), crm_save_terms_template(uuid, text, jsonb),
   crm_set_company_logo(uuid, text), crm_remove_file(uuid)
   to authenticated;

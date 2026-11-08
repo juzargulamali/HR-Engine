@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import { QUOTATION_CURRENCIES } from "@enginious-hr/domain";
+import { QUOTATION_CURRENCIES, lineDisplayNumber } from "@enginious-hr/domain";
+import { loadQuotation } from "@/lib/crm/quotations/data";
+import { pinAssets } from "@/lib/crm/quotations/pin-assets";
 import { createClient } from "@/lib/supabase/server";
 import { friendlyCrmError } from "@/lib/crm/errors";
 import type { ActionState } from "./companies";
@@ -64,17 +66,19 @@ const milestoneSchema = z.array(z.object({ label: z.string().trim().min(1, "Ever
 const clauseSchema = z.array(z.object({ title: z.string().trim().min(1, "Every clause needs a title").max(120), body: z.string().trim().min(1, "Every clause needs text").max(3000) })).max(40);
 const json = (v: unknown) => { try { return JSON.parse(String(v ?? "[]")); } catch { return "invalid"; } };
 
-/** Payment milestones and the terms clauses (both editable lists, saved together). A schedule that does not add up is refused at issue. */
+/** Payment milestones, the Exclusions block and the terms clauses (editable lists, saved together). A schedule that does not add up is refused at issue. */
 export async function saveQuotationTerms(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const ids = z.object({ opportunityId: uuid, proposalId: uuid, termsLabel: z.string().max(120).optional() }).safeParse(Object.fromEntries(formData));
   const ms = milestoneSchema.safeParse(json(formData.get("milestones")));
   const cl = clauseSchema.safeParse(json(formData.get("clauses")));
+  const ex = clauseSchema.safeParse(json(formData.get("exclusions") ?? "[]"));
   if (!ids.success) return { error: "Missing quotation." };
   if (!ms.success) return { error: firstIssue(ms.error) };
   if (!cl.success) return { error: firstIssue(cl.error) };
+  if (!ex.success) return { error: firstIssue(ex.error) };
   const { error } = await (await db()).rpc("crm_quote_save_header", {
     p_proposal: ids.data.proposalId,
-    p_patch: { milestones: ms.data.map((m) => ({ ...m, due: m.due || null })), terms: cl.data, terms_label: ids.data.termsLabel ?? null },
+    p_patch: { milestones: ms.data.map((m) => ({ ...m, due: m.due || null })), terms: cl.data, exclusions: ex.data, terms_label: ids.data.termsLabel ?? null },
   });
   if (error) return fail(error.message);
   refresh(ids.data.opportunityId, ids.data.proposalId);
@@ -147,19 +151,44 @@ export async function reorderQuotation(opportunityId: string, proposalId: string
   return { error: null };
 }
 
-/** The existing commercial approval request (crm_request_approval), tied to this quotation. */
+/** Requests approval of THIS version (crm_quote_request_approval). A waiting request for an older version is withdrawn first. */
 export async function requestQuotationApproval(opportunityId: string, proposalId: string): Promise<ActionState> {
   if (![opportunityId, proposalId].every((x) => uuid.safeParse(x).success)) return { error: "Missing quotation." };
-  const { error } = await (await db()).rpc("crm_request_approval", { p_opportunity_id: opportunityId, p_proposal_id: proposalId });
+  const { error } = await (await db()).rpc("crm_quote_request_approval", { p_proposal: proposalId });
   if (error) return fail(error.message);
   refresh(opportunityId, proposalId);
   return { error: null };
 }
 
-/** Issue: freezes the client-facing copy. Nothing is sent to anyone from here. */
+/**
+ * A founder's decision from the reviewer screen. `seenHash` is the version fingerprint the screen was rendered with: approving a version that changed after the
+ * screen was opened is refused by the database ("This quotation changed after you opened it ...").
+ */
+export async function decideQuotationApproval(opportunityId: string, proposalId: string, approvalId: string, decision: "approved" | "changes_requested", instruction: string, seenHash: string): Promise<ActionState> {
+  if (![opportunityId, proposalId, approvalId].every((x) => uuid.safeParse(x).success) || !["approved", "changes_requested"].includes(decision)) return { error: "Missing quotation." };
+  const { error } = await (await db()).rpc("crm_quote_decide_approval", { p_approval: approvalId, p_state: decision, p_instruction: instruction.trim() || null, p_seen_hash: seenHash });
+  if (error) return fail(error.message);
+  refresh(opportunityId, proposalId);
+  return { error: null };
+}
+
+/** Issue: pins the logo and item pictures (immutable copies owned by this revision), then freezes the client-facing copy. Nothing is sent to anyone from here. */
 export async function issueQuotation(opportunityId: string, proposalId: string): Promise<ActionState> {
   if (![opportunityId, proposalId].every((x) => uuid.safeParse(x).success)) return { error: "Missing quotation." };
-  const { error } = await (await db()).rpc("crm_quote_issue", { p_proposal: proposalId });
+  let bundle: Awaited<ReturnType<typeof loadQuotation>>;
+  try { bundle = await loadQuotation(proposalId); } catch { return { error: "Could not load this estimate, so nothing was issued. Try again." }; }
+  if (!bundle || bundle.header.opportunity_id !== opportunityId) return { error: "Quotation not found." };
+  const pos = new Map<string, string>();
+  const secs = [...bundle.sections].sort((a, b) => a.position - b.position);
+  secs.forEach((sec, si) => bundle!.lines.filter((l) => l.section_id === sec.id).sort((a, b) => a.position - b.position).forEach((l, li) => pos.set(l.id, lineDisplayNumber(si, li))));
+  const files = new Map(bundle.files.map((f) => [f.id, f]));
+  const pinned = await pinAssets({
+    proposalId,
+    logo: bundle.issuer.logo_path ? { bucket: "company-logos", path: bundle.issuer.logo_path } : null,
+    lines: bundle.lines.flatMap((l) => { const f = l.image_file_id ? files.get(l.image_file_id) : undefined; return f?.storage_path ? [{ lineId: l.id, position: pos.get(l.id) ?? "", bucket: "crm-files" as const, path: f.storage_path }] : []; }),
+  });
+  if ("error" in pinned) return { error: pinned.error };
+  const { error } = await (await db()).rpc("crm_quote_issue", { p_proposal: proposalId, p_assets: pinned.assets });
   if (error) return fail(error.message);
   refresh(opportunityId, proposalId);
   return { error: null };

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, ImagePlus, Pencil, Plus, Trash2 } from "lucide-react";
 import { QUOTATION_CURRENCIES, validateQuotationImageMeta, type CalculatedQuotation, type PaymentMilestone } from "@enginious-hr/domain";
 import {
-  createQuotationRevision, deleteQuotationLine, deleteQuotationSection, issueQuotation, reorderQuotation, requestQuotationApproval, saveQuotationDetails,
+  createQuotationRevision, deleteQuotationLine, deleteQuotationSection, issueQuotation, reorderQuotation, requestQuotationApproval, decideQuotationApproval, saveQuotationDetails,
   saveQuotationLine, saveQuotationSection, saveQuotationTerms, setQuotationLineImage,
 } from "@/lib/actions/quotations";
 import { finalizeCrmUpload, prepareCrmUpload } from "@/lib/actions/crmFiles";
@@ -259,17 +259,43 @@ function LinePicture({ ids, line, url, name }: { ids: Ids; line: QuotationLineRo
 // ---------------------------------------------------------------------------------------------------------------------------------
 // Payment milestones and terms
 // ---------------------------------------------------------------------------------------------------------------------------------
+type Clause = { title: string; body: string };
+/** An editable, reorderable list of titled paragraphs (Exclusions and Terms and conditions share it). */
+function ClauseList({ legend, hint, noun, items, set }: { legend: string; hint: string; noun: string; items: Clause[]; set: (f: (a: Clause[]) => Clause[]) => void }) {
+  const lower = noun.toLowerCase();
+  return (
+    <fieldset className="space-y-2">
+      <legend className="text-sm font-medium">{legend}</legend>
+      <p className="text-sm text-muted-foreground">{hint}</p>
+      {items.map((c, i) => (
+        <div key={i} className="space-y-1.5 rounded-md border border-border p-2">
+          <div className="flex gap-2">
+            <Input aria-label={`${noun} ${i + 1} title`} value={c.title} onChange={(e) => set((a) => a.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} />
+            <Button type="button" variant="ghost" size="sm" disabled={i === 0} aria-label={`Move ${lower} ${i + 1} up`} onClick={() => set((a) => swap(a, i, i - 1))}><ArrowUp className="h-4 w-4" aria-hidden /></Button>
+            <Button type="button" variant="ghost" size="sm" disabled={i === items.length - 1} aria-label={`Move ${lower} ${i + 1} down`} onClick={() => set((a) => swap(a, i, i + 1))}><ArrowDown className="h-4 w-4" aria-hidden /></Button>
+            <Button type="button" variant="ghost" size="sm" aria-label={`Remove ${lower} ${i + 1}`} onClick={() => set((a) => a.filter((_, j) => j !== i))}><Trash2 className="h-4 w-4" aria-hidden /></Button>
+          </div>
+          <Textarea aria-label={`${noun} ${i + 1} text`} rows={3} value={c.body} onChange={(e) => set((a) => a.map((x, j) => (j === i ? { ...x, body: e.target.value } : x)))} />
+        </div>
+      ))}
+      <Button type="button" variant="outline" size="sm" onClick={() => set((a) => [...a, { title: "", body: "" }])}><Plus className="h-4 w-4" aria-hidden /> Add {lower}</Button>
+    </fieldset>
+  );
+}
+
 export function TermsEditor({ ids, header }: { ids: Ids; header: QuotationHeader }) {
   const [ms, setMs] = useState<PaymentMilestone[]>(header.milestones);
   const [cl, setCl] = useState(header.terms);
+  const [ex, setEx] = useState(header.exclusions ?? []);
   const upd = <T,>(set: (f: (a: T[]) => T[]) => void, i: number, patch: Partial<T>) => set((a) => a.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   return (
-    <ActionForm action={saveQuotationTerms} submitLabel="Save milestones and terms">
+    <ActionForm action={saveQuotationTerms} submitLabel="Save milestones, exclusions and terms">
       <input type="hidden" name="opportunityId" value={ids.opportunityId} />
       <input type="hidden" name="proposalId" value={ids.proposalId} />
       <input type="hidden" name="termsLabel" value={header.terms_label ?? ""} />
       <input type="hidden" name="milestones" value={JSON.stringify(ms)} />
       <input type="hidden" name="clauses" value={JSON.stringify(cl)} />
+      <input type="hidden" name="exclusions" value={JSON.stringify(ex)} />
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium">Payment milestones</legend>
         <p className="text-sm text-muted-foreground">Percentages must add up to 100, or amounts to the total including VAT. Leave empty for no schedule.</p>
@@ -284,22 +310,8 @@ export function TermsEditor({ ids, header }: { ids: Ids; header: QuotationHeader
         ))}
         <Button type="button" variant="outline" size="sm" onClick={() => setMs((a) => [...a, { label: "", kind: a[0]?.kind ?? "percent", value: "", due: "" }])}><Plus className="h-4 w-4" aria-hidden /> Add milestone</Button>
       </fieldset>
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium">{header.terms_label ?? "Terms, assumptions and exclusions"}</legend>
-        <p className="text-sm text-muted-foreground">Copied from your company&apos;s standard terms when this estimate was created. Edit freely here; the company template is changed under Sales settings.</p>
-        {cl.map((c, i) => (
-          <div key={i} className="space-y-1.5 rounded-md border border-border p-2">
-            <div className="flex gap-2">
-              <Input aria-label={`Clause ${i + 1} title`} value={c.title} onChange={(e) => upd(setCl, i, { title: e.target.value })} />
-              <Button type="button" variant="ghost" size="sm" disabled={i === 0} aria-label={`Move clause ${i + 1} up`} onClick={() => setCl((a) => swap(a, i, i - 1))}><ArrowUp className="h-4 w-4" aria-hidden /></Button>
-              <Button type="button" variant="ghost" size="sm" disabled={i === cl.length - 1} aria-label={`Move clause ${i + 1} down`} onClick={() => setCl((a) => swap(a, i, i + 1))}><ArrowDown className="h-4 w-4" aria-hidden /></Button>
-              <Button type="button" variant="ghost" size="sm" aria-label={`Remove clause ${i + 1}`} onClick={() => setCl((a) => a.filter((_, j) => j !== i))}><Trash2 className="h-4 w-4" aria-hidden /></Button>
-            </div>
-            <Textarea aria-label={`Clause ${i + 1} text`} rows={3} value={c.body} onChange={(e) => upd(setCl, i, { body: e.target.value })} />
-          </div>
-        ))}
-        <Button type="button" variant="outline" size="sm" onClick={() => setCl((a) => [...a, { title: "", body: "" }])}><Plus className="h-4 w-4" aria-hidden /> Add clause</Button>
-      </fieldset>
+      <ClauseList legend="Exclusions" hint="What the price does not include. Its own block, printed before the terms. Starts empty: add the items that apply to this estimate." noun="Exclusion" items={ex} set={setEx} />
+      <ClauseList legend={header.terms_label ?? "Terms and conditions"} hint="Copied from your company's standard terms when this estimate was created. Edit freely here; the company template is changed under Sales settings." noun="Clause" items={cl} set={setCl} />
     </ActionForm>
   );
 }
@@ -326,6 +338,22 @@ export function IssueBar({ ids, blockers, needsApproval, approvalPending, canReq
         <Button type="button" disabled={pending || blockers.length > 0} onClick={() => { if (confirm("Issue this quotation? A frozen copy is made and this draft becomes read-only. Nothing is sent to anyone.")) run(() => issueQuotation(ids.opportunityId, ids.proposalId)); }}>Issue quotation</Button>
       </div>
       {nonApproval.length === 0 && needsApproval && blockers.length > 0 ? <p className="text-sm text-muted-foreground">Issuing needs the founder&apos;s approval first; editing the draft after approval asks for it again.</p> : null}
+    </div>
+  );
+}
+
+/** The reviewer screen for a founder: shows the version it was rendered with and approves or asks for changes. A version that changed after this screen opened cannot be approved from it. */
+export function ApprovalReview({ ids, approvalId, seenHash }: { ids: Ids; approvalId: string; seenHash: string }) {
+  const { run, pending, error } = useRun();
+  const [note, setNote] = useState("");
+  return (
+    <div className="space-y-2" data-testid="approval-review">
+      {error ? <Alert variant="destructive" role="alert">{error}</Alert> : null}
+      <Textarea aria-label="What needs to change (required to ask for changes)" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" disabled={pending} onClick={() => run(() => decideQuotationApproval(ids.opportunityId, ids.proposalId, approvalId, "approved", note, seenHash))}>Approve this version</Button>
+        <Button type="button" variant="outline" disabled={pending || note.trim().length === 0} onClick={() => run(() => decideQuotationApproval(ids.opportunityId, ids.proposalId, approvalId, "changes_requested", note, seenHash))}>Ask for changes</Button>
+      </div>
     </div>
   );
 }

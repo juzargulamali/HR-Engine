@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateLine, calculateQuotation, milestoneAmounts, QuotationInputError, validateMilestones, validateQuotationImageMeta } from "../src/quotations";
+import { calculateLine, calculateQuotation, lineDisplayNumber, sectionDisplayNumber, milestoneAmounts, QuotationInputError, validateMilestones, validateQuotationImageMeta } from "../src/quotations";
 
 const rate = (r: string) => ({ kind: "rate" as const, rate: r, label: `${r}%` });
 const oos = { kind: "out_of_scope" as const, label: "Out of scope" };
@@ -41,9 +41,10 @@ describe("quotation calculation (decimal, no float drift)", () => {
     ];
     return calculateQuotation({ currency: "EUR", vat: rate("5"), sections: order.map((i) => secs[i]!) });
   };
-  it("numbers lines sequentially across sections and totals are the sum of rounded lines", () => {
+  it("numbers lines per section (1.1, 1.2, 2.1 ...) and totals are the sum of rounded lines", () => {
     const q = doc([0, 1, 2]);
-    expect(q.sections.flatMap((s) => s.lines.map((l) => l.number))).toEqual([1, 2, 3, 4]);
+    expect(q.sections.flatMap((s) => s.lines.map((l) => l.number))).toEqual(["1.1", "1.2", "2.1", "3.1"]);
+    expect([lineDisplayNumber(0, 9), sectionDisplayNumber(11)]).toEqual(["1.10", "12"]);
     expect(q.net).toBe("1132.44"); // 99.99 + 29.99 (1.5 x 19.99 = 29.985) + 2.45 + 1000.01
     expect(q.vat).toBe("59.62");
     expect(q.gross).toBe("1192.06");
@@ -53,7 +54,7 @@ describe("quotation calculation (decimal, no float drift)", () => {
     const a = doc([0, 1, 2]);
     const b = doc([2, 0, 1]);
     expect([b.net, b.vat, b.gross]).toEqual([a.net, a.vat, a.gross]);
-    expect(b.sections[0]!.lines[0]!.number).toBe(1);
+    expect(b.sections[0]!.lines[0]!.number).toBe("1.1");
   });
   it("an unchosen VAT charges nothing and says so", () => {
     const q = calculateQuotation({ currency: null, vat: null, sections: [{ title: "A", lines: [{ quantity: 1, unitPrice: 10 }] }] });

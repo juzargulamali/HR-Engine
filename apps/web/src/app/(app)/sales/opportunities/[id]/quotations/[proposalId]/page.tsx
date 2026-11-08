@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Download } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
 import { LoadError } from "@/components/workspace/states";
@@ -8,12 +10,12 @@ import { formatDate, todayInDubai } from "@/components/sales/format";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadOpportunityDetail } from "@/lib/crm/data";
 import { loadQuotation, type QuotationBundle } from "@/lib/crm/quotations/data";
-import { calculate, hasValidApproval, issueBlockers, quotationState, QUOTATION_STATE_LABEL } from "@/lib/crm/quotations/model";
+import { calculate, hasValidApproval, issueBlockers, pendingApprovalIsStale, quotationState, QUOTATION_STATE_LABEL } from "@/lib/crm/quotations/model";
 import { countryLabel } from "@/lib/crm/clients-agencies/normalise";
 import { approvalPolicyOf } from "../../helpers";
 import { Panel } from "../../parts";
 import { buildOppView } from "../../view";
-import { DetailsForm, IssueBar, ReviseButton, SectionsEditor, TermsEditor, type OrgChoice } from "./editor";
+import { ApprovalReview, DetailsForm, IssueBar, ReviseButton, SectionsEditor, TermsEditor, type OrgChoice } from "./editor";
 import { money } from "./money";
 import { SnapshotView } from "./snapshot-view";
 
@@ -42,7 +44,7 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
   const editable = !issued && view.canEdit && view.isOpen;
   const calc = calculate(header, sections, lines);
   const ids = { opportunityId: id, proposalId };
-  const blockers = issueBlockers(header, sections, lines, bundle.approvals, policy, todayInDubai());
+  const blockers = issueBlockers(header, sections, lines, bundle.approvals, policy, todayInDubai(), bundle.contentHash);
   const { item } = detail;
   const enquiryParties: OrgChoice[] = [
     ...(item.agency ? [{ id: item.agency.id, name: item.agency.name, detail: "agency" }] : []),
@@ -63,6 +65,11 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
           <Badge variant={state === "issued" ? "success" : state === "superseded" ? "secondary" : "warning"}>{QUOTATION_STATE_LABEL[state]}</Badge>
         </div>
         <p className="text-sm text-muted-foreground">{item.opp.title} · {item.companyName}</p>
+        <div className="flex flex-wrap gap-2" aria-label="Downloads">
+          <a href={`/api/sales/quotations/${proposalId}/pdf`} className={buttonVariants({ variant: "outline", size: "sm" })}><Download className="h-4 w-4" aria-hidden /> Download PDF</a>
+          <a href={`/api/sales/quotations/${proposalId}/xlsx`} className={buttonVariants({ variant: "outline", size: "sm" })}><Download className="h-4 w-4" aria-hidden /> Download Excel (.xlsx)</a>
+          {!issued ? <span className="self-center text-xs text-muted-foreground">Downloads of a draft are marked DRAFT. Nothing is sent to anyone.</span> : null}
+        </div>
         {!issued ? <Alert role="status">This is a DRAFT estimate. It can be edited and saved incomplete. Nothing is sent to the client from here.</Alert> : null}
         {issued ? <Alert role="status">Issued on {formatDate(header.issue_date)}. This quotation is frozen and read-only{state === "superseded" ? " and has been replaced by a later revision" : ""}. To change it, create a revision.</Alert> : null}
         {!issued && !editable ? <p className="text-sm text-muted-foreground">Only the enquiry owner ({view.ownerName}) or a founder can change or issue this estimate.</p> : null}
@@ -76,6 +83,12 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
 
       {!issued ? (
         <>
+          {view.canDecide && bundle.contentHash && bundle.approvals.some((a) => a.id && a.proposal_id === proposalId && a.state === "pending" && a.quote_content_hash === bundle.contentHash) ? (
+            <Panel title="Review for approval" description="You are reviewing this exact version. If it changes after this page opened, approving from this page is refused and a fresh request is needed.">
+              <ApprovalReview ids={ids} approvalId={bundle.approvals.find((a) => a.proposal_id === proposalId && a.state === "pending")!.id!} seenHash={bundle.contentHash} />
+            </Panel>
+          ) : null}
+          {view.canDecide && pendingApprovalIsStale(header, bundle.approvals, bundle.contentHash) ? <Alert role="status">An approval request is waiting, but the quotation changed after it was requested. Ask the owner to request approval again.</Alert> : null}
           <Panel title="Issued by" description="Read from the company's own profile (Admin, Companies). Not editable here.">
             <p className="text-sm font-medium">{bundle.issuer.legal_name}</p>
             <p className="text-sm text-muted-foreground">{[bundle.issuer.trn ? `TRN ${bundle.issuer.trn}` : "No TRN recorded", bundle.issuer.address, bundle.issuer.phone, bundle.issuer.email, bundle.issuer.website].filter(Boolean).join(" · ")}</p>
@@ -103,7 +116,7 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
           </Panel>
           {editable ? (
             <Panel title="Issue" description={policy === "required" ? "This company requires a founder's approval before a quotation is issued." : "Issuing freezes a client-facing copy."}>
-              <IssueBar ids={ids} blockers={blockers} needsApproval={policy === "required" && !hasValidApproval(header, bundle.approvals)} approvalPending={pending} canRequestApproval />
+              <IssueBar ids={ids} blockers={blockers} needsApproval={policy === "required" && !hasValidApproval(header, bundle.approvals, bundle.contentHash)} approvalPending={pending && !pendingApprovalIsStale(header, bundle.approvals, bundle.contentHash)} canRequestApproval />
             </Panel>
           ) : null}
         </>

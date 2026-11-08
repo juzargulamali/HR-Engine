@@ -46,6 +46,8 @@ export interface QuotationBundle {
   /** line image file id -> short-lived signed address (best effort; missing = show the file name only). */
   imageUrls: Record<string, string>;
   approvals: ApprovalLite[];
+  /** The version fingerprint of the client-facing content as it is now (crm_quote_content_hash): the reviewer screen carries it back when approving. Null for an issued quotation or when it could not be computed. */
+  contentHash: string | null;
   /** Present once issued: THE frozen client-facing copy. Part 2 (PDF / XLSX) renders this and nothing else. */
   snapshot: { content: QuotationSnapshot; content_hash: string; issued_at: string } | null;
   /** The revision chain of this reference, newest first. */
@@ -67,7 +69,7 @@ export async function loadQuotation(proposalId: string): Promise<QuotationBundle
     db.from("companies").select("id, legal_name, trn, address, phone, email, website, logo_path").eq("id", header.company_id).single(),
     db.from("crm_organisations").select("id, name, country_code, place, vat_trn, trade_licence_no").is("archived_at", null).order("name"),
     db.from("crm_files").select("*").eq("opportunity_id", header.opportunity_id).is("deleted_at", null),
-    db.from("crm_approvals").select("proposal_id, state, decided_at, requested_at").eq("proposal_id", proposalId),
+    db.from("crm_approvals").select("id, proposal_id, state, decided_at, requested_at, quote_content_hash").eq("proposal_id", proposalId),
     db.from("crm_quotation_snapshots").select("content, content_hash, issued_at").eq("proposal_id", proposalId).maybeSingle(),
     db.from("crm_quotations").select("proposal_id, revision, issued_at").eq("company_id", header.company_id).eq("reference", header.reference).order("revision", { ascending: false }),
   ]);
@@ -75,6 +77,12 @@ export async function loadQuotation(proposalId: string): Promise<QuotationBundle
   const chainIds = ((chain.data ?? []) as { proposal_id: string; revision: number; issued_at: string | null }[]);
   const st = await db.from("crm_proposals").select("id, status").in("id", chainIds.map((c) => c.proposal_id));
   ok(st);
+  let contentHash: string | null = null;
+  if (!header.issued_at) {
+    const hr = await db.rpc("crm_quote_content_hash", { p_proposal: proposalId });
+    ok(hr);
+    contentHash = (hr.data as string | null) ?? null;
+  }
   const statusBy = new Map(((st.data ?? []) as { id: string; status: string }[]).map((r) => [r.id, r.status]));
   const lines = (lin.data ?? []) as QuotationLineRow[];
   const fileRows = (files.data ?? []) as CrmFileRow[];
@@ -92,7 +100,7 @@ export async function loadQuotation(proposalId: string): Promise<QuotationBundle
   return {
     header, proposal: p.data as CrmProposalRow, sections: (sec.data ?? []) as QuotationSectionRow[], lines, vatChoices: (vat.data ?? []) as VatChoiceRow[],
     issuer: co.data as IssuerLite, organisations, billTo: organisations.find((o) => o.id === header.bill_to_org_id) ?? null,
-    files: fileRows, imageUrls, approvals: (appr.data ?? []) as ApprovalLite[],
+    files: fileRows, imageUrls, approvals: (appr.data ?? []) as ApprovalLite[], contentHash,
     snapshot: (snap.data as QuotationBundle["snapshot"]) ?? null,
     revisions: chainIds.map((c) => ({ proposal_id: c.proposal_id, revision: c.revision, issued: !!c.issued_at, status: statusBy.get(c.proposal_id) ?? "draft" })),
   };

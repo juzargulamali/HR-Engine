@@ -44,8 +44,8 @@ export interface QuotationInput {
 
 export interface CalculatedLine {
   id?: string;
-  /** Sequential across the whole document, in section then line order. */
-  number: number;
+  /** Display number: `<section>.<line within the section>` ("1.1", "1.2", "2.1"), from `lineDisplayNumber`. */
+  number: string;
   quantity: string;
   unitPrice: string;
   vat: QuotationVat | null;
@@ -63,6 +63,14 @@ export interface CalculatedQuotation {
   vat: string;
   gross: string;
 }
+
+/**
+ * THE display numbering of a BOQ, used by the builder, the SQL snapshot (`crm_quote_build_content` mirrors it), the PDF and the XLSX so they cannot drift.
+ * Sections are numbered 1, 2, 3 in order; a line is `<section number>.<position within its section>`. Every line belongs to a section (the table requires
+ * it), so there are no unsectioned lines. Zero-based indexes in, text out (never a number: "1.10" must stay "1.10").
+ */
+export const sectionDisplayNumber = (sectionIndex: number): string => String(sectionIndex + 1);
+export const lineDisplayNumber = (sectionIndex: number, lineIndex: number): string => `${sectionIndex + 1}.${lineIndex + 1}`;
 
 export class QuotationInputError extends Error {}
 
@@ -108,20 +116,18 @@ export function calculateLine(quantity: string | number, unitPrice: string | num
 export function calculateQuotation(input: QuotationInput): CalculatedQuotation {
   const minorUnits = quotationMinorUnits(input.currency ?? "");
   const f = (n: bigint) => formatMinor(n, minorUnits);
-  let number = 0;
   let totalNet = 0n;
   let totalVat = 0n;
-  const sections = input.sections.map((s): CalculatedSection => {
+  const sections = input.sections.map((s, si): CalculatedSection => {
     let sNet = 0n;
     let sVat = 0n;
-    const lines = s.lines.map((l): CalculatedLine => {
+    const lines = s.lines.map((l, li): CalculatedLine => {
       const vat = l.vat ?? input.vat;
       const { net, vat: v } = calculateLine(l.quantity, l.unitPrice, vat, minorUnits);
       sNet += net;
       sVat += v;
-      number += 1;
       const norm = (x: string | number) => String(x).trim().replace(/^0+(?=\d)/, "").replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
-      return { ...(l.id ? { id: l.id } : {}), number, quantity: norm(l.quantity), unitPrice: norm(l.unitPrice), vat, net: f(net), vatAmount: f(v), gross: f(net + v) };
+      return { ...(l.id ? { id: l.id } : {}), number: lineDisplayNumber(si, li), quantity: norm(l.quantity), unitPrice: norm(l.unitPrice), vat, net: f(net), vatAmount: f(v), gross: f(net + v) };
     });
     totalNet += sNet;
     totalVat += sVat;
@@ -179,11 +185,13 @@ export function validateQuotationImageMeta(file: { name: string; size: number; t
 // ---------------------------------------------------------------------------------------------------------------------------------
 // The frozen, client-facing snapshot (crm_quotation_snapshots.content). Part 2 (PDF / XLSX) renders exactly this and nothing else.
 // ---------------------------------------------------------------------------------------------------------------------------------
+/** A picture PINNED at issue: an immutable copy owned by this revision (bucket `quotation-assets`), with the SHA-256 of its bytes. Never the mutable source file. */
+export interface QuotationPinnedAsset { bucket: "quotation-assets"; storage_path: string; sha256: string; mime_type: string }
 export interface QuotationSnapshotLine {
-  number: number;
+  /** The display number `<section>.<line>` at issue. */
+  number: string;
   description: string;
-  /** Reference to a stored file (bucket `crm-files`), never the bytes. */
-  image: { file_id: string; storage_path: string; mime_type: string; original_name: string; size_bytes: number } | null;
+  image: (QuotationPinnedAsset & { file_id: string; original_name: string; size_bytes: number }) | null;
   unit: string | null;
   quantity: string;
   unit_price: string;
@@ -199,13 +207,15 @@ export interface QuotationSnapshot {
   issue_date: string;
   validity_date: string | null;
   enquiry: { reference: string; title: string };
-  issuer: { company_id: string; legal_name: string; trn: string | null; address: string | null; phone: string | null; email: string | null; website: string | null; logo_path: string | null; country_code: string };
+  issuer: { company_id: string; legal_name: string; trn: string | null; address: string | null; phone: string | null; email: string | null; website: string | null; logo: QuotationPinnedAsset | null; country_code: string };
   bill_to: { organisation_id: string; name: string; address: string | null; country_code: string | null; vat_trn: string | null; trade_licence_no: string | null };
   currency: QuotationCurrency;
   minor_units: number;
   vat: { kind: "rate" | "out_of_scope"; label: string; rate: string | null };
-  sections: { title: string; lines: QuotationSnapshotLine[]; subtotal_net: string; subtotal_vat: string; subtotal_gross: string }[];
+  sections: { number: string; title: string; lines: QuotationSnapshotLine[]; subtotal_net: string; subtotal_vat: string; subtotal_gross: string }[];
   totals: { net: string; vat: string; gross: string };
   milestones: { label: string; kind: "percent" | "amount"; value: string; due: string | null; amount: string }[];
+  /** Exclusions are their own block, before the terms. Empty by default: the user adds the items. */
+  exclusions: { title: string; body: string }[];
   terms: { label: string | null; clauses: { title: string; body: string }[] };
 }

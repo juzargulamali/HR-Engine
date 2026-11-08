@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -58,6 +58,19 @@ describe("Estimates & Quotations (part 1)", () => {
     await line(p, s2, { description: "LED wall", quantity: "7", unit_price: "0.35", vat_choice_id: vat["Out of scope"] });
     return { p, s1, s2 };
   };
+  /** Pins fictional assets the way the server does: content-addressed objects owned by the quotation, registered in storage (fixture rows), returned as the issue argument. */
+  const sha = (b: string) => createHash("sha256").update(b).digest("hex");
+  const pin = async (p: string, lineImages: Record<string, string> = {}, logo?: string) => {
+    const put = async (name: string, bytes: string) => {
+      const h = sha(bytes); const pth = `${p}/${name}-${h}.png`;
+      await admin(`insert into storage.objects (bucket_id, name) values ('quotation-assets', '${pth}') on conflict do nothing`);
+      return { path: pth, sha256: h, mime_type: "image/png" };
+    };
+    const lines: Record<string, unknown> = {};
+    for (const [lid, bytes] of Object.entries(lineImages)) lines[lid] = await put(`line-${lid}`, bytes);
+    return { logo: logo ? await put("logo", logo) : null, lines };
+  };
+  const issue = (p: string, assets?: unknown, who = U.sara) => commit(who, assets === undefined ? `select crm_quote_issue('${p}')` : `select crm_quote_issue('${p}', ${j(assets)})`);
   const snap = async (p: string) => (await admin<{ content: any; content_hash: string }>(`select content, content_hash from crm_quotation_snapshots where proposal_id = '${p}'`))[0];
 
   beforeAll(async () => {
@@ -145,7 +158,8 @@ describe("Estimates & Quotations (part 1)", () => {
       const [h] = await admin<any>(`select * from crm_quotations where proposal_id = '${p}'`);
       expect(h.reference).toMatch(/^QUO-UAE-\d{4}-0001$|^QUO-UAE-\d{4}-\d{4}$/);
       expect(h.revision).toBe(1);
-      expect([h.currency, h.vat_kind, h.bill_to_org_id, h.issued_at]).toEqual([null, null, null, null]);
+      expect([h.currency, h.vat_choice_id, h.vat_kind, h.vat_label, h.vat_rate, h.bill_to_org_id, h.issued_at]).toEqual([null, null, null, null, null, null, null]); // no VAT choice is pre-selected
+      expect(h.exclusions).toEqual([]); // Exclusions start empty: nothing is seeded
       expect(h.terms).toHaveLength(6);
       expect(h.terms_label).toBe("Standard terms (working draft, pending legal review)");
       expect((await admin<any>(`select status, version from crm_proposals where id = '${p}'`))[0].status).toBe("draft");
@@ -198,7 +212,8 @@ describe("Estimates & Quotations (part 1)", () => {
       const c2 = (await snap(rev)).content;
       expect(c2.totals).toEqual(c.totals);
       expect(c2.sections[0].title).toBe("AV");
-      expect(c2.sections[0].lines[0].number).toBe(1);
+      expect(c2.sections[0].lines[0].number).toBe("1.1");
+      expect(c2.sections.map((x: any) => x.number)).toEqual(["1", "2"]);
       void s1; void s2;
     });
     it("milestones must be consistent at issue", async () => {
@@ -228,9 +243,26 @@ describe("Estimates & Quotations (part 1)", () => {
       expect((await snap(p1)).content.issuer).toMatchObject({ legal_name: "Fictional Enginious UAE LLC", trn: null, address: null });
       await admin(`update companies set trn = '100200300400003', address = 'Fictional Tower, Dubai', phone = '+971 0', email = 'q@fictional.example', logo_path = '${CO.uae}/${id()}-logo.png' where id = '${CO.uae}'`);
       const p2 = (await readyQuote(oppDirect, clientId)).p;
-      await commit(U.sara, `select crm_quote_issue('${p2}')`);
+      await expect(issue(p2)).rejects.toThrow(/company logo must be pinned/);
+      await issue(p2, await pin(p2, {}, "LOGO-BYTES-ORIGINAL"));
       expect((await snap(p2)).content.issuer).toMatchObject({ trn: "100200300400003", address: "Fictional Tower, Dubai", email: "q@fictional.example" });
-      expect((await snap(p2)).content.issuer.logo_path).toMatch(/-logo\.png$/);
+      const logo = (await snap(p2)).content.issuer.logo;
+      expect(logo).toMatchObject({ bucket: "quotation-assets", sha256: sha("LOGO-BYTES-ORIGINAL"), mime_type: "image/png" });
+      expect(logo.storage_path).toBe(`${p2}/logo-${sha("LOGO-BYTES-ORIGINAL")}.png`);   // a pinned copy owned by the revision, not the company's current logo path
+      expect(JSON.stringify((await snap(p2)).content)).not.toContain(`${CO.uae}/`);
+      // the company changes its logo: the issued snapshot is untouched
+      const before = JSON.stringify((await snap(p2)).content);
+      await admin(`update companies set logo_path = '${CO.uae}/${id()}-logo.webp' where id = '${CO.uae}'`);
+      expect(JSON.stringify((await snap(p2)).content)).toBe(before);
+      // a pin that is wrong (other proposal's path, wrong hash, not in storage) is refused
+      const p3 = (await readyQuote(oppDirect, clientId)).p;
+      const good = await pin(p3, {}, "X");
+      await expect(issue(p3, { ...good, logo: { ...good.logo, path: `${p2}/logo-${sha("X")}.png` } })).rejects.toThrow(/not pinned correctly/);
+      await expect(issue(p3, { ...good, logo: { ...good.logo, sha256: sha("Y") } })).rejects.toThrow(/not pinned correctly/);
+      await expect(issue(p3, { ...good, logo: { ...good.logo, path: `${p3}/logo-${sha("Z")}.png` } })).rejects.toThrow(/not pinned correctly/);   // path does not carry the recorded hash
+      await admin(`delete from storage.objects where bucket_id = 'quotation-assets' and name = '${good.logo!.path}'`);
+      await expect(issue(p3, good)).rejects.toThrow(/not found in the quotation store/);
+      await admin(`update companies set logo_path = null where id = '${CO.uae}'`);
       await admin(`update companies set legal_name = '  ' where id = '${CO.ksa}'`);
     });
     it("never puts internal notes in the snapshot", async () => {
@@ -242,23 +274,83 @@ describe("Estimates & Quotations (part 1)", () => {
     });
   });
 
-  describe("approval (the existing commercial approval)", () => {
-    it("with policy 'required' it cannot be issued without an approval given after the last change", async () => {
+  describe("approval is bound to the exact version reviewed", () => {
+    const required = async (fn: () => Promise<void>) => {
       await admin(`update crm_company_settings set approval_policy = 'required' where company_id = '${CO.uae}'`);
-      try {
+      try { await fn(); } finally { await admin(`update crm_company_settings set approval_policy = 'not_configured' where company_id = '${CO.uae}'`); }
+    };
+    const hashOf = async (p: string, who = U.founder) => (await commit<{ h: string }>(who, `select crm_quote_content_hash('${p}') as h`))[0].h;
+    const request = async (p: string) => (await commit<{ id: string }>(U.sara, `select crm_quote_request_approval('${p}') as id`))[0].id;
+    const decide = (ap: string, state: string, seen: string, who = U.founder) => commit(who, `select crm_quote_decide_approval('${ap}', '${state}', ${state === "approved" ? "null" : "'Change it'"}, '${seen}')`);
+
+    it("STALE SCREEN: an approval from a screen opened before an edit is refused, the edited quote cannot be issued until a fresh request is approved", async () => {
+      await required(async () => {
         const { p, s1 } = await readyQuote(oppDirect, clientId);
-        await expect(commit(U.sara, `select crm_quote_issue('${p}')`)).rejects.toThrow(/founder's approval/);
-        const [{ id: ap }] = await commit<{ id: string }>(U.sara, `select crm_request_approval('${oppDirect}', '${p}') as id`);
-        await expect(commit(U.sara, `select crm_quote_issue('${p}')`)).rejects.toThrow(/founder's approval/);
-        await commit(U.founder, `select crm_decide_approval('${ap}', 'approved')`);
-        await line(p, s1, { description: "Late addition", quantity: "1", unit_price: "1" }); // an edit after approval voids it
-        await expect(commit(U.sara, `select crm_quote_issue('${p}')`)).rejects.toThrow(/founder's approval/);
-        await admin(`update crm_approvals set state = 'approved', decided_at = now() + interval '1 second' where id = '${ap}'`);
-        await commit(U.sara, `select crm_quote_issue('${p}')`);
+        await expect(issue(p)).rejects.toThrow(/founder's approval/);
+        const ap = await request(p);
+        const seen = await hashOf(p);                                   // the approver opens the reviewer screen
+        await line(p, s1, { description: "Price changed after the approver opened the page", quantity: "1", unit_price: "9999" });   // Sales edits
+        await expect(decide(ap, "approved", seen)).rejects.toThrow(/changed after you opened it/);   // approve from the stale screen: refused
+        await expect(issue(p)).rejects.toThrow(/founder's approval/);
+        // the generic decide path cannot approve a quotation approval either
+        await expect(commit(U.founder, `select crm_decide_approval('${ap}', 'approved')`)).rejects.toThrow(/approved from its own page/);
+        expect((await admin<any>(`select state from crm_approvals where id = '${ap}'`))[0].state).toBe("pending");
+        // a fresh request withdraws the stale one and is decided against the CURRENT version
+        const ap2 = await request(p);
+        expect((await admin<any>(`select state from crm_approvals where id = '${ap}'`))[0].state).toBe("changes_requested");
+        await expect(decide(ap2, "approved", seen)).rejects.toThrow(/changed after you opened it/);      // the old screen still cannot approve
+        await decide(ap2, "approved", await hashOf(p));
+        await issue(p);
         expect((await admin(`select issued_at is not null as x from crm_quotations where proposal_id = '${p}'`))[0]).toEqual({ x: true });
-      } finally {
-        await admin(`update crm_company_settings set approval_policy = 'not_configured' where company_id = '${CO.uae}'`);
-      }
+      });
+    });
+    it("an edit after approval (before issue) needs a fresh approval; approving the current version then issuing works", async () => {
+      await required(async () => {
+        const { p, s1 } = await readyQuote(oppDirect, clientId);
+        const ap = await request(p);
+        await decide(ap, "approved", await hashOf(p));
+        await header(p, { internal_notes: "internal notes are not part of the reviewed version" });
+        await header(p, { exclusions: [{ title: "Civil works", body: "Excluded." }] });   // client-facing: changes the version
+        await expect(issue(p)).rejects.toThrow(/founder's approval/);
+        const ap2 = await request(p);
+        await decide(ap2, "approved", await hashOf(p));
+        await line(p, s1, { description: "x", quantity: "1", unit_price: "1" });
+        await expect(issue(p)).rejects.toThrow(/founder's approval/);
+        const ap3 = await request(p);
+        await decide(ap3, "approved", await hashOf(p));
+        await issue(p);
+      });
+    });
+    it("an approval requested through the generic path does not count; 'changes requested' needs no hash; only a founder decides", async () => {
+      await required(async () => {
+        const { p } = await readyQuote(oppDirect, clientId);
+        const [{ id: gen }] = await commit<{ id: string }>(U.sara, `select crm_request_approval('${oppDirect}', '${p}') as id`);
+        await expect(decide(gen, "approved", await hashOf(p))).rejects.toThrow(/not tied to a quotation version/);
+        await commit(U.founder, `select crm_decide_approval('${gen}', 'changes_requested', 'x')`);
+        const ap = await request(p);
+        await expect(decide(ap, "approved", await hashOf(p, U.sara), U.sara)).rejects.toThrow(/Only a founder/);
+        await decide(ap, "changes_requested", "stale-hash-is-fine-for-a-refusal");
+        await expect(issue(p)).rejects.toThrow(/founder's approval/);
+      });
+    });
+    it("the hash ignores internal notes and the day, and covers client-facing content", async () => {
+      const { p, s1 } = await readyQuote(oppDirect, clientId);
+      const h0 = await hashOf(p);
+      await header(p, { internal_notes: "SECRET-INTERNAL-NOTE-HASH" });
+      expect(await hashOf(p)).toBe(h0);
+      for (const patch of [{ validity_date: "2098-01-01" }, { currency: "USD" }]) { await header(p, patch); expect(await hashOf(p)).not.toBe(h0); await header(p, { validity_date: "2099-01-01", currency: "EUR" }); }
+      expect(await hashOf(p)).toBe(h0);
+      await line(p, s1, { description: "y", quantity: "1", unit_price: "1" });
+      expect(await hashOf(p)).not.toBe(h0);
+    });
+    it("policy not_required and not_configured are unchanged: issuing needs no approval, and no request can be made", async () => {
+      const { p } = await readyQuote(oppDirect, clientId);
+      await expect(request(p)).rejects.toThrow(/not configured/);
+      await admin(`update crm_company_settings set approval_policy = 'not_required' where company_id = '${CO.uae}'`);
+      try {
+        await expect(request(p)).rejects.toThrow(/not required/);
+        await issue(p);
+      } finally { await admin(`update crm_company_settings set approval_policy = 'not_configured' where company_id = '${CO.uae}'`); }
     });
   });
 
@@ -335,6 +427,28 @@ describe("Estimates & Quotations (part 1)", () => {
     });
   });
 
+  describe("numbering and exclusions", () => {
+    it("numbers sections 1, 2 and lines 1.1, 1.2, 2.1 in the snapshot, in display order", async () => {
+      const { p } = await readyQuote(oppDirect, clientId);
+      await issue(p);
+      const c = (await snap(p)).content;
+      expect(c.sections.map((x: any) => [x.number, x.title])).toEqual([["1", "Fabrication"], ["2", "AV"]]);
+      expect(c.sections.flatMap((x: any) => x.lines.map((l: any) => l.number))).toEqual(["1.1", "1.2", "2.1"]);
+    });
+    it("Exclusions are their own block: empty by default, editable, in the snapshot before the terms, copied to a revision, validated", async () => {
+      const { p } = await readyQuote(oppDirect, clientId);
+      await expect(header(p, { exclusions: [{ title: "", body: "x" }] })).rejects.toThrow(/title and text/);
+      await header(p, { exclusions: [{ title: "Civil works", body: "Not included unless in the BOQ." }] });
+      await issue(p);
+      const c = (await snap(p)).content;
+      expect(c.exclusions).toEqual([{ title: "Civil works", body: "Not included unless in the BOQ." }]);
+      expect(c.terms.clauses.length).toBeGreaterThan(0);   // terms stay their own block
+      expect(JSON.stringify(c.exclusions)).not.toContain("working draft");
+      const rev = (await commit<{ id: string }>(U.sara, `select crm_quote_create_revision('${p}') as id`))[0].id;
+      expect((await admin<any>(`select exclusions from crm_quotations where proposal_id = '${rev}'`))[0].exclusions).toHaveLength(1);
+    });
+  });
+
   describe("pictures", () => {
     it("accepts a small image of this enquiry only; refuses documents, big files, other enquiries; blocks removal once issued", async () => {
       const f = async (opp: string, mime: string, size: number, name: string) => {
@@ -352,11 +466,17 @@ describe("Estimates & Quotations (part 1)", () => {
       await expect(line(p, s1, { description: "x", quantity: "1", unit_price: "1", image_file_id: big })).rejects.toThrow(/5 MB/);
       await expect(line(p, s1, { description: "x", quantity: "1", unit_price: "1", image_file_id: foreign })).rejects.toThrow(/does not belong/);
       const l = await line(p, s1, { description: "With picture", quantity: "1", unit_price: "1", image_file_id: good });
-      await commit(U.sara, `select crm_quote_issue('${p}')`);
+      await expect(issue(p)).rejects.toThrow(/item picture must be pinned/);
+      await issue(p, await pin(p, { [l]: "PICTURE-BYTES-ORIGINAL" }));
       const content = (await snap(p)).content;
-      expect(content.sections[0].lines.find((x: any) => x.description === "With picture").image).toMatchObject({ file_id: good, mime_type: "image/png" });
+      const img = content.sections[0].lines.find((x: any) => x.description === "With picture").image;
+      expect(img).toMatchObject({ file_id: good, bucket: "quotation-assets", sha256: sha("PICTURE-BYTES-ORIGINAL"), mime_type: "image/png" });
+      expect(img.storage_path).toBe(`${p}/line-${l}-${sha("PICTURE-BYTES-ORIGINAL")}.png`);   // the pinned copy, never the mutable source path
+      expect(JSON.stringify(content)).not.toContain(`${CO.uae}/${oppDirect}/`);
+      // the pinned copy cannot be renamed or deleted while the revision exists (storage.objects guard)
+      await expect(admin(`delete from storage.objects where bucket_id = 'quotation-assets' and name = '${img.storage_path}'`)).rejects.toThrow(/pinned quotation asset/);
+      await expect(admin(`update storage.objects set name = name || 'x' where bucket_id = 'quotation-assets' and name = '${img.storage_path}'`)).rejects.toThrow(/pinned quotation asset/);
       await expect(commit(U.sara, `select crm_remove_file('${good}')`)).rejects.toThrow(/issued quotation/);
-      void l;
     });
   });
 
