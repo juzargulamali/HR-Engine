@@ -1,0 +1,111 @@
+/**
+ * What the JARVIS panel (browser) and the JARVIS server actions exchange. Plain JSON only: no secrets, no functions. The browser holds all of this in memory;
+ * nothing here is stored on the server (the only server-side records are the action ledger and the daily usage counter, see supabase/migrations/20261223000100).
+ */
+
+export type JarvisRefusalCode =
+  | "unavailable"        // hard-off (JARVIS_DISABLED), no provider key, or the confirmation secret is missing in production
+  | "signed_out"
+  | "not_available"      // the global switch is off or the person is not on the pilot allowlist
+  | "writes_off"         // the write kill switch is off: read-only help keeps working
+  | "company_not_allowed"
+  | "no_module_access"   // no grant for the module (e.g. Sales) in THIS company
+  | "unknown_action"
+  | "action_disabled"
+  | "invalid_input"
+  | "excluded_request"   // refused before any provider call (payroll, leave, other modules, SQL, credentials, deployment, permissions, deletion)
+  | "limit_reached"
+  | "provider_error"
+  | "token_invalid"
+  | "token_expired"
+  | "values_changed"     // the reviewed values differ from what the confirmation was issued for
+  | "company_changed"
+  | "needs_review"       // something changed since the review (a duplicate, a record, a permission): review again
+  | "not_permitted"      // the existing rule of the action refused it
+  | "save_failed"
+  | "ambiguous";         // the answer to the save was lost: check the original result, never create again
+
+export interface JarvisRefusal { ok: false; code: JarvisRefusalCode; message: string }
+
+export interface HelpView {
+  enabled: { id: string; title: string; description: string }[];
+  disabled: { id: string; title: string; reason: string }[];
+}
+
+export type OrgField = "agency" | "client";
+export interface OrgOption { id: string; name: string; place: string | null }
+export interface OrgChoice {
+  field: OrgField;
+  /** What the brief said (or the person typed to search). */
+  typedName: string | null;
+  status: "none" | "matched" | "suggested" | "ambiguous" | "not_found" | "wrong_role";
+  selectedId: string | null;
+  selectedName: string | null;
+  options: OrgOption[];
+  /** Plain words for the person, e.g. "register this organisation first". */
+  guidance: string | null;
+}
+
+export interface EnquiryValues {
+  companyId: string;
+  title: string;
+  source: string;
+  agencyOrgId: string | null;
+  clientOrgId: string | null;
+  currency: string | null;
+  value: number | null;
+  budgetNote: string | null;
+  brief: string | null;
+  eventStart: string | null;
+  eventEnd: string | null;
+  installStart: string | null;
+  location: string | null;
+  technologies: { name: string; qty: number }[];
+  scope: string | null;
+  waitingOn: "client" | "internal" | null;
+  nextTitle: string;
+  nextDate: string;
+  nextTime: string;
+  nextKind: "call" | "email" | "meeting" | "proposal" | "other";
+}
+
+export interface CardProblem { field: string; message: string }
+export interface CardQuestion { field: string; text: string; options?: { value: string; label: string }[] }
+export interface DuplicateView { id: string; reference: string; title: string; stage: string; level: "likely" | "possible"; reasons: string[] }
+
+export interface EnquiryCard {
+  kind: "enquiry.create";
+  company: { id: string; name: string };
+  values: EnquiryValues;
+  agency: OrgChoice;
+  client: OrgChoice;
+  problems: CardProblem[];
+  questions: CardQuestion[];
+  duplicates: DuplicateView[];
+  /** True when the reviewed values are complete and valid: only then is a confirmation issued. */
+  valid: boolean;
+  /** Everything the model returned that was kept, by field: lets the card show "from your brief" and leave the rest blank. */
+  fromBrief: string[];
+}
+
+export type SendResult =
+  | { ok: true; kind: "help"; help: HelpView }
+  | { ok: true; kind: "not_available"; title: string; reason: string }
+  | { ok: true; kind: "card"; card: EnquiryCard; confirmation: { id: string; token: string; expiresAt: string } | null }
+  | JarvisRefusal;
+
+export interface ConfirmDone { ok: true; status: "done"; confirmationId: string; reference: string; opportunityId: string; href: string; replayed: boolean }
+export type ConfirmResult = ConfirmDone | (JarvisRefusal & { confirmationId?: string });
+
+export type StatusResult =
+  | { ok: true; state: "done"; reference: string; opportunityId: string; href: string }
+  | { ok: true; state: "failed"; message: string }
+  | { ok: true; state: "not_recorded" }
+  | JarvisRefusal;
+
+export interface LauncherState { available: boolean; writes: boolean; companies: { id: string; name: string }[] }
+
+export interface ContextView {
+  company: { id: string; name: string } | null;
+  enquiry: { id: string; reference: string; title: string; companyId: string } | null;
+}
