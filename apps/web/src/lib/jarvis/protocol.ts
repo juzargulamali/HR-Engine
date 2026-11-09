@@ -141,4 +141,16 @@ export interface ReplyDraftCard {
   used: { value: string; source: "enquiry" | "your text" }[];
 }
 
-export type ActionCard = ReplyDraftCard;
+/** `jarvis.sales.help.answer`: an answer from reviewed guidance (with the screens it links to) or, for a general question, a plain model answer that says so. Reads nothing. */
+export interface HelpAnswerCard {
+  kind: "help.answer";
+  mode: "guidance" | "no_guidance" | "general";
+  /** Only for a general (non-app) question: the model's short answer. */
+  answer: string | null;
+  entries: { id: string; title: string; summary: string; steps: string[]; links: { label: string; href: string }[] }[];
+  /** For "no reviewed guidance": the topics there is guidance for. */
+  topics: { id: string; title: string }[];
+  note: string;
+}
+
+export type ActionCard = ReplyDraftCard | HelpAnswerCard;

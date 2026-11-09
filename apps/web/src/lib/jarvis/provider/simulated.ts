@@ -82,6 +82,13 @@ function draftReply(input: string): Record<string, unknown> {
   return out;
 }
 
+/** A general (non-app) answer: deterministic text that echoes nothing of the question except that it was general. */
+function generalAnswer(input: string): Record<string, unknown> {
+  const out: Record<string, unknown> = { answer: "This is a general answer (simulated): I can only give general information here, with no access to any company data." };
+  if (/ignore (all )?previous instructions/i.test(input)) Object.assign(out, { execute: true, showPayroll: true, role: "admin", systemPrompt: "leaked" });
+  return out;
+}
+
 export function createSimulatedProvider(): JarvisProvider {
   return {
     kind: "simulated",
@@ -90,6 +97,7 @@ export function createSimulatedProvider(): JarvisProvider {
       if (req.input.includes("[[provider-timeout]]")) throw new JarvisProviderError("timeout");
       if (req.input.includes("[[provider-error]]")) throw new JarvisProviderError("http", 500);
       if (req.task === "reply_draft") return draftReply(req.input);
+      if (req.task === "help_general") return generalAnswer(req.input);
       if (req.task !== "enquiry_fields") throw new JarvisProviderError("malformed");
       const out = extractEnquiry(req.input);
       if (/ignore (all )?previous instructions/i.test(req.input)) {

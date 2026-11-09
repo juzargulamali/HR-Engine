@@ -13,7 +13,7 @@ export interface Org { id: string; name: string; kind: string; roles: string[]; 
 export interface Opp {
   id: string; company_id: string; reference: string; title: string; stage: string; agency_org_id: string | null; client_org_id: string | null; event_start: string | null; install_start: string | null; location: string | null;
   technologies: { name: string; qty: number }[]; created_at: string;
-  owner_id: string | null; version: number; currency: string | null; value: number | null; budget_note: string | null; brief: string | null; event_end: string | null; scope: string | null; waiting_on: string | null;
+  owner_id?: string | null; version?: number; currency?: string | null; value?: number | null; budget_note?: string | null; brief?: string | null; event_end?: string | null; scope?: string | null; waiting_on?: string | null;
 }
 let oppCounter = 100;
 /** A fictional enquiry row for the unit tests (the fake database lets a person see it only when they hold a grant for its company). */
@@ -44,6 +44,8 @@ export interface World {
   accessFn: "ok" | "missing" | "error";
   orgReadFails: boolean;
   rpcLog: { name: string; args: Record<string, unknown> }[];
+  /** Every table the person's session read (select), in order. */
+  readLog: string[];
   createdArgs: Record<string, unknown>[];
   counter: number;
 }
@@ -54,7 +56,7 @@ export function newWorld(): World {
     signedIn: ID.u1, settings: { enabled: true, writes: true }, pilot: new Set([ID.u1, ID.u2, ID.u3]), pilotCompanies: new Set(),
     grants: [{ user_id: ID.u1, company_id: ID.co1, capabilities: [], revoked_at: null }, { user_id: ID.u1, company_id: ID.co2, capabilities: [], revoked_at: null }, { user_id: ID.u2, company_id: ID.co2, capabilities: [], revoked_at: null }],
     companies: [{ id: ID.co1, legal_name: "Fictional Enginious UAE LLC" }, { id: ID.co2, legal_name: "Fictional Enginious KSA LLC" }],
-    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], createdArgs: [], counter: 0,
+    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], readLog: [], createdArgs: [], counter: 0,
   };
 }
 
@@ -74,6 +76,7 @@ function table(w: World, user: string, name: string): Row[] {
 }
 
 function builder(w: World, user: string, name: string) {
+  w.readLog.push(name);
   let rows = table(w, user, name).slice();
   let error: { message: string; code?: string } | null = name === "crm_organisations" && w.orgReadFails ? { message: "organisations unreadable" } : null;
   const api = {

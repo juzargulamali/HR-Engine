@@ -386,3 +386,19 @@ describe("modes and the draft-reply card", () => {
     expect(await screen.findByText(/The company changed after this draft/)).toBeTruthy();
   });
 });
+
+describe("the help card", () => {
+  it("shows the reviewed guidance with real links and the note, and no confirm button", async () => {
+    const api = fakeApi({ send: async () => ({ ok: true, kind: "action", actionId: "jarvis.sales.help.answer", confirmation: null, card: { kind: "help.answer", mode: "guidance", answer: null, topics: [], note: "From Enginious OS's reviewed guidance.", entries: [{ id: "sales-follow-ups", title: "See and plan follow-ups", summary: "The Follow-ups page lists what is next.", steps: ["Open Follow-ups in Sales."], links: [{ label: "Follow-ups", href: "/sales/follow-ups" }] }] } }) });
+    mount(api, { enabledActionIds: [...ALL_IDS, "jarvis.sales.help.answer"] });
+    openPanel();
+    fireEvent.click(screen.getByTestId("mode-help"));
+    fireEvent.change(screen.getByLabelText("Paste a brief or ask a question"), { target: { value: "How do I log a follow-up?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    const c = await screen.findByTestId("jarvis-help-card");
+    expect(within(c).getByRole("link", { name: "Follow-ups" }).getAttribute("href")).toBe("/sales/follow-ups");
+    expect(within(c).getByText(/Open Follow-ups in Sales/)).toBeTruthy();
+    expect(within(c).queryByRole("button")).toBeNull();
+    expect(api.calls.send[0]![0]).toMatchObject({ intent: "help" });
+  });
+});

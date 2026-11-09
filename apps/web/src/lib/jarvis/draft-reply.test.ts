@@ -26,7 +26,7 @@ const CONVO = "Hi, please can you tell us the price for two LED walls for the ga
 const reply = (text = CONVO, extra: { enquiryId?: string | null; companyId?: string } = {}) =>
   a.send({ companyId: extra.companyId ?? ID.co1, text, intent: "reply", enquiryId: extra.enquiryId === undefined ? enquiry.id : extra.enquiryId });
 const cardOf = (r: SendResult): ReplyDraftCard => { if (!r.ok || r.kind !== "action" || r.card.kind !== "reply.draft") throw new Error(`expected a reply card, got ${JSON.stringify(r).slice(0, 200)}`); return r.card; };
-const refusal = (r: SendResult) => { if (r.ok) throw new Error(`expected a refusal, got ${JSON.stringify(r).slice(0, 200)}`); return r; };
+const refusal = <T extends { ok: boolean }>(r: T) => { if (r.ok) throw new Error(`expected a refusal, got ${JSON.stringify(r).slice(0, 200)}`); return r as Extract<T, { ok: false }>; };
 const writes = () => w.rpcLog.filter((c) => !["jarvis_my_access", "jarvis_usage_take"].includes(c.name));
 
 describe("jarvis.sales.draft_reply: a draft only, nothing sent, nothing written", () => {
@@ -143,7 +143,7 @@ describe("jarvis.sales.draft_reply: refusals", () => {
   it("nothing can be executed for a draft: the action has no write endpoint, whatever token or values the browser sends", async () => {
     await reply();
     expect(refusal(await a.execute({ actionId: "jarvis.sales.draft_reply", companyId: ID.co1, token: "x.y", values: { enquiryId: enquiry.id, conversation: CONVO } })).code).toBe("action_disabled");
-    expect(refusal(await a.confirmAction({ companyId: ID.co1, actionId: "jarvis.sales.draft_reply", token: "x.y", values: {} } as never) as never).code).toBe("action_disabled");
+    expect((await a.confirmAction({ companyId: ID.co1, actionId: "jarvis.sales.draft_reply", token: "x.y", values: {} })) as { ok: boolean; code?: string }).toMatchObject({ ok: false, code: "action_disabled" });
     expect(writes()).toEqual([]);
   });
   it("too long is refused; the daily limit is counted per draft and refused when reached; a provider error leaves ordinary CRM usable", async () => {

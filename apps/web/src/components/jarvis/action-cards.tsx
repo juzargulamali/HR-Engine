@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import type { ActionCard, ActionConfirmResult, ConfirmationView, ReplyDraftCard, SendResult, StatusResult } from "@/lib/jarvis/protocol";
+import type { ActionCard, ActionConfirmResult, ConfirmationView, HelpAnswerCard, ReplyDraftCard, SendResult, StatusResult } from "@/lib/jarvis/protocol";
 
 /** What the cards of the other actions call. Each is a server action that re-authorises the person on every call; this file decides nothing about access. */
 export interface ActionApi {
@@ -29,8 +29,28 @@ export interface ActionCardProps {
 export function ActionCardView(p: ActionCardProps) {
   switch (p.state.card.kind) {
     case "reply.draft": return <ReplyDraftView card={p.state.card} companyStale={p.companyStale} />;
+    case "help.answer": return <HelpAnswerView card={p.state.card} />;
     default: return null;
   }
+}
+
+/** An answer from reviewed guidance, with links to the real screens. Reads and writes nothing. */
+function HelpAnswerView({ card }: { card: HelpAnswerCard }) {
+  return (
+    <section aria-label="Answer" className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm" data-testid="jarvis-help-card" data-mode={card.mode}>
+      {card.answer ? <p className="whitespace-pre-wrap" data-testid="help-general-answer">{card.answer}</p> : null}
+      {card.entries.map((e) => (
+        <div key={e.id} className="space-y-1" data-testid={`help-entry-${e.id}`}>
+          <h3 className="font-heading text-sm font-semibold">{e.title}</h3>
+          <p>{e.summary}</p>
+          {e.steps.length > 0 ? <ol className="list-decimal space-y-0.5 pl-5 text-xs">{e.steps.map((s, i) => <li key={i}>{s}</li>)}</ol> : null}
+          {e.links.length > 0 ? <p className="flex flex-wrap gap-x-3 gap-y-1 text-xs">{e.links.map((l) => <Link key={l.href} href={l.href} className="font-medium underline underline-offset-2">{l.label}</Link>)}</p> : null}
+        </div>
+      ))}
+      {card.topics.length > 0 ? <ul className="list-disc space-y-0.5 pl-5 text-xs" data-testid="help-topics">{card.topics.map((t) => <li key={t.id}>{t.title}</li>)}</ul> : null}
+      <p className="text-xs text-muted-foreground">{card.note}</p>
+    </section>
+  );
 }
 
 /** A DRAFT with a copy button. No send button exists, nothing is written, and the "to confirm" list is shown ABOVE the draft. */
