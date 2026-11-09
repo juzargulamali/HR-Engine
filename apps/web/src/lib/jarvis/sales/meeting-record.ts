@@ -7,6 +7,7 @@ import { JarvisProviderError } from "../provider/types";
 import { JarvisRefusalError, type GenericResult, type JarvisActionDefinition, type JarvisContext } from "../types";
 import { enquiryRef, LOOKUP_WORDS, readEnquiry, type EnquiryRow } from "./enquiry-read";
 import { emptyMeeting, MEETING_INSTRUCTIONS, MEETING_JSON_SCHEMA, MEETING_TASK, meetingValuesSchema, questionsFor, sanitiseMeeting, validateMeeting } from "./meeting-values";
+import { proofRpcArgs } from "../token";
 import { rpcOutcome } from "./rpc-outcome";
 
 export const RECORD_MEETING_ID = "jarvis.sales.meeting.record";
@@ -55,6 +56,17 @@ export const recordMeeting: JarvisActionDefinition<RecordMeetingInput, MeetingVa
   usesProvider: true,
   inputSchema,
   valuesSchema: meetingValuesSchema,
+  /**
+   * Exactly what jarvis_record_meeting receives as its signed payload: the activity and the (optional) follow-up. "Occurred on" becomes a timestamp only for a past day, so the text can
+   * differ if the review is confirmed on a later Dubai day: the person is then asked to review again (never a silent change).
+   */
+  wirePayload: (v, ctx) => {
+    const today = crmToday(ctx.now);
+    const due = v.planFollowUp ? dubaiDateTimeToIso(v.followUpDate, v.followUpTime) : null;
+    if (v.planFollowUp && !due) return null;
+    const occurred = v.occurredOn && v.occurredOn < today ? dubaiDateTimeToIso(v.occurredOn, "12:00") : null;
+    return { activity: { kind: v.kind, body: v.body, occurred_at: occurred, internal: v.internal }, follow_up: v.planFollowUp ? { title: v.followUpTitle, due_at: due, kind: v.followUpKind } : null };
+  },
   describe: (v) => `Record a ${v.kind.replace("_", " ")}${v.planFollowUp ? " and a follow-up" : ""} on the enquiry`,
 
   async propose(ctx, input) {
@@ -101,16 +113,7 @@ export const recordMeeting: JarvisActionDefinition<RecordMeetingInput, MeetingVa
   },
 
   async execute(ctx, input) {
-    const v = input.values;
-    const today = crmToday(ctx.now);
-    const due = v.planFollowUp ? dubaiDateTimeToIso(v.followUpDate, v.followUpTime) : null;
-    if (v.planFollowUp && !due) return { kind: "refused", code: "invalid_input", message: "The follow-up needs a valid date and time." };
-    const occurred = v.occurredOn && v.occurredOn < today ? dubaiDateTimeToIso(v.occurredOn, "12:00") : null;
-    const r = await ctx.supabase.rpc("jarvis_record_meeting", {
-      p_confirmation_id: input.confirmationId, p_values_hash: input.valuesHash, p_enquiry_id: v.enquiryId,
-      p_activity: { kind: v.kind, body: v.body, occurred_at: occurred, internal: v.internal },
-      p_follow_up: v.planFollowUp ? { title: v.followUpTitle, due_at: due, kind: v.followUpKind } : null,
-    }).abortSignal(AbortSignal.timeout(20_000));
+    const r = await ctx.supabase.rpc("jarvis_record_meeting", proofRpcArgs(input.proof)).abortSignal(AbortSignal.timeout(20_000));
     return rpcOutcome(r, "The meeting could not be recorded.");
   },
 

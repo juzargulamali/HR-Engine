@@ -3,6 +3,7 @@ import { z } from "zod";
 import { cleanText, normaliseCountry, normaliseName, normaliseWebsite, ORGANISATION_ROLES, ROLE_LABEL, websiteDomain } from "@/lib/crm/clients-agencies/normalise";
 import type { CardProblem, OrgMatchView, OrgRegisterCard, OrgRole, OrgValues } from "../protocol";
 import { JarvisRefusalError, type GenericResult, type JarvisActionDefinition, type JarvisContext } from "../types";
+import { proofRpcArgs } from "../token";
 import { rpcOutcome } from "./rpc-outcome";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -105,6 +106,12 @@ export const registerOrganisation: JarvisActionDefinition<RegisterOrgInput, OrgV
   valuesSchema: orgValuesSchema,
   describe: (v) => `Register the organisation "${v.name}"`,
 
+  /** Exactly what jarvis_register_organisation receives as its signed payload. (The acknowledged same-name matches travel separately: see the wrapper's comment.) */
+  wirePayload: (v) => ({
+    company_id: v.companyId, name: v.name, roles: v.roles, country_code: cleanText(v.country) ? normaliseCountry(v.country) : null, website: normaliseWebsite(v.website).website,
+    place: cleanText(v.place), note: cleanText(v.note),
+  }),
+
   async propose(ctx, input) {
     if (input.mode === "search") return card(ctx, "search", input.name, emptyOrgValues(ctx.companyId, input.name));
     const parsed = orgValuesSchema.safeParse({ ...(input.fields ?? {}), companyId: ctx.companyId, ...(input.fields?.name === undefined && input.name ? { name: input.name } : {}) });
@@ -131,11 +138,7 @@ export const registerOrganisation: JarvisActionDefinition<RegisterOrgInput, OrgV
       catch { return { kind: "refused", code: "needs_review", message: "Could not check for the same organisation just now. Press Review changes to try again." }; }
       if (matches.some((m) => m.binding && !ack.includes(m.id))) return { kind: "refused", code: "needs_review", message: "An organisation with the same name or website now exists. Review the details again and say whether it is a different one." };
     }
-    const args = {
-      company_id: v.companyId, name: v.name, roles: v.roles, country_code: cleanText(v.country) ? normaliseCountry(v.country) : null, website: normaliseWebsite(v.website).website,
-      place: cleanText(v.place), note: cleanText(v.note), ack_ids: ack.filter((x) => /^[0-9a-f-]{36}$/i.test(x)),
-    };
-    const r = await ctx.supabase.rpc("jarvis_register_organisation", { p_confirmation_id: input.confirmationId, p_values_hash: input.valuesHash, p_args: args }).abortSignal(AbortSignal.timeout(20_000));
+    const r = await ctx.supabase.rpc("jarvis_register_organisation", { ...proofRpcArgs(input.proof), p_ack: ack.filter((x) => /^[0-9a-f-]{36}$/i.test(x)) }).abortSignal(AbortSignal.timeout(20_000));
     return rpcOutcome(r, "The organisation could not be registered.");
   },
 

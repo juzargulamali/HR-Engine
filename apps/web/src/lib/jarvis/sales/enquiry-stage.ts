@@ -4,6 +4,7 @@ import { crmStageLabel } from "@enginious-hr/domain";
 import type { EnquiryStageCard, StageValues } from "../protocol";
 import { JarvisRefusalError, type GenericResult, type JarvisActionDefinition, type JarvisContext } from "../types";
 import { enquiryRef, isOwnerOrFounder, LOOKUP_WORDS, readEnquiry, type EnquiryRow } from "./enquiry-read";
+import { proofRpcArgs } from "../token";
 import { rpcOutcome } from "./rpc-outcome";
 import { CLOSING_WORDS, NEVER_THROUGH_JARVIS, stageFromText, transitionsFrom, type Evidence } from "./stage-transitions";
 
@@ -78,6 +79,8 @@ export const changeStage: JarvisActionDefinition<ChangeStageInput, StageValues, 
   usesProvider: false,
   inputSchema,
   valuesSchema,
+  /** Exactly what jarvis_change_stage receives as its signed payload: the stage to move to. The enquiry and its version are the signed target. */
+  wirePayload: (v) => ({ to: v.to }),
   describe: (v) => `Move the enquiry from ${crmStageLabel(v.from)} to ${crmStageLabel(v.to)}`,
 
   async propose(ctx, input) {
@@ -105,9 +108,7 @@ export const changeStage: JarvisActionDefinition<ChangeStageInput, StageValues, 
 
   async execute(ctx, input) {
     if (input.target.kind !== "record" || input.target.version === null) return { kind: "refused", code: "needs_review", message: "This review is not bound to a version of the enquiry. Review the details again." };
-    const r = await ctx.supabase.rpc("jarvis_change_stage", {
-      p_confirmation_id: input.confirmationId, p_values_hash: input.valuesHash, p_enquiry_id: input.values.enquiryId, p_to: input.values.to, p_expected_version: input.target.version,
-    }).abortSignal(AbortSignal.timeout(20_000));
+    const r = await ctx.supabase.rpc("jarvis_change_stage", proofRpcArgs(input.proof)).abortSignal(AbortSignal.timeout(20_000));
     return rpcOutcome(r, "The stage could not be changed.");
   },
 

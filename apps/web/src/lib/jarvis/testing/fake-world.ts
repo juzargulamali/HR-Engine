@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JarvisConfig } from "../config";
 import type { JarvisDeps } from "../dispatcher";
@@ -62,6 +62,10 @@ export interface World {
   followUps: { id: string; opportunity_id: string; title: string; due_at: string; kind: string; assigned_to: string }[];
   meetingFailAfterActivity: boolean;
   counter: number;
+  /** The confirmation key the fake database holds (jarvis_proof_key). null = not set: every write wrapper fails closed. */
+  proofKey: string | null;
+  /** The fake database's clock. */
+  dbNow: () => Date;
 }
 
 export function newWorld(): World {
@@ -70,7 +74,7 @@ export function newWorld(): World {
     signedIn: ID.u1, settings: { enabled: true, writes: true }, pilot: new Set([ID.u1, ID.u2, ID.u3]), pilotCompanies: new Set(),
     grants: [{ user_id: ID.u1, company_id: ID.co1, capabilities: [], revoked_at: null }, { user_id: ID.u1, company_id: ID.co2, capabilities: [], revoked_at: null }, { user_id: ID.u2, company_id: ID.co2, capabilities: [], revoked_at: null }],
     companies: [{ id: ID.co1, legal_name: "Fictional Enginious UAE LLC" }, { id: ID.co2, legal_name: "Fictional Enginious KSA LLC" }],
-    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], readLog: [], createdArgs: [], registered: [], updates: [], proposals: [], zoho: [], moves: [], evidenceFails: false, activities: [], followUps: [], meetingFailAfterActivity: false, counter: 0,
+    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], readLog: [], createdArgs: [], registered: [], updates: [], proposals: [], zoho: [], moves: [], evidenceFails: false, activities: [], followUps: [], meetingFailAfterActivity: false, counter: 0, proofKey: SECRET, dbNow: () => new Date(),
   };
 }
 
@@ -136,6 +140,26 @@ function ledgerRow(w: World, user: string, cid: string, company: string, action:
   return row;
 }
 
+/**
+ * The fake database's proof check, written independently of the app's signer (plain Node crypto over the documented text): the same rules as jarvis_verify_proof. Returns the
+ * parsed payload and its hash, or the database's refusal. Nothing is stored before this passes.
+ */
+function proofGate(w: World, user: string, action: string, args: Record<string, unknown>): { payload: Record<string, unknown>; hash: string } | { refusal: { data: null; error: { message: string; code: string } } } {
+  const no = (message: string, code: string) => ({ refusal: { data: null as null, error: { message, code } } });
+  if (w.proofKey === null) return no("JARVIS cannot save changes right now.", "JV004");
+  const text = args.p_payload;
+  if (typeof text !== "string" || typeof args.p_mac !== "string" || !/^[0-9a-f]{64}$/.test(args.p_mac) || typeof args.p_confirmation !== "string" || typeof args.p_company !== "string" || typeof args.p_target !== "string" || typeof args.p_expires !== "number") {
+    return no("This confirmation is not valid. Review the details again.", "JV002");
+  }
+  const hash = createHash("sha256").update(text, "utf8").digest("hex");
+  const canonical = ["JARVIS-PROOF-V1", args.p_confirmation, user, args.p_company, action, args.p_target, args.p_version == null ? "-" : String(args.p_version), String(args.p_expires), hash].join("\n");
+  const expected = createHmac("sha256", w.proofKey).update(canonical, "utf8").digest();
+  const given = Buffer.from(args.p_mac, "hex");
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return no("This confirmation is not valid. Review the details again.", "JV002");
+  if (Math.floor(w.dbNow().getTime() / 1000) >= args.p_expires) return no("This review has expired. Review the details again.", "JV003");
+  return { payload: JSON.parse(text) as Record<string, unknown>, hash };
+}
+
 function rpc(w: World, user: string, name: string, args: Record<string, unknown>) {
   w.rpcLog.push({ name, args });
   const run = async (): Promise<{ data: unknown; error: { message: string; code?: string } | null }> => {
@@ -156,40 +180,44 @@ function rpc(w: World, user: string, name: string, args: Record<string, unknown>
         return { data: w.opps.filter((o) => has.has(o.company_id)).map((o) => ({ opportunity_id: o.id, company_id: o.company_id, reference: o.reference, title: o.title, stage: o.stage, owner_id: user, agency_org_id: o.agency_org_id, client_org_id: o.client_org_id, event_start: o.event_start, event_end: null, install_start: o.install_start, location: o.location, technologies: o.technologies, created_at: o.created_at })), error: null };
       }
       case "jarvis_create_enquiry": {
-        const a = access(w, user, (args.p_args as { company_id: string }).company_id);
-        const p = args.p_args as { company_id: string; title: string; agency_org_id: string | null; client_org_id: string | null; event_start: string | null; location: string | null; technologies: { name: string; qty: number }[] };
+        const pg = proofGate(w, user, "jarvis.sales.enquiry.create_from_brief", args);
+        if ("refusal" in pg) return pg.refusal;
+        const a = access(w, user, args.p_company as string);
+        const p = pg.payload as unknown as { company_id: string; title: string; agency_org_id: string | null; client_org_id: string | null; event_start: string | null; location: string | null; technologies: { name: string; qty: number }[] };
         if (!a.writes_allowed || !a.company_allowed) return { data: null, error: { message: "JARVIS writes are not available to you for this company", code: "42501" } };
         if (!grantedCompanies(w, user).has(p.company_id)) return { data: null, error: { message: "You do not have Sales access for this company", code: "42501" } };
-        const cid = args.p_confirmation_id as string;
+        const cid = args.p_confirmation as string;
         const prior = w.ledger.get(cid);
         if (prior) {
-          if (prior.user_id !== user || prior.company_id !== p.company_id || prior.values_hash !== args.p_values_hash) return { data: null, error: { message: "This confirmation cannot be used for these details", code: "42501" } };
+          if (prior.user_id !== user || prior.company_id !== p.company_id || prior.values_hash !== pg.hash) return { data: null, error: { message: "This confirmation cannot be used for these details", code: "42501" } };
           return { data: { status: prior.status, confirmation_id: cid, opportunity_id: prior.result_id, reference: prior.result_ref, replayed: true, error_message: prior.error_message }, error: null };
         }
         if (w.createMode === "network") return { data: null, error: { message: "TypeError: fetch failed" } };
         if (w.createMode === "refuse") return { data: null, error: { message: "Only a founder (or someone they delegated) can assign another owner", code: "42501" } };
-        w.createdArgs.push(args.p_args as Record<string, unknown>);
+        w.createdArgs.push(pg.payload);
         const id = randomUUID(); w.counter += 1; const reference = `OPP-UAE-2026-${String(w.counter).padStart(4, "0")}`;
         w.opps.push(mkOpp({ id, company_id: p.company_id, reference, title: p.title, agency_org_id: p.agency_org_id, client_org_id: p.client_org_id, event_start: p.event_start, location: p.location, technologies: p.technologies, owner_id: user }));
-        w.ledger.set(cid, { confirmation_id: cid, user_id: user, company_id: p.company_id, values_hash: args.p_values_hash as string, status: "done", result_id: id, result_ref: reference, error_message: null, action_id: "jarvis.sales.enquiry.create_from_brief", target: "new", result_extra: null });
+        w.ledger.set(cid, { confirmation_id: cid, user_id: user, company_id: p.company_id, values_hash: pg.hash, status: "done", result_id: id, result_ref: reference, error_message: null, action_id: "jarvis.sales.enquiry.create_from_brief", target: "new", result_extra: null });
         if (w.createMode === "lost") return { data: null, error: { message: "TypeError: fetch failed" } };
         return { data: { status: "done", confirmation_id: cid, opportunity_id: id, reference, replayed: false, error_message: null }, error: null };
       }
       case "jarvis_record_meeting": {
-        const opp = w.opps.find((o) => o.id === args.p_enquiry_id);
+        const pg = proofGate(w, user, "jarvis.sales.meeting.record", args);
+        if ("refusal" in pg) return pg.refusal;
+        const opp = w.opps.find((o) => o.id === args.p_target);
         const has = grantedCompanies(w, user);
         if (!opp || !has.has(opp.company_id)) return { data: null, error: { message: "Opportunity not found", code: "P0002" } };
-        const act = args.p_activity as { kind: string; body: string; occurred_at: string | null; internal: boolean } | null;
-        const fu = args.p_follow_up as { title: string; due_at: string; kind: string } | null;
+        const act = pg.payload.activity as { kind: string; body: string; occurred_at: string | null; internal: boolean } | null;
+        const fu = (pg.payload.follow_up ?? null) as { title: string; due_at: string; kind: string } | null;
         if (!act || !["call", "email", "meeting", "note", "client_response"].includes(act.kind) || !(act.body ?? "").trim()) return { data: null, error: { message: "Write what happened", code: "22023" } };
         if (fu && (!(fu.title ?? "").trim() || !fu.due_at)) return { data: null, error: { message: "The follow-up needs a title and a due date", code: "22023" } };
         const gate = gateWrite(w, user, opp.company_id);
         if (gate) return gate;
-        const cid = args.p_confirmation_id as string;
-        const prior = replay(w, user, cid, opp.company_id, "jarvis.sales.meeting.record", opp.id, args.p_values_hash as string);
+        const cid = args.p_confirmation as string;
+        const prior = replay(w, user, cid, opp.company_id, "jarvis.sales.meeting.record", opp.id, pg.hash);
         if (prior) return prior;
         if (w.createMode === "network") return { data: null, error: { message: "TypeError: fetch failed" } };
-        const fail = (code: string, message: string) => ({ data: json(ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.meeting.record", opp.id, args.p_values_hash as string, { status: "failed", error_code: code, error_message: message }), false), error: null });
+        const fail = (code: string, message: string) => ({ data: json(ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.meeting.record", opp.id, pg.hash, { status: "failed", error_code: code, error_message: message }), false), error: null });
         // ATOMIC: every refusal is decided before anything is stored, exactly as the database transaction rolls both back.
         if (opp.stage === "lost") return fail("23514", "A lost opportunity can no longer be updated");
         if (act.occurred_at && Date.parse(act.occurred_at) > Date.now() + 5 * 60_000) return fail("22023", "An activity cannot be dated in the future");
@@ -199,86 +227,95 @@ function rpc(w: World, user: string, name: string, args: Record<string, unknown>
         w.activities.push({ id: activityId, opportunity_id: opp.id, kind: act.kind, body: act.body, occurred_at: act.occurred_at, internal: !!act.internal, created_by: user });
         let followUpId: string | null = null;
         if (fu) { followUpId = randomUUID(); w.followUps.push({ id: followUpId, opportunity_id: opp.id, title: fu.title, due_at: fu.due_at, kind: fu.kind, assigned_to: user }); }
-        const row = ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.meeting.record", opp.id, args.p_values_hash as string, { status: "done", result_id: opp.id, result_ref: opp.reference, result_extra: { company_id: opp.company_id, activity_id: activityId, follow_up_id: followUpId } });
+        const row = ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.meeting.record", opp.id, pg.hash, { status: "done", result_id: opp.id, result_ref: opp.reference, result_extra: { company_id: opp.company_id, activity_id: activityId, follow_up_id: followUpId } });
         if (w.createMode === "lost") return { data: null, error: { message: "TypeError: fetch failed" } };
         return { data: json(row, false), error: null };
       }
       case "jarvis_change_stage": {
-        const opp = w.opps.find((o) => o.id === args.p_enquiry_id);
+        const pg = proofGate(w, user, "jarvis.sales.enquiry.change_stage", args);
+        if ("refusal" in pg) return pg.refusal;
+        const opp = w.opps.find((o) => o.id === args.p_target);
         const has = grantedCompanies(w, user);
         if (!opp || !has.has(opp.company_id)) return { data: null, error: { message: "Opportunity not found", code: "P0002" } };
         const ORDER = ["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation"];
-        const to = args.p_to as string;
+        const to = pg.payload.to as string;
         const i = ORDER.indexOf(opp.stage); const j = ORDER.indexOf(to);
-        if (args.p_expected_version == null) return { data: null, error: { message: "The confirmation is incomplete", code: "22023" } };
+        if (args.p_version == null) return { data: null, error: { message: "This confirmation is not valid. Review the details again.", code: "JV002" } };
         const gate = gateWrite(w, user, opp.company_id);
         if (gate) return gate;
-        const cid = args.p_confirmation_id as string;
-        const prior = replay(w, user, cid, opp.company_id, "jarvis.sales.enquiry.change_stage", opp.id, args.p_values_hash as string);
+        const cid = args.p_confirmation as string;
+        const prior = replay(w, user, cid, opp.company_id, "jarvis.sales.enquiry.change_stage", opp.id, pg.hash);
         if (prior) return prior;
+        // The signed version must still be current: raised before anything is written (no ledger row).
+        if ((opp.version ?? 1) !== args.p_version) return { data: null, error: { message: "This enquiry was changed by someone else after you reviewed it. Review the details again.", code: "40001" } };
         if (j < 0) return { data: null, error: { message: "JARVIS cannot move an enquiry to that stage", code: "22023" } };
         if (i >= 0 && Math.abs(j - i) !== 1) return { data: null, error: { message: "JARVIS moves an enquiry one step at a time", code: "22023" } };
         if (w.createMode === "network") return { data: null, error: { message: "TypeError: fetch failed" } };
-        const fail = (code: string, message: string) => ({ data: json(ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.enquiry.change_stage", opp.id, args.p_values_hash as string, { status: "failed", error_code: code, error_message: message }), false), error: null });
+        const fail = (code: string, message: string) => ({ data: json(ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.enquiry.change_stage", opp.id, pg.hash, { status: "failed", error_code: code, error_message: message }), false), error: null });
         const founder = w.grants.some((g) => g.user_id === user && g.company_id === opp.company_id && !g.revoked_at && g.capabilities.includes("founder"));
-        if ((opp.version ?? 1) !== args.p_expected_version) return fail("40001", "This opportunity was changed by someone else. Reload and try again.");
+        if ((opp.version ?? 1) !== args.p_version) return fail("40001", "This opportunity was changed by someone else. Reload and try again.");
         if (opp.owner_id !== user && !founder) return fail("42501", "Only the owner of this opportunity or a founder can do this");
         if (i < 0) return fail("23514", "A closed opportunity cannot change stage");
         if (to === "proposal_sent" && !w.proposals.some((p) => p.opportunity_id === opp.id && ["sent", "accepted"].includes(p.status))) return fail("23514", "Record a proposal as sent before moving to Proposal sent");
         if (to === "quote_sent" && !w.zoho.some((p) => p.opportunity_id === opp.id && (p.quote_ref ?? "").trim())) return fail("23514", "Record the Zoho Books quote reference before moving to Quote sent");
-        w.moves.push({ id: opp.id, from: opp.stage, to, version: args.p_expected_version as number });
+        w.moves.push({ id: opp.id, from: opp.stage, to, version: args.p_version as number });
         const from = opp.stage; opp.stage = to; opp.version = (opp.version ?? 1) + 1;
-        const row = ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.enquiry.change_stage", opp.id, args.p_values_hash as string, { status: "done", result_id: opp.id, result_ref: opp.reference, result_extra: { company_id: opp.company_id, version: opp.version, from, to } });
+        const row = ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.enquiry.change_stage", opp.id, pg.hash, { status: "done", result_id: opp.id, result_ref: opp.reference, result_extra: { company_id: opp.company_id, version: opp.version, from, to } });
         if (w.createMode === "lost") return { data: null, error: { message: "TypeError: fetch failed" } };
         return { data: json(row, false), error: null };
       }
       case "jarvis_update_enquiry": {
-        const patch = args.p_patch as Record<string, unknown>;
-        const opp = w.opps.find((o) => o.id === args.p_enquiry_id);
+        const pg = proofGate(w, user, "jarvis.sales.enquiry.update", args);
+        if ("refusal" in pg) return pg.refusal;
+        const patch = pg.payload;
+        const opp = w.opps.find((o) => o.id === args.p_target);
         const has = grantedCompanies(w, user);
         if (!opp || !has.has(opp.company_id)) return { data: null, error: { message: "Opportunity not found", code: "P0002" } };
         const keys = Object.keys(patch ?? {}).sort();
         const ALLOWED = ["title", "brief", "event_start", "event_end", "install_start", "location", "technologies", "scope", "waiting_on", "budget_note"];
-        if (keys.length === 0 || args.p_expected_version == null) return { data: null, error: { message: "The confirmation is incomplete", code: "22023" } };
+        if (keys.length === 0 || args.p_version == null) return { data: null, error: { message: "The confirmation is incomplete", code: "22023" } };
         for (const k of keys) if (!ALLOWED.includes(k)) return { data: null, error: { message: `Field ${k} cannot be changed through JARVIS`, code: "22023" } };
         const gate = gateWrite(w, user, opp.company_id);
         if (gate) return gate;
-        const cid = args.p_confirmation_id as string;
-        const prior = replay(w, user, cid, opp.company_id, "jarvis.sales.enquiry.update", opp.id, args.p_values_hash as string);
+        const cid = args.p_confirmation as string;
+        const prior = replay(w, user, cid, opp.company_id, "jarvis.sales.enquiry.update", opp.id, pg.hash);
         if (prior) return prior;
+        if ((opp.version ?? 1) !== args.p_version) return { data: null, error: { message: "This enquiry was changed by someone else after you reviewed it. Review the details again.", code: "40001" } };
         if (w.createMode === "network") return { data: null, error: { message: "TypeError: fetch failed" } };
-        const fail = (code: string, message: string) => ({ data: json(ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.enquiry.update", opp.id, args.p_values_hash as string, { status: "failed", error_code: code, error_message: message }), false), error: null });
+        const fail = (code: string, message: string) => ({ data: json(ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.enquiry.update", opp.id, pg.hash, { status: "failed", error_code: code, error_message: message }), false), error: null });
         const founder = w.grants.some((g) => g.user_id === user && g.company_id === opp.company_id && !g.revoked_at && g.capabilities.includes("founder"));
         if (opp.stage === "lost") return fail("23514", "A lost opportunity can no longer be edited");
-        if ((opp.version ?? 1) !== args.p_expected_version) return fail("40001", "This opportunity was changed by someone else. Reload and try again.");
+        if ((opp.version ?? 1) !== args.p_version) return fail("40001", "This opportunity was changed by someone else. Reload and try again.");
         if (opp.owner_id !== user && !founder) return fail("42501", "Only the owner of this opportunity or a founder can do this");
-        w.updates.push({ id: opp.id, patch, version: args.p_expected_version as number });
+        w.updates.push({ id: opp.id, patch, version: args.p_version as number });
         Object.assign(opp, patch);
         opp.version = (opp.version ?? 1) + 1;
-        const row = ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.enquiry.update", opp.id, args.p_values_hash as string, { status: "done", result_id: opp.id, result_ref: opp.reference, result_extra: { company_id: opp.company_id, version: opp.version, fields: keys } });
+        const row = ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.enquiry.update", opp.id, pg.hash, { status: "done", result_id: opp.id, result_ref: opp.reference, result_extra: { company_id: opp.company_id, version: opp.version, fields: keys } });
         if (w.createMode === "lost") return { data: null, error: { message: "TypeError: fetch failed" } };
         return { data: json(row, false), error: null };
       }
       case "jarvis_register_organisation": {
-        const p = args.p_args as { company_id: string; name: string; roles: string[]; country_code: string | null; website: string | null; place: string | null; note: string | null; ack_ids: string[] };
+        const pg = proofGate(w, user, "jarvis.sales.organisation.register", args);
+        if ("refusal" in pg) return pg.refusal;
+        const p = { ...(pg.payload as { company_id: string; name: string; roles: string[]; country_code: string | null; website: string | null; place: string | null; note: string | null }), ack_ids: (args.p_ack as string[] | undefined) ?? [] };
         const gate = gateWrite(w, user, p.company_id);
         if (gate) return gate;
-        const cid = args.p_confirmation_id as string;
-        const prior = replay(w, user, cid, p.company_id, "jarvis.sales.organisation.register", "new", args.p_values_hash as string);
+        const cid = args.p_confirmation as string;
+        const prior = replay(w, user, cid, p.company_id, "jarvis.sales.organisation.register", "new", pg.hash);
         if (prior) return prior;
         if (!p.roles || p.roles.length === 0) return { data: null, error: { message: "Choose what kind of organisation it is", code: "22023" } };
         if (w.createMode === "network") return { data: null, error: { message: "TypeError: fetch failed" } };
         if (w.createMode === "refuse") return { data: null, error: { message: "No CRM access", code: "42501" } };
         const hit = w.orgs.filter((o) => !o.archived_at && (o.name_key === key(p.name) || (domainOf(p.website) && o.website_domain === domainOf(p.website))));
         if (hit.some((o) => !(p.ack_ids ?? []).includes(o.id))) {
-          const row = ledgerRow(w, user, cid, p.company_id, "jarvis.sales.organisation.register", "new", args.p_values_hash as string, { status: "failed", error_code: "JV001", error_message: "A similar organisation (same name or website) already exists. Review the details again." });
+          const row = ledgerRow(w, user, cid, p.company_id, "jarvis.sales.organisation.register", "new", pg.hash, { status: "failed", error_code: "JV001", error_message: "A similar organisation (same name or website) already exists. Review the details again." });
           return { data: json(row, false), error: null };
         }
         const org = mkOrg(p.name, p.roles, p.place, p.website);
         org.country_code = p.country_code;
         w.orgs.push(org);
         w.registered.push({ ...p });
-        const row = ledgerRow(w, user, cid, p.company_id, "jarvis.sales.organisation.register", "new", args.p_values_hash as string, { status: "done", result_id: org.id, result_ref: p.name, result_extra: { company_id: p.company_id } });
+        const row = ledgerRow(w, user, cid, p.company_id, "jarvis.sales.organisation.register", "new", pg.hash, { status: "done", result_id: org.id, result_ref: p.name, result_extra: { company_id: p.company_id } });
         if (w.createMode === "lost") return { data: null, error: { message: "TypeError: fetch failed" } };
         return { data: json(row, false), error: null };
       }

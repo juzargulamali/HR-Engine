@@ -5,6 +5,8 @@ import { friendlyCrmError } from "@/lib/crm/errors";
 import { classifyRequest, EXCLUSION_MESSAGE } from "../classifier";
 import type { CardProblem, CardQuestion, EnquiryCard, EnquiryValues, OrgChoice, OrgField } from "../protocol";
 import { JarvisProviderError } from "../provider/types";
+import { proofRpcArgs } from "../token";
+import { proofRefusal } from "./rpc-outcome";
 import { JarvisRefusalError, type JarvisActionDefinition, type JarvisContext } from "../types";
 import { findDuplicateEnquiries } from "./duplicates";
 import { emptyValues, enquiryValuesSchema, questionFor, validateEnquiry } from "./enquiry-values";
@@ -90,6 +92,17 @@ export const createEnquiryFromBrief: JarvisActionDefinition<CreateFromBriefInput
   valuesSchema: enquiryValuesSchema,
   describe: (v) => `Create the enquiry "${v.title}"`,
 
+  /** Exactly what jarvis_create_enquiry receives (and what the proof is signed over): the enquiry's own fields. */
+  wirePayload(v) {
+    const due = dubaiDateTimeToIso(v.nextDate, v.nextTime);
+    if (!due) return null;
+    return {
+      company_id: v.companyId, title: v.title, source: v.source, next_title: v.nextTitle, next_due: due, next_kind: v.nextKind,
+      agency_org_id: v.agencyOrgId, client_org_id: v.clientOrgId, currency: v.currency, value: v.value, budget_note: v.budgetNote, brief: v.brief,
+      event_start: v.eventStart, event_end: v.eventEnd, install_start: v.installStart, location: v.location, technologies: v.technologies, scope: v.scope, waiting_on: v.waitingOn,
+    };
+  },
+
   async propose(ctx, input) {
     try {
       if (input.mode === "extract") {
@@ -163,19 +176,15 @@ export const createEnquiryFromBrief: JarvisActionDefinition<CreateFromBriefInput
       const acknowledged = Array.isArray(input.acknowledgements.duplicateIds) ? (input.acknowledgements.duplicateIds as unknown[]).filter((x): x is string => typeof x === "string") : [];
       if (dup.matches.some((m) => m.level === "likely" && !acknowledged.includes(m.id))) return { kind: "refused", code: "needs_review", message: "A similar enquiry now exists. Review the details again and say whether it is the same one." };
     }
-    const due = dubaiDateTimeToIso(v.nextDate, v.nextTime);
-    if (!due) return { kind: "refused", code: "invalid_input", message: "The next action needs a valid date and time." };
-    const args = {
-      company_id: v.companyId, title: v.title, source: v.source, next_title: v.nextTitle, next_due: due, next_kind: v.nextKind,
-      agency_org_id: v.agencyOrgId, client_org_id: v.clientOrgId, currency: v.currency, value: v.value, budget_note: v.budgetNote, brief: v.brief,
-      event_start: v.eventStart, event_end: v.eventEnd, install_start: v.installStart, location: v.location, technologies: v.technologies, scope: v.scope, waiting_on: v.waitingOn,
-    };
-    // ONE database call: the ledger row and the enquiry commit together (jarvis_create_enquiry wraps the existing crm_create_opportunity under this person's identity).
-    const r = await ctx.supabase.rpc("jarvis_create_enquiry", { p_confirmation_id: input.confirmationId, p_values_hash: input.valuesHash, p_args: args }).abortSignal(AbortSignal.timeout(20_000));
+    // ONE database call: the proof is verified inside the database first, then the ledger row and the enquiry commit together (jarvis_create_enquiry wraps the existing
+    // crm_create_opportunity under this person's identity). The payload text sent is exactly the text the proof was signed over.
+    const r = await ctx.supabase.rpc("jarvis_create_enquiry", proofRpcArgs(input.proof)).abortSignal(AbortSignal.timeout(20_000));
     if (r.error) {
       const code = (r.error as { code?: string }).code ?? "";
       // A SQLSTATE answer means the database refused and rolled back: nothing was created. Anything else (network, timeout, gateway) is an unknown outcome.
       if (/^[0-9A-Z]{5}$/.test(code) && !code.startsWith("PGRST")) {
+        const proof = proofRefusal(code, r.error.message);
+        if (proof) return proof;
         return { kind: "refused", code: code === "42501" ? "not_permitted" : "save_failed", message: friendlyCrmError(r.error.message) };
       }
       return { kind: "ambiguous" };

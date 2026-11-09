@@ -3,6 +3,7 @@ import type { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JarvisConfig } from "./config";
 import type { JarvisProvider } from "./provider/types";
+import type { ProofCall } from "./token";
 
 export type JarvisModuleId = "sales" | "projects" | "inventory" | "people_hr";
 export type JarvisRisk = "read" | "draft" | "write" | "external";
@@ -37,7 +38,11 @@ export interface JarvisProposal<TValues, TCard> {
 
 export interface JarvisExecuteInput<TValues> {
   confirmationId: string;
-  valuesHash: string;
+  /**
+   * The server-issued proof of exactly this action, as the database wrapper takes it: the signed company, target, version and expiry, the MAC and the exact payload text that was signed.
+   * Pass it to the wrapper with `proofRpcArgs(input.proof)`; nothing here is invented by the caller of `execute`. (`proof.payload` is `wirePayload(values)` as canonical JSON.)
+   */
+  proof: ProofCall;
   values: TValues;
   target: JarvisTarget;
   /** Extra, non-hashed acknowledgements the person gave on the card (e.g. "not the same enquiry"). */
@@ -68,6 +73,12 @@ export interface JarvisActionDefinition<TInput = unknown, TValues = unknown, TCa
   valuesSchema: z.ZodType<TValues>;
   /** One short sentence for the review card header. */
   describe(values: TValues): string;
+  /**
+   * The EXACT object the database wrapper will receive as its payload (canonical JSON, keys sorted, is what gets signed and sent). It must hold every value the write uses, so the proof
+   * covers the actual values: a changed value gives a different payload and needs a new review. Returns null when the values cannot be turned into a write (no proof is issued).
+   * Required for any action that has `execute`.
+   */
+  wirePayload?(values: TValues, ctx: JarvisContext): unknown | null;
   /** Builds the review card. NEVER writes. */
   propose(ctx: JarvisContext, input: TInput): Promise<JarvisProposal<TValues, TCard>>;
   /** The action's own existing permission/state rule, rechecked at execution (e.g. a record that changed, an organisation that is no longer visible). */

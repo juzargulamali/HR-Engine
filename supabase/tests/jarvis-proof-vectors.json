@@ -1,0 +1,75 @@
+{
+  "note": "Shared by the TypeScript signer tests (apps/web) and the SQL verifier tests (packages/rls-tests). Fictional key and ids. Computed with Node crypto directly. The canonical string joins the fields with a line feed.",
+  "secret": "fictional-proof-key-for-test-vectors-0001",
+  "proofs": [
+    {
+      "name": "create enquiry (new, no version)",
+      "jti": "11111111-1111-4111-8111-111111111111",
+      "uid": "22222222-2222-4222-8222-222222222222",
+      "co": "33333333-3333-4333-8333-333333333333",
+      "exp": 4102444800,
+      "act": "jarvis.sales.enquiry.create_from_brief",
+      "tgt": "new",
+      "ver": null,
+      "payload": "{\"agency_org_id\":null,\"brief\":\"Fiktional brief with a quote \\\" and unicode: é ✓\",\"company_id\":\"33333333-3333-4333-8333-333333333333\",\"title\":\"Fictional LED wall\"}",
+      "payloadSha256": "8eea2f5b58e691411a2d2c7d20e8bfe5b3a62d4b03c6ba2a9d34ed2e996a99e6",
+      "canonical": "JARVIS-PROOF-V1\n11111111-1111-4111-8111-111111111111\n22222222-2222-4222-8222-222222222222\n33333333-3333-4333-8333-333333333333\njarvis.sales.enquiry.create_from_brief\nnew\n-\n4102444800\n8eea2f5b58e691411a2d2c7d20e8bfe5b3a62d4b03c6ba2a9d34ed2e996a99e6",
+      "mac": "ffe8aa8627d6b14bf7152a6901fdc077cab736c9fc4d1c4f370905283df60496"
+    },
+    {
+      "name": "update enquiry (record, version 7)",
+      "jti": "44444444-4444-4444-8444-444444444444",
+      "uid": "22222222-2222-4222-8222-222222222222",
+      "co": "33333333-3333-4333-8333-333333333333",
+      "exp": 4102444800,
+      "act": "jarvis.sales.enquiry.update",
+      "tgt": "55555555-5555-4555-8555-555555555555",
+      "ver": 7,
+      "payload": "{\"location\":\"Harbour Hall\"}",
+      "payloadSha256": "9d6404a1d846c3eef388337fb84c8bfdde67875fc3dfa4512eaa8de40e164513",
+      "canonical": "JARVIS-PROOF-V1\n44444444-4444-4444-8444-444444444444\n22222222-2222-4222-8222-222222222222\n33333333-3333-4333-8333-333333333333\njarvis.sales.enquiry.update\n55555555-5555-4555-8555-555555555555\n7\n4102444800\n9d6404a1d846c3eef388337fb84c8bfdde67875fc3dfa4512eaa8de40e164513",
+      "mac": "766e7d7d48f9252cf7ce3daf456560e3c0748cca07b28fd19245a1f36014a7c7"
+    },
+    {
+      "name": "change stage (record, version 12)",
+      "jti": "66666666-6666-4666-8666-666666666666",
+      "uid": "22222222-2222-4222-8222-222222222222",
+      "co": "33333333-3333-4333-8333-333333333333",
+      "exp": 4102444800,
+      "act": "jarvis.sales.enquiry.change_stage",
+      "tgt": "55555555-5555-4555-8555-555555555555",
+      "ver": 12,
+      "payload": "{\"to\":\"qualified\"}",
+      "payloadSha256": "ea607aa96d83105a10f6c92e3ffa4e1239398b7fdd53b3a2fe0ed1964ac02fd8",
+      "canonical": "JARVIS-PROOF-V1\n66666666-6666-4666-8666-666666666666\n22222222-2222-4222-8222-222222222222\n33333333-3333-4333-8333-333333333333\njarvis.sales.enquiry.change_stage\n55555555-5555-4555-8555-555555555555\n12\n4102444800\nea607aa96d83105a10f6c92e3ffa4e1239398b7fdd53b3a2fe0ed1964ac02fd8",
+      "mac": "d4c35c19309406f24a4279335c5160606184ee4cb62d28335e6c36ad3c3ab372"
+    }
+  ],
+  "hmac": [
+    {
+      "key": "key",
+      "message": "The quick brown fox",
+      "mac": "203d1e5cedd2d18f8c5a3beff0bd9c1ebcb97097dfcb288c46b00c9227fde2c0"
+    },
+    {
+      "key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+      "message": "msg",
+      "mac": "ce3cf455678bd9de76d2f2e35c4b385d37d2b6f478869f052c8e3b4587a9f1fd"
+    },
+    {
+      "key": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "mac": "6dcfc43d8fe5ed84b9b0b0aa34d1c7197d7f420c68705599257a26f4ecc5e4da"
+    },
+    {
+      "key": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "message": "héllo wörld ✓",
+      "mac": "5c458d386907ec8aef57db1d240b7b00ead68b146c7f2441803715998b7a2906"
+    },
+    {
+      "key": "short",
+      "message": "",
+      "mac": "d1dc9996d36343e5389bb594fb38f03ace27d64436998bd16fdaba82c2c891c6"
+    }
+  ]
+}

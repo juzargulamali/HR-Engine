@@ -10,6 +10,7 @@ import { enquiryRef, isOwnerOrFounder, LOOKUP_WORDS, readEnquiry, type EnquiryRo
 import {
   changesOf, currentForm, dbPatch, diffPatch, FIELD_COLUMN, FIELD_LABEL, sanitiseUpdate, UPDATE_INSTRUCTIONS, UPDATE_JSON_SCHEMA, UPDATE_TASK, updateFormSchema, updateValuesSchema, validateUpdate,
 } from "./enquiry-update-values";
+import { proofRpcArgs } from "../token";
 import { rpcOutcome } from "./rpc-outcome";
 
 export const UPDATE_ENQUIRY_ID = "jarvis.sales.enquiry.update";
@@ -69,6 +70,8 @@ export const updateEnquiry: JarvisActionDefinition<UpdateEnquiryInput, UpdateVal
   usesProvider: true,
   inputSchema,
   valuesSchema: updateValuesSchema,
+  /** Exactly what jarvis_update_enquiry receives as its signed payload: the (allowlisted) changed fields, as the database columns. The enquiry and its version are the signed target. */
+  wirePayload: (v) => dbPatch(v.patch),
   describe: (v) => `Update ${Object.keys(v.patch).map((k) => FIELD_LABEL[k as keyof typeof FIELD_LABEL] ?? k).join(", ").toLowerCase()} of the enquiry`,
 
   async propose(ctx, input) {
@@ -117,9 +120,7 @@ export const updateEnquiry: JarvisActionDefinition<UpdateEnquiryInput, UpdateVal
 
   async execute(ctx, input) {
     if (input.target.kind !== "record" || input.target.version === null) return { kind: "refused", code: "needs_review", message: "This review is not bound to a version of the enquiry. Review the details again." };
-    const r = await ctx.supabase.rpc("jarvis_update_enquiry", {
-      p_confirmation_id: input.confirmationId, p_values_hash: input.valuesHash, p_enquiry_id: input.values.enquiryId, p_expected_version: input.target.version, p_patch: dbPatch(input.values.patch),
-    }).abortSignal(AbortSignal.timeout(20_000));
+    const r = await ctx.supabase.rpc("jarvis_update_enquiry", proofRpcArgs(input.proof)).abortSignal(AbortSignal.timeout(20_000));
     return rpcOutcome(r, "The enquiry could not be updated.");
   },
 

@@ -16,12 +16,17 @@
 --   5. jarvis_usage           per person per Dubai day: how many provider requests were used (daily limit survives restarts and several app instances).
 --   6. jarvis_my_access(company)   booleans only: may THIS user use JARVIS (and its writes, and for this company).
 --   7. jarvis_usage_take(limit)    atomically counts one request and says whether it is within the limit.
---   8. jarvis_create_enquiry(confirmation id, values hash, args)  ONE transaction: ledger row + crm_create_opportunity. A repeat returns the ORIGINAL result.
+--   8. jarvis_create_enquiry(proof ..., payload)  ONE transaction: proof check, ledger row + crm_create_opportunity. A repeat returns the ORIGINAL result.
 --   9. (part 2) jarvis_register_organisation, jarvis_update_enquiry, jarvis_change_stage, jarvis_record_meeting: the same pattern for the other write actions, each calling
 --      the EXISTING function(s) under the caller's own identity. They share the internal helpers jarvis_ledger_enter / _done / _fail / _json (not callable by users).
+--  10. (confirmation boundary) jarvis_proof_key + jarvis_hmac_sha256 + jarvis_verify_proof + jarvis_set_proof_key: EVERY write wrapper first verifies, INSIDE the database,
+--      a keyed MAC (HMAC-SHA256) that only the app server can issue, over the signed-in person, the company, the action, the target, the record version, the expiry, the
+--      proof id and the SHA-256 of the exact payload text. A confirmation id and hash that a caller made up are NOT proof: without a valid MAC nothing is written. The key is
+--      a row only the database's own definer functions can read (set by the owner with jarvis_set_proof_key; the same value as the app's JARVIS_CONFIRMATION_SECRET).
+--      With no key set every wrapper fails closed. The MAC is HMAC-SHA256 built on the built-in sha256(bytea) (no extension needed, identical on any Postgres 11+).
 --
 -- RLS: every table has RLS on. The signed-in user may read only their OWN ledger rows; nobody can write any table directly (there is no write policy);
--- the settings, allowlist and usage tables have no read policy at all (the user learns their own access only through jarvis_my_access()).
+-- the settings, allowlist, usage and proof key tables have no read policy at all (the user learns their own access only through jarvis_my_access()).
 -- ROLLBACK: supabase/manual-sql/jarvis_90_rollback.sql (CHANGES the database; export jarvis_action_ledger first: it is the audit record).
 -- -----------------------------------------------------------------------------
 
@@ -76,19 +81,126 @@ create table if not exists jarvis_usage (
   primary key (user_id, usage_day)
 );
 
+-- The confirmation proof key: ONE row, the same secret the app server holds in JARVIS_CONFIRMATION_SECRET. No row = not set = every write wrapper fails closed.
+-- Nobody but the database's own definer functions can read it (no policy, no privilege for any API role); only the owner can set it (jarvis_set_proof_key).
+create table if not exists jarvis_proof_key (
+  id     boolean primary key default true check (id),
+  secret text not null check (length(secret) >= 32),
+  set_at timestamptz not null default now()
+);
+
 alter table jarvis_settings enable row level security;
 alter table jarvis_pilot_users enable row level security;
 alter table jarvis_pilot_companies enable row level security;
 alter table jarvis_action_ledger enable row level security;
 alter table jarvis_usage enable row level security;
+alter table jarvis_proof_key enable row level security;
 
 -- The only read policy: a person reads their own ledger rows (the app's "check the original result" call). No write policy exists on any table.
 drop policy if exists jarvis_ledger_select_own on jarvis_action_ledger;
 create policy jarvis_ledger_select_own on jarvis_action_ledger for select to authenticated using (user_id = auth.uid());
 
 -- Table privileges: where the platform default grants everything to the API roles, take it back (RLS above is a second wall, not the only one).
-revoke all on table jarvis_settings, jarvis_pilot_users, jarvis_pilot_companies, jarvis_action_ledger, jarvis_usage from public, anon, authenticated;
+revoke all on table jarvis_settings, jarvis_pilot_users, jarvis_pilot_companies, jarvis_action_ledger, jarvis_usage, jarvis_proof_key from public, anon, authenticated;
 grant select on table jarvis_action_ledger to authenticated;
+-- The proof key is not readable through the platform's service key either (JARVIS never uses that key; this keeps the secret out of its reach too).
+do $$ begin
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    execute 'revoke all on table jarvis_proof_key from service_role';
+  end if;
+end $$;
+
+-- -----------------------------------------------------------------------------
+-- THE CONFIRMATION BOUNDARY. Nothing below trusts a confirmation id or a hash that the caller supplies.
+--
+-- The app server issues, at propose time, a PROOF: an HMAC-SHA256 (keyed with the secret in jarvis_proof_key, which the signed-in person can never read) over this exact text,
+-- fields joined by a line feed (LF, chr(10)), in this order (format version 1):
+--     JARVIS-PROOF-V1
+--     <proof id: the confirmation id (a uuid, lower case)>
+--     <the approving person: auth.uid()>
+--     <company id>
+--     <action id: hard-coded by each wrapper>
+--     <target: the record id, or the word new>
+--     <record version as a decimal integer, or a single hyphen when the action has no version>
+--     <expiry: epoch seconds, a decimal integer>
+--     <SHA-256 of the exact payload TEXT (UTF-8), 64 lower-case hex characters>
+-- Every write wrapper calls jarvis_verify_proof FIRST, with ITS OWN hard-coded action id and auth.uid() (never a caller-supplied person), before any lock, ledger row or
+-- business write. A proof made for another person, company, action, target, version or payload, an invented proof, an expired proof (judged by the database clock) or a
+-- missing key all stop the call with nothing written. The payload text is cast to jsonb only AFTER its hash has been proved.
+-- -----------------------------------------------------------------------------
+create or replace function jarvis_hmac_sha256(p_key bytea, p_msg bytea)
+returns bytea
+language plpgsql immutable strict
+set search_path = pg_catalog
+as $$
+declare
+  v_k bytea := p_key;
+  v_ipad bytea := decode(repeat('00', 64), 'hex');
+  v_opad bytea := decode(repeat('00', 64), 'hex');
+  i integer;
+begin
+  -- RFC 2104 with SHA-256 (64-byte block): a longer key is hashed first, a shorter one is padded with zero bytes.
+  if length(v_k) > 64 then v_k := sha256(v_k); end if;
+  if length(v_k) < 64 then v_k := v_k || decode(repeat('00', 64 - length(v_k)), 'hex'); end if;
+  for i in 0..63 loop
+    v_ipad := set_byte(v_ipad, i, get_byte(v_k, i) # 54);   -- 0x36
+    v_opad := set_byte(v_opad, i, get_byte(v_k, i) # 92);   -- 0x5c
+  end loop;
+  return sha256(v_opad || sha256(v_ipad || p_msg));
+end;
+$$;
+
+-- Owner-run only (see docs/jarvis-deployment.md): stores or rotates the proof key. Not security definer: whoever may run it must already own the table.
+create or replace function jarvis_set_proof_key(p_secret text)
+returns void
+language plpgsql
+set search_path = public
+as $$
+begin
+  if p_secret is null or length(p_secret) < 32 then raise exception 'The proof key must be at least 32 characters' using errcode = '22023'; end if;
+  insert into jarvis_proof_key as k (id, secret, set_at) values (true, p_secret, now())
+  on conflict (id) do update set secret = excluded.secret, set_at = now();
+end;
+$$;
+
+-- Returns the SHA-256 (hex) of the payload text when, and only when, the proof is valid for THIS person and THIS exact call. Raises otherwise:
+--   28000 not signed in; 22023 incomplete; JV002 the proof is not valid; JV003 the proof has expired; JV004 the confirmation key is not set (fail closed).
+create or replace function jarvis_verify_proof(p_action text, p_confirmation uuid, p_company uuid, p_target text, p_version integer, p_expires bigint, p_mac text, p_payload text)
+returns text
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_user uuid := auth.uid();
+  v_secret text;
+  v_hash text;
+  v_expect bytea;
+  v_given bytea;
+  v_diff integer := 0;
+  i integer;
+begin
+  if v_user is null then raise exception 'Not signed in' using errcode = '28000'; end if;
+  if p_action is null or p_confirmation is null or p_company is null or p_target is null or p_expires is null or p_mac is null or p_payload is null then
+    raise exception 'The confirmation is incomplete' using errcode = '22023';
+  end if;
+  if p_target !~ '^(new|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$' or p_mac !~ '^[0-9a-f]{64}$' or octet_length(p_payload) > 200000 then
+    raise exception 'This confirmation is not valid. Review the details again.' using errcode = 'JV002';
+  end if;
+  select secret into v_secret from jarvis_proof_key where id;
+  if v_secret is null then raise exception 'JARVIS cannot save changes right now.' using errcode = 'JV004'; end if;
+  v_hash := encode(sha256(convert_to(p_payload, 'UTF8')), 'hex');
+  v_expect := jarvis_hmac_sha256(convert_to(v_secret, 'UTF8'), convert_to(
+    'JARVIS-PROOF-V1' || chr(10) || p_confirmation::text || chr(10) || v_user::text || chr(10) || p_company::text || chr(10) || p_action || chr(10) || p_target || chr(10)
+    || coalesce(p_version::text, '-') || chr(10) || p_expires::text || chr(10) || v_hash, 'UTF8'));
+  v_given := decode(p_mac, 'hex');
+  -- Constant-time style comparison: every byte is compared, the result is decided once at the end.
+  for i in 0..31 loop v_diff := v_diff | (get_byte(v_expect, i) # get_byte(v_given, i)); end loop;
+  if v_diff <> 0 then raise exception 'This confirmation is not valid. Review the details again.' using errcode = 'JV002'; end if;
+  -- The expiry is judged by the DATABASE clock, and only after the proof is known to be genuine (so the signed expiry can be trusted).
+  if extract(epoch from now()) >= p_expires then raise exception 'This review has expired. Review the details again.' using errcode = 'JV003'; end if;
+  return v_hash;
+end;
+$$;
 
 -- -----------------------------------------------------------------------------
 -- Access for the signed-in user: booleans only (never the allowlist, never other people).
@@ -147,51 +259,53 @@ $$;
 -- -----------------------------------------------------------------------------
 -- Create an enquiry through JARVIS, exactly once per confirmation id.
 --
+--   * PROOF FIRST: jarvis_verify_proof checks the server-issued MAC (person, company, this action, target "new", expiry, proof id, SHA-256 of the exact payload text) before
+--     anything else. An invented confirmation id or MAC, a changed payload, another person's proof, an expired proof or a missing key writes NOTHING.
 --   * Identity is auth.uid() (the caller's own session): crm_create_opportunity reads the same identity and applies ITS OWN rules (Sales grant for the company,
 --     company settings, organisation roles, owner rules...). This wrapper adds no privilege: a person the existing function refuses is refused here.
 --   * ONE transaction: the ledger row (UNIQUE confirmation id) and the enquiry commit together or not at all. Concurrent calls with the same confirmation id are
 --     serialised by a transaction-scoped advisory lock on it; the second one finds the first one's committed row and returns the ORIGINAL result, creating nothing.
 --   * A refusal by the existing rules is recorded as status 'failed' (the enquiry part rolls back in a sub-transaction, the ledger row stays) and a repeat with the
 --     same confirmation id returns that same failure: a failed confirmation is final, the person reviews again to get a new one.
---   * A different person, a different company or different reviewed values on a used confirmation id are refused (no second enquiry, nothing revealed).
---   * Nothing but ids, the reference and the outcome is stored. p_args (the enquiry's own fields) goes only to crm_create_opportunity.
--- Returns jsonb: {status: done|failed, confirmation_id, opportunity_id, reference, replayed, error_code, error_message, completed_at}
+--   * Nothing but ids, the reference, the outcome and the payload's SHA-256 is stored. The payload (the enquiry's own fields) goes only to crm_create_opportunity.
+-- p_payload is the exact canonical JSON text the app signed. Returns jsonb: {status: done|failed, confirmation_id, opportunity_id, reference, replayed, error_code, error_message, completed_at}
 -- -----------------------------------------------------------------------------
-create or replace function jarvis_create_enquiry(p_confirmation_id uuid, p_values_hash text, p_args jsonb)
+drop function if exists jarvis_create_enquiry(uuid, text, jsonb);
+create or replace function jarvis_create_enquiry(p_confirmation uuid, p_company uuid, p_target text, p_version integer, p_expires bigint, p_mac text, p_payload text)
 returns jsonb
 language plpgsql security definer
 set search_path = public
 as $$
 declare
   v_user uuid := auth.uid();
-  v_company uuid;
+  v_hash text;
+  v_args jsonb;
   v_led jarvis_action_ledger;
   v_id uuid;
   v_ref text;
   v_msg text;
   v_state text;
 begin
-  if v_user is null then raise exception 'Not signed in' using errcode = '28000'; end if;
-  if p_confirmation_id is null or p_values_hash is null or p_values_hash !~ '^[0-9a-f]{64}$' or p_args is null or jsonb_typeof(p_args) <> 'object' then
-    raise exception 'The confirmation is incomplete' using errcode = '22023';
-  end if;
-  v_company := nullif(p_args->>'company_id', '')::uuid;
-  if v_company is null then raise exception 'The confirmation names no company' using errcode = '22023'; end if;
+  v_hash := jarvis_verify_proof('jarvis.sales.enquiry.create_from_brief', p_confirmation, p_company, p_target, p_version, p_expires, p_mac, p_payload);
+  if p_target <> 'new' or p_version is not null then raise exception 'This confirmation is not valid. Review the details again.' using errcode = 'JV002'; end if;
+  v_args := p_payload::jsonb;
+  if jsonb_typeof(v_args) <> 'object' then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
+  if nullif(v_args->>'company_id', '')::uuid is distinct from p_company then raise exception 'This confirmation is not valid. Review the details again.' using errcode = 'JV002'; end if;
 
   -- Switches and allowlists: the global switch, the pilot allowlist, the write kill switch, the company list.
-  if not coalesce((select a.writes_allowed from jarvis_my_access(v_company) a), false)
-     or not coalesce((select a.company_allowed from jarvis_my_access(v_company) a), false) then
+  if not coalesce((select a.writes_allowed from jarvis_my_access(p_company) a), false)
+     or not coalesce((select a.company_allowed from jarvis_my_access(p_company) a), false) then
     raise exception 'JARVIS writes are not available to you for this company' using errcode = '42501';
   end if;
   -- The existing permission rule, checked up front so a refused person leaves no ledger row (crm_create_opportunity repeats it).
-  if not crm_has_access(v_company) then
+  if not crm_has_access(p_company) then
     raise exception 'You do not have Sales access for this company' using errcode = '42501';
   end if;
 
-  perform pg_advisory_xact_lock(hashtextextended('jarvis:' || p_confirmation_id::text, 0));
-  select * into v_led from jarvis_action_ledger where confirmation_id = p_confirmation_id;
+  perform pg_advisory_xact_lock(hashtextextended('jarvis:' || p_confirmation::text, 0));
+  select * into v_led from jarvis_action_ledger where confirmation_id = p_confirmation;
   if found then
-    if v_led.user_id <> v_user or v_led.company_id <> v_company or v_led.action_id <> 'jarvis.sales.enquiry.create_from_brief' or v_led.values_hash <> p_values_hash then
+    if v_led.user_id <> v_user or v_led.company_id <> p_company or v_led.action_id <> 'jarvis.sales.enquiry.create_from_brief' or v_led.values_hash <> v_hash then
       raise exception 'This confirmation cannot be used for these details' using errcode = '42501';
     end if;
     return jsonb_build_object('status', v_led.status, 'confirmation_id', v_led.confirmation_id, 'opportunity_id', v_led.result_id, 'reference', v_led.result_ref,
@@ -199,36 +313,36 @@ begin
   end if;
 
   insert into jarvis_action_ledger (confirmation_id, user_id, company_id, action_id, target, values_hash, status)
-  values (p_confirmation_id, v_user, v_company, 'jarvis.sales.enquiry.create_from_brief', 'new', p_values_hash, 'pending')
+  values (p_confirmation, v_user, p_company, 'jarvis.sales.enquiry.create_from_brief', 'new', v_hash, 'pending')
   returning * into v_led;
 
   begin
     v_id := crm_create_opportunity(
-      p_company_id => v_company,
-      p_title => p_args->>'title',
-      p_source => p_args->>'source',
-      p_next_title => p_args->>'next_title',
-      p_next_due => nullif(p_args->>'next_due', '')::timestamptz,
-      p_agency_org_id => nullif(p_args->>'agency_org_id', '')::uuid,
-      p_client_org_id => nullif(p_args->>'client_org_id', '')::uuid,
+      p_company_id => p_company,
+      p_title => v_args->>'title',
+      p_source => v_args->>'source',
+      p_next_title => v_args->>'next_title',
+      p_next_due => nullif(v_args->>'next_due', '')::timestamptz,
+      p_agency_org_id => nullif(v_args->>'agency_org_id', '')::uuid,
+      p_client_org_id => nullif(v_args->>'client_org_id', '')::uuid,
       p_owner_id => null,
-      p_currency => nullif(p_args->>'currency', ''),
-      p_value => nullif(p_args->>'value', '')::numeric,
-      p_budget_note => nullif(p_args->>'budget_note', ''),
-      p_brief => nullif(p_args->>'brief', ''),
-      p_event_start => nullif(p_args->>'event_start', '')::date,
-      p_event_end => nullif(p_args->>'event_end', '')::date,
-      p_install_start => nullif(p_args->>'install_start', '')::date,
-      p_location => nullif(p_args->>'location', ''),
-      p_technologies => coalesce(p_args->'technologies', '[]'::jsonb),
-      p_scope => nullif(p_args->>'scope', ''),
-      p_waiting_on => nullif(p_args->>'waiting_on', ''),
+      p_currency => nullif(v_args->>'currency', ''),
+      p_value => nullif(v_args->>'value', '')::numeric,
+      p_budget_note => nullif(v_args->>'budget_note', ''),
+      p_brief => nullif(v_args->>'brief', ''),
+      p_event_start => nullif(v_args->>'event_start', '')::date,
+      p_event_end => nullif(v_args->>'event_end', '')::date,
+      p_install_start => nullif(v_args->>'install_start', '')::date,
+      p_location => nullif(v_args->>'location', ''),
+      p_technologies => coalesce(v_args->'technologies', '[]'::jsonb),
+      p_scope => nullif(v_args->>'scope', ''),
+      p_waiting_on => nullif(v_args->>'waiting_on', ''),
       p_contacts => '[]'::jsonb,
-      p_next_kind => coalesce(nullif(p_args->>'next_kind', ''), 'other'));
+      p_next_kind => coalesce(nullif(v_args->>'next_kind', ''), 'other'));
     select reference into v_ref from crm_opportunities where id = v_id;
     -- The usual timeline: one more event on the new enquiry saying how it was created. The actor recorded is the approving person (auth.uid()).
     insert into crm_opportunity_events (opportunity_id, company_id, kind, from_value, to_value, reason, actor_id)
-    values (v_id, v_company, 'created', 'jarvis', 'new', 'Created through JARVIS after the person reviewed and approved it.', v_user);
+    values (v_id, p_company, 'created', 'jarvis', 'new', 'Created through JARVIS after the person reviewed and approved it.', v_user);
     update jarvis_action_ledger set status = 'done', result_id = v_id, result_ref = v_ref, completed_at = now() where id = v_led.id returning * into v_led;
   exception when others then
     get stacked diagnostics v_msg = message_text, v_state = returned_sqlstate;
@@ -320,20 +434,29 @@ end;
 $$;
 
 -- -----------------------------------------------------------------------------
+-- The wrappers below share one shape: p_confirmation (the proof id), p_company, p_target, p_version, p_expires (epoch seconds), p_mac (hex) and p_payload (the exact canonical JSON
+-- text the app signed). Each one verifies the proof FIRST (jarvis_verify_proof, with its own hard-coded action id), checks the signed company and target against what it
+-- finds, and only then takes the advisory lock, writes the ledger row and calls the existing function(s). A refused proof writes nothing at all.
+-- -----------------------------------------------------------------------------
+
+-- -----------------------------------------------------------------------------
 -- Register a client or agency through JARVIS, exactly once per confirmation id (jarvis.sales.organisation.register).
 --   * The organisation is created by the EXISTING crm_create_organisation_profile (the Clients & Agencies create path), with this company's account profile and NO owner,
 --     lead source or exhibition: JARVIS sets none of them. Its own rule applies (a Sales grant); this wrapper adds no privilege.
 --   * At least one role is required here (the existing function allows none; JARVIS asks the person to confirm the exact type).
---   * A same-name or same-website organisation that still exists blocks the save unless the person's review named it (p_args.ack_ids): the same rule as the card.
--- p_args: {company_id, name, roles[], country_code, website, place, note, ack_ids[]}. Returns the ledger result: {status, result_id (the organisation), reference (its name), extra{company_id}, replayed, ...}.
+--   * A same-name or same-website organisation that still exists blocks the save unless the person's review named it (p_ack, a list of organisation ids): the same rule as the card.
+--     p_ack is NOT part of the signed payload: it can only RELAX this duplicate guard for the very organisation the proof approved, which the signed payload fixes.
+-- p_payload: {company_id, name, roles[], country_code, website, place, note}. Returns the ledger result: {status, result_id (the organisation), reference (its name), extra{company_id}, replayed, ...}.
 -- -----------------------------------------------------------------------------
-create or replace function jarvis_register_organisation(p_confirmation_id uuid, p_values_hash text, p_args jsonb)
+drop function if exists jarvis_register_organisation(uuid, text, jsonb);
+create or replace function jarvis_register_organisation(p_confirmation uuid, p_company uuid, p_target text, p_version integer, p_expires bigint, p_mac text, p_payload text, p_ack jsonb default '[]'::jsonb)
 returns jsonb
 language plpgsql security definer
 set search_path = public
 as $$
 declare
-  v_company uuid;
+  v_hash text;
+  v_args jsonb;
   v_replay jsonb;
   v_roles text[];
   v_name text;
@@ -342,59 +465,67 @@ declare
   v_state text;
   v_ack uuid[];
 begin
-  if p_args is null or jsonb_typeof(p_args) <> 'object' then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
-  v_company := nullif(p_args->>'company_id', '')::uuid;
-  v_name := btrim(coalesce(p_args->>'name', ''));
-  if v_company is null then raise exception 'The confirmation names no company' using errcode = '22023'; end if;
+  v_hash := jarvis_verify_proof('jarvis.sales.organisation.register', p_confirmation, p_company, p_target, p_version, p_expires, p_mac, p_payload);
+  if p_target <> 'new' or p_version is not null then raise exception 'This confirmation is not valid. Review the details again.' using errcode = 'JV002'; end if;
+  v_args := p_payload::jsonb;
+  if jsonb_typeof(v_args) <> 'object' then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
+  if nullif(v_args->>'company_id', '')::uuid is distinct from p_company then raise exception 'This confirmation is not valid. Review the details again.' using errcode = 'JV002'; end if;
+  v_name := btrim(coalesce(v_args->>'name', ''));
   if length(v_name) = 0 or length(v_name) > 200 then raise exception 'Enter the organisation name' using errcode = '22023'; end if;
-  if jsonb_typeof(p_args->'roles') is distinct from 'array' or jsonb_array_length(p_args->'roles') = 0 then
+  if jsonb_typeof(v_args->'roles') is distinct from 'array' or jsonb_array_length(v_args->'roles') = 0 then
     raise exception 'Choose what kind of organisation it is' using errcode = '22023';
   end if;
-  select array_agg(x) into v_roles from jsonb_array_elements_text(p_args->'roles') x;
+  select array_agg(x) into v_roles from jsonb_array_elements_text(v_args->'roles') x;
   if not (v_roles <@ array['agency', 'direct', 'client', 'technology']::text[]) then raise exception 'One of the roles is not allowed' using errcode = '22023'; end if;
-  select coalesce(array_agg(x::uuid), '{}') into v_ack from jsonb_array_elements_text(coalesce(p_args->'ack_ids', '[]'::jsonb)) x;
+  if jsonb_typeof(coalesce(p_ack, '[]'::jsonb)) <> 'array' then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
+  select coalesce(array_agg(x::uuid), '{}') into v_ack from jsonb_array_elements_text(coalesce(p_ack, '[]'::jsonb)) x;
 
-  v_replay := jarvis_ledger_enter(p_confirmation_id, p_values_hash, 'jarvis.sales.organisation.register', v_company, 'new');
+  v_replay := jarvis_ledger_enter(p_confirmation, v_hash, 'jarvis.sales.organisation.register', p_company, 'new');
   if v_replay is not null then return v_replay; end if;
 
   begin
-    if exists (select 1 from crm_import_candidates(v_name, nullif(btrim(p_args->>'website'), '')) c where not (c.org_id = any (v_ack))) then
+    if exists (select 1 from crm_import_candidates(v_name, nullif(btrim(v_args->>'website'), '')) c where not (c.org_id = any (v_ack))) then
       raise exception 'A similar organisation (same name or website) already exists. Review the details again.' using errcode = 'JV001';
     end if;
     v_id := crm_create_organisation_profile(
       p_name => v_name,
       p_roles => v_roles,
-      p_country_code => nullif(p_args->>'country_code', ''),
-      p_website => nullif(btrim(p_args->>'website'), ''),
-      p_place => nullif(btrim(p_args->>'place'), ''),
-      p_note => nullif(btrim(p_args->>'note'), ''),
-      p_company_id => v_company);
-    return jarvis_ledger_done(p_confirmation_id, v_id, v_name, jsonb_build_object('company_id', v_company));
+      p_country_code => nullif(v_args->>'country_code', ''),
+      p_website => nullif(btrim(v_args->>'website'), ''),
+      p_place => nullif(btrim(v_args->>'place'), ''),
+      p_note => nullif(btrim(v_args->>'note'), ''),
+      p_company_id => p_company);
+    return jarvis_ledger_done(p_confirmation, v_id, v_name, jsonb_build_object('company_id', p_company));
   exception when others then
     get stacked diagnostics v_msg = message_text, v_state = returned_sqlstate;
-    return jarvis_ledger_fail(p_confirmation_id, v_state, v_msg);
+    return jarvis_ledger_fail(p_confirmation, v_state, v_msg);
   end;
 end;
 $$;
 
 -- -----------------------------------------------------------------------------
 -- Update an enquiry through JARVIS, exactly once per confirmation id (jarvis.sales.enquiry.update).
---   * The change is made by the EXISTING crm_update_opportunity under the caller's own identity: it locks the enquiry, checks the expected VERSION (a change by anyone else
---     since the review is refused, 40001), requires the owner or a founder, refuses a Lost enquiry, validates technologies. This wrapper adds no privilege.
+--   * The target is the enquiry (p_target = its id) and the signed version is the version the person reviewed (p_version, required). The proof is verified first; then the
+--     signed company must be the enquiry's company and the signed version must still be the enquiry's current version (a change by anyone else since the review is refused
+--     with nothing written; a repeat of a saved confirmation skips that test and returns the ORIGINAL result).
+--   * The change is made by the EXISTING crm_update_opportunity under the caller's own identity: it locks the enquiry, checks the expected VERSION again, requires the owner or
+--     a founder, refuses a Lost enquiry, validates technologies. This wrapper adds no privilege.
 --   * ONLY a named allowlist of fields can be changed here (narrower than the existing function): title, brief, event_start, event_end, install_start, location, technologies,
 --     scope, waiting_on, budget_note. Nothing touching the owner, the stage, the agency or end client, money (value, currency, payment terms), exclusions, risks, evidence,
 --     files, proposals, Zoho, handover or closure can pass through it, whatever the caller sends.
---   * The expected version is required. A repeat with the same confirmation id returns the ORIGINAL result and changes nothing (the version check is not re-run on a repeat).
 --   * A second timeline line says it was changed through JARVIS and approved by the person (the usual "Details changed" line is written by the existing function).
--- Returns the ledger result: {status, result_id (the enquiry), reference, extra{company_id, version, fields[]}, replayed, ...}.
+-- p_payload: the patch object (the allowlisted fields). Returns the ledger result: {status, result_id (the enquiry), reference, extra{company_id, version, fields[]}, replayed, ...}.
 -- -----------------------------------------------------------------------------
-create or replace function jarvis_update_enquiry(p_confirmation_id uuid, p_values_hash text, p_enquiry_id uuid, p_expected_version integer, p_patch jsonb)
+drop function if exists jarvis_update_enquiry(uuid, text, uuid, integer, jsonb);
+create or replace function jarvis_update_enquiry(p_confirmation uuid, p_company uuid, p_target text, p_version integer, p_expires bigint, p_mac text, p_payload text)
 returns jsonb
 language plpgsql security definer
 set search_path = public
 as $$
 declare
   v crm_opportunities;
+  v_hash text;
+  v_patch jsonb;
   v_allowed text[] := array['title', 'brief', 'event_start', 'event_end', 'install_start', 'location', 'technologies', 'scope', 'waiting_on', 'budget_note'];
   v_keys text[];
   k text;
@@ -403,48 +534,57 @@ declare
   v_msg text;
   v_state text;
 begin
-  if p_enquiry_id is null or p_expected_version is null or p_patch is null or jsonb_typeof(p_patch) <> 'object' or p_patch = '{}'::jsonb then
-    raise exception 'The confirmation is incomplete' using errcode = '22023';
-  end if;
-  select array_agg(x order by x) into v_keys from jsonb_object_keys(p_patch) x;
+  v_hash := jarvis_verify_proof('jarvis.sales.enquiry.update', p_confirmation, p_company, p_target, p_version, p_expires, p_mac, p_payload);
+  if p_target = 'new' or p_version is null then raise exception 'This confirmation is not valid. Review the details again.' using errcode = 'JV002'; end if;
+  v_patch := p_payload::jsonb;
+  if jsonb_typeof(v_patch) <> 'object' or v_patch = '{}'::jsonb then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
+  select array_agg(x order by x) into v_keys from jsonb_object_keys(v_patch) x;
   foreach k in array v_keys loop
     if not (k = any (v_allowed)) then raise exception 'Field % cannot be changed through JARVIS', k using errcode = '22023'; end if;
   end loop;
-  -- The enquiry as the caller sees it (not-visible and not-existing look the same); the company decides the switches and grant checked next.
-  v := crm_lock_opportunity(p_enquiry_id);
+  -- The enquiry as the caller sees it (not-visible and not-existing look the same); its company must be the signed one.
+  v := crm_lock_opportunity(p_target::uuid);
+  if v.company_id <> p_company then raise exception 'This confirmation is not valid. Review the details again.' using errcode = 'JV002'; end if;
 
-  v_replay := jarvis_ledger_enter(p_confirmation_id, p_values_hash, 'jarvis.sales.enquiry.update', v.company_id, p_enquiry_id::text);
+  v_replay := jarvis_ledger_enter(p_confirmation, v_hash, 'jarvis.sales.enquiry.update', p_company, p_target);
   if v_replay is not null then return v_replay; end if;
+  -- The signed version must still be the current one. Raised here (outside the sub-block below), so a stale review rolls the whole call back: nothing is written.
+  if v.version is distinct from p_version then raise exception 'This enquiry was changed by someone else after you reviewed it. Review the details again.' using errcode = '40001'; end if;
 
   begin
-    v_version := crm_update_opportunity(p_enquiry_id, p_expected_version, p_patch);
+    v_version := crm_update_opportunity(p_target::uuid, p_version, v_patch);
     insert into crm_opportunity_events (opportunity_id, company_id, kind, from_value, to_value, reason, actor_id)
-    values (p_enquiry_id, v.company_id, 'details_changed', 'jarvis', 'update', array_to_string(v_keys, ', '), auth.uid());
-    return jarvis_ledger_done(p_confirmation_id, p_enquiry_id, v.reference, jsonb_build_object('company_id', v.company_id, 'version', v_version, 'fields', to_jsonb(v_keys)));
+    values (p_target::uuid, p_company, 'details_changed', 'jarvis', 'update', array_to_string(v_keys, ', '), auth.uid());
+    return jarvis_ledger_done(p_confirmation, p_target::uuid, v.reference, jsonb_build_object('company_id', p_company, 'version', v_version, 'fields', to_jsonb(v_keys)));
   exception when others then
     get stacked diagnostics v_msg = message_text, v_state = returned_sqlstate;
-    return jarvis_ledger_fail(p_confirmation_id, v_state, v_msg);
+    return jarvis_ledger_fail(p_confirmation, v_state, v_msg);
   end;
 end;
 $$;
 
 -- -----------------------------------------------------------------------------
 -- Change an enquiry's stage through JARVIS, exactly once per confirmation id (jarvis.sales.enquiry.change_stage).
+--   * The target is the enquiry (p_target = its id), the signed version is the version the person reviewed (required) and the payload is {"to": "<stage>"}. Proof first; then the
+--     signed company must be the enquiry's company and the signed version its current version (stale = refused with nothing written; a repeat of a saved move skips that test).
 --   * The move is made by the EXISTING crm_move_stage under the caller's own identity: it locks the enquiry, checks the expected VERSION, requires the owner or a founder, refuses a
 --     closed or on-hold enquiry, and keeps its two evidence gates (Proposal sent needs a proposal recorded as sent; Quote sent needs the Zoho Books quote reference). Nothing is bypassed.
 --   * NARROWER than the existing function: only a move of exactly ONE step between the six working stages (new, qualified, proposal_prep, proposal_sent, quote_sent, negotiation) in
 --     either direction. Skipping stages, On hold, Won, Lost, reopen and handover cannot go through this wrapper, whatever the caller sends (they have their own forms and evidence).
---   * The expected version is required. A repeat with the same confirmation id returns the ORIGINAL result and moves nothing.
 --   * A second timeline line says the move was made through JARVIS and approved by the person (the usual "Stage changed" line is written by the existing function).
 -- Returns the ledger result: {status, result_id (the enquiry), reference, extra{company_id, version, from, to}, replayed, ...}.
 -- -----------------------------------------------------------------------------
-create or replace function jarvis_change_stage(p_confirmation_id uuid, p_values_hash text, p_enquiry_id uuid, p_to text, p_expected_version integer)
+drop function if exists jarvis_change_stage(uuid, text, uuid, text, integer);
+create or replace function jarvis_change_stage(p_confirmation uuid, p_company uuid, p_target text, p_version integer, p_expires bigint, p_mac text, p_payload text)
 returns jsonb
 language plpgsql security definer
 set search_path = public
 as $$
 declare
   v crm_opportunities;
+  v_hash text;
+  v_in jsonb;
+  v_to_stage text;
   v_from integer;
   v_to integer;
   v_replay jsonb;
@@ -452,28 +592,34 @@ declare
   v_msg text;
   v_state text;
 begin
-  if p_enquiry_id is null or p_expected_version is null or p_to is null then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
-  v := crm_lock_opportunity(p_enquiry_id);
+  v_hash := jarvis_verify_proof('jarvis.sales.enquiry.change_stage', p_confirmation, p_company, p_target, p_version, p_expires, p_mac, p_payload);
+  if p_target = 'new' or p_version is null then raise exception 'This confirmation is not valid. Review the details again.' using errcode = 'JV002'; end if;
+  v_in := p_payload::jsonb;
+  if jsonb_typeof(v_in) <> 'object' or jsonb_typeof(v_in->'to') is distinct from 'string' then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
+  v_to_stage := v_in->>'to';
+  v := crm_lock_opportunity(p_target::uuid);
+  if v.company_id <> p_company then raise exception 'This confirmation is not valid. Review the details again.' using errcode = 'JV002'; end if;
 
-  v_replay := jarvis_ledger_enter(p_confirmation_id, p_values_hash, 'jarvis.sales.enquiry.change_stage', v.company_id, p_enquiry_id::text);
+  v_replay := jarvis_ledger_enter(p_confirmation, v_hash, 'jarvis.sales.enquiry.change_stage', p_company, p_target);
   if v_replay is not null then return v_replay; end if;
 
   -- Checked AFTER the repeat test on purpose (a repeat of a saved move must return the original result, although the enquiry is now at the new stage). A refusal here rolls
   -- the whole call back, ledger row included: JARVIS never offers these moves, so nothing is recorded for them.
+  if v.version is distinct from p_version then raise exception 'This enquiry was changed by someone else after you reviewed it. Review the details again.' using errcode = '40001'; end if;
   v_from := crm_stage_index(v.stage);
-  v_to := crm_stage_index(p_to);
+  v_to := crm_stage_index(v_to_stage);
   if v_to is null then raise exception 'JARVIS cannot move an enquiry to that stage' using errcode = '22023'; end if;
   if v_from is not null and abs(v_to - v_from) <> 1 then raise exception 'JARVIS moves an enquiry one step at a time' using errcode = '22023'; end if;
 
   begin
     -- A closed or on-hold enquiry has no working stage: the existing function says so in its own words.
-    v_version := crm_move_stage(p_enquiry_id, p_to, p_expected_version);
+    v_version := crm_move_stage(p_target::uuid, v_to_stage, p_version);
     insert into crm_opportunity_events (opportunity_id, company_id, kind, from_value, to_value, reason, actor_id)
-    values (p_enquiry_id, v.company_id, 'details_changed', 'jarvis', 'stage', v.stage || '>' || p_to, auth.uid());
-    return jarvis_ledger_done(p_confirmation_id, p_enquiry_id, v.reference, jsonb_build_object('company_id', v.company_id, 'version', v_version, 'from', v.stage, 'to', p_to));
+    values (p_target::uuid, p_company, 'details_changed', 'jarvis', 'stage', v.stage || '>' || v_to_stage, auth.uid());
+    return jarvis_ledger_done(p_confirmation, p_target::uuid, v.reference, jsonb_build_object('company_id', p_company, 'version', v_version, 'from', v.stage, 'to', v_to_stage));
   exception when others then
     get stacked diagnostics v_msg = message_text, v_state = returned_sqlstate;
-    return jarvis_ledger_fail(p_confirmation_id, v_state, v_msg);
+    return jarvis_ledger_fail(p_confirmation, v_state, v_msg);
   end;
 end;
 $$;
@@ -484,54 +630,81 @@ $$;
 --     transaction as the ledger row: if either is refused (a closed enquiry has no follow-ups, the date is in the future, no Sales access...) NEITHER is saved and the ledger
 --     records the refusal once. There is no half-state. One confirmation covers both.
 --   * The follow-up is always for the caller (assignee = the person approving); handing it to someone else is a separate decision JARVIS does not make.
---   * No record version is bound: neither function uses one. The enquiry's own rules (not Lost for an activity; not Won or Lost for a follow-up) decide.
--- p_activity {kind, body, occurred_at (null = now), internal}; p_follow_up null or {title, due_at, kind}. Returns the ledger result: {status, result_id (the enquiry), reference,
+--   * No record version is bound (the signed version is the fixed marker): neither function uses one. The enquiry's own rules (not Lost for an activity; not Won or Lost for a
+--     follow-up) decide. The target is the enquiry (p_target = its id) and its company must be the signed company.
+-- p_payload {activity: {kind, body, occurred_at (null = now), internal}, follow_up: null or {title, due_at, kind}}. Returns the ledger result: {status, result_id (the enquiry), reference,
 -- extra{company_id, activity_id, follow_up_id}, replayed, ...}.
 -- -----------------------------------------------------------------------------
-create or replace function jarvis_record_meeting(p_confirmation_id uuid, p_values_hash text, p_enquiry_id uuid, p_activity jsonb, p_follow_up jsonb)
+drop function if exists jarvis_record_meeting(uuid, text, uuid, jsonb, jsonb);
+create or replace function jarvis_record_meeting(p_confirmation uuid, p_company uuid, p_target text, p_version integer, p_expires bigint, p_mac text, p_payload text)
 returns jsonb
 language plpgsql security definer
 set search_path = public
 as $$
 declare
   v crm_opportunities;
+  v_hash text;
+  v_in jsonb;
+  p_activity jsonb;
+  p_follow_up jsonb;
   v_replay jsonb;
   v_act uuid;
   v_fu uuid;
   v_msg text;
   v_state text;
 begin
-  if p_enquiry_id is null or p_activity is null or jsonb_typeof(p_activity) <> 'object' then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
+  v_hash := jarvis_verify_proof('jarvis.sales.meeting.record', p_confirmation, p_company, p_target, p_version, p_expires, p_mac, p_payload);
+  if p_target = 'new' or p_version is not null then raise exception 'This confirmation is not valid. Review the details again.' using errcode = 'JV002'; end if;
+  v_in := p_payload::jsonb;
+  if jsonb_typeof(v_in) <> 'object' then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
+  p_activity := v_in->'activity';
+  p_follow_up := case when jsonb_typeof(v_in->'follow_up') = 'object' then v_in->'follow_up' else null end;
+  if p_activity is null or jsonb_typeof(p_activity) <> 'object' then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
   if p_activity->>'kind' is null or p_activity->>'kind' not in ('call', 'email', 'meeting', 'note', 'client_response') then raise exception 'Choose the type of activity' using errcode = '22023'; end if;
   if length(btrim(coalesce(p_activity->>'body', ''))) = 0 or length(p_activity->>'body') > 4000 then raise exception 'Write what happened (4000 characters at most)' using errcode = '22023'; end if;
   if p_follow_up is not null then
-    if jsonb_typeof(p_follow_up) <> 'object' or length(btrim(coalesce(p_follow_up->>'title', ''))) = 0 or length(p_follow_up->>'title') > 300 or nullif(p_follow_up->>'due_at', '') is null then
+    if length(btrim(coalesce(p_follow_up->>'title', ''))) = 0 or length(p_follow_up->>'title') > 300 or nullif(p_follow_up->>'due_at', '') is null then
       raise exception 'The follow-up needs a title and a due date' using errcode = '22023';
     end if;
   end if;
-  v := crm_lock_opportunity(p_enquiry_id);
+  v := crm_lock_opportunity(p_target::uuid);
+  if v.company_id <> p_company then raise exception 'This confirmation is not valid. Review the details again.' using errcode = 'JV002'; end if;
 
-  v_replay := jarvis_ledger_enter(p_confirmation_id, p_values_hash, 'jarvis.sales.meeting.record', v.company_id, p_enquiry_id::text);
+  v_replay := jarvis_ledger_enter(p_confirmation, v_hash, 'jarvis.sales.meeting.record', p_company, p_target);
   if v_replay is not null then return v_replay; end if;
 
   begin
-    v_act := crm_add_activity(p_enquiry_id, p_activity->>'kind', p_activity->>'body', coalesce(nullif(p_activity->>'occurred_at', '')::timestamptz, now()), coalesce((p_activity->>'internal')::boolean, false));
+    v_act := crm_add_activity(p_target::uuid, p_activity->>'kind', p_activity->>'body', coalesce(nullif(p_activity->>'occurred_at', '')::timestamptz, now()), coalesce((p_activity->>'internal')::boolean, false));
     if p_follow_up is not null then
-      v_fu := crm_create_follow_up(p_enquiry_id, p_follow_up->>'title', (p_follow_up->>'due_at')::timestamptz, coalesce(nullif(p_follow_up->>'kind', ''), 'other'), null);
+      v_fu := crm_create_follow_up(p_target::uuid, p_follow_up->>'title', (p_follow_up->>'due_at')::timestamptz, coalesce(nullif(p_follow_up->>'kind', ''), 'other'), null);
     end if;
     insert into crm_opportunity_events (opportunity_id, company_id, kind, from_value, to_value, reason, actor_id)
-    values (p_enquiry_id, v.company_id, 'details_changed', 'jarvis', 'meeting', case when v_fu is null then 'activity' else 'activity and follow-up' end, auth.uid());
-    return jarvis_ledger_done(p_confirmation_id, p_enquiry_id, v.reference, jsonb_build_object('company_id', v.company_id, 'activity_id', v_act, 'follow_up_id', v_fu));
+    values (p_target::uuid, p_company, 'details_changed', 'jarvis', 'meeting', case when v_fu is null then 'activity' else 'activity and follow-up' end, auth.uid());
+    return jarvis_ledger_done(p_confirmation, p_target::uuid, v.reference, jsonb_build_object('company_id', p_company, 'activity_id', v_act, 'follow_up_id', v_fu));
   exception when others then
     get stacked diagnostics v_msg = message_text, v_state = returned_sqlstate;
-    return jarvis_ledger_fail(p_confirmation_id, v_state, v_msg);
+    return jarvis_ledger_fail(p_confirmation, v_state, v_msg);
   end;
 end;
 $$;
 
-revoke all on function jarvis_my_access(uuid), jarvis_usage_take(integer), jarvis_create_enquiry(uuid, text, jsonb), jarvis_register_organisation(uuid, text, jsonb), jarvis_update_enquiry(uuid, text, uuid, integer, jsonb), jarvis_change_stage(uuid, text, uuid, text, integer), jarvis_record_meeting(uuid, text, uuid, jsonb, jsonb) from public, anon;
-grant execute on function jarvis_my_access(uuid), jarvis_usage_take(integer), jarvis_create_enquiry(uuid, text, jsonb), jarvis_register_organisation(uuid, text, jsonb), jarvis_update_enquiry(uuid, text, uuid, integer, jsonb), jarvis_change_stage(uuid, text, uuid, text, integer), jarvis_record_meeting(uuid, text, uuid, jsonb, jsonb) to authenticated;
--- The internal helpers are NOT callable by anyone through the API (the wrappers above run as their owner and may call them).
-revoke all on function jarvis_ledger_json(jarvis_action_ledger, boolean), jarvis_ledger_enter(uuid, text, text, uuid, text), jarvis_ledger_done(uuid, uuid, text, jsonb), jarvis_ledger_fail(uuid, text, text) from public, anon, authenticated;
+-- Grants. Users may call the access check, the usage counter and the five write wrappers (each of which verifies the proof itself). Everything else is internal.
+revoke all on function jarvis_my_access(uuid), jarvis_usage_take(integer),
+  jarvis_create_enquiry(uuid, uuid, text, integer, bigint, text, text), jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text, jsonb),
+  jarvis_update_enquiry(uuid, uuid, text, integer, bigint, text, text), jarvis_change_stage(uuid, uuid, text, integer, bigint, text, text), jarvis_record_meeting(uuid, uuid, text, integer, bigint, text, text)
+  from public, anon;
+grant execute on function jarvis_my_access(uuid), jarvis_usage_take(integer),
+  jarvis_create_enquiry(uuid, uuid, text, integer, bigint, text, text), jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text, jsonb),
+  jarvis_update_enquiry(uuid, uuid, text, integer, bigint, text, text), jarvis_change_stage(uuid, uuid, text, integer, bigint, text, text), jarvis_record_meeting(uuid, uuid, text, integer, bigint, text, text)
+  to authenticated;
+-- The internal helpers and the proof machinery are NOT callable by anyone through the API (the wrappers above run as their owner and may call them). The key setter is for the
+-- owner only: not authenticated, not anon, not the platform's service role.
+revoke all on function jarvis_ledger_json(jarvis_action_ledger, boolean), jarvis_ledger_enter(uuid, text, text, uuid, text), jarvis_ledger_done(uuid, uuid, text, jsonb), jarvis_ledger_fail(uuid, text, text),
+  jarvis_hmac_sha256(bytea, bytea), jarvis_verify_proof(text, uuid, uuid, text, integer, bigint, text, text), jarvis_set_proof_key(text) from public, anon, authenticated;
+do $$ begin
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    execute 'revoke all on function jarvis_hmac_sha256(bytea, bytea), jarvis_verify_proof(text, uuid, uuid, text, integer, bigint, text, text), jarvis_set_proof_key(text) from service_role';
+  end if;
+end $$;
 
--- ROLLBACK: supabase/manual-sql/jarvis_90_rollback.sql drops the three functions and the five tables (export jarvis_action_ledger first).
+-- ROLLBACK: supabase/manual-sql/jarvis_90_rollback.sql drops every jarvis_* function and the six tables, the proof key included (export jarvis_action_ledger first).
