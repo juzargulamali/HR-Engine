@@ -4,6 +4,7 @@ import { createEnquiryFromBrief } from "./sales/enquiry-create-from-brief";
 import { registerDisabledSalesActions } from "./sales/disabled-actions";
 import { draftReply } from "./sales/draft-reply";
 import { helpAnswer } from "./sales/help-answer";
+import { registerOrganisation } from "./sales/organisation-register";
 
 let done = false;
 
@@ -16,7 +17,7 @@ export function registerAllJarvisActions(): void {
   if (done) return;
   done = true;
   registerJarvisAction(createEnquiryFromBrief);
-  const implemented = [draftReply, helpAnswer];
+  const implemented = [draftReply, helpAnswer, registerOrganisation];
   for (const a of implemented) registerJarvisAction(a);
   registerDisabledSalesActions(implemented.map((a) => a.id));
 }

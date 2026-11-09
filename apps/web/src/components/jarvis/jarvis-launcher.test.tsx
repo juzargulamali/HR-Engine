@@ -12,7 +12,7 @@ vi.mock("@/lib/actions/jarvis", () => ({ jarvisSend: vi.fn(), jarvisContext: vi.
 
 import { JarvisLauncher, type JarvisClientApi } from "./jarvis-launcher";
 import { JarvisMark } from "./jarvis-mark";
-import type { ConfirmResult, EnquiryCard, EnquiryValues, ReplyDraftCard, SendResult, StatusResult } from "@/lib/jarvis/protocol";
+import type { ActionConfirmResult, ConfirmResult, EnquiryCard, EnquiryValues, OrgRegisterCard, ReplyDraftCard, SendResult, StatusResult } from "@/lib/jarvis/protocol";
 
 const CO1 = "11111111-1111-4111-8111-111111111111";
 const CO2 = "22222222-2222-4222-8222-222222222222";
@@ -400,5 +400,116 @@ describe("the help card", () => {
     expect(within(c).getByText(/Open Follow-ups in Sales/)).toBeTruthy();
     expect(within(c).queryByRole("button")).toBeNull();
     expect(api.calls.send[0]![0]).toMatchObject({ intent: "help" });
+  });
+});
+
+const ROLES = [{ id: "agency", label: "Agency" }, { id: "direct", label: "Direct client" }, { id: "client", label: "End client" }, { id: "technology", label: "Technology company" }] as OrgRegisterCard["roleOptions"];
+const orgSearch = (over: Partial<OrgRegisterCard> = {}): OrgRegisterCard => ({ kind: "org.register", stage: "search", company: { id: CO1, name: companies[0]!.name }, query: "Fictional Lantern Events", matches: [], values: { companyId: CO1, name: "Fictional Lantern Events", roles: [], country: null, website: null, place: null, note: null }, problems: [], valid: false, roleOptions: ROLES, ...over });
+const orgDetails = (over: Partial<OrgRegisterCard> = {}): OrgRegisterCard => orgSearch({ stage: "details", problems: [{ field: "roles", message: "Choose what kind of organisation it is (agency, direct client, end client or technology company)." }], ...over });
+const ORG_ID = "jarvis.sales.organisation.register";
+const actionResult = (card: OrgRegisterCard, confirmation: ReturnType<typeof conf> | null = null): SendResult => ({ ok: true, kind: "action", actionId: ORG_ID, card, confirmation });
+const IDS = [...ALL_IDS, ORG_ID];
+
+describe("register a client or agency (two steps, its own confirmation)", () => {
+  async function toSearch(api: ReturnType<typeof fakeApi>) {
+    mount(api, { enabledActionIds: IDS });
+    openPanel();
+    fireEvent.click(screen.getByTestId("mode-organisation"));
+    fireEvent.change(screen.getByLabelText("Paste a brief or ask a question"), { target: { value: "Fictional Lantern Events" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByTestId("jarvis-org-card");
+  }
+  it("search step: shows what exists with links, offers 'register as new' (never registers), then the details step has its own button, disabled until the type is chosen", async () => {
+    const existing = { id: "44444444-4444-4444-8444-444444444444", name: "Fictional Lantern Events Ltd", roles: ["agency"], place: "Dubai", country: null, website: null, reasons: ["similar name" as const], binding: false };
+    const api = fakeApi({
+      send: async () => actionResult(orgSearch({ matches: [existing] })),
+      act: async () => actionResult(orgDetails({ matches: [existing] })),
+    });
+    await toSearch(api);
+    const card = screen.getByTestId("jarvis-org-card");
+    expect(card.getAttribute("data-stage")).toBe("search");
+    expect(within(card).getByRole("link", { name: "Fictional Lantern Events Ltd" }).getAttribute("href")).toBe(`/sales/accounts/${existing.id}?company=${CO1}`);
+    expect(within(card).queryByTestId("register-organisation")).toBeNull();
+    fireEvent.click(within(card).getByTestId("org-new"));
+    await waitFor(() => expect(screen.getByTestId("jarvis-org-card").getAttribute("data-stage")).toBe("details"));
+    expect(api.calls.act[0]![0]).toMatchObject({ companyId: CO1, actionId: ORG_ID, input: { mode: "details", name: "Fictional Lantern Events" } });
+    expect(api.calls.confirmAction).toHaveLength(0);
+    const save = screen.getByTestId("register-organisation") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(screen.getByTestId("problem-roles")).toBeTruthy();
+  });
+  it("details step: choosing the type and reviewing issues the confirmation; the explicit button saves once and shows the real name with a link", async () => {
+    let n = 0;
+    const api = fakeApi({
+      send: async () => actionResult(orgDetails()),
+      act: async (...a: unknown[]) => { const input = (a[0] as { input: { fields?: { roles?: string[] } } }).input; n++; return actionResult(orgDetails({ problems: [], valid: true, values: { ...orgDetails().values, roles: (input.fields?.roles ?? []) as OrgRegisterCard["values"]["roles"] } }), conf(`org-${n}`)); },
+      confirmAction: async (): Promise<ActionConfirmResult> => ({ ok: true, status: "done", confirmationId: "org-1", actionId: ORG_ID, reference: "Fictional Lantern Events", href: `/sales/accounts/x?company=${CO1}`, summary: "Fictional Lantern Events was added to Clients & Agencies, and you approved it.", replayed: false }),
+    });
+    await toSearch(api);
+    fireEvent.click(screen.getByTestId("role-agency"));
+    expect(screen.getByText(/You changed something: review the changes first/)).toBeTruthy();
+    expect((screen.getByTestId("register-organisation") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    await waitFor(() => expect((screen.getByTestId("register-organisation") as HTMLButtonElement).disabled).toBe(false));
+    const save = screen.getByTestId("register-organisation");
+    fireEvent.click(save); fireEvent.click(save);
+    const done = await screen.findByTestId("jarvis-result");
+    expect(done.textContent).toMatch(/Fictional Lantern Events was added/);
+    expect(within(done).getByRole("link", { name: /Open Fictional Lantern Events/ }).getAttribute("href")).toBe(`/sales/accounts/x?company=${CO1}`);
+    expect(api.calls.confirmAction).toHaveLength(1);
+    expect(api.calls.confirmAction[0]![0]).toMatchObject({ companyId: CO1, actionId: ORG_ID, token: "tok-org-1", acknowledgements: { matchIds: [] } });
+  });
+  it("a same-name organisation needs 'these are different organisations' ticked, and the acknowledged ids go with the save", async () => {
+    const twin = { id: "55555555-5555-4555-8555-555555555555", name: "Fictional Lantern Events", roles: ["agency"], place: null, country: null, website: null, reasons: ["same name" as const], binding: true };
+    const api = fakeApi({
+      send: async () => actionResult(orgDetails({ problems: [], valid: true, matches: [twin], values: { ...orgDetails().values, roles: ["agency"] } }), conf("org-9")),
+      confirmAction: async (): Promise<ActionConfirmResult> => ({ ok: true, status: "done", confirmationId: "org-9", actionId: ORG_ID, reference: "Fictional Lantern Events", href: null, summary: "Added.", replayed: false }),
+    });
+    await toSearch(api);
+    const save = screen.getByTestId("register-organisation") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("ack-org"));
+    expect((screen.getByTestId("register-organisation") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByTestId("register-organisation"));
+    await screen.findByTestId("jarvis-result");
+    expect(api.calls.confirmAction[0]![0]).toMatchObject({ acknowledgements: { matchIds: [twin.id] } });
+  });
+  it("an unknown answer shows 'Checking the original result' and never offers a second save; a refusal is shown in words", async () => {
+    let status = 0;
+    const api = fakeApi({
+      send: async () => actionResult(orgDetails({ problems: [], valid: true, values: { ...orgDetails().values, roles: ["agency"] } }), conf("org-5")),
+      confirmAction: async (): Promise<ActionConfirmResult> => ({ ok: false, code: "ambiguous", message: "We did not get an answer to the save.", confirmationId: "org-5" }),
+      status: async (): Promise<StatusResult> => (++status < 2 ? { ok: true, state: "not_recorded" } : { ok: true, state: "done", reference: "Fictional Lantern Events", opportunityId: "o", href: "/sales/accounts/o", summary: "Saved earlier.", actionId: ORG_ID }),
+    });
+    await toSearch(api);
+    fireEvent.click(screen.getByTestId("register-organisation"));
+    await screen.findByTestId("jarvis-checking");
+    expect(screen.queryByTestId("register-organisation")).toBeNull();
+    expect((await screen.findByTestId("jarvis-result", {}, { timeout: 6000 })).textContent).toMatch(/Saved earlier/);
+    expect(api.calls.confirmAction).toHaveLength(1);
+  }, 12000);
+  it("a refusal by the server is shown and the card can be reviewed again", async () => {
+    const api = fakeApi({
+      send: async () => actionResult(orgDetails({ problems: [], valid: true, values: { ...orgDetails().values, roles: ["agency"] } }), conf("org-6")),
+      confirmAction: async (): Promise<ActionConfirmResult> => ({ ok: false, code: "not_permitted", message: "You do not have access to that module for this company." }),
+    });
+    await toSearch(api);
+    fireEvent.click(screen.getByTestId("register-organisation"));
+    expect((await screen.findByTestId("card-failed")).textContent).toMatch(/do not have access/);
+  });
+  it("the review card's unknown organisation offers 'Register with JARVIS' only when the action is enabled, and it starts the search step", async () => {
+    const notFound = { field: "agency" as const, typedName: "Fictional Lantern Events", status: "not_found" as const, selectedId: null, selectedName: null, options: [], guidance: 'No organisation called "Fictional Lantern Events" is recorded. Register it in Clients & Agencies first; JARVIS never creates an organisation by itself.' };
+    const api = fakeApi({ send: async (...a: unknown[]) => ((a[0] as { intent?: string }).intent === "organisation" ? actionResult(orgSearch()) : cardResult(card({ agency: notFound, valid: false, problems: [{ field: "agencyOrgId", message: "x" }] }), null)) });
+    mount(api, { enabledActionIds: IDS });
+    openPanel();
+    await paste();
+    fireEvent.click(screen.getByTestId("register-agency"));
+    await screen.findByTestId("jarvis-org-card");
+    expect(api.calls.send[1]![0]).toMatchObject({ text: "Fictional Lantern Events", intent: "organisation" });
+    cleanup();
+    mount(fakeApi({ send: async () => cardResult(card({ agency: notFound, valid: false, problems: [{ field: "agencyOrgId", message: "x" }] }), null) }));
+    openPanel();
+    await paste();
+    expect(screen.queryByTestId("register-agency")).toBeNull();
   });
 });

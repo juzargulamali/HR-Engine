@@ -91,7 +91,8 @@ describe("JARVIS platform (part 1)", () => {
       const after = (await db.seed(pack("jarvis_05_preservation_check_readonly.sql"))).rows as typeof before;
       const changed = after.filter((a, i) => JSON.stringify(a) !== JSON.stringify(before[i])).map((a) => a.item);
       expect(changed.every((i) => i.includes("INTENDED TO CHANGE"))).toBe(true);
-      expect(changed.length).toBe(8);
+      expect(changed.length).toBe(before.filter((r) => r.item.includes("INTENDED TO CHANGE")).length);
+      expect(changed.length).toBeGreaterThanOrEqual(8);
       expect(after.filter((a) => a.item.startsWith("function crm_create_opportunity"))[0]?.fingerprint).toBe(before.filter((a) => a.item.startsWith("function crm_create_opportunity"))[0]?.fingerprint);
     });
     it("verify pack: every pass/fail row says OK", async () => {

@@ -41,6 +41,12 @@ export function routeMessage(text: string, intent?: JarvisModeKey | null): Route
   return { kind: "brief" };
 }
 
+/** "register Wave Agency as a new agency" -> "Wave Agency"; a bare name stays as it is. */
+export function organisationNameFromText(text: string): string {
+  const t = text.replace(/^\s*(?:please\s+)?(?:register|add|create|onboard)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?(?:client|agency|organi[sz]ation|company|customer)?\s*(?:called|named)?\s*[:\-]?\s*/i, "").replace(/\s+as\s+(?:a\s+|an\s+)?(?:new\s+)?(?:direct\s+client|end\s+client|client|agency|organi[sz]ation|company)\.?\s*$/i, "").trim();
+  return (t || text).trim().slice(0, 200);
+}
+
 /** What the typed text becomes as the action's own input (the action's input schema validates it again). */
 function inputFor(key: JarvisModeKey, text: string, enquiryId: string | null): unknown {
   switch (key) {
@@ -48,7 +54,7 @@ function inputFor(key: JarvisModeKey, text: string, enquiryId: string | null): u
     case "update": return { mode: "extract", enquiryId, text };
     case "stage": return { mode: "propose", enquiryId, text };
     case "meeting": return { mode: "extract", enquiryId, notes: text };
-    case "organisation": return { mode: "search", name: text };
+    case "organisation": return { mode: "search", name: organisationNameFromText(text) };
     case "help": return { question: text };
     default: return null;
   }

@@ -34,7 +34,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
  * current company, and any likely duplicate has been acknowledged. The real reference and the link appear only after the app confirms the save; an unknown answer shows
  * "Checking the original result" and never offers a second create.
  */
-export function ReviewCard({ state, companyStale, api, onState }: { state: CardState; companyStale: boolean; api: CardApi; onState: (s: CardState) => void }) {
+export function ReviewCard({ state, companyStale, api, onState, onRegisterOrg }: { state: CardState; companyStale: boolean; api: CardApi; onState: (s: CardState) => void; onRegisterOrg?: (name: string) => void }) {
   const uid = useId();
   const { card, confirmation } = state;
   const [draft, setDraft] = useState<EnquiryValues>(card.values);
@@ -159,11 +159,11 @@ export function ReviewCard({ state, companyStale, api, onState }: { state: CardS
         <OrgBlock idf={idf} label="Agency" hint="The intermediary that sent the brief." field="agency" choice={card.agency} id={draft.agencyOrgId} typed={typed.agency} searching={searching.agency} disabled={busy}
           error={err("agencyOrgId")} tag={tag("agencyOrgId")}
           onTyped={(v) => setTyped((t) => ({ ...t, agency: v }))} onSearching={(v) => setSearching((s) => ({ ...s, agency: v }))}
-          onSearch={() => void review({ agency: typed.agency })} onPick={(id) => { set("agencyOrgId", id); void review(undefined, { agencyOrgId: id }); }} onClear={() => { set("agencyOrgId", null); setTyped((t) => ({ ...t, agency: "" })); }} />
+          onRegister={onRegisterOrg} onSearch={() => void review({ agency: typed.agency })} onPick={(id) => { set("agencyOrgId", id); void review(undefined, { agencyOrgId: id }); }} onClear={() => { set("agencyOrgId", null); setTyped((t) => ({ ...t, agency: "" })); }} />
         <OrgBlock idf={idf} label="End client" hint="The brand the work is for." field="client" choice={card.client} id={draft.clientOrgId} typed={typed.client} searching={searching.client} disabled={busy}
           error={card.problems.find((p) => p.field === "clientOrgId")?.message} tag={tag("clientOrgId")}
           onTyped={(v) => setTyped((t) => ({ ...t, client: v }))} onSearching={(v) => setSearching((s) => ({ ...s, client: v }))}
-          onSearch={() => void review({ client: typed.client })} onPick={(id) => { set("clientOrgId", id); void review(undefined, { clientOrgId: id }); }} onClear={() => { set("clientOrgId", null); setTyped((t) => ({ ...t, client: "" })); }} />
+          onRegister={onRegisterOrg} onSearch={() => void review({ client: typed.client })} onPick={(id) => { set("clientOrgId", id); void review(undefined, { clientOrgId: id }); }} onClear={() => { set("clientOrgId", null); setTyped((t) => ({ ...t, client: "" })); }} />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_9rem]">
           {field("nextTitle", "Next action", <Input id={idf("nextTitle")} value={draft.nextTitle} maxLength={300} onChange={(e) => set("nextTitle", e.target.value)} disabled={busy} placeholder="e.g. Call to qualify the brief" />)}
           {field("nextDate", "Due", <Input id={idf("nextDate")} type="date" value={draft.nextDate} onChange={(e) => set("nextDate", e.target.value)} disabled={busy} />)}
@@ -243,7 +243,7 @@ export function ReviewCard({ state, companyStale, api, onState }: { state: CardS
 
 function OrgBlock(p: {
   idf: (n: string) => string; label: string; hint: string; field: OrgField; choice: OrgChoice; id: string | null; typed: string; searching: boolean; disabled: boolean; error?: string; tag: React.ReactNode;
-  onTyped: (v: string) => void; onSearching: (v: boolean) => void; onSearch: () => void; onPick: (id: string) => void; onClear: () => void;
+  onTyped: (v: string) => void; onSearching: (v: boolean) => void; onSearch: () => void; onPick: (id: string) => void; onClear: () => void; onRegister?: (name: string) => void;
 }) {
   const name = `${p.field}OrgId`;
   const picked = p.id && p.choice.selectedId === p.id && !p.searching;
@@ -271,6 +271,9 @@ function OrgBlock(p: {
         </div>
       )}
       {!picked && p.choice.guidance ? <p className="text-xs text-muted-foreground" data-testid={`guidance-${p.field}`}>{p.choice.guidance}</p> : <p className="text-xs text-muted-foreground">{p.hint}</p>}
+      {!picked && p.choice.status === "not_found" && p.onRegister && p.choice.typedName ? (
+        <Button type="button" size="sm" variant="outline" onClick={() => p.onRegister?.(p.choice.typedName!)} data-testid={`register-${p.field}`}>Register “{p.choice.typedName}” with JARVIS</Button>
+      ) : null}
       {p.error && !picked ? <p className="text-xs text-destructive">{p.error}</p> : null}
     </div>
   );

@@ -165,6 +165,18 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
     } finally { setBusy(false); }
   }
 
+  /** From a review card whose organisation is not recorded: start the (separate) register flow for that name. It searches first and asks for its own confirmation. */
+  async function startRegister(name: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await api.send({ companyId, text: name, intent: "organisation", enquiryId: null });
+      if (!r.ok) push({ role: "jarvis", kind: "text", tone: "error", text: r.message });
+      else if (r.kind === "action") push({ role: "jarvis", kind: "action", actionId: r.actionId, state: { card: r.card, confirmation: r.confirmation }, companyId, rev: 0 });
+    } catch { push({ role: "jarvis", kind: "text", tone: "error", text: "JARVIS could not be reached. Sales & CRM is not affected." }); }
+    finally { setBusy(false); }
+  }
+
   function changeCompany(id: string) {
     if (id === companyId) return;
     const hadCard = messages.some((m) => m.role === "jarvis" && m.kind === "card");
@@ -265,6 +277,7 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
                     state={m.state}
                     companyStale={m.companyId !== companyId}
                     api={api}
+                    onRegisterOrg={enabledActionIds.includes("jarvis.sales.organisation.register") ? (n) => void startRegister(n) : undefined}
                     onState={(s) => setMessages((ms) => ms.map((x) => (x.id === m.id && x.role === "jarvis" && x.kind === "card" ? { ...x, state: s, rev: x.rev + 1 } : x)))}
                   />
                 );

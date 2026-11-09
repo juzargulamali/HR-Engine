@@ -153,4 +153,21 @@ export interface HelpAnswerCard {
   note: string;
 }
 
-export type ActionCard = ReplyDraftCard | HelpAnswerCard;
+/** `jarvis.sales.organisation.register`. Two steps: "search" (what already exists; the person chooses to use it or to register a NEW one) then "details" (the exact type and fields, with their OWN confirmation). */
+export type OrgRole = "agency" | "direct" | "client" | "technology";
+export interface OrgValues { companyId: string; name: string; roles: OrgRole[]; country: string | null; website: string | null; place: string | null; note: string | null }
+export interface OrgMatchView { id: string; name: string; roles: string[]; place: string | null; country: string | null; website: string | null; reasons: ("same name" | "same website" | "similar name")[]; binding: boolean }
+export interface OrgRegisterCard {
+  kind: "org.register";
+  stage: "search" | "details";
+  company: { id: string; name: string };
+  /** What the person typed to search. */
+  query: string;
+  matches: OrgMatchView[];
+  values: OrgValues;
+  problems: CardProblem[];
+  valid: boolean;
+  roleOptions: { id: OrgRole; label: string }[];
+}
+
+export type ActionCard = ReplyDraftCard | HelpAnswerCard | OrgRegisterCard;

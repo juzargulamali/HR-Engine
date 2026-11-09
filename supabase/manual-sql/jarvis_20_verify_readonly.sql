@@ -27,16 +27,25 @@ select item, result from (
          case when exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_jarvis_ledger_confirmation' and indexdef like 'CREATE UNIQUE INDEX%(confirmation_id)%') then 'OK' else 'MISSING' end
   union all select 7, 'function ' || f || ' exists, SECURITY DEFINER with a fixed search_path',
          case when exists (select 1 from pg_proc where oid = to_regprocedure('public.' || f) and prosecdef and exists (select 1 from unnest(proconfig) c where c = 'search_path=public')) then 'OK' else 'MISSING or wrong shape' end
-    from unnest(array['jarvis_my_access(uuid)', 'jarvis_usage_take(integer)', 'jarvis_create_enquiry(uuid, text, jsonb)']) f
+    from unnest(array['jarvis_my_access(uuid)', 'jarvis_usage_take(integer)', 'jarvis_create_enquiry(uuid, text, jsonb)', 'jarvis_ledger_enter(uuid, text, text, uuid, text)',
+                      'jarvis_ledger_done(uuid, uuid, text, jsonb)', 'jarvis_ledger_fail(uuid, text, text)', 'jarvis_register_organisation(uuid, text, jsonb)']) f
   union all select 8, 'signed-in users can call ' || f || '; anon and public cannot',
          case when to_regprocedure('public.' || f) is not null
                 and has_function_privilege('authenticated', to_regprocedure('public.' || f)::oid, 'execute')
                 and not has_function_privilege('anon', to_regprocedure('public.' || f)::oid, 'execute')
                 and not exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where p.oid = to_regprocedure('public.' || f) and a.grantee = 0) then 'OK' else 'FAIL - privileges differ' end
-    from unnest(array['jarvis_my_access(uuid)', 'jarvis_usage_take(integer)', 'jarvis_create_enquiry(uuid, text, jsonb)']) f
+    from unnest(array['jarvis_my_access(uuid)', 'jarvis_usage_take(integer)', 'jarvis_create_enquiry(uuid, text, jsonb)', 'jarvis_register_organisation(uuid, text, jsonb)']) f
+  union all select 8, 'the internal helper ' || f || ' is NOT callable by signed-in users or anon (only the wrappers, which run as their owner, use it)',
+         case when to_regprocedure('public.' || f) is not null
+                and not has_function_privilege('authenticated', to_regprocedure('public.' || f)::oid, 'execute')
+                and not has_function_privilege('anon', to_regprocedure('public.' || f)::oid, 'execute') then 'OK' else 'FAIL - callable or missing' end
+    from unnest(array['jarvis_ledger_json(jarvis_action_ledger, boolean)', 'jarvis_ledger_enter(uuid, text, text, uuid, text)', 'jarvis_ledger_done(uuid, uuid, text, jsonb)', 'jarvis_ledger_fail(uuid, text, text)']) f
   union all select 9, 'jarvis_create_enquiry calls the EXISTING crm_create_opportunity and checks the write switch, the Sales grant and the ledger (definition text)',
          case when exists (select 1 from pg_proc where proname = 'jarvis_create_enquiry' and pronamespace = 'public'::regnamespace
                               and prosrc like '%crm_create_opportunity(%' and prosrc like '%crm_has_access(v_company)%' and prosrc like '%pg_advisory_xact_lock%' and prosrc like '%writes_allowed%') then 'OK' else 'WRONG TEXT' end
+  union all select 9, 'jarvis_register_organisation calls the EXISTING crm_create_organisation_profile and the ledger helpers, and refuses a same-name or same-website organisation that was not acknowledged (definition text)',
+         case when exists (select 1 from pg_proc where proname = 'jarvis_register_organisation' and pronamespace = 'public'::regnamespace
+                              and prosrc like '%crm_create_organisation_profile(%' and prosrc like '%jarvis_ledger_enter(%' and prosrc like '%crm_import_candidates(%' and prosrc like '%ack_ids%') then 'OK' else 'WRONG TEXT' end
   union all select 10, 'the wrapper stores no enquiry text: the ledger has no column for a brief, prompt or model output',
          case when not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jarvis_action_ledger' and column_name in ('brief', 'prompt', 'args', 'body', 'text', 'content', 'output', 'values'))
               then 'OK' else 'FAIL - an unexpected text column exists' end

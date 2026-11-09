@@ -1,7 +1,7 @@
 -- READ-ONLY. Run in the SQL Editor of "Enginious HR Engine_V2" BEFORE the migration 20261223000100_jarvis_platform.sql.
 -- Run the WHOLE file; it returns ONE result table (section | item | detail). It creates, changes and deletes nothing. Send the full result.
 -- HOW TO READ IT: every section B row must say OK, and row 300 must say the change is NOT yet applied. Section C is information only.
--- The migration is purely additive: it adds jarvis_* tables and three jarvis_* functions and replaces NOTHING that exists. JARVIS stays OFF for everyone after it (see docs/jarvis-deployment.md).
+-- The migration is purely additive: it adds jarvis_* tables and jarvis_* functions (the access check, the usage counter, one wrapper per write action and their internal helpers) and replaces NOTHING that exists. JARVIS stays OFF for everyone after it (see docs/jarvis-deployment.md).
 select section, item, detail from (
   select 'A session' as section, 1 as ord, 'running as' as item, current_user::text as detail
   union all select 'A session', 2, 'today (Dubai)', to_char(now() at time zone 'Asia/Dubai', 'YYYY-MM-DD HH24:MI')
@@ -10,7 +10,8 @@ select section, item, detail from (
     from unnest(array['companies', 'profiles', 'crm_opportunities', 'crm_company_grants', 'crm_organisations', 'crm_follow_ups', 'crm_opportunity_events', 'crm_reference_counters', 'crm_company_settings']) t
   union all select 'B prerequisites', 200 + row_number() over (order by f), 'function ' || f,
          case when exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname = f) then 'OK' else 'MISSING - install the earlier Sales migrations first' end
-    from unnest(array['crm_create_opportunity', 'crm_has_access', 'crm_require_user', 'crm_log_event', 'crm_find_duplicate_candidates', 'crm_organisation_roles', 'crm_opportunities_check_party_roles']) f
+    from unnest(array['crm_create_opportunity', 'crm_has_access', 'crm_require_user', 'crm_log_event', 'crm_find_duplicate_candidates', 'crm_organisation_roles', 'crm_opportunities_check_party_roles',
+                      'crm_create_organisation_profile', 'crm_import_candidates', 'crm_lock_opportunity', 'crm_check_version', 'crm_require_owner_or_founder', 'crm_update_opportunity', 'crm_move_stage', 'crm_add_activity', 'crm_create_follow_up', 'crm_user_has_company_access']) f
   union all select 'B prerequisites', 250, 'crm_create_opportunity has the 21-argument signature the wrapper calls by name',
          case when to_regprocedure('public.crm_create_opportunity(uuid, text, text, text, timestamptz, uuid, uuid, uuid, text, numeric, text, text, date, date, date, text, jsonb, text, text, jsonb, text)') is not null
               then 'OK' else 'UNEXPECTED - the function differs from the one this change expects. Do not continue; send this result.' end
@@ -18,7 +19,7 @@ select section, item, detail from (
          case when exists (select 1 from pg_roles where rolname = 'authenticated') then 'OK' else 'MISSING' end
   union all select 'B prerequisites', 300, 'applied already?',
          case when to_regclass('public.jarvis_settings') is not null or to_regclass('public.jarvis_action_ledger') is not null
-                or exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname in ('jarvis_my_access', 'jarvis_usage_take', 'jarvis_create_enquiry'))
+                or exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname like 'jarvis\_%')
               then 'ALREADY APPLIED - not a first run; run jarvis_20_verify_readonly.sql instead'
               else 'OK - not applied yet' end
   union all select 'C what exists today', 1000, 'active Sales grants (people who could be pilot users)',

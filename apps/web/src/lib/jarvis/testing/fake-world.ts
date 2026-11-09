@@ -9,7 +9,7 @@ import type { JarvisProvider } from "../provider/types";
  * A small in-memory stand-in for the database, for the JARVIS unit tests ONLY (fictional data). It mimics what the app layer relies on: the person's own session (what they can
  * see depends on their grants), the pilot switches, the ledger with its idempotency, and a lost-response failure mode. The real SQL is proved in packages/rls-tests/test/jarvis.rls.test.ts.
  */
-export interface Org { id: string; name: string; kind: string; roles: string[]; place: string | null; name_key: string; archived_at: string | null }
+export interface Org { id: string; name: string; kind: string; roles: string[]; place: string | null; name_key: string; archived_at: string | null; website?: string | null; website_domain?: string | null; country_code?: string | null }
 export interface Opp {
   id: string; company_id: string; reference: string; title: string; stage: string; agency_org_id: string | null; client_org_id: string | null; event_start: string | null; install_start: string | null; location: string | null;
   technologies: { name: string; qty: number }[]; created_at: string;
@@ -24,7 +24,8 @@ export const mkOpp = (over: Partial<Opp> & { company_id: string }): Opp => ({
 
 export const ID = { co1: "11111111-1111-4111-8111-111111111111", co2: "22222222-2222-4222-8222-222222222222", u1: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", u2: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2", u3: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3" };
 export const key = (n: string) => n.toLowerCase().replace(/[^a-z0-9]+/g, "");
-export const mkOrg = (name: string, roles: string[], place: string | null = null): Org => ({ id: randomUUID(), name, kind: roles[0] ?? "client", roles, place, name_key: key(name), archived_at: null });
+export const domainOf = (w: string | null | undefined): string | null => { const d = (w ?? "").trim().replace(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, "").replace(/^www\./i, "").replace(/[/?#:].*$/, "").toLowerCase(); return d.includes(".") ? d : null; };
+export const mkOrg = (name: string, roles: string[], place: string | null = null, website: string | null = null): Org => ({ id: randomUUID(), name, kind: roles[0] ?? "client", roles, place, name_key: key(name), archived_at: null, website, website_domain: domainOf(website), country_code: null });
 
 export interface World {
   signedIn: string | null;
@@ -35,7 +36,7 @@ export interface World {
   companies: { id: string; legal_name: string }[];
   orgs: Org[];
   opps: Opp[];
-  ledger: Map<string, { confirmation_id: string; user_id: string; company_id: string; values_hash: string; status: "done" | "failed"; result_id: string | null; result_ref: string | null; error_message: string | null }>;
+  ledger: Map<string, { confirmation_id: string; user_id: string; company_id: string; values_hash: string; status: "done" | "failed"; result_id: string | null; result_ref: string | null; error_message: string | null; action_id: string; target: string; result_extra: Record<string, unknown> | null; error_code?: string | null }>;
   usage: Map<string, number>;
   /** ok | refuse (the database refuses, nothing created) | network (no answer, nothing created) | lost (created, but the answer is lost) */
   createMode: "ok" | "refuse" | "network" | "lost";
@@ -47,6 +48,8 @@ export interface World {
   /** Every table the person's session read (select), in order. */
   readLog: string[];
   createdArgs: Record<string, unknown>[];
+  /** What the organisation wrapper was asked to register (after its checks). */
+  registered: Record<string, unknown>[];
   counter: number;
 }
 
@@ -56,7 +59,7 @@ export function newWorld(): World {
     signedIn: ID.u1, settings: { enabled: true, writes: true }, pilot: new Set([ID.u1, ID.u2, ID.u3]), pilotCompanies: new Set(),
     grants: [{ user_id: ID.u1, company_id: ID.co1, capabilities: [], revoked_at: null }, { user_id: ID.u1, company_id: ID.co2, capabilities: [], revoked_at: null }, { user_id: ID.u2, company_id: ID.co2, capabilities: [], revoked_at: null }],
     companies: [{ id: ID.co1, legal_name: "Fictional Enginious UAE LLC" }, { id: ID.co2, legal_name: "Fictional Enginious KSA LLC" }],
-    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], readLog: [], createdArgs: [], counter: 0,
+    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], readLog: [], createdArgs: [], registered: [], counter: 0,
   };
 }
 
@@ -98,6 +101,28 @@ function access(w: World, user: string, company: string | null) {
   return { is_available: inPilot, writes_allowed: inPilot && w.settings.writes, company_allowed: company === null || w.pilotCompanies.size === 0 || w.pilotCompanies.has(company) };
 }
 
+type LedgerRow = World["ledger"] extends Map<string, infer V> ? V : never;
+const json = (r: LedgerRow, replayed: boolean) => ({ status: r.status, confirmation_id: r.confirmation_id, result_id: r.result_id, reference: r.result_ref, extra: r.result_extra, replayed, error_code: r.error_code ?? null, error_message: r.error_message });
+/** The switches, company list and Sales-grant checks every wrapper makes first (refused with 42501 and no ledger row). */
+function gateWrite(w: World, user: string, company: string) {
+  const a = access(w, user, company);
+  if (!a.writes_allowed || !a.company_allowed) return { data: null, error: { message: "JARVIS writes are not available to you for this company", code: "42501" } };
+  if (!grantedCompanies(w, user).has(company)) return { data: null, error: { message: "You do not have Sales access for this company", code: "42501" } };
+  return null;
+}
+/** A used confirmation id returns the ORIGINAL result; another person, company, action, target or values are refused. */
+function replay(w: World, user: string, cid: string, company: string, action: string, target: string, hash: string) {
+  const prior = w.ledger.get(cid);
+  if (!prior) return null;
+  if (prior.user_id !== user || prior.company_id !== company || prior.action_id !== action || prior.target !== target || prior.values_hash !== hash) return { data: null, error: { message: "This confirmation cannot be used for these details", code: "42501" } };
+  return { data: json(prior, true), error: null };
+}
+function ledgerRow(w: World, user: string, cid: string, company: string, action: string, target: string, hash: string, o: Partial<LedgerRow>): LedgerRow {
+  const row: LedgerRow = { confirmation_id: cid, user_id: user, company_id: company, values_hash: hash, status: "done", result_id: null, result_ref: null, error_message: null, action_id: action, target, result_extra: null, error_code: null, ...o };
+  w.ledger.set(cid, row);
+  return row;
+}
+
 function rpc(w: World, user: string, name: string, args: Record<string, unknown>) {
   w.rpcLog.push({ name, args });
   const run = async (): Promise<{ data: unknown; error: { message: string; code?: string } | null }> => {
@@ -133,9 +158,32 @@ function rpc(w: World, user: string, name: string, args: Record<string, unknown>
         w.createdArgs.push(args.p_args as Record<string, unknown>);
         const id = randomUUID(); w.counter += 1; const reference = `OPP-UAE-2026-${String(w.counter).padStart(4, "0")}`;
         w.opps.push(mkOpp({ id, company_id: p.company_id, reference, title: p.title, agency_org_id: p.agency_org_id, client_org_id: p.client_org_id, event_start: p.event_start, location: p.location, technologies: p.technologies, owner_id: user }));
-        w.ledger.set(cid, { confirmation_id: cid, user_id: user, company_id: p.company_id, values_hash: args.p_values_hash as string, status: "done", result_id: id, result_ref: reference, error_message: null });
+        w.ledger.set(cid, { confirmation_id: cid, user_id: user, company_id: p.company_id, values_hash: args.p_values_hash as string, status: "done", result_id: id, result_ref: reference, error_message: null, action_id: "jarvis.sales.enquiry.create_from_brief", target: "new", result_extra: null });
         if (w.createMode === "lost") return { data: null, error: { message: "TypeError: fetch failed" } };
         return { data: { status: "done", confirmation_id: cid, opportunity_id: id, reference, replayed: false, error_message: null }, error: null };
+      }
+      case "jarvis_register_organisation": {
+        const p = args.p_args as { company_id: string; name: string; roles: string[]; country_code: string | null; website: string | null; place: string | null; note: string | null; ack_ids: string[] };
+        const gate = gateWrite(w, user, p.company_id);
+        if (gate) return gate;
+        const cid = args.p_confirmation_id as string;
+        const prior = replay(w, user, cid, p.company_id, "jarvis.sales.organisation.register", "new", args.p_values_hash as string);
+        if (prior) return prior;
+        if (!p.roles || p.roles.length === 0) return { data: null, error: { message: "Choose what kind of organisation it is", code: "22023" } };
+        if (w.createMode === "network") return { data: null, error: { message: "TypeError: fetch failed" } };
+        if (w.createMode === "refuse") return { data: null, error: { message: "No CRM access", code: "42501" } };
+        const hit = w.orgs.filter((o) => !o.archived_at && (o.name_key === key(p.name) || (domainOf(p.website) && o.website_domain === domainOf(p.website))));
+        if (hit.some((o) => !(p.ack_ids ?? []).includes(o.id))) {
+          const row = ledgerRow(w, user, cid, p.company_id, "jarvis.sales.organisation.register", "new", args.p_values_hash as string, { status: "failed", error_code: "JV001", error_message: "A similar organisation (same name or website) already exists. Review the details again." });
+          return { data: json(row, false), error: null };
+        }
+        const org = mkOrg(p.name, p.roles, p.place, p.website);
+        org.country_code = p.country_code;
+        w.orgs.push(org);
+        w.registered.push({ ...p });
+        const row = ledgerRow(w, user, cid, p.company_id, "jarvis.sales.organisation.register", "new", args.p_values_hash as string, { status: "done", result_id: org.id, result_ref: p.name, result_extra: { company_id: p.company_id } });
+        if (w.createMode === "lost") return { data: null, error: { message: "TypeError: fetch failed" } };
+        return { data: json(row, false), error: null };
       }
       default: return { data: null, error: { message: `unexpected rpc ${name}` } };
     }
