@@ -19,10 +19,11 @@ begin
   end if;
 end $$;
 
--- Current signatures first, then the signatures of the earlier draft of this migration (never applied hosted; dropped here only so a database that ever had them is left clean).
+-- Current signatures first (and the earlier, eight-argument register-organisation signature that carried the unsigned acknowledgement), then the signatures of the earlier draft of this migration (never applied hosted; dropped here only so a database that ever had them is left clean).
 drop function if exists jarvis_record_meeting(uuid, uuid, text, integer, bigint, text, text);
 drop function if exists jarvis_change_stage(uuid, uuid, text, integer, bigint, text, text);
 drop function if exists jarvis_update_enquiry(uuid, uuid, text, integer, bigint, text, text);
+drop function if exists jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text);
 drop function if exists jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text, jsonb);
 drop function if exists jarvis_create_enquiry(uuid, uuid, text, integer, bigint, text, text);
 drop function if exists jarvis_verify_proof(text, uuid, uuid, text, integer, bigint, text, text);

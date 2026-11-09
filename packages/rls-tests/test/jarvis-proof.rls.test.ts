@@ -1,16 +1,19 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
-import { callArgs, PROOF_KEY, proofCall, sha256Hex, wrapperSql, type ProofCall } from "../src/jarvis-proof";
+import { callArgs, deriveProofKey, deriveReviewKey, PROOF_KEY, proofCall, proofText, reviewCall, sha256Hex, wrapperSql, type ProofCall } from "../src/jarvis-proof";
 
 // THE CONFIRMATION BOUNDARY, proved against a real Postgres (migration 20261223000100_jarvis_platform.sql). Fictional data only.
 //
-// The defect this closes: the confirmation token used to be checked only in the app server, so an eligible pilot person could call a JARVIS wrapper straight through the API with a
-// confirmation id and hash they made up, and write something nobody reviewed. Now EVERY write wrapper first verifies, inside the database, a keyed MAC that only the app server can
-// issue (the key is a row nobody but the database's own functions can read). Every test below calls the wrapper DIRECTLY as an eligible pilot person (pilot on, Sales grant, correct
-// company), the way an attacker with a session token would, and checks that nothing is written when the proof is not a genuine, current proof of exactly this call.
+// The defects this closes: (1) the confirmation token used to be checked only in the app server, so an eligible pilot person could call a JARVIS wrapper straight through the API with a
+// confirmation id and hash they made up; (2) after that fix the proposal step still returned to the browser the very MAC the database accepts as proof, so a pilot person could take the
+// proposal's token and call a wrapper without the explicit confirmation ever happening; (3) the register-organisation duplicate acknowledgement was outside the signed material.
+// Now there are TWO artefacts: the browser holds a REVIEW TOKEN (review key, domain JARVIS-REVIEW-V1: no wrapper accepts it), and the DATABASE PROOF (proof key derived from the same
+// secret, domain JARVIS-PROOF-V1) exists only inside the server's confirmation request. EVERY write wrapper verifies the proof inside the database; the register wrapper reads its
+// acknowledgement only from the verified payload and checks it against what exists. Every test below calls the wrapper DIRECTLY as an eligible pilot person (pilot on, Sales grant,
+// correct company), the way an attacker with a session token would, and checks that nothing is written when the proof is not a genuine, current proof of exactly this call.
 const MIGRATION = "20261223000100_jarvis_platform.sql";
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const id = () => randomUUID();
@@ -24,6 +27,10 @@ const MEETING = "jarvis.sales.meeting.record";
 const SOON = new Date(Date.now() + 2 * 86_400_000).toISOString();
 const VECTORS = JSON.parse(readFileSync(path.resolve(__dirname, "../../../supabase/tests/jarvis-proof-vectors.json"), "utf8")) as {
   secret: string;
+  proofKey: string;
+  reviewKey: string;
+  derivation: { label: string; key: string }[];
+  reviews: { name: string; jti: string; uid: string; co: string; exp: number; act: string; tgt: string; ver: number | null; payloadSha256: string; canonical: string; mac: string }[];
   proofs: { name: string; jti: string; uid: string; co: string; exp: number; act: string; tgt: string; ver: number | null; payload: string; payloadSha256: string; canonical: string; mac: string }[];
   hmac: { key: string; message: string; mac: string }[];
 };
@@ -50,40 +57,40 @@ describe("JARVIS confirmation boundary: server-issued proof verified inside the 
 
   /** One entry per write wrapper: how to build a VALID call for it and a different (also signed) payload for the "values changed" cases. */
   interface Kind {
-    name: string; fn: string; action: string; extra: string; versioned: boolean;
+    name: string; fn: string; action: string; versioned: boolean;
     /** A fresh, valid call as `user` would be approved by the server. */
     make(user: string, o?: { jti?: string; expires?: number; key?: string }): Promise<{ call: ProofCall; params: unknown[]; target: string }>;
     /** The same call, signed for a DIFFERENT payload (not the one that is sent). */
     altPayload(call: ProofCall): string;
   }
-  const orgPayload = (over: Record<string, unknown> = {}) => ({ company_id: CO.uae, name: `Fictional Org ${randomBytes(4).toString("hex")}`, roles: ["agency"], country_code: "AE", website: null, place: "Dubai", note: null, ...over });
+  const orgPayload = (over: Record<string, unknown> = {}) => ({ acknowledged_org_ids: [], company_id: CO.uae, name: `Fictional Org ${randomBytes(4).toString("hex")}`, roles: ["agency"], country_code: "AE", website: null, place: "Dubai", note: null, ...over });
   const createPayload = (over: Record<string, unknown> = {}) => ({
     company_id: CO.uae, title: `Fictional LED wall ${randomBytes(3).toString("hex")}`, source: "whatsapp", next_title: "Call to qualify the brief", next_due: SOON, next_kind: "call",
     agency_org_id: agencyId, client_org_id: clientId, currency: "AED", value: 45000, brief: "SECRET-BRIEF-TEXT-1234", location: "Harbour Hall", technologies: [{ name: "LED wall", qty: 2 }], ...over,
   });
   const KINDS: Kind[] = [
     {
-      name: "create an enquiry", fn: "jarvis_create_enquiry", action: CREATE, extra: "", versioned: false,
+      name: "create an enquiry", fn: "jarvis_create_enquiry", action: CREATE, versioned: false,
       make: async (user, o = {}) => { const call = proofCall({ user, company: CO.uae, action: CREATE, target: "new", payload: createPayload(), ...o }); return { call, params: callArgs(call), target: "new" }; },
       altPayload: (c) => j({ ...JSON.parse(c.payload), title: "A different title nobody reviewed" }),
     },
     {
-      name: "register an organisation", fn: "jarvis_register_organisation", action: REGISTER, extra: ", $8::jsonb", versioned: false,
-      make: async (user, o = {}) => { const call = proofCall({ user, company: CO.uae, action: REGISTER, target: "new", payload: orgPayload(), ...o }); return { call, params: [...callArgs(call), "[]"], target: "new" }; },
+      name: "register an organisation", fn: "jarvis_register_organisation", action: REGISTER, versioned: false,
+      make: async (user, o = {}) => { const call = proofCall({ user, company: CO.uae, action: REGISTER, target: "new", payload: orgPayload(), ...o }); return { call, params: callArgs(call), target: "new" }; },
       altPayload: (c) => j({ ...JSON.parse(c.payload), name: "A Different Organisation Nobody Reviewed" }),
     },
     {
-      name: "update an enquiry", fn: "jarvis_update_enquiry", action: UPDATE, extra: "", versioned: true,
+      name: "update an enquiry", fn: "jarvis_update_enquiry", action: UPDATE, versioned: true,
       make: async (user, o = {}) => { const oid = await newEnquiry(); const call = proofCall({ user, company: CO.uae, action: UPDATE, target: oid, version: await versionOf(oid), payload: { location: "Marina Arena", scope: "Supply and operate" }, ...o }); return { call, params: callArgs(call), target: oid }; },
       altPayload: (c) => j({ ...JSON.parse(c.payload), location: "Somewhere nobody reviewed" }),
     },
     {
-      name: "change an enquiry's stage", fn: "jarvis_change_stage", action: STAGE, extra: "", versioned: true,
+      name: "change an enquiry's stage", fn: "jarvis_change_stage", action: STAGE, versioned: true,
       make: async (user, o = {}) => { const oid = await newEnquiry(); const call = proofCall({ user, company: CO.uae, action: STAGE, target: oid, version: await versionOf(oid), payload: { to: "qualified" }, ...o }); return { call, params: callArgs(call), target: oid }; },
       altPayload: () => j({ to: "negotiation" }),
     },
     {
-      name: "record a meeting", fn: "jarvis_record_meeting", action: MEETING, extra: "", versioned: false,
+      name: "record a meeting", fn: "jarvis_record_meeting", action: MEETING, versioned: false,
       make: async (user, o = {}) => {
         const oid = await newEnquiry();
         const payload = { activity: { kind: "meeting", body: "SECRET-MEETING-NOTES-4242 agreed two LED walls", occurred_at: null, internal: false }, follow_up: { title: "Send the proposal", due_at: new Date(Date.now() + 3 * 86_400_000).toISOString(), kind: "proposal" } };
@@ -93,7 +100,7 @@ describe("JARVIS confirmation boundary: server-issued proof verified inside the 
       altPayload: (c) => j({ ...JSON.parse(c.payload), activity: { ...JSON.parse(c.payload).activity, body: "Notes nobody reviewed" } }),
     },
   ];
-  const send = (kind: Kind, user: string, params: unknown[]) => commit<{ r: Record<string, unknown> }>(user, wrapperSql(kind.fn, kind.extra), params);
+  const send = (kind: Kind, user: string, params: unknown[]) => commit<{ r: Record<string, unknown> }>(user, wrapperSql(kind.fn), params);
   const POS = { jti: 0, company: 1, target: 2, version: 3, expires: 4, mac: 5, payload: 6 } as const;
   const sameWorld = async (before: Record<string, string>) => expect(await world()).toEqual(before);
 
@@ -144,9 +151,15 @@ describe("JARVIS confirmation boundary: server-issued proof verified inside the 
       expect((await rejection(admin(`select jarvis_set_proof_key(null)`))).code).toBe("22023");
       await admin(`select jarvis_set_proof_key('${PROOF_KEY}')`);
       expect((await admin(`select count(*)::int n from jarvis_proof_key`))[0]).toEqual({ n: 1 });
+      // the database stores ONLY the derived proof key (hex), never the root secret, and never the review key
+      const stored = (await admin<{ secret: string }>(`select secret from jarvis_proof_key`))[0].secret;
+      expect(stored).toBe(deriveProofKey(PROOF_KEY).toString("hex"));
+      expect(stored).not.toBe(PROOF_KEY);
+      expect(stored).not.toBe(deriveReviewKey(PROOF_KEY).toString("hex"));
       const info = ((await db.seed(pack("jarvis_20_verify_readonly.sql"))).rows as { item: string; result: string }[]).find((r) => r.item.includes("confirmation proof key"));
       expect(info?.result).toMatch(/^set \(since /);
       expect(JSON.stringify(info)).not.toContain(PROOF_KEY);
+      expect(JSON.stringify(info)).not.toContain(deriveProofKey(PROOF_KEY).toString("hex"));
     });
     it("the key cannot be read by signed-in people or anon: not the table, not the proof functions, not jarvis_my_access, not any pack output", async () => {
       for (const u of [U.sara, U.founder, U.outsider, null]) {
@@ -161,8 +174,13 @@ describe("JARVIS confirmation boundary: server-issued proof verified inside the 
       expect(JSON.stringify(access)).not.toContain(PROOF_KEY);
       // the key appears in no ledger row, no wrapper result, no pack result
       const dump = JSON.stringify([await admin(`select * from jarvis_action_ledger`), await admin(`select * from jarvis_my_access()`)]);
-      expect(dump).not.toContain(PROOF_KEY);
-      for (const f of ["jarvis_00_preflight_readonly.sql", "jarvis_05_preservation_check_readonly.sql", "jarvis_20_verify_readonly.sql"]) expect(JSON.stringify((await db.seed(pack(f))).rows)).not.toContain(PROOF_KEY);
+      for (const secret of [PROOF_KEY, deriveProofKey(PROOF_KEY).toString("hex"), deriveReviewKey(PROOF_KEY).toString("hex")]) {
+        expect(dump).not.toContain(secret);
+        for (const f of ["jarvis_00_preflight_readonly.sql", "jarvis_05_preservation_check_readonly.sql", "jarvis_20_verify_readonly.sql"]) expect(JSON.stringify((await db.seed(pack(f))).rows)).not.toContain(secret);
+      }
+      // the review key is not in the database at all: no function text and no table row mentions it
+      expect((await admin<{ n: string }>(`select count(*)::text n from pg_proc where proname like 'jarvis\\_%' and prosrc like '%JARVIS-REVIEW%'`))[0].n).toBe("0");
+      expect((await admin<{ n: string }>(`select count(*)::text n from jarvis_proof_key where secret = '${deriveReviewKey(PROOF_KEY).toString("hex")}'`))[0].n).toBe("0");
     });
     it("the platform service role cannot read or call the key machinery either", async () => {
       const rows = await admin<{ a: boolean; b: boolean; c: boolean; d: boolean }>(`select has_table_privilege('service_role', 'public.jarvis_proof_key', 'select') a,
@@ -174,6 +192,7 @@ describe("JARVIS confirmation boundary: server-issued proof verified inside the 
       const rows = (await db.seed(pack("jarvis_20_verify_readonly.sql"))).rows as { item: string; result: string }[];
       expect(rows.filter((r) => !r.item.startsWith("INFORMATION") && r.result !== "OK")).toEqual([]);
       expect(rows.filter((r) => r.item.startsWith("THE CONFIRMATION BOUNDARY")).length).toBe(5);
+      expect(rows.filter((r) => r.item.startsWith("NO UNSIGNED WRITE PARAMETERS")).length).toBe(5);
     });
   });
 
@@ -185,14 +204,38 @@ describe("JARVIS confirmation boundary: server-issued proof verified inside the 
         expect(r[0].mac, `${v.key.length}/${v.message.length}`).toBe(v.mac);
       }
     });
-    it("the test-side signer reproduces the vector MACs (so the signer used in these tests is the documented one)", () => {
+    it("both key derivations agree: SQL (jarvis_set_proof_key stores HMAC(secret, 'JARVIS-PROOF-KEY-V1') as hex) = Node = the vectors; the review key is a different value the database never computes", async () => {
+      expect(deriveProofKey(VECTORS.secret).toString("hex")).toBe(VECTORS.proofKey);
+      expect(deriveReviewKey(VECTORS.secret).toString("hex")).toBe(VECTORS.reviewKey);
+      expect(VECTORS.proofKey).not.toBe(VECTORS.reviewKey);
+      for (const d of VECTORS.derivation) {
+        const r = await admin<{ k: string }>(`select encode(jarvis_hmac_sha256(convert_to($$${VECTORS.secret}$$, 'UTF8'), convert_to('${d.label}', 'UTF8')), 'hex') as k`);
+        expect(r[0].k, d.label).toBe(d.key);
+      }
+      const original = (await admin<{ secret: string }>(`select secret from jarvis_proof_key`))[0].secret;
+      await admin(`select jarvis_set_proof_key('${VECTORS.secret}')`);
+      try {
+        expect((await admin<{ secret: string }>(`select secret from jarvis_proof_key`))[0].secret).toBe(VECTORS.proofKey);
+      } finally {
+        await admin(`update jarvis_proof_key set secret = '${original}'`);
+      }
+    });
+    it("the test-side signers reproduce the vector MACs: the proof MAC (proof key, JARVIS-PROOF-V1) and the review MAC (review key, JARVIS-REVIEW-V1), and the two always differ", () => {
       for (const p of VECTORS.proofs) {
         expect(sha256Hex(p.payload)).toBe(p.payloadSha256);
         const c = proofCall({ user: p.uid, company: p.co, action: p.act, target: p.tgt, version: p.ver, payload: p.payload, jti: p.jti, expires: p.exp, key: VECTORS.secret });
         expect(c.mac, p.name).toBe(p.mac);
+        expect(proofText({ jti: p.jti, user: p.uid, company: p.co, action: p.act, target: p.tgt, version: p.ver, expires: p.exp, payload: p.payload })).toBe(p.canonical);
+      }
+      for (const [i, r] of VECTORS.reviews.entries()) {
+        const p = VECTORS.proofs[i]!;
+        const c = reviewCall({ user: r.uid, company: r.co, action: r.act, target: r.tgt, version: r.ver, payload: p.payload, jti: r.jti, expires: r.exp, key: VECTORS.secret });
+        expect(c.mac, r.name).toBe(r.mac);
+        expect(r.mac).not.toBe(p.mac);
+        expect(r.canonical.split("\n")[0]).toBe("JARVIS-REVIEW-V1");
       }
     });
-    it("jarvis_verify_proof accepts EXACTLY the vector proofs (same canonical text, same MAC) and returns the payload hash; any one-character change is refused", async () => {
+    it("jarvis_verify_proof accepts EXACTLY the vector proofs (same canonical text, same MAC) and returns the payload hash; any one-character change is refused; the vector REVIEW MACs are refused as proofs", async () => {
       const original = (await admin<{ secret: string }>(`select secret from jarvis_proof_key`))[0].secret;
       await admin(`select jarvis_set_proof_key('${VECTORS.secret}')`);
       try {
@@ -203,16 +246,18 @@ describe("JARVIS confirmation boundary: server-issued proof verified inside the 
             return r[1]!.rows[0]!.h;
           } catch (e) { return (e as { code?: string }).code ?? "error"; } finally { await db.seed(`select set_config('request.jwt.claims', '', false)`); }
         };
-        for (const p of VECTORS.proofs) {
+        for (const [i, p] of VECTORS.proofs.entries()) {
           expect(await verify(p.uid, p), p.name).toBe(p.payloadSha256);
           const flipped = `${p.mac.slice(0, -1)}${p.mac.endsWith("0") ? "1" : "0"}`;
           expect(await verify(p.uid, { ...p, mac: flipped }), `${p.name} (mac)`).toBe("JV002");
           expect(await verify(p.uid, { ...p, payload: `${p.payload} ` }), `${p.name} (payload)`).toBe("JV002");
           expect(await verify(p.uid, { ...p, exp: p.exp + 1 }), `${p.name} (expiry)`).toBe("JV002");
           expect(await verify(U.sara, p), `${p.name} (another person)`).toBe("JV002");
+          // the browser's review token for the very same fields: its MAC is refused by the database
+          expect(await verify(p.uid, { ...p, mac: VECTORS.reviews[i]!.mac }), `${p.name} (review MAC as proof)`).toBe("JV002");
         }
       } finally {
-        await admin(`select jarvis_set_proof_key('${original}')`);
+        await admin(`update jarvis_proof_key set secret = '${original}'`);
       }
     });
   });
@@ -224,9 +269,7 @@ describe("JARVIS confirmation boundary: server-issued proof verified inside the 
       const before = await world();
       for (const mac of [randomBytes(32).toString("hex"), "0".repeat(64), sha256Hex(call.payload), "f".repeat(64)]) {
         const params = callArgs({ ...call, jti: id(), mac });
-        params.length = 7;
-        const full = k.extra ? [...params, "[]"] : params;
-        expect((await rejection(send(k, U.sara, full))).code).toBe("JV002");
+        expect((await rejection(send(k, U.sara, params))).code).toBe("JV002");
       }
       // the earlier shape (confirmation id, hash, payload) does not exist any more
       expect((await rejection(commit(U.sara, `select ${k.fn}('${id()}', '${sha256Hex("x")}', '{}'::jsonb)`))).code).toBe("42883");
@@ -265,7 +308,7 @@ describe("JARVIS confirmation boundary: server-issued proof verified inside the 
       expect((await rejection(send(k, U.sara, p))).code).toBe("JV002");
       const signedForKsa = proofCall({ user: U.sara, company: CO.ksa, action: k.action, target: call.target, version: call.version, payload: call.payload });
       const q = callArgs(signedForKsa); q[POS.company] = CO.uae; // the MAC says KSA, the call says UAE
-      expect((await rejection(send(k, U.sara, k.extra ? [...q, "[]"] : q))).code).toBe("JV002");
+      expect((await rejection(send(k, U.sara, q))).code).toBe("JV002");
       await sameWorld(before);
     });
     it("(4c) a proof for ANOTHER ACTION is refused here (a proof for action A cannot be used with wrapper B)", async () => {
@@ -273,8 +316,7 @@ describe("JARVIS confirmation boundary: server-issued proof verified inside the 
       const before = await world();
       for (const other of KINDS.filter((x) => x.action !== k.action)) {
         const wrong = proofCall({ user: U.sara, company: CO.uae, action: other.action, target: call.target, version: call.version, payload: call.payload, jti: id() });
-        const params = callArgs(wrong);
-        expect((await rejection(send(k, U.sara, k.extra ? [...params, "[]"] : params))).code, `${other.action} -> ${k.action}`).toBe("JV002");
+        expect((await rejection(send(k, U.sara, callArgs(wrong)))).code, `${other.action} -> ${k.action}`).toBe("JV002");
       }
       await sameWorld(before);
     });
@@ -344,13 +386,12 @@ describe("JARVIS confirmation boundary: server-issued proof verified inside the 
       expect((await rejection(send(k, U.omar, params))).code).toBe("JV002");
     });
     it("the existing CRM permission rules still run inside, unchanged: a pilot person WITHOUT a Sales grant for the company is refused with a valid proof for them, nothing written", async () => {
-      const { call, params } = await k.make(U.sara);
+      const { call } = await k.make(U.sara);
       const before = await world();
       const own = proofCall({ user: U.noGrant, company: CO.uae, action: k.action, target: call.target, version: call.version, payload: call.payload });
       const p = callArgs(own);
-      const e = await rejection(send(k, U.noGrant, k.extra ? [...p, "[]"] : p));
+      const e = await rejection(send(k, U.noGrant, p));
       expect(["42501", "P0002"]).toContain(e.code);
-      void params;
       await sameWorld(before);
     });
   });
@@ -434,7 +475,7 @@ describe("JARVIS confirmation boundary: server-issued proof verified inside the 
     it("an ineligible person (not on the pilot list) is refused even with a valid proof for them", async () => {
       const call = proofCall({ user: U.outsider, company: CO.uae, action: REGISTER, target: "new", payload: orgPayload() });
       const before = await world();
-      expect((await rejection(commit(U.outsider, wrapperSql("jarvis_register_organisation", ", $8::jsonb"), [...callArgs(call), "[]"]))).code).toBe("42501");
+      expect((await rejection(commit(U.outsider, wrapperSql("jarvis_register_organisation"), callArgs(call)))).code).toBe("42501");
       await sameWorld(before);
     });
   });

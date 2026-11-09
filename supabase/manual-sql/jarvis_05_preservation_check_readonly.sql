@@ -1,6 +1,6 @@
 -- READ-ONLY. Run BEFORE the migration 20261223000100_jarvis_platform.sql, and again AFTER it. Compare the two results row by row.
 -- Every row must be IDENTICAL before and after EXCEPT the rows marked "(INTENDED TO CHANGE)": the new jarvis_* tables and functions (absent before, present after).
--- The migration adds objects only (the proof key table and the proof functions among them): it must not change any existing function (above all the crm_* functions JARVIS calls unchanged), any enquiry, follow-up, activity,
+-- The migration adds objects only (the proof key table, the proof/derivation helpers and the five wrappers among them; their definitions are the rows "definition of ..."): it must not change any existing function (above all the crm_* functions JARVIS calls unchanged), any enquiry, follow-up, activity,
 -- timeline event, organisation, account profile or Sales grant. Run it TWICE before the migration (the two results must match: nothing else is changing the data meanwhile).
 select item, n, fingerprint from (
   select 1 as ord, 'function ' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as item,
@@ -18,6 +18,9 @@ select item, n, fingerprint from (
          (select count(*)::text from pg_proc where pronamespace = 'public'::regnamespace and proname = f), '-'
     from unnest(array['jarvis_my_access', 'jarvis_usage_take', 'jarvis_create_enquiry', 'jarvis_ledger_json', 'jarvis_ledger_enter', 'jarvis_ledger_done', 'jarvis_ledger_fail',
                     'jarvis_register_organisation', 'jarvis_update_enquiry', 'jarvis_change_stage', 'jarvis_record_meeting', 'jarvis_hmac_sha256', 'jarvis_verify_proof', 'jarvis_set_proof_key']) f
+  union all select 2, 'definition of ' || f || ' (INTENDED TO CHANGE: absent before; after, this is the fingerprint of the wrapper / proof helper as installed: a later release that changes it changes this row)',
+         '-', coalesce((select md5(string_agg(md5(pg_get_functiondef(p.oid)), ',' order by p.oid::text)) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f), '-')
+    from unnest(array['jarvis_create_enquiry', 'jarvis_register_organisation', 'jarvis_update_enquiry', 'jarvis_change_stage', 'jarvis_record_meeting', 'jarvis_verify_proof', 'jarvis_hmac_sha256', 'jarvis_set_proof_key']) f
   union all select 3, 'enquiries (every column)', count(*)::text, coalesce(md5(string_agg(o::text, ',' order by id)), '-') from crm_opportunities o
   union all select 4, 'follow-ups (every column)', count(*)::text, coalesce(md5(string_agg(f::text, ',' order by id)), '-') from crm_follow_ups f
   union all select 5, 'timeline events (every column)', count(*)::text, coalesce(md5(string_agg(e::text, ',' order by id)), '-') from crm_opportunity_events e

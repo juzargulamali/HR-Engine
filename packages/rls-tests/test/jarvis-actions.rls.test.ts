@@ -61,12 +61,11 @@ describe("JARVIS part 2: write wrappers", () => {
   // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
   describe("jarvis_register_organisation", () => {
     const ACT = "jarvis.sales.organisation.register";
-    const args = (over: Record<string, unknown> = {}) => ({ company_id: CO.uae, name: "Fictional Lantern Events", roles: ["agency"], country_code: "AE", website: "https://www.lantern-events.example/about", place: "Dubai", note: "SECRET-NOTE-TEXT-777", ack_ids: [], ...over });
-    /** `ack_ids` travel separately from the signed payload (see the wrapper's comment); everything else is the signed payload. `as` = who presents the proof (default: who it was signed for). */
+    const args = (over: Record<string, unknown> = {}) => ({ company_id: CO.uae, name: "Fictional Lantern Events", roles: ["agency"], country_code: "AE", website: "https://www.lantern-events.example/about", place: "Dubai", note: "SECRET-NOTE-TEXT-777", acknowledged_org_ids: [], ...over });
+    /** The acknowledgement (`acknowledged_org_ids`) is part of the SIGNED payload text: there is no other parameter. `as` = who presents the proof (default: who it was signed for). */
     const reg = (user: string, conf: string, a: Record<string, unknown> = args(), o: { as?: string; company?: string } = {}) => {
-      const { ack_ids, ...payload } = a;
-      const c = proofCall({ user, company: o.company ?? (typeof a.company_id === "string" ? a.company_id : CO.uae), action: ACT, target: "new", payload, jti: conf });
-      return commit<{ r: Record<string, unknown> }>(o.as ?? user, wrapperSql("jarvis_register_organisation", ", $8::jsonb"), [...callArgs(c), j(ack_ids ?? [])]);
+      const c = proofCall({ user, company: o.company ?? (typeof a.company_id === "string" ? a.company_id : CO.uae), action: ACT, target: "new", payload: a, jti: conf });
+      return commit<{ r: Record<string, unknown> }>(o.as ?? user, wrapperSql("jarvis_register_organisation"), callArgs(c));
     };
     const orgCount = async (name?: string) => Number((await admin<{ n: string }>(`select count(*)::text n from crm_organisations ${name ? `where name = '${name}'` : ""}`))[0].n);
     type R = { status: string; result_id: string | null; reference: string | null; extra: { company_id: string } | null; replayed: boolean; error_code: string | null; error_message: string | null };
@@ -110,24 +109,21 @@ describe("JARVIS part 2: write wrappers", () => {
       expect((await rejection(reg(U.sara, conf, args({ name: "Fictional Bound Studio", website: null, place: "Elsewhere" })))).code).toBe("42501");
       expect(await orgCount()).toBe(n);
     });
-    it("a same-name or same-website organisation that was not named as different is refused (recorded failed once, replayed, nothing created); naming it lets the save through", async () => {
+    it("a same-name or same-website organisation that was not named as different is refused with NOTHING written (no organisation, no ledger row); naming exactly it lets the save through", async () => {
       const existing = (await admin<{ id: string }>(`select id from crm_organisations where name = 'Fictional Lantern Events' limit 1`))[0].id;
       const n = await orgCount();
       const conf = id();
       const r = (await reg(U.sara, conf, args({ name: "FICTIONAL LANTERN EVENTS L.L.C", website: null })))[0].r as R;
       expect(r.status).toBe("done"); // 'LLC' changes the normalised name: not the same name
+      const l = await ledgerCount();
       const same = args({ name: "fictional lantern events", website: null });
-      const f = (await reg(U.sara, id(), same))[0].r as R;
-      expect(f).toMatchObject({ status: "failed", error_code: "JV001", result_id: null });
-      expect(f.error_message).toMatch(/similar organisation/);
-      const byDomain = (await reg(U.sara, id(), args({ name: "A Completely Different Name", website: "http://lantern-events.example/" })))[0].r as R;
-      expect(byDomain).toMatchObject({ status: "failed", error_code: "JV001" });
+      const e1 = await rejection(reg(U.sara, id(), same));
+      expect(e1.code).toBe("JV001");
+      expect(e1.message).toMatch(/similar organisation/);
+      expect((await rejection(reg(U.sara, id(), args({ name: "A Completely Different Name", website: "http://lantern-events.example/" })))).code).toBe("JV001");
       expect(await orgCount()).toBe(n + 1);
-      const conf2 = id();
-      const failed = (await reg(U.sara, conf2, same))[0].r as R;
-      expect(failed.status).toBe("failed");
-      expect((await reg(U.sara, conf2, same))[0].r).toMatchObject({ status: "failed", replayed: true });
-      const ok = (await reg(U.sara, id(), args({ name: "fictional lantern events", website: null, ack_ids: [existing] })))[0].r as R;
+      expect(await ledgerCount()).toBe(l);
+      const ok = (await reg(U.sara, id(), args({ name: "fictional lantern events", website: null, acknowledged_org_ids: [existing] })))[0].r as R;
       expect(ok.status).toBe("done");
       expect(await orgCount()).toBe(n + 2);
     });

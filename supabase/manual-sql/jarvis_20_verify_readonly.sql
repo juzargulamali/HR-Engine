@@ -28,7 +28,7 @@ select item, result from (
   union all select 7, 'function ' || f || ' exists, SECURITY DEFINER with a fixed search_path',
          case when exists (select 1 from pg_proc where oid = to_regprocedure('public.' || f) and prosecdef and exists (select 1 from unnest(proconfig) c where c = 'search_path=public')) then 'OK' else 'MISSING or wrong shape' end
     from unnest(array['jarvis_my_access(uuid)', 'jarvis_usage_take(integer)', 'jarvis_create_enquiry(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_ledger_enter(uuid, text, text, uuid, text)',
-                      'jarvis_ledger_done(uuid, uuid, text, jsonb)', 'jarvis_ledger_fail(uuid, text, text)', 'jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text, jsonb)',
+                      'jarvis_ledger_done(uuid, uuid, text, jsonb)', 'jarvis_ledger_fail(uuid, text, text)', 'jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text)',
                       'jarvis_update_enquiry(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_change_stage(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_record_meeting(uuid, uuid, text, integer, bigint, text, text)',
                       'jarvis_verify_proof(text, uuid, uuid, text, integer, bigint, text, text)']) f
   union all select 8, 'signed-in users can call ' || f || '; anon and public cannot',
@@ -36,7 +36,7 @@ select item, result from (
                 and has_function_privilege('authenticated', to_regprocedure('public.' || f)::oid, 'execute')
                 and not has_function_privilege('anon', to_regprocedure('public.' || f)::oid, 'execute')
                 and not exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where p.oid = to_regprocedure('public.' || f) and a.grantee = 0) then 'OK' else 'FAIL - privileges differ' end
-    from unnest(array['jarvis_my_access(uuid)', 'jarvis_usage_take(integer)', 'jarvis_create_enquiry(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text, jsonb)', 'jarvis_update_enquiry(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_change_stage(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_record_meeting(uuid, uuid, text, integer, bigint, text, text)']) f
+    from unnest(array['jarvis_my_access(uuid)', 'jarvis_usage_take(integer)', 'jarvis_create_enquiry(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_update_enquiry(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_change_stage(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_record_meeting(uuid, uuid, text, integer, bigint, text, text)']) f
   union all select 8, 'the internal helper ' || f || ' is NOT callable by signed-in users, anon, public or the platform service role (only the wrappers, which run as their owner, use it; the key setter is for the owner only)',
          case when to_regprocedure('public.' || f) is not null
                 and not has_function_privilege('authenticated', to_regprocedure('public.' || f)::oid, 'execute')
@@ -48,9 +48,9 @@ select item, result from (
   union all select 9, 'jarvis_create_enquiry calls the EXISTING crm_create_opportunity and checks the write switch, the Sales grant and the ledger (definition text)',
          case when exists (select 1 from pg_proc where proname = 'jarvis_create_enquiry' and pronamespace = 'public'::regnamespace
                               and prosrc like '%crm_create_opportunity(%' and prosrc like '%crm_has_access(p_company)%' and prosrc like '%pg_advisory_xact_lock%' and prosrc like '%writes_allowed%') then 'OK' else 'WRONG TEXT' end
-  union all select 9, 'jarvis_register_organisation calls the EXISTING crm_create_organisation_profile and the ledger helpers, and refuses a same-name or same-website organisation that was not acknowledged (definition text)',
+  union all select 9, 'jarvis_register_organisation calls the EXISTING crm_create_organisation_profile and the ledger helpers, reads the duplicate acknowledgement ONLY from the verified payload (acknowledged_org_ids; no p_ack) and requires it to equal the same-name or same-website organisations that exist now (definition text)',
          case when exists (select 1 from pg_proc where proname = 'jarvis_register_organisation' and pronamespace = 'public'::regnamespace
-                              and prosrc like '%crm_create_organisation_profile(%' and prosrc like '%jarvis_ledger_enter(%' and prosrc like '%crm_import_candidates(%' and prosrc like '%p_ack%') then 'OK' else 'WRONG TEXT' end
+                              and prosrc like '%crm_create_organisation_profile(%' and prosrc like '%jarvis_ledger_enter(%' and prosrc like '%crm_import_candidates(%' and prosrc like '%acknowledged_org_ids%' and prosrc like '%JV001%' and prosrc not like '%p_ack%') then 'OK' else 'WRONG TEXT' end
   union all select 9, 'jarvis_update_enquiry calls the EXISTING crm_update_opportunity with the expected version, only for the allowlisted fields (definition text)',
          case when exists (select 1 from pg_proc where proname = 'jarvis_update_enquiry' and pronamespace = 'public'::regnamespace
                               and prosrc like '%crm_update_opportunity(%' and prosrc like '%p_version%' and prosrc like '%v_allowed%' and prosrc like '%jarvis_ledger_enter(%'
@@ -75,10 +75,22 @@ select item, result from (
          case when exists (select 1 from pg_proc where proname = 'jarvis_verify_proof' and pronamespace = 'public'::regnamespace and prosecdef
                               and prosrc like '%auth.uid()%' and prosrc like '%jarvis_proof_key%' and prosrc like '%jarvis_hmac_sha256(%' and prosrc like '%JARVIS-PROOF-V1%' and prosrc like '%now()%'
                               and prosrc like '%JV004%' and prosrc like '%JV003%' and prosrc like '%JV002%') then 'OK' else 'WRONG TEXT' end
+  union all select 9, 'NO UNSIGNED WRITE PARAMETERS: ' || w.fn || ' takes exactly the seven signed arguments (p_confirmation, p_company, p_target, p_version, p_expires, p_mac, p_payload) and nothing else',
+         case when p.oid is null then 'MISSING'
+              when p.pronargs = 7 and p.proargnames = array['p_confirmation', 'p_company', 'p_target', 'p_version', 'p_expires', 'p_mac', 'p_payload'] and p.prosrc not like '%p_ack%' then 'OK' else 'FAIL - an extra or renamed parameter exists' end
+    from (values ('jarvis_create_enquiry'), ('jarvis_register_organisation'), ('jarvis_update_enquiry'), ('jarvis_change_stage'), ('jarvis_record_meeting')) w(fn)
+    left join pg_proc p on p.proname = w.fn and p.pronamespace = 'public'::regnamespace
+  union all select 9, 'the database never holds or computes the REVIEW key (the key the browser''s review token is made with): no jarvis_* function mentions it, and the stored key is the derived PROOF key only (definition text)',
+         case when not exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'jarvis\_%' and (p.prosrc like '%JARVIS-REVIEW%'))
+               and exists (select 1 from pg_proc where proname = 'jarvis_set_proof_key' and pronamespace = 'public'::regnamespace and prosrc like '%JARVIS-PROOF-KEY-V1%' and prosrc like '%jarvis_hmac_sha256(%')
+               and exists (select 1 from pg_proc where proname = 'jarvis_verify_proof' and pronamespace = 'public'::regnamespace and prosrc like '%decode(v_secret, ''hex'')%') then 'OK' else 'WRONG TEXT' end
+  union all select 9, 'the proof key table is unchanged in shape: one boolean id, one text key (64 hex characters once set) and its timestamp',
+         case when (select string_agg(column_name || ':' || data_type, ',' order by ordinal_position) from information_schema.columns where table_schema = 'public' and table_name = 'jarvis_proof_key') = 'id:boolean,secret:text,set_at:timestamp with time zone'
+               and not exists (select 1 from jarvis_proof_key where secret !~ '^[0-9a-f]{64}$') then 'OK' else 'FAIL - the key table differs, or holds something that is not a derived key' end
   union all select 9, 'signed-in users can execute EXACTLY the seven expected jarvis_* functions (so no old signature that skips the proof is left behind)',
          case when (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'jarvis\_%' and has_function_privilege('authenticated', p.oid, 'execute')) = 7
                and not exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'jarvis\_%' and has_function_privilege('authenticated', p.oid, 'execute')
-                                  and not exists (select 1 from unnest(array['jarvis_my_access(uuid)', 'jarvis_usage_take(integer)', 'jarvis_create_enquiry(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text, jsonb)', 'jarvis_update_enquiry(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_change_stage(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_record_meeting(uuid, uuid, text, integer, bigint, text, text)']) f where to_regprocedure('public.' || f)::oid = p.oid)) then 'OK' else 'FAIL - a different set of jarvis_* functions is callable' end
+                                  and not exists (select 1 from unnest(array['jarvis_my_access(uuid)', 'jarvis_usage_take(integer)', 'jarvis_create_enquiry(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_update_enquiry(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_change_stage(uuid, uuid, text, integer, bigint, text, text)', 'jarvis_record_meeting(uuid, uuid, text, integer, bigint, text, text)']) f where to_regprocedure('public.' || f)::oid = p.oid)) then 'OK' else 'FAIL - a different set of jarvis_* functions is callable' end
   union all select 9, 'no jarvis_* function is callable by anon or public',
          case when not exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'jarvis\_%'
                                   and (has_function_privilege('anon', p.oid, 'execute') or exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where a.grantee = 0))) then 'OK' else 'FAIL - callable' end
