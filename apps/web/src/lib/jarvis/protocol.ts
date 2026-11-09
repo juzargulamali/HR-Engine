@@ -197,4 +197,24 @@ export interface EnquiryUpdateCard {
   valid: boolean;
 }
 
-export type ActionCard = ReplyDraftCard | HelpAnswerCard | OrgRegisterCard | EnquiryUpdateCard;
+/** `jarvis.sales.enquiry.change_stage`: ONE step between the six working stages, with the database's evidence gates shown and kept. */
+export interface StageTransitionView { to: string; toLabel: string; direction: "forward" | "back"; enabled: boolean; reason: string | null }
+export interface StageEvidenceView { label: string; met: boolean | null; text: string }
+export interface StageValues { companyId: string; enquiryId: string; from: string; to: string }
+export interface EnquiryStageCard {
+  kind: "enquiry.stage";
+  enquiry: EnquiryRef & { version: number };
+  from: string; fromLabel: string;
+  /** The proposed stage, or null while the person has not chosen one. */
+  to: string | null; toLabel: string | null;
+  transitions: StageTransitionView[];
+  /** What the chosen move needs and whether it is recorded. */
+  evidence: StageEvidenceView[];
+  /** What the existing move does (and does not do), in words. */
+  effects: string[];
+  values: StageValues | null;
+  problems: CardProblem[];
+  valid: boolean;
+}
+
+export type ActionCard = ReplyDraftCard | HelpAnswerCard | OrgRegisterCard | EnquiryUpdateCard | EnquiryStageCard;

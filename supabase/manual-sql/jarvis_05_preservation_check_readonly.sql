@@ -10,14 +10,14 @@ select item, n, fingerprint from (
      and p.proname in ('crm_create_opportunity', 'crm_has_access', 'crm_has_capability', 'crm_require_user', 'crm_log_event', 'crm_find_duplicate_candidates',
                        'crm_organisation_roles', 'crm_opportunities_check_party_roles', 'crm_user_has_company_access', 'crm_validate_technologies',
                        'crm_create_organisation_profile', 'crm_import_candidates', 'crm_lock_opportunity', 'crm_check_version', 'crm_require_owner_or_founder', 'crm_update_opportunity',
-                       'crm_move_stage', 'crm_add_activity', 'crm_create_follow_up')
+                       'crm_move_stage', 'crm_add_activity', 'crm_create_follow_up', 'crm_stage_index')
   union all select 2, 'new table ' || t || ' (INTENDED TO CHANGE: absent before, present after)',
          (case when to_regclass('public.' || t) is not null then '1' else '0' end), '-'
     from unnest(array['jarvis_settings', 'jarvis_pilot_users', 'jarvis_pilot_companies', 'jarvis_action_ledger', 'jarvis_usage']) t
   union all select 2, 'new function ' || f || ' (INTENDED TO CHANGE: absent before, present after)',
          (select count(*)::text from pg_proc where pronamespace = 'public'::regnamespace and proname = f), '-'
     from unnest(array['jarvis_my_access', 'jarvis_usage_take', 'jarvis_create_enquiry', 'jarvis_ledger_json', 'jarvis_ledger_enter', 'jarvis_ledger_done', 'jarvis_ledger_fail',
-                    'jarvis_register_organisation', 'jarvis_update_enquiry']) f
+                    'jarvis_register_organisation', 'jarvis_update_enquiry', 'jarvis_change_stage']) f
   union all select 3, 'enquiries (every column)', count(*)::text, coalesce(md5(string_agg(o::text, ',' order by id)), '-') from crm_opportunities o
   union all select 4, 'follow-ups (every column)', count(*)::text, coalesce(md5(string_agg(f::text, ',' order by id)), '-') from crm_follow_ups f
   union all select 5, 'timeline events (every column)', count(*)::text, coalesce(md5(string_agg(e::text, ',' order by id)), '-') from crm_opportunity_events e

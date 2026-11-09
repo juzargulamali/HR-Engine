@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
-import type { ActionCard, ActionConfirmResult, ConfirmationView, EnquiryUpdateCard, HelpAnswerCard, OrgRegisterCard, OrgRole, OrgValues, ReplyDraftCard, SendResult, StatusResult, UpdateForm } from "@/lib/jarvis/protocol";
+import type { ActionCard, ActionConfirmResult, ConfirmationView, EnquiryStageCard, EnquiryUpdateCard, HelpAnswerCard, OrgRegisterCard, OrgRole, OrgValues, ReplyDraftCard, SendResult, StatusResult, UpdateForm } from "@/lib/jarvis/protocol";
 
 /** What the cards of the other actions call. Each is a server action that re-authorises the person on every call; this file decides nothing about access. */
 export interface ActionApi {
@@ -33,6 +33,7 @@ export function ActionCardView(p: ActionCardProps) {
     case "reply.draft": return <ReplyDraftView card={p.state.card} companyStale={p.companyStale} />;
     case "help.answer": return <HelpAnswerView card={p.state.card} />;
     case "org.register": return <OrgRegisterView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
+    case "enquiry.stage": return <StageView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
     case "enquiry.update": return <UpdateView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
     default: return null;
   }
@@ -370,6 +371,52 @@ function UpdateView(p: ActionCardProps & { card: EnquiryUpdateCard; confirmation
       ) : null}
       <SaveBox actionId={p.actionId} companyId={p.companyId} confirmation={confirmation} values={card.values} canSave={canSave} label="Save changes" busyLabel="Saving…" api={p.api} testId="save-update" onSettled={setSaved} />
       {confirmation && card.valid && !dirty && !saved ? <p className="text-[11px] text-muted-foreground">This review is for version {card.enquiry.version} of the enquiry. If anyone changes it first you will be asked to review again. Valid until {new Date(confirmation.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.</p> : null}
+    </section>
+  );
+}
+
+
+/** Change status: current and proposed stage, the evidence the stage needs, what changes, and the ONE button that moves it. Disabled moves say why. */
+function StageView(p: ActionCardProps & { card: EnquiryStageCard; confirmation: ConfirmationView | null }) {
+  const { card, confirmation } = p;
+  const [saved, setSaved] = useState(false);
+  const { busy, error, run } = usePropose(p);
+  const canSave = card.valid && !!confirmation && !p.companyStale;
+  if (p.companyStale && !saved) return <Alert variant="warning">The company changed after this review, so it can no longer be used. Ask again for the new company.</Alert>;
+  return (
+    <section aria-label="Review the stage change" className="space-y-3 rounded-lg border border-border bg-card p-3 text-sm" data-testid="jarvis-stage-card">
+      <header className="space-y-1">
+        <h3 className="font-heading text-sm font-semibold">Review before the stage changes</h3>
+        <p className="text-xs text-muted-foreground"><Link href={`/sales/opportunities/${card.enquiry.id}`} className="font-medium text-foreground underline underline-offset-2">{card.enquiry.reference}</Link> · {card.enquiry.title}. Nothing moves until you press Move.</p>
+      </header>
+      <p className="flex flex-wrap items-center gap-2" data-testid="stage-from-to">
+        <span className="rounded-md border border-border bg-field px-2 py-1 font-medium">{card.fromLabel}</span>
+        <span aria-hidden>→</span>
+        {card.toLabel ? <span className="rounded-md border border-border bg-field px-2 py-1 font-medium">{card.toLabel}</span> : <span className="text-muted-foreground">choose a stage below</span>}
+      </p>
+      <div className="space-y-1" role="group" aria-label="Stages you can move to">
+        <p className="text-xs font-medium">One step at a time:</p>
+        <ul className="space-y-1">
+          {card.transitions.map((t) => (
+            <li key={t.to} className="flex flex-wrap items-start gap-2 text-xs" data-testid={`transition-${t.to}`} data-enabled={t.enabled}>
+              <Button type="button" size="sm" variant={card.to === t.to ? "secondary" : "outline"} disabled={!t.enabled || busy || saved} aria-pressed={card.to === t.to}
+                onClick={() => void run({ mode: "propose", enquiryId: card.enquiry.id, to: t.to })}>{t.direction === "back" ? "Back to " : "Forward to "}{t.toLabel}</Button>
+              {!t.enabled && t.reason ? <span className="min-w-0 flex-1 pt-1 text-muted-foreground">{t.reason}</span> : null}
+            </li>
+          ))}
+        </ul>
+      </div>
+      {card.evidence.length > 0 ? (
+        <ul className="space-y-1 text-xs" data-testid="stage-evidence">
+          {card.evidence.map((e) => <li key={e.label}><strong>{e.label}:</strong> <span className={e.met === false ? "text-destructive" : "text-muted-foreground"}>{e.text}</span></li>)}
+        </ul>
+      ) : null}
+      {card.problems.length > 0 ? <p className="text-xs text-muted-foreground" data-testid="card-missing">{card.problems.map((x) => x.message).join(" ")}</p> : null}
+      <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground" data-testid="stage-effects">{card.effects.map((x) => <li key={x}>{x}</li>)}</ul>
+      <p className="text-[11px] text-muted-foreground">Won, Lost, On hold, reopening and handover are not available through JARVIS: use the buttons on the enquiry page.</p>
+      {error ? <Alert variant="destructive" role="alert">{error}</Alert> : null}
+      <SaveBox actionId={p.actionId} companyId={p.companyId} confirmation={confirmation} values={card.values} canSave={canSave} label={card.toLabel ? `Move to ${card.toLabel}` : "Move"} busyLabel="Moving…" api={p.api} testId="save-stage" onSettled={setSaved} />
+      {confirmation && card.valid && !saved ? <p className="text-[11px] text-muted-foreground">This review is for version {card.enquiry.version}. If anyone changes the enquiry first you will be asked to review again.</p> : null}
     </section>
   );
 }

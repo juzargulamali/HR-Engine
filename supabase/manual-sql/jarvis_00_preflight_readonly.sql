@@ -11,7 +11,7 @@ select section, item, detail from (
   union all select 'B prerequisites', 200 + row_number() over (order by f), 'function ' || f,
          case when exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname = f) then 'OK' else 'MISSING - install the earlier Sales migrations first' end
     from unnest(array['crm_create_opportunity', 'crm_has_access', 'crm_require_user', 'crm_log_event', 'crm_find_duplicate_candidates', 'crm_organisation_roles', 'crm_opportunities_check_party_roles',
-                      'crm_create_organisation_profile', 'crm_import_candidates', 'crm_lock_opportunity', 'crm_check_version', 'crm_require_owner_or_founder', 'crm_update_opportunity', 'crm_move_stage', 'crm_add_activity', 'crm_create_follow_up', 'crm_user_has_company_access']) f
+                      'crm_create_organisation_profile', 'crm_import_candidates', 'crm_lock_opportunity', 'crm_check_version', 'crm_require_owner_or_founder', 'crm_update_opportunity', 'crm_move_stage', 'crm_stage_index', 'crm_add_activity', 'crm_create_follow_up', 'crm_user_has_company_access']) f
   union all select 'B prerequisites', 250, 'crm_create_opportunity has the 21-argument signature the wrapper calls by name',
          case when to_regprocedure('public.crm_create_opportunity(uuid, text, text, text, timestamptz, uuid, uuid, uuid, text, numeric, text, text, date, date, date, text, jsonb, text, text, jsonb, text)') is not null
               then 'OK' else 'UNEXPECTED - the function differs from the one this change expects. Do not continue; send this result.' end

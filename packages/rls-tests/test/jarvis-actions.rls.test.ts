@@ -176,7 +176,7 @@ describe("JARVIS part 2: write wrappers", () => {
       expect(r.extra).toMatchObject({ company_id: CO.uae, version: v + 1, fields: ["event_start", "location", "technologies"] });
       expect(await opp(oid)).toMatchObject({ location: "Marina Arena", event_start: "2026-12-10", version: v + 1, stage: "new", owner_id: U.sara, value: null, technologies: [{ name: "LED wall", qty: 3 }] });
       const ev = await events(oid);
-      expect(ev.filter((e) => e.kind === "details_changed").map((e) => [e.from_value, e.to_value])).toEqual([[null, "event_start, location, technologies"], ["jarvis", "update"]]);
+      expect(ev.filter((e) => e.kind === "details_changed").map((e) => `${e.from_value}|${e.to_value}`).sort()).toEqual(["jarvis|update", "null|event_start, location, technologies"]);
       expect(ev.find((e) => e.from_value === "jarvis")).toMatchObject({ actor_id: U.sara, reason: "event_start, location, technologies" });
       const led = (await admin<Record<string, unknown>>(`select action_id, target, status, result_id, result_extra from jarvis_action_ledger where confirmation_id = '${conf}'`))[0];
       expect(led).toMatchObject({ action_id: "jarvis.sales.enquiry.update", target: oid, status: "done", result_id: oid });
@@ -286,6 +286,143 @@ describe("JARVIS part 2: write wrappers", () => {
       expect((await rejection(upd(U.sara, conf, oid, v, { scope: "Bound scope" }, sha("other")))).code).toBe("42501");
       const other = await newEnquiry(U.sara, "Another one");
       expect((await rejection(upd(U.sara, conf, other, Number((await opp(other)).version), { scope: "Bound scope" }))).code).toBe("42501");
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+  describe("jarvis_change_stage", () => {
+    const hash = () => sha(`stage ${id()}`);
+    const move = (user: string, conf: string, oid: string, to: string, version: number | null, h = HASH_S) =>
+      commit<{ r: Record<string, unknown> }>(user, `select jarvis_change_stage($1::uuid, $2, $3::uuid, $4, $5::integer) as r`, [conf, h, oid, to, version]);
+    const HASH_S = sha("stage values A");
+    type R = { status: string; result_id: string | null; extra: { company_id: string; version: number; from: string; to: string } | null; replayed: boolean; error_code: string | null; error_message: string | null };
+    const ver = async (oid: string) => Number((await opp(oid)).version);
+    const step = async (user: string, oid: string, to: string) => (await move(user, id(), oid, to, await ver(oid), hash()))[0].r as R;
+    const sentProposal = async (user: string, oid: string, status = "sent") => {
+      const pid = (await commit<{ id: string }>(user, `select crm_add_proposal($1::uuid, 'Fictional proposal note') as id`, [oid]))[0].id;
+      await commit(user, `select crm_set_proposal_status($1::uuid, $2, current_date)`, [pid, status]);
+    };
+
+    it("every UNGATED one-step move works, forward and back, through the EXISTING crm_move_stage: version +1, the usual stage line and the JARVIS line, a ledger row", async () => {
+      await ensureOrgs();
+      const oid = await newEnquiry(U.sara);
+      const v = await ver(oid);
+      const conf = id();
+      const r = (await move(U.sara, conf, oid, "qualified", v))[0].r as R;
+      expect(r).toMatchObject({ status: "done", replayed: false, result_id: oid });
+      expect(r.extra).toMatchObject({ company_id: CO.uae, version: v + 1, from: "new", to: "qualified" });
+      expect(await opp(oid)).toMatchObject({ stage: "qualified", version: v + 1 });
+      const ev = await events(oid);
+      expect(ev.find((e) => e.kind === "stage_changed")).toMatchObject({ from_value: "new", to_value: "qualified", actor_id: U.sara });
+      expect(ev.find((e) => e.from_value === "jarvis")).toMatchObject({ kind: "details_changed", to_value: "stage", reason: "new>qualified", actor_id: U.sara });
+      expect((await admin<Record<string, unknown>>(`select action_id, target, status from jarvis_action_ledger where confirmation_id = '${conf}'`))[0]).toMatchObject({ action_id: "jarvis.sales.enquiry.change_stage", target: oid, status: "done" });
+      expect((await step(U.sara, oid, "proposal_prep")).status).toBe("done");
+      expect((await step(U.sara, oid, "qualified")).status).toBe("done");
+      expect((await step(U.sara, oid, "new")).status).toBe("done");
+      expect(await opp(oid)).toMatchObject({ stage: "new" });
+      expect((await admin(`select 1 from crm_follow_ups where opportunity_id = '${oid}' and status = 'open'`)).length).toBe(1); // the open follow-up is untouched
+    });
+    it("PROPOSAL SENT: refused without a recorded sent proposal (a draft does not count, recorded failed once, nothing moves); allowed once one is recorded as sent", async () => {
+      const oid = await newEnquiry(U.sara);
+      await step(U.sara, oid, "qualified"); await step(U.sara, oid, "proposal_prep");
+      const conf = id();
+      const f = (await move(U.sara, conf, oid, "proposal_sent", await ver(oid)))[0].r as R;
+      expect(f).toMatchObject({ status: "failed", error_code: "23514" });
+      expect(f.error_message).toMatch(/Record a proposal as sent/);
+      expect((await opp(oid)).stage).toBe("proposal_prep");
+      await commit(U.sara, `select crm_add_proposal($1::uuid, 'draft only')`, [oid]);
+      expect(((await step(U.sara, oid, "proposal_sent")) as R).status).toBe("failed");
+      await sentProposal(U.sara, oid);
+      expect(((await step(U.sara, oid, "proposal_sent")) as R).status).toBe("done");
+      expect((await opp(oid)).stage).toBe("proposal_sent");
+      expect(((await move(U.sara, conf, oid, "proposal_sent", 1))[0].r as R)).toMatchObject({ status: "failed", replayed: true });
+    });
+    it("QUOTE SENT: refused without the Zoho quote reference (blank does not count); allowed with it; negotiation then needs nothing", async () => {
+      const oid = await newEnquiry(U.sara);
+      for (const to of ["qualified", "proposal_prep"]) await step(U.sara, oid, to);
+      await sentProposal(U.sara, oid);
+      await step(U.sara, oid, "proposal_sent");
+      const f = await step(U.sara, oid, "quote_sent");
+      expect(f).toMatchObject({ status: "failed", error_code: "23514" });
+      expect(f.error_message).toMatch(/Zoho Books quote reference/);
+      await commit(U.sara, `select crm_upsert_zoho_reference($1::uuid, p_quote_ref => 'QT-FICTIONAL-1')`, [oid]);
+      expect((await step(U.sara, oid, "quote_sent")).status).toBe("done");
+      expect((await step(U.sara, oid, "negotiation")).status).toBe("done");
+      expect((await step(U.sara, oid, "quote_sent")).status).toBe("done"); // back into a gated stage: its evidence still exists
+      expect((await opp(oid)).stage).toBe("quote_sent");
+    });
+    it("what JARVIS never offers is refused by the wrapper before the ledger: skips, two steps back, On hold, Won, Lost, unknown stages; nothing changes", async () => {
+      const oid = await newEnquiry(U.sara);
+      const before = await opp(oid); const l = await ledgerCount();
+      for (const to of ["proposal_prep", "negotiation", "on_hold", "won", "lost", "bogus", "new"]) expect((await rejection(move(U.sara, id(), oid, to, await ver(oid)))).code, to).toBe("22023");
+      await step(U.sara, oid, "qualified"); await step(U.sara, oid, "proposal_prep");
+      expect((await rejection(move(U.sara, id(), oid, "new", await ver(oid)))).code).toBe("22023");
+      await step(U.sara, oid, "qualified"); await step(U.sara, oid, "new");
+      expect(await opp(oid)).toMatchObject({ stage: before.stage });
+      expect(await ledgerCount()).toBe(l + 4);
+    });
+    it("an on-hold, won or lost enquiry cannot be moved: the existing function refuses (recorded failed), Won/Lost/hold forms are the only way", async () => {
+      const lost = await newEnquiry(U.sara);
+      await commit(U.sara, `select crm_mark_lost($1::uuid, 'Event cancelled')`, [lost]);
+      expect(await step(U.sara, lost, "qualified")).toMatchObject({ status: "failed", error_code: "23514" });
+      const held = await newEnquiry(U.sara);
+      await commit(U.sara, `select crm_hold_opportunity($1::uuid, 'Client postponed event', (current_date + 10))`, [held]);
+      const f = await step(U.sara, held, "qualified");
+      expect(f.status).toBe("failed");
+      expect(f.error_message).toMatch(/Resume the opportunity/);
+      expect((await opp(held)).stage).toBe("on_hold");
+    });
+    it("STALE version is refused by the existing rule; N parallel calls with one confirmation id move it exactly ONCE; a repeat returns the original although the stage moved on", async () => {
+      const oid = await newEnquiry(U.sara);
+      const v = await ver(oid);
+      await step(U.sara, oid, "qualified");
+      const f = (await move(U.sara, id(), oid, "proposal_prep", v))[0].r as R;
+      expect(f).toMatchObject({ status: "failed", error_code: "40001" });
+      const oid2 = await newEnquiry(U.sara);
+      const v2 = await ver(oid2);
+      const conf = id();
+      const rs = (await Promise.all(Array.from({ length: 12 }, () => move(U.sara, conf, oid2, "qualified", v2)))).map((x) => x[0].r as R);
+      expect(rs.filter((r) => !r.replayed).length).toBe(1);
+      expect(rs.every((r) => r.status === "done")).toBe(true);
+      expect((await opp(oid2)).version).toBe(v2 + 1);
+      expect((await events(oid2)).filter((e) => e.from_value === "jarvis")).toHaveLength(1);
+      await step(U.sara, oid2, "proposal_prep");
+      expect((await move(U.sara, conf, oid2, "qualified", v2))[0].r).toMatchObject({ status: "done", replayed: true });
+      expect((await opp(oid2)).stage).toBe("proposal_prep");
+    });
+    it("the owner-or-founder rule applies: a colleague is refused (recorded failed, nothing moves); the founder may move another person's enquiry", async () => {
+      const oid = await newEnquiry(U.sara);
+      expect(await step(U.omar, oid, "qualified")).toMatchObject({ status: "failed", error_code: "42501" });
+      expect((await opp(oid)).stage).toBe("new");
+      expect((await step(U.founder, oid, "qualified")).status).toBe("done");
+    });
+    it("cannot bypass visibility or switches: no grant, another company, a forged id, revoked grant, JARVIS or writes off; no ledger row, nothing moves", async () => {
+      const oid = await newEnquiry(U.sara);
+      const v = await ver(oid);
+      const before = await opp(oid); const l = await ledgerCount();
+      expect((await rejection(move(U.noGrant, id(), oid, "qualified", v))).code).toBe("P0002");
+      expect((await rejection(move(U.ksaStaff, id(), oid, "qualified", v))).code).toBe("P0002");
+      expect((await rejection(move(U.sara, id(), id(), "qualified", v))).code).toBe("P0002");
+      expect((await rejection(move(U.sara, id(), oid, "qualified", null))).code).toBe("22023");
+      await admin(`update jarvis_settings set writes_enabled = false`);
+      expect((await rejection(move(U.sara, id(), oid, "qualified", v))).code).toBe("42501");
+      await admin(`update jarvis_settings set writes_enabled = true, enabled = false`);
+      expect((await rejection(move(U.sara, id(), oid, "qualified", v))).code).toBe("42501");
+      await admin(`update jarvis_settings set enabled = true`);
+      await admin(`update crm_company_grants set revoked_at = now() where user_id = '${U.sara}'`);
+      expect((await rejection(move(U.sara, id(), oid, "qualified", v))).code).toBe("P0002");
+      await admin(`update crm_company_grants set revoked_at = null where user_id = '${U.sara}'`);
+      expect(await opp(oid)).toEqual(before);
+      expect(await ledgerCount()).toBe(l);
+    });
+    it("another person, another enquiry or different reviewed values on a used confirmation id are refused", async () => {
+      const oid = await newEnquiry(U.sara);
+      const conf = id();
+      await move(U.sara, conf, oid, "qualified", await ver(oid));
+      expect((await rejection(move(U.founder, conf, oid, "qualified", 1))).code).toBe("42501");
+      expect((await rejection(move(U.sara, conf, oid, "qualified", 1, sha("different")))).code).toBe("42501");
+      const other = await newEnquiry(U.sara);
+      expect((await rejection(move(U.sara, conf, other, "qualified", await ver(other)))).code).toBe("42501");
     });
   });
 });

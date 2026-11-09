@@ -12,7 +12,7 @@ vi.mock("@/lib/actions/jarvis", () => ({ jarvisSend: vi.fn(), jarvisContext: vi.
 
 import { JarvisLauncher, type JarvisClientApi } from "./jarvis-launcher";
 import { JarvisMark } from "./jarvis-mark";
-import type { ActionConfirmResult, ConfirmResult, EnquiryCard, EnquiryValues, EnquiryUpdateCard, OrgRegisterCard, ReplyDraftCard, SendResult, StatusResult } from "@/lib/jarvis/protocol";
+import type { ActionConfirmResult, ConfirmResult, EnquiryCard, EnquiryValues, EnquiryStageCard, EnquiryUpdateCard, OrgRegisterCard, ReplyDraftCard, SendResult, StatusResult } from "@/lib/jarvis/protocol";
 
 const CO1 = "11111111-1111-4111-8111-111111111111";
 const CO2 = "22222222-2222-4222-8222-222222222222";
@@ -567,5 +567,52 @@ describe("update an enquiry", () => {
     await open(empty);
     expect(screen.getByTestId("update-nothing")).toBeTruthy();
     expect((screen.getByTestId("save-update") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+const STG_ID = "jarvis.sales.enquiry.change_stage";
+const stageCard = (over: Partial<EnquiryStageCard> = {}): EnquiryStageCard => ({
+  kind: "enquiry.stage", enquiry: { id: ENQ, reference: "OPP-UAE-2026-0007", title: "Harbour gala LED wall", stage: "new", stageLabel: "New enquiry", companyId: CO1, version: 5 }, from: "new", fromLabel: "New enquiry", to: "qualified", toLabel: "Qualified",
+  transitions: [{ to: "qualified", toLabel: "Qualified", direction: "forward", enabled: true, reason: null }, { to: "proposal_sent", toLabel: "Proposal sent", direction: "forward", enabled: false, reason: "That skips stages. JARVIS moves one step at a time." }],
+  evidence: [{ label: "Evidence", met: true, text: "This move needs no extra evidence." }], effects: ["The enquiry moves to the new stage."], values: { companyId: CO1, enquiryId: ENQ, from: "new", to: "qualified" }, problems: [], valid: true, ...over,
+});
+const stageResult = (c: EnquiryStageCard, confirmation: ReturnType<typeof conf> | null = conf("s-1")): SendResult => ({ ok: true, kind: "action", actionId: STG_ID, card: c, confirmation });
+
+describe("change status", () => {
+  async function open(api: ReturnType<typeof fakeApi>) {
+    mount(api, { enabledActionIds: [...IDS, STG_ID] });
+    openPanel();
+    fireEvent.click(screen.getByTestId("mode-stage"));
+    fireEvent.change(screen.getByLabelText("Paste a brief or ask a question"), { target: { value: "move to qualified" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByTestId("jarvis-stage-card");
+  }
+  it("shows current -> proposed, the evidence and effects, disabled moves with their reason, and moves once", async () => {
+    const api = fakeApi({ send: async () => stageResult(stageCard()), confirmAction: async (): Promise<ActionConfirmResult> => ({ ok: true, status: "done", confirmationId: "s-1", actionId: STG_ID, reference: "OPP-UAE-2026-0007", href: `/sales/opportunities/${ENQ}`, summary: "OPP-UAE-2026-0007 was moved from New enquiry to Qualified, and you approved it.", replayed: false }) });
+    await open(api);
+    expect(screen.getByTestId("stage-from-to").textContent).toMatch(/New enquiry.*Qualified/);
+    expect(screen.getByTestId("transition-proposal_sent").textContent).toMatch(/skips stages/);
+    expect((within(screen.getByTestId("transition-proposal_sent")).getByRole("button") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("stage-evidence").textContent).toMatch(/no extra evidence/);
+    expect(screen.getByText(/Won, Lost, On hold, reopening and handover are not available/)).toBeTruthy();
+    const save = screen.getByTestId("save-stage");
+    fireEvent.click(save); fireEvent.click(save);
+    expect((await screen.findByTestId("jarvis-result")).textContent).toMatch(/moved from New enquiry to Qualified/);
+    expect(api.calls.confirmAction).toHaveLength(1);
+  });
+  it("choosing a stage asks the server (no write); without a valid choice Move stays disabled; a stale refusal is shown", async () => {
+    const api = fakeApi({
+      send: async () => stageResult(stageCard({ to: null, toLabel: null, values: null, valid: false, problems: [{ field: "to", message: "Choose the stage to move it to." }] }), null),
+      act: async () => stageResult(stageCard()),
+      confirmAction: async (): Promise<ActionConfirmResult> => ({ ok: false, code: "needs_review", message: "This enquiry was changed by someone else after you reviewed it. Review the details again before moving it." }),
+    });
+    await open(api);
+    expect((screen.getByTestId("save-stage") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(screen.getByTestId("transition-qualified")).getByRole("button"));
+    await waitFor(() => expect(api.calls.act).toHaveLength(1));
+    expect(api.calls.act[0]![0]).toMatchObject({ actionId: STG_ID, input: { mode: "propose", enquiryId: ENQ, to: "qualified" } });
+    await waitFor(() => expect((screen.getByTestId("save-stage") as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByTestId("save-stage"));
+    expect((await screen.findByTestId("card-failed")).textContent).toMatch(/changed by someone else/);
   });
 });

@@ -52,6 +52,11 @@ export interface World {
   registered: Record<string, unknown>[];
   /** What the update wrapper applied. */
   updates: { id: string; patch: Record<string, unknown>; version: number }[];
+  /** Evidence rows the stage gates read, and the moves the stage wrapper applied. */
+  proposals: { opportunity_id: string; status: string }[];
+  zoho: { opportunity_id: string; quote_ref: string | null }[];
+  moves: { id: string; from: string; to: string; version: number }[];
+  evidenceFails: boolean;
   counter: number;
 }
 
@@ -61,7 +66,7 @@ export function newWorld(): World {
     signedIn: ID.u1, settings: { enabled: true, writes: true }, pilot: new Set([ID.u1, ID.u2, ID.u3]), pilotCompanies: new Set(),
     grants: [{ user_id: ID.u1, company_id: ID.co1, capabilities: [], revoked_at: null }, { user_id: ID.u1, company_id: ID.co2, capabilities: [], revoked_at: null }, { user_id: ID.u2, company_id: ID.co2, capabilities: [], revoked_at: null }],
     companies: [{ id: ID.co1, legal_name: "Fictional Enginious UAE LLC" }, { id: ID.co2, legal_name: "Fictional Enginious KSA LLC" }],
-    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], readLog: [], createdArgs: [], registered: [], updates: [], counter: 0,
+    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], readLog: [], createdArgs: [], registered: [], updates: [], proposals: [], zoho: [], moves: [], evidenceFails: false, counter: 0,
   };
 }
 
@@ -75,6 +80,8 @@ function table(w: World, user: string, name: string): Row[] {
     case "companies": return w.companies as unknown as Row[];
     case "crm_organisations": return has.size > 0 ? (w.orgs as unknown as Row[]) : [];
     case "crm_opportunities": return w.opps.filter((o) => has.has(o.company_id)) as unknown as Row[];
+    case "crm_proposals": return w.proposals.filter((p) => w.opps.some((o) => o.id === p.opportunity_id && has.has(o.company_id))) as unknown as Row[];
+    case "crm_zoho_references": return w.zoho.filter((p) => w.opps.some((o) => o.id === p.opportunity_id && has.has(o.company_id))) as unknown as Row[];
     case "jarvis_action_ledger": return [...w.ledger.values()].filter((l) => l.user_id === user) as unknown as Row[];
     default: return [];
   }
@@ -83,7 +90,7 @@ function table(w: World, user: string, name: string): Row[] {
 function builder(w: World, user: string, name: string) {
   w.readLog.push(name);
   let rows = table(w, user, name).slice();
-  let error: { message: string; code?: string } | null = name === "crm_organisations" && w.orgReadFails ? { message: "organisations unreadable" } : null;
+  let error: { message: string; code?: string } | null = (name === "crm_organisations" && w.orgReadFails) || ((name === "crm_proposals" || name === "crm_zoho_references") && w.evidenceFails) ? { message: "unreadable" } : null;
   const api = {
     select() { return api; },
     eq(c: string, v: unknown) { rows = rows.filter((r) => r[c] === v); return api; },
@@ -163,6 +170,35 @@ function rpc(w: World, user: string, name: string, args: Record<string, unknown>
         w.ledger.set(cid, { confirmation_id: cid, user_id: user, company_id: p.company_id, values_hash: args.p_values_hash as string, status: "done", result_id: id, result_ref: reference, error_message: null, action_id: "jarvis.sales.enquiry.create_from_brief", target: "new", result_extra: null });
         if (w.createMode === "lost") return { data: null, error: { message: "TypeError: fetch failed" } };
         return { data: { status: "done", confirmation_id: cid, opportunity_id: id, reference, replayed: false, error_message: null }, error: null };
+      }
+      case "jarvis_change_stage": {
+        const opp = w.opps.find((o) => o.id === args.p_enquiry_id);
+        const has = grantedCompanies(w, user);
+        if (!opp || !has.has(opp.company_id)) return { data: null, error: { message: "Opportunity not found", code: "P0002" } };
+        const ORDER = ["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation"];
+        const to = args.p_to as string;
+        const i = ORDER.indexOf(opp.stage); const j = ORDER.indexOf(to);
+        if (args.p_expected_version == null) return { data: null, error: { message: "The confirmation is incomplete", code: "22023" } };
+        const gate = gateWrite(w, user, opp.company_id);
+        if (gate) return gate;
+        const cid = args.p_confirmation_id as string;
+        const prior = replay(w, user, cid, opp.company_id, "jarvis.sales.enquiry.change_stage", opp.id, args.p_values_hash as string);
+        if (prior) return prior;
+        if (j < 0) return { data: null, error: { message: "JARVIS cannot move an enquiry to that stage", code: "22023" } };
+        if (i >= 0 && Math.abs(j - i) !== 1) return { data: null, error: { message: "JARVIS moves an enquiry one step at a time", code: "22023" } };
+        if (w.createMode === "network") return { data: null, error: { message: "TypeError: fetch failed" } };
+        const fail = (code: string, message: string) => ({ data: json(ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.enquiry.change_stage", opp.id, args.p_values_hash as string, { status: "failed", error_code: code, error_message: message }), false), error: null });
+        const founder = w.grants.some((g) => g.user_id === user && g.company_id === opp.company_id && !g.revoked_at && g.capabilities.includes("founder"));
+        if ((opp.version ?? 1) !== args.p_expected_version) return fail("40001", "This opportunity was changed by someone else. Reload and try again.");
+        if (opp.owner_id !== user && !founder) return fail("42501", "Only the owner of this opportunity or a founder can do this");
+        if (i < 0) return fail("23514", "A closed opportunity cannot change stage");
+        if (to === "proposal_sent" && !w.proposals.some((p) => p.opportunity_id === opp.id && ["sent", "accepted"].includes(p.status))) return fail("23514", "Record a proposal as sent before moving to Proposal sent");
+        if (to === "quote_sent" && !w.zoho.some((p) => p.opportunity_id === opp.id && (p.quote_ref ?? "").trim())) return fail("23514", "Record the Zoho Books quote reference before moving to Quote sent");
+        w.moves.push({ id: opp.id, from: opp.stage, to, version: args.p_expected_version as number });
+        const from = opp.stage; opp.stage = to; opp.version = (opp.version ?? 1) + 1;
+        const row = ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.enquiry.change_stage", opp.id, args.p_values_hash as string, { status: "done", result_id: opp.id, result_ref: opp.reference, result_extra: { company_id: opp.company_id, version: opp.version, from, to } });
+        if (w.createMode === "lost") return { data: null, error: { message: "TypeError: fetch failed" } };
+        return { data: json(row, false), error: null };
       }
       case "jarvis_update_enquiry": {
         const patch = args.p_patch as Record<string, unknown>;

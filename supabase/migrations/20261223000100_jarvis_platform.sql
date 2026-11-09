@@ -428,8 +428,58 @@ begin
 end;
 $$;
 
-revoke all on function jarvis_my_access(uuid), jarvis_usage_take(integer), jarvis_create_enquiry(uuid, text, jsonb), jarvis_register_organisation(uuid, text, jsonb), jarvis_update_enquiry(uuid, text, uuid, integer, jsonb) from public, anon;
-grant execute on function jarvis_my_access(uuid), jarvis_usage_take(integer), jarvis_create_enquiry(uuid, text, jsonb), jarvis_register_organisation(uuid, text, jsonb), jarvis_update_enquiry(uuid, text, uuid, integer, jsonb) to authenticated;
+-- -----------------------------------------------------------------------------
+-- Change an enquiry's stage through JARVIS, exactly once per confirmation id (jarvis.sales.enquiry.change_stage).
+--   * The move is made by the EXISTING crm_move_stage under the caller's own identity: it locks the enquiry, checks the expected VERSION, requires the owner or a founder, refuses a
+--     closed or on-hold enquiry, and keeps its two evidence gates (Proposal sent needs a proposal recorded as sent; Quote sent needs the Zoho Books quote reference). Nothing is bypassed.
+--   * NARROWER than the existing function: only a move of exactly ONE step between the six working stages (new, qualified, proposal_prep, proposal_sent, quote_sent, negotiation) in
+--     either direction. Skipping stages, On hold, Won, Lost, reopen and handover cannot go through this wrapper, whatever the caller sends (they have their own forms and evidence).
+--   * The expected version is required. A repeat with the same confirmation id returns the ORIGINAL result and moves nothing.
+--   * A second timeline line says the move was made through JARVIS and approved by the person (the usual "Stage changed" line is written by the existing function).
+-- Returns the ledger result: {status, result_id (the enquiry), reference, extra{company_id, version, from, to}, replayed, ...}.
+-- -----------------------------------------------------------------------------
+create or replace function jarvis_change_stage(p_confirmation_id uuid, p_values_hash text, p_enquiry_id uuid, p_to text, p_expected_version integer)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v crm_opportunities;
+  v_from integer;
+  v_to integer;
+  v_replay jsonb;
+  v_version integer;
+  v_msg text;
+  v_state text;
+begin
+  if p_enquiry_id is null or p_expected_version is null or p_to is null then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
+  v := crm_lock_opportunity(p_enquiry_id);
+
+  v_replay := jarvis_ledger_enter(p_confirmation_id, p_values_hash, 'jarvis.sales.enquiry.change_stage', v.company_id, p_enquiry_id::text);
+  if v_replay is not null then return v_replay; end if;
+
+  -- Checked AFTER the repeat test on purpose (a repeat of a saved move must return the original result, although the enquiry is now at the new stage). A refusal here rolls
+  -- the whole call back, ledger row included: JARVIS never offers these moves, so nothing is recorded for them.
+  v_from := crm_stage_index(v.stage);
+  v_to := crm_stage_index(p_to);
+  if v_to is null then raise exception 'JARVIS cannot move an enquiry to that stage' using errcode = '22023'; end if;
+  if v_from is not null and abs(v_to - v_from) <> 1 then raise exception 'JARVIS moves an enquiry one step at a time' using errcode = '22023'; end if;
+
+  begin
+    -- A closed or on-hold enquiry has no working stage: the existing function says so in its own words.
+    v_version := crm_move_stage(p_enquiry_id, p_to, p_expected_version);
+    insert into crm_opportunity_events (opportunity_id, company_id, kind, from_value, to_value, reason, actor_id)
+    values (p_enquiry_id, v.company_id, 'details_changed', 'jarvis', 'stage', v.stage || '>' || p_to, auth.uid());
+    return jarvis_ledger_done(p_confirmation_id, p_enquiry_id, v.reference, jsonb_build_object('company_id', v.company_id, 'version', v_version, 'from', v.stage, 'to', p_to));
+  exception when others then
+    get stacked diagnostics v_msg = message_text, v_state = returned_sqlstate;
+    return jarvis_ledger_fail(p_confirmation_id, v_state, v_msg);
+  end;
+end;
+$$;
+
+revoke all on function jarvis_my_access(uuid), jarvis_usage_take(integer), jarvis_create_enquiry(uuid, text, jsonb), jarvis_register_organisation(uuid, text, jsonb), jarvis_update_enquiry(uuid, text, uuid, integer, jsonb), jarvis_change_stage(uuid, text, uuid, text, integer) from public, anon;
+grant execute on function jarvis_my_access(uuid), jarvis_usage_take(integer), jarvis_create_enquiry(uuid, text, jsonb), jarvis_register_organisation(uuid, text, jsonb), jarvis_update_enquiry(uuid, text, uuid, integer, jsonb), jarvis_change_stage(uuid, text, uuid, text, integer) to authenticated;
 -- The internal helpers are NOT callable by anyone through the API (the wrappers above run as their owner and may call them).
 revoke all on function jarvis_ledger_json(jarvis_action_ledger, boolean), jarvis_ledger_enter(uuid, text, text, uuid, text), jarvis_ledger_done(uuid, uuid, text, jsonb), jarvis_ledger_fail(uuid, text, text) from public, anon, authenticated;
 

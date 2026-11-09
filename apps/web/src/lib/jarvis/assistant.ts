@@ -52,7 +52,7 @@ function inputFor(key: JarvisModeKey, text: string, enquiryId: string | null): u
   switch (key) {
     case "reply": return { enquiryId, conversation: text };
     case "update": return { mode: "extract", enquiryId, text };
-    case "stage": return { mode: "propose", enquiryId, text };
+    case "stage": return { mode: "propose", enquiryId, text: text.slice(0, 500) };
     case "meeting": return { mode: "extract", enquiryId, notes: text };
     case "organisation": return { mode: "search", name: organisationNameFromText(text) };
     case "help": return { question: text };
