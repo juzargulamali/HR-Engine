@@ -1808,6 +1808,7 @@ export interface Database {
       crm_remove_file: { Args: { p_file_id: string }; Returns: string | null };
       crm_add_proposal: { Args: { p_opportunity_id: string; p_note?: string | null; p_file_id?: string | null }; Returns: string };
       crm_set_proposal_status: { Args: { p_proposal_id: string; p_status: string; p_sent_on?: string | null }; Returns: undefined };
+      crm_save_zoho_reference: { Args: { p_opportunity_id: string; p_fields: Record<string, unknown>; p_expected?: Record<string, unknown> | null }; Returns: undefined };
       crm_upsert_zoho_reference: {
         Args: {
           p_opportunity_id: string; p_quote_ref?: string | null; p_quote_sent_on?: string | null; p_invoice_ref?: string | null;

@@ -1,13 +1,15 @@
 import { canActOnFollowUp, canAssignOwner, canChangeOpportunityContacts, canConfirmAvailability, canDecideApproval, canEditContactRecord, canEditOpportunity, canReopenClosed, isCrmActive, isCrmClosed, isCrmFounder, type ApprovalPolicy } from "@enginious-hr/domain";
 import { todayInDubai } from "@/components/sales/format";
 import type { CrmContext } from "@/lib/crm/context";
-import type { OpportunityDetail } from "@/lib/crm/data";
+import type { DetailSection, OpportunityDetail } from "@/lib/crm/data";
 import type { CrmFollowUpRow, CrmOpportunityRow } from "@/types/crm";
 import { approvalPolicyOf } from "./helpers";
 
 /** Who may do what on this opportunity, decided once. The database repeats every rule; this only shapes what is offered. */
 export interface OppView {
   detail: OpportunityDetail;
+  /** Sections that could NOT be read: their data in `detail` is empty and must be shown as "could not load", never as "none". Empty when everything loaded. */
+  failed: ReadonlySet<DetailSection>;
   ctx: CrmContext;
   opp: CrmOpportunityRow;
   ownerName: string;
@@ -35,7 +37,12 @@ export interface OppView {
   people: { id: string; name: string }[];
 }
 
-export function buildOppView(ctx: CrmContext, detail: OpportunityDetail): OppView {
+const NOTHING_FAILED: ReadonlySet<DetailSection> = new Set();
+
+/** True when any of the sections could not be read. */
+export const anyFailed = (view: Pick<OppView, "failed">, ...sections: DetailSection[]): boolean => sections.some((s) => view.failed.has(s));
+
+export function buildOppView(ctx: CrmContext, detail: OpportunityDetail, failed: ReadonlySet<DetailSection> = NOTHING_FAILED): OppView {
   const opp = detail.item.opp;
   const ref = { companyId: opp.company_id, ownerId: opp.owner_id };
   const canEdit = canEditOpportunity(ctx.grants, ref, ctx.userId);
@@ -44,7 +51,7 @@ export function buildOppView(ctx: CrmContext, detail: OpportunityDetail): OppVie
   const isLost = opp.stage === "lost";
   const openFollowUps = detail.followUps.filter((f) => f.status === "open");
   return {
-    detail, ctx, opp,
+    detail, failed, ctx, opp,
     ownerName: detail.item.ownerName,
     isOpen: !isCrmClosed(opp.stage),
     isActive: isCrmActive(opp.stage),

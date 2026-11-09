@@ -6,6 +6,7 @@ import { HandoverStatusBadge } from "@/components/projects/badges";
 import { Muted } from "@/components/projects/parts";
 import { formatDateTime } from "@/components/sales/format";
 import { HANDOVER_STATUS_LABELS } from "@enginious-hr/domain";
+import { LoadError } from "@/components/workspace/states";
 import { isNotInstalled } from "@/lib/projects/errors";
 import { createClient } from "@/lib/supabase/server";
 import type { ProjHandoverRow, ProjHandoverStatusRow } from "@/types/projects";
@@ -14,11 +15,13 @@ import { ProjectHandoverForm, WithdrawProjectHandoverForm, type BriefValues } fr
 
 export interface ProjectHandoverState {
   installed: boolean;
+  /** The read itself failed (not "not installed" and not "nothing prepared yet"): nothing about the handover is known, so nothing is offered. */
+  failed?: boolean;
   status: ProjHandoverStatusRow | null;
   row: ProjHandoverRow | null;
 }
 
-/** Reads the Projects handover for an opportunity. A missing table or function reads as "not installed", never as an error page. */
+/** Reads the Projects handover for an opportunity. A missing table or function reads as "not installed"; any OTHER failure is `failed` (never "nothing prepared yet"). */
 export async function loadProjectHandover(opportunityId: string): Promise<ProjectHandoverState> {
   try {
     const supabase = await createClient();
@@ -27,9 +30,14 @@ export async function loadProjectHandover(opportunityId: string): Promise<Projec
       supabase.from("proj_handovers").select("*").eq("crm_opportunity_id", opportunityId).neq("status", "withdrawn").maybeSingle(),
     ]);
     if (isNotInstalled(statusRes.error) || isNotInstalled(rowRes.error)) return { installed: false, status: null, row: null };
+    if (statusRes.error || rowRes.error) {
+      console.error("[crm] project handover read failed", statusRes.error?.message ?? rowRes.error?.message);
+      return { installed: true, failed: true, status: null, row: null };
+    }
     return { installed: true, status: statusRes.data?.[0] ?? null, row: (rowRes.data as ProjHandoverRow | null) ?? null };
-  } catch {
-    return { installed: false, status: null, row: null };
+  } catch (e) {
+    console.error("[crm] project handover read threw", e);
+    return { installed: true, failed: true, status: null, row: null };
   }
 }
 
@@ -48,6 +56,13 @@ export function ProjectHandoverPanel({
     return (
       <Panel title="Project handover (Projects & Tasks)">
         <Muted>Projects &amp; Tasks is not installed in this environment yet, so a project handover cannot be prepared here. The Sales handover above is unaffected.</Muted>
+      </Panel>
+    );
+  }
+  if (state.failed) {
+    return (
+      <Panel title="Project handover (Projects & Tasks)">
+        <LoadError what="the project handover" retryHref={`/sales/opportunities/${opportunityId}/handover`} note="It is not empty: it could not be read, so nothing can be saved, submitted or withdrawn here until it loads." />
       </Panel>
     );
   }

@@ -10,6 +10,7 @@ import type { ActionState } from "./companies";
 import { friendlyCrmError } from "@/lib/crm/errors";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadOrganisations } from "@/lib/crm/data";
+import { diffZohoForm, isMissingDatabaseFunction, ZOHO_FIELDS, ZOHO_FORM_NAMES, ZOHO_SAVE_UNAVAILABLE } from "@/lib/crm/zoho-save";
 
 /**
  * Sales & CRM server actions. Every one is a thin wrapper over a crm_* database function: the function (not this file)
@@ -576,20 +577,33 @@ export async function addLink(_prev: ActionState, formData: FormData): Promise<A
   return { error: null };
 }
 
-const zohoSchema = z.object({
-  id: uuid, quoteRef: optionalText, quoteSentOn: optionalDate, invoiceRef: optionalText, invoiceIssuedOn: optionalDate, paymentReceivedOn: optionalDate, paidAmount: optionalNumber,
-});
+const zohoSchema = z.object({ id: uuid });
+const numberOrBlank = z.string().trim().refine((v) => v === "" || (Number.isFinite(Number(v)) && Number(v) >= 0), "Amount paid must be zero or more");
+const dateOrBlank = z.string().trim().refine((v) => v === "" || /^\d{4}-\d{2}-\d{2}$/.test(v), "Use a valid date");
+
+/**
+ * Saves only what the person CHANGED (see `lib/crm/zoho-save.ts`): an untouched field is left out, an emptied field is an intentional clear, and the
+ * value seen travels with each changed field so a stale edit of the same field is refused. The database merges under a row lock and decides what is allowed
+ * (`crm_save_zoho_reference`: the stale-edit refusal, and that an existing quote reference is not cleared once the enquiry has reached Quote sent).
+ * There is NO fallback: if that function is not installed the save is not attempted any other way, and the person is told plainly that saving is temporarily
+ * unavailable (reading the references is unaffected).
+ */
 export async function saveZohoReference(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const p = zohoSchema.safeParse(Object.fromEntries(formData));
+  const raw = Object.fromEntries(formData);
+  const p = zohoSchema.safeParse(raw);
   if (!p.success) return { error: firstIssue(p.error) };
-  const d = p.data;
+  for (const f of ZOHO_FIELDS) {
+    const v = String(raw[ZOHO_FORM_NAMES[f]] ?? "");
+    const check = (f === "paid_amount" ? numberOrBlank : f.endsWith("_on") ? dateOrBlank : z.string()).safeParse(v);
+    if (!check.success) return { error: firstIssue(check.error) };
+  }
+  const change = diffZohoForm(raw);
+  if (!change) return { error: null, warning: "Nothing was changed, so nothing was saved." };
   const supabase = await createClient();
-  const { error } = await supabase.rpc("crm_upsert_zoho_reference", {
-    p_opportunity_id: d.id, p_quote_ref: d.quoteRef ?? null, p_quote_sent_on: d.quoteSentOn ?? null, p_invoice_ref: d.invoiceRef ?? null,
-    p_invoice_issued_on: d.invoiceIssuedOn ?? null, p_payment_received_on: d.paymentReceivedOn ?? null, p_paid_amount: d.paidAmount ?? null,
-  });
+  const { error } = await supabase.rpc("crm_save_zoho_reference", { p_opportunity_id: p.data.id, p_fields: change.fields, p_expected: change.expected });
+  if (error && isMissingDatabaseFunction(error)) return { error: ZOHO_SAVE_UNAVAILABLE };
   if (error) return fail(error.message);
-  refresh(d.id);
+  refresh(p.data.id);
   return { error: null };
 }
 

@@ -8,7 +8,7 @@ import { estimateNoteText } from "@/lib/crm/quotations/wording";
 import { fileDisplayName, PROPOSAL_STATUS_LABELS, proposalActions } from "./helpers";
 import { Muted, Panel } from "./parts";
 import { AddProposalForm, ProposalStatusButton } from "./proposal-forms";
-import type { OppView } from "./view";
+import { anyFailed, type OppView } from "./view";
 
 /**
  * Proposal versions: built elsewhere (Canva, Word…) and kept here as a recorded file or link. "Sent" is a dated fact
@@ -16,6 +16,10 @@ import type { OppView } from "./view";
  */
 export async function ProposalsPanel({ view }: { view: OppView }) {
   const { detail, ctx, opp, canEdit, isOpen, policy } = view;
+  // Versions, the documents they point to and the latest approval together decide what is shown and offered: any of them failing is "could not load" with no action.
+  if (anyFailed(view, "proposals", "files", "approvals")) {
+    return <LoadError what="the proposal versions" retryHref={`/sales/opportunities/${opp.id}?tab=proposals`} note="Nothing can be added or recorded here until they load: the page would not know the next version number or which version was sent." />;
+  }
   // Estimates built in the app appear here as versions, but an estimate is never an official quotation sent to the client: it carries its own label and no "Record as sent".
   let estimates: Awaited<ReturnType<typeof loadEstimateMarks>>;
   try { estimates = await loadEstimateMarks(detail.proposals.map((p) => p.id)); } catch { return <LoadError what="the proposal versions" retryHref={`/sales/opportunities/${opp.id}?tab=proposals`} />; }

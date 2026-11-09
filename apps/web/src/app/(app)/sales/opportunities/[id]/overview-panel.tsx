@@ -6,7 +6,8 @@ import type { ContactPickerData } from "./contact-helpers";
 import { ContactsPanel } from "./contacts-panel";
 import { FollowUpsPanel } from "./follow-ups-panel";
 import { Fact, Muted, Panel, SubHeading } from "./parts";
-import type { OppView } from "./view";
+import { LoadError } from "@/components/workspace/states";
+import { anyFailed, type OppView } from "./view";
 
 const EVIDENCE = { purchase_order: "Purchase order", authorised_email: "Authorised email" } as const;
 
@@ -35,7 +36,7 @@ export function OverviewPanel({ view, picker = null }: { view: OppView; picker?:
               {item.client?.place ? <p className="break-words text-sm text-muted-foreground">{item.client.place}</p> : null}
             </div>
           </div>
-          <div className="mt-5"><SubHeading>Contacts</SubHeading><div className="mt-2"><ContactsPanel contacts={detail.contacts} manage={{ view, picker }} /></div></div>
+          <div className="mt-5"><SubHeading>Contacts</SubHeading><div className="mt-2">{anyFailed(view, "contacts") ? <LoadError what="the contacts" retryHref={`/sales/opportunities/${opp.id}`} note="Contacts cannot be added or changed until they load." /> : <ContactsPanel contacts={detail.contacts} manage={{ view, picker }} />}</div></div>
         </Panel>
         <FollowUpsPanel view={view} />
       </div>
@@ -59,7 +60,7 @@ export function OverviewPanel({ view, picker = null }: { view: OppView; picker?:
             </Fact>
             <Fact label="Equipment availability"><AvailabilityBadge state={item.availability} /></Fact>
             <Fact label="Commercial approval">
-              <ApprovalBadge policy={policy} latest={detail.approvals[0] ? { state: detail.approvals[0].state } : null} />
+              {anyFailed(view, "approvals") ? <span className="text-sm text-destructive">Could not load the approval history.</span> : <ApprovalBadge policy={policy} latest={detail.approvals[0] ? { state: detail.approvals[0].state } : null} />}
             </Fact>
           </dl>
         </Panel>
@@ -72,7 +73,7 @@ export function OverviewPanel({ view, picker = null }: { view: OppView; picker?:
             <Fact label="Created">{formatDate(opp.created_at)} by {ctx.personName(opp.created_by)}</Fact>
             <Fact label="First response">{opp.first_response_at ? formatDateTime(opp.first_response_at) : "None recorded yet"}</Fact>
             <Fact label="In this stage since">{formatDate(opp.stage_changed_at)}</Fact>
-            {item.nextFollowUp ? <Fact label="Next action">{item.nextFollowUp.title}<br /><DueText dueAt={item.nextFollowUp.due_at} className="whitespace-normal text-sm" /></Fact> : null}
+            {anyFailed(view, "followUps") ? <Fact label="Next action"><span className="text-sm text-destructive">Could not load the follow-ups.</span></Fact> : item.nextFollowUp ? <Fact label="Next action">{item.nextFollowUp.title}<br /><DueText dueAt={item.nextFollowUp.due_at} className="whitespace-normal text-sm" /></Fact> : null}
           </dl>
         </Panel>
       </div>

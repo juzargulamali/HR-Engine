@@ -8,6 +8,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ActionForm, Field } from "@/components/sales/action-form";
 import { Modal } from "@/components/sales/modal";
+import { ZOHO_FIELDS, ZOHO_FORM_NAMES, ZOHO_SEEN_PREFIX } from "@/lib/crm/zoho-save";
 
 export interface ZohoValues {
   quoteRef: string | null;
@@ -21,8 +22,15 @@ export interface ZohoValues {
 /** References typed in by hand. Zoho Books stays the accounting record; nothing here is read from or sent to it. */
 export function ZohoForm({ opportunityId, values, currency }: { opportunityId: string; values: ZohoValues; currency: string }) {
   return (
-    <ActionForm action={saveZohoReference} submitLabel="Save references" className="space-y-4">
+    // The key makes the form start again from the stored values whenever they change (after this person's own save, or a reload showing a colleague's): the fields
+    // on screen and the "seen" values below always come from the SAME read, so a field the person never touched is never mistaken for one they emptied.
+    <ActionForm key={JSON.stringify(values)} action={saveZohoReference} submitLabel="Save references" className="space-y-4">
       <input type="hidden" name="id" value={opportunityId} />
+      {/* What was on screen when the form opened: only a field that differs from it is saved, and the database refuses a stale edit of the same field. */}
+      {ZOHO_FIELDS.map((f) => {
+        const key = ZOHO_FORM_NAMES[f]; const seen = { quote_ref: values.quoteRef, quote_sent_on: values.quoteSentOn, invoice_ref: values.invoiceRef, invoice_issued_on: values.invoiceIssuedOn, payment_received_on: values.paymentReceivedOn, paid_amount: values.paidAmount }[f];
+        return <input key={f} type="hidden" name={ZOHO_SEEN_PREFIX + key} value={seen ?? ""} />;
+      })}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Quote reference (Zoho Books)" htmlFor="z-qref" hint="Needed before the opportunity can move to Quote sent."><Input id="z-qref" name="quoteRef" defaultValue={values.quoteRef ?? ""} /></Field>
         <Field label="Quote sent on" htmlFor="z-qdate"><Input id="z-qdate" name="quoteSentOn" type="date" defaultValue={values.quoteSentOn ?? ""} /></Field>
@@ -31,7 +39,7 @@ export function ZohoForm({ opportunityId, values, currency }: { opportunityId: s
         <Field label="Payment received on" htmlFor="z-pdate"><Input id="z-pdate" name="paymentReceivedOn" type="date" defaultValue={values.paymentReceivedOn ?? ""} /></Field>
         <Field label={`Amount paid (${currency})`} htmlFor="z-paid"><Input id="z-paid" name="paidAmount" type="number" min={0} step="0.01" inputMode="decimal" defaultValue={values.paidAmount ?? ""} /></Field>
       </div>
-      <p className="text-sm text-muted-foreground">Entered by hand from Zoho Books. A quote sent, an invoice issued and a payment received are three separate facts.</p>
+      <p className="text-sm text-muted-foreground">Entered by hand from Zoho Books. A quote sent, an invoice issued and a payment received are three separate facts. Only the fields you change are saved, so a colleague&apos;s change to another field is kept; empty a field to clear it. Once the enquiry has reached Quote sent, the quote reference cannot be cleared: replace it with the correct one instead.</p>
     </ActionForm>
   );
 }

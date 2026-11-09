@@ -3,10 +3,11 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { CRM_EVIDENCE_TYPES, CRM_LOST_REASONS } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
+import { LoadError } from "@/components/workspace/states";
 import { StageBadge } from "@/components/sales/badges";
 import { formatDate, formatMoney, todayInDubai } from "@/components/sales/format";
 import { getCrmContext } from "@/lib/crm/context";
-import { loadOpportunityDetail } from "@/lib/crm/data";
+import { loadOpportunityDetailResult } from "@/lib/crm/data";
 import { buildOppView } from "../view";
 import { CloseForm } from "./close-form";
 
@@ -16,9 +17,27 @@ export default async function CloseOpportunityPage({ params, searchParams }: { p
   const [{ id }, { outcome }] = await Promise.all([params, searchParams]);
   const ctx = await getCrmContext();
   if (!ctx) return null;
-  const detail = await loadOpportunityDetail(ctx, id);
-  if (!detail) notFound();
-  const view = buildOppView(ctx, detail);
+  const result = await loadOpportunityDetailResult(ctx, id);
+  if (result.kind === "not_found") notFound();
+  const heading = <h1 className="text-2xl font-semibold">Close this opportunity</h1>;
+  const backTo = (
+    <Link href={`/sales/opportunities/${id}`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Back to the enquiry
+    </Link>
+  );
+  // The close form (Won or Lost) is built from the enquiry: when it could not be read, nothing is offered. This is not "not found" and not "no access".
+  if (result.kind !== "ok") {
+    return (
+      <div className="space-y-5">
+        <header className="space-y-2">{backTo}{heading}</header>
+        {result.kind === "denied"
+          ? <Alert variant="destructive" role="alert">You do not have access to this enquiry, so it cannot be closed from here.</Alert>
+          : <LoadError what="this enquiry" retryHref={`/sales/opportunities/${id}/close`} note="It cannot be closed from here until it loads. Nothing was changed." />}
+      </div>
+    );
+  }
+  const { detail } = result;
+  const view = buildOppView(ctx, detail, result.failed);
   const { opp } = view;
   const back = (
     <Link href={`/sales/opportunities/${opp.id}`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
@@ -47,6 +66,9 @@ export default async function CloseOpportunityPage({ params, searchParams }: { p
         </Alert>
       ) : !view.canEdit ? (
         <Alert variant="destructive">Only the owner ({view.ownerName}) or a founder can close this opportunity.</Alert>
+      ) : view.failed.has("followUps") ? (
+        // Closing cancels every open follow-up and the form says how many: without the list the form would state a wrong number, so it is not offered.
+        <LoadError what="the follow-ups" retryHref={`/sales/opportunities/${opp.id}/close`} note="Closing cancels the open follow-ups, so the close form is not offered until they load. Nothing was changed." />
       ) : (
         <CloseForm
           key={opp.version}

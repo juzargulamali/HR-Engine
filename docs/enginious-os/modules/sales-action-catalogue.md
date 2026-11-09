@@ -1,6 +1,6 @@
 # Sales & CRM action catalogue
 
-Status: built from the code at `main` `d4a9dc325dc669990e146ebb15eeb0cc3d2c11d4` (`../README.md` stamp row "Sales & CRM app map completed"). **Code read only; nothing was run** (no app, database or hosted project). This is a lookup table of every Sales & CRM action that changes data, advances a workflow or communicates outside the system, so a person or an AI worker can decide what an action does before anyone does it. The per-screen references are linked from each entry's "Reached through" line; the screen-by-screen index is [`sales-coverage-index.md`](./sales-coverage-index.md). Conventions as in `../README.md`: every claim cites a source; `Unverified` marks what code reading could not confirm.
+Status: built from the code at `main` `d4a9dc325dc669990e146ebb15eeb0cc3d2c11d4` (`../README.md` stamp row "Sales & CRM app map completed"). **Code read only; nothing was run** (no app, database or hosted project), **except** the three entries changed on 2026-11-08 by the write-rules fixes (`sales.zoho.save_references`, `sales.proposal.supersede`, `sales.enquiry.mark_won`: migration `20261222000100`, **not applied on any hosted project**, guide `../../sales-crm-write-rules-deployment.md`; exercised on a throwaway local database and the local-stack walk-through). This is a lookup table of every Sales & CRM action that changes data, advances a workflow or communicates outside the system, so a person or an AI worker can decide what an action does before anyone does it. The per-screen references are linked from each entry's "Reached through" line; the screen-by-screen index is [`sales-coverage-index.md`](./sales-coverage-index.md). Conventions as in `../README.md`: every claim cites a source; `Unverified` marks what code reading could not confirm.
 
 ## 0. What this catalogue is NOT (read first)
 
@@ -282,7 +282,7 @@ Shared meanings:
 |---|---|
 | (1) Reached | `markWon` (`crm.ts`); `crm_mark_won`; Close page and dialogs |
 | (2) Record | `crm_opportunities` |
-| (3) Inputs | Evidence type (purchase order or authorised email), reference, document date, optional note; the enquiry must have a value |
+| (3) Inputs | Evidence type (purchase order or authorised email), reference, document date (**not after the Dubai day**: the form's `max` and, since migration `20261222000100` (not applied on hosted), `crm_mark_won` itself, SQLSTATE `22023`; a refused call changes nothing), optional note; the enquiry must have a value |
 | (4) Permissions | Owner/founder |
 | (5) Starting states | A working stage (not On hold) |
 | (6) Changes | Stage `won`, evidence columns, `closed_at`, `closed_by`, `stage_before_close`; new `crm_closures` row; **all open follow-ups cancelled**; an empty `crm_handovers` row (kept if one exists) |
@@ -483,27 +483,27 @@ Shared meanings:
 | (2) Record | `crm_proposals` row |
 | (3) Inputs | None |
 | (4) Permissions | Owner/founder |
-| (5) Starting states | UI offers draft or sent versions; the function checks only that the enquiry is open (an accepted version could also be superseded by a direct call: `Unverified` intent) |
+| (5) Starting states | `draft` or `sent` only: the UI offers it for those, and the database now refuses `accepted` and already `superseded` versions (SQLSTATE `23514`; migration `20261222000100`, **not applied on hosted**, where the old function still accepts any starting status). The enquiry must be open |
 | (6) Changes | `status superseded` |
 | (7) Side effects | Event `proposal` |
 | (8) Verify | "Superseded" badge |
 | (9) STOP | **Yes**: retires a proposal version (history only, but visible to the team). Approver: the enquiry owner |
-| (10) Retry | Idempotent (repeats the event) |
+| (10) Retry | Refused on repeat (an already superseded version cannot be superseded again), so safe |
 | (11) Surface | UI over DB function |
 
 #### `sales.zoho.save_references`
 | Field | Entry |
 |---|---|
-| (1) Reached | `saveZohoReference` (`crm.ts`); `crm_upsert_zoho_reference` |
+| (1) Reached | `saveZohoReference` (`crm.ts`); `crm_save_zoho_reference` (migration `20261222000100`, **not applied on hosted**); **there is no fallback**: with the old database the app shows "Saving Zoho Books references is temporarily unavailable" and writes nothing (references stay readable) |
 | (2) Record | `crm_zoho_references` row (one per enquiry) |
-| (3) Inputs | Quote reference, quote sent on, invoice reference, invoice issued on, payment received on, amount paid; **all fields are overwritten by the form** (blank clears) |
+| (3) Inputs | Quote reference, quote sent on, invoice reference, invoice issued on, payment received on, amount paid. **Only the fields the person changed are sent**, each with the value they saw; an emptied field is an intentional clear, an untouched field is never sent (so never cleared) |
 | (4) Permissions | Owner/founder |
-| (5) Starting states | The UI hides the form on Lost; the function has **no stage check** |
-| (6) Changes | The row (upsert); `updated_by`, `updated_at` |
+| (5) Starting states | Open, on-hold and Won enquiries; **a Lost enquiry is refused** (SQLSTATE `23514`). **Decision B: clearing an existing quote reference is refused at Quote sent, Negotiation and Won (and on hold from Quote sent or Negotiation)**, SQLSTATE `23514`; correcting it to another non-blank value, other fields (invoice and payment on Won), an omitted quote reference and a first value are allowed; records at those stages with a missing reference are not backfilled and not blocked (`../../sales-crm-write-rules-deployment.md`) |
+| (6) Changes | The changed fields of the row (field-level merge under the opportunity row lock); `updated_by`, `updated_at` |
 | (7) Side effects | A non-blank quote reference unlocks the Quote sent stage move; reports show the references; **nothing is sent to or read from Zoho Books** |
 | (8) Verify | Commercial tab shows the saved values and "Last updated"; Reports invoice and payment table |
-| (9) STOP | **Yes**: overwrites all references and unlocks a stage gate. Approver: the enquiry owner, with the Zoho Books quote number from the accounting record. The Zoho side is `Unverified` |
-| (10) Retry | Idempotent for identical input; **a retry after someone else edited overwrites their values**: read the Commercial tab first |
+| (9) STOP | **Yes**: records references and can unlock a stage gate. Approver: the enquiry owner, with the Zoho Books quote number from the accounting record. The Zoho side is `Unverified` |
+| (10) Retry | Safe: a repeat sets the same fields to the same values; a change made by someone else to another field is kept; a stale edit of the same field is refused ("Someone else changed ... Reload to see their change"), so read the Commercial tab again before retrying that. A refused clear of the quote reference is not retried: enter the correct reference instead. **Unavailable state:** if the database function is not installed, nothing is written and retrying does not help until the migration is applied |
 | (11) Surface | UI over DB function |
 
 #### `sales.availability.request`
@@ -1056,5 +1056,5 @@ After a handover is submitted, the next steps are Projects screens and functions
 
 * **63 actions** catalogued in section 3 (enquiries, contacts and files 13; stage changes 6; follow-ups and reminders 7; proposals, availability, approval and Zoho 9; handover 4; settings and company 4; accounts, import and outreach 9; estimates 11). Plus 6 read-only action groups (section 5), the external-communication table (section 4) and the internal list (section 6).
 * **Flagged stop-and-ask: 32** (24 unconditional, 8 conditional: `sales.enquiry.edit_details`, `.move_stage`, `sales.followup.complete`, `.reassign`, `sales.account.save_profile`, `sales.outreach.set_status`, `sales.estimate.delete_section`, `.delete_line`). Unconditional: `sales.enquiry.assign_owner`, `.mark_won`, `.mark_lost`, `.reopen`, `.remove_file`, `sales.contact.update_shared`, `sales.proposal.record_sent`, `.record_accepted`, `.supersede`, `sales.zoho.save_references`, `sales.availability.record_result`, `sales.approval.decide`, `sales.handover.save_and_submit`, `.withdraw`, `.update_legacy`, `sales.settings.save_company`, `.save_vat_choice`, `sales.company.save_issuer_details`, `.upload_logo`, `sales.account.assign_owner`, `sales.import.apply`, `sales.outreach.assign`, `sales.estimate.decide_approval`, `.finalise`.
-* **Not safely retryable without reading first: 24.** Duplicate risk (15): `sales.enquiry.create`, `.add_activity`, `.contact_create_and_link`, `.add_link`, `.upload_file`, `sales.contact.create`, `sales.organisation.create_simple`, `sales.followup.create`, `.create_on_account`, `sales.proposal.add_version`, `sales.settings.save_vat_choice`, `sales.account.create`, `sales.outreach.log_activity`, `sales.estimate.create`, `.save_section` (without an id). Repeats a side effect or overwrites (9): `sales.estimate.finalise` (repeats the asset copying; the database itself refuses a second finalisation), `sales.proposal.record_sent`, `sales.zoho.save_references`, `sales.availability.request`, `.record_result`, `sales.settings.save_company`, `sales.company.upload_logo`, `sales.contact.update_shared`, `sales.outreach.link_inquiry`. The other 39 are idempotent, refused on repeat, or protected by a version check (the strongest guards: `sales.import.apply` by batch key and advisory lock, `sales.enquiry.*` stage actions by the version check and by refusing a repeat).
-* **Entries whose permission or starting state was not fully confirmed:** `sales.enquiry.add_link` (the Lost-enquiry refusal of `crm_register_file` was not read), `sales.proposal.supersede` (the function checks no starting status; intent unconfirmed), `sales.company.save_issuer_details` (the exact write mechanism behind the System Administrator rule), `sales.estimate.finalise` (clean-up of pinned copies after a failed finalise), `sales.estimate.save_draft` (partial-failure behaviour), `sales.enquiry.upload_file` (the storage side needs a running stack). Hosted state of every action is `Unverified` (nothing was run against any hosted project).
+* **Not safely retryable without reading first: 23** (was 24: `sales.zoho.save_references` moved out after the merge fix). Duplicate risk (15): `sales.enquiry.create`, `.add_activity`, `.contact_create_and_link`, `.add_link`, `.upload_file`, `sales.contact.create`, `sales.organisation.create_simple`, `sales.followup.create`, `.create_on_account`, `sales.proposal.add_version`, `sales.settings.save_vat_choice`, `sales.account.create`, `sales.outreach.log_activity`, `sales.estimate.create`, `.save_section` (without an id). Repeats a side effect or overwrites (8): `sales.estimate.finalise` (repeats the asset copying; the database itself refuses a second finalisation), `sales.proposal.record_sent`, `sales.availability.request`, `.record_result`, `sales.settings.save_company`, `sales.company.upload_logo`, `sales.contact.update_shared`, `sales.outreach.link_inquiry`. The other 40 are idempotent, refused on repeat, or protected by a version check (the strongest guards: `sales.import.apply` by batch key and advisory lock, `sales.enquiry.*` stage actions by the version check and by refusing a repeat).
+* **Entries whose permission or starting state was not fully confirmed:** `sales.enquiry.add_link` (the Lost-enquiry refusal of `crm_register_file` was not read), `sales.company.save_issuer_details` (the exact write mechanism behind the System Administrator rule), `sales.estimate.finalise` (clean-up of pinned copies after a failed finalise), `sales.estimate.save_draft` (partial-failure behaviour), `sales.enquiry.upload_file` (the storage side needs a running stack). Hosted state of every action is `Unverified` (nothing was run against any hosted project).

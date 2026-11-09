@@ -45,7 +45,11 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
   const ctx = await getCrmContext();
   if (!ctx) return null;
   if (ctx.grants.length === 0) return null;
-  const showDone = firstParam(sp, "view") === "done";
+  const view = firstParam(sp, "view");
+  const showDone = view === "done";
+  // My Day links here with ?view=today ("N due today"): the to-do list narrowed to its Today group (the reminder, handover and needs-attention cards belong to the whole list
+  // and stay one click away behind "Show all to-do"). Any other value is the ordinary to-do view.
+  const todayOnly = view === "today";
   const who: "mine" | "all" = firstParam(sp, "who") === "all" ? "all" : "mine";
   const openId = parseRecordId(firstParam(sp, "open"));
   const here = (patch: Record<string, string | null> = {}) => withParams(BASE, sp, patch);
@@ -113,7 +117,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
         </nav>
       </div>
 
-      {!showDone && reminders.length > 0 ? (
+      {!showDone && !todayOnly && reminders.length > 0 ? (
         <Card>
           <CardContent className="space-y-2 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -142,9 +146,9 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
         </Card>
       ) : null}
 
-      {!showDone ? <HandoverAttention check={handover} /> : null}
+      {!showDone && !todayOnly ? <HandoverAttention check={handover} /> : null}
 
-      {!showDone && needs.length > 0 ? <NeedsAttention items={needs} open={open} who={who} /> : null}
+      {!showDone && !todayOnly && needs.length > 0 ? <NeedsAttention items={needs} open={open} who={who} /> : null}
 
       {showDone ? (
         doneRows.length === 0 ? (
@@ -178,6 +182,11 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
             <p className="text-sm text-muted-foreground">The 30 most recently completed follow-ups.</p>
           </>
         )
+      ) : todayOnly && groups.today.length === 0 && todoCount > 0 ? (
+        <>
+          <TodayOnlyNote showAll={here({ view: null })} />
+          <EmptyState title="Nothing is due today" description={who === "mine" ? "This shows follow-ups assigned to you. Choose Everyone to see the whole team's." : undefined} />
+        </>
       ) : todoCount === 0 ? (
         <EmptyState
           title="Nothing to follow up"
@@ -185,7 +194,8 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
         />
       ) : (
         <div className="space-y-6">
-          {([["Overdue", groups.overdue, true], ["Today", groups.today, false], ["Upcoming", groups.upcoming, false]] as const).map(([title, rows, danger]) =>
+          {todayOnly ? <TodayOnlyNote showAll={here({ view: null })} /> : null}
+          {([["Overdue", groups.overdue, true], ["Today", groups.today, false], ["Upcoming", groups.upcoming, false]] as const).filter(([title]) => !todayOnly || title === "Today").map(([title, rows, danger]) =>
             rows.length === 0 ? null : (
               <section key={title} aria-labelledby={`g-${title}`}>
                 <h2 id={`g-${title}`} className={cn("mb-2 text-sm font-semibold", danger && "text-destructive")}>{title} <span className="font-normal text-muted-foreground">({rows.length})</span></h2>
@@ -248,6 +258,15 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
       )}
       {panel}
     </div>
+  );
+}
+
+/** Shown when the page was opened from My Day's "due today": says what is (and is not) on screen and how to get the rest back. */
+function TodayOnlyNote({ showAll }: { showAll: string }) {
+  return (
+    <p className="text-sm text-muted-foreground" role="status">
+      Showing only what is due today. <Link href={showAll} scroll={false} className="font-medium text-foreground underline underline-offset-2">Show all to-do</Link>
+    </p>
   );
 }
 

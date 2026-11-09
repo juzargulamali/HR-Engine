@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDate, formatMoney } from "@/components/sales/format";
+import { LoadError } from "@/components/workspace/states";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadFollowUps, loadOpportunities, num, type FollowUpListItem, type OpportunityListItem } from "@/lib/crm/data";
 import {
@@ -23,6 +24,12 @@ export const metadata = { title: "Sales reports" };
 type Params = Record<string, string | string[] | undefined>;
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 const LOAD_LIMIT = 2000; // loadOpportunities caps at this many (newest first)
+/** The address of this page with the same filters, for "Try again". */
+const here = (sp: Params) => {
+  const qs = new URLSearchParams();
+  for (const k of ["from", "to", "company"]) if (first(sp[k])) qs.set(k, first(sp[k]));
+  return `/sales/reports${qs.size ? `?${qs.toString()}` : ""}`;
+};
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<Params> }) {
   const sp = await searchParams;
@@ -33,19 +40,21 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const period = resolvePeriod(first(sp.from), first(sp.to), now);
   const company = ctx.companies.some((c) => c.id === first(sp.company)) ? first(sp.company) : "";
 
-  let items: OpportunityListItem[];
-  let followUps: FollowUpListItem[];
-  try {
-    [items, { open: followUps }] = await Promise.all([loadOpportunities(ctx), loadFollowUps(ctx)]);
-  } catch (e) {
-    console.error("[crm] reports load failed", e);
+  // The enquiries are what almost every card is built from: without them there is no report. The follow-ups feed one card only, so their failure is that card's.
+  const [itemsRes, followUpsRes] = await Promise.allSettled([loadOpportunities(ctx), loadFollowUps(ctx)]);
+  if (itemsRes.status === "rejected") {
+    console.error("[crm] reports load failed", itemsRes.reason);
     return (
       <div className="space-y-4">
         <Header />
-        <Alert variant="destructive">Could not load the reports. Reload the page; if it keeps happening, tell an administrator.</Alert>
+        <LoadError what="the reports" retryHref={here(sp)} note="No figure is shown because the enquiries they are built from could not be read. This is not a report with zero results." />
       </div>
     );
   }
+  const items: OpportunityListItem[] = itemsRes.value;
+  const followUpsFailed = followUpsRes.status === "rejected";
+  if (followUpsRes.status === "rejected") console.error("[crm] reports follow-ups failed", followUpsRes.reason);
+  const followUps: FollowUpListItem[] = followUpsRes.status === "fulfilled" ? followUpsRes.value.open : [];
 
   const scoped = items.filter((i) => !company || i.opp.company_id === company);
   const opps: ReportOpp[] = scoped.map((i) => ({ ...i.opp, value: i.value }));
@@ -66,22 +75,26 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     now,
   );
 
-  // Manual Zoho references for the won opportunities in view. RLS limits this to companies the person may see.
-  let zohoError: string | null = null;
+  // Manual Zoho references for the won opportunities in view. RLS limits this to companies the person may see. A failed read is the card's own
+  // "Could not load": it is never shown as "Not recorded" on every row or as "0 of N have an invoice reference".
+  let zohoFailed = false;
   let zohoRows: CrmZohoReferenceRow[] = [];
   if (wl.wonOpps.length > 0) {
     const supabase = await createClient();
     const { data, error } = await supabase.from("crm_zoho_references").select("*").limit(5000);
-    if (error) zohoError = "Could not load the Zoho references.";
+    if (error) { zohoFailed = true; console.error("[crm] reports zoho references failed", error.message); }
     else zohoRows = data ?? [];
   }
   // Closures that were later reopened are kept in history; they are not outcomes any more, so count them separately.
   let reopened = { won: 0, lost: 0, total: 0 };
+  let reopenedFailed = false;
   {
     const supabase = await createClient();
-    const { data } = await supabase.from("crm_closures").select("outcome, closed_at, reopened_at").not("reopened_at", "is", null).limit(5000);
-    reopened = reopenedClosures(data ?? [], period);
+    const { data, error } = await supabase.from("crm_closures").select("outcome, closed_at, reopened_at").not("reopened_at", "is", null).limit(5000);
+    if (error) { reopenedFailed = true; console.error("[crm] reports reopened closures failed", error.message); }
+    else reopened = reopenedClosures(data ?? [], period);
   }
+  const failedCards = [followUpsFailed ? "Follow-ups" : null, reopenedFailed ? "the reopened-closures note under Won and lost" : null, zohoFailed ? "Won value against invoice and payment references" : null].filter((x): x is string => x !== null);
   const wonRows = wonValueRows(wl.wonOpps, zohoRows);
   const zoho = zohoSummary(wonRows);
   const titleOf = new Map(items.map((i) => [i.opp.id, i]));
@@ -118,6 +131,12 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         Period: {formatDate(period.from)} to {formatDate(period.to)} (Dubai dates){isDefaultPeriod ? ", the last 90 days" : ""}. It applies to won and lost (by closing date), enquiries by source and timeliness (by date logged). Pipeline and follow-up figures are as of now.
       </p>
       {items.length >= LOAD_LIMIT ? <Alert variant="warning">Only the newest {LOAD_LIMIT.toLocaleString("en-US")} opportunities are included, so older figures may be incomplete.</Alert> : null}
+
+      {failedCards.length > 0 ? (
+        <Alert variant="warning" role="status">
+          <strong>This report is incomplete.</strong> Could not load: {failedCards.join("; ")}. Every other figure below is correct for what it covers, and each affected card says so.
+        </Alert>
+      ) : null}
 
       {items.length === 0 ? (
         <EmptyState title="Not enough data yet" description="Reports appear once opportunities have been recorded." action={<Link href="/sales/new" className={buttonVariants({ size: "sm" })}>New enquiry</Link>} />
@@ -159,15 +178,19 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             )}
           </ReportCard>
 
-          <ReportCard title="Follow-ups" description="Open follow-ups as of now." note={`n = ${fuCounts.overdue + fuCounts.dueToday + fuCounts.upcoming} open follow-ups`}>
-            <dl className="grid grid-cols-3 gap-3 text-center">
-              {[{ l: "Overdue", n: fuCounts.overdue }, { l: "Due today", n: fuCounts.dueToday }, { l: "Upcoming", n: fuCounts.upcoming }].map((x) => (
-                <div key={x.l} className="rounded-md border border-border p-3">
-                  <dt className="text-sm text-muted-foreground">{x.l}</dt>
-                  <dd className="text-2xl font-semibold tabular-nums">{x.n}</dd>
-                </div>
-              ))}
-            </dl>
+          <ReportCard title="Follow-ups" description="Open follow-ups as of now." note={followUpsFailed ? undefined : `n = ${fuCounts.overdue + fuCounts.dueToday + fuCounts.upcoming} open follow-ups`}>
+            {followUpsFailed ? (
+              <LoadError what="the follow-up counts" retryHref={here(sp)} note="The counts are not zero: they could not be read." />
+            ) : (
+              <dl className="grid grid-cols-3 gap-3 text-center">
+                {[{ l: "Overdue", n: fuCounts.overdue }, { l: "Due today", n: fuCounts.dueToday }, { l: "Upcoming", n: fuCounts.upcoming }].map((x) => (
+                  <div key={x.l} className="rounded-md border border-border p-3">
+                    <dt className="text-sm text-muted-foreground">{x.l}</dt>
+                    <dd className="text-2xl font-semibold tabular-nums">{x.n}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
           </ReportCard>
 
           <ReportCard title="Timeliness" description="First response to enquiries logged in the period. The share within target needs both a response target and a working calendar." note={`n = ${elapsed.enquiries} enquiries logged in the period`}>
@@ -193,6 +216,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
               <div className="rounded-md border border-border p-3"><div className="text-sm text-muted-foreground">Win rate</div><div className="text-2xl font-semibold tabular-nums">{wl.winRatePercent === null ? "n/a" : `${wl.winRatePercent}%`}</div></div>
             </div>
             {wl.winRatePercent === null ? <p className="mt-2 text-sm text-muted-foreground">No opportunities were closed in this period, so there is no win rate.</p> : <p className="mt-2 text-sm text-muted-foreground">Win rate is won as a share of won plus lost. Small numbers move it a lot.</p>}
+            {reopenedFailed ? <LoadError what="the count of closures that were later reopened" retryHref={here(sp)} note="The won and lost figures above do not depend on it; only the note about reopened closures is missing." /> : null}
             {reopened.total > 0 ? <p className="mt-2 text-sm text-muted-foreground">{reopened.total} closure{reopened.total === 1 ? "" : "s"} in this period ({reopened.won} won, {reopened.lost} lost) {reopened.total === 1 ? "was" : "were"} later reopened. They are open again, so they are not counted above; each closure stays in that opportunity&apos;s history.</p> : null}
             {wl.wonWithoutEvidence > 0 ? <p className="mt-2 text-sm text-[hsl(var(--os-amber))]">{wl.wonWithoutEvidence} won with no evidence recorded, not counted as won.</p> : null}
           </ReportCard>
@@ -227,8 +251,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             note={`n = ${wl.won} won opportunities`}
             className="lg:col-span-2"
           >
-            {zohoError ? <Alert variant="destructive" className="mb-3">{zohoError}</Alert> : null}
-            {wonRows.length === 0 ? (
+            {zohoFailed ? (
+              <LoadError what="the invoice and payment references" retryHref={here(sp)} note="The won value is shown in the card above; the references could not be read, so they are not shown as blank." />
+            ) : wonRows.length === 0 ? (
               <p className="text-sm text-muted-foreground">No won opportunities in this period.</p>
             ) : (
               <>

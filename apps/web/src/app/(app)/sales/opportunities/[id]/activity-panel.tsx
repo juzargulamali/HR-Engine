@@ -6,27 +6,36 @@ import { describeHistoryEvent } from "./closure-helpers";
 import { ClosureHistory } from "./closure-history";
 import { buildTimeline, describeEvent, planNextProps } from "./helpers";
 import { Muted, Panel } from "./parts";
-import { planNextInput, type OppView } from "./view";
+import { LoadError } from "@/components/workspace/states";
+import { anyFailed, planNextInput, type OppView } from "./view";
 
 const KIND_LABEL = { call: "Call", email: "Email", meeting: "Meeting", note: "Note", client_response: "Client response" } as const;
 
 /** What people did (calls, notes, client replies) and what changed on the record (stage, owner, value…), newest first, in one list. */
 export function ActivityPanel({ view, showForm = true }: { view: OppView; showForm?: boolean }) {
   const { detail, ctx, opp, isLost } = view;
-  const timeline = buildTimeline(detail.activities, detail.events);
-  const next = planNextProps(planNextInput(view));
+  const timelineFailed = anyFailed(view, "activities", "events");
+  const timeline = timelineFailed ? [] : buildTimeline(detail.activities, detail.events);
+  // The "log an activity" form plans the next follow-up from the follow-ups: without them it is not offered (and says why).
+  const followUpsFailed = anyFailed(view, "followUps");
+  const next = followUpsFailed ? null : planNextProps(planNextInput(view));
+  const retry = `/sales/opportunities/${opp.id}?tab=activity`;
   return (
     <div className="space-y-6">
       {isLost ? (
         <Muted>A lost opportunity can no longer be updated until it is reopened. The history below is kept.</Muted>
-      ) : !showForm ? null : (
+      ) : !showForm ? null : next === null ? (
+        <Panel title="Log an activity"><LoadError what="the follow-ups" retryHref={retry} note="An activity cannot be logged here until they load, because logging one can plan the next step." /></Panel>
+      ) : (
         <Panel title="Log an activity" description="Anyone with Sales access can add to the timeline. Log a call and plan the next step here, in one go.">
           <AddActivityForm opportunityId={opp.id} {...next} />
         </Panel>
       )}
       <ClosureHistory view={view} />
       <Panel title="Timeline" description="Activities and changes to the record together.">
-        {timeline.length === 0 ? (
+        {timelineFailed ? (
+          <LoadError what="the timeline" retryHref={retry} note="It is not empty: the activities or the history could not be read." />
+        ) : timeline.length === 0 ? (
           <Muted>Nothing has been recorded yet.</Muted>
         ) : (
           <ol className="divide-y divide-border/70">
