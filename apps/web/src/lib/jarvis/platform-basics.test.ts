@@ -2,8 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { canonicalJson, valuesHash } from "./canonical";
-import { signConfirmation, verifyConfirmation, type ConfirmationPayload } from "./token";
+import { readFileSync } from "node:fs";
+import { createHash, createHmac } from "node:crypto";
+import path from "node:path";
+import { canonicalJson } from "./canonical";
+import { issueProof, payloadHash, proofMac, proofRpcArgs, proofString, verifyProof, type ProofFields } from "./token";
 import { readJarvisConfig, simulatedAllowed, configUnavailableReason, DEFAULT_JARVIS_MODEL } from "./config";
 import { selectProvider } from "./provider";
 import { sanitiseLog } from "./log";
@@ -13,45 +16,84 @@ import { z } from "zod";
 
 const SECRET = "s".repeat(40);
 const now = new Date("2026-11-09T10:00:00Z");
-const payload = (over: Partial<ConfirmationPayload> = {}): ConfirmationPayload => ({ v: 1, cid: "c1", uid: "u1", co: "co1", act: "jarvis.sales.enquiry.create_from_brief", tgt: "new", ver: null, h: valuesHash({ a: 1 }), iat: Math.floor(now.getTime() / 1000), exp: Math.floor(now.getTime() / 1000) + 900, ...over });
+const CID = "11111111-1111-4111-8111-111111111111";
+const UID = "22222222-2222-4222-8222-222222222222";
+const CO = "33333333-3333-4333-8333-333333333333";
+const PAYLOAD = canonicalJson({ b: 1, a: "x" });
+const payload = (over: Partial<ProofFields> = {}): ProofFields => ({ cid: CID, uid: UID, co: CO, act: "jarvis.sales.enquiry.create_from_brief", tgt: "new", ver: null, ph: payloadHash(PAYLOAD), exp: Math.floor(now.getTime() / 1000) + 900, ...over });
+const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
-describe("canonical values hash", () => {
-  it("is the same whatever the key order, and changes with any value", () => {
+describe("canonical payload text", () => {
+  it("is the same whatever the key order, and its hash changes with any value", () => {
     expect(canonicalJson({ b: 1, a: { d: 2, c: [3, { y: 1, x: 2 }] } })).toBe(canonicalJson({ a: { c: [3, { x: 2, y: 1 }], d: 2 }, b: 1 }));
-    expect(valuesHash({ a: 1, b: undefined })).toBe(valuesHash({ a: 1 }));
-    expect(valuesHash({ a: 1 })).not.toBe(valuesHash({ a: 2 }));
-    expect(valuesHash({ a: "1" })).not.toBe(valuesHash({ a: 1 }));
-    expect(valuesHash({ t: [{ name: "x", qty: 1 }] })).not.toBe(valuesHash({ t: [{ name: "x", qty: 2 }] }));
+    const h = (v: unknown) => payloadHash(canonicalJson(v));
+    expect(h({ a: 1, b: undefined })).toBe(h({ a: 1 }));
+    expect(h({ a: 1 })).not.toBe(h({ a: 2 }));
+    expect(h({ a: "1" })).not.toBe(h({ a: 1 }));
+    expect(h({ t: [{ name: "x", qty: 1 }] })).not.toBe(h({ t: [{ name: "x", qty: 2 }] }));
   });
 });
 
-describe("confirmation token", () => {
-  it("round-trips a valid token and carries no brief text", () => {
-    const t = signConfirmation(payload(), SECRET);
-    const v = verifyConfirmation(t, SECRET, now);
-    expect(v.ok && v.payload.cid).toBe("c1");
-    expect(Object.keys(JSON.parse(Buffer.from(t.split(".")[0]!, "base64url").toString())).sort()).toEqual(["act", "cid", "co", "exp", "h", "iat", "tgt", "uid", "v", "ver"]);
+describe("confirmation proof (the app side of the database's proof)", () => {
+  it("round-trips a valid proof and carries no brief text", () => {
+    const t = issueProof(payload(), SECRET);
+    const v = verifyProof(t, SECRET, now);
+    expect(v.ok && v.fields.cid).toBe(CID);
+    expect(v.ok && v.mac).toMatch(/^[0-9a-f]{64}$/);
+    expect(Object.keys(JSON.parse(Buffer.from(t.split(".")[0]!, "base64url").toString())).sort()).toEqual(["act", "cid", "co", "exp", "ph", "tgt", "uid", "v", "ver"]);
   });
-  it("rejects a tampered payload, a tampered signature, another secret, malformed and oversized input", () => {
-    const t = signConfirmation(payload(), SECRET);
-    const [body, sig] = t.split(".") as [string, string];
-    const forged = Buffer.from(JSON.stringify(payload({ uid: "u2" }))).toString("base64url");
-    expect(verifyConfirmation(`${forged}.${sig}`, SECRET, now)).toEqual({ ok: false, reason: "signature" });
-    expect(verifyConfirmation(`${body}.${sig.slice(0, -2)}AA`, SECRET, now)).toEqual({ ok: false, reason: "signature" });
-    expect(verifyConfirmation(t, "t".repeat(40), now)).toEqual({ ok: false, reason: "signature" });
-    expect(verifyConfirmation("nonsense", SECRET, now)).toEqual({ ok: false, reason: "malformed" });
-    expect(verifyConfirmation("a.b.c", SECRET, now)).toEqual({ ok: false, reason: "malformed" });
-    expect(verifyConfirmation("x".repeat(3000), SECRET, now)).toEqual({ ok: false, reason: "malformed" });
-    expect(verifyConfirmation(undefined as unknown as string, SECRET, now)).toEqual({ ok: false, reason: "malformed" });
+  it("rejects a tampered body, a tampered MAC, another secret, malformed and oversized input", () => {
+    const t = issueProof(payload(), SECRET);
+    const [body, mac] = t.split(".") as [string, string];
+    const forge = (over: Partial<ProofFields>) => `${Buffer.from(JSON.stringify({ v: 2, ...payload(over) })).toString("base64url")}.${mac}`;
+    for (const over of [{ uid: "99999999-9999-4999-8999-999999999999" }, { co: "99999999-9999-4999-8999-999999999999" }, { act: "jarvis.sales.enquiry.update" }, { tgt: "99999999-9999-4999-8999-999999999999" }, { ver: 3 }, { ph: sha("other") }, { exp: payload().exp + 1 }, { cid: "99999999-9999-4999-8999-999999999999" }]) {
+      expect(verifyProof(forge(over), SECRET, now)).toEqual({ ok: false, reason: "signature" });
+    }
+    expect(verifyProof(`${body}.${mac.slice(0, -2)}${mac.endsWith("aa") ? "bb" : "aa"}`, SECRET, now)).toEqual({ ok: false, reason: "signature" });
+    expect(verifyProof(t, "t".repeat(40), now)).toEqual({ ok: false, reason: "signature" });
+    expect(verifyProof("nonsense", SECRET, now)).toEqual({ ok: false, reason: "malformed" });
+    expect(verifyProof("a.b.c", SECRET, now)).toEqual({ ok: false, reason: "malformed" });
+    expect(verifyProof(`${body}.nothex`, SECRET, now)).toEqual({ ok: false, reason: "malformed" });
+    expect(verifyProof("x".repeat(3000), SECRET, now)).toEqual({ ok: false, reason: "malformed" });
+    expect(verifyProof(undefined as unknown as string, SECRET, now)).toEqual({ ok: false, reason: "malformed" });
   });
   it("expires at the configured time (and not before)", () => {
-    const t = signConfirmation(payload(), SECRET);
-    expect(verifyConfirmation(t, SECRET, new Date(now.getTime() + 899_000)).ok).toBe(true);
-    expect(verifyConfirmation(t, SECRET, new Date(now.getTime() + 900_000))).toEqual({ ok: false, reason: "expired" });
+    const t = issueProof(payload(), SECRET);
+    expect(verifyProof(t, SECRET, new Date(now.getTime() + 899_000)).ok).toBe(true);
+    expect(verifyProof(t, SECRET, new Date(now.getTime() + 900_000))).toEqual({ ok: false, reason: "expired" });
   });
-  it("a token signed for a payload with a wrong shape is malformed", () => {
-    const bad = signConfirmation({ ...payload(), v: 2 } as unknown as ConfirmationPayload, SECRET);
-    expect(verifyConfirmation(bad, SECRET, now)).toEqual({ ok: false, reason: "malformed" });
+  it("a body with a wrong shape or an old format version is malformed", () => {
+    const mac = proofMac(payload(), SECRET);
+    const enc = (o: unknown) => `${Buffer.from(JSON.stringify(o)).toString("base64url")}.${mac}`;
+    expect(verifyProof(enc({ v: 1, ...payload() }), SECRET, now)).toEqual({ ok: false, reason: "malformed" });
+    expect(verifyProof(enc({ v: 2, ...payload(), cid: "c1" }), SECRET, now)).toEqual({ ok: false, reason: "malformed" });
+    expect(verifyProof(enc({ v: 2, ...payload(), tgt: "somewhere" }), SECRET, now)).toEqual({ ok: false, reason: "malformed" });
+  });
+  it("the wrapper arguments are exactly the signed fields and the payload text", () => {
+    const a = proofRpcArgs({ confirmationId: CID, company: CO, target: "new", version: null, expires: 5, mac: "ab", payload: PAYLOAD });
+    expect(a).toEqual({ p_confirmation: CID, p_company: CO, p_target: "new", p_version: null, p_expires: 5, p_mac: "ab", p_payload: PAYLOAD });
+  });
+});
+
+/** Vectors shared with the database tests (packages/rls-tests/test/jarvis-proof.rls.test.ts): the SQL verifier must accept exactly what this signer produces. */
+describe("shared proof vectors (TypeScript signer = SQL verifier)", () => {
+  const vectors = JSON.parse(readFileSync(path.resolve(__dirname, "../../../../../supabase/tests/jarvis-proof-vectors.json"), "utf8")) as {
+    secret: string;
+    proofs: { name: string; jti: string; uid: string; co: string; exp: number; act: string; tgt: string; ver: number | null; payload: string; payloadSha256: string; canonical: string; mac: string }[];
+    hmac: { key: string; message: string; mac: string }[];
+  };
+  it("the payload hash, the signed text and the MAC all match the independently computed vectors", () => {
+    expect(vectors.proofs.length).toBeGreaterThanOrEqual(3);
+    for (const v of vectors.proofs) {
+      const f: ProofFields = { cid: v.jti, uid: v.uid, co: v.co, act: v.act, tgt: v.tgt, ver: v.ver, exp: v.exp, ph: payloadHash(v.payload) };
+      expect(f.ph, v.name).toBe(v.payloadSha256);
+      expect(proofString(f), v.name).toBe(v.canonical);
+      expect(proofMac(f, vectors.secret), v.name).toBe(v.mac);
+      expect(issueProof(f, vectors.secret).endsWith(`.${v.mac}`)).toBe(true);
+    }
+  });
+  it("the plain HMAC-SHA256 vectors match Node's implementation", () => {
+    for (const v of vectors.hmac) expect(createHmac("sha256", v.key).update(v.message, "utf8").digest("hex")).toBe(v.mac);
   });
 });
 

@@ -94,8 +94,8 @@ describe("execute: only the explicit confirmation registers, once", () => {
     if (!c.ok) throw new Error();
     expect(c.href).toMatch(new RegExp(`^/sales/accounts/[0-9a-f-]{36}\\?company=${ID.co1}$`));
     expect(calls()).toHaveLength(1);
-    expect(calls()[0]!.args).toMatchObject({ p_confirmation_id: r.id });
-    expect(calls()[0]!.args.p_args).toMatchObject({ company_id: ID.co1, name: "Fictional Lantern Events", roles: ["agency"], country_code: "AE", website: "https://www.lanternevents.example/about", place: "Dubai", ack_ids: [] });
+    expect(calls()[0]!.args).toMatchObject({ p_confirmation: r.id, p_company: ID.co1, p_target: "new", p_version: null, p_ack: [] });
+    expect(JSON.parse(calls()[0]!.args.p_payload as string)).toMatchObject({ company_id: ID.co1, name: "Fictional Lantern Events", roles: ["agency"], country_code: "AE", website: "https://www.lanternevents.example/about", place: "Dubai" });
     expect(w.registered).toHaveLength(1);
     expect(w.orgs.filter((o) => o.name === "Fictional Lantern Events")).toHaveLength(1);
     // JARVIS sets no owner, lead source, exhibition or contacts

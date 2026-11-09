@@ -351,3 +351,15 @@ export function fakeDeps(w: World, over: { config?: Partial<JarvisConfig>; provi
 }
 
 export const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+
+/**
+ * Wrapper arguments carrying a REAL proof (HMAC over the documented text, plain Node crypto, independent of the app's signer), for tests that call the fake database directly as
+ * "the person with the API key". `key` defaults to the key the fake database holds; pass another to build a proof the database cannot accept.
+ */
+export function proofArgs(user: string, o: { action: string; company: string; target: string; version?: number | null; payload: unknown; jti?: string; exp?: number; key?: string }) {
+  const text = typeof o.payload === "string" ? o.payload : JSON.stringify(o.payload);
+  const jti = o.jti ?? randomUUID();
+  const exp = o.exp ?? Math.floor(Date.now() / 1000) + 900;
+  const canonical = ["JARVIS-PROOF-V1", jti, user, o.company, o.action, o.target, o.version == null ? "-" : String(o.version), String(exp), createHash("sha256").update(text, "utf8").digest("hex")].join("\n");
+  return { p_confirmation: jti, p_company: o.company, p_target: o.target, p_version: o.version ?? null, p_expires: exp, p_mac: createHmac("sha256", o.key ?? SECRET).update(canonical, "utf8").digest("hex"), p_payload: text };
+}

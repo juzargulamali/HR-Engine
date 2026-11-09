@@ -8,7 +8,7 @@ import { createAssistant, type JarvisAssistant } from "./assistant";
 import { simulatedProviderCalls } from "./provider/simulated";
 import type { ActionConfirmResult, MeetingCard, SendResult } from "./protocol";
 import { acceptDate, datesStatedIn, validateMeeting } from "./sales/meeting-values";
-import { fakeDeps, ID, mkOpp, newWorld, type Opp, type World } from "./testing/fake-world";
+import { fakeDeps, ID, mkOpp, newWorld, proofArgs, type Opp, type World } from "./testing/fake-world";
 
 const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const TODAY = crmToday();
@@ -148,8 +148,10 @@ describe("execute: ONE confirmation, ONE atomic save", () => {
     expect(c.summary).toMatch(/activity and the follow-up were recorded together/);
     expect(c.href).toBe(`/sales/opportunities/${e.id}`);
     expect(calls()).toHaveLength(1);
-    expect(calls()[0]!.args).toMatchObject({ p_confirmation_id: r.id, p_enquiry_id: e.id, p_activity: { kind: "meeting", occurred_at: null, internal: false }, p_follow_up: { title: "Send the proposal", kind: "proposal" } });
-    expect(String((calls()[0]!.args.p_follow_up as { due_at: string }).due_at)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(calls()[0]!.args).toMatchObject({ p_confirmation: r.id, p_target: e.id, p_company: ID.co1, p_version: null });
+    const sent = JSON.parse(calls()[0]!.args.p_payload as string) as { activity: Record<string, unknown>; follow_up: { due_at: string } & Record<string, unknown> };
+    expect(sent).toMatchObject({ activity: { kind: "meeting", occurred_at: null, internal: false }, follow_up: { title: "Send the proposal", kind: "proposal" } });
+    expect(String(sent.follow_up.due_at)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(w.activities).toHaveLength(1);
     expect(w.followUps).toHaveLength(1);
     expect(w.followUps[0]!.assigned_to).toBe(ID.u1);
@@ -160,8 +162,9 @@ describe("execute: ONE confirmation, ONE atomic save", () => {
     const v = meet(await revise({ ...r.card.values, planFollowUp: false }));
     const c = await confirm({ card: v.card, token: v.confirmation!.token });
     expect(c.ok).toBe(true);
-    expect(calls()[0]!.args.p_follow_up).toBeNull();
-    expect(String((calls()[0]!.args.p_activity as { occurred_at: string }).occurred_at)).toMatch(/^2026-10-01T/);
+    const sent = JSON.parse(calls()[0]!.args.p_payload as string) as { activity: { occurred_at: string }; follow_up: unknown };
+    expect(sent.follow_up).toBeNull();
+    expect(String(sent.activity.occurred_at)).toMatch(/^2026-10-01T/);
     expect(w.followUps).toHaveLength(0);
     if (c.ok) expect(c.summary).toMatch(/activity was recorded/);
   });
@@ -174,7 +177,7 @@ describe("execute: ONE confirmation, ONE atomic save", () => {
     expect(calls()).toHaveLength(0);
     // reach the database anyway (the second wall): it refuses and stores neither
     const { fakeSupabase } = await import("./testing/fake-world");
-    const args = { p_confirmation_id: crypto.randomUUID(), p_values_hash: "c".repeat(64), p_enquiry_id: e.id, p_activity: { kind: "meeting", body: "x", occurred_at: null, internal: false }, p_follow_up: { title: "t", due_at: new Date(Date.now() + 86_400_000).toISOString(), kind: "other" } };
+    const args = proofArgs(ID.u1, { action: ACT, company: ID.co1, target: e.id, payload: { activity: { kind: "meeting", body: "x", occurred_at: null, internal: false }, follow_up: { title: "t", due_at: new Date(Date.now() + 86_400_000).toISOString(), kind: "other" } } });
     const sb = fakeSupabase(w, ID.u1);
     expect((await sb.rpc("jarvis_record_meeting", args) as { data: unknown }).data).toMatchObject({ status: "failed", error_code: "23514", error_message: "A closed opportunity has no follow-ups" });
     expect((await sb.rpc("jarvis_record_meeting", args) as { data: unknown }).data).toMatchObject({ status: "failed", replayed: true });
@@ -205,7 +208,7 @@ describe("execute: ONE confirmation, ONE atomic save", () => {
     const r = await ready();
     const v = r.card.values;
     for (const t of [{ ...v, body: "Something else" }, { ...v, followUpDate: addDays(FUTURE, 1) }, { ...v, followUpTitle: "Other" }, { ...v, kind: "call" }, { ...v, planFollowUp: false }, { ...v, enquiryId: crypto.randomUUID() }, { ...v, companyId: ID.co2 }]) {
-      expect(refusal(await confirm(r, { values: t })).code).toMatch(/^(values_changed|company_changed|invalid_input)$/);
+      expect(refusal(await confirm(r, { values: t })).code).toMatch(/^(values_changed|company_changed|invalid_input|needs_review)$/);
     }
     expect(calls()).toHaveLength(0);
     expect((await confirm(r, { values: { ...v, assignedTo: ID.u2, stage: "won", execute: true } })).ok).toBe(true);

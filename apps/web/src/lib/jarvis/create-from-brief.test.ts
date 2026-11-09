@@ -9,7 +9,7 @@ import { registerAllJarvisActions } from "./actions";
 import { createAssistant, type JarvisAssistant } from "./assistant";
 import { simulatedProviderCalls } from "./provider/simulated";
 import type { ConfirmResult, EnquiryCard, SendResult } from "./protocol";
-import { fakeDeps, ID, mkOrg, newWorld, type World } from "./testing/fake-world";
+import { fakeDeps, ID, mkOrg, newWorld, sha, type World } from "./testing/fake-world";
 
 const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const NEXT = addDays(crmToday(), 3);
@@ -145,9 +145,13 @@ describe("execute: only the explicit confirmation writes, once", () => {
     expect(c.href).toBe(`/sales/opportunities/${c.opportunityId}`);
     expect(w.opps).toHaveLength(1);
     expect(creates()).toHaveLength(1);
-    const args = creates()[0]!.args as { p_confirmation_id: string; p_values_hash: string; p_args: Record<string, unknown> };
-    expect(args.p_confirmation_id).toBe(r.id);
-    expect(args.p_values_hash).toMatch(/^[0-9a-f]{64}$/);
+    const rpcArgs = creates()[0]!.args as { p_confirmation: string; p_company: string; p_target: string; p_version: number | null; p_expires: number; p_mac: string; p_payload: string };
+    expect(rpcArgs.p_confirmation).toBe(r.id);
+    expect(rpcArgs).toMatchObject({ p_company: ID.co1, p_target: "new", p_version: null });
+    expect(rpcArgs.p_mac).toMatch(/^[0-9a-f]{64}$/);
+    // The payload text sent to the wrapper is EXACTLY the text the proof's hash covers (the token's ph), byte for byte.
+    expect(sha(rpcArgs.p_payload)).toBe(JSON.parse(Buffer.from(r.token.split(".")[0]!, "base64url").toString()).ph);
+    const args = { p_args: JSON.parse(rpcArgs.p_payload) as Record<string, unknown> };
     expect(args.p_args).toMatchObject({ company_id: ID.co1, title: "Harbour gala LED wall", source: "whatsapp", agency_org_id: w.orgs[0]!.id, client_org_id: w.orgs[1]!.id, next_kind: "call", currency: "AED", value: 45000 });
     expect(String(args.p_args.next_due)).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
     expect("owner_id" in args.p_args).toBe(false);

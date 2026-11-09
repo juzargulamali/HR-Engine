@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 /** JSON with sorted keys and no undefined, so the same values always give the same text (and the same hash) whoever built the object. */
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(sortValue(value));
@@ -17,6 +15,3 @@ function sortValue(v: unknown): unknown {
   }
   return v;
 }
-
-/** SHA-256 (hex) of the canonical form: the "exact reviewed values" a confirmation is bound to. */
-export const valuesHash = (value: unknown): string => createHash("sha256").update(canonicalJson(value)).digest("hex");

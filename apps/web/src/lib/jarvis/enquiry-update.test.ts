@@ -8,7 +8,7 @@ import { simulatedProviderCalls } from "./provider/simulated";
 import type { ActionConfirmResult, EnquiryUpdateCard, SendResult } from "./protocol";
 import { UPDATE_FIELDS } from "./protocol";
 import { dbPatch, diffPatch, currentForm, validateUpdate } from "./sales/enquiry-update-values";
-import { fakeDeps, ID, mkOpp, newWorld, type Opp, type World } from "./testing/fake-world";
+import { fakeDeps, ID, mkOpp, newWorld, proofArgs, type Opp, type World } from "./testing/fake-world";
 
 let w: World;
 let a: JarvisAssistant;
@@ -104,7 +104,7 @@ describe("propose: who may use it, and on what", () => {
     expect(JSON.stringify(r.card)).not.toMatch(/ownerId|owner_id|"won"|paymentTerms|exclusions|risks|agency/);
     const c = await confirm({ card: r.card, token: r.confirmation!.token });
     expect(c.ok).toBe(true);
-    expect(calls()[0]!.args.p_patch).toEqual({ location: "Marina Arena" });
+    expect(JSON.parse(calls()[0]!.args.p_payload as string)).toEqual({ location: "Marina Arena" });
     expect(w.opps[0]).toMatchObject({ stage: "new", value: 987654, owner_id: ID.u1 });
   });
   it("requests for payroll, SQL or permissions are refused before the provider", async () => {
@@ -153,9 +153,10 @@ describe("execute: only the explicit confirmation writes, once, and only if the 
     expect(c.href).toBe(`/sales/opportunities/${e.id}`);
     expect(c.summary).toMatch(/updated \(event start, event end, location\)/);
     expect(calls()).toHaveLength(1);
-    expect(calls()[0]!.args).toMatchObject({ p_confirmation_id: r.id, p_enquiry_id: e.id, p_expected_version: 3, p_patch: { event_start: "2026-12-10", event_end: "2026-12-12", location: "Marina Arena" } });
+    expect(calls()[0]!.args).toMatchObject({ p_confirmation: r.id, p_target: e.id, p_company: ID.co1, p_version: 3 });
+    expect(JSON.parse(calls()[0]!.args.p_payload as string)).toEqual({ event_start: "2026-12-10", event_end: "2026-12-12", location: "Marina Arena" });
     expect(w.opps[0]).toMatchObject({ location: "Marina Arena", event_start: "2026-12-10", version: 4, value: 987654, owner_id: ID.u1, stage: "new" });
-    expect(Object.keys(calls()[0]!.args.p_patch as object).every((k) => ["title", "brief", "event_start", "event_end", "install_start", "location", "technologies", "scope", "waiting_on", "budget_note"].includes(k))).toBe(true);
+    expect(Object.keys(JSON.parse(calls()[0]!.args.p_payload as string) as object).every((k) => ["title", "brief", "event_start", "event_end", "install_start", "location", "technologies", "scope", "waiting_on", "budget_note"].includes(k))).toBe(true);
   });
   it("a repeat of the same confirmation (double click, retry, restart) returns the ORIGINAL result and changes nothing, although the version has moved on; parallel clicks change it once", async () => {
     const r = await ready();
@@ -185,32 +186,37 @@ describe("execute: only the explicit confirmation writes, once, and only if the 
     expect(tokenOf(fresh.token).ver).toBe(4);
     expect((await confirm(fresh)).ok).toBe(true);
   });
-  it("the database's own version rule is the second wall: a stale version reaching the wrapper is refused, recorded once as failed and replayed", async () => {
+  it("the database's own version rule is the second wall: a proof for a stale version is refused with NOTHING written (no ledger row), and the expected-version rule of the existing function stays", async () => {
     w.opps[0]!.version = 9;
-    const conf = crypto.randomUUID();
-    const args = { p_confirmation_id: conf, p_values_hash: "a".repeat(64), p_enquiry_id: e.id, p_expected_version: 3, p_patch: { location: "X" } };
-    expect(await fakeCall(w, "jarvis_update_enquiry", args)).toMatchObject({ status: "failed", error_code: "40001", replayed: false });
-    expect(await fakeCall(w, "jarvis_update_enquiry", args)).toMatchObject({ status: "failed", error_code: "40001", replayed: true });
+    const args = proofArgs(ID.u1, { action: ACT, company: ID.co1, target: e.id, version: 3, payload: { location: "X" } });
+    expect(await fakeCall(w, "jarvis_update_enquiry", args)).toMatchObject({ code: "40001" });
+    expect(w.ledger.size).toBe(0);
     expect(w.updates).toEqual([]);
     expect(w.opps[0]!.location).toBe("Harbour Hall");
+    // a refusal by the existing rules (not the owner) after a valid proof is still recorded once as failed and replayed
+    w.opps[0]!.version = 3; w.opps[0]!.owner_id = ID.u2;
+    const ok = proofArgs(ID.u1, { action: ACT, company: ID.co1, target: e.id, version: 3, payload: { location: "X" } });
+    expect(await fakeCall(w, "jarvis_update_enquiry", ok)).toMatchObject({ status: "failed", error_code: "42501", replayed: false });
+    expect(await fakeCall(w, "jarvis_update_enquiry", ok)).toMatchObject({ status: "failed", error_code: "42501", replayed: true });
+    expect(w.updates).toEqual([]);
   });
   it("tampered values (any field, the enquiry, the company) are refused with nothing saved; forbidden or unknown keys smuggled into the patch are dropped", async () => {
     const r = await ready();
     const v = r.card.values;
     for (const t of [{ ...v, patch: { ...v.patch, location: "Elsewhere" } }, { ...v, patch: { ...v.patch, title: "New title" } }, { ...v, patch: { location: "Marina Arena" } }, { ...v, enquiryId: crypto.randomUUID() }, { ...v, companyId: ID.co2 }]) {
-      expect(refusal(await confirm(r, { values: t })).code).toMatch(/^(values_changed|company_changed|invalid_input)$/);
+      expect(refusal(await confirm(r, { values: t })).code).toMatch(/^(values_changed|company_changed|invalid_input|needs_review)$/);
     }
     expect(calls()).toHaveLength(0);
     const ok = await confirm(r, { values: { ...v, patch: { ...v.patch, value: 5, owner_id: ID.u2, stage: "won", agencyOrgId: null, paymentTerms: "x" }, execute: true } });
     expect(ok.ok).toBe(true);
-    expect(JSON.stringify(calls()[0]!.args.p_patch)).not.toMatch(/value|owner|stage|agency|payment|execute/);
+    expect(JSON.stringify(JSON.parse(calls()[0]!.args.p_payload as string))).not.toMatch(/value|owner|stage|agency|payment|execute/);
   });
   it("another enquiry's id with a valid token for this one is refused (the token binds the target)", async () => {
     const other = mkOpp({ company_id: ID.co1, owner_id: ID.u1 });
     w.opps.push(other);
     const r = await ready();
     const out = refusal(await confirm(r, { values: { ...r.card.values, enquiryId: other.id } }));
-    expect(out.code).toBe("values_changed");
+    expect(out.code).toMatch(/^(values_changed|needs_review)$/);
     expect(calls()).toHaveLength(0);
   });
   it("an expired, wrong-company, wrong-action confirmation and revoked access are refused", async () => {
@@ -261,6 +267,6 @@ describe("execute: only the explicit confirmation writes, once, and only if the 
 
 async function fakeCall(world: World, name: string, args: Record<string, unknown>) {
   const { fakeSupabase } = await import("./testing/fake-world");
-  const r = await fakeSupabase(world, ID.u1).rpc(name, args);
-  return (r as { data: unknown }).data;
+  const r = (await fakeSupabase(world, ID.u1).rpc(name, args)) as { data: unknown; error: { code?: string } | null };
+  return r.error ? { code: r.error.code } : r.data;
 }

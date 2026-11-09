@@ -7,7 +7,7 @@ import { createAssistant, type JarvisAssistant } from "./assistant";
 import { simulatedProviderCalls } from "./provider/simulated";
 import type { ActionConfirmResult, EnquiryStageCard, SendResult } from "./protocol";
 import { stageFromText, transitionsFrom, transitionTable, WORKING } from "./sales/stage-transitions";
-import { fakeDeps, ID, mkOpp, newWorld, type Opp, type World } from "./testing/fake-world";
+import { fakeDeps, ID, mkOpp, newWorld, proofArgs, type Opp, type World } from "./testing/fake-world";
 
 let w: World;
 let a: JarvisAssistant;
@@ -166,7 +166,8 @@ describe("execute: only the explicit confirmation moves it, once, and only if it
     expect(c).toMatchObject({ ok: true, status: "done", reference: e.reference, replayed: false, actionId: ACT });
     if (!c.ok) throw new Error();
     expect(c.summary).toBe(`${e.reference} was moved from New enquiry to Qualified, and you approved it.`);
-    expect(calls()[0]!.args).toMatchObject({ p_confirmation_id: r.id, p_enquiry_id: e.id, p_to: "qualified", p_expected_version: 5 });
+    expect(calls()[0]!.args).toMatchObject({ p_confirmation: r.id, p_company: ID.co1, p_target: e.id, p_version: 5 });
+    expect(JSON.parse(calls()[0]!.args.p_payload as string)).toEqual({ to: "qualified" });
     expect(w.moves).toEqual([{ id: e.id, from: "new", to: "qualified", version: 5 }]);
     expect(e).toMatchObject({ stage: "qualified", version: 6, owner_id: ID.u1 });
   });
@@ -200,19 +201,19 @@ describe("execute: only the explicit confirmation moves it, once, and only if it
     expect(calls()).toHaveLength(0);
     // straight to the wrapper without the app's check: the existing gate refuses, recorded once as failed
     const { fakeSupabase } = await import("./testing/fake-world");
-    const conf = crypto.randomUUID();
-    const args = { p_confirmation_id: conf, p_values_hash: "b".repeat(64), p_enquiry_id: e.id, p_to: "proposal_sent", p_expected_version: 5 };
+    const proof = (to: string) => proofArgs(ID.u1, { action: ACT, company: ID.co1, target: e.id, version: 5, payload: { to } });
+    const args = proof("proposal_sent");
     const sb = fakeSupabase(w, ID.u1);
     expect((await sb.rpc("jarvis_change_stage", args) as { data: unknown }).data).toMatchObject({ status: "failed", error_code: "23514", error_message: "Record a proposal as sent before moving to Proposal sent" });
     expect((await sb.rpc("jarvis_change_stage", args) as { data: unknown }).data).toMatchObject({ status: "failed", replayed: true });
     expect(e.stage).toBe("proposal_prep");
     // and the wrapper itself refuses what JARVIS never offers
-    for (const to of ["won", "lost", "on_hold", "negotiation"]) expect(((await sb.rpc("jarvis_change_stage", { ...args, p_confirmation_id: crypto.randomUUID(), p_to: to }) as { error: { code: string } | null }).error?.code)).toBe("22023");
+    for (const to of ["won", "lost", "on_hold", "negotiation"]) expect(((await sb.rpc("jarvis_change_stage", proof(to)) as { error: { code: string } | null }).error?.code)).toBe("22023");
   });
   it("tampered values (target stage, from, enquiry, company) are refused; the token cannot be moved to another enquiry", async () => {
     const r = await ready("qualified");
     const v = r.card.values!;
-    for (const t of [{ ...v, to: "negotiation" }, { ...v, to: "won" }, { ...v, from: "qualified" }, { ...v, enquiryId: crypto.randomUUID() }, { ...v, companyId: ID.co2 }]) expect(refusal(await confirm(r, { values: t })).code).toMatch(/^(values_changed|company_changed|invalid_input)$/);
+    for (const t of [{ ...v, to: "negotiation" }, { ...v, to: "won" }, { ...v, from: "qualified" }, { ...v, enquiryId: crypto.randomUUID() }, { ...v, companyId: ID.co2 }]) expect(refusal(await confirm(r, { values: t })).code).toMatch(/^(values_changed|company_changed|invalid_input|needs_review)$/);
     expect(calls()).toHaveLength(0);
   });
   it("expired, wrong company, wrong action, revoked access, writes off: refused with nothing moved", async () => {
