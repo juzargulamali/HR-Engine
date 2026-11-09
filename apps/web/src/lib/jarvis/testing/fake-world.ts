@@ -30,6 +30,8 @@ export interface World {
   /** ok | refuse (the database refuses, nothing created) | network (no answer, nothing created) | lost (created, but the answer is lost) */
   createMode: "ok" | "refuse" | "network" | "lost";
   dupFails: boolean;
+  /** ok | missing (PGRST202: the migration is not applied) | error */
+  accessFn: "ok" | "missing" | "error";
   orgReadFails: boolean;
   rpcLog: { name: string; args: Record<string, unknown> }[];
   createdArgs: Record<string, unknown>[];
@@ -42,7 +44,7 @@ export function newWorld(): World {
     signedIn: ID.u1, settings: { enabled: true, writes: true }, pilot: new Set([ID.u1, ID.u2, ID.u3]), pilotCompanies: new Set(),
     grants: [{ user_id: ID.u1, company_id: ID.co1, capabilities: [], revoked_at: null }, { user_id: ID.u1, company_id: ID.co2, capabilities: [], revoked_at: null }, { user_id: ID.u2, company_id: ID.co2, capabilities: [], revoked_at: null }],
     companies: [{ id: ID.co1, legal_name: "Fictional Enginious UAE LLC" }, { id: ID.co2, legal_name: "Fictional Enginious KSA LLC" }],
-    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, orgReadFails: false, rpcLog: [], createdArgs: [], counter: 0,
+    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], createdArgs: [], counter: 0,
   };
 }
 
@@ -87,7 +89,10 @@ function rpc(w: World, user: string, name: string, args: Record<string, unknown>
   w.rpcLog.push({ name, args });
   const run = async (): Promise<{ data: unknown; error: { message: string; code?: string } | null }> => {
     switch (name) {
-      case "jarvis_my_access": return { data: [access(w, user, (args.p_company_id as string | null) ?? null)], error: null };
+      case "jarvis_my_access":
+        if (w.accessFn === "missing") return { data: null, error: { message: "Could not find the function public.jarvis_my_access", code: "PGRST202" } };
+        if (w.accessFn === "error") return { data: null, error: { message: "boom", code: "XX000" } };
+        return { data: [access(w, user, (args.p_company_id as string | null) ?? null)], error: null };
       case "jarvis_usage_take": {
         const limit = args.p_limit as number; const used = w.usage.get(user) ?? 0;
         if (used >= limit) return { data: [{ allowed: false, used, remaining: 0 }], error: null };

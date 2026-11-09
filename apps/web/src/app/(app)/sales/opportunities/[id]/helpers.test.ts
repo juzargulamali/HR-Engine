@@ -19,6 +19,10 @@ describe("buildTimeline", () => {
 });
 
 describe("describeEvent", () => {
+  it("says when an enquiry was created through JARVIS, and leaves the ordinary created event as it was", () => {
+    expect(describeEvent(ev("1", "t", "created", null, "new"), names)).toBe("Enquiry created.");
+    expect(describeEvent(ev("1", "t", "created", "jarvis", "new", "Created through JARVIS after the person reviewed and approved it."), names)).toMatch(/created through JARVIS.*reviewed and approved/);
+  });
   it("shows the estimate events the database writes as estimate events, and ordinary proposal events unchanged", () => {
     expect(describeEvent(ev("1", "t", "proposal", null, "v1 estimate draft"), names)).toBe("Estimate v1 drafted.");
     expect(describeEvent(ev("1", "t", "proposal", null, "QUO-UAE-2026-0001 rev 1 issued"), names)).toBe("Estimate QUO-UAE-2026-0001 revision 1 finalised.");

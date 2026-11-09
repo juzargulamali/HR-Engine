@@ -417,6 +417,7 @@ describe("denied data never reaches the provider", () => {
     w.signedIn = ID.u2;
     const c = await a.context({ companyId: null, enquiryId: hidden.id });
     expect(c).toMatchObject({ ok: true, view: { company: null, enquiry: null } });
+    expect(await a.context({ companyId: ID.co1, enquiryId: null })).toMatchObject({ ok: true, view: { company: null, enquiry: null } }); // a company id from the browser does not reveal a company the person has no grant for
     w.signedIn = ID.u1;
     const ok = await a.context({ companyId: null, enquiryId: hidden.id });
     expect(ok).toMatchObject({ ok: true, view: { enquiry: { reference: "OPP-UAE-2026-0007", companyId: ID.co1 }, company: { name: "Fictional Enginious UAE LLC" } } });
@@ -473,11 +474,27 @@ describe("limits, provider failures and availability (ordinary CRM stays usable)
     expect((await a.availability()).companies.map((c) => c.id)).toEqual([ID.co2]);
     w.pilot.delete(ID.u2);
     expect((await a.availability()).available).toBe(false);
+    w.pilot.add(ID.u2); w.pilotCompanies.add(ID.co1);
+    expect((await a.availability()).available).toBe(false); // the pilot covers only company 1 and this person has a grant only for company 2: nothing to offer
+    w.signedIn = ID.u1;
+    expect((await a.availability()).companies.map((c) => c.id)).toEqual([ID.co1]); // the picker never offers a company the server would refuse
+    w.pilotCompanies.clear();
     w.signedIn = ID.u3;
     expect((await a.availability()).available).toBe(false); // on the pilot list but holds no Sales grant: nothing to offer
     w.signedIn = null;
     expect((await a.availability()).available).toBe(false);
     expect(refusal(await a.send({ companyId: ID.co1, text: BRIEF })).code).toBe("signed_out");
+  });
+  it("when the migration is not applied (or the access check fails) JARVIS is simply unavailable: no launcher, calls refused, and only a real failure is logged", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    w.accessFn = "missing";
+    expect((await a.availability()).available).toBe(false);
+    expect(refusal(await a.send({ companyId: ID.co1, text: BRIEF })).code).toBe("unavailable");
+    expect(info.mock.calls.filter((c) => String(c[0]).includes("access_unreadable") && String(c[0]).includes("availability"))).toHaveLength(0);
+    w.accessFn = "error";
+    expect((await a.availability()).available).toBe(false);
+    expect(info.mock.calls.some((c) => String(c[0]).includes("access_unreadable"))).toBe(true);
+    expect(simulatedProviderCalls).toHaveLength(0);
   });
   it("the switch is enforced on EVERY call, not by hiding the launcher: off, not on the allowlist, no grant, wrong company", async () => {
     w.settings.enabled = false;

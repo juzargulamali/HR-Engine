@@ -194,8 +194,16 @@ export function createDispatcher(deps: JarvisDeps) {
     if (acc.error && (acc.error as { code?: string }).code !== "PGRST202") jarvisLog({ event: "availability", code: "access_unreadable" });
     const row = (Array.isArray(acc.data) ? acc.data[0] : acc.data) as { is_available?: boolean; writes_allowed?: boolean } | null | undefined;
     if (acc.error || !row?.is_available) return none;
-    const companies = await deps.companies({ supabase, userId });
-    if (companies === "error" || companies.length === 0) return none;
+    const all = await deps.companies({ supabase, userId });
+    if (all === "error") return none;
+    // Only companies the pilot covers are offered (the pilot company list, when the owner set one): the picker never offers a company the server would refuse.
+    const allowed = await Promise.all(all.map(async (c) => {
+      const r = await supabase.rpc("jarvis_my_access", { p_company_id: c.id });
+      const a = (Array.isArray(r.data) ? r.data[0] : r.data) as { company_allowed?: boolean } | null | undefined;
+      return !r.error && !!a?.company_allowed;
+    }));
+    const companies = all.filter((_, i) => allowed[i]);
+    if (companies.length === 0) return none;
     return { available: true, writes: !!row.writes_allowed, companies, maxInputChars: config.maxInputChars };
   }
 

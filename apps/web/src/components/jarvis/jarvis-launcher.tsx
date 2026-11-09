@@ -259,7 +259,7 @@ export function JarvisLauncher({ companies, writes, maxInputChars, api = serverA
               <div className="flex items-center justify-between gap-2">
                 <p className={`text-[11px] ${text.length > maxInputChars ? "text-destructive" : "text-muted-foreground"}`}>{text.length > 0 ? `${text.length} / ${maxInputChars}` : "Ctrl+Enter sends."}</p>
                 <div className="flex gap-2">
-                  {messages.length > 0 ? <Button type="button" size="sm" variant="ghost" onClick={() => { setMessages([]); setNotice(null); }} disabled={busy}>Clear</Button> : null}
+                  {messages.length > 0 ? <Button type="button" size="sm" variant="ghost" aria-label="Clear conversation" onClick={() => { setMessages([]); setNotice(null); }} disabled={busy}>Clear</Button> : null}
                   <Button type="submit" size="sm" disabled={busy || text.trim() === ""}>Send</Button>
                 </div>
               </div>

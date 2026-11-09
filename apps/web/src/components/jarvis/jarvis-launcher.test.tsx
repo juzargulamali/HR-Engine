@@ -29,8 +29,9 @@ const card = (over: Partial<EnquiryCard> = {}): EnquiryCard => ({
 const conf = (id = "conf-1") => ({ id, token: `tok-${id}`, expiresAt: new Date(Date.now() + 900_000).toISOString() });
 const cardResult = (c: EnquiryCard = card(), confirmation: ReturnType<typeof conf> | null = conf()): SendResult => ({ ok: true, kind: "card", card: c, confirmation });
 
-function fakeApi(over: Partial<JarvisClientApi> = {}): JarvisClientApi & { calls: Record<string, unknown[][]> } {
-  const calls: Record<string, unknown[][]> = { send: [], review: [], confirm: [], status: [], context: [] };
+type Calls = Record<"send" | "review" | "confirm" | "status" | "context", unknown[][]>;
+function fakeApi(over: Partial<JarvisClientApi> = {}): JarvisClientApi & { calls: Calls } {
+  const calls: Calls = { send: [], review: [], confirm: [], status: [], context: [] };
   const impl = {
     send: async () => cardResult(),
     review: async () => cardResult(),
@@ -39,7 +40,7 @@ function fakeApi(over: Partial<JarvisClientApi> = {}): JarvisClientApi & { calls
     context: async () => ({ ok: true as const, view: { company: null, enquiry: null } }),
     ...over,
   } as Record<string, (...a: unknown[]) => Promise<unknown>>;
-  const wrapped = Object.fromEntries(Object.entries(impl).map(([k, f]) => [k, (...a: unknown[]) => { calls[k]!.push(a); return f(...a); }]));
+  const wrapped = Object.fromEntries(Object.entries(impl).map(([k, f]) => [k, (...a: unknown[]) => { calls[k as keyof Calls].push(a); return f(...a); }]));
   return { calls, ...wrapped } as never;
 }
 

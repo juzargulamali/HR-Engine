@@ -75,8 +75,10 @@ export function createAssistant(deps: JarvisDeps) {
         const o = r.data as { id: string; reference: string; title: string; company_id: string } | null;
         if (o) view.enquiry = { id: o.id, reference: o.reference, title: o.title, companyId: o.company_id };
       }
+      // A company is named only if it is one this person has a module grant for: a company id from the browser is a hint, never a way to read another company's name.
+      const mine = await deps.companies({ supabase: auth.ctx.supabase, userId: auth.ctx.userId });
       const companyId = view.enquiry?.companyId ?? (req.companyId && uuid.test(req.companyId) ? req.companyId : null);
-      if (companyId) {
+      if (companyId && mine !== "error" && mine.some((c) => c.id === companyId)) {
         const c = await auth.ctx.supabase.from("companies").select("id, legal_name").eq("id", companyId).maybeSingle();
         const row = c.data as { id: string; legal_name: string } | null;
         if (row) view.company = { id: row.id, name: row.legal_name };

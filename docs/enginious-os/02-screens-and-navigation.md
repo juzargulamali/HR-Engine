@@ -119,6 +119,7 @@ Notes
 * `navGroupsFromModules` feeds the command palette (search); secondary links appear there only.
 * The header shows a breadcrumb "Module / Page" (`breadcrumbFor`); the most specific link wins (`/attendance-clock` is not swallowed by `/attendance`).
 * **Phone bottom bar** (`shell-chrome.tsx`): My Day; Sales (only with a Sales grant, to `/sales/follow-ups`); Clock (employees only; reads "Clocked in" when a shift is open); Me (`/profile`); More (opens the full menu drawer). Shown below the `lg` breakpoint.
+* **JARVIS launcher** (not a menu entry): one floating button "Open JARVIS" on the right edge of every signed-in page (a round button above the bottom bar on phones), drawn by `apps/web/src/app/(app)/layout.tsx` only when the server says the person may use JARVIS (`lib/jarvis/launcher.ts`: environment ready, the pilot switch on, the person on the pilot list, an active Sales grant for a company the pilot covers). OFF by default and absent for everyone otherwise; hiding it is cosmetic, every JARVIS call is checked again on the server. Opens a side panel (desktop) or a full-height sheet (phone); see [`modules/jarvis.md`](./modules/jarvis.md).
 * The menu is only an offer. Hiding a row grants and removes nothing; the page and database decide (`nav-groups.ts` header).
 
 ## 3. Direct-URL behaviour

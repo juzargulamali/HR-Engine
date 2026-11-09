@@ -38,7 +38,7 @@ Not on this list: export, import, bulk owner change, bulk stage move. (Bulk assi
 
 ## 3. Creating an enquiry
 
-Two doors, one action: the quick-add dialog (list pages) and the full page `/sales/new` (secondary in the menu, also reached from a link in the quick-add dialog and from an account's Outreach "Create inquiry"). Both post to `createOpportunity` (`apps/web/src/lib/actions/crm.ts`) which calls `crm_create_opportunity` (`20261115000200_crm_workflow_functions.sql`). Catalogue: `sales.enquiry.create`.
+Two doors, one action: the quick-add dialog (list pages) and the full page `/sales/new` (secondary in the menu, also reached from a link in the quick-add dialog and from an account's Outreach "Create inquiry"). Both post to `createOpportunity` (`apps/web/src/lib/actions/crm.ts`) which calls `crm_create_opportunity` (`20261115000200_crm_workflow_functions.sql`). Catalogue: `sales.enquiry.create`. A **third door**, the JARVIS assistant (OFF by default, owner-switched pilot), reaches the same database function through the wrapper `jarvis_create_enquiry` after the person reviews and approves a card: [`jarvis.md`](./jarvis.md), catalogue `jarvis.sales.enquiry.create_from_brief`.
 
 ### 3.1 Quick add (dialog, `components/sales/quick-add-enquiry-form.tsx`)
 

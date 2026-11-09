@@ -47,7 +47,7 @@ Shared meanings:
 | (7) Side effects | Event `created`; optional `crm_outreach_link_inquiry` when started from Outreach (its refusal leaves the enquiry in place); the new next action appears in the owner's Follow-ups and can later raise reminders |
 | (8) Verify | `/sales/opportunities?open=<id>` or the page: reference, stage New enquiry, owner, one open follow-up, timeline "Enquiry created." |
 | (9) STOP | No. Ask if a similar enquiry warning appears ("This may be the same enquiry"): the person decides |
-| (10) Retry | **Duplicate risk**: each call makes another enquiry and consumes a reference number; no idempotency key. After an ambiguous failure search the list for the title and organisation first |
+| (10) Retry | **Duplicate risk**: each call makes another enquiry and consumes a reference number; no idempotency key. (The JARVIS door, 3.9, is idempotent per confirmation id.) After an ambiguous failure search the list for the title and organisation first |
 | (11) Surface | UI over DB function |
 
 #### `sales.enquiry.edit_details`
@@ -996,6 +996,27 @@ All estimate edits go through `crm_quote_load_editable` (owner/founder, estimate
 | (10) Retry | Safe: a second call is refused ("already an unissued revision") |
 | (11) Surface | UI over DB function |
 
+### 3.9 JARVIS actions (reference: [JARVIS](./jarvis.md); surface "JARVIS action")
+
+JARVIS is the Enginious OS assistant (OFF by default, owner-switched pilot; **not** hosted-applied). A JARVIS action is a **typed, registered** action reached only from the JARVIS panel's review card: `propose` never writes, a server-signed confirmation binds the reviewed values, and the write goes through ONE definer function that records a ledger row and calls the existing function in the same transaction. Worker rule 4 applies unchanged: **stop-and-ask is "yes" for every write**: the person reviews and presses the button. "Disabled" actions are registered (so the panel lists them as "Not available yet") and refuse every call.
+
+#### `jarvis.sales.enquiry.create_from_brief`
+| Field | Entry |
+|---|---|
+| (1) Reached | The JARVIS panel (launcher, right edge): paste a brief, review the card, press **Create enquiry**. Server actions `jarvisSend`, `jarvisReview`, `jarvisConfirm`, `jarvisStatus` (`apps/web/src/lib/actions/jarvis.ts`); action `apps/web/src/lib/jarvis/sales/enquiry-create-from-brief.ts`; database wrapper `jarvis_create_enquiry` (`20261223000100_jarvis_platform.sql`), which calls `crm_create_opportunity` |
+| (2) Record | New `crm_opportunities` row (same as `sales.enquiry.create`); a `jarvis_action_ledger` row keyed by the confirmation id |
+| (3) Inputs | The `sales.enquiry.create` field set (title, source, agency and/or end client, currency, value, budget note, brief summary, dates, location, technologies, scope, waiting on, next action title, date, type). Owner is always the approver. Organisations are chosen from visible, role-correct records: **never created**. Contacts: none (added on the page) |
+| (4) Permissions | JARVIS pilot on (global switch, allowlist, company list), write switch on, an active Sales grant for the company, then the existing rules of `crm_create_opportunity` (company settings, organisation roles, technologies). Refused: everyone else, with no side effect; the wrapper adds no privilege |
+| (5) Starting states | None (creates). The company must have Sales settings; likely duplicates must be acknowledged on the card |
+| (6) Changes | As `sales.enquiry.create` (enquiry, reference counter, first open follow-up for the approver) plus the ledger row |
+| (7) Side effects | Events `created` and a second `created` event "created through JARVIS" (actor = the approver). The pasted brief is sent to the AI provider; **nothing is stored of it** (no text in the ledger, no chat history) |
+| (8) Verify | The panel shows the real reference only after reading the enquiry back; then as `sales.enquiry.create` (page, stage New enquiry, owner = approver, one open follow-up, two timeline lines) |
+| (9) STOP | **Yes**: the person must review the card and press Create enquiry; a chat message can never confirm. Ask if a duplicate is flagged |
+| (10) Retry | **Idempotent per confirmation id**: a repeat (double click, retry after a timeout, restart) returns the ORIGINAL result and creates nothing; a different reviewed value needs a new review. After an unknown answer use the read-only status ("Checking the original result"); never create again |
+| (11) Surface | **JARVIS action** (UI-only, through the panel); not callable by the model or by chat text |
+
+Disabled (registered, **not available yet**, every call refused): `jarvis.sales.email.draft_reply` (read-only draft of a client email or reply; never sends), `jarvis.sales.help.ask` (general Enginious OS questions; the deterministic "what can you do?" help is built in and needs no action), `jarvis.sales.organisation.register` (register a client or agency; today JARVIS only says "register it in Clients & Agencies first"), `jarvis.sales.enquiry.update`, `jarvis.sales.enquiry.change_status`, `jarvis.sales.meeting.notes_to_activity`. Each needs its own checks before it is enabled.
+
 ## 4. Actions that communicate outside the system
 
 | Action or job | Reaches outside? | What leaves, to whom |
@@ -1054,7 +1075,7 @@ After a handover is submitted, the next steps are Projects screens and functions
 
 ## 8. Totals and gaps
 
-* **63 actions** catalogued in section 3 (enquiries, contacts and files 13; stage changes 6; follow-ups and reminders 7; proposals, availability, approval and Zoho 9; handover 4; settings and company 4; accounts, import and outreach 9; estimates 11). Plus 6 read-only action groups (section 5), the external-communication table (section 4) and the internal list (section 6).
+* **63 actions** catalogued in section 3 (plus one enabled JARVIS action and six disabled ones in section 3.9, counted separately: they sit on top of the actions below) (enquiries, contacts and files 13; stage changes 6; follow-ups and reminders 7; proposals, availability, approval and Zoho 9; handover 4; settings and company 4; accounts, import and outreach 9; estimates 11). Plus 6 read-only action groups (section 5), the external-communication table (section 4) and the internal list (section 6).
 * **Flagged stop-and-ask: 32** (24 unconditional, 8 conditional: `sales.enquiry.edit_details`, `.move_stage`, `sales.followup.complete`, `.reassign`, `sales.account.save_profile`, `sales.outreach.set_status`, `sales.estimate.delete_section`, `.delete_line`). Unconditional: `sales.enquiry.assign_owner`, `.mark_won`, `.mark_lost`, `.reopen`, `.remove_file`, `sales.contact.update_shared`, `sales.proposal.record_sent`, `.record_accepted`, `.supersede`, `sales.zoho.save_references`, `sales.availability.record_result`, `sales.approval.decide`, `sales.handover.save_and_submit`, `.withdraw`, `.update_legacy`, `sales.settings.save_company`, `.save_vat_choice`, `sales.company.save_issuer_details`, `.upload_logo`, `sales.account.assign_owner`, `sales.import.apply`, `sales.outreach.assign`, `sales.estimate.decide_approval`, `.finalise`.
 * **Not safely retryable without reading first: 23** (was 24: `sales.zoho.save_references` moved out after the merge fix). Duplicate risk (15): `sales.enquiry.create`, `.add_activity`, `.contact_create_and_link`, `.add_link`, `.upload_file`, `sales.contact.create`, `sales.organisation.create_simple`, `sales.followup.create`, `.create_on_account`, `sales.proposal.add_version`, `sales.settings.save_vat_choice`, `sales.account.create`, `sales.outreach.log_activity`, `sales.estimate.create`, `.save_section` (without an id). Repeats a side effect or overwrites (8): `sales.estimate.finalise` (repeats the asset copying; the database itself refuses a second finalisation), `sales.proposal.record_sent`, `sales.availability.request`, `.record_result`, `sales.settings.save_company`, `sales.company.upload_logo`, `sales.contact.update_shared`, `sales.outreach.link_inquiry`. The other 40 are idempotent, refused on repeat, or protected by a version check (the strongest guards: `sales.import.apply` by batch key and advisory lock, `sales.enquiry.*` stage actions by the version check and by refusing a repeat).
 * **Entries whose permission or starting state was not fully confirmed:** `sales.enquiry.add_link` (the Lost-enquiry refusal of `crm_register_file` was not read), `sales.company.save_issuer_details` (the exact write mechanism behind the System Administrator rule), `sales.estimate.finalise` (clean-up of pinned copies after a failed finalise), `sales.estimate.save_draft` (partial-failure behaviour), `sales.enquiry.upload_file` (the storage side needs a running stack). Hosted state of every action is `Unverified` (nothing was run against any hosted project).

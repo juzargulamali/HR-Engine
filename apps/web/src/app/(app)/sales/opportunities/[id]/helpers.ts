@@ -44,7 +44,7 @@ const EVIDENCE_WORDS: Record<string, string> = { purchase_order: "Purchase order
 export function describeEvent(e: Pick<CrmOpportunityEventRow, "kind" | "from_value" | "to_value" | "reason">, personName: (id: string | null | undefined) => string): string {
   const reason = e.reason ? ` Reason: ${e.reason}.` : "";
   switch (e.kind) {
-    case "created": return "Enquiry created.";
+    case "created": return e.from_value === "jarvis" ? "Enquiry created through JARVIS: the person who saved it reviewed and approved it first." : "Enquiry created.";
     case "stage_changed": return `Stage changed from ${crmStageLabel(e.from_value ?? "")} to ${crmStageLabel(e.to_value ?? "")}.`;
     case "held": return `Put on hold.${reason}`;
     case "resumed": return `Resumed${e.to_value ? ` (back to ${crmStageLabel(e.to_value)})` : ""}.`;
