@@ -1,0 +1,66 @@
+# JARVIS: setup (environment, pilot switches, data handling)
+
+JARVIS is the Enginious OS assistant (reference: [`enginious-os/modules/jarvis.md`](./enginious-os/modules/jarvis.md)). **It is OFF by default.** The database pack (`20261223000100` and the corrective `20261223000200`) has been applied on hosted Enginious HR Engine V2 and verified read-only (`jarvis-deployment.md`, "Hosted V2 result"); JARVIS is **not** enabled there, no proof key is set and nothing is applied to Production. This page is for the owner. Database steps are in [`jarvis-deployment.md`](./jarvis-deployment.md). What was verified: the isolated local stack, with the simulated provider and, once, with the real API for one fictional brief (section 5). **The hosted JARVIS workflow and pilot are unverified.**
+
+## 1. Environment variables (server only, set in Vercel; none of them is ever sent to the browser)
+
+| Variable | Needed | Default | What it does |
+|---|---|---|---|
+| `ANTHROPIC_API_KEY` | yes, for the real provider | none | The Anthropic key. Missing = JARVIS is unavailable (no launcher, every call refused); ordinary Sales & CRM is unaffected. **Never** put it in Git, a screenshot, a chat or a log. Mark it Sensitive in Vercel. |
+| `JARVIS_CONFIRMATION_SECRET` | **yes in Production and Preview** | dev-only constant outside production | At least 32 random characters. The ONE root secret: the app derives two keys from it, a **review key** (signs the review token the browser holds; only the server knows it) and a **proof key** (signs the short-lived **database proof** that the server issues inside the confirmation request and the database checks before every JARVIS write). **Vercel holds this root value; Supabase stores only the derived database proof key** (the owner step in `jarvis-deployment.md` runs `select jarvis_set_proof_key('<root value>')`, which derives the key inside the database with `HMAC-SHA256(root, "JARVIS-PROOF-KEY-V1")`, the same derivation as `lib/jarvis/token.ts:28`; **pass the root value, never a key you derived yourself**; the database proof key is needed only for confirmed writes, so the first access-only test leaves it unset with `writes_enabled = false`); if they differ, or the database has none, JARVIS cannot save anything and says so (it fails closed; ordinary CRM is unaffected). In production JARVIS also **refuses to operate** if the variable is missing or shorter. Generate with `openssl rand -base64 48`. **Where each value lives:** the root value in Vercel only (server-only, Sensitive); the derived proof key only in the database key table (set by the owner in the SQL Editor, never read back). **Never in Git, a log, a screenshot, a chat or an email.** Changing it (rotation) means setting the database and the environment together, exactly as before; open reviews are invalidated (people review again). Nothing new for the owner: still one root value, one SQL line. **To show the launcher at all, a Preview needs only `ANTHROPIC_API_KEY` and `JARVIS_CONFIRMATION_SECRET`** (`lib/jarvis/config.ts`, `lib/jarvis/dispatcher.ts:210`); no database key is needed for that. |
+| `JARVIS_MODEL` | no | `claude-sonnet-5-5` | The model id sent to the API. A product setting: change it in Vercel without a code release. |
+| `JARVIS_MAX_INPUT_CHARS` | no | 6000 | Longest pasted brief (200 to 20000). |
+| `JARVIS_MAX_OUTPUT_TOKENS` | no | 1200 | Output cap per request (100 to 4000). |
+| `JARVIS_TIMEOUT_MS` | no | 20000 | Provider call limit (1000 to 60000). A timeout ends in a clear message; CRM still works. |
+| `JARVIS_DAILY_LIMIT_PER_USER` | no | 30 | Provider requests per person per Dubai day (1 to 500), counted in the database (`jarvis_usage`), so restarts and several instances do not reset it. Reviewing and confirming are not counted. |
+| `JARVIS_CONFIRMATION_TTL_MINUTES` | no | 15 | How long a reviewed card can be confirmed: the life of the review token (1 to 60). |
+| `JARVIS_PROOF_TTL_SECONDS` | no | 120 | How long the database proof, issued only inside the confirmation request and never shown to the browser, is valid (30 to 600). A retry after a timeout gets a fresh one for the same confirmation. |
+| `JARVIS_DISABLED=1` | no | unset | **Hard off**, regardless of the database switches. |
+| `JARVIS_PROVIDER` | no | `anthropic` | `anthropic`, or `simulated` (tests and local runs only: **refused when `NODE_ENV` or `VERCEL_ENV` is `production`**). |
+| `JARVIS_ALLOW_SIMULATED_ON_LOCAL_STACK=1` | local stack only | unset | Lets the isolated local test stack (a production build pointing at a loopback database, never on Vercel) use the simulated provider. Never set it anywhere hosted: it has no effect on Vercel (Vercel always sets `VERCEL`), and it needs a loopback database address. |
+
+## 2. Adding a key to the isolated Preview (owner steps; Claude does none of them)
+
+1. Use a **separate Anthropic key** for Preview with a low spend limit set in the Anthropic console. Do not reuse a Production key.
+2. Vercel -> the project -> Settings -> Environment Variables: add `ANTHROPIC_API_KEY` and `JARVIS_CONFIRMATION_SECRET` for **Preview only** (leave Production unchecked), mark them Sensitive. Do **not** set the database proof key for the first access-only test (`jarvis-deployment.md`, "One-user Sales & CRM pilot on a Preview"): it is needed only before a confirmed-write test ("OWNER STEP": the root value goes to Vercel, Supabase stores only the derived key). Optionally `JARVIS_DAILY_LIMIT_PER_USER` (for example 10) while piloting.
+3. Redeploy the Preview. The Preview must point at the isolated (V2 or a throwaway) Supabase project, never at Production data.
+4. Apply the database pack to **that** project (`jarvis-deployment.md`; on hosted V2 it is already applied and verified), then switch the pilot on for named people only (section 3), writes off. Set the database proof key (the owner step) only before a confirmed-write test.
+5. Production stays off: do not add the variables to Production, and do not add anyone to the pilot there, until the owner decides.
+
+## 3. Switching the pilot on and off (no code release)
+
+All switches are rows the owner changes in the Supabase SQL Editor (there is no screen for them in part 1). Exact statements are in [`jarvis-deployment.md`](./jarvis-deployment.md) section "Pilot controls". In short:
+
+* **On**: `update jarvis_settings set enabled = true;` then add people: `insert into jarvis_pilot_users (user_id, note) values ('<user id>', 'pilot');`. A person needs both the pilot row **and** an active Sales grant for a company to see the launcher.
+* **Writes off, read-only help stays**: `update jarvis_settings set writes_enabled = false;` (creating is refused with a clear message).
+* **Restrict to companies**: `insert into jarvis_pilot_companies (company_id) values ('<company id>');` (while the list is empty there is no company restriction).
+* **Off at once for everyone**: `update jarvis_settings set enabled = false;`, or set `JARVIS_DISABLED=1` in Vercel. (Writes alone can also be stopped by clearing the proof key: `delete from jarvis_proof_key;`, which fails every write closed.) Both are enforced on the server for every request; hiding the launcher is not the control.
+
+## 4. Data handling
+
+* **Sent to the AI provider**: only what a person pastes into the panel, fixed instructions, today's date and the field schema. For the enquiry actions also the minimum facts of the ONE enquiry the person chose: a reply draft gets the enquiry's reply-relevant facts (title, organisation names, dates, location, technologies, scope, summary, the client's budget note; never the internal value, owner or ids), an update request gets the current values of the ten editable fields, meeting notes get only the notes. A help question about the app is answered from reviewed guidance with nothing sent; a general question sends only the question. Change status and registering an organisation use no provider. No other enquiries, ids, company data or other modules.
+* **Kept by Enginious OS**: the enquiry the person approved (with a short summary as its Brief); a ledger row (who approved, company, action, the record's id and reference, ids of what was created, timestamps, no text); a usage counter. **Not kept**: the pasted text, prompts, model output, chat history. Logs carry no text.
+* **Real client briefs need separate owner approval.** Until the owner says so, use fictional briefs only. Anthropic's own retention and training terms depend on the owner's agreement and settings: not verified here. Check them before real briefs are pasted.
+* A person can only ever do through JARVIS what their own Sales grant lets them do; JARVIS cannot read salaries, leave, payroll, other modules, configuration, credentials or permissions, and cannot delete anything.
+
+## 5. Live provider check (pending, to be recorded) and the provider notes
+
+**Status.** The first live attempt returned HTTP 400 on the forced tool choice (`tool_choice: type "tool" and "any" are not supported for this model`, model `claude-sonnet-5-5`); it is fixed in the request (`tool_choice: auto`, the `record_fields` tool, an explicit instruction in the system text). **Live result (2026-11-09, isolated local stack, real Anthropic API, model `claude-sonnet-5-5`, one fictional brief, head `9a4a71d`): PASS.** The review card appeared (the provider answered with a valid `record_fields` result; propose took about 9 s); before approval there were 0 enquiries and 0 confirmed ledger rows; after one explicit Create press there was exactly 1 enquiry (`OPP-UAE-2026-0001`, a local fictional row) and 1 `done` ledger row; the app log held only the sanitised `propose`/`execute` events (no key, no brief text). The database, auth gateway and app were all loopback; hosted V2, Vercel and Production were not touched. This is one run with one fictional brief on the local stack: the other four provider-backed actions (draft reply, update enquiry, meeting notes, help) share the same provider code and request shape and are covered by mocked-fetch tests, but each has not been exercised live; hosted behaviour is `Unverified`. No automated test calls the real API.
+
+**Provider notes.** One request per action, no automatic retry (a person can simply try again). If the model does not answer by calling the tool, or the tool result has none of the expected fields, JARVIS shows "could not make sense of that", creates no review card and writes nothing. A failed provider call still counts toward the daily limit.
+
+**Troubleshooting: reading the diagnostics line.** Every provider failure writes one line to the server log (Vercel runtime logs), as JSON, with `"event":"provider"` and these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `actionId` | which JARVIS action (e.g. `jarvis.sales.enquiry.create_from_brief`) |
+| `failureClass` | `http` (the API answered with an error status), `timeout` (no answer within `JARVIS_TIMEOUT_MS`), `network` (could not reach the API), `malformed` (answered, but without a usable `record_fields` result) |
+| `status` | the HTTP status (400 bad request, 401 key rejected, 403 not allowed, 404 model not found, 429 rate limited, 5xx/529 provider trouble), or null |
+| `apiErrorType` | the API's error type, e.g. `invalid_request_error`, `authentication_error`, `not_found_error`, `rate_limit_error`, `overloaded_error`; null if absent |
+| `elapsedMs` | milliseconds until the failure was known (a value near `JARVIS_TIMEOUT_MS` points to a timeout) |
+
+The line never contains the key, headers, the request, the pasted text, the instructions or the provider's error message; to see the message, reproduce with a fictional text in a Preview and use the Anthropic console. Typical reading: `http` 400 `invalid_request_error` = the request itself is not accepted for the configured `JARVIS_MODEL` (check the model id first); 401 `authentication_error` = the key is wrong or revoked; 404 `not_found_error` = unknown model id; 429 = wait or raise the limit with the provider.
+
+## 6. Local runs (developers)
+
+`apps/web/os-shell-checks/README.md` ("JARVIS flow") shows how to start the isolated stack with the simulated provider and run `jarvis-flow.mjs`; `seed/jarvis.sh` stores the exported `JARVIS_CONFIRMATION_SECRET` as the local database's proof key (the same owner step). For `next dev` set `JARVIS_PROVIDER=simulated` (allowed outside production), apply the migration to the local database and run `select jarvis_set_proof_key('<the value of JARVIS_CONFIRMATION_SECRET, or the development constant in lib/jarvis/config.ts>');` as the database owner (without it saving is refused: fail closed).

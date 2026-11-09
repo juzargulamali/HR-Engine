@@ -411,3 +411,12 @@ html[data-theme="light"] .os-pill[data-tone="green"] { color: hsl(152 70% 18%); 
 /* The shell is dark in both themes: its badges keep the shell's own colours in the light theme too. */
 html[data-theme="light"] .os-chrome .os-badge[data-tone="cyan"] { color: hsl(var(--accent)); }
 html[data-theme="light"] .os-chrome .os-badge[data-tone="green"], html[data-theme="light"] .os-chrome .os-pill[data-tone="green"] { color: hsl(var(--os-green)); }
+
+/* ------------------------------------------------------------------ JARVIS (assistant launcher and panel) */
+/* The mark colour: Enginious teal in the light theme, cyan in the dark theme. */
+:root { --jarvis-mark: #27CDD8; }
+:root[data-theme="light"] { --jarvis-mark: #1D5D6C; }
+/* A brief pulse when the panel opens; switched off for people who ask for less motion. */
+@keyframes jarvis-pulse { 0% { box-shadow: 0 0 0 0 hsl(var(--accent) / 0.55); } 100% { box-shadow: 0 0 0 14px hsl(var(--accent) / 0); } }
+.jarvis-pulse { animation: jarvis-pulse 0.9s ease-out 1; }
+@media (prefers-reduced-motion: reduce) { .jarvis-pulse { animation: none; } .jarvis-launcher, .jarvis-launcher * { transition: none !important; } }

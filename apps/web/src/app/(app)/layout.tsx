@@ -13,6 +13,8 @@ import { loadInventoryNavAccess } from "@/lib/inventory/context";
 import { loadBudgetNavAccess, loadBudgetWaitingCount } from "@/lib/budget/data";
 import { loadProjectsNavAccess } from "@/lib/projects/context";
 import { loadDirectReportsNav } from "@/lib/nav/direct-reports";
+import { getLauncherState } from "@/lib/jarvis/launcher";
+import { JarvisLauncher } from "@/components/jarvis/jarvis-launcher";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await getCurrentSession();
@@ -96,7 +98,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     else if (waiting.state === "error") menuLoadFailed = true;
   }
 
+  // JARVIS (the assistant): the launcher is drawn only when the server says this person may use it (switch on, on the pilot list, a Sales grant, a provider and a secret
+  // configured). Any failure means no launcher and nothing else changes. Hiding it is a convenience: every JARVIS call checks the same things again on the server.
+  const jarvis = await getLauncherState(session.userId);
+
   return (
+    <>
     <AppShell session={session} clockOpenSince={clockOpenSince} clockLoadFailed={clockLoadFailed} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants} projects={projects} inventory={inventory} budget={{ ...budget, ...(budgetWaiting ? { waiting: budgetWaiting } : {}) }} hasDirectReports={directReports.hasDirectReports}>
       <OsScope>
         {session.loadFailed || menuLoadFailed ? (
@@ -108,5 +115,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {children}
       </OsScope>
     </AppShell>
+    {jarvis.available ? <JarvisLauncher companies={jarvis.companies} writes={jarvis.writes} maxInputChars={jarvis.maxInputChars} enabledActionIds={jarvis.enabledActionIds} /> : null}
+    </>
   );
 }
