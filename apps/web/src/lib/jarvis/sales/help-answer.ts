@@ -3,6 +3,7 @@ import { z } from "zod";
 import { classifyRequest, EXCLUSION_MESSAGE } from "../classifier";
 import { APP_QUESTION, GUIDANCE, matchGuidance } from "../help/guidance";
 import type { HelpAnswerCard } from "../protocol";
+import { logProviderFailure } from "../provider/diagnostics";
 import { JarvisProviderError } from "../provider/types";
 import { JarvisRefusalError, type JarvisActionDefinition } from "../types";
 
@@ -72,7 +73,7 @@ export const helpAnswer: JarvisActionDefinition<HelpAnswerInput, HelpAnswerInput
     }
     const a = raw && typeof raw === "object" ? (raw as { answer?: unknown }).answer : null;
     const answer = typeof a === "string" ? a.trim().slice(0, 1500) : "";
-    if (!answer) throw new JarvisRefusalError("provider_error", WORDS.malformed!);
+    if (!answer) { logProviderFailure(HELP_ANSWER_ID, new JarvisProviderError("malformed")); throw new JarvisRefusalError("provider_error", WORDS.malformed!); }
     return done({ mode: "general", answer, entries: [], topics: [], note: NOTE_GENERAL });
   },
 };

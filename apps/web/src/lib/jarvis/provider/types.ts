@@ -20,12 +20,29 @@ export interface StructuredRequest {
   timeoutMs: number;
 }
 
+export type JarvisProviderFailure = "timeout" | "http" | "malformed" | "network";
+
+/** Only the sanitised facts about a failure: never a message, a body, a header, a key, a prompt or customer text. */
+export interface JarvisProviderErrorDetail {
+  /** The API's `error.type` string (e.g. "invalid_request_error"), kept only when it matches /^[a-z_]{1,64}$/; otherwise null. Never the error message. */
+  apiErrorType?: string | null;
+  /** Milliseconds from sending the request until the failure was known. */
+  elapsedMs?: number;
+}
+
 export class JarvisProviderError extends Error {
-  constructor(readonly kind: "timeout" | "http" | "malformed" | "network", readonly status?: number) {
+  readonly apiErrorType: string | null;
+  readonly elapsedMs: number | null;
+  constructor(readonly kind: JarvisProviderFailure, readonly status?: number, detail: JarvisProviderErrorDetail = {}) {
     super(`provider ${kind}${status ? ` ${status}` : ""}`);
     this.name = "JarvisProviderError";
+    this.apiErrorType = typeof detail.apiErrorType === "string" && API_ERROR_TYPE.test(detail.apiErrorType) ? detail.apiErrorType : null;
+    this.elapsedMs = typeof detail.elapsedMs === "number" && Number.isFinite(detail.elapsedMs) ? Math.max(0, Math.round(detail.elapsedMs)) : null;
   }
 }
+
+/** The only shape of API error type that is ever logged. */
+export const API_ERROR_TYPE = /^[a-z_]{1,64}$/;
 
 export interface JarvisProvider {
   readonly kind: "anthropic" | "simulated";

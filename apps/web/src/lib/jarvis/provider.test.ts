@@ -13,7 +13,7 @@ const KEY = "sk-ant-fictional-test-key-0000";
 const ok = (input: unknown) => new Response(JSON.stringify({ content: [{ type: "text", text: "..." }, { type: "tool_use", name: "record_fields", input }] }), { status: 200 });
 
 describe("Anthropic provider (plain fetch, no network in tests)", () => {
-  it("sends the configured model, the cap, ONE forced tool, the brief inside <brief> tags and the key only in the header", async () => {
+  it("sends the configured model, the cap, ONE tool with tool_choice auto, the brief inside <brief> tags and the key only in the header", async () => {
     const f = vi.fn(async () => ok({ title: "x" }));
     const p = createAnthropicProvider({ apiKey: KEY, model: "claude-sonnet-5-5", fetchImpl: f as unknown as typeof fetch });
     expect(await p.structured(req)).toEqual({ title: "x" });
@@ -22,7 +22,7 @@ describe("Anthropic provider (plain fetch, no network in tests)", () => {
     expect((init.headers as Record<string, string>)["x-api-key"]).toBe(KEY);
     expect((init.headers as Record<string, string>)["anthropic-version"]).toBe("2023-06-01");
     const body = JSON.parse(init.body as string);
-    expect(body).toMatchObject({ model: "claude-sonnet-5-5", max_tokens: 777, tool_choice: { type: "tool", name: "record_fields" } });
+    expect(body).toMatchObject({ model: "claude-sonnet-5-5", max_tokens: 777, tool_choice: { type: "auto" } });
     expect(body.tools).toHaveLength(1);
     expect(body.messages).toEqual([{ role: "user", content: `<brief>\n${req.input}\n</brief>` }]);
     expect(body.system).toContain("untrusted");

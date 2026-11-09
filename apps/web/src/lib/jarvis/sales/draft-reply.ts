@@ -3,6 +3,7 @@ import { z } from "zod";
 import { crmToday } from "@enginious-hr/domain";
 import { classifyRequest, EXCLUSION_MESSAGE } from "../classifier";
 import type { ReplyDraftCard } from "../protocol";
+import { logProviderFailure } from "../provider/diagnostics";
 import { JarvisProviderError } from "../provider/types";
 import { JarvisRefusalError, type JarvisActionDefinition, type JarvisContext } from "../types";
 import { enquiryRef, LOOKUP_WORDS, organisationNames, readEnquiry, type EnquiryRow } from "./enquiry-read";
@@ -77,7 +78,7 @@ async function build(ctx: JarvisContext, input: DraftReplyInput): Promise<ReplyD
     throw new JarvisRefusalError("provider_error", WORDS[err instanceof JarvisProviderError ? err.kind : "network"]!);
   }
   const draft = sanitiseReply(raw);
-  if (!draft) throw new JarvisRefusalError("provider_error", WORDS.malformed!);
+  if (!draft) { logProviderFailure(DRAFT_REPLY_ID, new JarvisProviderError("malformed")); throw new JarvisRefusalError("provider_error", WORDS.malformed!); }
   // The model's own claims are checked against the real sources: a value it says came from the enquiry or the conversation must really be there, or it is unconfirmed.
   const used: ReplyDraftCard["used"] = [];
   const extra: ToConfirm[] = [];

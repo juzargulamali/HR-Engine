@@ -6,6 +6,7 @@ import { configUnavailableReason } from "./config";
 import { canonicalJson } from "./canonical";
 import { jarvisLog } from "./log";
 import type { HelpView, JarvisRefusal, JarvisRefusalCode, LauncherState, StatusResult } from "./protocol";
+import { withProviderDiagnostics } from "./provider/diagnostics";
 import type { JarvisProvider } from "./provider/types";
 import { listJarvisActions, resolveJarvisAction } from "./registry";
 import { issueDbProof, issueReview, payloadHash, verifyReview, type ProofCall } from "./token";
@@ -70,7 +71,7 @@ export function createDispatcher(deps: JarvisDeps) {
       if (!g) { jarvisLog({ event: "refused", actionId: action.id, code: "no_module_access" }); return refuse("no_module_access", "You do not have access to that module for this company."); }
     }
     const ctx: JarvisContext = {
-      userId: id.userId, companyId: companyId ?? "", supabase, config, provider, now: deps.now(),
+      userId: id.userId, companyId: companyId ?? "", supabase, config, provider: action ? withProviderDiagnostics(provider, action.id) : provider, now: deps.now(),
       takeUsage: async () => {
         const r = await supabase.rpc("jarvis_usage_take", { p_limit: config.dailyLimit });
         const u = (Array.isArray(r.data) ? r.data[0] : r.data) as { allowed?: boolean } | null | undefined;
