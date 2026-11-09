@@ -7,7 +7,7 @@ JARVIS is the Enginious OS assistant (reference: [`enginious-os/modules/jarvis.m
 | Variable | Needed | Default | What it does |
 |---|---|---|---|
 | `ANTHROPIC_API_KEY` | yes, for the real provider | none | The Anthropic key. Missing = JARVIS is unavailable (no launcher, every call refused); ordinary Sales & CRM is unaffected. **Never** put it in Git, a screenshot, a chat or a log. Mark it Sensitive in Vercel. |
-| `JARVIS_CONFIRMATION_SECRET` | **yes in Production and Preview** | dev-only constant outside production | At least 32 random characters. Signs the confirmation tokens. In production JARVIS **refuses to operate** if it is missing or shorter. Generate with `openssl rand -base64 48`. Changing it invalidates reviews that are open (people review again). |
+| `JARVIS_CONFIRMATION_SECRET` | **yes in Production and Preview** | dev-only constant outside production | At least 32 random characters. Signs the confirmation **proofs** that the database checks before every JARVIS write. **The database must hold the SAME value** (the owner step in `jarvis-deployment.md`: `select jarvis_set_proof_key('<same value>')`); if they differ, or the database has none, JARVIS cannot save anything and says so (it fails closed; ordinary CRM is unaffected). In production JARVIS also **refuses to operate** if the variable is missing or shorter. Generate with `openssl rand -base64 48`. **Where each copy lives:** Vercel (server-only, Sensitive) and the database key table (set by the owner in the SQL Editor). **Never in Git, a log, a screenshot, a chat or an email.** Changing it (rotation) means changing both together; open reviews are invalidated (people review again). |
 | `JARVIS_MODEL` | no | `claude-sonnet-5-5` | The model id sent to the API. A product setting: change it in Vercel without a code release. |
 | `JARVIS_MAX_INPUT_CHARS` | no | 6000 | Longest pasted brief (200 to 20000). |
 | `JARVIS_MAX_OUTPUT_TOKENS` | no | 1200 | Output cap per request (100 to 4000). |
@@ -21,9 +21,9 @@ JARVIS is the Enginious OS assistant (reference: [`enginious-os/modules/jarvis.m
 ## 2. Adding a key to the isolated Preview (owner steps; Claude does none of them)
 
 1. Use a **separate Anthropic key** for Preview with a low spend limit set in the Anthropic console. Do not reuse a Production key.
-2. Vercel -> the project -> Settings -> Environment Variables: add `ANTHROPIC_API_KEY` and `JARVIS_CONFIRMATION_SECRET` for **Preview only** (leave Production unchecked), mark them Sensitive. Optionally `JARVIS_DAILY_LIMIT_PER_USER` (for example 10) while piloting.
+2. Vercel -> the project -> Settings -> Environment Variables: add `ANTHROPIC_API_KEY` and `JARVIS_CONFIRMATION_SECRET` for **Preview only** (leave Production unchecked), mark them Sensitive. Then store the same `JARVIS_CONFIRMATION_SECRET` value in that Preview's database as the proof key (`jarvis-deployment.md`, "OWNER STEP"). Optionally `JARVIS_DAILY_LIMIT_PER_USER` (for example 10) while piloting.
 3. Redeploy the Preview. The Preview must point at the isolated (V2 or a throwaway) Supabase project, never at Production data.
-4. Apply the database pack to **that** project (`jarvis-deployment.md`), then switch the pilot on for named people only (section 3).
+4. Apply the database pack to **that** project (`jarvis-deployment.md`), set the proof key (the owner step: same value as the variable), then switch the pilot on for named people only (section 3).
 5. Production stays off: do not add the variables to Production, and do not add anyone to the pilot there, until the owner decides.
 
 ## 3. Switching the pilot on and off (no code release)
@@ -33,7 +33,7 @@ All switches are rows the owner changes in the Supabase SQL Editor (there is no 
 * **On**: `update jarvis_settings set enabled = true;` then add people: `insert into jarvis_pilot_users (user_id, note) values ('<user id>', 'pilot');`. A person needs both the pilot row **and** an active Sales grant for a company to see the launcher.
 * **Writes off, read-only help stays**: `update jarvis_settings set writes_enabled = false;` (creating is refused with a clear message).
 * **Restrict to companies**: `insert into jarvis_pilot_companies (company_id) values ('<company id>');` (while the list is empty there is no company restriction).
-* **Off at once for everyone**: `update jarvis_settings set enabled = false;`, or set `JARVIS_DISABLED=1` in Vercel. Both are enforced on the server for every request; hiding the launcher is not the control.
+* **Off at once for everyone**: `update jarvis_settings set enabled = false;`, or set `JARVIS_DISABLED=1` in Vercel. (Writes alone can also be stopped by clearing the proof key: `delete from jarvis_proof_key;`, which fails every write closed.) Both are enforced on the server for every request; hiding the launcher is not the control.
 
 ## 4. Data handling
 
@@ -48,4 +48,4 @@ Nothing in this change called the real API. The request in `apps/web/src/lib/jar
 
 ## 6. Local runs (developers)
 
-`apps/web/os-shell-checks/README.md` ("JARVIS flow") shows how to start the isolated stack with the simulated provider and run `jarvis-flow.mjs`. For `next dev` set `JARVIS_PROVIDER=simulated` (allowed outside production) and apply the migration to the local database.
+`apps/web/os-shell-checks/README.md` ("JARVIS flow") shows how to start the isolated stack with the simulated provider and run `jarvis-flow.mjs`; `seed/jarvis.sh` stores the exported `JARVIS_CONFIRMATION_SECRET` as the local database's proof key (the same owner step). For `next dev` set `JARVIS_PROVIDER=simulated` (allowed outside production), apply the migration to the local database and run `select jarvis_set_proof_key('<the value of JARVIS_CONFIRMATION_SECRET, or the development constant in lib/jarvis/config.ts>');` as the database owner (without it saving is refused: fail closed).

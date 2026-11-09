@@ -998,12 +998,12 @@ All estimate edits go through `crm_quote_load_editable` (owner/founder, estimate
 
 ### 3.9 JARVIS actions (reference: [JARVIS](./jarvis.md); surface "JARVIS action")
 
-JARVIS is the Enginious OS assistant (OFF by default, owner-switched pilot; **not** hosted-applied). A JARVIS action is a **typed, registered** action reached only from the JARVIS panel's review card: `propose` never writes, a server-signed confirmation binds the reviewed values, and the write goes through ONE definer function that records a ledger row and calls the existing function in the same transaction. Worker rule 4 applies unchanged: **stop-and-ask is "yes" for every write**: the person reviews and presses the button. "Disabled" actions are registered (so the panel lists them as "Not available yet") and refuse every call.
+JARVIS is the Enginious OS assistant (OFF by default, owner-switched pilot; **not** hosted-applied). A JARVIS action is a **typed, registered** action reached only from the JARVIS panel's review card: `propose` never writes, a server-issued **proof** (a keyed MAC over the person, company, action, target, version, expiry, proof id and the exact payload text) binds the reviewed values, and the write goes through ONE definer function that **verifies that proof inside the database first** (a confirmation id and hash invented by a caller write nothing; no proof key set = fail closed), then records a ledger row and calls the existing function in the same transaction ([`jarvis.md`](./jarvis.md) section 6.1). Worker rule 4 applies unchanged: **stop-and-ask is "yes" for every write**: the person reviews and presses the button. "Disabled" actions are registered (so the panel lists them as "Not available yet") and refuse every call.
 
 #### `jarvis.sales.enquiry.create_from_brief`
 | Field | Entry |
 |---|---|
-| (1) Reached | The JARVIS panel (launcher, right edge): paste a brief, review the card, press **Create enquiry**. Server actions `jarvisSend`, `jarvisReview`, `jarvisConfirm`, `jarvisStatus` (`apps/web/src/lib/actions/jarvis.ts`); action `apps/web/src/lib/jarvis/sales/enquiry-create-from-brief.ts`; database wrapper `jarvis_create_enquiry` (`20261223000100_jarvis_platform.sql`), which calls `crm_create_opportunity` |
+| (1) Reached | The JARVIS panel (launcher, right edge): paste a brief, review the card, press **Create enquiry**. Server actions `jarvisSend`, `jarvisReview`, `jarvisConfirm`, `jarvisStatus` (`apps/web/src/lib/actions/jarvis.ts`); action `apps/web/src/lib/jarvis/sales/enquiry-create-from-brief.ts`; database wrapper `jarvis_create_enquiry` (`20261223000100_jarvis_platform.sql`), which verifies the proof and then calls `crm_create_opportunity` |
 | (2) Record | New `crm_opportunities` row (same as `sales.enquiry.create`); a `jarvis_action_ledger` row keyed by the confirmation id |
 | (3) Inputs | The `sales.enquiry.create` field set (title, source, agency and/or end client, currency, value, budget note, brief summary, dates, location, technologies, scope, waiting on, next action title, date, type). Owner is always the approver. Organisations are chosen from visible, role-correct records: **never created**. Contacts: none (added on the page) |
 | (4) Permissions | JARVIS pilot on (global switch, allowlist, company list), write switch on, an active Sales grant for the company, then the existing rules of `crm_create_opportunity` (company settings, organisation roles, technologies). Refused: everyone else, with no side effect; the wrapper adds no privilege |
@@ -1012,10 +1012,10 @@ JARVIS is the Enginious OS assistant (OFF by default, owner-switched pilot; **no
 | (7) Side effects | Events `created` and a second `created` event "created through JARVIS" (actor = the approver). The pasted brief is sent to the AI provider; **nothing is stored of it** (no text in the ledger, no chat history) |
 | (8) Verify | The panel shows the real reference only after reading the enquiry back; then as `sales.enquiry.create` (page, stage New enquiry, owner = approver, one open follow-up, two timeline lines) |
 | (9) STOP | **Yes**: the person must review the card and press Create enquiry; a chat message can never confirm. Ask if a duplicate is flagged |
-| (10) Retry | **Idempotent per confirmation id**: a repeat (double click, retry after a timeout, restart) returns the ORIGINAL result and creates nothing; a different reviewed value needs a new review. After an unknown answer use the read-only status ("Checking the original result"); never create again |
+| (10) Retry | **Idempotent per proof id (the confirmation id)**: a repeat of the same proof (double click, retry after a timeout, restart) within its 15 minutes returns the ORIGINAL result and creates nothing; any edited value needs a new review and a NEW proof (the old proof is refused by the app and by the database). After an unknown answer use the read-only status ("Checking the original result"); never create again |
 | (11) Surface | **JARVIS action** (UI-only, through the panel); not callable by the model or by chat text |
 
-Part 2 added the other six Sales actions, **all enabled when the pilot is on** (simulated provider only; live provider unverified). They share the platform of the entry above: `propose` never writes; a server-signed confirmation binds person, company, action, target, the hash of the reviewed values and (update, status) the record version; every write is ONE definer wrapper (`20261223000100_jarvis_platform.sql`, helpers `jarvis_ledger_enter/_done/_fail`) that records the ledger row and calls the existing function(s) in the same transaction. Stop-and-ask is "yes" for every write. Reference: [`jarvis.md`](./jarvis.md) section 2.
+Part 2 added the other six Sales actions, **all enabled when the pilot is on** (simulated provider only; live provider unverified). They share the platform of the entry above: `propose` never writes; a server-issued proof binds person, company, action, target, the exact payload text and (update, status) the record version, and is **verified inside the database by every write wrapper before anything is written**; every write is ONE definer wrapper (`20261223000100_jarvis_platform.sql`, helpers `jarvis_ledger_enter/_done/_fail`) that records the ledger row and calls the existing function(s) in the same transaction. Stop-and-ask is "yes" for every write. Reference: [`jarvis.md`](./jarvis.md) section 2.
 
 #### `jarvis.sales.draft_reply`
 | Field | Entry |
@@ -1059,7 +1059,7 @@ Part 2 added the other six Sales actions, **all enabled when the pilot is on** (
 | (7) Side effects | None beyond the ledger |
 | (8) Verify | The panel shows the real name only after reading the organisation back; a link to its account page |
 | (9) STOP | **Yes**: the details card has its own button; a same-name organisation needs an explicit "different" tick |
-| (10) Retry | **Idempotent per confirmation id**: a repeat returns the ORIGINAL result; N parallel calls create one; after an unknown answer use the read-only status |
+| (10) Retry | **Idempotent per proof id**: a repeat returns the ORIGINAL result; N parallel calls create one; after an unknown answer use the read-only status |
 | (11) Surface | **JARVIS action** (UI-only, through the panel); not callable by the model or by chat text |
 
 #### `jarvis.sales.enquiry.update`
@@ -1074,7 +1074,7 @@ Part 2 added the other six Sales actions, **all enabled when the pilot is on** (
 | (7) Side effects | The usual "Details changed" event plus one "Changed through JARVIS" event (actor = approver) |
 | (8) Verify | Read back; the card showed before -> after |
 | (9) STOP | **Yes**: Save changes; a changed enquiry needs a fresh review |
-| (10) Retry | **Idempotent per confirmation id**; a repeat returns the original although the version moved on; a stale version is refused (also by the database) and shown |
+| (10) Retry | **Idempotent per proof id**; a repeat returns the original although the version moved on; a stale version is refused (by the app and by the database, which writes nothing for it) and shown; an edited value needs a new proof |
 | (11) Surface | **JARVIS action** (UI-only, through the panel); not callable by the model or by chat text |
 
 #### `jarvis.sales.enquiry.change_stage`
@@ -1089,7 +1089,7 @@ Part 2 added the other six Sales actions, **all enabled when the pilot is on** (
 | (7) Side effects | The usual "Stage changed" event plus one JARVIS event; the open follow-up is untouched |
 | (8) Verify | Read back; the card showed current and proposed stage, the evidence and the effects |
 | (9) STOP | **Yes**: Move; a changed enquiry needs a fresh review |
-| (10) Retry | **Idempotent per confirmation id**; stale version refused; the database's own gates apply and are shown |
+| (10) Retry | **Idempotent per proof id**; stale version refused (nothing written); the database's own gates apply and are shown |
 | (11) Surface | **JARVIS action** (UI-only, through the panel); not callable by the model or by chat text |
 
 #### `jarvis.sales.meeting.record`
@@ -1104,7 +1104,7 @@ Part 2 added the other six Sales actions, **all enabled when the pilot is on** (
 | (7) Side effects | One "through JARVIS" event |
 | (8) Verify | Read back; the card showed both items |
 | (9) STOP | **Yes**: ONE button saves both or neither (no half-state) |
-| (10) Retry | **Idempotent per confirmation id**; both writes commit together or not at all |
+| (10) Retry | **Idempotent per proof id**; both writes commit together or not at all |
 | (11) Surface | **JARVIS action** (UI-only, through the panel); not callable by the model or by chat text |
 
 ## 4. Actions that communicate outside the system
