@@ -29,7 +29,14 @@ const ANON = JSON.parse(execSync(`node ${new URL("../../../packages/e2e-tests/lo
 const apiToken = async (email) => (await (await fetch(`${API}/auth/v1/token?grant_type=password`, { method: "POST", headers: { apikey: ANON, "content-type": "application/json" }, body: JSON.stringify({ email, password: "local-stack-password" }) })).json()).access_token;
 const apiRpc = async (token, fn, body) => { const r = await fetch(`${API}/rest/v1/rpc/${fn}`, { method: "POST", headers: { apikey: ANON, Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => ({})) }; };
 const flat = (t) => t.replace(/\s+/g, " ");
-const as = async (email, viewport = { width: 1440, height: 900 }, theme = "light", ctxOptions = {}) => { if (page) await page.context().close(); page = await newPage(browser, viewport, theme, ctxOptions); page.on("dialog", (d) => d.accept()); await login(page, email); return page; };
+// Every REVIEW TOKEN the browser session receives from a proposal (a readable body, a dot, a 64-hex MAC): captured from the server-action responses, exactly what a pilot person could lift from their own session.
+const reviewTokens = [];
+const TOKEN_RE = /eyJ[A-Za-z0-9_-]{20,}\.[0-9a-f]{64}/g;
+const as = async (email, viewport = { width: 1440, height: 900 }, theme = "light", ctxOptions = {}) => {
+  if (page) await page.context().close(); page = await newPage(browser, viewport, theme, ctxOptions); page.on("dialog", (d) => d.accept());
+  page.on("response", async (r) => { if (r.request().method() === "POST" && r.status() === 200) { try { for (const t of (await r.text()).match(TOKEN_RE) ?? []) if (!reviewTokens.includes(t)) reviewTokens.push(t); } catch { /* a streamed body that was closed */ } } });
+  await login(page, email); return page;
+};
 const go = (path) => page.goto(`${BASE}${path}`, { waitUntil: "networkidle" });
 const launcher = () => page.getByRole("button", { name: "Open JARVIS" });
 const panel = () => page.getByRole("dialog", { name: "JARVIS" });
@@ -264,6 +271,43 @@ await step("a DIRECT call to the platform API (outside the app) by an eligible p
   if (key.status === 200 && (await key.text()) !== "[]") throw new Error("the proof key table is readable through the API");
   if (enquiries() !== n0 || Number(sql("select count(*) from jarvis_action_ledger")) !== l0 || Number(sql("select count(*) from crm_organisations")) !== o0) throw new Error("something was written");
   void mine;
+});
+
+await step("THE REVIEW TOKEN from the browser session is not a database proof: every wrapper called through the platform API with it (as the MAC, with its own fields, in every arrangement) is refused, nothing is created, no confirmed ledger row", async () => {
+  if (reviewTokens.length === 0) throw new Error("no review token was captured from the browser session (the proposal responses carry it)");
+  const token = await apiToken("emp@e2e.local");
+  const n0 = enquiries(); const l0 = Number(sql("select count(*) from jarvis_action_ledger")); const d0 = ledger("done"); const o0 = Number(sql("select count(*) from crm_organisations"));
+  const e0 = sql("select id from crm_opportunities limit 1");
+  const v0 = Number(sql(`select version from crm_opportunities where id = '${e0}'`));
+  let tried = 0;
+  for (const t of reviewTokens) {
+    const [b64, mac] = t.split(".");
+    const f = JSON.parse(Buffer.from(b64, "base64url").toString("utf8"));
+    const wrappers = [
+      ["jarvis_create_enquiry", { p_target: "new", p_version: null, p_payload: JSON.stringify({ company_id: f.co, title: "Taken from a review token", source: "whatsapp", next_title: "x", next_due: "2030-01-01T10:00:00Z" }) }],
+      ["jarvis_register_organisation", { p_target: "new", p_version: null, p_payload: JSON.stringify({ acknowledged_org_ids: [], company_id: f.co, name: "Org From A Review Token", roles: ["agency"] }) }],
+      ["jarvis_update_enquiry", { p_target: e0, p_version: v0, p_payload: '{"scope":"changed with a review token"}' }],
+      ["jarvis_change_stage", { p_target: e0, p_version: v0, p_payload: '{"to":"qualified"}' }],
+      ["jarvis_record_meeting", { p_target: e0, p_version: null, p_payload: '{"activity":{"kind":"note","body":"from a review token"},"follow_up":null}' }],
+    ];
+    for (const [fn, a] of wrappers) {
+      // (a) the token's own fields (its jti, its expiry) with its MAC as the proof MAC, the payload the call really wants; (b) the same with a fresh jti and a short expiry; (c) the token's own body as the payload
+      const arrangements = [
+        { p_confirmation: f.cid, p_company: f.co, p_expires: f.exp, p_mac: mac },
+        { p_confirmation: "99999999-8888-4777-8666-555555555555", p_company: f.co, p_expires: Math.floor(Date.now() / 1000) + 120, p_mac: mac },
+        { p_confirmation: f.cid, p_company: f.co, p_expires: f.exp, p_mac: mac, p_payload: Buffer.from(b64, "base64url").toString("utf8") },
+      ];
+      for (const x of arrangements) {
+        const r = await apiRpc(token, fn, { ...a, ...x });
+        tried++;
+        if (r.status === 200 || r.body.code !== "JV002") throw new Error(`${fn} was not refused as an invalid proof: ${r.status} ${JSON.stringify(r.body)}`);
+      }
+    }
+  }
+  if (tried < 15) throw new Error(`only ${tried} calls were made`);
+  if (enquiries() !== n0 || Number(sql("select count(*) from jarvis_action_ledger")) !== l0 || ledger("done") !== d0 || Number(sql("select count(*) from crm_organisations")) !== o0) throw new Error("something was written");
+  if (Number(sql(`select version from crm_opportunities where id = '${e0}'`)) !== v0) throw new Error("an enquiry was changed");
+  console.log(`   (${reviewTokens.length} review token(s) from the browser session, ${tried} direct calls, all refused)`);
 });
 
 // ---- 8. JARVIS off again: ordinary Sales & CRM unchanged ------------------------------------------------------------------------------------------------------------

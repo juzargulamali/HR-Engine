@@ -41,7 +41,9 @@ const mkEnquiry = (title, company = UAE, n = 5) => asDb(n, `select crm_create_op
 const proofFor = (user, { action, company, target, version, payload }) => {
   const jti = randomUUID(); const exp = Math.floor(Date.now() / 1000) + 600;
   const text = ["JARVIS-PROOF-V1", jti, user, company, action, target, version === null ? "-" : String(version), String(exp), createHash("sha256").update(payload, "utf8").digest("hex")].join("\n");
-  return { jti, exp, payload, mac: createHmac("sha256", process.env.JARVIS_CONFIRMATION_SECRET).update(text, "utf8").digest("hex") };
+  // The database holds only the derived PROOF key: HMAC(secret, "JARVIS-PROOF-KEY-V1") (the browser's review token is made with another derived key and never verifies here).
+  const proofKey = createHmac("sha256", process.env.JARVIS_CONFIRMATION_SECRET).update("JARVIS-PROOF-KEY-V1", "utf8").digest();
+  return { jti, exp, payload, mac: createHmac("sha256", proofKey).update(text, "utf8").digest("hex") };
 };
 const opp = (id, col) => sql(`select ${col} from crm_opportunities where id = '${id}'`);
 const usage = () => sql("select coalesce(sum(requests), 0) from jarvis_usage");
@@ -296,7 +298,7 @@ await step("JARVIS switched off: the launcher disappears; ordinary Sales & CRM w
   const n = ledger("done") + ledger("failed");
   // With JARVIS OFF even a GENUINE proof is refused by the switches (a proof is necessary, not sufficient); an invented one is refused as not valid.
   const gen = (action, target, version, payload) => proofFor(EMP, { action, company: UAE, target, version, payload });
-  const reg = gen("jarvis.sales.organisation.register", "new", null, JSON.stringify({ company_id: UAE, name: "X", roles: ["agency"] }));
+  const reg = gen("jarvis.sales.organisation.register", "new", null, JSON.stringify({ acknowledged_org_ids: [], company_id: UAE, name: "X", roles: ["agency"] }));
   const upd = gen("jarvis.sales.enquiry.update", E1, 1, '{"scope":"x"}');
   const stg = gen("jarvis.sales.enquiry.change_stage", E1, 1, '{"to":"qualified"}');
   const mtg = gen("jarvis.sales.meeting.record", E1, null, '{"activity":{"kind":"note","body":"x"},"follow_up":null}');
