@@ -37,7 +37,7 @@ const callers: Caller[] = [
 ];
 
 let f: Fetch;
-let info: ReturnType<typeof vi.spyOn>;
+let info: { mock: { calls: unknown[][] } };
 const make = (fetchImpl: Fetch) => createAssistant(fakeDeps(w, { provider: createAnthropicProvider({ apiKey: KEY, model: "claude-sonnet-5-5", fetchImpl: fetchImpl as unknown as typeof fetch }) }));
 const bodyOf = (n = 0) => JSON.parse(((f.mock.calls[n] as unknown as [string, RequestInit])[1]).body as string);
 const providerLogs = () => info.mock.calls.map((c) => { try { return JSON.parse(String(c[0])) as Record<string, unknown>; } catch { return null; } }).filter((l): l is Record<string, unknown> => !!l && l.event === "provider");

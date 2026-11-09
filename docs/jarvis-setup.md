@@ -43,9 +43,23 @@ All switches are rows the owner changes in the Supabase SQL Editor (there is no 
 * **Real client briefs need separate owner approval.** Until the owner says so, use fictional briefs only. Anthropic's own retention and training terms depend on the owner's agreement and settings: not verified here. Check them before real briefs are pasted.
 * A person can only ever do through JARVIS what their own Sales grant lets them do; JARVIS cannot read salaries, leave, payroll, other modules, configuration, credentials or permissions, and cannot delete anything.
 
-## 5. Live provider check (pending)
+## 5. Live provider check (pending, to be recorded) and the provider notes
 
-Nothing in this change called the real API. The request in `apps/web/src/lib/jarvis/provider/anthropic.ts` (Messages API, one forced tool, model `claude-sonnet-5-5`) is tested against a mocked `fetch`. **Before the pilot**, the owner (or Claude, with an owner-approved Preview key and fictional text) should run one fictional brief through the Preview and check that the card fills in; until then "live provider works" is `Unverified`.
+**Status.** The first live attempt returned HTTP 400 on the forced tool choice (`tool_choice: type "tool" and "any" are not supported for this model`, model `claude-sonnet-5-5`); it is fixed in the request (`tool_choice: auto`, the `record_fields` tool, an explicit instruction in the system text). The live UI check after the fix is **pending, to be recorded** by the coordinator; until then "live provider works" is `Unverified`. No test calls the real API.
+
+**Provider notes.** One request per action, no automatic retry (a person can simply try again). If the model does not answer by calling the tool, or the tool result has none of the expected fields, JARVIS shows "could not make sense of that", creates no review card and writes nothing. A failed provider call still counts toward the daily limit.
+
+**Troubleshooting: reading the diagnostics line.** Every provider failure writes one line to the server log (Vercel runtime logs), as JSON, with `"event":"provider"` and these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `actionId` | which JARVIS action (e.g. `jarvis.sales.enquiry.create_from_brief`) |
+| `failureClass` | `http` (the API answered with an error status), `timeout` (no answer within `JARVIS_TIMEOUT_MS`), `network` (could not reach the API), `malformed` (answered, but without a usable `record_fields` result) |
+| `status` | the HTTP status (400 bad request, 401 key rejected, 403 not allowed, 404 model not found, 429 rate limited, 5xx/529 provider trouble), or null |
+| `apiErrorType` | the API's error type, e.g. `invalid_request_error`, `authentication_error`, `not_found_error`, `rate_limit_error`, `overloaded_error`; null if absent |
+| `elapsedMs` | milliseconds until the failure was known (a value near `JARVIS_TIMEOUT_MS` points to a timeout) |
+
+The line never contains the key, headers, the request, the pasted text, the instructions or the provider's error message; to see the message, reproduce with a fictional text in a Preview and use the Anthropic console. Typical reading: `http` 400 `invalid_request_error` = the request itself is not accepted for the configured `JARVIS_MODEL` (check the model id first); 401 `authentication_error` = the key is wrong or revoked; 404 `not_found_error` = unknown model id; 429 = wait or raise the limit with the provider.
 
 ## 6. Local runs (developers)
 
