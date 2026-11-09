@@ -84,7 +84,7 @@ export function ReviewCard({ state, companyStale, api, onState }: { state: CardS
     const t = setTimeout(async () => {
       const s = await api.status(phase.confirmationId).catch(() => null);
       if (cancelled) return;
-      if (s && s.ok && s.state === "done") setPhase({ kind: "done", reference: s.reference, href: s.href, replayed: true });
+      if (s && s.ok && s.state === "done") setPhase({ kind: "done", reference: s.reference, href: s.href ?? `/sales/opportunities/${s.opportunityId}`, replayed: true });
       else if (s && s.ok && s.state === "failed") { lock.current = false; setPhase({ kind: "failed", message: s.message }); }
       else setPhase((p) => (p.kind === "checking" ? { ...p, tries: p.tries + 1, settled: p.tries + 1 >= 4 } : p));
     }, phase.tries === 0 ? 400 : 2000);

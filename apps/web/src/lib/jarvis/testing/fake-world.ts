@@ -10,7 +10,17 @@ import type { JarvisProvider } from "../provider/types";
  * see depends on their grants), the pilot switches, the ledger with its idempotency, and a lost-response failure mode. The real SQL is proved in packages/rls-tests/test/jarvis.rls.test.ts.
  */
 export interface Org { id: string; name: string; kind: string; roles: string[]; place: string | null; name_key: string; archived_at: string | null }
-export interface Opp { id: string; company_id: string; reference: string; title: string; stage: string; agency_org_id: string | null; client_org_id: string | null; event_start: string | null; install_start: string | null; location: string | null; technologies: { name: string; qty: number }[]; created_at: string }
+export interface Opp {
+  id: string; company_id: string; reference: string; title: string; stage: string; agency_org_id: string | null; client_org_id: string | null; event_start: string | null; install_start: string | null; location: string | null;
+  technologies: { name: string; qty: number }[]; created_at: string;
+  owner_id: string | null; version: number; currency: string | null; value: number | null; budget_note: string | null; brief: string | null; event_end: string | null; scope: string | null; waiting_on: string | null;
+}
+let oppCounter = 100;
+/** A fictional enquiry row for the unit tests (the fake database lets a person see it only when they hold a grant for its company). */
+export const mkOpp = (over: Partial<Opp> & { company_id: string }): Opp => ({
+  id: randomUUID(), reference: `OPP-UAE-2026-${String(++oppCounter).padStart(4, "0")}`, title: "Fictional harbour gala", stage: "new", agency_org_id: null, client_org_id: null, event_start: null, install_start: null, location: null,
+  technologies: [], created_at: new Date().toISOString(), owner_id: ID.u1, version: 1, currency: null, value: null, budget_note: null, brief: null, event_end: null, scope: null, waiting_on: null, ...over,
+});
 
 export const ID = { co1: "11111111-1111-4111-8111-111111111111", co2: "22222222-2222-4222-8222-222222222222", u1: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", u2: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2", u3: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3" };
 export const key = (n: string) => n.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -119,7 +129,7 @@ function rpc(w: World, user: string, name: string, args: Record<string, unknown>
         if (w.createMode === "refuse") return { data: null, error: { message: "Only a founder (or someone they delegated) can assign another owner", code: "42501" } };
         w.createdArgs.push(args.p_args as Record<string, unknown>);
         const id = randomUUID(); w.counter += 1; const reference = `OPP-UAE-2026-${String(w.counter).padStart(4, "0")}`;
-        w.opps.push({ id, company_id: p.company_id, reference, title: p.title, stage: "new", agency_org_id: p.agency_org_id, client_org_id: p.client_org_id, event_start: p.event_start, install_start: null, location: p.location, technologies: p.technologies, created_at: new Date().toISOString() });
+        w.opps.push(mkOpp({ id, company_id: p.company_id, reference, title: p.title, agency_org_id: p.agency_org_id, client_org_id: p.client_org_id, event_start: p.event_start, location: p.location, technologies: p.technologies, owner_id: user }));
         w.ledger.set(cid, { confirmation_id: cid, user_id: user, company_id: p.company_id, values_hash: args.p_values_hash as string, status: "done", result_id: id, result_ref: reference, error_message: null });
         if (w.createMode === "lost") return { data: null, error: { message: "TypeError: fetch failed" } };
         return { data: { status: "done", confirmation_id: cid, opportunity_id: id, reference, replayed: false, error_message: null }, error: null };

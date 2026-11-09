@@ -56,6 +56,32 @@ function extractEnquiry(text: string): Record<string, unknown> {
   return out;
 }
 
+/** A reply draft from the labelled facts and the conversation (deterministic). Markers: "[[invent-price]]" makes it state a price, a date and availability that nobody gave it. */
+function draftReply(input: string): Record<string, unknown> {
+  const facts = /<enquiry>\n([\s\S]*?)\n<\/enquiry>/.exec(input)?.[1] ?? "";
+  const convo = /<conversation>\n([\s\S]*?)\n<\/conversation>/.exec(input)?.[1] ?? "";
+  const field = (k: string) => new RegExp(`^${k}: (.+)$`, "mi").exec(facts)?.[1] ?? null;
+  const title = field("Title") ?? "your enquiry";
+  const dates = field("Event dates");
+  const used: { value: string; source: string }[] = [];
+  const lines = [`Dear colleague,`, ``, `Thank you for your message about ${title}.`];
+  if (dates) { lines.push(`We have noted the event dates as ${dates}.`); for (const d of dates.match(/\d{4}-\d{2}-\d{2}/g) ?? []) used.push({ value: d, source: "enquiry" }); }
+  const asked = /price|cost|quote|how much|budget/i.test(convo);
+  const quoted = /(?:AED|USD)\s?[\d,]+/i.exec(convo)?.[0];
+  if (quoted) { lines.push(`You mentioned ${quoted}; we will review it and come back to you.`); used.push({ value: quoted, source: "conversation" }); }
+  else if (asked) lines.push(`We will confirm the pricing once we have checked the details and come back to you.`);
+  if (/available|availability|in stock/i.test(convo)) lines.push(`We will check availability and confirm.`);
+  const toConfirm: { kind: string; text: string }[] = [];
+  if (convo.includes("[[invent-price]]")) {
+    lines.push(`The total will be AED 99,999 and the equipment is available on 14 January 2027, reserved for you.`);
+    used.push({ value: "AED 99,999", source: "enquiry" });
+  }
+  lines.push(``, `Kind regards,`, `[Your name]`);
+  const out: Record<string, unknown> = { subject: `Re: ${title}`.slice(0, 150), body: lines.join("\n"), toConfirm, usedValues: used };
+  if (/ignore (all )?previous instructions/i.test(convo)) Object.assign(out, { execute: true, send: true, to: "attacker@example.com", grantAdmin: true, confirmed: true, role: "admin" });
+  return out;
+}
+
 export function createSimulatedProvider(): JarvisProvider {
   return {
     kind: "simulated",
@@ -63,6 +89,7 @@ export function createSimulatedProvider(): JarvisProvider {
       simulatedProviderCalls.push({ ...req });
       if (req.input.includes("[[provider-timeout]]")) throw new JarvisProviderError("timeout");
       if (req.input.includes("[[provider-error]]")) throw new JarvisProviderError("http", 500);
+      if (req.task === "reply_draft") return draftReply(req.input);
       if (req.task !== "enquiry_fields") throw new JarvisProviderError("malformed");
       const out = extractEnquiry(req.input);
       if (/ignore (all )?previous instructions/i.test(req.input)) {

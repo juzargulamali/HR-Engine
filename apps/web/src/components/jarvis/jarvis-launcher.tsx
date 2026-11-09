@@ -9,13 +9,15 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useFocusTrap } from "@/lib/use-focus-trap";
-import { jarvisConfirm, jarvisContext, jarvisReview, jarvisSend, jarvisStatus } from "@/lib/actions/jarvis";
+import { jarvisAct, jarvisConfirm, jarvisConfirmAction, jarvisContext, jarvisReview, jarvisSend, jarvisStatus } from "@/lib/actions/jarvis";
+import { JARVIS_MODES, type JarvisModeKey } from "@/lib/jarvis/modes";
 import type { ContextView, HelpView, JarvisRefusal, SendResult } from "@/lib/jarvis/protocol";
+import { ActionCardView, type ActionApi, type ActionCardState } from "./action-cards";
 import { JarvisMark } from "./jarvis-mark";
 import { ReviewCard, type CardApi, type CardState } from "./review-card";
 
-export interface JarvisClientApi extends CardApi {
-  send: (a: { companyId: string; text: string }) => Promise<SendResult>;
+export interface JarvisClientApi extends CardApi, ActionApi {
+  send: (a: { companyId: string; text: string; intent?: string | null; enquiryId?: string | null }) => Promise<SendResult>;
   context: (a: { companyId: string | null; enquiryId: string | null }) => Promise<{ ok: true; view: ContextView } | JarvisRefusal>;
 }
 
@@ -26,13 +28,16 @@ export const serverApi: JarvisClientApi = {
   review: (a) => jarvisReview({ companyId: a.companyId, fields: a.fields as unknown as Record<string, unknown>, typed: a.typed, search: a.search, fromBrief: a.fromBrief }),
   confirm: (a) => jarvisConfirm({ companyId: a.companyId, token: a.token, values: a.values, duplicateIds: a.duplicateIds }),
   status: (id) => jarvisStatus(id),
+  act: (a) => jarvisAct(a),
+  confirmAction: (a) => jarvisConfirmAction(a),
 };
 
 type Msg =
   | { id: number; role: "user"; text: string }
   | { id: number; role: "jarvis"; kind: "text"; text: string; tone?: "error" | "info" }
   | { id: number; role: "jarvis"; kind: "help"; help: HelpView }
-  | { id: number; role: "jarvis"; kind: "card"; state: CardState; companyId: string; rev: number };
+  | { id: number; role: "jarvis"; kind: "card"; state: CardState; companyId: string; rev: number }
+  | { id: number; role: "jarvis"; kind: "action"; actionId: string; state: ActionCardState; companyId: string; rev: number };
 type NewMsg = Msg extends infer M ? (M extends { id: number } ? Omit<M, "id"> : never) : never;
 
 const ENQUIRY_PATH = /^\/sales\/opportunities\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i;
@@ -69,7 +74,9 @@ function RouteWatcher({ onEnquiry }: { onEnquiry: (id: string | null) => void })
  * ONE floating launcher on the right edge of the signed-in app, and the JARVIS panel it opens. Drawn only for people the server says may use JARVIS (the (app) layout asks);
  * every call the panel makes is checked again on the server. The conversation lives in this component's memory only: reloading the page clears it, nothing is stored.
  */
-export function JarvisLauncher({ companies, writes, maxInputChars, api = serverApi }: { companies: { id: string; name: string }[]; writes: boolean; maxInputChars: number; api?: JarvisClientApi }) {
+const CREATE_ID = "jarvis.sales.enquiry.create_from_brief";
+
+export function JarvisLauncher({ companies, writes, maxInputChars, enabledActionIds = [CREATE_ID], api = serverApi }: { companies: { id: string; name: string }[]; writes: boolean; maxInputChars: number; enabledActionIds?: string[]; api?: JarvisClientApi }) {
   const [open, setOpen] = useState(false);
   const [pulse, setPulse] = useState(false);
   const [companyId, setCompanyId] = useState(companies[0]?.id ?? "");
@@ -78,6 +85,7 @@ export function JarvisLauncher({ companies, writes, maxInputChars, api = serverA
   const [notice, setNotice] = useState<string | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [text, setText] = useState("");
+  const [modeKey, setModeKey] = useState<JarvisModeKey | null>(null);
   const [busy, setBusy] = useState(false);
   const phone = useIsPhone();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -89,6 +97,8 @@ export function JarvisLauncher({ companies, writes, maxInputChars, api = serverA
   useEffect(() => { companyRef.current = companyId; }, [companyId]);
   const titleId = useId();
   const chip = routeEnquiry && enquiry?.id === routeEnquiry ? enquiry : null;
+  const modes = JARVIS_MODES.filter((m) => enabledActionIds.includes(m.actionId));
+  const mode = modeKey ? modes.find((m) => m.key === modeKey) ?? null : null;
   const nameOf = (id: string) => companies.find((c) => c.id === id)?.name ?? "that company";
 
   useFocusTrap(panelRef, open && phone);
@@ -143,10 +153,12 @@ export function JarvisLauncher({ companies, writes, maxInputChars, api = serverA
     push({ role: "user", text: t.length > 160 ? `${t.slice(0, 160)}… (${t.length} characters)` : t });
     setText("");
     try {
-      const r = await api.send({ companyId, text: t });
+      const r = await api.send({ companyId, text: t, intent: mode?.key ?? null, enquiryId: chip?.id ?? null });
       if (!r.ok) push({ role: "jarvis", kind: "text", tone: "error", text: r.message });
       else if (r.kind === "help") push({ role: "jarvis", kind: "help", help: r.help });
       else if (r.kind === "not_available") push({ role: "jarvis", kind: "text", tone: "info", text: `${r.title}: ${r.reason}` });
+      else if (r.kind === "info") push({ role: "jarvis", kind: "text", tone: "info", text: r.text });
+      else if (r.kind === "action") push({ role: "jarvis", kind: "action", actionId: r.actionId, state: { card: r.card, confirmation: r.confirmation }, companyId, rev: 0 });
       else push({ role: "jarvis", kind: "card", state: { card: r.card, confirmation: r.confirmation }, companyId, rev: 0 });
     } catch {
       push({ role: "jarvis", kind: "text", tone: "error", text: "JARVIS could not be reached. Sales & CRM is not affected: you can add the enquiry yourself." });
@@ -222,14 +234,31 @@ export function JarvisLauncher({ companies, writes, maxInputChars, api = serverA
             <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3" aria-live="polite" aria-relevant="additions" data-testid="jarvis-messages">
               <div className="space-y-2">
                 <p className="rounded-lg bg-secondary/60 px-3 py-2 text-sm" data-testid="jarvis-welcome">{WELCOME}</p>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2" role="group" aria-label="What to do">
                   <Button type="button" size="sm" variant="outline" onClick={() => void send("What can you do?")} disabled={busy}>What can you do?</Button>
+                  {modes.length > 1 ? modes.map((m) => (
+                    <Button key={m.key} type="button" size="sm" variant={modeKey === m.key ? "secondary" : "outline"} aria-pressed={modeKey === m.key} data-testid={`mode-${m.key}`} disabled={busy}
+                      onClick={() => { setModeKey(modeKey === m.key ? null : m.key); inputRef.current?.focus(); }}>{m.label}</Button>
+                  )) : null}
                 </div>
               </div>
               {messages.map((m) => {
                 if (m.role === "user") return <p key={m.id} className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-lg bg-primary/15 px-3 py-2 text-sm" data-testid="jarvis-user-msg">{m.text}</p>;
                 if (m.kind === "text") return m.tone === "error" ? <Alert key={m.id} variant="destructive" role="alert" data-testid="jarvis-error">{m.text}</Alert> : <p key={m.id} className="rounded-lg bg-secondary/60 px-3 py-2 text-sm" data-testid="jarvis-info">{m.text}</p>;
                 if (m.kind === "help") return <HelpList key={m.id} help={m.help} />;
+                if (m.kind === "action") {
+                  return (
+                    <ActionCardView
+                      key={`${m.id}-${m.rev}`}
+                      actionId={m.actionId}
+                      state={m.state}
+                      companyId={m.companyId}
+                      companyStale={m.companyId !== companyId}
+                      api={api}
+                      onState={(s) => setMessages((ms) => ms.map((x) => (x.id === m.id && x.role === "jarvis" && x.kind === "action" ? { ...x, state: s, rev: x.rev + 1 } : x)))}
+                    />
+                  );
+                }
                 return (
                   <ReviewCard
                     key={`${m.id}-${m.rev}`}
@@ -244,6 +273,13 @@ export function JarvisLauncher({ companies, writes, maxInputChars, api = serverA
             </div>
 
             <form className="space-y-2 border-t border-border px-4 py-3" onSubmit={(e) => { e.preventDefault(); void send(text); }}>
+              {mode ? (
+                <p className="flex flex-wrap items-center gap-2 text-xs" data-testid="jarvis-mode-note">
+                  <span className="rounded-md border border-border bg-field px-2 py-1 font-medium">{mode.label}</span>
+                  {mode.needsEnquiry ? (chip ? <span className="text-muted-foreground">for {chip.reference}</span> : <span className="text-muted-foreground">Open an enquiry first, or include its reference (for example OPP-UAE-2026-0001).</span>) : null}
+                  <button type="button" onClick={() => setModeKey(null)} className="text-muted-foreground underline underline-offset-2">Clear mode</button>
+                </p>
+              ) : null}
               <label htmlFor={`${titleId}-in`} className="sr-only">Paste a brief or ask a question</label>
               <Textarea
                 id={`${titleId}-in`}
@@ -252,7 +288,7 @@ export function JarvisLauncher({ companies, writes, maxInputChars, api = serverA
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); void send(text); } }}
-                placeholder="Paste a WhatsApp message, an email or a rough brief…"
+                placeholder={mode?.placeholder ?? "Paste a WhatsApp message, an email or a rough brief…"}
                 disabled={busy}
                 className="max-h-40 resize-y"
               />
@@ -263,7 +299,7 @@ export function JarvisLauncher({ companies, writes, maxInputChars, api = serverA
                   <Button type="submit" size="sm" disabled={busy || text.trim() === ""}>Send</Button>
                 </div>
               </div>
-              <p className="text-[11px] text-muted-foreground">JARVIS sends only what you paste to its AI provider. Nothing is saved until you press Create enquiry. This conversation is not stored.</p>
+              <p className="text-[11px] text-muted-foreground">JARVIS sends only what you paste (and, for an enquiry you chose, the facts needed for that task) to its AI provider. Nothing is saved until you press the confirm button on a review card. This conversation is not stored.</p>
             </form>
           </div>
         </>

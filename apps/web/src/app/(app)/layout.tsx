@@ -115,7 +115,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {children}
       </OsScope>
     </AppShell>
-    {jarvis.available ? <JarvisLauncher companies={jarvis.companies} writes={jarvis.writes} maxInputChars={jarvis.maxInputChars} /> : null}
+    {jarvis.available ? <JarvisLauncher companies={jarvis.companies} writes={jarvis.writes} maxInputChars={jarvis.maxInputChars} enabledActionIds={jarvis.enabledActionIds} /> : null}
     </>
   );
 }

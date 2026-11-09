@@ -76,7 +76,12 @@ export interface JarvisActionDefinition<TInput = unknown, TValues = unknown, TCa
   execute?(ctx: JarvisContext, input: JarvisExecuteInput<TValues>): Promise<JarvisExecuteOutcome<TResult>>;
   /** Reads the result back through the person's own session (the interface shows the real reference only after this succeeds). */
   verify?(ctx: JarvisContext, result: TResult): Promise<{ ok: boolean }>;
+  /** How a saved result is shown (the reference and where to open it), also when it is read back from the ledger by confirmation id. Generic actions only. */
+  resultView?(r: { resultId: string; reference: string; extra: Record<string, unknown> | null; target: string }): { reference: string; href: string | null; summary: string };
 }
+
+/** What a generic write action's `execute` returns as its `result` (ids and the real reference only; never text the person typed). */
+export interface GenericResult { resultId: string; reference: string; extra: Record<string, unknown> | null }
 
 export type AnyJarvisAction = JarvisActionDefinition<any, any, any, any>;
 

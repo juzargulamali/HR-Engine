@@ -8,11 +8,11 @@ vi.mock("server-only", () => ({}));
 let path = "/sales";
 let search = "";
 vi.mock("next/navigation", () => ({ usePathname: () => path, useSearchParams: () => new URLSearchParams(search) }));
-vi.mock("@/lib/actions/jarvis", () => ({ jarvisSend: vi.fn(), jarvisContext: vi.fn(), jarvisReview: vi.fn(), jarvisConfirm: vi.fn(), jarvisStatus: vi.fn() }));
+vi.mock("@/lib/actions/jarvis", () => ({ jarvisSend: vi.fn(), jarvisContext: vi.fn(), jarvisReview: vi.fn(), jarvisConfirm: vi.fn(), jarvisStatus: vi.fn(), jarvisAct: vi.fn(), jarvisConfirmAction: vi.fn() }));
 
 import { JarvisLauncher, type JarvisClientApi } from "./jarvis-launcher";
 import { JarvisMark } from "./jarvis-mark";
-import type { ConfirmResult, EnquiryCard, EnquiryValues, SendResult, StatusResult } from "@/lib/jarvis/protocol";
+import type { ConfirmResult, EnquiryCard, EnquiryValues, ReplyDraftCard, SendResult, StatusResult } from "@/lib/jarvis/protocol";
 
 const CO1 = "11111111-1111-4111-8111-111111111111";
 const CO2 = "22222222-2222-4222-8222-222222222222";
@@ -29,15 +29,17 @@ const card = (over: Partial<EnquiryCard> = {}): EnquiryCard => ({
 const conf = (id = "conf-1") => ({ id, token: `tok-${id}`, expiresAt: new Date(Date.now() + 900_000).toISOString() });
 const cardResult = (c: EnquiryCard = card(), confirmation: ReturnType<typeof conf> | null = conf()): SendResult => ({ ok: true, kind: "card", card: c, confirmation });
 
-type Calls = Record<"send" | "review" | "confirm" | "status" | "context", unknown[][]>;
+type Calls = Record<"send" | "review" | "confirm" | "status" | "context" | "act" | "confirmAction", unknown[][]>;
 function fakeApi(over: Partial<JarvisClientApi> = {}): JarvisClientApi & { calls: Calls } {
-  const calls: Calls = { send: [], review: [], confirm: [], status: [], context: [] };
+  const calls: Calls = { send: [], review: [], confirm: [], status: [], context: [], act: [], confirmAction: [] };
   const impl = {
     send: async () => cardResult(),
     review: async () => cardResult(),
     confirm: async (): Promise<ConfirmResult> => ({ ok: true, status: "done", confirmationId: "conf-1", reference: "OPP-UAE-2026-0001", opportunityId: "o1", href: "/sales/opportunities/o1", replayed: false }),
     status: async (): Promise<StatusResult> => ({ ok: true, state: "not_recorded" }),
     context: async () => ({ ok: true as const, view: { company: null, enquiry: null } }),
+    act: async () => ({ ok: false as const, code: "unknown_action" as const, message: "not used" }),
+    confirmAction: async () => ({ ok: false as const, code: "unknown_action" as const, message: "not used" }),
     ...over,
   } as Record<string, (...a: unknown[]) => Promise<unknown>>;
   const wrapped = Object.fromEntries(Object.entries(impl).map(([k, f]) => [k, (...a: unknown[]) => { calls[k as keyof Calls].push(a); return f(...a); }]));
@@ -321,5 +323,66 @@ describe("the mark", () => {
     expect(container.innerHTML).not.toMatch(/animate|<image|href=|url\(/);
     expect(container.querySelectorAll("path").length).toBe(2);
     expect(container.querySelectorAll("rect").length).toBe(1);
+  });
+});
+
+const ALL_IDS = ["jarvis.sales.enquiry.create_from_brief", "jarvis.sales.draft_reply"];
+const replyCard = (over: Partial<ReplyDraftCard> = {}): ReplyDraftCard => ({
+  kind: "reply.draft", enquiry: { id: ENQ, reference: "OPP-UAE-2026-0007", title: "Harbour gala LED wall", stage: "new", stageLabel: "New enquiry", companyId: CO1 },
+  subject: "Re: Harbour gala LED wall", body: "Dear colleague,\n\nThank you.\n\nKind regards,\n[Your name]",
+  toConfirm: [{ kind: "price", text: 'The draft mentions "AED 99,999", which is not in the enquiry or in your text. Confirm the price before sending.', origin: "check" }],
+  used: [{ value: "2026-12-05", source: "enquiry" }], ...over,
+});
+
+describe("modes and the draft-reply card", () => {
+  it("offers a mode for each enabled action only, and sends the chosen mode with the enquiry the page shows", async () => {
+    path = `/sales/opportunities/${ENQ}`;
+    const api = fakeApi({
+      context: async () => ({ ok: true as const, view: { company: { id: CO1, name: companies[0]!.name }, enquiry: { id: ENQ, reference: "OPP-UAE-2026-0007", title: "Harbour gala LED wall", companyId: CO1 } } }),
+      send: async () => ({ ok: true, kind: "action", actionId: "jarvis.sales.draft_reply", card: replyCard(), confirmation: null }),
+    });
+    mount(api, { enabledActionIds: ALL_IDS });
+    openPanel();
+    expect(screen.getByTestId("mode-reply")).toBeTruthy();
+    expect(screen.queryByTestId("mode-update")).toBeNull();
+    await screen.findByTestId("jarvis-enquiry-chip");
+    fireEvent.click(screen.getByTestId("mode-reply"));
+    expect(screen.getByTestId("jarvis-mode-note").textContent).toMatch(/Draft a reply.*for OPP-UAE-2026-0007/);
+    fireEvent.change(screen.getByLabelText("Paste a brief or ask a question"), { target: { value: "Hi, what is the price?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByTestId("jarvis-reply-card");
+    expect(api.calls.send[0]![0]).toMatchObject({ companyId: CO1, text: "Hi, what is the price?", intent: "reply", enquiryId: ENQ });
+  });
+  it("shows what must be confirmed ABOVE the draft, offers Copy and no send button, and edits stay local", async () => {
+    const api = fakeApi({ send: async () => ({ ok: true, kind: "action", actionId: "jarvis.sales.draft_reply", card: replyCard(), confirmation: null }) });
+    const write = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: write }, configurable: true });
+    mount(api, { enabledActionIds: ALL_IDS });
+    openPanel();
+    fireEvent.click(screen.getByTestId("mode-reply"));
+    fireEvent.change(screen.getByLabelText("Paste a brief or ask a question"), { target: { value: "Hi" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    const c = await screen.findByTestId("jarvis-reply-card");
+    const toConfirm = within(c).getByTestId("reply-to-confirm");
+    const body = within(c).getByTestId("reply-body");
+    expect(toConfirm.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(toConfirm.textContent).toMatch(/AED 99,999/);
+    expect(within(c).queryByRole("button", { name: /send|create|save|confirm/i })).toBeNull();
+    fireEvent.change(body, { target: { value: "Edited draft" } });
+    fireEvent.click(within(c).getByTestId("reply-copy"));
+    await waitFor(() => expect(write).toHaveBeenCalledWith("Subject: Re: Harbour gala LED wall\n\nEdited draft"));
+    expect(api.calls.confirmAction).toHaveLength(0);
+    expect(api.calls.act).toHaveLength(0);
+  });
+  it("says so when nothing needs confirming, and a changed company marks the draft", async () => {
+    const api = fakeApi({ send: async () => ({ ok: true, kind: "action", actionId: "jarvis.sales.draft_reply", card: replyCard({ toConfirm: [] }), confirmation: null }) });
+    mount(api, { enabledActionIds: ALL_IDS });
+    openPanel();
+    fireEvent.click(screen.getByTestId("mode-reply"));
+    fireEvent.change(screen.getByLabelText("Paste a brief or ask a question"), { target: { value: "Hi" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByTestId("reply-nothing-to-confirm");
+    fireEvent.change(screen.getByLabelText("Company for JARVIS"), { target: { value: CO2 } });
+    expect(await screen.findByText(/The company changed after this draft/)).toBeTruthy();
   });
 });

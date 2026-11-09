@@ -19,6 +19,8 @@ const RULES: { category: ExclusionCategory; re: RegExp }[] = [
   { category: "leave_hr", re: new RegExp(`\\b${VERBS_READ}\\b${GAP}\\b(?:leave\\s+balances?|annual\\s+leave|sick\\s+leave|leave\\s+requests?|time\\s+off|attendance|clock(?:ed)?[-\\s]?in|recovery\\s+leave|hr\\s+(?:data|records?|files?)|personal\\s+data|performance\\s+reviews?|disciplinary)\\b`, "i") },
   { category: "other_modules", re: new RegExp(`\\b${VERBS_READ}\\b${GAP}\\b(?:inventory|warehouse\\s+stock|stock\\s+levels?|project\\s+budgets?|budgets?\\s+and\\s+expenses?|expenses?|claims?|timesheets?|all\\s+employees|employee\\s+(?:list|records?|details)|staff\\s+list|projects?\\s+(?:list|tasks?|plans?))\\b`, "i") },
   { category: "source_code", re: new RegExp(`\\b${VERBS_READ}\\b${GAP}\\b(?:source\\s+code|the\\s+code|code\\s+base|codebase|repo(?:sitory)?|git\\s+(?:log|diff|history)|pull\\s+request|api\\s+routes?|server\\s+actions?|migration\\s+files?|system\\s+prompt|your\\s+instructions|your\\s+prompt)\\b`, "i") },
+  { category: "source_code", re: new RegExp(`\\b(?:${VERBS_READ}|repeat|recite|summari[sz]e|reveal|leak|ignore)\\b${GAP}\\b(?:system\\s+(?:prompt|message|instructions?)|hidden\\s+(?:prompt|instructions?)|your\\s+(?:tools?|tool\\s+list|functions?)|the\\s+(?:tools|functions)\\s+you\\s+(?:have|can\\s+call)|internal\\s+(?:docs?|documents?|documentation|map|notes?)|action\\s+catalogue|app\\s+map)\\b`, "i") },
+  { category: "other_modules", re: new RegExp(`\\b${VERBS_READ}\\b${GAP}\\b(?:other|another|someone\\s+else's|everyone's|all)\\s+(?:users?|people|colleagues|staff|employees|salespeople)(?:'s|s')?\\s+(?:data|messages?|chats?|conversations?|enquir(?:y|ies)|records?|details|files?|requests?)\\b`, "i") },
   { category: "credentials", re: new RegExp(`\\b${VERBS_READ}\\b${GAP}\\b(?:api[\\s_-]?keys?|secrets?|passwords?|pass\\s?phrases?|tokens?|service[\\s_-]?role|credentials?|env(?:ironment)?\\s+variables?|\\.env|private\\s+keys?|connection\\s+strings?)\\b`, "i") },
   { category: "app_config", re: /\b(?:change|edit|update|modify|toggle|switch|set|disable|enable|turn\s+(?:on|off))\b[^.\n]{0,40}\b(?:app(?:lication)?\s+config(?:uration)?|environment\s+variables?|feature\s+flags?|the\s+pilot|pilot\s+(?:list|switch|users?)|kill\s+switch|jarvis\s+(?:settings?|switch|access)|writes?\s+switch|company\s+settings\s+for\s+the\s+app)\b/i },
   { category: "deployment", re: /\b(?:deploy|redeploy|roll\s?back|release|ship|push|promote|merge|publish)\b[^.\n]{0,40}\b(?:to\s+prod(?:uction)?|the\s+(?:app|site|website|build|code|branch|release)|production|vercel|main\s+branch|a\s+release)\b/i },
@@ -29,9 +31,18 @@ const RULES: { category: ExclusionCategory; re: RegExp }[] = [
 
 export interface Classification { allowed: boolean; category?: ExclusionCategory }
 
-export function classifyRequest(text: string): Classification {
+/** A single short how-to question ("How do I check stock levels?"). */
+export const HOW_TO = /^\s*(?:how\s+(?:do|can|should|would)\s+(?:i|we|you)|how\s+to|where\s+(?:do|can|would|is|are)\s+(?:i|we|the)|what(?:'s| is) the (?:way|process|steps?)\b)[^\n]{0,280}$/i;
+
+/**
+ * `howTo`: the person is asking HOW to do something in the app (the help action only). A one-line how-to question that merely names another module ("How do I
+ * book inventory?") is guidance, not a request for that module's records, so the other-modules rule alone is relaxed for it. Every other rule (payroll, leave, SQL,
+ * credentials, deletion...) still applies, and so does the other-modules rule for anything that is not a single how-to line.
+ */
+export function classifyRequest(text: string, opts: { howTo?: boolean } = {}): Classification {
   const t = text.normalize("NFKC");
-  for (const r of RULES) if (r.re.test(t)) return { allowed: false, category: r.category };
+  const howTo = !!opts.howTo && HOW_TO.test(t) && t.length <= 300;
+  for (const r of RULES) if (r.re.test(t) && !(howTo && r.category === "other_modules")) return { allowed: false, category: r.category };
   return { allowed: true };
 }
 

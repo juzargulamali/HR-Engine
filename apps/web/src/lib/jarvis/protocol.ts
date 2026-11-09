@@ -88,24 +88,57 @@ export interface EnquiryCard {
   fromBrief: string[];
 }
 
+export interface ConfirmationView { id: string; token: string; expiresAt: string }
+
 export type SendResult =
   | { ok: true; kind: "help"; help: HelpView }
   | { ok: true; kind: "not_available"; title: string; reason: string }
-  | { ok: true; kind: "card"; card: EnquiryCard; confirmation: { id: string; token: string; expiresAt: string } | null }
+  | { ok: true; kind: "info"; text: string }
+  | { ok: true; kind: "card"; card: EnquiryCard; confirmation: ConfirmationView | null }
+  /** Any other registered action (draft a reply, help, register an organisation, update, change stage, meeting notes): the card is that action's own. */
+  | { ok: true; kind: "action"; actionId: string; card: ActionCard; confirmation: ConfirmationView | null }
   | JarvisRefusal;
+
+/** What a generic action's confirmed save returns: the real record reference (only after the app read it back) and where to open it. */
+export interface ActionDone { ok: true; status: "done"; confirmationId: string; actionId: string; reference: string; href: string | null; summary: string; replayed: boolean }
+export type ActionConfirmResult = ActionDone | (JarvisRefusal & { confirmationId?: string });
 
 export interface ConfirmDone { ok: true; status: "done"; confirmationId: string; reference: string; opportunityId: string; href: string; replayed: boolean }
 export type ConfirmResult = ConfirmDone | (JarvisRefusal & { confirmationId?: string });
 
 export type StatusResult =
-  | { ok: true; state: "done"; reference: string; opportunityId: string; href: string }
+  | { ok: true; state: "done"; reference: string; opportunityId: string; href: string | null; summary?: string; actionId?: string }
   | { ok: true; state: "failed"; message: string }
   | { ok: true; state: "not_recorded" }
   | JarvisRefusal;
 
-export interface LauncherState { available: boolean; writes: boolean; companies: { id: string; name: string }[]; maxInputChars: number }
+export interface LauncherState {
+  available: boolean; writes: boolean; companies: { id: string; name: string }[]; maxInputChars: number;
+  /** Ids of the actions that are enabled (the panel offers a mode for each; the server checks every call again). */
+  enabledActionIds: string[];
+}
 
 export interface ContextView {
   company: { id: string; name: string } | null;
   enquiry: { id: string; reference: string; title: string; companyId: string } | null;
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// Cards of the other Sales actions (part 2). Each card is plain JSON built by the server from records the person can see; the browser only draws it.
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+export interface EnquiryRef { id: string; reference: string; title: string; stage: string; stageLabel: string; companyId: string }
+
+/** `jarvis.sales.draft_reply`: a DRAFT only. Nothing is sent, nothing is written. */
+export interface ReplyDraftCard {
+  kind: "reply.draft";
+  enquiry: EnquiryRef;
+  subject: string;
+  body: string;
+  /** UNCONFIRMED prices, dates and availability (and promises) found in the draft: shown ABOVE it; confirm each one before anything is sent. */
+  toConfirm: { kind: "price" | "date" | "availability" | "promise" | "other"; text: string; origin: "model" | "check" }[];
+  /** Values the draft uses that really are in the enquiry or in the person's own text, and which of the two. */
+  used: { value: string; source: "enquiry" | "your text" }[];
+}
+
+export type ActionCard = ReplyDraftCard;

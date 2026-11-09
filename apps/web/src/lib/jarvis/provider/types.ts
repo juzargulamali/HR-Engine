@@ -10,6 +10,10 @@ export interface StructuredRequest {
   instructions: string;
   /** The untrusted text to read (the pasted brief) and nothing else. */
   input: string;
+  /** The tag the provider wraps `input` in (default "brief"); null = `input` already carries its own tags. */
+  inputTag?: string | null;
+  /** Task-specific closing instruction for the system text (default: extract only, never guess). */
+  guard?: string;
   /** JSON schema of the single object the model must return. */
   jsonSchema: Record<string, unknown>;
   maxOutputTokens: number;

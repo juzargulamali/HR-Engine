@@ -2,7 +2,7 @@ import "server-only";
 import type { LauncherState } from "./protocol";
 import { getJarvis } from "./runtime";
 
-const none: LauncherState = { available: false, writes: false, companies: [], maxInputChars: 0 };
+const none: LauncherState = { available: false, writes: false, companies: [], maxInputChars: 0, enabledActionIds: [] };
 
 /**
  * For the signed-in layout only: should the launcher be drawn for this person? Any failure means "no launcher" (JARVIS unavailable, everything else normal).

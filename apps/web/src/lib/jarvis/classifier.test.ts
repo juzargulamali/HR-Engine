@@ -58,12 +58,13 @@ describe("message routing (deterministic, before any provider call)", () => {
   it("routes help, the disabled capabilities, refusals and briefs", () => {
     expect(routeMessage("what can you do?")).toEqual({ kind: "help" });
     expect(routeMessage("Help")).toEqual({ kind: "help" });
-    expect(routeMessage("draft a reply to the client email")).toEqual({ kind: "disabled", actionId: "jarvis.sales.email.draft_reply" });
-    expect(routeMessage("register Wave Agency as a new agency")).toEqual({ kind: "disabled", actionId: "jarvis.sales.organisation.register" });
-    expect(routeMessage("move this enquiry to negotiation stage")).toEqual({ kind: "disabled", actionId: "jarvis.sales.enquiry.change_status" });
-    expect(routeMessage("update the enquiry title")).toEqual({ kind: "disabled", actionId: "jarvis.sales.enquiry.update" });
-    expect(routeMessage("meeting notes: we agreed two LED walls")).toEqual({ kind: "disabled", actionId: "jarvis.sales.meeting.notes_to_activity" });
-    expect(routeMessage("how do I add a follow-up?")).toEqual({ kind: "disabled", actionId: "jarvis.sales.help.ask" });
+    expect(routeMessage("draft a reply to the client email")).toEqual({ kind: "mode", key: "reply", chosen: false });
+    expect(routeMessage("register Wave Agency as a new agency")).toEqual({ kind: "mode", key: "organisation", chosen: false });
+    expect(routeMessage("move this enquiry to negotiation stage")).toEqual({ kind: "mode", key: "stage", chosen: false });
+    expect(routeMessage("update the enquiry title")).toEqual({ kind: "mode", key: "update", chosen: false });
+    expect(routeMessage("meeting notes: we agreed two LED walls")).toEqual({ kind: "mode", key: "meeting", chosen: false });
+    expect(routeMessage("how do I add a follow-up?")).toEqual({ kind: "mode", key: "help", chosen: false });
+    expect(routeMessage("anything", "reply")).toEqual({ kind: "mode", key: "reply", chosen: true });
     expect(routeMessage("show me payroll")).toMatchObject({ kind: "excluded" });
     expect(routeMessage("Agency: Wave Agency\nClient: Harbour\nEvent: 2026-12-05")).toEqual({ kind: "brief" });
   });

@@ -155,17 +155,24 @@ export function createDispatcher(deps: JarvisDeps) {
     }
   }
 
-  /** Read-only: what the ledger recorded for one of the person's own confirmations. Never writes; never offers a second create. */
+  /** Read-only: what the ledger recorded for one of the person's own confirmations. Never writes; never offers a second save. */
   async function status(confirmationId: unknown): Promise<StatusResult> {
     if (typeof confirmationId !== "string" || !UUID.test(confirmationId)) return refuse("invalid_input", "That confirmation is not valid.");
     const auth = await authorize(null, null, "read");
     if (!auth.ok) return auth;
-    const r = await auth.ctx.supabase.from("jarvis_action_ledger").select("status, result_id, result_ref, error_message").eq("confirmation_id", confirmationId).maybeSingle();
+    const r = await auth.ctx.supabase.from("jarvis_action_ledger").select("action_id, target, status, result_id, result_ref, result_extra, error_message").eq("confirmation_id", confirmationId).maybeSingle();
     if (r.error) return refuse("unavailable", "Could not check the result right now. Try again in a moment.");
-    const row = r.data as { status: string; result_id: string | null; result_ref: string | null; error_message: string | null } | null;
+    const row = r.data as { action_id: string; target: string; status: string; result_id: string | null; result_ref: string | null; result_extra?: Record<string, unknown> | null; error_message: string | null } | null;
     if (!row || row.status === "pending") return { ok: true, state: "not_recorded" };
-    if (row.status === "done" && row.result_id && row.result_ref) return { ok: true, state: "done", reference: row.result_ref, opportunityId: row.result_id, href: `/sales/opportunities/${row.result_id}` };
-    return { ok: true, state: "failed", message: row.error_message ?? "The enquiry was not created." };
+    if (row.status === "done" && row.result_id && row.result_ref) {
+      const a = listJarvisActions().find((x) => x.id === row.action_id);
+      if (a?.resultView) {
+        const v = a.resultView({ resultId: row.result_id, reference: row.result_ref, extra: row.result_extra ?? null, target: row.target });
+        return { ok: true, state: "done", reference: v.reference, opportunityId: row.result_id, href: v.href, summary: v.summary, actionId: row.action_id };
+      }
+      return { ok: true, state: "done", reference: row.result_ref, opportunityId: row.result_id, href: `/sales/opportunities/${row.result_id}`, actionId: row.action_id };
+    }
+    return { ok: true, state: "failed", message: row.error_message ?? "That was not saved." };
   }
 
   /** Deterministic: no provider, no model. What JARVIS can and cannot do right now, from the registry. */
@@ -182,7 +189,7 @@ export function createDispatcher(deps: JarvisDeps) {
    * `knownUserId` is the layout's own authenticated session (saves a second sign-in round trip on every page); it only decides visibility.
    */
   async function availability(knownUserId?: string): Promise<LauncherState> {
-    const none: LauncherState = { available: false, writes: false, companies: [], maxInputChars: 0 };
+    const none: LauncherState = { available: false, writes: false, companies: [], maxInputChars: 0, enabledActionIds: [] };
     const config = deps.config();
     if (configUnavailableReason(config, { needsProvider: true, needsSecret: true })) return none;
     if (!deps.provider(config)) return none;
@@ -204,7 +211,7 @@ export function createDispatcher(deps: JarvisDeps) {
     }));
     const companies = all.filter((_, i) => allowed[i]);
     if (companies.length === 0) return none;
-    return { available: true, writes: !!row.writes_allowed, companies, maxInputChars: config.maxInputChars };
+    return { available: true, writes: !!row.writes_allowed, companies, maxInputChars: config.maxInputChars, enabledActionIds: listJarvisActions().filter((a) => a.status.enabled).map((a) => a.id) };
   }
 
   return { authorize, propose, execute, status, help, availability };

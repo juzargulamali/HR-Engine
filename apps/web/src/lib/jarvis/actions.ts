@@ -2,6 +2,7 @@ import "server-only";
 import { registerJarvisAction } from "./registry";
 import { createEnquiryFromBrief } from "./sales/enquiry-create-from-brief";
 import { registerDisabledSalesActions } from "./sales/disabled-actions";
+import { draftReply } from "./sales/draft-reply";
 
 let done = false;
 
@@ -14,7 +15,9 @@ export function registerAllJarvisActions(): void {
   if (done) return;
   done = true;
   registerJarvisAction(createEnquiryFromBrief);
-  registerDisabledSalesActions();
+  const implemented = [draftReply];
+  for (const a of implemented) registerJarvisAction(a);
+  registerDisabledSalesActions(implemented.map((a) => a.id));
 }
 
 /** For tests only: lets a test register the list again after clearing the registry. */

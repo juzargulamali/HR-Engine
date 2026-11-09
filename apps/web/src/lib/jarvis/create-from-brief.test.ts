@@ -510,15 +510,15 @@ describe("limits, provider failures and availability (ordinary CRM stays usable)
   });
   it("help answers deterministically from the registry, with no provider call and no usage; the other Sales actions show as not available yet", async () => {
     const h = await a.send({ companyId: ID.co1, text: "What can you do?" });
-    expect(h.ok && h.kind === "help" && h.help.enabled.map((x) => x.id)).toEqual(["jarvis.sales.enquiry.create_from_brief"]);
+    expect(h.ok && h.kind === "help" && h.help.enabled.map((x) => x.id)).toEqual(["jarvis.sales.enquiry.create_from_brief", "jarvis.sales.draft_reply"]);
     const disabled = h.ok && h.kind === "help" ? h.help.disabled.map((x) => x.id).sort() : [];
-    expect(disabled).toEqual(["jarvis.sales.email.draft_reply", "jarvis.sales.enquiry.change_status", "jarvis.sales.enquiry.update", "jarvis.sales.help.ask", "jarvis.sales.meeting.notes_to_activity", "jarvis.sales.organisation.register"].sort());
+    expect(disabled).toEqual(["jarvis.sales.enquiry.change_stage", "jarvis.sales.enquiry.update", "jarvis.sales.help.answer", "jarvis.sales.meeting.record", "jarvis.sales.organisation.register"].sort());
     expect(h.ok && h.kind === "help" && h.help.disabled.every((x) => /Not available yet/.test(x.reason))).toBe(true);
     expect(simulatedProviderCalls).toHaveLength(0);
     expect(w.usage.size).toBe(0);
-    const d = await a.send({ companyId: ID.co1, text: "draft a reply to the client's email" });
-    expect(d).toMatchObject({ ok: true, kind: "not_available", title: "Draft a client email or reply" });
-    expect(await a.propose({ actionId: "jarvis.sales.email.draft_reply", companyId: ID.co1, input: {} })).toMatchObject({ ok: false, code: "action_disabled" });
+    const d = await a.send({ companyId: ID.co1, text: "update the enquiry title" });
+    expect(d).toMatchObject({ ok: true, kind: "not_available", title: "Update an enquiry" });
+    expect(await a.propose({ actionId: "jarvis.sales.enquiry.update", companyId: ID.co1, input: {} })).toMatchObject({ ok: false, code: "action_disabled" });
   });
 });
 
