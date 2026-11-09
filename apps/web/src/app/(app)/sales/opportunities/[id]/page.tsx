@@ -34,8 +34,8 @@ export const metadata = { title: "Opportunity" };
 const EVIDENCE = { purchase_order: "purchase order", authorised_email: "authorised email" } as const;
 const LINK_OUTLINE = cn(buttonVariants({ variant: "outline", size: "sm" }));
 
-export default async function OpportunityPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
-  const [{ id }, { tab }] = await Promise.all([params, searchParams]);
+export default async function OpportunityPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; event_link?: string }> }) {
+  const [{ id }, { tab, event_link: eventLink }] = await Promise.all([params, searchParams]);
   const ctx = await getCrmContext();
   if (!ctx) return null;
   const result = await loadOpportunityDetailResult(ctx, id);
@@ -129,6 +129,10 @@ export default async function OpportunityPage({ params, searchParams }: { params
             {isWon ? <Link href={`/sales/opportunities/${opp.id}/handover`} className={LINK_OUTLINE}>Handover package</Link> : null}
           </div>
         </div>
+
+        {eventLink === "failed" ? (
+          <Alert variant="warning" role="status">The enquiry was created, but it could not be linked to the event edition you chose (only the enquiry owner or a founder can link it). Ask the owner, or use Edit details to link it.</Alert>
+        ) : null}
 
         {isHold ? (
           <Alert variant="warning" role="status">

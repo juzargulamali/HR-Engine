@@ -30,11 +30,12 @@ describe("directory table", () => {
   it("has one row per organisation with the columns, a linked name, the badge words and the owner or Unassigned", () => {
     view(rows);
     const heads = screen.getAllByRole("columnheader").map((h) => h.textContent?.replace(/\s+/g, " ").trim());
-    expect(heads).toEqual(["Name", "Country", "Type", "Enquiries", "Won enquiries", "Last enquiry", "Relationship", "Account owner"]);
+    expect(heads).toEqual(["Name", "Country", "Outreach priority", "Type", "Enquiries", "Won enquiries", "Last enquiry", "Relationship", "Account owner"]);
     expect(screen.getAllByRole("row")).toHaveLength(3);
     expect(screen.getByRole("link", { name: "Fictional Alpha" }).getAttribute("href")).toBe("/sales/accounts/a");
     const alpha = within(screen.getAllByRole("row")[1]!);
     expect(alpha.getByText("Won work")).toBeTruthy();
+    expect(alpha.getByText("Unrated")).toBeTruthy(); // no outreach priority yet
     expect(alpha.getByText("Amal Fixture")).toBeTruthy();
     expect(alpha.getByText("Agency")).toBeTruthy();
     expect(alpha.getByText("End client")).toBeTruthy(); // several roles together
@@ -124,7 +125,7 @@ describe("quick filters", () => {
 describe("phone sort links", () => {
   it("offers every sort, with the direction of the active one in words", () => {
     render(<PhoneSort sort={{ key: "won", dir: "desc" }} hrefFor={(k) => `/s?sort=${k}`} />);
-    expect(screen.getAllByRole("link")).toHaveLength(7);
+    expect(screen.getAllByRole("link")).toHaveLength(8);
     expect(screen.getByRole("link", { name: /Won enquiries\s*descending/ }).getAttribute("aria-current")).toBe("true");
   });
 });

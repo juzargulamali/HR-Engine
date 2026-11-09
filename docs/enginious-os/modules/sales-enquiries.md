@@ -46,7 +46,8 @@ Two doors, one action: the quick-add dialog (list pages) and the full page `/sal
 |---|---|---|---|
 | Company | Only the person's companies; shown only with more than one company. A company with no Sales settings is labelled "(no Sales settings yet)" and the database refuses it ("CRM settings (reference code and currency) are not configured for this company yet") | yes | `crm_create_opportunity` (reads `crm_company_settings`) |
 | What is the enquiry? (title) | Up to 200 characters | yes | `createOpportunitySchema` |
-| Agency, End client | Role-aware pickers (section 3.4); at least one of the two | one of two | `crm_create_opportunity`, trigger `crm_opportunities_party_roles` (`20261219000100_crm_clients_agencies.sql`) |
+| Agency, End client | ONE search-as-you-type field each (section 3.4); at least one of the two | one of two | `crm_create_opportunity`, trigger `crm_opportunities_party_roles` (`20261219000100_crm_clients_agencies.sql`) |
+| Event / Exhibition (optional) | ONE search-as-you-type field over the shared editions ("GITEX Global · 2027 · Dubai"); typing alone links nothing; empty = not linked | no | `crm_set_opportunity_edition`, called right after `crm_create_opportunity` (which is unchanged). If the link is refused (for example the enquiry was created for a colleague, and only the owner or a founder may link) the enquiry still exists and its page says so |
 | Where did it come from? | Fixed list, section 3.3 | yes | `crm_opportunities.source` check |
 | Next action, Due date | The first follow-up; date not before today (Dubai); time is fixed 10:00 and type fixed Call in this dialog | yes | creates a `crm_follow_ups` row |
 | Optional block: Event start, Event end, Installation, Location, Technologies, Budget or value, Currency | As the full page (section 3.2); the dialog's own copy of these fields | no | same |
@@ -60,7 +61,8 @@ Two doors, one action: the quick-add dialog (list pages) and the full page `/sal
 | Company | As above | yes | No company at all: "You do not have Sales access to any company yet" with Ask for access |
 | Requirement (title) | One-line brief | yes | max 200 |
 | Where did it come from? | Source | yes | section 3.3 |
-| Agency / End client | Search box + select + "Add organisation" | at least one | Role-aware (3.4); a prefill from an account's Outreach picks the picker the account's role fits |
+| Agency / End client | One search-as-you-type field each + "Add organisation" | at least one | Role-aware (3.4); a prefill from an account's Outreach picks the field the account's role fits |
+| Event / Exhibition (optional) | Same field as on the full page | no | Section 3.4 |
 | Contacts | Tick contacts of the chosen organisations; "Add contact" dialog (`AddContactDialog`) | no | Linked through `crm_opportunity_contacts` |
 | Next action, Date, Time (Dubai, default 10:00), Type | Type options: Call, Email, Meeting, Proposal work, Other | action and date required | `nextKind` enum `call, email, meeting, proposal, other` |
 | Owner | Defaults to the person; other choices (people with Sales access to the company) only for holders of `assign_owner` (founders included) | no | Another owner without the capability: "Only a founder (or someone they delegated) can assign another owner"; an owner without a company grant: "The chosen owner has no Sales access for this company" (`crm_create_opportunity`) |
@@ -85,7 +87,10 @@ What a successful create writes (`crm_create_opportunity`): one `crm_opportuniti
 | Owner | People holding an active Sales grant for the company | `crm_people()` via `getCrmContext` |
 | Agency / End client | Organisations holding that role | section 3.4 |
 
-### 3.4 Role-aware organisation pickers
+### 3.4 Role-aware organisation pickers (one search-as-you-type field each)
+
+Agency, End client and Event / Exhibition are each **one field** (`SearchCombobox`, `components/sales/combobox.tsx`): type, see the matches directly below the input, choose by mouse, touch or keyboard (arrows, Enter, Escape); built to the ARIA combobox pattern. Matching: every word typed must appear in the name or the detail, names starting with it first, at most 8 shown. Under each match: for an account its **country (or place) and website**, to tell similar names apart; for an edition its venue and start date. The shared directory is searched (every company's accounts). **Typing alone never selects or creates anything**: editing the text after a choice clears the choice until a match is chosen again, and Enter picks only a highlighted match. Tests: `combobox.test.tsx`, `inquiry-organisation-pickers.test.tsx`.
+
 
 The Agency picker offers organisations with the agency role; the End client picker offers end-client or direct-client roles; an organisation with no roles recorded reads as its legacy `kind`; one organisation can appear in both (`apps/web/src/lib/crm/organisation-roles.ts`, `offeredFor`). Saving a role the organisation lacks is refused by trigger `crm_opportunities_party_roles` / `crm_opportunities_check_party_roles` (`20261219000100_crm_clients_agencies.sql`; checked on create and whenever agency or client changes). Documented in detail in `sales-clients-and-agencies.md` section 9.2. "Add organisation" in these pickers uses `createOrganisation` -> `crm_create_organisation` (name and one of Agency, End client, Direct client; place; note): catalogue `sales.organisation.create_simple`. Tests: `inquiry-organisation-pickers.test.tsx` (`apps/web/src/app/(app)/sales/new/`), `organisation-roles.test.ts`.
 
@@ -124,7 +129,8 @@ Catalogue: `sales.enquiry.edit_details`. Rules (`crm_update_opportunity`): owner
 
 | Field | Notes |
 |---|---|
-| Agency, End client | Role-aware pickers (3.4); posted **only when changed** so saving other fields never rewrites or logs them; a failed organisation load shows "Could not load the organisations. Close this and try again." |
+| Event / Exhibition | Set, change or **clear** the link to a specific edition; posted **only when changed** (so saving other details never touches it); the enquiry owner or a founder (same rule as the other details), refused on a lost enquiry; if the other details saved but the link was refused the message says so. The enquiry's Scope & dates tab shows the current event ("Not linked to an event" for every enquiry made before this existed: nothing is guessed from the old text) | `setOpportunityEdition` / `updateOpportunity` -> `crm_set_opportunity_edition` (stale-version check like the rest) |
+| Agency, End client | Role-aware search fields (3.4); posted **only when changed** so saving other fields never rewrites or logs them; a failed organisation load shows "Could not load the organisations. Close this and try again." |
 | Title (max 200), Brief | Full mode only |
 | Currency (3 letters), Value (zero or more), Budget as the client stated it | Both modes; "Visible to everyone with Sales access" |
 | Payment terms, Installation starts, Show starts, Show ends, Location | Full mode |

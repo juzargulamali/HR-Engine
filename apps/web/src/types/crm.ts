@@ -63,6 +63,10 @@ export type CrmOrganisationRow = {
   trade_licence_no: string | null;
   place: string | null;
   note: string | null;
+  /** The ONE shared outreach priority of the account, 1 to 5 (5 = highest); null = Unrated (migration 20261224000100). */
+  outreach_priority: number | null;
+  outreach_priority_by: string | null;
+  outreach_priority_at: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -152,9 +156,29 @@ export type CrmTechnology = {
   qty: number;
 }
 
+export type CrmEventKind = "exhibition" | "conference" | "other";
+/** A recurring event (migration 20261224000100). Shared by every company; editions hold the dates and the place. */
+export type CrmEventRow = {
+  id: string; name: string; name_key: string; kind: CrmEventKind; website: string | null; note: string | null;
+  created_by: string | null; created_at: string; updated_at: string; archived_at: string | null;
+}
+export type CrmEventEditionRow = {
+  id: string; event_id: string; start_date: string; end_date: string; city: string | null; country_code: string | null; venue: string | null; note: string | null;
+  created_by: string | null; created_at: string; updated_at: string; archived_at: string | null;
+}
+export type CrmObservationKind = "exhibited" | "did_not_exhibit";
+export type CrmAgencyRole = "stand_builder" | "stand_design" | "av_technology" | "fabrication" | "other";
+export type CrmObservationRow = {
+  id: string; edition_id: string; exhibitor_org_id: string; kind: CrmObservationKind; agency_org_id: string | null; agency_unknown: boolean;
+  stand_no: string | null; agency_role: CrmAgencyRole | null; note: string | null; verification: "unverified" | "confirmed";
+  created_by: string | null; created_at: string; updated_at: string;
+}
+
 export type CrmOpportunityRow = {
   id: string;
   company_id: string;
+  /** The event edition this enquiry is linked to, or null (every enquiry made before the link existed is null). */
+  event_edition_id: string | null;
   reference: string;
   title: string;
   brief: string | null;

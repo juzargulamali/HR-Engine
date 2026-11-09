@@ -1,6 +1,7 @@
 import { canAssignOwner, canManageCrmSettings, isCrmFounder } from "@enginious-hr/domain";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadOrganisations } from "@/lib/crm/data";
+import { loadEditionOptions, type EditionOption } from "@/lib/crm/events/data";
 import { todayInDubai } from "./format";
 import { QuickAddEnquiryForm } from "./quick-add-enquiry-form";
 
@@ -20,6 +21,10 @@ export async function QuickAddEnquiry() {
     console.error("[crm] quick add: organisations load failed", e);
     return <span role="status" className="text-sm text-destructive">Could not load organisations, so enquiries cannot be added from here right now. Reload the page.</span>;
   }
+  // The editions are optional: if they cannot be read the form still works and says so next to the Event field.
+  let editions: EditionOption[] = [];
+  let editionsFailed = false;
+  try { editions = await loadEditionOptions(); } catch (e) { console.error("[crm] quick add: editions load failed", e); editionsFailed = true; }
   return (
     <QuickAddEnquiryForm
       companies={ctx.companies.map((c) => ({
@@ -31,7 +36,9 @@ export async function QuickAddEnquiry() {
         canOpenSettings: isCrmFounder(ctx.grants, c.id) || canManageCrmSettings(ctx.grants, c.id),
         people: ctx.people.filter((p) => p.companyIds.includes(c.id)).map((p) => ({ id: p.id, name: p.name })),
       }))}
-      organisations={organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, roles: o.roles, place: o.place }))}
+      organisations={organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, roles: o.roles, place: o.place, country: o.country_code, website: o.website }))}
+      editions={editions}
+      editionsFailed={editionsFailed}
       currentUserId={ctx.userId}
       currentUserName={ctx.fullName ?? "Me"}
       today={todayInDubai()}

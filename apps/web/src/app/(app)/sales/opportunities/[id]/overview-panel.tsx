@@ -1,4 +1,6 @@
 import { crmSourceLabel, isCommerciallyWon } from "@enginious-hr/domain";
+import { Suspense } from "react";
+import { EventFact } from "./event-fact";
 import { ApprovalBadge, AvailabilityBadge, DueText } from "@/components/sales/badges";
 import { formatDate, formatDateTime, formatMoney } from "@/components/sales/format";
 import { Badge } from "@/components/ui/badge";
@@ -69,6 +71,7 @@ export function OverviewPanel({ view, picker = null }: { view: OppView; picker?:
             <Fact label="Value">{formatMoney(item.value, opp.currency)}</Fact>
             <Fact label="Budget as stated">{opp.budget_note ?? "Not known"}</Fact>
             <Fact label="Source">{crmSourceLabel(opp.source)}</Fact>
+            <Fact label="Event / Exhibition"><Suspense fallback="…"><EventFact editionId={opp.event_edition_id} /></Suspense></Fact>
             <Fact label="Owner">{view.ownerName}</Fact>
             <Fact label="Created">{formatDate(opp.created_at)} by {ctx.personName(opp.created_by)}</Fact>
             <Fact label="First response">{opp.first_response_at ? formatDateTime(opp.first_response_at) : "None recorded yet"}</Fact>

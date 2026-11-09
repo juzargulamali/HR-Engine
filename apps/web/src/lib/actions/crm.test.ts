@@ -38,6 +38,44 @@ describe("friendlyCrmError", () => {
   });
 });
 
+describe("the optional Event / Exhibition link", () => {
+  const EDITION = "44444444-4444-4444-8444-444444444444";
+  const calls = (name: string) => rpc.mock.calls.filter((c) => c[0] === name).map((c) => c[1]);
+  it("an enquiry without an edition is created exactly as before: no link call", async () => {
+    await expect(createOpportunity({ error: null }, fd(base))).rejects.toThrow("redirect:/sales/opportunities/new-id");
+    expect(calls("crm_set_opportunity_edition")).toHaveLength(0);
+  });
+  it("links the chosen edition after the enquiry is created, through its own function", async () => {
+    await expect(createOpportunity({ error: null }, fd({ ...base, eventEditionId: EDITION }))).rejects.toThrow("redirect:/sales/opportunities/new-id");
+    expect(calls("crm_create_opportunity")).toHaveLength(1);
+    expect(calls("crm_create_opportunity")[0]).not.toHaveProperty("p_event_edition_id");
+    expect(calls("crm_set_opportunity_edition")).toEqual([{ p_id: "new-id", p_edition: EDITION, p_expected_version: null }]);
+  });
+  it("when the link is refused the enquiry still exists and the person lands on it with a notice", async () => {
+    rpc.mockImplementation(async (name: string) => (name === "crm_set_opportunity_edition" ? { data: null, error: { message: "Only the owner of this opportunity or a founder can do this" } } : { data: "new-id", error: null }));
+    await expect(createOpportunity({ error: null }, fd({ ...base, eventEditionId: EDITION }))).rejects.toThrow("redirect:/sales/opportunities/new-id?event_link=failed");
+  });
+  it("editing: a changed link is set after the details, against the version the details produced; a cleared link is null; nothing changed says so", async () => {
+    current = 3;
+    rpc.mockImplementation(async (name: string) => (name === "crm_update_opportunity" ? { data: 4, error: null } : { data: 5, error: null }));
+    expect(await updateOpportunity({ error: null }, fd({ id: O, expectedVersion: "3", title: "New title", event_edition_id: EDITION }))).toEqual({ error: null });
+    expect(calls("crm_update_opportunity")[0]).toMatchObject({ p_expected_version: 3, p_patch: { title: "New title" } });
+    expect(calls("crm_set_opportunity_edition")[0]).toEqual({ p_id: O, p_edition: EDITION, p_expected_version: 4 });
+    rpc.mockClear();
+    expect(await updateOpportunity({ error: null }, fd({ id: O, expectedVersion: "3", event_edition_id: "" }))).toEqual({ error: null });
+    expect(calls("crm_update_opportunity")).toHaveLength(0);
+    expect(calls("crm_set_opportunity_edition")[0]).toEqual({ p_id: O, p_edition: null, p_expected_version: 3 });
+    expect((await updateOpportunity({ error: null }, fd({ id: O, expectedVersion: "3" }))).error).toBe("Nothing to save.");
+    expect((await updateOpportunity({ error: null }, fd({ id: O, expectedVersion: "3", event_edition_id: "not-a-uuid" }))).error).toMatch(/Choose the event edition/);
+  });
+  it("says the other details were saved when only the link was refused", async () => {
+    current = 3;
+    rpc.mockImplementation(async (name: string) => (name === "crm_update_opportunity" ? { data: 4, error: null } : { data: null, error: { message: "Choose an edition from the list (an archived or unknown edition cannot be linked)" } }));
+    const r = await updateOpportunity({ error: null }, fd({ id: O, expectedVersion: "3", title: "T", event_edition_id: EDITION }));
+    expect(r.error).toMatch(/The other details were saved, but the event link was not/);
+  });
+});
+
 describe("createOpportunity", () => {
   it("requires an agency or an end client", async () => {
     const r = await createOpportunity({ error: null }, fd({ ...base, agencyOrgId: "" }));

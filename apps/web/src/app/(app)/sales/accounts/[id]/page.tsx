@@ -18,6 +18,7 @@ import { countryLabel, LEAD_SOURCE_LABEL, ROLE_LABEL } from "@/lib/crm/clients-a
 import { eligibleStaff, type StaffPerson } from "@/lib/crm/clients-agencies/staff";
 import { AddAccountContactButton, EditAccountButton, EditAccountContactButton } from "../account-forms";
 import { AddAccountFollowUpButton, AddFollowUpButton, AssignOwnerButton, ReassignFollowUpButton } from "../owner-and-follow-ups";
+import { PriorityControl } from "../priority-control";
 
 export const metadata = { title: "Account" };
 
@@ -174,6 +175,14 @@ export default async function AccountPageRoute({ params, searchParams }: { param
                 </div>
               ))}
             </dl>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2"><CardTitle>Outreach priority</CardTitle></CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <PriorityControl orgId={org.id} value={org.outreach_priority} label="Outreach priority (shared)" />
+            <p className="text-muted-foreground">One rating for the whole team, 1 to 5 (5 is highest) or Unrated. It says who to approach first; it is not a review score. Every Enginious company sees the same value{org.outreach_priority_at ? `, last set ${formatDate(org.outreach_priority_at)}` : ""}.</p>
           </CardContent>
         </Card>
 
