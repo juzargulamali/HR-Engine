@@ -170,4 +170,31 @@ export interface OrgRegisterCard {
   roleOptions: { id: OrgRole; label: string }[];
 }
 
-export type ActionCard = ReplyDraftCard | HelpAnswerCard | OrgRegisterCard;
+/**
+ * `jarvis.sales.enquiry.update`: ONLY these fields can be changed through JARVIS (the allowlist, also enforced in the database wrapper). Not here, on purpose: owner, stage, agency,
+ * end client, value, currency, payment terms, exclusions, risks, evidence, files, proposals, Zoho, handover, closure.
+ */
+export const UPDATE_FIELDS = ["title", "brief", "eventStart", "eventEnd", "installStart", "location", "technologies", "scope", "waitingOn", "budgetNote"] as const;
+export type UpdateFieldKey = (typeof UPDATE_FIELDS)[number];
+export interface UpdateForm {
+  title: string; brief: string | null; eventStart: string | null; eventEnd: string | null; installStart: string | null; location: string | null;
+  technologies: { name: string; qty: number }[]; scope: string | null; waitingOn: "client" | "internal" | null; budgetNote: string | null;
+}
+/** What is bound to the confirmation: the enquiry, its company and ONLY the fields that change (new values). The record version is bound by the token. */
+export interface UpdateValues { companyId: string; enquiryId: string; patch: Partial<UpdateForm> }
+export interface UpdateChange { field: UpdateFieldKey; label: string; before: string; after: string }
+export interface EnquiryUpdateCard {
+  kind: "enquiry.update";
+  enquiry: EnquiryRef & { version: number };
+  /** Each changed field, before -> after, in words. */
+  changes: UpdateChange[];
+  /** The enquiry's current values of the allowlisted fields, and the proposed ones (the form edits `proposed`). */
+  current: UpdateForm;
+  proposed: UpdateForm;
+  fields: { key: UpdateFieldKey; label: string }[];
+  values: UpdateValues;
+  problems: CardProblem[];
+  valid: boolean;
+}
+
+export type ActionCard = ReplyDraftCard | HelpAnswerCard | OrgRegisterCard | EnquiryUpdateCard;

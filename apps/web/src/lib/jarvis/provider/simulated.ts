@@ -82,6 +82,28 @@ function draftReply(input: string): Record<string, unknown> {
   return out;
 }
 
+/** An enquiry update from labelled lines of the request ("Location: X", "Event: 2026-12-05 to 2026-12-07", "Clear location"). Hostile marker returns keys outside the allowlist. */
+function enquiryUpdate(input: string): Record<string, unknown> {
+  const req = /<request>\n([\s\S]*?)\n<\/request>/.exec(input)?.[1] ?? "";
+  const out: Record<string, unknown> = {};
+  const set = (key: string, names: string[]) => { const v = labelled(req, names); if (v) out[key] = v; };
+  set("title", ["title", "name"]); set("location", ["location", "venue"]); set("scope", ["scope"]); set("brief", ["brief", "summary"]); set("budgetNote", ["budget note", "budget"]);
+  const ev = labelled(req, ["event", "event dates", "event date", "show"]);
+  const dates = ev?.match(/\d{4}-\d{2}-\d{2}/g) ?? [];
+  if (dates[0]) out.eventStart = dates[0];
+  if (dates[1]) out.eventEnd = dates[1];
+  const inst = iso(labelled(req, ["installation", "install", "install date"]));
+  if (inst) out.installStart = inst;
+  const w = labelled(req, ["waiting on", "waiting"]);
+  if (w) out.waitingOn = /client/i.test(w) ? "client" : /internal|team/i.test(w) ? "internal" : null;
+  const tech = labelled(req, ["technologies", "technology", "tech"]);
+  if (tech) out.technologies = tech.split(/[;,]/).map((t) => t.trim()).filter(Boolean).map((t) => { const m = /^(.*?)(?:\s*[x×]\s*(\d+))?$/i.exec(t)!; return { name: m[1]!.trim(), qty: m[2] ? Number(m[2]) : 1 }; });
+  const clear = [...req.matchAll(/\bclear (?:the )?(location|scope|brief|budget note|waiting on|installation)\b/gi)].map((m) => ({ location: "location", scope: "scope", brief: "brief", "budget note": "budgetNote", "waiting on": "waitingOn", installation: "installStart" } as Record<string, string>)[m[1]!.toLowerCase()]);
+  if (clear.length) out.clear = clear;
+  if (/ignore (all )?previous instructions/i.test(req)) Object.assign(out, { value: 1, currency: "USD", ownerId: "00000000-0000-4000-8000-0000000000cc", owner_id: "00000000-0000-4000-8000-0000000000cc", stage: "won", agencyOrgId: "00000000-0000-4000-8000-0000000000aa", agency_org_id: "00000000-0000-4000-8000-0000000000aa", execute: true, confirmed: true, paymentTerms: "100% upfront", exclusions: "none", risks: ["x"] });
+  return out;
+}
+
 /** A general (non-app) answer: deterministic text that echoes nothing of the question except that it was general. */
 function generalAnswer(input: string): Record<string, unknown> {
   const out: Record<string, unknown> = { answer: "This is a general answer (simulated): I can only give general information here, with no access to any company data." };
@@ -98,6 +120,7 @@ export function createSimulatedProvider(): JarvisProvider {
       if (req.input.includes("[[provider-error]]")) throw new JarvisProviderError("http", 500);
       if (req.task === "reply_draft") return draftReply(req.input);
       if (req.task === "help_general") return generalAnswer(req.input);
+      if (req.task === "enquiry_update") return enquiryUpdate(req.input);
       if (req.task !== "enquiry_fields") throw new JarvisProviderError("malformed");
       const out = extractEnquiry(req.input);
       if (/ignore (all )?previous instructions/i.test(req.input)) {

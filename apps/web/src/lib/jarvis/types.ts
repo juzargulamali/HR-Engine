@@ -71,7 +71,7 @@ export interface JarvisActionDefinition<TInput = unknown, TValues = unknown, TCa
   /** Builds the review card. NEVER writes. */
   propose(ctx: JarvisContext, input: TInput): Promise<JarvisProposal<TValues, TCard>>;
   /** The action's own existing permission/state rule, rechecked at execution (e.g. a record that changed, an organisation that is no longer visible). */
-  authorize?(ctx: JarvisContext, values: TValues, target: JarvisTarget): Promise<{ ok: true } | { ok: false; code?: "not_permitted" | "needs_review" | "invalid_input"; message: string }>;
+  authorize?(ctx: JarvisContext, values: TValues, target: JarvisTarget, meta: { confirmationId: string }): Promise<{ ok: true } | { ok: false; code?: "not_permitted" | "needs_review" | "invalid_input"; message: string }>;
   /** Writes through the module's own existing path. Only the dispatcher calls it, only after the token, hash, company and authorisation checks. */
   execute?(ctx: JarvisContext, input: JarvisExecuteInput<TValues>): Promise<JarvisExecuteOutcome<TResult>>;
   /** Reads the result back through the person's own session (the interface shows the real reference only after this succeeds). */

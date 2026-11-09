@@ -18,6 +18,7 @@ begin
   end if;
 end $$;
 
+drop function if exists jarvis_update_enquiry(uuid, text, uuid, integer, jsonb);
 drop function if exists jarvis_register_organisation(uuid, text, jsonb);
 drop function if exists jarvis_ledger_fail(uuid, text, text);
 drop function if exists jarvis_ledger_done(uuid, uuid, text, jsonb);

@@ -41,6 +41,19 @@ describe("JARVIS part 2: write wrappers", () => {
   });
   afterAll(async () => { await db.teardown(); });
 
+  let clientId = ""; let agencyId = "";
+  const soon = () => new Date(Date.now() + 2 * 86_400_000).toISOString();
+  /** A fictional enquiry created by `user` through the EXISTING function; returns its id. */
+  const newEnquiry = async (user: string, title = "Fictional harbour gala", company = CO.uae) =>
+    (await commit<{ id: string }>(user, `select crm_create_opportunity(p_company_id => $1::uuid, p_title => $2, p_source => 'whatsapp', p_next_title => 'Call', p_next_due => $3::timestamptz, p_client_org_id => $4::uuid, p_location => 'Harbour Hall', p_technologies => '[{"name":"LED wall","qty":2}]'::jsonb) as id`, [company, title, soon(), clientId]))[0].id;
+  const opp = async (oid: string) => (await admin<Record<string, unknown>>(`select title, location, event_start::text, version, stage, owner_id, value, currency, technologies, scope from crm_opportunities where id = '${oid}'`))[0];
+  const events = async (oid: string) => admin<{ kind: string; from_value: string | null; to_value: string | null; reason: string | null; actor_id: string }>(`select kind, from_value, to_value, reason, actor_id from crm_opportunity_events where opportunity_id = '${oid}' order by created_at, id`);
+  const ensureOrgs = async () => {
+    if (clientId) return;
+    clientId = (await commit<{ id: string }>(U.founder, `select crm_create_organisation_profile(p_name => 'Fictional Harbour Client', p_roles => '{client}', p_country_code => 'AE') as id`))[0].id;
+    agencyId = (await commit<{ id: string }>(U.founder, `select crm_create_organisation_profile(p_name => 'Fictional Wave Agency 2', p_roles => '{agency}', p_country_code => 'AE') as id`))[0].id;
+  };
+
   // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
   describe("jarvis_register_organisation", () => {
     const HASH = sha("org values A");
@@ -143,6 +156,136 @@ describe("JARVIS part 2: write wrappers", () => {
       for (const sql of [`select jarvis_ledger_enter('${id()}', '${HASH}', 'x', '${CO.uae}', 'new')`, `select jarvis_ledger_done('${id()}', '${id()}', 'x', null)`, `select jarvis_ledger_fail('${id()}', 'x', 'y')`]) {
         expect((await rejection(commit(U.sara, sql))).message).toMatch(/permission denied/);
       }
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+  describe("jarvis_update_enquiry", () => {
+    const HASH = sha("update values A");
+    const upd = (user: string, conf: string, oid: string, version: number | null, patch: Record<string, unknown>, hash = HASH) =>
+      commit<{ r: Record<string, unknown> }>(user, `select jarvis_update_enquiry($1::uuid, $2, $3::uuid, $4::integer, $5::jsonb) as r`, [conf, hash, oid, version, j(patch)]);
+    type R = { status: string; result_id: string | null; reference: string | null; extra: { company_id: string; version: number; fields: string[] } | null; replayed: boolean; error_code: string | null; error_message: string | null };
+
+    it("changes only the patched allowlisted columns through the EXISTING function, under the caller's identity, bumps the version once and writes both timeline lines", async () => {
+      await ensureOrgs();
+      const oid = await newEnquiry(U.sara);
+      const v = Number((await opp(oid)).version);
+      const conf = id();
+      const r = (await upd(U.sara, conf, oid, v, { location: "Marina Arena", event_start: "2026-12-10", technologies: [{ name: "LED wall", qty: 3 }] }))[0].r as R;
+      expect(r).toMatchObject({ status: "done", replayed: false, result_id: oid });
+      expect(r.extra).toMatchObject({ company_id: CO.uae, version: v + 1, fields: ["event_start", "location", "technologies"] });
+      expect(await opp(oid)).toMatchObject({ location: "Marina Arena", event_start: "2026-12-10", version: v + 1, stage: "new", owner_id: U.sara, value: null, technologies: [{ name: "LED wall", qty: 3 }] });
+      const ev = await events(oid);
+      expect(ev.filter((e) => e.kind === "details_changed").map((e) => [e.from_value, e.to_value])).toEqual([[null, "event_start, location, technologies"], ["jarvis", "update"]]);
+      expect(ev.find((e) => e.from_value === "jarvis")).toMatchObject({ actor_id: U.sara, reason: "event_start, location, technologies" });
+      const led = (await admin<Record<string, unknown>>(`select action_id, target, status, result_id, result_extra from jarvis_action_ledger where confirmation_id = '${conf}'`))[0];
+      expect(led).toMatchObject({ action_id: "jarvis.sales.enquiry.update", target: oid, status: "done", result_id: oid });
+    });
+    it("the ledger holds no field text", async () => {
+      const dump = JSON.stringify(await admin(`select * from jarvis_action_ledger`));
+      for (const needle of ["Marina Arena", "LED wall", "Harbour Hall"]) expect(dump).not.toContain(needle);
+    });
+    it("a repeat returns the ORIGINAL result although the version moved on, and changes nothing; N parallel calls change it exactly ONCE", async () => {
+      const oid = await newEnquiry(U.sara);
+      const v = Number((await opp(oid)).version);
+      const conf = id();
+      await upd(U.sara, conf, oid, v, { scope: "Supply and operate" });
+      const after = await opp(oid);
+      for (let i = 0; i < 3; i++) expect((await upd(U.sara, conf, oid, v, { scope: "Supply and operate" }))[0].r).toMatchObject({ status: "done", replayed: true, result_id: oid });
+      expect(await opp(oid)).toEqual(after);
+      const oid2 = await newEnquiry(U.sara);
+      const v2 = Number((await opp(oid2)).version);
+      const par = id();
+      const rs = (await Promise.all(Array.from({ length: 12 }, () => upd(U.sara, par, oid2, v2, { scope: "Parallel scope" })))).map((x) => x[0].r as R);
+      expect(rs.filter((r) => !r.replayed).length).toBe(1);
+      expect(rs.every((r) => r.status === "done")).toBe(true);
+      expect((await opp(oid2)).version).toBe(v2 + 1);
+      expect((await events(oid2)).filter((e) => e.from_value === "jarvis")).toHaveLength(1);
+    });
+    it("STALE: a version that is no longer current is refused by the existing rule, recorded once as failed (nothing changed), and replayed", async () => {
+      const oid = await newEnquiry(U.sara);
+      const v = Number((await opp(oid)).version);
+      await upd(U.sara, id(), oid, v, { scope: "First change" });
+      const conf = id();
+      const f = (await upd(U.sara, conf, oid, v, { scope: "Second change on an old version" }))[0].r as R;
+      expect(f).toMatchObject({ status: "failed", error_code: "40001", replayed: false });
+      expect(f.error_message).toMatch(/changed by someone else/);
+      expect((await opp(oid)).scope).toBe("First change");
+      expect((await upd(U.sara, conf, oid, v, { scope: "Second change on an old version" }))[0].r).toMatchObject({ status: "failed", replayed: true });
+    });
+    it("two people editing at once from the same version: exactly one wins, the other is refused as stale", async () => {
+      const oid = await newEnquiry(U.sara);
+      await admin(`update crm_opportunities set owner_id = '${U.sara}' where id = '${oid}'`);
+      const v = Number((await opp(oid)).version);
+      const [a, b] = await Promise.all([upd(U.sara, id(), oid, v, { scope: "Sara's scope" }), upd(U.founder, id(), oid, v, { scope: "Founder's scope" })]);
+      const rs = [a[0].r as R, b[0].r as R];
+      expect(rs.filter((r) => r.status === "done")).toHaveLength(1);
+      expect(rs.filter((r) => r.status === "failed")[0]).toMatchObject({ error_code: "40001" });
+      expect((await opp(oid)).version).toBe(v + 1);
+    });
+    it("ONLY the allowlist passes: owner, stage, agency or end client, value, currency, payment terms, exclusions, risks, source and anything unknown are refused before the ledger, nothing changes", async () => {
+      const oid = await newEnquiry(U.sara);
+      const v = Number((await opp(oid)).version);
+      const before = await opp(oid); const l = await ledgerCount();
+      for (const k of ["owner_id", "stage", "agency_org_id", "client_org_id", "value", "currency", "payment_terms", "exclusions", "risks", "source", "reference", "company_id", "version", "evidence_reference", "bogus"]) {
+        const e = await rejection(upd(U.sara, id(), oid, v, { [k]: k === "risks" ? [] : "x", scope: "Allowed together with a forbidden one" }));
+        expect(e.code, k).toBe("22023");
+        expect(e.message).toMatch(/cannot be changed through JARVIS/);
+      }
+      expect(await opp(oid)).toEqual(before);
+      expect(await ledgerCount()).toBe(l);
+    });
+    it("incomplete requests are refused with no ledger row (no version, empty patch, not an object, bad hash)", async () => {
+      const oid = await newEnquiry(U.sara);
+      const l = await ledgerCount();
+      expect((await rejection(upd(U.sara, id(), oid, null, { scope: "x" }))).code).toBe("22023");
+      expect((await rejection(upd(U.sara, id(), oid, 1, {}))).code).toBe("22023");
+      expect((await rejection(commit(U.sara, `select jarvis_update_enquiry($1::uuid, $2, $3::uuid, 1, '[1]'::jsonb)`, [id(), HASH, oid]))).code).toBe("22023");
+      expect((await rejection(commit(U.sara, `select jarvis_update_enquiry($1::uuid, 'nope', $2::uuid, 1, '{"scope":"x"}'::jsonb)`, [id(), oid]))).code).toBe("22023");
+      expect(await ledgerCount()).toBe(l);
+    });
+    it("the EXISTING owner-or-founder rule applies: a colleague with a Sales grant is refused (recorded failed, nothing changed); the founder may edit another person's enquiry", async () => {
+      const oid = await newEnquiry(U.sara);
+      const v = Number((await opp(oid)).version);
+      const f = (await upd(U.omar, id(), oid, v, { scope: "Omar's scope" }))[0].r as R;
+      expect(f).toMatchObject({ status: "failed", error_code: "42501" });
+      expect((await opp(oid)).scope).toBeNull();
+      expect(((await upd(U.founder, id(), oid, v, { scope: "Founder's scope" }))[0].r as R).status).toBe("done");
+    });
+    it("a Lost enquiry is refused by the existing rule; a Won enquiry's money is not in the allowlist anyway", async () => {
+      const oid = await newEnquiry(U.sara);
+      await commit(U.sara, `select crm_mark_lost($1::uuid, 'Event cancelled')`, [oid]);
+      const v = Number((await opp(oid)).version);
+      expect(((await upd(U.sara, id(), oid, v, { scope: "x" }))[0].r as R)).toMatchObject({ status: "failed", error_code: "23514" });
+    });
+    it("cannot bypass visibility or permissions: no Sales grant, another company's enquiry, a forged id, revoked grant, JARVIS or writes off; no ledger row, nothing changes", async () => {
+      const oid = await newEnquiry(U.sara);
+      const v = Number((await opp(oid)).version);
+      const before = await opp(oid); const l = await ledgerCount();
+      expect((await rejection(upd(U.noGrant, id(), oid, v, { scope: "x" }))).code).toBe("P0002");
+      expect((await rejection(upd(U.ksaStaff, id(), oid, v, { scope: "x" }))).code).toBe("P0002");
+      expect((await rejection(upd(U.sara, id(), id(), v, { scope: "x" }))).code).toBe("P0002");
+      expect((await rejection(upd(U.outsider, id(), oid, v, { scope: "x" }))).code).toMatch(/P0002|42501/);
+      await admin(`update jarvis_settings set writes_enabled = false`);
+      expect((await rejection(upd(U.sara, id(), oid, v, { scope: "x" }))).code).toBe("42501");
+      await admin(`update jarvis_settings set writes_enabled = true, enabled = false`);
+      expect((await rejection(upd(U.sara, id(), oid, v, { scope: "x" }))).code).toBe("42501");
+      await admin(`update jarvis_settings set enabled = true`);
+      await admin(`update crm_company_grants set revoked_at = now() where user_id = '${U.sara}'`);
+      expect((await rejection(upd(U.sara, id(), oid, v, { scope: "x" }))).code).toBe("P0002");
+      await admin(`update crm_company_grants set revoked_at = null where user_id = '${U.sara}'`);
+      expect(await opp(oid)).toEqual(before);
+      expect(await ledgerCount()).toBe(l);
+    });
+    it("another person, or different reviewed values, on a used confirmation id are refused", async () => {
+      const oid = await newEnquiry(U.sara);
+      const v = Number((await opp(oid)).version);
+      const conf = id();
+      await upd(U.sara, conf, oid, v, { scope: "Bound scope" });
+      expect((await rejection(upd(U.founder, conf, oid, v, { scope: "Bound scope" }))).code).toBe("42501");
+      expect((await rejection(upd(U.sara, conf, oid, v, { scope: "Bound scope" }, sha("other")))).code).toBe("42501");
+      const other = await newEnquiry(U.sara, "Another one");
+      expect((await rejection(upd(U.sara, conf, other, Number((await opp(other)).version), { scope: "Bound scope" }))).code).toBe("42501");
     });
   });
 });

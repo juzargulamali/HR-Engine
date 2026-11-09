@@ -12,7 +12,7 @@ vi.mock("@/lib/actions/jarvis", () => ({ jarvisSend: vi.fn(), jarvisContext: vi.
 
 import { JarvisLauncher, type JarvisClientApi } from "./jarvis-launcher";
 import { JarvisMark } from "./jarvis-mark";
-import type { ActionConfirmResult, ConfirmResult, EnquiryCard, EnquiryValues, OrgRegisterCard, ReplyDraftCard, SendResult, StatusResult } from "@/lib/jarvis/protocol";
+import type { ActionConfirmResult, ConfirmResult, EnquiryCard, EnquiryValues, EnquiryUpdateCard, OrgRegisterCard, ReplyDraftCard, SendResult, StatusResult } from "@/lib/jarvis/protocol";
 
 const CO1 = "11111111-1111-4111-8111-111111111111";
 const CO2 = "22222222-2222-4222-8222-222222222222";
@@ -511,5 +511,61 @@ describe("register a client or agency (two steps, its own confirmation)", () => 
     openPanel();
     await paste();
     expect(screen.queryByTestId("register-agency")).toBeNull();
+  });
+});
+
+const UPD_ID = "jarvis.sales.enquiry.update";
+const form = { title: "Harbour gala LED wall", brief: null, eventStart: "2026-12-05", eventEnd: null, installStart: null, location: "Harbour Hall", technologies: [{ name: "LED wall", qty: 2 }], scope: null, waitingOn: null, budgetNote: null };
+const updCard = (over: Partial<EnquiryUpdateCard> = {}): EnquiryUpdateCard => ({
+  kind: "enquiry.update", enquiry: { id: ENQ, reference: "OPP-UAE-2026-0007", title: "Harbour gala LED wall", stage: "new", stageLabel: "New enquiry", companyId: CO1, version: 3 },
+  changes: [{ field: "location", label: "Location", before: "Harbour Hall", after: "Marina Arena" }], current: form, proposed: { ...form, location: "Marina Arena" },
+  fields: [{ key: "title", label: "Title" }], values: { companyId: CO1, enquiryId: ENQ, patch: { location: "Marina Arena" } }, problems: [], valid: true, ...over,
+});
+const updResult = (c: EnquiryUpdateCard, confirmation: ReturnType<typeof conf> | null = conf("u-1")): SendResult => ({ ok: true, kind: "action", actionId: UPD_ID, card: c, confirmation });
+
+describe("update an enquiry", () => {
+  async function open(api: ReturnType<typeof fakeApi>) {
+    mount(api, { enabledActionIds: [...IDS, UPD_ID] });
+    openPanel();
+    fireEvent.click(screen.getByTestId("mode-update"));
+    fireEvent.change(screen.getByLabelText("Paste a brief or ask a question"), { target: { value: "Location: Marina Arena" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByTestId("jarvis-update-card");
+  }
+  it("shows before and after, binds nothing in the browser, and saves once with the explicit button (a double click is one call)", async () => {
+    const api = fakeApi({
+      send: async () => updResult(updCard()),
+      confirmAction: async (): Promise<ActionConfirmResult> => ({ ok: true, status: "done", confirmationId: "u-1", actionId: UPD_ID, reference: "OPP-UAE-2026-0007", href: `/sales/opportunities/${ENQ}`, summary: "OPP-UAE-2026-0007 was updated (location), and you approved it.", replayed: false }),
+    });
+    await open(api);
+    const row = screen.getByTestId("change-location");
+    expect(row.textContent).toMatch(/Location.*Harbour Hall.*Marina Arena/);
+    expect(screen.getByText(/version 3 of the enquiry/)).toBeTruthy();
+    const save = screen.getByTestId("save-update");
+    fireEvent.click(save); fireEvent.click(save);
+    expect((await screen.findByTestId("jarvis-result")).textContent).toMatch(/was updated \(location\)/);
+    expect(api.calls.confirmAction).toHaveLength(1);
+    expect(api.calls.confirmAction[0]![0]).toMatchObject({ actionId: UPD_ID, token: "tok-u-1", values: { patch: { location: "Marina Arena" } } });
+  });
+  it("editing a field needs 'Review changes' first (save disabled), and the revise call carries the whole form", async () => {
+    const api = fakeApi({ send: async () => updResult(updCard()), act: async () => updResult(updCard({ proposed: { ...form, location: "Marina Arena", scope: "Everything" } }), conf("u-2")) });
+    await open(api);
+    fireEvent.change(screen.getByLabelText("Scope"), { target: { value: "Everything" } });
+    expect((screen.getByTestId("save-update") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    await waitFor(() => expect(api.calls.act).toHaveLength(1));
+    expect(api.calls.act[0]![0]).toMatchObject({ actionId: UPD_ID, input: { mode: "revise", enquiryId: ENQ, fields: { scope: "Everything", location: "Marina Arena" } } });
+    await waitFor(() => expect((screen.getByTestId("save-update") as HTMLButtonElement).disabled).toBe(false));
+  });
+  it("a stale enquiry is shown in words, the card stays reviewable; nothing to change cannot be saved", async () => {
+    const api = fakeApi({ send: async () => updResult(updCard()), confirmAction: async (): Promise<ActionConfirmResult> => ({ ok: false, code: "needs_review", message: "This enquiry was changed by someone else after you reviewed it. Review the details again before saving." }) });
+    await open(api);
+    fireEvent.click(screen.getByTestId("save-update"));
+    expect((await screen.findByTestId("card-failed")).textContent).toMatch(/changed by someone else/);
+    cleanup();
+    const empty = fakeApi({ send: async () => updResult(updCard({ changes: [], valid: false, proposed: form, problems: [{ field: "patch", message: "Nothing would change. Say what to change." }] }), null) });
+    await open(empty);
+    expect(screen.getByTestId("update-nothing")).toBeTruthy();
+    expect((screen.getByTestId("save-update") as HTMLButtonElement).disabled).toBe(true);
   });
 });

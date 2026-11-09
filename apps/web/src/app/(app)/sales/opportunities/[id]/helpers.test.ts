@@ -23,6 +23,12 @@ describe("describeEvent", () => {
     expect(describeEvent(ev("1", "t", "created", null, "new"), names)).toBe("Enquiry created.");
     expect(describeEvent(ev("1", "t", "created", "jarvis", "new", "Created through JARVIS after the person reviewed and approved it."), names)).toMatch(/created through JARVIS.*reviewed and approved/);
   });
+  it("says when a change, a stage move or a meeting record was made through JARVIS after the person approved it (and the ordinary lines are unchanged)", () => {
+    expect(describeEvent(ev("1", "t", "details_changed", null, "location, event_start"), names)).toBe("Details changed: location, show start date.");
+    expect(describeEvent(ev("1", "t", "details_changed", "jarvis", "update", "event_start, location"), names)).toBe("Changed through JARVIS (show start date, location): the person who saved it reviewed and approved it first.");
+    expect(describeEvent(ev("1", "t", "details_changed", "jarvis", "stage", "new>qualified"), names)).toBe("Stage change made through JARVIS (New enquiry to Qualified): the person who saved it reviewed and approved it first.");
+    expect(describeEvent(ev("1", "t", "details_changed", "jarvis", "meeting", "activity and follow-up"), names)).toMatch(/recorded through JARVIS.*approved/);
+  });
   it("shows the estimate events the database writes as estimate events, and ordinary proposal events unchanged", () => {
     expect(describeEvent(ev("1", "t", "proposal", null, "v1 estimate draft"), names)).toBe("Estimate v1 drafted.");
     expect(describeEvent(ev("1", "t", "proposal", null, "QUO-UAE-2026-0001 rev 1 issued"), names)).toBe("Estimate QUO-UAE-2026-0001 revision 1 finalised.");

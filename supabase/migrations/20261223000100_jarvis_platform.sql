@@ -377,8 +377,59 @@ begin
 end;
 $$;
 
-revoke all on function jarvis_my_access(uuid), jarvis_usage_take(integer), jarvis_create_enquiry(uuid, text, jsonb), jarvis_register_organisation(uuid, text, jsonb) from public, anon;
-grant execute on function jarvis_my_access(uuid), jarvis_usage_take(integer), jarvis_create_enquiry(uuid, text, jsonb), jarvis_register_organisation(uuid, text, jsonb) to authenticated;
+-- -----------------------------------------------------------------------------
+-- Update an enquiry through JARVIS, exactly once per confirmation id (jarvis.sales.enquiry.update).
+--   * The change is made by the EXISTING crm_update_opportunity under the caller's own identity: it locks the enquiry, checks the expected VERSION (a change by anyone else
+--     since the review is refused, 40001), requires the owner or a founder, refuses a Lost enquiry, validates technologies. This wrapper adds no privilege.
+--   * ONLY a named allowlist of fields can be changed here (narrower than the existing function): title, brief, event_start, event_end, install_start, location, technologies,
+--     scope, waiting_on, budget_note. Nothing touching the owner, the stage, the agency or end client, money (value, currency, payment terms), exclusions, risks, evidence,
+--     files, proposals, Zoho, handover or closure can pass through it, whatever the caller sends.
+--   * The expected version is required. A repeat with the same confirmation id returns the ORIGINAL result and changes nothing (the version check is not re-run on a repeat).
+--   * A second timeline line says it was changed through JARVIS and approved by the person (the usual "Details changed" line is written by the existing function).
+-- Returns the ledger result: {status, result_id (the enquiry), reference, extra{company_id, version, fields[]}, replayed, ...}.
+-- -----------------------------------------------------------------------------
+create or replace function jarvis_update_enquiry(p_confirmation_id uuid, p_values_hash text, p_enquiry_id uuid, p_expected_version integer, p_patch jsonb)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v crm_opportunities;
+  v_allowed text[] := array['title', 'brief', 'event_start', 'event_end', 'install_start', 'location', 'technologies', 'scope', 'waiting_on', 'budget_note'];
+  v_keys text[];
+  k text;
+  v_replay jsonb;
+  v_version integer;
+  v_msg text;
+  v_state text;
+begin
+  if p_enquiry_id is null or p_expected_version is null or p_patch is null or jsonb_typeof(p_patch) <> 'object' or p_patch = '{}'::jsonb then
+    raise exception 'The confirmation is incomplete' using errcode = '22023';
+  end if;
+  select array_agg(x order by x) into v_keys from jsonb_object_keys(p_patch) x;
+  foreach k in array v_keys loop
+    if not (k = any (v_allowed)) then raise exception 'Field % cannot be changed through JARVIS', k using errcode = '22023'; end if;
+  end loop;
+  -- The enquiry as the caller sees it (not-visible and not-existing look the same); the company decides the switches and grant checked next.
+  v := crm_lock_opportunity(p_enquiry_id);
+
+  v_replay := jarvis_ledger_enter(p_confirmation_id, p_values_hash, 'jarvis.sales.enquiry.update', v.company_id, p_enquiry_id::text);
+  if v_replay is not null then return v_replay; end if;
+
+  begin
+    v_version := crm_update_opportunity(p_enquiry_id, p_expected_version, p_patch);
+    insert into crm_opportunity_events (opportunity_id, company_id, kind, from_value, to_value, reason, actor_id)
+    values (p_enquiry_id, v.company_id, 'details_changed', 'jarvis', 'update', array_to_string(v_keys, ', '), auth.uid());
+    return jarvis_ledger_done(p_confirmation_id, p_enquiry_id, v.reference, jsonb_build_object('company_id', v.company_id, 'version', v_version, 'fields', to_jsonb(v_keys)));
+  exception when others then
+    get stacked diagnostics v_msg = message_text, v_state = returned_sqlstate;
+    return jarvis_ledger_fail(p_confirmation_id, v_state, v_msg);
+  end;
+end;
+$$;
+
+revoke all on function jarvis_my_access(uuid), jarvis_usage_take(integer), jarvis_create_enquiry(uuid, text, jsonb), jarvis_register_organisation(uuid, text, jsonb), jarvis_update_enquiry(uuid, text, uuid, integer, jsonb) from public, anon;
+grant execute on function jarvis_my_access(uuid), jarvis_usage_take(integer), jarvis_create_enquiry(uuid, text, jsonb), jarvis_register_organisation(uuid, text, jsonb), jarvis_update_enquiry(uuid, text, uuid, integer, jsonb) to authenticated;
 -- The internal helpers are NOT callable by anyone through the API (the wrappers above run as their owner and may call them).
 revoke all on function jarvis_ledger_json(jarvis_action_ledger, boolean), jarvis_ledger_enter(uuid, text, text, uuid, text), jarvis_ledger_done(uuid, uuid, text, jsonb), jarvis_ledger_fail(uuid, text, text) from public, anon, authenticated;
 

@@ -17,7 +17,7 @@ select item, n, fingerprint from (
   union all select 2, 'new function ' || f || ' (INTENDED TO CHANGE: absent before, present after)',
          (select count(*)::text from pg_proc where pronamespace = 'public'::regnamespace and proname = f), '-'
     from unnest(array['jarvis_my_access', 'jarvis_usage_take', 'jarvis_create_enquiry', 'jarvis_ledger_json', 'jarvis_ledger_enter', 'jarvis_ledger_done', 'jarvis_ledger_fail',
-                    'jarvis_register_organisation']) f
+                    'jarvis_register_organisation', 'jarvis_update_enquiry']) f
   union all select 3, 'enquiries (every column)', count(*)::text, coalesce(md5(string_agg(o::text, ',' order by id)), '-') from crm_opportunities o
   union all select 4, 'follow-ups (every column)', count(*)::text, coalesce(md5(string_agg(f::text, ',' order by id)), '-') from crm_follow_ups f
   union all select 5, 'timeline events (every column)', count(*)::text, coalesce(md5(string_agg(e::text, ',' order by id)), '-') from crm_opportunity_events e

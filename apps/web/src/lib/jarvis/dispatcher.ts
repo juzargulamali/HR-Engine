@@ -134,7 +134,7 @@ export function createDispatcher(deps: JarvisDeps) {
     if (hash !== p.h) { jarvisLog({ event: "refused", actionId: action.id, code: "values_changed" }); return { ...refuse("values_changed", "The details changed after the review. Press Review changes to check them again before creating anything."), confirmationId: p.cid }; }
     if ((values.data as { companyId?: string }).companyId !== undefined && (values.data as { companyId?: string }).companyId !== p.co) return refuse("company_changed", "The company changed since you reviewed this. Review the details again.");
     const target: JarvisTarget = p.tgt === "new" ? { kind: "new" } : { kind: "record", id: p.tgt, version: p.ver };
-    const own = action.authorize ? await action.authorize(ctx, values.data, target) : ({ ok: true } as const);
+    const own = action.authorize ? await action.authorize(ctx, values.data, target, { confirmationId: p.cid }) : ({ ok: true } as const);
     if (!own.ok) { jarvisLog({ event: "refused", actionId: action.id, code: own.code ?? "not_permitted" }); return { ...refuse(own.code ?? "not_permitted", own.message), confirmationId: p.cid }; }
     const started = Date.now();
     try {

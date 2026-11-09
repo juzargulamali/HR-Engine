@@ -224,7 +224,7 @@ describe("execute: only the explicit confirmation writes, once", () => {
   });
   it("a token cannot be used for another action, and unknown or disabled actions are refused by the dispatcher", async () => {
     const r = await ready();
-    expect(refusal(await a.execute({ actionId: "jarvis.sales.enquiry.update", companyId: ID.co1, token: r.token, values: r.card.values })).code).toBe("action_disabled");
+    expect(refusal(await a.execute({ actionId: "jarvis.sales.enquiry.update", companyId: ID.co1, token: r.token, values: r.card.values })).code).toBe("token_invalid");
     expect(refusal(await a.execute({ actionId: "crm_create_opportunity", companyId: ID.co1, token: r.token, values: r.card.values })).code).toBe("unknown_action");
     expect(refusal(await a.execute({ actionId: "jarvis.sales.enquiry.delete", companyId: ID.co1, token: r.token, values: r.card.values })).code).toBe("unknown_action");
     expect(creates()).toHaveLength(0);

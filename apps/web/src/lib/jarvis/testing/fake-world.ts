@@ -50,6 +50,8 @@ export interface World {
   createdArgs: Record<string, unknown>[];
   /** What the organisation wrapper was asked to register (after its checks). */
   registered: Record<string, unknown>[];
+  /** What the update wrapper applied. */
+  updates: { id: string; patch: Record<string, unknown>; version: number }[];
   counter: number;
 }
 
@@ -59,7 +61,7 @@ export function newWorld(): World {
     signedIn: ID.u1, settings: { enabled: true, writes: true }, pilot: new Set([ID.u1, ID.u2, ID.u3]), pilotCompanies: new Set(),
     grants: [{ user_id: ID.u1, company_id: ID.co1, capabilities: [], revoked_at: null }, { user_id: ID.u1, company_id: ID.co2, capabilities: [], revoked_at: null }, { user_id: ID.u2, company_id: ID.co2, capabilities: [], revoked_at: null }],
     companies: [{ id: ID.co1, legal_name: "Fictional Enginious UAE LLC" }, { id: ID.co2, legal_name: "Fictional Enginious KSA LLC" }],
-    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], readLog: [], createdArgs: [], registered: [], counter: 0,
+    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], readLog: [], createdArgs: [], registered: [], updates: [], counter: 0,
   };
 }
 
@@ -161,6 +163,33 @@ function rpc(w: World, user: string, name: string, args: Record<string, unknown>
         w.ledger.set(cid, { confirmation_id: cid, user_id: user, company_id: p.company_id, values_hash: args.p_values_hash as string, status: "done", result_id: id, result_ref: reference, error_message: null, action_id: "jarvis.sales.enquiry.create_from_brief", target: "new", result_extra: null });
         if (w.createMode === "lost") return { data: null, error: { message: "TypeError: fetch failed" } };
         return { data: { status: "done", confirmation_id: cid, opportunity_id: id, reference, replayed: false, error_message: null }, error: null };
+      }
+      case "jarvis_update_enquiry": {
+        const patch = args.p_patch as Record<string, unknown>;
+        const opp = w.opps.find((o) => o.id === args.p_enquiry_id);
+        const has = grantedCompanies(w, user);
+        if (!opp || !has.has(opp.company_id)) return { data: null, error: { message: "Opportunity not found", code: "P0002" } };
+        const keys = Object.keys(patch ?? {}).sort();
+        const ALLOWED = ["title", "brief", "event_start", "event_end", "install_start", "location", "technologies", "scope", "waiting_on", "budget_note"];
+        if (keys.length === 0 || args.p_expected_version == null) return { data: null, error: { message: "The confirmation is incomplete", code: "22023" } };
+        for (const k of keys) if (!ALLOWED.includes(k)) return { data: null, error: { message: `Field ${k} cannot be changed through JARVIS`, code: "22023" } };
+        const gate = gateWrite(w, user, opp.company_id);
+        if (gate) return gate;
+        const cid = args.p_confirmation_id as string;
+        const prior = replay(w, user, cid, opp.company_id, "jarvis.sales.enquiry.update", opp.id, args.p_values_hash as string);
+        if (prior) return prior;
+        if (w.createMode === "network") return { data: null, error: { message: "TypeError: fetch failed" } };
+        const fail = (code: string, message: string) => ({ data: json(ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.enquiry.update", opp.id, args.p_values_hash as string, { status: "failed", error_code: code, error_message: message }), false), error: null });
+        const founder = w.grants.some((g) => g.user_id === user && g.company_id === opp.company_id && !g.revoked_at && g.capabilities.includes("founder"));
+        if (opp.stage === "lost") return fail("23514", "A lost opportunity can no longer be edited");
+        if ((opp.version ?? 1) !== args.p_expected_version) return fail("40001", "This opportunity was changed by someone else. Reload and try again.");
+        if (opp.owner_id !== user && !founder) return fail("42501", "Only the owner of this opportunity or a founder can do this");
+        w.updates.push({ id: opp.id, patch, version: args.p_expected_version as number });
+        Object.assign(opp, patch);
+        opp.version = (opp.version ?? 1) + 1;
+        const row = ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.enquiry.update", opp.id, args.p_values_hash as string, { status: "done", result_id: opp.id, result_ref: opp.reference, result_extra: { company_id: opp.company_id, version: opp.version, fields: keys } });
+        if (w.createMode === "lost") return { data: null, error: { message: "TypeError: fetch failed" } };
+        return { data: json(row, false), error: null };
       }
       case "jarvis_register_organisation": {
         const p = args.p_args as { company_id: string; name: string; roles: string[]; country_code: string | null; website: string | null; place: string | null; note: string | null; ack_ids: string[] };

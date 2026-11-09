@@ -6,7 +6,8 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import type { ActionCard, ActionConfirmResult, ConfirmationView, HelpAnswerCard, OrgRegisterCard, OrgRole, OrgValues, ReplyDraftCard, SendResult, StatusResult } from "@/lib/jarvis/protocol";
+import { Select } from "@/components/ui/select";
+import type { ActionCard, ActionConfirmResult, ConfirmationView, EnquiryUpdateCard, HelpAnswerCard, OrgRegisterCard, OrgRole, OrgValues, ReplyDraftCard, SendResult, StatusResult, UpdateForm } from "@/lib/jarvis/protocol";
 
 /** What the cards of the other actions call. Each is a server action that re-authorises the person on every call; this file decides nothing about access. */
 export interface ActionApi {
@@ -32,6 +33,7 @@ export function ActionCardView(p: ActionCardProps) {
     case "reply.draft": return <ReplyDraftView card={p.state.card} companyStale={p.companyStale} />;
     case "help.answer": return <HelpAnswerView card={p.state.card} />;
     case "org.register": return <OrgRegisterView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
+    case "enquiry.update": return <UpdateView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
     default: return null;
   }
 }
@@ -289,6 +291,85 @@ function ReplyDraftView({ card, companyStale }: { card: ReplyDraftCard; companyS
         <Button type="button" size="sm" onClick={() => void copy()} data-testid="reply-copy">Copy draft</Button>
         <span role="status" className="text-xs text-muted-foreground">{copied === "yes" ? "Copied. Paste it into your email." : copied === "no" ? "Could not copy automatically: the draft is selected, press Ctrl+C." : ""}</span>
       </div>
+    </section>
+  );
+}
+
+
+/** Update an enquiry: each change as before -> after, the allowlisted fields editable, and the ONE button that saves them. The record's version is bound to the review. */
+function UpdateView(p: ActionCardProps & { card: EnquiryUpdateCard; confirmation: ConfirmationView | null }) {
+  const { card, confirmation } = p;
+  const [draft, setDraft] = useState<UpdateForm>(card.proposed);
+  const [saved, setSaved] = useState(false);
+  const { busy, error, run } = usePropose(p);
+  const dirty = !same(draft, card.proposed);
+  const canSave = card.valid && !!confirmation && !dirty && !p.companyStale;
+  const set = <K extends keyof UpdateForm>(k: K, v: UpdateForm[K]) => setDraft((d) => ({ ...d, [k]: v }));
+  const err = (f: string) => card.problems.find((x) => x.field === f)?.message;
+  const key = card.enquiry.id.slice(0, 8);
+  const now = (label: string, v: string) => (card.changes.some((c) => c.label === label) ? <p className="text-[11px] text-muted-foreground">Now: {v}</p> : null);
+  const cur = card.current;
+  const line = (id: string, label: string, control: React.ReactNode, problem?: string) => (
+    <div className="space-y-1">
+      <label htmlFor={`${key}-${id}`} className="text-xs font-medium text-muted-foreground">{label}</label>
+      {control}
+      {problem ? <p className="text-xs text-destructive" data-testid={`problem-${id}`}>{problem}</p> : null}
+    </div>
+  );
+  const text = (id: keyof UpdateForm & string, label: string, type = "text", max = 200) => line(id, label, <Input id={`${key}-${id}`} type={type} maxLength={max} value={String(draft[id] ?? "")} disabled={busy || saved} onChange={(e) => set(id, (e.target.value === "" ? (id === "title" ? "" : null) : e.target.value) as never)} />, err(id));
+  if (p.companyStale && !saved) return <Alert variant="warning">The company changed after this review, so it can no longer be used. Ask again for the new company.</Alert>;
+  return (
+    <section aria-label="Review the changes" className="space-y-3 rounded-lg border border-border bg-card p-3 text-sm" data-testid="jarvis-update-card">
+      <header className="space-y-1">
+        <h3 className="font-heading text-sm font-semibold">Review before anything is saved</h3>
+        <p className="text-xs text-muted-foreground">Changes to <Link href={`/sales/opportunities/${card.enquiry.id}`} className="font-medium text-foreground underline underline-offset-2">{card.enquiry.reference}</Link> · {card.enquiry.title} · {card.enquiry.stageLabel}. Only the fields below can be changed through JARVIS. Nothing is saved until you press Save changes.</p>
+      </header>
+      {card.changes.length > 0 ? (
+        <table className="w-full text-xs" data-testid="update-changes">
+          <caption className="sr-only">What will change</caption>
+          <thead><tr className="text-left text-muted-foreground"><th className="pb-1 font-medium">Field</th><th className="pb-1 font-medium">Now</th><th className="pb-1 font-medium">After</th></tr></thead>
+          <tbody>{card.changes.map((c) => <tr key={c.field} data-testid={`change-${c.field}`} className="border-t border-border align-top"><td className="py-1 pr-2 font-medium">{c.label}</td><td className="py-1 pr-2 text-muted-foreground">{c.before}</td><td className="py-1">{c.after}</td></tr>)}</tbody>
+        </table>
+      ) : <p className="rounded-md border border-border bg-secondary/40 p-2 text-xs" data-testid="update-nothing">Nothing would change yet. Edit a field below, or say what to change.</p>}
+      <details className="rounded-md border border-border p-2" open={card.changes.length === 0 || undefined}>
+        <summary className="cursor-pointer text-xs font-medium">Edit the fields</summary>
+        <div className="mt-3 space-y-3">
+          {text("title", "Title")}{now("Title", cur.title)}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {text("eventStart", "Event start", "date")}{text("eventEnd", "Event end", "date")}{text("installStart", "Installation", "date")}
+          </div>
+          {text("location", "Location")}
+          {text("budgetNote", "Budget note", "text", 1000)}
+          {line("waitingOn", "Waiting on", (
+            <Select id={`${key}-waitingOn`} value={draft.waitingOn ?? ""} disabled={busy || saved} onChange={(e) => set("waitingOn", (e.target.value || null) as UpdateForm["waitingOn"])}>
+              <option value="">Nobody</option><option value="client">The client</option><option value="internal">Our own team</option>
+            </Select>))}
+          <fieldset className="space-y-2">
+            <legend className="text-xs font-medium text-muted-foreground">Technologies requested</legend>
+            {draft.technologies.map((t, i) => (
+              <div key={i} className="grid grid-cols-[minmax(0,1fr)_4.5rem_auto] items-center gap-2">
+                <Input aria-label={`Technology ${i + 1} name`} value={t.name} maxLength={120} disabled={busy || saved} onChange={(e) => set("technologies", draft.technologies.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+                <Input aria-label={`Technology ${i + 1} quantity`} type="number" min={1} value={t.qty} disabled={busy || saved} onChange={(e) => set("technologies", draft.technologies.map((x, j) => (j === i ? { ...x, qty: Math.max(1, Math.floor(Number(e.target.value) || 1)) } : x)))} />
+                <Button type="button" size="sm" variant="ghost" disabled={busy || saved} aria-label={`Remove technology ${i + 1}`} onClick={() => set("technologies", draft.technologies.filter((_, j) => j !== i))}>Remove</Button>
+              </div>
+            ))}
+            {draft.technologies.length < 20 ? <Button type="button" size="sm" variant="outline" disabled={busy || saved} onClick={() => set("technologies", [...draft.technologies, { name: "", qty: 1 }])}>Add a technology</Button> : null}
+            {err("technologies") ? <p className="text-xs text-destructive">{err("technologies")}</p> : null}
+          </fieldset>
+          {line("scope", "Scope", <Textarea id={`${key}-scope`} rows={2} maxLength={4000} value={draft.scope ?? ""} disabled={busy || saved} onChange={(e) => set("scope", e.target.value || null)} />)}
+          {line("brief", "Brief", <Textarea id={`${key}-brief`} rows={3} maxLength={4000} value={draft.brief ?? ""} disabled={busy || saved} onChange={(e) => set("brief", e.target.value || null)} />)}
+        </div>
+      </details>
+      {card.problems.length > 0 && !dirty ? <p className="text-xs text-muted-foreground" data-testid="card-missing">{card.problems.map((x) => x.message.replace(/\.$/, "")).join("; ")}.</p> : null}
+      {error ? <Alert variant="destructive" role="alert">{error}</Alert> : null}
+      {!saved ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {dirty || !card.valid || !confirmation ? <Button type="button" variant="secondary" size="sm" disabled={busy || (!dirty && card.valid && !!confirmation)} onClick={() => void run({ mode: "revise", enquiryId: card.enquiry.id, fields: draft })}>{busy ? "Reviewing…" : "Review changes"}</Button> : null}
+          {dirty ? <span className="text-xs text-muted-foreground">You changed something: review the changes first.</span> : null}
+        </div>
+      ) : null}
+      <SaveBox actionId={p.actionId} companyId={p.companyId} confirmation={confirmation} values={card.values} canSave={canSave} label="Save changes" busyLabel="Saving…" api={p.api} testId="save-update" onSettled={setSaved} />
+      {confirmation && card.valid && !dirty && !saved ? <p className="text-[11px] text-muted-foreground">This review is for version {card.enquiry.version} of the enquiry. If anyone changes it first you will be asked to review again. Valid until {new Date(confirmation.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.</p> : null}
     </section>
   );
 }

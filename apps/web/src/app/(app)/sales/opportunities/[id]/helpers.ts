@@ -57,6 +57,13 @@ export function describeEvent(e: Pick<CrmOpportunityEventRow, "kind" | "from_val
     case "owner_changed": return `Owner changed from ${personName(e.from_value)} to ${personName(e.to_value)}.${reason}`;
     case "value_changed": return `Value changed from ${e.from_value ?? "not set"} to ${e.to_value ?? "not set"}.`;
     case "details_changed": {
+      // The line JARVIS adds after a change the person reviewed and approved there (the usual "Details changed" line is written by the update itself).
+      if (e.from_value === "jarvis") {
+        const approved = "the person who saved it reviewed and approved it first.";
+        if (e.to_value === "stage") { const [from, to] = (e.reason ?? "").split(">"); return `Stage change made through JARVIS (${crmStageLabel(from ?? "")} to ${crmStageLabel(to ?? "")}): ${approved}`; }
+        if (e.to_value === "meeting") return `Meeting activity and follow-up recorded through JARVIS: ${approved}`;
+        return `Changed through JARVIS${e.reason ? ` (${e.reason.split(", ").map((f) => DETAIL_FIELD_LABELS[f] ?? f).join(", ")})` : ""}: ${approved}`;
+      }
       const fields = (e.to_value ?? "").split(", ").filter(Boolean).map((f) => DETAIL_FIELD_LABELS[f] ?? f);
       return fields.length ? `Details changed: ${fields.join(", ")}.` : "Details changed.";
     }
