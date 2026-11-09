@@ -1,7 +1,10 @@
 import { randomUUID, createHash } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
+import { callArgs, PROOF_KEY, proofCall, wrapperSql } from "../src/jarvis-proof";
 
+// Every wrapper is called here DIRECTLY as the signed-in person, with a REAL server-issued proof (signed with the key the database holds): the proof checks themselves, and what a caller
+// with an invented proof can and cannot do, are in jarvis-proof.rls.test.ts.
 // JARVIS part 2: the ledger-backed wrappers of the other write actions (migration 20261223000100_jarvis_platform.sql, extended in place). Fictional data only. For each wrapper:
 //   * the work is done by the EXISTING function under the caller's own identity (a refused person is refused by the underlying rule, with no ledger row);
 //   * the ledger row and the work commit together; N parallel calls with one confirmation id do the work exactly ONCE; a repeat returns the ORIGINAL result;
@@ -37,6 +40,7 @@ describe("JARVIS part 2: write wrappers", () => {
     `);
     await db.applyMigration(MIGRATION);
     await admin(`update jarvis_settings set enabled = true, writes_enabled = true`);
+    await admin(`select jarvis_set_proof_key('${PROOF_KEY}')`);
     await admin(`insert into jarvis_pilot_users (user_id) values ('${U.sara}'), ('${U.omar}'), ('${U.founder}'), ('${U.noGrant}'), ('${U.ksaStaff}')`);
   });
   afterAll(async () => { await db.teardown(); });
@@ -56,9 +60,14 @@ describe("JARVIS part 2: write wrappers", () => {
 
   // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
   describe("jarvis_register_organisation", () => {
-    const HASH = sha("org values A");
+    const ACT = "jarvis.sales.organisation.register";
     const args = (over: Record<string, unknown> = {}) => ({ company_id: CO.uae, name: "Fictional Lantern Events", roles: ["agency"], country_code: "AE", website: "https://www.lantern-events.example/about", place: "Dubai", note: "SECRET-NOTE-TEXT-777", ack_ids: [], ...over });
-    const reg = (user: string, conf: string, a: Record<string, unknown> = args(), hash = HASH) => commit<{ r: Record<string, unknown> }>(user, `select jarvis_register_organisation($1::uuid, $2, $3::jsonb) as r`, [conf, hash, j(a)]);
+    /** `ack_ids` travel separately from the signed payload (see the wrapper's comment); everything else is the signed payload. `as` = who presents the proof (default: who it was signed for). */
+    const reg = (user: string, conf: string, a: Record<string, unknown> = args(), o: { as?: string; company?: string } = {}) => {
+      const { ack_ids, ...payload } = a;
+      const c = proofCall({ user, company: o.company ?? (typeof a.company_id === "string" ? a.company_id : CO.uae), action: ACT, target: "new", payload, jti: conf });
+      return commit<{ r: Record<string, unknown> }>(o.as ?? user, wrapperSql("jarvis_register_organisation", ", $8::jsonb"), [...callArgs(c), j(ack_ids ?? [])]);
+    };
     const orgCount = async (name?: string) => Number((await admin<{ n: string }>(`select count(*)::text n from crm_organisations ${name ? `where name = '${name}'` : ""}`))[0].n);
     type R = { status: string; result_id: string | null; reference: string | null; extra: { company_id: string } | null; replayed: boolean; error_code: string | null; error_message: string | null };
 
@@ -95,8 +104,10 @@ describe("JARVIS part 2: write wrappers", () => {
       const conf = id();
       await reg(U.sara, conf, args({ name: "Fictional Bound Studio", website: null }));
       const n = await orgCount();
-      expect((await rejection(commit(U.founder, `select jarvis_register_organisation($1::uuid, $2, $3::jsonb)`, [conf, HASH, j(args({ name: "Fictional Bound Studio", website: null }))]))).code).toBe("42501");
-      expect((await rejection(reg(U.sara, conf, args({ name: "Fictional Bound Studio", website: null }), sha("different")))).code).toBe("42501");
+      // another person presenting sara's proof: the MAC binds the approving person, so the database refuses it as not valid (nothing is revealed about the confirmation)
+      expect((await rejection(reg(U.sara, conf, args({ name: "Fictional Bound Studio", website: null }), { as: U.founder }))).code).toBe("JV002");
+      // the same confirmation id used for different (separately signed) values: refused by the ledger
+      expect((await rejection(reg(U.sara, conf, args({ name: "Fictional Bound Studio", website: null, place: "Elsewhere" })))).code).toBe("42501");
       expect(await orgCount()).toBe(n);
     });
     it("a same-name or same-website organisation that was not named as different is refused (recorded failed once, replayed, nothing created); naming it lets the save through", async () => {
@@ -127,10 +138,13 @@ describe("JARVIS part 2: write wrappers", () => {
     });
     it("the type is required and checked in SQL: no roles, an unknown role or an empty name are refused with no ledger row", async () => {
       const before = await ledgerCount();
-      for (const a of [args({ roles: [] }), args({ roles: ["boss"] }), args({ roles: "agency" }), args({ name: "   " }), args({ company_id: null })]) {
+      for (const a of [args({ roles: [] }), args({ roles: ["boss"] }), args({ roles: "agency" }), args({ name: "   " })]) {
         expect(["22023", "22P02"]).toContain((await rejection(reg(U.sara, id(), a))).code);
       }
-      expect((await rejection(commit(U.sara, `select jarvis_register_organisation($1::uuid, 'nope', $2::jsonb)`, [id(), j(args())]))).code).toBe("22023");
+      // a payload that names another company than the signed one is not valid
+      expect((await rejection(reg(U.sara, id(), args({ company_id: CO.ksa }), { company: CO.uae }))).code).toBe("JV002");
+      expect((await rejection(reg(U.sara, id(), args({ company_id: null }), { company: CO.uae }))).code).toBe("JV002");
+      expect((await rejection(commit(U.sara, `select jarvis_register_organisation($1::uuid, $2::uuid, 'new', null, 5::bigint, 'nope', '{}')`, [id(), CO.uae]))).code).toBe("JV002");
       expect(await ledgerCount()).toBe(before);
     });
     it("cannot bypass permissions: no Sales grant, another company's grant, a revoked grant, JARVIS off or writes off are refused with no ledger row and no organisation", async () => {
@@ -150,10 +164,11 @@ describe("JARVIS part 2: write wrappers", () => {
       expect(await ledgerCount()).toBe(l);
     });
     it("signed out (anon) and direct calls of the internal helpers are refused", async () => {
-      for (const sql of [`select jarvis_register_organisation('${id()}', '${HASH}', '{}'::jsonb)`, `select jarvis_ledger_enter('${id()}', '${HASH}', 'x', '${CO.uae}', 'new')`]) {
+      const H = sha("any");
+      for (const sql of [`select jarvis_register_organisation('${id()}', '${CO.uae}', 'new', null, 5, '${H}', '{}')`, `select jarvis_ledger_enter('${id()}', '${H}', 'x', '${CO.uae}', 'new')`]) {
         expect((await rejection(db.asUser(null, async (q) => (await q(sql)).rows))).message).toMatch(/permission denied/);
       }
-      for (const sql of [`select jarvis_ledger_enter('${id()}', '${HASH}', 'x', '${CO.uae}', 'new')`, `select jarvis_ledger_done('${id()}', '${id()}', 'x', null)`, `select jarvis_ledger_fail('${id()}', 'x', 'y')`]) {
+      for (const sql of [`select jarvis_ledger_enter('${id()}', '${H}', 'x', '${CO.uae}', 'new')`, `select jarvis_ledger_done('${id()}', '${id()}', 'x', null)`, `select jarvis_ledger_fail('${id()}', 'x', 'y')`]) {
         expect((await rejection(commit(U.sara, sql))).message).toMatch(/permission denied/);
       }
     });
@@ -161,9 +176,10 @@ describe("JARVIS part 2: write wrappers", () => {
 
   // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
   describe("jarvis_update_enquiry", () => {
-    const HASH = sha("update values A");
-    const upd = (user: string, conf: string, oid: string, version: number | null, patch: Record<string, unknown>, hash = HASH) =>
-      commit<{ r: Record<string, unknown> }>(user, `select jarvis_update_enquiry($1::uuid, $2, $3::uuid, $4::integer, $5::jsonb) as r`, [conf, hash, oid, version, j(patch)]);
+    const ACT = "jarvis.sales.enquiry.update";
+    /** `version` is the signed record version (null = signed as "no version", which this wrapper refuses). `o.as` = who presents the proof. */
+    const upd = (user: string, conf: string, oid: string, version: number | null, patch: unknown, o: { as?: string; company?: string } = {}) =>
+      commit<{ r: Record<string, unknown> }>(o.as ?? user, wrapperSql("jarvis_update_enquiry"), callArgs(proofCall({ user, company: o.company ?? CO.uae, action: ACT, target: oid, version, payload: patch, jti: conf })));
     type R = { status: string; result_id: string | null; reference: string | null; extra: { company_id: string; version: number; fields: string[] } | null; replayed: boolean; error_code: string | null; error_message: string | null };
 
     it("changes only the patched allowlisted columns through the EXISTING function, under the caller's identity, bumps the version once and writes both timeline lines", async () => {
@@ -202,26 +218,30 @@ describe("JARVIS part 2: write wrappers", () => {
       expect((await opp(oid2)).version).toBe(v2 + 1);
       expect((await events(oid2)).filter((e) => e.from_value === "jarvis")).toHaveLength(1);
     });
-    it("STALE: a version that is no longer current is refused by the existing rule, recorded once as failed (nothing changed), and replayed", async () => {
+    it("STALE: a proof for a version that is no longer current is refused by the wrapper (40001) with NOTHING written, not even a ledger row", async () => {
       const oid = await newEnquiry(U.sara);
       const v = Number((await opp(oid)).version);
       await upd(U.sara, id(), oid, v, { scope: "First change" });
+      const l = await ledgerCount();
       const conf = id();
-      const f = (await upd(U.sara, conf, oid, v, { scope: "Second change on an old version" }))[0].r as R;
-      expect(f).toMatchObject({ status: "failed", error_code: "40001", replayed: false });
-      expect(f.error_message).toMatch(/changed by someone else/);
+      const e = await rejection(upd(U.sara, conf, oid, v, { scope: "Second change on an old version" }));
+      expect(e.code).toBe("40001");
+      expect(e.message).toMatch(/changed by someone else/);
       expect((await opp(oid)).scope).toBe("First change");
-      expect((await upd(U.sara, conf, oid, v, { scope: "Second change on an old version" }))[0].r).toMatchObject({ status: "failed", replayed: true });
+      expect(await ledgerCount()).toBe(l);
+      expect((await admin(`select 1 from jarvis_action_ledger where confirmation_id = '${conf}'`)).length).toBe(0);
     });
-    it("two people editing at once from the same version: exactly one wins, the other is refused as stale", async () => {
+    it("two people editing at once from the same version: exactly one wins, the other is refused as stale (nothing written for it)", async () => {
       const oid = await newEnquiry(U.sara);
       await admin(`update crm_opportunities set owner_id = '${U.sara}' where id = '${oid}'`);
       const v = Number((await opp(oid)).version);
-      const [a, b] = await Promise.all([upd(U.sara, id(), oid, v, { scope: "Sara's scope" }), upd(U.founder, id(), oid, v, { scope: "Founder's scope" })]);
-      const rs = [a[0].r as R, b[0].r as R];
-      expect(rs.filter((r) => r.status === "done")).toHaveLength(1);
-      expect(rs.filter((r) => r.status === "failed")[0]).toMatchObject({ error_code: "40001" });
+      const l = await ledgerCount();
+      const out = await Promise.allSettled([upd(U.sara, id(), oid, v, { scope: "Sara's scope" }), upd(U.founder, id(), oid, v, { scope: "Founder's scope" })]);
+      expect(out.filter((x) => x.status === "fulfilled")).toHaveLength(1);
+      const lost = out.find((x) => x.status === "rejected") as PromiseRejectedResult;
+      expect((lost.reason as { code?: string }).code).toBe("40001");
       expect((await opp(oid)).version).toBe(v + 1);
+      expect(await ledgerCount()).toBe(l + 1);
     });
     it("ONLY the allowlist passes: owner, stage, agency or end client, value, currency, payment terms, exclusions, risks, source and anything unknown are refused before the ledger, nothing changes", async () => {
       const oid = await newEnquiry(U.sara);
@@ -235,13 +255,13 @@ describe("JARVIS part 2: write wrappers", () => {
       expect(await opp(oid)).toEqual(before);
       expect(await ledgerCount()).toBe(l);
     });
-    it("incomplete requests are refused with no ledger row (no version, empty patch, not an object, bad hash)", async () => {
+    it("incomplete requests are refused with no ledger row (no signed version, empty patch, not an object, a MAC that is not a MAC)", async () => {
       const oid = await newEnquiry(U.sara);
       const l = await ledgerCount();
-      expect((await rejection(upd(U.sara, id(), oid, null, { scope: "x" }))).code).toBe("22023");
+      expect((await rejection(upd(U.sara, id(), oid, null, { scope: "x" }))).code).toBe("JV002");
       expect((await rejection(upd(U.sara, id(), oid, 1, {}))).code).toBe("22023");
-      expect((await rejection(commit(U.sara, `select jarvis_update_enquiry($1::uuid, $2, $3::uuid, 1, '[1]'::jsonb)`, [id(), HASH, oid]))).code).toBe("22023");
-      expect((await rejection(commit(U.sara, `select jarvis_update_enquiry($1::uuid, 'nope', $2::uuid, 1, '{"scope":"x"}'::jsonb)`, [id(), oid]))).code).toBe("22023");
+      expect((await rejection(upd(U.sara, id(), oid, 1, "[1]"))).code).toBe("22023");
+      expect((await rejection(commit(U.sara, `select jarvis_update_enquiry($1::uuid, $2::uuid, $3, 1, 5::bigint, 'nope', '{"scope":"x"}')`, [id(), CO.uae, oid]))).code).toBe("JV002");
       expect(await ledgerCount()).toBe(l);
     });
     it("the EXISTING owner-or-founder rule applies: a colleague with a Sales grant is refused (recorded failed, nothing changed); the founder may edit another person's enquiry", async () => {
@@ -282,8 +302,8 @@ describe("JARVIS part 2: write wrappers", () => {
       const v = Number((await opp(oid)).version);
       const conf = id();
       await upd(U.sara, conf, oid, v, { scope: "Bound scope" });
-      expect((await rejection(upd(U.founder, conf, oid, v, { scope: "Bound scope" }))).code).toBe("42501");
-      expect((await rejection(upd(U.sara, conf, oid, v, { scope: "Bound scope" }, sha("other")))).code).toBe("42501");
+      expect((await rejection(upd(U.sara, conf, oid, v, { scope: "Bound scope" }, { as: U.founder }))).code).toBe("JV002");
+      expect((await rejection(upd(U.sara, conf, oid, v, { scope: "Other scope" }))).code).toBe("42501");
       const other = await newEnquiry(U.sara, "Another one");
       expect((await rejection(upd(U.sara, conf, other, Number((await opp(other)).version), { scope: "Bound scope" }))).code).toBe("42501");
     });
@@ -291,13 +311,12 @@ describe("JARVIS part 2: write wrappers", () => {
 
   // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
   describe("jarvis_change_stage", () => {
-    const hash = () => sha(`stage ${id()}`);
-    const move = (user: string, conf: string, oid: string, to: string, version: number | null, h = HASH_S) =>
-      commit<{ r: Record<string, unknown> }>(user, `select jarvis_change_stage($1::uuid, $2, $3::uuid, $4, $5::integer) as r`, [conf, h, oid, to, version]);
-    const HASH_S = sha("stage values A");
+    const ACT = "jarvis.sales.enquiry.change_stage";
+    const move = (user: string, conf: string, oid: string, to: string, version: number | null, o: { as?: string; payload?: unknown } = {}) =>
+      commit<{ r: Record<string, unknown> }>(o.as ?? user, wrapperSql("jarvis_change_stage"), callArgs(proofCall({ user, company: CO.uae, action: ACT, target: oid, version, payload: o.payload ?? { to }, jti: conf })));
     type R = { status: string; result_id: string | null; extra: { company_id: string; version: number; from: string; to: string } | null; replayed: boolean; error_code: string | null; error_message: string | null };
     const ver = async (oid: string) => Number((await opp(oid)).version);
-    const step = async (user: string, oid: string, to: string) => (await move(user, id(), oid, to, await ver(oid), hash()))[0].r as R;
+    const step = async (user: string, oid: string, to: string) => (await move(user, id(), oid, to, await ver(oid)))[0].r as R;
     const sentProposal = async (user: string, oid: string, status = "sent") => {
       const pid = (await commit<{ id: string }>(user, `select crm_add_proposal($1::uuid, 'Fictional proposal note') as id`, [oid]))[0].id;
       await commit(user, `select crm_set_proposal_status($1::uuid, $2, current_date)`, [pid, status]);
@@ -335,7 +354,7 @@ describe("JARVIS part 2: write wrappers", () => {
       await sentProposal(U.sara, oid);
       expect(((await step(U.sara, oid, "proposal_sent")) as R).status).toBe("done");
       expect((await opp(oid)).stage).toBe("proposal_sent");
-      expect(((await move(U.sara, conf, oid, "proposal_sent", 1))[0].r as R)).toMatchObject({ status: "failed", replayed: true });
+      expect(((await move(U.sara, conf, oid, "proposal_sent", await ver(oid) - 1))[0].r as R)).toMatchObject({ status: "failed", replayed: true });
     });
     it("QUOTE SENT: refused without the Zoho quote reference (blank does not count); allowed with it; negotiation then needs nothing", async () => {
       const oid = await newEnquiry(U.sara);
@@ -372,12 +391,13 @@ describe("JARVIS part 2: write wrappers", () => {
       expect(f.error_message).toMatch(/Resume the opportunity/);
       expect((await opp(held)).stage).toBe("on_hold");
     });
-    it("STALE version is refused by the existing rule; N parallel calls with one confirmation id move it exactly ONCE; a repeat returns the original although the stage moved on", async () => {
+    it("STALE proof version is refused with nothing written (no ledger row); N parallel calls with one confirmation id move it exactly ONCE; a repeat returns the original although the stage moved on", async () => {
       const oid = await newEnquiry(U.sara);
       const v = await ver(oid);
       await step(U.sara, oid, "qualified");
-      const f = (await move(U.sara, id(), oid, "proposal_prep", v))[0].r as R;
-      expect(f).toMatchObject({ status: "failed", error_code: "40001" });
+      const l0 = await ledgerCount();
+      expect((await rejection(move(U.sara, id(), oid, "proposal_prep", v))).code).toBe("40001");
+      expect(await ledgerCount()).toBe(l0);
       const oid2 = await newEnquiry(U.sara);
       const v2 = await ver(oid2);
       const conf = id();
@@ -403,7 +423,7 @@ describe("JARVIS part 2: write wrappers", () => {
       expect((await rejection(move(U.noGrant, id(), oid, "qualified", v))).code).toBe("P0002");
       expect((await rejection(move(U.ksaStaff, id(), oid, "qualified", v))).code).toBe("P0002");
       expect((await rejection(move(U.sara, id(), id(), "qualified", v))).code).toBe("P0002");
-      expect((await rejection(move(U.sara, id(), oid, "qualified", null))).code).toBe("22023");
+      expect((await rejection(move(U.sara, id(), oid, "qualified", null))).code).toBe("JV002");
       await admin(`update jarvis_settings set writes_enabled = false`);
       expect((await rejection(move(U.sara, id(), oid, "qualified", v))).code).toBe("42501");
       await admin(`update jarvis_settings set writes_enabled = true, enabled = false`);
@@ -419,8 +439,9 @@ describe("JARVIS part 2: write wrappers", () => {
       const oid = await newEnquiry(U.sara);
       const conf = id();
       await move(U.sara, conf, oid, "qualified", await ver(oid));
-      expect((await rejection(move(U.founder, conf, oid, "qualified", 1))).code).toBe("42501");
-      expect((await rejection(move(U.sara, conf, oid, "qualified", 1, sha("different")))).code).toBe("42501");
+      const v = await ver(oid) - 1;
+      expect((await rejection(move(U.sara, conf, oid, "qualified", v, { as: U.founder }))).code).toBe("JV002");
+      expect((await rejection(move(U.sara, conf, oid, "proposal_prep", v))).code).toBe("42501");
       const other = await newEnquiry(U.sara);
       expect((await rejection(move(U.sara, conf, other, "qualified", await ver(other)))).code).toBe("42501");
     });
@@ -428,11 +449,11 @@ describe("JARVIS part 2: write wrappers", () => {
 
   // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
   describe("jarvis_record_meeting (activity + follow-up, atomic)", () => {
-    const HASH = sha("meeting values A");
+    const ACT = "jarvis.sales.meeting.record";
     const activity = (over: Record<string, unknown> = {}) => ({ kind: "meeting", body: "SECRET-MEETING-NOTES-4242 agreed two LED walls", occurred_at: null, internal: false, ...over });
     const followUp = (over: Record<string, unknown> = {}) => ({ title: "SECRET-FOLLOWUP-TITLE send proposal", due_at: new Date(Date.now() + 3 * 86_400_000).toISOString(), kind: "proposal", ...over });
-    const rec = (user: string, conf: string, oid: string, act: unknown = activity(), fu: unknown = followUp(), hash = HASH) =>
-      commit<{ r: Record<string, unknown> }>(user, `select jarvis_record_meeting($1::uuid, $2, $3::uuid, $4::jsonb, $5::jsonb) as r`, [conf, hash, oid, j(act), fu === null ? null : j(fu)]);
+    const rec = (user: string, conf: string, oid: string, act: unknown = activity(), fu: unknown = followUp(), o: { as?: string } = {}) =>
+      commit<{ r: Record<string, unknown> }>(o.as ?? user, wrapperSql("jarvis_record_meeting"), callArgs(proofCall({ user, company: CO.uae, action: ACT, target: oid, version: null, payload: { activity: act, follow_up: fu }, jti: conf })));
     type R = { status: string; result_id: string | null; reference: string | null; extra: { company_id: string; activity_id: string; follow_up_id: string | null } | null; replayed: boolean; error_code: string | null; error_message: string | null };
     const counts = async (oid: string) => (await admin<{ a: string; f: string; o: string }>(`select (select count(*) from crm_activities where opportunity_id = '${oid}')::text a, (select count(*) from crm_follow_ups where opportunity_id = '${oid}')::text f, (select count(*) from crm_follow_ups where opportunity_id = '${oid}' and status = 'open')::text o`))[0];
 
@@ -474,11 +495,12 @@ describe("JARVIS part 2: write wrappers", () => {
       expect(stage).toBe("won");
       const before = await counts(oid);
       const conf = id();
-      const f = (await rec(U.sara, conf, oid))[0].r as R;
+      const [act, fu] = [activity(), followUp()]; // one payload: a repeat must send the same text (its hash is part of the proof)
+      const f = (await rec(U.sara, conf, oid, act, fu))[0].r as R;
       expect(f).toMatchObject({ status: "failed", error_code: "23514", replayed: false });
       expect(f.error_message).toMatch(/closed opportunity has no follow-ups/);
       expect(await counts(oid)).toEqual(before);
-      expect((await rec(U.sara, conf, oid))[0].r).toMatchObject({ status: "failed", replayed: true });
+      expect((await rec(U.sara, conf, oid, act, fu))[0].r).toMatchObject({ status: "failed", replayed: true });
       expect(await counts(oid)).toEqual(before);
       // the activity alone IS allowed on a Won enquiry
       expect(((await rec(U.sara, id(), oid, activity(), null))[0].r as R).status).toBe("done");
@@ -498,14 +520,16 @@ describe("JARVIS part 2: write wrappers", () => {
     it("a repeat returns the ORIGINAL result and records nothing more; N parallel calls with one confirmation id record exactly ONE activity and ONE follow-up", async () => {
       const oid = await newEnquiry(U.sara);
       const conf = id();
-      const first = (await rec(U.sara, conf, oid))[0].r as R;
+      const [act, fu] = [activity(), followUp()];
+      const first = (await rec(U.sara, conf, oid, act, fu))[0].r as R;
       const after = await counts(oid);
-      for (let i = 0; i < 3; i++) expect((await rec(U.sara, conf, oid))[0].r).toMatchObject({ status: "done", replayed: true, extra: first.extra });
+      for (let i = 0; i < 3; i++) expect((await rec(U.sara, conf, oid, act, fu))[0].r).toMatchObject({ status: "done", replayed: true, extra: first.extra });
       expect(await counts(oid)).toEqual(after);
       const oid2 = await newEnquiry(U.sara);
       const b2 = await counts(oid2);
       const par = id();
-      const rs = (await Promise.all(Array.from({ length: 12 }, () => rec(U.sara, par, oid2)))).map((x) => x[0].r as R);
+      const [act2, fu2] = [activity(), followUp()];
+      const rs = (await Promise.all(Array.from({ length: 12 }, () => rec(U.sara, par, oid2, act2, fu2)))).map((x) => x[0].r as R);
       expect(rs.filter((r) => !r.replayed).length).toBe(1);
       expect(new Set(rs.map((r) => r.extra!.activity_id)).size).toBe(1);
       expect(await counts(oid2)).toEqual({ a: String(Number(b2.a) + 1), f: String(Number(b2.f) + 1), o: String(Number(b2.o) + 1) });
@@ -513,10 +537,12 @@ describe("JARVIS part 2: write wrappers", () => {
     it("malformed requests are refused with no ledger row (type, text, follow-up without title or date, not objects)", async () => {
       const oid = await newEnquiry(U.sara);
       const l = await ledgerCount();
-      for (const [a, f] of [[activity({ kind: "fax" }), followUp()], [activity({ body: "  " }), followUp()], [activity({ body: "x".repeat(4001) }), followUp()], [activity(), followUp({ title: "" })], [activity(), followUp({ due_at: null })], [activity(), [1]]] as [unknown, unknown][]) {
+      for (const [a, f] of [[activity({ kind: "fax" }), followUp()], [activity({ body: "  " }), followUp()], [activity({ body: "x".repeat(4001) }), followUp()], [activity(), followUp({ title: "" })], [activity(), followUp({ due_at: null })]] as [unknown, unknown][]) {
         expect(["22023", "22P02"]).toContain((await rejection(rec(U.sara, id(), oid, a, f))).code);
       }
-      expect((await rejection(commit(U.sara, `select jarvis_record_meeting($1::uuid, $2, $3::uuid, '[1]'::jsonb, null)`, [id(), HASH, oid]))).code).toBe("22023");
+      expect((await rejection(commit(U.sara, wrapperSql("jarvis_record_meeting"), callArgs(proofCall({ user: U.sara, company: CO.uae, action: ACT, target: oid, payload: "[1]" }))))).code).toBe("22023");
+      // a meeting is not bound to a record version: a proof signed WITH a version is refused
+      expect((await rejection(commit(U.sara, wrapperSql("jarvis_record_meeting"), callArgs(proofCall({ user: U.sara, company: CO.uae, action: ACT, target: oid, version: 3, payload: { activity: activity(), follow_up: null } }))))).code).toBe("JV002");
       expect(await ledgerCount()).toBe(l);
     });
     it("the follow-up is always the caller's: there is no way to name an assignee through the wrapper", async () => {
@@ -546,8 +572,8 @@ describe("JARVIS part 2: write wrappers", () => {
       const oid = await newEnquiry(U.sara);
       const conf = id();
       await rec(U.sara, conf, oid);
-      expect((await rejection(rec(U.omar, conf, oid))).code).toBe("42501");
-      expect((await rejection(rec(U.sara, conf, oid, activity(), followUp(), sha("other")))).code).toBe("42501");
+      expect((await rejection(rec(U.sara, conf, oid, activity(), followUp(), { as: U.omar }))).code).toBe("JV002");
+      expect((await rejection(rec(U.sara, conf, oid, activity({ body: "A different note" })))).code).toBe("42501");
       expect((await rejection(rec(U.sara, conf, await newEnquiry(U.sara)))).code).toBe("42501");
     });
   });

@@ -3,8 +3,10 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
+import { callArgs, PROOF_KEY, proofCall, wrapperSql } from "../src/jarvis-proof";
 
 // JARVIS part 1 (migration 20261223000100_jarvis_platform.sql). Fictional data only. Proves against a real Postgres:
+// Every call below carries a REAL server-issued proof (signed with the key the database holds); what an invented or altered proof can and cannot do is in jarvis-proof.rls.test.ts.
 //   * default OFF: nobody is available, nothing can be created, and the migration changes no existing function or row (owner pack preflight / preservation / verify);
 //   * the pilot controls: global switch, allowlist, write kill switch (read-only help keeps working), optional company list; access is answered as booleans only;
 //   * jarvis_create_enquiry: the enquiry comes from the EXISTING crm_create_opportunity under the caller's own identity (a person without a Sales grant, or for a
@@ -22,7 +24,8 @@ const CO = { uae: id(), ksa: id() };
 const U = { sara: id(), omar: id(), noGrant: id(), ksaStaff: id(), outsider: id(), founder: id() };
 const SQL_USERS = Object.entries(U).map(([k, v]) => `('${v}', '${k}@jarvis-test.ae')`).join(", ");
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
-const HASH = sha("reviewed values A");
+const HASH = sha("any 64 hex characters");
+const CREATE = "jarvis.sales.enquiry.create_from_brief";
 
 describe("JARVIS platform (part 1)", () => {
   const db = new RlsTestDatabase();
@@ -32,7 +35,8 @@ describe("JARVIS platform (part 1)", () => {
   const pack = (f: string) => readFileSync(path.join(__dirname, "../../../supabase/manual-sql", f), "utf8");
   const rejection = async (p: Promise<unknown>) => { try { await p; } catch (e) { return e as { code?: string; message: string }; } throw new Error("expected a refusal, but the call succeeded"); };
   const j = (o: unknown) => JSON.stringify(o);
-  const soon = () => new Date(Date.now() + 2 * 86_400_000).toISOString();
+  const SOON = new Date(Date.now() + 2 * 86_400_000).toISOString();
+  const soon = () => SOON; // one value: a repeat of a confirmation must send the same payload text (its hash is part of the proof)
 
   let clientId: string; let agencyId: string; let plainOrg: string;
   const args = (over: Record<string, unknown> = {}) => ({
@@ -40,8 +44,9 @@ describe("JARVIS platform (part 1)", () => {
     agency_org_id: agencyId, client_org_id: clientId, currency: "AED", value: 45000, brief: "SECRET-BRIEF-TEXT-1234 needs two LED walls", location: "Harbour Hall",
     event_start: "2026-12-05", technologies: [{ name: "LED wall", qty: 2 }], ...over,
   });
-  const create = (user: string, conf: string, a: Record<string, unknown> = args(), hash = HASH) =>
-    commit<{ r: Record<string, unknown> }>(user, `select jarvis_create_enquiry($1::uuid, $2, $3::jsonb) as r`, [conf, hash, j(a)]);
+  /** `o.as` = who presents the proof (default: who it was signed for); `o.company` = the company the proof is signed for (default: the payload's). */
+  const create = (user: string, conf: string, a: Record<string, unknown> = args(), o: { as?: string; company?: string } = {}) =>
+    commit<{ r: Record<string, unknown> }>(o.as ?? user, wrapperSql("jarvis_create_enquiry"), callArgs(proofCall({ user, company: o.company ?? (typeof a.company_id === "string" ? a.company_id : CO.uae), action: CREATE, target: "new", payload: a, jti: conf })));
   const countOpps = async () => Number((await admin<{ n: string }>(`select count(*)::text n from crm_opportunities`))[0].n);
   const countLedger = async () => Number((await admin<{ n: string }>(`select count(*)::text n from jarvis_action_ledger`))[0].n);
   const setSwitches = (enabled: boolean, writes: boolean) => admin(`update jarvis_settings set enabled = ${enabled}, writes_enabled = ${writes}`);
@@ -76,6 +81,7 @@ describe("JARVIS platform (part 1)", () => {
     before = (await db.seed(pack("jarvis_05_preservation_check_readonly.sql"))).rows as typeof before;
     before2 = (await db.seed(pack("jarvis_05_preservation_check_readonly.sql"))).rows as typeof before2;
     await db.applyMigration(MIGRATIONS_BEFORE);
+    await db.seed(`select jarvis_set_proof_key('${PROOF_KEY}')`);
   });
   afterAll(async () => { await db.teardown(); });
 
@@ -114,7 +120,7 @@ describe("JARVIS platform (part 1)", () => {
       expect(await world()).toEqual(before);
     });
     it("a signed-out (anon) caller cannot call any function", async () => {
-      for (const sql of [`select * from jarvis_my_access()`, `select * from jarvis_usage_take(5)`, `select jarvis_create_enquiry('${id()}', '${HASH}', '{}'::jsonb)`]) {
+      for (const sql of [`select * from jarvis_my_access()`, `select * from jarvis_usage_take(5)`, `select jarvis_create_enquiry('${id()}', '${CO.uae}', 'new', null, 5, '${HASH}', '{}')`]) {
         const e = await rejection(db.asUser(null, async (q) => (await q(sql)).rows));
         expect(e.message).toMatch(/permission denied/);
       }
@@ -222,16 +228,16 @@ describe("JARVIS platform (part 1)", () => {
       const conf = id();
       await create(U.sara, conf);
       const before = await world();
-      const e = await rejection(commit(U.founder, `select jarvis_create_enquiry($1::uuid, $2, $3::jsonb) as r`, [conf, HASH, j(args())]));
-      expect(e.code).toBe("42501");
+      const e = await rejection(create(U.sara, conf, args(), { as: U.founder }));
+      expect(e.code).toBe("JV002"); // the proof is for sara: for anyone else it is simply not valid, and nothing is revealed
       expect(await world()).toEqual(before);
     });
     it("a used confirmation id with a different company or different reviewed values is refused (no second enquiry)", async () => {
       const conf = id();
       await create(U.sara, conf);
       const before = await world();
-      expect((await rejection(create(U.sara, conf, args(), sha("other values")))).code).toBe("42501");
-      expect((await rejection(commit(U.ksaStaff, `select jarvis_create_enquiry($1::uuid, $2, $3::jsonb)`, [conf, HASH, j(args({ company_id: CO.ksa }))]))).code).toBe("42501");
+      expect((await rejection(create(U.sara, conf, args({ title: "Different reviewed values" })))).code).toBe("42501");
+      expect((await rejection(create(U.ksaStaff, conf, args({ company_id: CO.ksa })))).code).toBe("42501");
       expect(await world()).toEqual(before);
     });
     it("cannot bypass the existing create permission: a pilot user WITHOUT a Sales grant is refused and leaves no ledger row", async () => {
@@ -288,9 +294,15 @@ describe("JARVIS platform (part 1)", () => {
     });
     it("malformed input is refused with no ledger row", async () => {
       const before = await world();
-      for (const [conf, hash, a] of [[id(), "not-a-hash", args()], [id(), HASH, { title: "x" }], [id(), HASH, [1, 2]]] as [string, string, unknown][]) {
-        const e = await rejection(commit(U.sara, `select jarvis_create_enquiry($1::uuid, $2, $3::jsonb)`, [conf, hash, j(a)]));
-        expect(["22023", "22P02"]).toContain(e.code);
+      const c = (payload: unknown, over: Partial<{ company: string }> = {}) => callArgs(proofCall({ user: U.sara, company: over.company ?? CO.uae, action: CREATE, target: "new", payload }));
+      // a MAC that is not a MAC, a payload that is not an object, a payload naming no company or another one than the signed one
+      const bad = callArgs(proofCall({ user: U.sara, company: CO.uae, action: CREATE, target: "new", payload: args() })); bad[5] = "not-a-mac";
+      for (const [params, code] of [[bad, "JV002"], [c([1, 2]), "22023"], [c({ title: "x" }), "JV002"], [c(args({ company_id: CO.ksa })), "JV002"]] as [unknown[], string][]) {
+        expect((await rejection(commit(U.sara, wrapperSql("jarvis_create_enquiry"), params))).code).toBe(code);
+      }
+      // a proof for a record target (or one signed with a version) is not a proof for creating something new
+      for (const o of [{ target: id() }, { version: 3 }]) {
+        expect((await rejection(commit(U.sara, wrapperSql("jarvis_create_enquiry"), callArgs(proofCall({ user: U.sara, company: CO.uae, action: CREATE, target: "new", payload: args(), ...o }))))).code).toBe("JV002");
       }
       expect(await world()).toEqual(before);
     });
