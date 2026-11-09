@@ -120,7 +120,7 @@ await step("agency AND end client linked: no default recipient, the person must 
   await has(/agency and an end client are both linked/, "reason for the forced choice");
   await page.getByRole("radio", { name: /Fictional Harbour Client/ }).check();
   await page.locator("#est-vat").selectOption(await optionValue(page.locator("#est-vat"), /^5%$/));
-  const s = flat(await saveState().innerText()); if (!/Unsaved changes/.test(s)) throw new Error(`state after editing: ${s}`);
+  const s = flat(await saveState().innerText()); if (!/Saving…|Saved/.test(s)) throw new Error(`state after editing: ${s}`);   // the draft saves itself as the person works
 });
 await step("More options: internal notes, Assumptions, Exclusions, Next steps, payment details, Review pricing after; saved in one go", async () => {
   await page.getByTestId("more-options").locator("summary").click();
@@ -181,7 +181,7 @@ await step("a quantity that cannot be saved is said in words next to the item an
   await typeRow(rowOf(2), "Rigging points", "abc", "50", "pcs");
   await has(/Quantity must be a number above zero/, "inline issue");
   await saveDraft();
-  await page.waitForFunction(() => /Could not save/.test(document.querySelector('[data-testid="save-state"]')?.textContent ?? ""));
+  await page.waitForFunction(() => /Not saved yet/.test(document.querySelector('[data-testid="save-state"]')?.textContent ?? ""));   // kept on screen, left out of the save, said in words
   await typeRow(rowOf(2), "Rigging points", "2", "50", "pcs");
   await saveDraft(); await waitSaved();
 });
