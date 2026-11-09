@@ -9,6 +9,8 @@
 import { chromium, newPage, login, BASE, psql as sql } from "./lib.mjs";
 import { asDb } from "./inventory-flow-lib.mjs";
 import { mkdirSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { createRequire } from "node:module";
 
 const SHOTS = process.env.SHOTS_DIR ?? "/tmp/jarvis-shots"; mkdirSync(SHOTS, { recursive: true });
 const UAE = "00000000-0000-4000-8000-00000000a001"; const PL = "00000000-0000-4000-8000-00000000a002"; const U = "00000000-0000-4000-8000";
@@ -21,6 +23,11 @@ const step = async (name, fn) => {
     await page?.screenshot({ path: `${SHOTS}/fail-${name.replace(/\W+/g, "_").slice(0, 50)}.png`, fullPage: true }).catch(() => {});
   }
 };
+// The platform API as a signed-in person's own session would call it (the local gateway + PostgREST): used to prove that a call made DIRECTLY, outside the app, with an invented proof is refused.
+const API = "http://127.0.0.1:54321";
+const ANON = JSON.parse(execSync(`node ${new URL("../../../packages/e2e-tests/local-stack/gateway.mjs", import.meta.url).pathname} --keys`).toString()).anon;
+const apiToken = async (email) => (await (await fetch(`${API}/auth/v1/token?grant_type=password`, { method: "POST", headers: { apikey: ANON, "content-type": "application/json" }, body: JSON.stringify({ email, password: "local-stack-password" }) })).json()).access_token;
+const apiRpc = async (token, fn, body) => { const r = await fetch(`${API}/rest/v1/rpc/${fn}`, { method: "POST", headers: { apikey: ANON, Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => ({})) }; };
 const flat = (t) => t.replace(/\s+/g, " ");
 const as = async (email, viewport = { width: 1440, height: 900 }, theme = "light", ctxOptions = {}) => { if (page) await page.context().close(); page = await newPage(browser, viewport, theme, ctxOptions); page.on("dialog", (d) => d.accept()); await login(page, email); return page; };
 const go = (path) => page.goto(`${BASE}${path}`, { waitUntil: "networkidle" });
@@ -235,6 +242,30 @@ await step("the write kill switch: help still works, a brief is refused with a c
   sql(`update jarvis_settings set writes_enabled = true`);
 });
 
+// ---- 7b. THE CONFIRMATION BOUNDARY: a direct call outside the app, with an invented proof, as an ELIGIBLE pilot person -----------------------------------------------------------
+await step("a DIRECT call to the platform API (outside the app) by an eligible pilot person with an invented confirmation id and MAC is refused for every write wrapper: nothing is created, no confirmed ledger row", async () => {
+  const token = await apiToken("emp@e2e.local");
+  const mine = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString()).sub;
+  if (!/^t\|t\|t$/.test(asDb(5, `select * from jarvis_my_access()`))) throw new Error("emp@ is not an eligible pilot person at this point");
+  const n0 = enquiries(); const l0 = Number(sql("select count(*) from jarvis_action_ledger")); const o0 = Number(sql("select count(*) from crm_organisations"));
+  const invented = (extra) => ({ p_confirmation: "11111111-2222-4333-8444-555555555555", p_company: UAE, p_target: "new", p_version: null, p_expires: 4102444800, p_mac: "b".repeat(64), p_payload: JSON.stringify({ company_id: UAE, title: "Invented through the API", source: "whatsapp", next_title: "x", next_due: "2030-01-01T10:00:00Z" }), ...extra });
+  const calls = [["jarvis_create_enquiry", invented({})], ["jarvis_register_organisation", invented({ p_payload: JSON.stringify({ company_id: UAE, name: "Invented Org", roles: ["agency"] }) })],
+    ["jarvis_update_enquiry", invented({ p_target: sql("select id from crm_opportunities limit 1"), p_version: 1, p_payload: '{"scope":"x"}' })],
+    ["jarvis_change_stage", invented({ p_target: sql("select id from crm_opportunities limit 1"), p_version: 1, p_payload: '{"to":"qualified"}' })],
+    ["jarvis_record_meeting", invented({ p_target: sql("select id from crm_opportunities limit 1"), p_payload: '{"activity":{"kind":"note","body":"x"},"follow_up":null}' })]];
+  for (const [fn, body] of calls) {
+    const r = await apiRpc(token, fn, body);
+    if (r.status === 200 || r.body.code !== "JV002") throw new Error(`${fn} was not refused as an invalid proof: ${r.status} ${JSON.stringify(r.body)}`);
+  }
+  // the old (id, hash, payload) shape is gone, and the key is unreadable through the API
+  const old = await apiRpc(token, "jarvis_create_enquiry", { p_confirmation_id: "11111111-2222-4333-8444-555555555555", p_values_hash: "a".repeat(64), p_args: { company_id: UAE } });
+  if (old.status === 200) throw new Error("the earlier wrapper shape still works");
+  const key = await fetch(`${API}/rest/v1/jarvis_proof_key?select=*`, { headers: { apikey: ANON, Authorization: `Bearer ${token}` } });
+  if (key.status === 200 && (await key.text()) !== "[]") throw new Error("the proof key table is readable through the API");
+  if (enquiries() !== n0 || Number(sql("select count(*) from jarvis_action_ledger")) !== l0 || Number(sql("select count(*) from crm_organisations")) !== o0) throw new Error("something was written");
+  void mine;
+});
+
 // ---- 8. JARVIS off again: ordinary Sales & CRM unchanged ------------------------------------------------------------------------------------------------------------
 await step("JARVIS switched off again: the launcher disappears at once and ordinary Sales & CRM works (list shows the JARVIS enquiries; the normal form still creates one)", async () => {
   sql(`update jarvis_settings set enabled = false`);
@@ -256,7 +287,8 @@ await step("with JARVIS off, a direct call to the server actions is refused (hid
   const out = asDb(5, `select * from jarvis_my_access()`);
   if (!/^f\|f\|t$/.test(out)) throw new Error(`jarvis_my_access said ${out}`);
   let refused = false;
-  try { asDb(5, `select jarvis_create_enquiry('${"0".repeat(8)}-0000-4000-8000-${"0".repeat(12)}', '${"a".repeat(64)}', '{"company_id":"${UAE}"}'::jsonb)`); } catch (e) { refused = /not available/.test(String(e.stderr)); }
+  // an invented proof: refused before the switches are even looked at (the database wants a genuine, server-issued proof first)
+  try { asDb(5, `select jarvis_create_enquiry('${"0".repeat(8)}-0000-4000-8000-${"0".repeat(12)}', '${UAE}', 'new', null, 4102444800, '${"a".repeat(64)}', '{"company_id":"${UAE}"}')`); } catch (e) { refused = /not valid/.test(String(e.stderr)); }
   if (!refused) throw new Error("the database RPC was not refused with JARVIS off");
   if (sql("select count(*) from jarvis_action_ledger") !== r) throw new Error("the ledger changed");
 });

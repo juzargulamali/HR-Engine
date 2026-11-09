@@ -6,6 +6,8 @@
 import { chromium, newPage, login, BASE, psql as sql } from "./lib.mjs";
 import { asDb, asDbTry } from "./inventory-flow-lib.mjs";
 import { mkdirSync } from "node:fs";
+import { createHash, createHmac, randomUUID } from "node:crypto";
+if (!process.env.JARVIS_CONFIRMATION_SECRET) throw new Error("export JARVIS_CONFIRMATION_SECRET (the same value the app and the seed were given): a few steps sign genuine proofs with it");
 
 const SHOTS = process.env.SHOTS_DIR ?? "/tmp/jarvis-sales-shots"; mkdirSync(SHOTS, { recursive: true });
 const UAE = "00000000-0000-4000-8000-00000000a001"; const PL = "00000000-0000-4000-8000-00000000a002"; const U = "00000000-0000-4000-8000";
@@ -35,6 +37,12 @@ const enabledBtn = async (testId) => page.waitForFunction((id) => { const b = do
 const ledger = (status = "done") => Number(sql(`select count(*) from jarvis_action_ledger where status = '${status}'`));
 const ledgerBy = (action) => Number(sql(`select count(*) from jarvis_action_ledger where action_id = '${action}' and status = 'done'`));
 const mkEnquiry = (title, company = UAE, n = 5) => asDb(n, `select crm_create_opportunity(p_company_id => '${company}', p_title => '${title}', p_source => 'whatsapp', p_next_title => 'Call', p_next_due => (now() + interval '3 days'), p_client_org_id => (select id from crm_organisations where name = 'Fictional Harbour Brands'), p_location => 'Harbour Hall', p_event_start => '2026-12-05', p_technologies => '[{\"name\":\"LED wall\",\"qty\":2}]'::jsonb)`);
+// A GENUINE proof as the app server would sign it (the local secret is the one the app and the database were both given): used only to prove what the database does with a real proof.
+const proofFor = (user, { action, company, target, version, payload }) => {
+  const jti = randomUUID(); const exp = Math.floor(Date.now() / 1000) + 600;
+  const text = ["JARVIS-PROOF-V1", jti, user, company, action, target, version === null ? "-" : String(version), String(exp), createHash("sha256").update(payload, "utf8").digest("hex")].join("\n");
+  return { jti, exp, payload, mac: createHmac("sha256", process.env.JARVIS_CONFIRMATION_SECRET).update(text, "utf8").digest("hex") };
+};
 const opp = (id, col) => sql(`select ${col} from crm_opportunities where id = '${id}'`);
 const usage = () => sql("select coalesce(sum(requests), 0) from jarvis_usage");
 
@@ -243,7 +251,10 @@ await step("MEETING date never guessed: 'next week' proposes no date, asks, and 
 await step("MEETING atomic: a closed (Won) enquiry takes the activity but proposes no follow-up; the database refuses a follow-up on it and stores neither", async () => {
   const closed = mkEnquiry("Closed enquiry for meeting test");
   sql(`update crm_opportunities set stage = 'won', stage_changed_at = now(), closed_at = now(), closed_by = '${EMP}', evidence_type = 'purchase_order', evidence_reference = 'PO-9', evidence_date = current_date, value = 1000, currency = 'AED' where id = '${closed}'`);
-  const direct = asDbTry(5, `select jarvis_record_meeting(gen_random_uuid(), repeat('d', 64), '${closed}', '{\"kind\":\"meeting\",\"body\":\"x\"}'::jsonb, '{\"title\":\"t\",\"due_at\":\"2030-01-01T10:00:00Z\"}'::jsonb)`);
+  // A GENUINE proof (made with the local secret, exactly as the app signs it) for a follow-up on a Won enquiry: the database accepts the proof, the existing rule refuses the follow-up, and NEITHER is saved.
+  const payload = JSON.stringify({ activity: { kind: "meeting", body: "x", occurred_at: null, internal: false }, follow_up: { title: "t", due_at: "2030-01-01T10:00:00Z", kind: "other" } });
+  const proof = proofFor(EMP, { action: "jarvis.sales.meeting.record", company: UAE, target: closed, version: null, payload });
+  const direct = asDbTry(5, `select jarvis_record_meeting('${proof.jti}', '${UAE}', '${closed}', null, ${proof.exp}, '${proof.mac}', $p$${payload}$p$)`);
   if (!direct.ok || !/closed opportunity has no follow-ups/.test(direct.out)) throw new Error(direct.out);
   if (sql(`select count(*) from crm_activities where opportunity_id = '${closed}'`) !== "0") throw new Error("the activity was saved without its follow-up");
   await go(`/sales/opportunities/${closed}`); await openPanel(); await clear(); await mode("meeting");
@@ -283,12 +294,22 @@ await step("JARVIS switched off: the launcher disappears; ordinary Sales & CRM w
   await page.getByRole("dialog", { name: /Add follow-up/ }).waitFor({ timeout: 10000 });
   await page.keyboard.press("Escape");
   const n = ledger("done") + ledger("failed");
-  for (const stmt of [
-    `select jarvis_register_organisation(gen_random_uuid(), repeat('a', 64), '{\"company_id\":\"${UAE}\",\"name\":\"X\",\"roles\":[\"agency\"]}'::jsonb)`,
-    `select jarvis_update_enquiry(gen_random_uuid(), repeat('a', 64), '${E1}', 1, '{\"scope\":\"x\"}'::jsonb)`,
-    `select jarvis_change_stage(gen_random_uuid(), repeat('a', 64), '${E1}', 'qualified', 1)`,
-    `select jarvis_record_meeting(gen_random_uuid(), repeat('a', 64), '${E1}', '{\"kind\":\"note\",\"body\":\"x\"}'::jsonb, null)`,
-  ]) { const r = asDbTry(5, stmt); if (r.ok || !/not available/.test(r.out)) throw new Error(`not refused: ${r.out}`); }
+  // With JARVIS OFF even a GENUINE proof is refused by the switches (a proof is necessary, not sufficient); an invented one is refused as not valid.
+  const gen = (action, target, version, payload) => proofFor(EMP, { action, company: UAE, target, version, payload });
+  const reg = gen("jarvis.sales.organisation.register", "new", null, JSON.stringify({ company_id: UAE, name: "X", roles: ["agency"] }));
+  const upd = gen("jarvis.sales.enquiry.update", E1, 1, '{"scope":"x"}');
+  const stg = gen("jarvis.sales.enquiry.change_stage", E1, 1, '{"to":"qualified"}');
+  const mtg = gen("jarvis.sales.meeting.record", E1, null, '{"activity":{"kind":"note","body":"x"},"follow_up":null}');
+  for (const [stmt, re] of [
+    [`select jarvis_register_organisation('${reg.jti}', '${UAE}', 'new', null, ${reg.exp}, '${reg.mac}', $p$${reg.payload}$p$)`, /not available/],
+    [`select jarvis_update_enquiry('${upd.jti}', '${UAE}', '${E1}', 1, ${upd.exp}, '${upd.mac}', $p$${upd.payload}$p$)`, /not available/],
+    [`select jarvis_change_stage('${stg.jti}', '${UAE}', '${E1}', 1, ${stg.exp}, '${stg.mac}', $p$${stg.payload}$p$)`, /not available/],
+    [`select jarvis_record_meeting('${mtg.jti}', '${UAE}', '${E1}', null, ${mtg.exp}, '${mtg.mac}', $p$${mtg.payload}$p$)`, /not available/],
+    [`select jarvis_register_organisation(gen_random_uuid(), '${UAE}', 'new', null, 4102444800, repeat('a', 64), '{"company_id":"${UAE}","name":"X","roles":["agency"]}')`, /not valid/],
+    [`select jarvis_update_enquiry(gen_random_uuid(), '${UAE}', '${E1}', 1, 4102444800, repeat('a', 64), '{"scope":"x"}')`, /not valid/],
+    [`select jarvis_change_stage(gen_random_uuid(), '${UAE}', '${E1}', 1, 4102444800, repeat('a', 64), '{"to":"qualified"}')`, /not valid/],
+    [`select jarvis_record_meeting(gen_random_uuid(), '${UAE}', '${E1}', null, 4102444800, repeat('a', 64), '{"activity":{"kind":"note","body":"x"},"follow_up":null}')`, /not valid/],
+  ]) { const r = asDbTry(5, stmt); if (r.ok || !re.test(r.out)) throw new Error(`not refused as expected (${re}): ${r.out}`); }
   if (ledger("done") + ledger("failed") !== n) throw new Error("the ledger changed");
 });
 
