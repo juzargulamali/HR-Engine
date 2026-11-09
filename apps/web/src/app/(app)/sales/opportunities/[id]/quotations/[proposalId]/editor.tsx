@@ -91,6 +91,10 @@ function attentionOf(rows: readonly RowState[]): string | null {
   return `${name} is not saved yet: ${first.issue}${incomplete.length > 1 ? ` (and ${incomplete.length - 1} more)` : ""}`;
 }
 
+/** A photo that could not be added. The file is kept so "Try again" needs no new pick; nothing is finalised or sent for approval until it is retried or discarded. */
+interface PhotoFailure { label: string; message: string }
+type PhotoFailureView = PhotoFailure & { key: string };
+
 /** What the sections, pictures and Finalise parts of the screen may do to the saved draft. Each is queued behind the saves before it, so nothing is saved or created twice. */
 interface Ops {
   /** Save now (typed changes included) and say how it went. */
@@ -103,7 +107,11 @@ interface Ops {
   /** Upload a picture and attach it to the item, saving the item first when it is not saved yet; a message when it failed. */
   attachPicture: (key: string, file: File, onPhase: (text: string) => void) => Promise<string | null>;
   removePicture: (key: string) => Promise<string | null>;
-  /** Wait for every save and upload; null when all is saved, otherwise what needs attention. */
+  /** Try a photo that failed again with the same file (a message when it failed again). */
+  retryPhoto: (key: string, onPhase?: (text: string) => void) => Promise<string | null>;
+  /** Give up on a photo that failed: the item stays, without a photo, and finishing is no longer held back by it. */
+  discardPhoto: (key: string) => void;
+  /** Wait for every save and upload; null when all is saved and no photo failed, otherwise what needs attention. */
   settle: () => Promise<string | null>;
 }
 
@@ -123,6 +131,14 @@ export function EstimateBuilder(p: BuilderProps) {
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const newKey = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Photos that failed, by item key: the map (with the files) is what the finish reads, the list is what the screen draws.
+  const failedPhotos = useRef(new Map<string, PhotoFailure & { file: File }>());
+  const [photoFailures, setPhotoFailures] = useState<(PhotoFailure & { key: string })[]>([]);
+  const syncFailures = () => setPhotoFailures([...failedPhotos.current].map(([k, f]) => ({ key: k, label: f.label, message: f.message })));
+  const setFailure = (key: string, failure: (PhotoFailure & { file: File }) | null) => {
+    if (failure) failedPhotos.current.set(key, failure); else failedPhotos.current.delete(key);
+    syncFailures();
+  };
 
   // The one save: everything typed that can be saved as typed. Items that are incomplete stay on screen and are left out; items the server wrote take their id (and keep their key).
   const runSave = async (): Promise<SaveOutcome> => {
@@ -163,6 +179,52 @@ export function EstimateBuilder(p: BuilderProps) {
 
   const rowOf = (key: string) => work.current.rows.find((r) => r.key === key);
   const refreshed = () => router.refresh();
+  /** The whole of adding a photo; a message when it did not work. Run through `attachPicture`, which records a failure BEFORE the work counts as finished. */
+  const attachBody = async (key: string, file: File, onPhase: (text: string) => void): Promise<string | null> => {
+    const problem = validateQuotationImageMeta({ name: file.name, size: file.size, type: file.type });
+    if (problem) return problem;
+    const row = rowOf(key);
+    if (!row) return "That item was removed, so the photo was not added.";
+    // An item that cannot be saved as typed has nothing to attach the photo to: say what is missing before uploading anything.
+    const issue = isBlankNewRow(row) ? "Describe the item." : rowIssue(row);
+    if (issue) return `Finish this item first, then add the photo. ${issue}`;
+    try {
+      const early = saveNow();   // the item is saved while the file uploads, so nothing waits twice
+      onPhase("Checking…");
+      const prepared = await prepareCrmUpload({ opportunityId: p.ids.opportunityId, name: file.name, size: file.size, type: file.type, purpose: "proposal", label: "Estimate item photo" });
+      if (prepared.error !== null) return prepared.error;
+      onPhase("Uploading privately…");
+      const { error: up } = await createClient().storage.from("crm-quarantine").uploadToSignedUrl(prepared.path, prepared.token, file, { contentType: file.type });
+      if (up) return "The upload did not complete. Check your connection, then try again.";
+      onPhase("Checking the file's contents…");
+      const done = await finalizeCrmUpload(prepared.intentId);
+      if (done.error || !done.fileId) return done.error ?? "The photo could not be added. Try again.";
+      const fileId = done.fileId;
+      await early;
+      onPhase("Saving the item…");
+      if (!rowOf(key)?.id) await saveNow();
+      onPhase("Attaching…");
+      const attached = await queue.exclusive(async () => {
+        const cur = rowOf(key);
+        if (!cur) return "That item was removed, so the photo was not added.";
+        if (!cur.id) return "The item could not be saved, so the photo was not added. Check the item and try again.";
+        return (await setQuotationLineImage(p.ids.opportunityId, p.ids.proposalId, cur.id, cur.sectionId, fileId)).error;
+      });
+      if (!attached) refreshed();
+      return attached;
+    } catch {
+      return "Something went wrong while adding the photo. Your item is still here; try again.";
+    }
+  };
+  const attachPicture = (key: string, file: File, onPhase: (text: string) => void): Promise<string | null> => queue.track((async () => {
+    const problem = await attachBody(key, file, onPhase);
+    // Recorded inside the tracked work: when "wait for everything" returns, a failed photo is already on record.
+    const row = rowOf(key);
+    const name = row?.description.trim();
+    if (problem && row) setFailure(key, { file, message: problem, label: name ? `Item “${name.slice(0, 40)}”` : "A new item" });
+    else setFailure(key, null);
+    return problem;
+  })());
   const ops: Ops = {
     saveNow,
     exclusive: (task) => { void saveNow(); return queue.exclusive(task); },
@@ -174,45 +236,15 @@ export function EstimateBuilder(p: BuilderProps) {
         if (res.error) return res.error;
       }
       commit((x) => ({ ...x, rows: x.rows.filter((y) => y.key !== key) }));
+      setFailure(key, null);
       return null;
     }),
-    dropSectionRows: (sectionId) => commit((x) => ({ ...x, rows: x.rows.filter((r) => r.sectionId !== sectionId) })),
-    attachPicture: (key, file, onPhase) => queue.track((async () => {
-      const problem = validateQuotationImageMeta({ name: file.name, size: file.size, type: file.type });
-      if (problem) return problem;
-      const row = rowOf(key);
-      if (!row) return "That item was removed, so the photo was not added.";
-      // An item that cannot be saved as typed has nothing to attach the photo to: say what is missing before uploading anything.
-      const issue = isBlankNewRow(row) ? "Describe the item." : rowIssue(row);
-      if (issue) return `Finish this item first, then add the photo. ${issue}`;
-      try {
-        const early = saveNow();   // the item is saved while the file uploads, so nothing waits twice
-        onPhase("Checking…");
-        const prepared = await prepareCrmUpload({ opportunityId: p.ids.opportunityId, name: file.name, size: file.size, type: file.type, purpose: "proposal", label: "Estimate item photo" });
-        if (prepared.error !== null) return prepared.error;
-        onPhase("Uploading privately…");
-        const { error: up } = await createClient().storage.from("crm-quarantine").uploadToSignedUrl(prepared.path, prepared.token, file, { contentType: file.type });
-        if (up) return "The upload did not complete. Check your connection, then try again.";
-        onPhase("Checking the file's contents…");
-        const done = await finalizeCrmUpload(prepared.intentId);
-        if (done.error || !done.fileId) return done.error ?? "The photo could not be added. Try again.";
-        const fileId = done.fileId;
-        await early;
-        onPhase("Saving the item…");
-        if (!rowOf(key)?.id) await saveNow();
-        onPhase("Attaching…");
-        const attached = await queue.exclusive(async () => {
-          const cur = rowOf(key);
-          if (!cur) return "That item was removed, so the photo was not added.";
-          if (!cur.id) return "The item could not be saved, so the photo was not added. Check the item and try again.";
-          return (await setQuotationLineImage(p.ids.opportunityId, p.ids.proposalId, cur.id, cur.sectionId, fileId)).error;
-        });
-        if (!attached) refreshed();
-        return attached;
-      } catch {
-        return "Something went wrong while adding the photo. Your item is still here; try again.";
-      }
-    })()),
+    dropSectionRows: (sectionId) => {
+      for (const r of work.current.rows) if (r.sectionId === sectionId) failedPhotos.current.delete(r.key);
+      commit((x) => ({ ...x, rows: x.rows.filter((r) => r.sectionId !== sectionId) }));
+      syncFailures();
+    },
+    attachPicture,
     removePicture: (key) => queue.exclusive(async () => {
       const cur = rowOf(key);
       if (!cur?.id) return null;
@@ -220,6 +252,11 @@ export function EstimateBuilder(p: BuilderProps) {
       if (!res.error) refreshed();
       return res.error;
     }),
+    retryPhoto: (key, onPhase) => {
+      const failure = failedPhotos.current.get(key);
+      return failure ? attachPicture(key, failure.file, onPhase ?? (() => undefined)) : Promise.resolve(null);
+    },
+    discardPhoto: (key) => setFailure(key, null),
     settle: async () => {
       // A few rounds: typing during the wait is saved too. Each round saves everything typed so far, then waits for pictures and steps still running.
       for (let round = 0; round < 3; round += 1) {
@@ -227,6 +264,11 @@ export function EstimateBuilder(p: BuilderProps) {
         await queue.idle();
         if (!out.ok) return out.message;
         if (!queue.last.ok) return queue.last.message;
+        // A photo that failed (or whose item is gone) stops the finish until it is retried or discarded; the estimate stays an editable draft.
+        const live = new Set(work.current.rows.map((r) => r.key));
+        for (const k of [...failedPhotos.current.keys()]) if (!live.has(k)) setFailure(k, null);
+        const failedFirst = [...failedPhotos.current.values()][0];
+        if (failedFirst) return `${failedFirst.label}: the photo was not added. ${failedFirst.message} Try again or discard the photo, then continue.${failedPhotos.current.size > 1 ? ` (${failedPhotos.current.size - 1} more photo${failedPhotos.current.size > 2 ? "s" : ""} failed too.)` : ""}`;
         const attention = attentionOf(work.current.rows);
         if (attention) return `${attention} Fix it or delete it, then try again.`;
         if (!hasUnsaved(work.current)) return null;
@@ -277,10 +319,10 @@ export function EstimateBuilder(p: BuilderProps) {
         <DetailsStep p={p} details={details} patch={patchDetails} notes={notes} patchNotes={patchNotes} />
       ) : null}
       {step === "boq" ? (
-        <BoqStep p={p} rows={rows} numbers={numbers} calc={calc} cur={cur} locked={pendingWork || incomplete.length > 0} hasIncomplete={incomplete.length > 0} saving={saving} patchRow={patchRow} addRow={addRow} ops={ops} focusKey={focusKey} />
+        <BoqStep p={p} rows={rows} numbers={numbers} calc={calc} cur={cur} locked={pendingWork || incomplete.length > 0} hasIncomplete={incomplete.length > 0} saving={saving} patchRow={patchRow} addRow={addRow} ops={ops} focusKey={focusKey} photoFailures={photoFailures} />
       ) : null}
       {step === "finalise" ? (
-        <FinaliseStep p={p} details={details} notes={notes} patchNotes={patchNotes} calc={calc} cur={cur} pendingWork={pendingWork} recipientChecked={recipientChecked} setRecipientChecked={setRecipientChecked} ops={ops} />
+        <FinaliseStep p={p} details={details} notes={notes} patchNotes={patchNotes} calc={calc} cur={cur} pendingWork={pendingWork} recipientChecked={recipientChecked} setRecipientChecked={setRecipientChecked} ops={ops} photoFailures={photoFailures} />
       ) : null}
 
       <div className="sticky bottom-0 z-10 -mx-1 space-y-2 rounded-lg border border-border bg-card/95 p-3 shadow-sm backdrop-blur" data-testid="builder-bar">
@@ -466,11 +508,11 @@ function PaymentDetails({ notes, patchNotes }: { notes: NotesState; patchNotes: 
 // ---------------------------------------------------------------------------------------------------------------------------------
 // Step 2: BOQ (items inline, sections optional)
 // ---------------------------------------------------------------------------------------------------------------------------------
-function BoqStep({ p, rows, numbers, calc, cur, locked, hasIncomplete, saving, patchRow, addRow, ops, focusKey }: {
+function BoqStep({ p, rows, numbers, calc, cur, locked, hasIncomplete, saving, patchRow, addRow, ops, focusKey, photoFailures }: {
   p: BuilderProps; rows: RowState[]; numbers: Map<string, string>; calc: ReturnType<typeof liveCalc>["calc"]; cur: string;
   /** True while something is unsaved or saving: moving things around and deleting a section wait for the save. */
   locked: boolean; hasIncomplete: boolean; saving: boolean;
-  patchRow: (key: string, patch: Partial<RowState>) => void; addRow: (sectionId: string | null) => void; ops: Ops; focusKey: string | null;
+  patchRow: (key: string, patch: Partial<RowState>) => void; addRow: (sectionId: string | null) => void; ops: Ops; focusKey: string | null; photoFailures: PhotoFailureView[];
 }) {
   const router = useRouter();
   const { run, pending, error } = useRun();
@@ -496,7 +538,7 @@ function BoqStep({ p, rows, numbers, calc, cur, locked, hasIncomplete, saving, p
       <section aria-label="Items without a section" className="rounded-lg border border-border">
         {looseRows.length === 0 ? <p className="px-3 py-3 text-sm text-muted-foreground">No items yet. Add the first item below.</p> : (
           <ul className="divide-y divide-border/70">
-            {looseRows.map((r) => <ItemRow key={r.key} p={p} row={r} number={numbers.get(r.key) ?? ""} cur={cur} patchRow={patchRow} ops={ops} autoFocus={focusKey === r.key} locked={locked} siblings={looseRows} scopeId={loose?.id ?? null} />)}
+            {looseRows.map((r) => <ItemRow key={r.key} p={p} row={r} number={numbers.get(r.key) ?? ""} cur={cur} patchRow={patchRow} ops={ops} autoFocus={focusKey === r.key} locked={locked} photoFailure={photoFailures.find((f) => f.key === r.key) ?? null} siblings={looseRows} scopeId={loose?.id ?? null} />)}
           </ul>
         )}
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-2">
@@ -519,7 +561,7 @@ function BoqStep({ p, rows, numbers, calc, cur, locked, hasIncomplete, saving, p
             </div>
             {secRows.length > 0 ? (
               <ul className="divide-y divide-border/70">
-                {secRows.map((r) => <ItemRow key={r.key} p={p} row={r} number={numbers.get(r.key) ?? ""} cur={cur} patchRow={patchRow} ops={ops} autoFocus={focusKey === r.key} locked={locked} siblings={secRows} scopeId={s.id} />)}
+                {secRows.map((r) => <ItemRow key={r.key} p={p} row={r} number={numbers.get(r.key) ?? ""} cur={cur} patchRow={patchRow} ops={ops} autoFocus={focusKey === r.key} locked={locked} photoFailure={photoFailures.find((f) => f.key === r.key) ?? null} siblings={secRows} scopeId={s.id} />)}
               </ul>
             ) : <p className="px-3 py-3 text-sm text-muted-foreground">No items in this section yet.</p>}
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-2">
@@ -535,8 +577,8 @@ function BoqStep({ p, rows, numbers, calc, cur, locked, hasIncomplete, saving, p
   );
 }
 
-function ItemRow({ p, row, number, cur, patchRow, ops, autoFocus, locked, siblings, scopeId }: {
-  p: BuilderProps; row: RowState; number: string; cur: string; patchRow: (k: string, x: Partial<RowState>) => void; ops: Ops; autoFocus: boolean; locked: boolean;
+function ItemRow({ p, row, number, cur, patchRow, ops, autoFocus, locked, photoFailure, siblings, scopeId }: {
+  p: BuilderProps; row: RowState; number: string; cur: string; patchRow: (k: string, x: Partial<RowState>) => void; ops: Ops; autoFocus: boolean; locked: boolean; photoFailure: PhotoFailureView | null;
   siblings: RowState[]; scopeId: string | null;
 }) {
   const { run, pending, error } = useRun();
@@ -570,7 +612,8 @@ function ItemRow({ p, row, number, cur, patchRow, ops, autoFocus, locked, siblin
         <ItemFigures p={p} row={row} cur={cur} />
         {issue ? <p className="text-sm text-destructive" role="status">{issue}</p> : null}
         <LinePicture imageFileId={savedLine?.image_file_id ?? null} url={p.imageUrls[savedLine?.image_file_id ?? ""] ?? null} name={p.imageNames[savedLine?.image_file_id ?? ""] ?? null}
-          attach={(file, onPhase) => ops.attachPicture(row.key, file, onPhase)} remove={() => ops.removePicture(row.key)} />
+          attach={(file, onPhase) => ops.attachPicture(row.key, file, onPhase)} remove={() => ops.removePicture(row.key)}
+          failure={photoFailure} retry={(onPhase) => ops.retryPhoto(row.key, onPhase)} discard={() => ops.discardPhoto(row.key)} />
         {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
       </div>
     </li>
@@ -619,39 +662,34 @@ function RenameSection({ ids, section }: { ids: Ids; section: QuotationSectionRo
  * The photo beside an item. The upload itself (private quarantine, server checks) and the attaching are done by the builder, which saves the item first when it is not
  * saved yet and queues the attach behind the saves. A failed upload keeps the chosen file here, so "Try again" needs no new pick.
  */
-function LinePicture({ imageFileId, url, name, attach, remove }: {
+function LinePicture({ imageFileId, url, name, attach, remove, failure, retry, discard }: {
   imageFileId: string | null; url: string | null; name: string | null;
   attach: (file: File, onPhase: (text: string) => void) => Promise<string | null>; remove: () => Promise<string | null>;
+  /** The builder keeps a failed photo (and its file) even when this item is not on screen; finishing is held until it is retried or discarded. */
+  failure: { message: string } | null; retry: (onPhase: (text: string) => void) => Promise<string | null>; discard: () => void;
 }) {
   const [phase, setPhase] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [retry, setRetry] = useState<File | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const [added, setAdded] = useState(false);
   const working = useRef(false);
-  async function send(file: File) {
+  async function run(task: () => Promise<string | null>, first: string) {
     if (working.current) return;
     working.current = true;
-    setError(null); setRetry(null); setAdded(false);
-    setPhase("Checking…");
-    try {
-      const problem = await attach(file, setPhase);
-      if (problem) { setError(problem); setRetry(file); } else setAdded(true);
-    } finally {
-      working.current = false;
-      setPhase("");
-    }
+    setRemoveError(null); setAdded(false);
+    setPhase(first);
+    try { const problem = await task(); if (!problem) setAdded(true); } finally { working.current = false; setPhase(""); }
   }
   async function onRemove() {
     if (working.current) return;
     working.current = true;
-    setError(null); setAdded(false);
+    setRemoveError(null); setAdded(false);
     setPhase("Removing…");
-    try { const problem = await remove(); if (problem) setError(problem); } finally { working.current = false; setPhase(""); }
+    try { const problem = await remove(); if (problem) setRemoveError(problem); } finally { working.current = false; setPhase(""); }
   }
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (file) void send(file);
+    if (file) void run(() => attach(file, setPhase), "Checking…");
   };
   return (
     <div className="space-y-1">
@@ -669,13 +707,16 @@ function LinePicture({ imageFileId, url, name, attach, remove }: {
         </label>
       )}
       {phase ? <p className="text-sm text-muted-foreground" role="status">{phase}</p> : null}
-      {added && !imageFileId && !phase ? <p className="text-sm text-muted-foreground" role="status">Photo added.</p> : null}
-      {error ? (
-        <p className="text-sm text-destructive" role="alert">
-          {error}
-          {retry ? <> <button type="button" className="font-medium underline underline-offset-2" onClick={() => void send(retry)}>Try again</button></> : null}
+      {added && !imageFileId && !phase && !failure ? <p className="text-sm text-muted-foreground" role="status">Photo added.</p> : null}
+      {failure && !phase ? (
+        <p className="text-sm text-destructive" role="alert" data-testid="photo-failed">
+          The photo was not added. {failure.message}{" "}
+          <button type="button" className="font-medium underline underline-offset-2" onClick={() => void run(() => retry(setPhase), "Checking…")}>Try again</button>
+          {" · "}
+          <button type="button" className="font-medium underline underline-offset-2" onClick={discard}>Discard photo</button>
         </p>
       ) : null}
+      {removeError ? <p className="text-sm text-destructive" role="alert">{removeError}</p> : null}
     </div>
   );
 }
@@ -685,10 +726,10 @@ function LinePicture({ imageFileId, url, name, attach, remove }: {
 // ---------------------------------------------------------------------------------------------------------------------------------
 const excerpt = (text: string, n = 180) => { const t = text.replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n).trimEnd()}…` : t; };
 
-function FinaliseStep({ p, details, notes, patchNotes, calc, cur, pendingWork, recipientChecked, setRecipientChecked, ops }: {
+function FinaliseStep({ p, details, notes, patchNotes, calc, cur, pendingWork, recipientChecked, setRecipientChecked, ops, photoFailures }: {
   p: BuilderProps; details: DetailsState; notes: NotesState; patchNotes: (x: Partial<NotesState>) => void; calc: ReturnType<typeof liveCalc>["calc"]; cur: string;
   /** True while a save or upload is running or waiting, or something typed is not saved yet. */
-  pendingWork: boolean; recipientChecked: boolean; setRecipientChecked: (v: boolean) => void; ops: Ops;
+  pendingWork: boolean; recipientChecked: boolean; setRecipientChecked: (v: boolean) => void; ops: Ops; photoFailures: PhotoFailureView[];
 }) {
   const router = useRouter();
   const [refreshing, startRefresh] = useTransition();
@@ -703,7 +744,9 @@ function FinaliseStep({ p, details, notes, patchNotes, calc, cur, pendingWork, r
   const running = phase !== "" || refreshing;
   // While anything is saving or unsaved the list below (read from the SAVED draft) would be out of date: Finalise waits for the save and checks the saved estimate afresh.
   const blockers = pendingWork ? [] : p.blockers;
-  const canFinalise = recipientChecked && !running && (pendingWork || blockers.length === 0);
+  const photoHeld = photoFailures.length > 0;   // a photo that failed holds back both buttons until it is retried or discarded
+  const [retrying, setRetrying] = useState<string | null>(null);
+  const canFinalise = recipientChecked && !running && !photoHeld && (pendingWork || blockers.length === 0);
   const done = () => startRefresh(() => router.refresh());
 
   /** Wait for every save and upload, then run `then`. Anything missing or failed is explained here and the estimate stays editable. */
@@ -789,6 +832,21 @@ function FinaliseStep({ p, details, notes, patchNotes, calc, cur, pendingWork, r
             <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-muted-foreground">{blockers.map((b) => <li key={b}>{b}</li>)}</ul>
           </div>
         ) : <p className="text-sm text-muted-foreground">Everything needed to finalise is in place.</p>}
+        {photoHeld ? (
+          <div className="space-y-2 rounded-md border border-destructive/40 p-3" role="alert" data-testid="photo-failures">
+            <p className="text-sm font-medium">{photoFailures.length === 1 ? "A photo was not added, so this cannot be finalised or sent for approval yet." : `${photoFailures.length} photos were not added, so this cannot be finalised or sent for approval yet.`}</p>
+            <ul className="space-y-1.5 text-sm">
+              {photoFailures.map((f) => (
+                <li key={f.key} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span><strong>{f.label}</strong>: {f.message}</span>
+                  <Button type="button" variant="outline" size="sm" disabled={retrying !== null} onClick={async () => { setRetrying(f.key); try { await ops.retryPhoto(f.key); } finally { setRetrying(null); } }}>{retrying === f.key ? "Trying…" : "Try again"}</Button>
+                  <Button type="button" variant="ghost" size="sm" disabled={retrying !== null} onClick={() => ops.discardPhoto(f.key)}>Discard photo</Button>
+                </li>
+              ))}
+            </ul>
+            <p className="text-sm text-muted-foreground">Discarding keeps the item and leaves it without a photo. The estimate stays a draft until you choose.</p>
+          </div>
+        ) : null}
         {waitText ? <p className="text-sm font-medium" role="status" data-testid="finalise-wait">{waitText}</p> : null}
         {problem ? (
           <Alert variant="destructive" role="alert" data-testid="finalise-problem">
@@ -803,7 +861,7 @@ function FinaliseStep({ p, details, notes, patchNotes, calc, cur, pendingWork, r
         </label>
         <div className="flex flex-wrap gap-2">
           {p.needsApproval && !p.approvalPending ? (
-            <Button type="button" variant="outline" disabled={running} onClick={requestApproval}>Request approval</Button>
+            <Button type="button" variant="outline" disabled={running || photoHeld} onClick={requestApproval}>Request approval</Button>
           ) : null}
           <Button type="button" disabled={!canFinalise} onClick={finalise}>Finalise estimate</Button>
         </div>

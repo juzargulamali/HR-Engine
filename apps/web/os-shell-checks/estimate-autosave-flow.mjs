@@ -10,6 +10,9 @@
 //     5. edits an existing item, adds a third item with a photo, goes to Preview & finalise and presses Finalise while that save AND that upload are still pending
 //        (every server call is slowed down so the wait can be seen) -> it says it is waiting, nothing is finalised until both are done, then the EXISTING finalisation
 //        flow freezes the estimate with the latest edit and the third photo pinned in it.
+//     6. REGRESSION (second estimate): Finalise is started while a photo upload is pending and the upload is FORCED TO FAIL -> nothing is finalised, the estimate stays an editable
+//        draft, the message names the item, Finalise is held; "Try again" while it still fails keeps it held; "Try again" once uploads work attaches the photo; a second photo that
+//        fails can be explicitly discarded, and only then does Finalise go through (the item stays, without a photo).
 import { chromium, newPage, login, BASE, psql as sql } from "./lib.mjs";
 import { asDb } from "./inventory-flow-lib.mjs";
 import { deflateSync } from "node:zlib";
@@ -157,6 +160,85 @@ await step("Finalise waits for a pending save and a pending upload, then uses th
   if (rigging?.image?.bucket !== "quotation-assets" || !/^[0-9a-f]{64}$/.test(rigging.image.sha256 ?? "")) throw new Error(`the third photo is not pinned in the snapshot: ${JSON.stringify(rigging)}`);
   expectEq(count(`select count(*) from crm_files where opportunity_id='${opp}'`), 2, "two photos registered, one each");
   await page.screenshot({ path: `${SHOTS}/3-finalised.png` });
+});
+
+await step("a photo that FAILS while Finalise waits stops it: the estimate stays a draft, the photo is named, and it must be retried or discarded before going on", async () => {
+  const opp2 = asDb(5, `select crm_create_opportunity(p_company_id => '${CO}', p_title => 'Fictional pavilion', p_source => 'agency_call', p_next_title => 'Call', p_next_due => now() + interval '2 days', p_client_org_id => '${client}')`);
+  sql(`update crm_opportunities set currency='EUR' where id='${opp2}'`);
+  await page.goto(`${BASE}/sales/opportunities/${opp2}?tab=quotations`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Create draft estimate" }).click();
+  await page.waitForURL(/\/quotations\//); proposalId = page.url().split("/").pop();
+  const vat = page.locator("#est-vat");
+  await vat.selectOption(await vat.locator("option").evaluateAll((os) => os.find((o) => /^5%$/.test(o.textContent))?.value));
+  await goStep("BOQ");
+  // the browser's direct upload is slowed, then FAILS, while failUploads is on (every other call is normal)
+  let failUploads = true;
+  await page.route("**/storage/v1/object/upload/sign/**", async (route) => {
+    if (!failUploads || route.request().method() !== "PUT") return route.fallback();
+    await new Promise((ok) => setTimeout(ok, 1500));
+    return route.abort("failed");
+  });
+  const issued = () => count(`select count(*) from crm_quotations where proposal_id='${proposalId}' and issued_at is not null`);
+  const finalise = page.getByRole("button", { name: "Finalise estimate" });
+  const panel = page.getByTestId("photo-failures");
+  const imageOf = (d) => sql(`select coalesce(image_file_id::text, '-') from crm_quotation_lines where proposal_id='${proposalId}' and description='${d}'`);
+
+  // 1. start finalising while the photo is pending; the upload then fails
+  await loose().getByRole("button", { name: "Add item" }).click();
+  const a = loose().locator("li").first();
+  await typeRow(a, "Banner stand", "2", "80", "pcs");
+  await a.locator('input[type="file"]').setInputFiles(photo("banner.png", 90));
+  await goStep("Preview & finalise");
+  await page.getByRole("checkbox", { name: /I have checked who this estimate is addressed to/ }).check();
+  await finalise.click();
+  await page.getByTestId("finalise-wait").waitFor({ timeout: 5000 });
+  await panel.waitFor({ timeout: 20000 });
+  const said = flat(await panel.innerText());
+  if (!/Banner stand/.test(said) || !/not added/.test(said)) throw new Error(`the failed photo is not named: ${said}`);
+  const problem = flat(await page.getByTestId("finalise-problem").innerText());
+  if (!/Banner stand/.test(problem) || !/still a draft/.test(problem)) throw new Error(`finalise message: ${problem}`);
+  expectEq(issued(), 0, "nothing is finalised after the photo failed");
+  if (!(await finalise.isDisabled())) throw new Error("Finalise is not held while a photo has failed");
+  await page.screenshot({ path: `${SHOTS}/4-photo-failed-held.png` });
+
+  // 2. Try again while uploads still fail: still held, still a draft
+  await panel.getByRole("button", { name: "Try again" }).click();
+  await page.waitForFunction(() => /Try again/.test(document.querySelector('[data-testid="photo-failures"]')?.textContent ?? ""), null, { timeout: 15000 });
+  expectEq(await panel.count(), 1, "still held after a failed retry"); expectEq(issued(), 0, "still a draft after a failed retry");
+  expectEq(imageOf("Banner stand"), "-", "no photo attached by a failed upload");
+
+  // 3. uploads work again: Try again attaches the photo to that item and releases the hold
+  failUploads = false;
+  await panel.getByRole("button", { name: "Try again" }).click();
+  await panel.waitFor({ state: "detached", timeout: 30000 });
+  if (imageOf("Banner stand") === "-") throw new Error("the retried photo was not attached to the item");
+  expectEq(issued(), 0, "retrying does not finalise by itself");
+
+  // 4. a second photo fails again: it must be discarded explicitly before Finalise goes on
+  failUploads = true;
+  await goStep("BOQ");
+  await loose().getByRole("button", { name: "Add item" }).click();
+  const b = loose().locator("li").nth(1);
+  await typeRow(b, "Pole base", "1", "20", "pcs");
+  await b.locator('input[type="file"]').setInputFiles(photo("base.png", 160));
+  await goStep("Preview & finalise");
+  await finalise.click();
+  await panel.waitFor({ timeout: 20000 });
+  if (!/Pole base/.test(flat(await panel.innerText()))) throw new Error("the second failed photo is not named");
+  expectEq(issued(), 0, "nothing is finalised while the second photo is unresolved");
+  await panel.getByRole("button", { name: "Discard photo" }).click();
+  await panel.waitFor({ state: "detached" });
+  expectEq(issued(), 0, "discarding does not finalise by itself");
+  expectEq(imageOf("Pole base"), "-", "the discarded photo is not on the item");
+  if (await finalise.isDisabled()) throw new Error("Finalise is still held after the photo was discarded");
+  failUploads = false;
+  await finalise.click();
+  await page.waitForFunction(() => /Finalised on/.test(document.querySelector("main")?.innerText ?? ""), null, { timeout: 60000 });
+  expectEq(issued(), 1, "finalised once the photo was retried or discarded");
+  expectEq(lines(), 2, "both items kept (the item of the discarded photo stays)");
+  const snap = JSON.parse(sql(`select jsonb_path_query_array(content, '$.sections[*].lines[*]')::text from crm_quotation_snapshots where proposal_id='${proposalId}'`));
+  if (!snap.find((l) => l.description === "Banner stand")?.image) throw new Error("the retried photo is missing from the finalised estimate");
+  if (snap.find((l) => l.description === "Pole base")?.image) throw new Error("the discarded photo is in the finalised estimate");
 });
 
 await page.context().close(); await browser.close();
