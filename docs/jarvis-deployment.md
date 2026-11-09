@@ -89,6 +89,74 @@ update jarvis_settings set enabled = false, writes_enabled = false, updated_at =
 
 A person sees the launcher only with **all** of: `enabled = true`, a `jarvis_pilot_users` row, an active profile, an active Sales grant for a company the pilot covers, and the environment ready (key, confirmation secret, not `JARVIS_DISABLED`); saving also needs the database proof key (step 6). The server re-checks all of it on every request.
 
+## Hosted V2 result (owner-reported, reviewed by QA from the exported SQL results)
+
+The owner applied `20261223000200_jarvis_helper_privileges.sql` on hosted Enginious HR Engine V2 (after `20261223000100`). QA reviewed the exported results:
+
+* The read-only verifier (`jarvis_20_verify_readonly.sql`) returned **70 OK, 0 failures and 4 informational rows**.
+* `jarvis_ledger_json`, `jarvis_ledger_enter`, `jarvis_ledger_done` and `jarvis_ledger_fail` **deny EXECUTE to `service_role`, `authenticated`, `anon` and `PUBLIC`**.
+* At verification time both switches (`enabled`, `writes_enabled`) were off, there were zero pilot users, the proof key was unset and the ledger was empty.
+
+**This closes the hosted ledger-helper privilege issue.** It does **not** verify the hosted JARVIS workflow: nothing has been enabled, no proof key has been set, no live provider call has been made from hosted V2, and no pilot has run. Those remain **unverified**. The Production project is untouched.
+
+## Review of the remaining service_role grants (read-only review; nothing changed)
+
+After the fix, `service_role` still holds the platform-default `EXECUTE` (granted by `postgres` through the default function privileges) on nine functions, because `20261223000100` granted them to `authenticated` only and did not revoke the default for the service role. The question is whether anything needs it. Evidence, from the code at head `e8dfcf5`:
+
+* **The only service-role client in the application** is `createAdminClient()` (`apps/web/src/lib/supabase/admin.ts:14-18`, `SUPABASE_SERVICE_ROLE_KEY`). Its callers (`app/api/cron/leave-accrual/route.ts:83`, `comp-day-expiry/route.ts:29`, `document-expiry/route.ts:29`, `recovery-windows/route.ts:31`, `app/api/ai/detect-balance-discrepancies/route.ts:36`, `lib/crm/upload-cleanup.ts:18`, `lib/crm/quotations/pin-assets.ts:28,32`) call none of the JARVIS functions: no file under `app/api`, `lib/crm` or `lib/actions` other than `lib/actions/jarvis.ts` mentions JARVIS at all, and `vercel.json:2-8` lists no JARVIS job.
+* **Every JARVIS database call uses the signed-in person's own session client.** `lib/jarvis/runtime.ts:19,23` builds it with `createClient()` from `lib/supabase/server.ts:30-32` (anon key plus the person's cookie session, so the database role is `authenticated`). The dispatcher states there is no service-role client in JARVIS (`lib/jarvis/dispatcher.ts:24-25`), and `lib/jarvis/create-from-brief.test.ts:554-556` fails the build if any JARVIS source file (including `components/jarvis` and `lib/actions/jarvis.ts`) mentions `service_role`, `SUPABASE_SERVICE_ROLE_KEY`, `supabase/admin` or `createAdminClient`.
+* **Scripts and tests** call the functions as the owner or as `authenticated`: `apps/web/os-shell-checks/seed/jarvis.sh:16,23` (`jarvis_set_proof_key` as the database owner, reads as `set local role authenticated`), `jarvis-flow.mjs:256,259-262,287-291,331-335` and `jarvis-sales-flow.mjs:259,306-313` (the person's API token or `authenticated`). No CI workflow or job in the repository calls them.
+* **Other SQL**: no other migration or function calls a `jarvis_*` entry point; the wrappers call the helpers as their owner.
+
+| Function (exact signature) | Called from (file:line) | Client and database role | Service-role grant |
+|---|---|---|---|
+| `jarvis_my_access(uuid)` | `lib/jarvis/dispatcher.ts:62` (every request), `:215`, `:224` (launcher state; called from `app/(app)/layout.tsx:103` via `getLauncherState`) | person's session, `authenticated` | **unnecessary** |
+| `jarvis_usage_take(integer)` | `lib/jarvis/dispatcher.ts:76` | person's session, `authenticated` | **unnecessary** |
+| `jarvis_create_enquiry(uuid, uuid, text, integer, bigint, text, text)` | `lib/jarvis/sales/enquiry-create-from-brief.ts:181` | person's session, `authenticated` (server actions `lib/actions/jarvis.ts:37,55`) | **unnecessary** |
+| `jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text)` | `lib/jarvis/sales/organisation-register.ts:150` | same | **unnecessary** |
+| `jarvis_update_enquiry(uuid, uuid, text, integer, bigint, text, text)` | `lib/jarvis/sales/enquiry-update.ts:123` | same | **unnecessary** |
+| `jarvis_change_stage(uuid, uuid, text, integer, bigint, text, text)` | `lib/jarvis/sales/enquiry-stage.ts:111` | same | **unnecessary** |
+| `jarvis_record_meeting(uuid, uuid, text, integer, bigint, text, text)` | `lib/jarvis/sales/meeting-record.ts:116` | same | **unnecessary** |
+| `jarvis_ledger_json`, `_enter`, `_done`, `_fail` | only inside the wrappers (SQL, run as the owner) | n/a | already revoked (verified on hosted V2) |
+| `jarvis_hmac_sha256`, `jarvis_verify_proof`, `jarvis_set_proof_key` | only inside the wrappers; the setter is run by the owner | n/a | already revoked |
+
+**Classification and its limit.** In the repository, all nine remaining grants are **unnecessary**: no code path, route, job or script invokes them with the service-role credential, the design forbids a service-role client for JARVIS, and the entry-point server actions authenticate the person first (`lib/jarvis/dispatcher.ts:57-62`). That a function refuses a service-role call because `auth.uid()` is null is **not** the reason; the reason is that nothing calls them. What the repository cannot show is a caller that lives only on the hosted project (a Supabase Edge Function, a `pg_cron` job, an external integration holding the service key). Treat that as **unverified until the owner runs the read-only check below**; if it returns nothing, the grants are unnecessary on hosted too.
+
+```sql
+-- READ-ONLY. Anything outside the repository that could call JARVIS with the service role.
+select jobid, jobname, left(command, 120) as command_start from cron.job where command ilike '%jarvis%';   -- scheduled jobs (skip if the cron schema is absent)
+select count(*) as functions_other_than_jarvis_calling_jarvis from pg_proc p where p.pronamespace not in ('pg_catalog'::regnamespace, 'information_schema'::regnamespace) and p.proname not like 'jarvis\_%' and p.prosrc ilike '%jarvis\_%';
+```
+(Edge Functions are listed in the Supabase dashboard under Edge Functions; the repository has none.)
+
+**Recommendation.** Revoke `EXECUTE` from `service_role` on the seven wrappers, `jarvis_my_access` and `jarvis_usage_take`, as a **separate, targeted migration** (not part of this documentation pass; nothing was changed): `authenticated` stays, `anon` and `PUBLIC` stay closed. It is low risk, tightens the boundary to "signed-in people only" and removes a latent path that depends on `auth.uid()` being null as the only wall. Outline: `20261223000300_jarvis_entry_point_privileges.sql`, privileges only, idempotent, aborting if `service_role` (or any role other than the owner and `authenticated`) can still execute them; tests in the same style as `jarvis-helper-privileges.rls.test.ts` (default function privileges recreated: before = service role can execute the nine; after = only the owner and `authenticated` can, ACLs of the helpers and proof functions byte-identical, the verifier all OK, a valid proof still creates an enquiry through the wrapper, direct service-role calls refused with `42501`, idempotent, preservation check identical); plus two verifier rows (`service_role` cannot execute any `jarvis_*` function; `authenticated` executes exactly the seven wrappers' set) so a future `jarvis_*` function that inherits the platform default is caught. Apply only after the owner's read-only check above is clean.
+
+## One-user Sales & CRM pilot: checklist for review (fictional data; writes OFF for the first access check)
+
+This is a proposal for the owner to review; none of it has been run on hosted. Never put a secret value in a ticket, chat or screenshot.
+
+**A. Prerequisites for the access check (writes off)**
+1. Both migrations applied and the verifier clean on V2 (done, section "Hosted V2 result").
+2. A Preview deployment of the `feat/jarvis` head pointing at **V2** (never Production data), with `ANTHROPIC_API_KEY` (a separate low-spend key) and `JARVIS_CONFIRMATION_SECRET` (32+ random characters) set for Preview only and marked Sensitive; `JARVIS_DAILY_LIMIT_PER_USER` small (for example 10); `JARVIS_PROVIDER` unset; `JARVIS_DISABLED` unset. The launcher needs the provider key and the secret in the app environment; the database proof key may stay unset for this check (saving is not tested here).
+3. Three accounts (people with test purposes, no real client data used): **Pilot A** (active Sales grant for one company), **Non-pilot B** (also an active Sales grant, to show the allowlist, not the grant, is the gate), optionally **C** (on the allowlist but no Sales grant).
+
+**B. Steps (owner runs the SQL in the V2 SQL Editor)**
+1. Baseline, switches off: `select * from jarvis_settings;` shows `enabled = false, writes_enabled = false`; `select count(*) from jarvis_pilot_users;` is 0; `select count(*) from jarvis_action_ledger;` is 0. Sign in as A and as B: **no** "Open JARVIS" launcher for either.
+2. Switch on for one person, writes off, one company only: `update jarvis_settings set enabled = true, writes_enabled = false, updated_at = now();` then add A to `jarvis_pilot_users` and the one company to `jarvis_pilot_companies` (statements in "Pilot controls" above).
+3. Reload as **A**: the "Open JARVIS" launcher is visible; the company picker offers only the pilot company. Open the panel: with writes off, asking it to create an enquiry from a fictional brief is **refused with the "cannot create or change records right now" message** (no review card). Check afterwards: ledger count still 0, enquiry count unchanged. (Optional read-only question to the help action uses one provider call.)
+4. Reload as **B** (and C if used): **no launcher**. Optional read-only proof as the owner: in a transaction, `set local role authenticated;` with B's claims, `select * from jarvis_my_access();` returns `is_available = false`, then `rollback`.
+5. Switch it off: `update jarvis_settings set enabled = false, writes_enabled = false, updated_at = now();` reload as A: the launcher is gone. (Also available: remove A with `delete from jarvis_pilot_users where user_id = '<id>';`, or set `JARVIS_DISABLED=1` in Vercel; both are enforced on the server for every request.)
+6. Confirm nothing was written: ledger count 0, no new enquiries, `jarvis_usage` shows at most A's own counter row.
+
+**C. Remaining prerequisites for a separate confirmed-write test (not part of the access check)**
+1. The owner step: set the database proof key with the same value as `JARVIS_CONFIRMATION_SECRET` (`jarvis-deployment.md`, "OWNER STEP"); the verifier's informational row must say `set`; until then every write fails closed.
+2. `writes_enabled = true` for the one pilot user and the one pilot company only; the daily limit and the Anthropic spend cap in place.
+3. Fictional organisations (a client and an agency) and, if needed, one fictional enquiry created beforehand in a test company or clearly labelled as test, so no real record can be touched; the test brief is the fictional one used locally.
+4. Start with **one** action (create an enquiry from a brief): expected 0 enquiries before pressing Create and exactly 1 plus one `done` ledger row after, with the same checks as the local run. The other actions stay out of the first write test.
+5. A cleanup plan: JARVIS cannot delete, so the test enquiry is closed or marked as test through the normal Sales screens, and the ledger is exported (it is the audit record) before any rollback.
+6. A decision on Anthropic's retention and training terms (unverified) and a separate owner approval before any real client brief.
+7. The app and the database must be at matching heads: the Preview built from the verified `feat/jarvis` head. The recommended revoke migration above is independent and can be applied before or after, but not during the test.
+
 ## Rehearsal on a throwaway local database (what the RLS suite and the local walk-through did)
 
 Run on a throwaway Postgres built from every migration (no hosted project): preflight, preservation (twice), migration applied **twice**, the proof key set, preservation after (only the twenty-eight intended rows differ, the existing `crm_*` functions byte-identical), verify (every row OK), the behaviour tests (`jarvis.rls.test.ts` 30, `jarvis-actions.rls.test.ts` 39 and `jarvis-proof.rls.test.ts` 105 RLS tests, including 12 parallel calls with one confirmation id doing the work exactly once for each wrapper, the review token refused as a proof by every wrapper, and the register-organisation acknowledgement checked in SQL), rollback **refused** while the ledger had rows, rollback with the confirmation line **twice** (the proof key is gone with the table), and the migration **re-applied** (default OFF again, key not set). Result: see `docs/enginious-os/06-change-log.md` for the run and counts. **Hosted V2: not applied, not verified.**

@@ -1,6 +1,6 @@
 # JARVIS: setup (environment, pilot switches, data handling)
 
-JARVIS is the Enginious OS assistant (reference: [`enginious-os/modules/jarvis.md`](./enginious-os/modules/jarvis.md)). **It is OFF by default and nothing here has been applied to hosted V2 or Production.** This page is for the owner. Database steps are in [`jarvis-deployment.md`](./jarvis-deployment.md). What was verified: the isolated local stack with the **simulated** provider only. **No live AI provider check has been made** (see "Live provider check" below).
+JARVIS is the Enginious OS assistant (reference: [`enginious-os/modules/jarvis.md`](./enginious-os/modules/jarvis.md)). **It is OFF by default.** The database pack (`20261223000100` and the corrective `20261223000200`) has been applied on hosted Enginious HR Engine V2 and verified read-only (`jarvis-deployment.md`, "Hosted V2 result"); JARVIS is **not** enabled there, no proof key is set and nothing is applied to Production. This page is for the owner. Database steps are in [`jarvis-deployment.md`](./jarvis-deployment.md). What was verified: the isolated local stack, with the simulated provider and, once, with the real API for one fictional brief (section 5). **The hosted JARVIS workflow and pilot are unverified.**
 
 ## 1. Environment variables (server only, set in Vercel; none of them is ever sent to the browser)
 
