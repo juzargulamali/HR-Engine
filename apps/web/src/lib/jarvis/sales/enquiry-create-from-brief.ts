@@ -178,7 +178,7 @@ export const createEnquiryFromBrief: JarvisActionDefinition<CreateFromBriefInput
     }
     // ONE database call: the proof is verified inside the database first, then the ledger row and the enquiry commit together (jarvis_create_enquiry wraps the existing
     // crm_create_opportunity under this person's identity). The payload text sent is exactly the text the proof was signed over.
-    const r = await ctx.supabase.rpc("jarvis_create_enquiry", proofRpcArgs(input.proof)).abortSignal(AbortSignal.timeout(20_000));
+    const r = await ctx.supabase.rpc("jarvis_create_enquiry", proofRpcArgs(input.proofFor())).abortSignal(AbortSignal.timeout(20_000));
     if (r.error) {
       const code = (r.error as { code?: string }).code ?? "";
       // A SQLSTATE answer means the database refused and rolled back: nothing was created. Anything else (network, timeout, gateway) is an unknown outcome.

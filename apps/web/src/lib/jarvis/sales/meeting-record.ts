@@ -113,7 +113,7 @@ export const recordMeeting: JarvisActionDefinition<RecordMeetingInput, MeetingVa
   },
 
   async execute(ctx, input) {
-    const r = await ctx.supabase.rpc("jarvis_record_meeting", proofRpcArgs(input.proof)).abortSignal(AbortSignal.timeout(20_000));
+    const r = await ctx.supabase.rpc("jarvis_record_meeting", proofRpcArgs(input.proofFor())).abortSignal(AbortSignal.timeout(20_000));
     return rpcOutcome(r, "The meeting could not be recorded.");
   },
 

@@ -21,9 +21,13 @@
 --      the EXISTING function(s) under the caller's own identity. They share the internal helpers jarvis_ledger_enter / _done / _fail / _json (not callable by users).
 --  10. (confirmation boundary) jarvis_proof_key + jarvis_hmac_sha256 + jarvis_verify_proof + jarvis_set_proof_key: EVERY write wrapper first verifies, INSIDE the database,
 --      a keyed MAC (HMAC-SHA256) that only the app server can issue, over the signed-in person, the company, the action, the target, the record version, the expiry, the
---      proof id and the SHA-256 of the exact payload text. A confirmation id and hash that a caller made up are NOT proof: without a valid MAC nothing is written. The key is
---      a row only the database's own definer functions can read (set by the owner with jarvis_set_proof_key; the same value as the app's JARVIS_CONFIRMATION_SECRET).
---      With no key set every wrapper fails closed. The MAC is HMAC-SHA256 built on the built-in sha256(bytea) (no extension needed, identical on any Postgres 11+).
+--      proof id and the SHA-256 of the exact payload text. A confirmation id and hash that a caller made up are NOT proof: without a valid MAC nothing is written.
+--      TWO DISTINCT ARTEFACTS: the browser holds only a REVIEW TOKEN (keyed with a review key the database never has; domain JARVIS-REVIEW-V1), which no wrapper accepts. The
+--      database PROOF is keyed with proof_key = HMAC(secret, 'JARVIS-PROOF-KEY-V1'), is issued by the server only inside the explicit confirmation request (after it re-verified
+--      the review token, the access and the values), lives for minutes and is never returned to the browser. The database stores ONLY that derived proof key (jarvis_set_proof_key
+--      derives it from the same value as the app's JARVIS_CONFIRMATION_SECRET and stores the derived key, not the secret). With no key set every wrapper fails closed.
+--      The MAC is HMAC-SHA256 built on the built-in sha256(bytea) (no extension needed, identical on any Postgres 11+).
+--      The duplicate acknowledgement of the register-organisation wrapper is part of the SIGNED payload (no unsigned write parameter exists on any wrapper).
 --
 -- RLS: every table has RLS on. The signed-in user may read only their OWN ledger rows; nobody can write any table directly (there is no write policy);
 -- the settings, allowlist, usage and proof key tables have no read policy at all (the user learns their own access only through jarvis_my_access()).
@@ -81,8 +85,9 @@ create table if not exists jarvis_usage (
   primary key (user_id, usage_day)
 );
 
--- The confirmation proof key: ONE row, the same secret the app server holds in JARVIS_CONFIRMATION_SECRET. No row = not set = every write wrapper fails closed.
--- Nobody but the database's own definer functions can read it (no policy, no privilege for any API role); only the owner can set it (jarvis_set_proof_key).
+-- The confirmation PROOF key: ONE row holding the key DERIVED from the secret the app server holds in JARVIS_CONFIRMATION_SECRET: proof_key = HMAC-SHA256(secret, 'JARVIS-PROOF-KEY-V1'),
+-- as 64 hex characters (the column keeps its name). The root secret itself, and the app's separate review key, are never stored here. No row = not set = every write wrapper
+-- fails closed. Nobody but the database's own definer functions can read it (no policy, no privilege for any API role); only the owner can set it (jarvis_set_proof_key).
 create table if not exists jarvis_proof_key (
   id     boolean primary key default true check (id),
   secret text not null check (length(secret) >= 32),
@@ -113,8 +118,9 @@ end $$;
 -- -----------------------------------------------------------------------------
 -- THE CONFIRMATION BOUNDARY. Nothing below trusts a confirmation id or a hash that the caller supplies.
 --
--- The app server issues, at propose time, a PROOF: an HMAC-SHA256 (keyed with the secret in jarvis_proof_key, which the signed-in person can never read) over this exact text,
--- fields joined by a line feed (LF, chr(10)), in this order (format version 1):
+-- The app server issues a PROOF, SERVER-SIDE ONLY and only inside the explicit confirmation request (after it re-verified its own review token, the person's access and the
+-- exact values): an HMAC-SHA256 keyed with the proof key in jarvis_proof_key (derived from the shared secret; the signed-in person can never read it, and the review token the
+-- browser holds is made with a DIFFERENT key and domain, so it never verifies here) over this exact text, fields joined by a line feed (LF, chr(10)), in this order (format version 1):
 --     JARVIS-PROOF-V1
 --     <proof id: the confirmation id (a uuid, lower case)>
 --     <the approving person: auth.uid()>
@@ -122,7 +128,7 @@ end $$;
 --     <action id: hard-coded by each wrapper>
 --     <target: the record id, or the word new>
 --     <record version as a decimal integer, or a single hyphen when the action has no version>
---     <expiry: epoch seconds, a decimal integer>
+--     <expiry: epoch seconds, a decimal integer; short, minutes>
 --     <SHA-256 of the exact payload TEXT (UTF-8), 64 lower-case hex characters>
 -- Every write wrapper calls jarvis_verify_proof FIRST, with ITS OWN hard-coded action id and auth.uid() (never a caller-supplied person), before any lock, ledger row or
 -- business write. A proof made for another person, company, action, target, version or payload, an invented proof, an expired proof (judged by the database clock) or a
@@ -150,7 +156,9 @@ begin
 end;
 $$;
 
--- Owner-run only (see docs/jarvis-deployment.md): stores or rotates the proof key. Not security definer: whoever may run it must already own the table.
+-- Owner-run only (see docs/jarvis-deployment.md): stores or rotates the proof key. The owner passes the SAME value as the app's JARVIS_CONFIRMATION_SECRET; the function derives
+-- proof_key = HMAC-SHA256(secret, 'JARVIS-PROOF-KEY-V1') (the app derives the same key) and stores ONLY the derived key (hex): the database never holds the root secret and
+-- never derives or stores the review key. Not security definer: whoever may run it must already own the table.
 create or replace function jarvis_set_proof_key(p_secret text)
 returns void
 language plpgsql
@@ -158,7 +166,8 @@ set search_path = public
 as $$
 begin
   if p_secret is null or length(p_secret) < 32 then raise exception 'The proof key must be at least 32 characters' using errcode = '22023'; end if;
-  insert into jarvis_proof_key as k (id, secret, set_at) values (true, p_secret, now())
+  insert into jarvis_proof_key as k (id, secret, set_at)
+  values (true, encode(jarvis_hmac_sha256(convert_to(p_secret, 'UTF8'), convert_to('JARVIS-PROOF-KEY-V1', 'UTF8')), 'hex'), now())
   on conflict (id) do update set secret = excluded.secret, set_at = now();
 end;
 $$;
@@ -189,7 +198,7 @@ begin
   select secret into v_secret from jarvis_proof_key where id;
   if v_secret is null then raise exception 'JARVIS cannot save changes right now.' using errcode = 'JV004'; end if;
   v_hash := encode(sha256(convert_to(p_payload, 'UTF8')), 'hex');
-  v_expect := jarvis_hmac_sha256(convert_to(v_secret, 'UTF8'), convert_to(
+  v_expect := jarvis_hmac_sha256(decode(v_secret, 'hex'), convert_to(
     'JARVIS-PROOF-V1' || chr(10) || p_confirmation::text || chr(10) || v_user::text || chr(10) || p_company::text || chr(10) || p_action || chr(10) || p_target || chr(10)
     || coalesce(p_version::text, '-') || chr(10) || p_expires::text || chr(10) || v_hash, 'UTF8'));
   v_given := decode(p_mac, 'hex');
@@ -444,12 +453,16 @@ $$;
 --   * The organisation is created by the EXISTING crm_create_organisation_profile (the Clients & Agencies create path), with this company's account profile and NO owner,
 --     lead source or exhibition: JARVIS sets none of them. Its own rule applies (a Sales grant); this wrapper adds no privilege.
 --   * At least one role is required here (the existing function allows none; JARVIS asks the person to confirm the exact type).
---   * A same-name or same-website organisation that still exists blocks the save unless the person's review named it (p_ack, a list of organisation ids): the same rule as the card.
---     p_ack is NOT part of the signed payload: it can only RELAX this duplicate guard for the very organisation the proof approved, which the signed payload fixes.
--- p_payload: {company_id, name, roles[], country_code, website, place, note}. Returns the ledger result: {status, result_id (the organisation), reference (its name), extra{company_id}, replayed, ...}.
+--   * THE DUPLICATE ACKNOWLEDGEMENT IS SIGNED. The person's "this is a different organisation" ticks are the ids in the payload's acknowledged_org_ids, part of the exact payload
+--     text the proof's hash covers; the wrapper reads the acknowledgement from the VERIFIED payload and from nowhere else (there is no unsigned parameter). At execution time the
+--     DATABASE finds the organisations that now have the same name or website (crm_import_candidates) and REQUIRES the acknowledged set to be EXACTLY that set: an omitted,
+--     changed or unrelated id, or a duplicate that appeared after the review, refuses the call (JV001) and writes NOTHING (no organisation, no ledger row). The server checks the
+--     same before it issues the proof; this check is the authority. A repeat of a saved confirmation returns the ORIGINAL result before this check (it would find its own organisation).
+-- p_payload: {acknowledged_org_ids[], company_id, name, roles[], country_code, website, place, note}. Returns the ledger result: {status, result_id (the organisation), reference (its name), extra{company_id}, replayed, ...}.
 -- -----------------------------------------------------------------------------
 drop function if exists jarvis_register_organisation(uuid, text, jsonb);
-create or replace function jarvis_register_organisation(p_confirmation uuid, p_company uuid, p_target text, p_version integer, p_expires bigint, p_mac text, p_payload text, p_ack jsonb default '[]'::jsonb)
+drop function if exists jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text, jsonb);
+create or replace function jarvis_register_organisation(p_confirmation uuid, p_company uuid, p_target text, p_version integer, p_expires bigint, p_mac text, p_payload text)
 returns jsonb
 language plpgsql security definer
 set search_path = public
@@ -464,6 +477,7 @@ declare
   v_msg text;
   v_state text;
   v_ack uuid[];
+  v_required uuid[];
 begin
   v_hash := jarvis_verify_proof('jarvis.sales.organisation.register', p_confirmation, p_company, p_target, p_version, p_expires, p_mac, p_payload);
   if p_target <> 'new' or p_version is not null then raise exception 'This confirmation is not valid. Review the details again.' using errcode = 'JV002'; end if;
@@ -477,16 +491,21 @@ begin
   end if;
   select array_agg(x) into v_roles from jsonb_array_elements_text(v_args->'roles') x;
   if not (v_roles <@ array['agency', 'direct', 'client', 'technology']::text[]) then raise exception 'One of the roles is not allowed' using errcode = '22023'; end if;
-  if jsonb_typeof(coalesce(p_ack, '[]'::jsonb)) <> 'array' then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
-  select coalesce(array_agg(x::uuid), '{}') into v_ack from jsonb_array_elements_text(coalesce(p_ack, '[]'::jsonb)) x;
+  -- The acknowledgement comes ONLY from the verified payload (a missing or malformed list is an incomplete confirmation).
+  if jsonb_typeof(v_args->'acknowledged_org_ids') is distinct from 'array' then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
+  select coalesce(array_agg(distinct x::uuid), '{}') into v_ack from jsonb_array_elements_text(v_args->'acknowledged_org_ids') x;
 
   v_replay := jarvis_ledger_enter(p_confirmation, v_hash, 'jarvis.sales.organisation.register', p_company, 'new');
   if v_replay is not null then return v_replay; end if;
 
+  -- The duplicate rule, decided by the database at execution time and OUTSIDE the sub-block below: a refusal rolls the whole call back, ledger row included, so nothing at all is
+  -- written. The signed acknowledgement must cover EVERY organisation that now has the same name or website, and name no other.
+  select coalesce(array_agg(distinct c.org_id), '{}') into v_required from crm_import_candidates(v_name, nullif(btrim(v_args->>'website'), '')) c;
+  if not (v_required <@ v_ack and v_ack <@ v_required) then
+    raise exception 'A similar organisation (same name or website) exists, and the acknowledgement does not match it. Review the details again.' using errcode = 'JV001';
+  end if;
+
   begin
-    if exists (select 1 from crm_import_candidates(v_name, nullif(btrim(v_args->>'website'), '')) c where not (c.org_id = any (v_ack))) then
-      raise exception 'A similar organisation (same name or website) already exists. Review the details again.' using errcode = 'JV001';
-    end if;
     v_id := crm_create_organisation_profile(
       p_name => v_name,
       p_roles => v_roles,
@@ -690,11 +709,11 @@ $$;
 
 -- Grants. Users may call the access check, the usage counter and the five write wrappers (each of which verifies the proof itself). Everything else is internal.
 revoke all on function jarvis_my_access(uuid), jarvis_usage_take(integer),
-  jarvis_create_enquiry(uuid, uuid, text, integer, bigint, text, text), jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text, jsonb),
+  jarvis_create_enquiry(uuid, uuid, text, integer, bigint, text, text), jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text),
   jarvis_update_enquiry(uuid, uuid, text, integer, bigint, text, text), jarvis_change_stage(uuid, uuid, text, integer, bigint, text, text), jarvis_record_meeting(uuid, uuid, text, integer, bigint, text, text)
   from public, anon;
 grant execute on function jarvis_my_access(uuid), jarvis_usage_take(integer),
-  jarvis_create_enquiry(uuid, uuid, text, integer, bigint, text, text), jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text, jsonb),
+  jarvis_create_enquiry(uuid, uuid, text, integer, bigint, text, text), jarvis_register_organisation(uuid, uuid, text, integer, bigint, text, text),
   jarvis_update_enquiry(uuid, uuid, text, integer, bigint, text, text), jarvis_change_stage(uuid, uuid, text, integer, bigint, text, text), jarvis_record_meeting(uuid, uuid, text, integer, bigint, text, text)
   to authenticated;
 -- The internal helpers and the proof machinery are NOT callable by anyone through the API (the wrappers above run as their owner and may call them). The key setter is for the

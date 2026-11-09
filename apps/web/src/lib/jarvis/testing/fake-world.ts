@@ -62,7 +62,7 @@ export interface World {
   followUps: { id: string; opportunity_id: string; title: string; due_at: string; kind: string; assigned_to: string }[];
   meetingFailAfterActivity: boolean;
   counter: number;
-  /** The confirmation key the fake database holds (jarvis_proof_key). null = not set: every write wrapper fails closed. */
+  /** The secret the owner gave the fake database with jarvis_set_proof_key (the database stores and uses only the DERIVED proof key). null = not set: every write wrapper fails closed. */
   proofKey: string | null;
   /** The fake database's clock. */
   dbNow: () => Date;
@@ -153,7 +153,8 @@ function proofGate(w: World, user: string, action: string, args: Record<string, 
   }
   const hash = createHash("sha256").update(text, "utf8").digest("hex");
   const canonical = ["JARVIS-PROOF-V1", args.p_confirmation, user, args.p_company, action, args.p_target, args.p_version == null ? "-" : String(args.p_version), String(args.p_expires), hash].join("\n");
-  const expected = createHmac("sha256", w.proofKey).update(canonical, "utf8").digest();
+  // The database holds only the derived PROOF key (HMAC(secret, "JARVIS-PROOF-KEY-V1")); it never has the review key.
+  const expected = createHmac("sha256", createHmac("sha256", w.proofKey).update("JARVIS-PROOF-KEY-V1", "utf8").digest()).update(canonical, "utf8").digest();
   const given = Buffer.from(args.p_mac, "hex");
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) return no("This confirmation is not valid. Review the details again.", "JV002");
   if (Math.floor(w.dbNow().getTime() / 1000) >= args.p_expires) return no("This review has expired. Review the details again.", "JV003");
@@ -297,7 +298,9 @@ function rpc(w: World, user: string, name: string, args: Record<string, unknown>
       case "jarvis_register_organisation": {
         const pg = proofGate(w, user, "jarvis.sales.organisation.register", args);
         if ("refusal" in pg) return pg.refusal;
-        const p = { ...(pg.payload as { company_id: string; name: string; roles: string[]; country_code: string | null; website: string | null; place: string | null; note: string | null }), ack_ids: (args.p_ack as string[] | undefined) ?? [] };
+        // The acknowledgement is read ONLY from the verified payload (the wrapper has no other parameter).
+        const p = pg.payload as { company_id: string; name: string; roles: string[]; country_code: string | null; website: string | null; place: string | null; note: string | null; acknowledged_org_ids?: string[] };
+        if (!Array.isArray(p.acknowledged_org_ids)) return { data: null, error: { message: "The confirmation is incomplete", code: "22023" } };
         const gate = gateWrite(w, user, p.company_id);
         if (gate) return gate;
         const cid = args.p_confirmation as string;
@@ -307,14 +310,14 @@ function rpc(w: World, user: string, name: string, args: Record<string, unknown>
         if (w.createMode === "network") return { data: null, error: { message: "TypeError: fetch failed" } };
         if (w.createMode === "refuse") return { data: null, error: { message: "No CRM access", code: "42501" } };
         const hit = w.orgs.filter((o) => !o.archived_at && (o.name_key === key(p.name) || (domainOf(p.website) && o.website_domain === domainOf(p.website))));
-        if (hit.some((o) => !(p.ack_ids ?? []).includes(o.id))) {
-          const row = ledgerRow(w, user, cid, p.company_id, "jarvis.sales.organisation.register", "new", pg.hash, { status: "failed", error_code: "JV001", error_message: "A similar organisation (same name or website) already exists. Review the details again." });
-          return { data: json(row, false), error: null };
-        }
+        // The database requires the signed acknowledgement to be EXACTLY the matching set; a refusal writes nothing (not even a ledger row).
+        const ids = new Set(p.acknowledged_org_ids);
+        if (hit.length !== ids.size || hit.some((o) => !ids.has(o.id))) return { data: null, error: { message: "A similar organisation (same name or website) exists, and the acknowledgement does not match it. Review the details again.", code: "JV001" } };
         const org = mkOrg(p.name, p.roles, p.place, p.website);
         org.country_code = p.country_code;
         w.orgs.push(org);
-        w.registered.push({ ...p });
+        const { acknowledged_org_ids: _ack, ...registeredValues } = p; void _ack;
+        w.registered.push({ ...registeredValues });
         const row = ledgerRow(w, user, cid, p.company_id, "jarvis.sales.organisation.register", "new", pg.hash, { status: "done", result_id: org.id, result_ref: p.name, result_extra: { company_id: p.company_id } });
         if (w.createMode === "lost") return { data: null, error: { message: "TypeError: fetch failed" } };
         return { data: json(row, false), error: null };
@@ -333,7 +336,7 @@ export function fakeSupabase(w: World, user: string): SupabaseClient {
 export const SECRET = "x".repeat(40);
 export const testConfig = (over: Partial<JarvisConfig> = {}): JarvisConfig => ({
   disabled: false, providerKind: "simulated", providerNote: null, apiKey: null, model: "test-model", maxInputChars: 6000, maxOutputTokens: 1200, timeoutMs: 20000, dailyLimit: 30,
-  confirmationTtlMs: 15 * 60_000, confirmationSecret: SECRET, productionLike: false, ...over,
+  confirmationTtlMs: 15 * 60_000, proofTtlMs: 120_000, confirmationSecret: SECRET, productionLike: false, ...over,
 });
 
 export function fakeDeps(w: World, over: { config?: Partial<JarvisConfig>; provider?: JarvisProvider | null; now?: () => Date } = {}): JarvisDeps {
@@ -354,12 +357,13 @@ export const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
 /**
  * Wrapper arguments carrying a REAL proof (HMAC over the documented text, plain Node crypto, independent of the app's signer), for tests that call the fake database directly as
- * "the person with the API key". `key` defaults to the key the fake database holds; pass another to build a proof the database cannot accept.
+ * "the person with the API key". `key` is the SECRET the proof key is derived from (default: the one the fake database was given); pass another to build a proof the database cannot accept.
  */
 export function proofArgs(user: string, o: { action: string; company: string; target: string; version?: number | null; payload: unknown; jti?: string; exp?: number; key?: string }) {
   const text = typeof o.payload === "string" ? o.payload : JSON.stringify(o.payload);
   const jti = o.jti ?? randomUUID();
   const exp = o.exp ?? Math.floor(Date.now() / 1000) + 900;
   const canonical = ["JARVIS-PROOF-V1", jti, user, o.company, o.action, o.target, o.version == null ? "-" : String(o.version), String(exp), createHash("sha256").update(text, "utf8").digest("hex")].join("\n");
-  return { p_confirmation: jti, p_company: o.company, p_target: o.target, p_version: o.version ?? null, p_expires: exp, p_mac: createHmac("sha256", o.key ?? SECRET).update(canonical, "utf8").digest("hex"), p_payload: text };
+  const proofKey = createHmac("sha256", o.key ?? SECRET).update("JARVIS-PROOF-KEY-V1", "utf8").digest();
+  return { p_confirmation: jti, p_company: o.company, p_target: o.target, p_version: o.version ?? null, p_expires: exp, p_mac: createHmac("sha256", proofKey).update(canonical, "utf8").digest("hex"), p_payload: text };
 }

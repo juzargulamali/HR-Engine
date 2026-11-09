@@ -91,7 +91,7 @@ async function card(ctx: JarvisContext, stage: "search" | "details", query: stri
 /**
  * Register a client or agency. It searches the organisations the person may see (their own session), lets them use an existing one, and only on a SEPARATE details step (the
  * exact type and fields) issues a confirmation to create a NEW one through the existing Clients & Agencies create path, inside the ledger-backed atomic wrapper
- * (jarvis_register_organisation): a retry never creates a second organisation. Same-name or same-website organisations must be named as "different" on the review.
+ * (jarvis_register_organisation): a retry never creates a second organisation. Same-name or same-website organisations must be named as "different" on the review: the acknowledgement is signed into the database proof and checked again by the database.
  */
 export const registerOrganisation: JarvisActionDefinition<RegisterOrgInput, OrgValues, OrgRegisterCard, GenericResult> = {
   id: REGISTER_ORG_ID,
@@ -106,7 +106,7 @@ export const registerOrganisation: JarvisActionDefinition<RegisterOrgInput, OrgV
   valuesSchema: orgValuesSchema,
   describe: (v) => `Register the organisation "${v.name}"`,
 
-  /** Exactly what jarvis_register_organisation receives as its signed payload. (The acknowledged same-name matches travel separately: see the wrapper's comment.) */
+  /** What the person REVIEWED (the review token binds its hash). At confirmation the server adds `acknowledged_org_ids` (the verified acknowledgement) to it before signing the database proof. */
   wirePayload: (v) => ({
     company_id: v.companyId, name: v.name, roles: v.roles, country_code: cleanText(v.country) ? normaliseCountry(v.country) : null, website: normaliseWebsite(v.website).website,
     place: cleanText(v.place), note: cleanText(v.note),
@@ -129,16 +129,25 @@ export const registerOrganisation: JarvisActionDefinition<RegisterOrgInput, OrgV
     const v = input.values;
     const known = await ctx.supabase.from("jarvis_action_ledger").select("status").eq("confirmation_id", input.confirmationId).maybeSingle();
     if (known.error) return { kind: "ambiguous" };
-    const ack = Array.isArray(input.acknowledgements.matchIds) ? (input.acknowledgements.matchIds as unknown[]).filter((x): x is string => typeof x === "string") : [];
+    const given = input.acknowledgements.matchIds;
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (given !== undefined && (!Array.isArray(given) || !given.every((x) => typeof x === "string" && UUID.test(x)))) return { kind: "refused", code: "needs_review", message: "The acknowledgement is not valid. Review the details again." };
+    const submitted = [...new Set(((given ?? []) as string[]).map((x) => x.toLowerCase()))].sort();
+    let ack = submitted;
     if (!known.data) {
-      // A same-name or same-website organisation must have been named as "different" on the card; a failed check fails closed. (A repeat of a saved confirmation skips this: it would
-      // find the very organisation that confirmation created.)
+      // The acknowledgement the person gave must be EXACTLY the organisations that now have the same name or website: omitted, changed or extra = review again. (The database makes the
+      // same comparison, as the authority, against what exists at execution time; this earlier check only saves a round trip and fails closed.) A repeat of a saved confirmation skips
+      // this: it would find the very organisation that confirmation created, and the database returns the original result.
       let matches: OrgMatchView[];
       try { matches = await findOrganisationMatches(ctx.supabase, v.name, normaliseWebsite(v.website).website); }
       catch { return { kind: "refused", code: "needs_review", message: "Could not check for the same organisation just now. Press Review changes to try again." }; }
-      if (matches.some((m) => m.binding && !ack.includes(m.id))) return { kind: "refused", code: "needs_review", message: "An organisation with the same name or website now exists. Review the details again and say whether it is a different one." };
+      const required = matches.filter((m) => m.binding).map((m) => m.id.toLowerCase()).sort();
+      if (required.some((id) => !submitted.includes(id))) return { kind: "refused", code: "needs_review", message: "An organisation with the same name or website now exists. Review the details again and say whether it is a different one." };
+      if (submitted.some((id) => !required.includes(id))) return { kind: "refused", code: "needs_review", message: "The organisations you marked as different no longer match this review. Review the details again." };
+      ack = required;
     }
-    const r = await ctx.supabase.rpc("jarvis_register_organisation", { ...proofRpcArgs(input.proof), p_ack: ack.filter((x) => /^[0-9a-f-]{36}$/i.test(x)) }).abortSignal(AbortSignal.timeout(20_000));
+    // Only now, after every recheck, is the database proof issued. The acknowledgement is part of the SIGNED payload text (the wrapper reads it from there and nowhere else).
+    const r = await ctx.supabase.rpc("jarvis_register_organisation", proofRpcArgs(input.proofFor({ acknowledged_org_ids: ack }))).abortSignal(AbortSignal.timeout(20_000));
     return rpcOutcome(r, "The organisation could not be registered.");
   },
 

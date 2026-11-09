@@ -7,12 +7,15 @@ import "server-only";
  *   ANTHROPIC_API_KEY                 the provider key (server only; never logged, never sent to the browser). Missing = the assistant is unavailable
  *   JARVIS_MODEL                      default claude-sonnet-5-5 (a product setting: change it without a code release)
  *   JARVIS_PROVIDER                   anthropic | simulated   (simulated is for tests and local runs ONLY and is refused in production, see simulatedAllowed)
- *   JARVIS_CONFIRMATION_SECRET        at least 32 characters; signs the confirmation tokens. REQUIRED in production (JARVIS refuses to operate without it)
+ *   JARVIS_CONFIRMATION_SECRET        at least 32 characters; the ONE root secret. Two keys are derived from it: the review key (signs the review tokens the browser holds; only this
+ *                                     server knows it) and the proof key (signs the short-lived database proofs; the database holds the same derived key, set with
+ *                                     jarvis_set_proof_key from this same value). REQUIRED in production (JARVIS refuses to operate without it)
  *   JARVIS_MAX_INPUT_CHARS            default 6000     the longest brief accepted
  *   JARVIS_MAX_OUTPUT_TOKENS          default 1200     the provider's output cap
  *   JARVIS_TIMEOUT_MS                 default 20000    the provider call limit
  *   JARVIS_DAILY_LIMIT_PER_USER       default 30       provider requests per person per Dubai day (counted in the database)
- *   JARVIS_CONFIRMATION_TTL_MINUTES   default 15       how long a reviewed card can be confirmed
+ *   JARVIS_CONFIRMATION_TTL_MINUTES   default 15       how long a reviewed card can be confirmed (the review token's life)
+ *   JARVIS_PROOF_TTL_SECONDS          default 120      how long the database proof issued INSIDE a confirmation request is valid (30 to 600)
  *   JARVIS_ALLOW_SIMULATED_ON_LOCAL_STACK=1   lets the isolated local test stack (a production build against a loopback database, never on Vercel) use the simulated provider
  */
 export const DEFAULT_JARVIS_MODEL = "claude-sonnet-5-5";
@@ -30,6 +33,8 @@ export interface JarvisConfig {
   timeoutMs: number;
   dailyLimit: number;
   confirmationTtlMs: number;
+  /** Life of the database proof issued inside a confirmation request (short: it is used in the same request). */
+  proofTtlMs: number;
   /** null = not configured (in production-like environments the assistant then refuses to operate). */
   confirmationSecret: string | null;
   productionLike: boolean;
@@ -85,6 +90,7 @@ export function readJarvisConfig(env: Env = process.env): JarvisConfig {
     timeoutMs: clampInt(env.JARVIS_TIMEOUT_MS, 20000, 1000, 60000),
     dailyLimit: clampInt(env.JARVIS_DAILY_LIMIT_PER_USER, 30, 1, 500),
     confirmationTtlMs: clampInt(env.JARVIS_CONFIRMATION_TTL_MINUTES, 15, 1, 60) * 60_000,
+    proofTtlMs: clampInt(env.JARVIS_PROOF_TTL_SECONDS, 120, 30, 600) * 1000,
     confirmationSecret,
     productionLike,
   };

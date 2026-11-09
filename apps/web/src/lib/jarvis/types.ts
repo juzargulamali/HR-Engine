@@ -39,13 +39,14 @@ export interface JarvisProposal<TValues, TCard> {
 export interface JarvisExecuteInput<TValues> {
   confirmationId: string;
   /**
-   * The server-issued proof of exactly this action, as the database wrapper takes it: the signed company, target, version and expiry, the MAC and the exact payload text that was signed.
-   * Pass it to the wrapper with `proofRpcArgs(input.proof)`; nothing here is invented by the caller of `execute`. (`proof.payload` is `wirePayload(values)` as canonical JSON.)
+   * Issues a FRESH database proof for this confirmation (same confirmation id, short expiry, the signed company, target and version) over the exact payload text. Call it ONLY after the
+   * action's own last rechecks, and pass the result straight to the wrapper with `proofRpcArgs(...)`. `extra` is added to the payload (it must not repeat a reviewed key): it is how a
+   * server-verified acknowledgement becomes part of the signed text. The proof is never returned, logged or stored.
    */
-  proof: ProofCall;
+  proofFor: (extra?: Record<string, unknown>) => ProofCall;
   values: TValues;
   target: JarvisTarget;
-  /** Extra, non-hashed acknowledgements the person gave on the card (e.g. "not the same enquiry"). */
+  /** What the person ticked on the card (e.g. "this is a different enquiry"). NOT part of the review token: the action rechecks it against the database and binds what it accepts into the proof's payload. */
   acknowledgements: Record<string, unknown>;
 }
 

@@ -8,7 +8,7 @@ import { jarvisLog } from "./log";
 import type { HelpView, JarvisRefusal, JarvisRefusalCode, LauncherState, StatusResult } from "./protocol";
 import type { JarvisProvider } from "./provider/types";
 import { listJarvisActions, resolveJarvisAction } from "./registry";
-import { issueProof, payloadHash, verifyProof, type ProofCall } from "./token";
+import { issueDbProof, issueReview, payloadHash, verifyReview, type ProofCall } from "./token";
 import { JarvisRefusalError, type AnyJarvisAction, type JarvisContext, type JarvisModuleId, type JarvisTarget } from "./types";
 
 /** Everything the dispatcher needs from the outside world, so tests can run it with fakes and production wires the signed-in person's session. */
@@ -94,8 +94,9 @@ export function createDispatcher(deps: JarvisDeps) {
       const p = await action.propose(auth.ctx, parsed.data);
       let confirmation: { id: string; token: string; expiresAt: string } | null = null;
       if (p.valid && action.execute) {
-        // The PROOF: a keyed MAC over the person, company, action, target, version, expiry, proof id and the SHA-256 of the exact payload text the database wrapper will receive.
-        // The same MAC is verified inside the database before anything is written, so it cannot be invented or altered by the person holding it.
+        // The REVIEW TOKEN: a MAC (review key, held only by this server) over the person, company, action, target, version, expiry, confirmation id and the SHA-256 of the exact reviewed
+        // values. It is what the browser holds. It is NOT a database proof and cannot be made into one: the database never knows the review key, and no wrapper accepts this domain.
+        // The database proof is issued later, inside the confirmation request, only after this token, the access and the values have been verified again.
         const wire = action.wirePayload ? action.wirePayload(p.values, auth.ctx) : null;
         if (wire !== null && wire !== undefined) {
           const secret = auth.ctx.config.confirmationSecret!;
@@ -103,7 +104,7 @@ export function createDispatcher(deps: JarvisDeps) {
           const cid = deps.newId().toLowerCase();
           const tgt = p.target.kind === "new" ? "new" : p.target.id.toLowerCase();
           const ver = p.target.kind === "record" ? p.target.version : null;
-          const token = issueProof({ cid, uid: auth.ctx.userId.toLowerCase(), co: auth.ctx.companyId.toLowerCase(), act: action.id, tgt, ver, exp, ph: payloadHash(canonicalJson(wire)) }, secret);
+          const token = issueReview({ cid, uid: auth.ctx.userId.toLowerCase(), co: auth.ctx.companyId.toLowerCase(), act: action.id, tgt, ver, exp, ph: payloadHash(canonicalJson(wire)) }, secret);
           confirmation = { id: cid, token, expiresAt: new Date(exp * 1000).toISOString() };
         }
       }
@@ -124,7 +125,7 @@ export function createDispatcher(deps: JarvisDeps) {
     const auth = await authorize(action, req.companyId, "execute");
     if (!auth.ok) return auth;
     const { ctx } = auth;
-    const v = verifyProof(req.token, ctx.config.confirmationSecret!, ctx.now);
+    const v = verifyReview(req.token, ctx.config.confirmationSecret!, ctx.now);
     if (!v.ok) {
       jarvisLog({ event: "refused", actionId: action.id, code: `token_${v.reason}` });
       return v.reason === "expired" ? refuse("token_expired", "This review has expired. Review the details again before creating anything.") : refuse("token_invalid", "This confirmation is not valid. Review the details again.");
@@ -134,19 +135,25 @@ export function createDispatcher(deps: JarvisDeps) {
     if (p.co !== req.companyId.toLowerCase()) return refuse("company_changed", "The company changed since you reviewed this. Review the details again.");
     const values = action.valuesSchema.safeParse(req.values);
     if (!values.success) return refuse("invalid_input", "The details are not valid. Review them again.");
-    // The payload text is rebuilt from the (possibly edited) values and must be the one the proof was issued for: an edited value needs a NEW review and a NEW proof.
+    // The payload text is rebuilt from the (possibly edited) values and must be the one the review token was issued for: an edited value needs a NEW proposal and a NEW review token.
     const wire = action.wirePayload ? action.wirePayload(values.data, ctx) : null;
     if (wire === null || wire === undefined) return refuse("invalid_input", "The details are not valid. Review them again.");
     const payload = canonicalJson(wire);
     if (payloadHash(payload) !== p.ph) { jarvisLog({ event: "refused", actionId: action.id, code: "values_changed" }); return { ...refuse("values_changed", "The details changed after the review. Press Review changes to check them again before creating anything."), confirmationId: p.cid }; }
     if ((values.data as { companyId?: string }).companyId !== undefined && (values.data as { companyId?: string }).companyId!.toLowerCase() !== p.co) return refuse("company_changed", "The company changed since you reviewed this. Review the details again.");
     const target: JarvisTarget = p.tgt === "new" ? { kind: "new" } : { kind: "record", id: p.tgt, version: p.ver };
-    const proof: ProofCall = { confirmationId: p.cid, company: p.co, target: p.tgt, version: p.ver, expires: p.exp, mac: v.mac, payload };
+    // The DATABASE PROOF, issued only now (token, access and values are verified; the action rechecks its own state before it asks for it): same confirmation id as the review token,
+    // a fresh short expiry, the exact payload text (plus any server-verified acknowledgement). It goes straight into the wrapper call and is never returned, logged or stored.
+    const proofFor = (extra?: Record<string, unknown>): ProofCall => {
+      const body = extra ? { ...(wire as Record<string, unknown>), ...extra } : wire;
+      if (extra && Object.keys(extra).some((k) => Object.prototype.hasOwnProperty.call(wire as object, k))) throw new JarvisRefusalError("invalid_input", "The details are not valid. Review them again.");
+      return issueDbProof({ cid: p.cid, uid: ctx.userId.toLowerCase(), co: p.co, act: action.id, tgt: p.tgt, ver: p.ver, exp: Math.floor(deps.now().getTime() / 1000) + Math.floor(ctx.config.proofTtlMs / 1000), payload: canonicalJson(body) }, ctx.config.confirmationSecret!);
+    };
     const own = action.authorize ? await action.authorize(ctx, values.data, target, { confirmationId: p.cid }) : ({ ok: true } as const);
     if (!own.ok) { jarvisLog({ event: "refused", actionId: action.id, code: own.code ?? "not_permitted" }); return { ...refuse(own.code ?? "not_permitted", own.message), confirmationId: p.cid }; }
     const started = Date.now();
     try {
-      const out = await action.execute(ctx, { confirmationId: p.cid, proof, values: values.data, target, acknowledgements: req.acknowledgements ?? {} });
+      const out = await action.execute(ctx, { confirmationId: p.cid, proofFor, values: values.data, target, acknowledgements: req.acknowledgements ?? {} });
       if (out.kind === "ambiguous") { jarvisLog({ event: "execute", actionId: action.id, outcome: "ambiguous", ms: Date.now() - started }); return { ...refuse("ambiguous", "We did not get an answer to the save. Checking the original result: nothing will be created twice."), confirmationId: p.cid }; }
       if (out.kind === "refused") { jarvisLog({ event: "execute", actionId: action.id, outcome: out.code, ms: Date.now() - started }); return { ...refuse(out.code, out.message), confirmationId: p.cid }; }
       if (action.verify) {

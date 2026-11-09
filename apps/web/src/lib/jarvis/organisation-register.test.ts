@@ -94,8 +94,9 @@ describe("execute: only the explicit confirmation registers, once", () => {
     if (!c.ok) throw new Error();
     expect(c.href).toMatch(new RegExp(`^/sales/accounts/[0-9a-f-]{36}\\?company=${ID.co1}$`));
     expect(calls()).toHaveLength(1);
-    expect(calls()[0]!.args).toMatchObject({ p_confirmation: r.id, p_company: ID.co1, p_target: "new", p_version: null, p_ack: [] });
-    expect(JSON.parse(calls()[0]!.args.p_payload as string)).toMatchObject({ company_id: ID.co1, name: "Fictional Lantern Events", roles: ["agency"], country_code: "AE", website: "https://www.lanternevents.example/about", place: "Dubai" });
+    expect(calls()[0]!.args).toMatchObject({ p_confirmation: r.id, p_company: ID.co1, p_target: "new", p_version: null });
+    expect(Object.keys(calls()[0]!.args)).not.toContain("p_ack");
+    expect(JSON.parse(calls()[0]!.args.p_payload as string)).toMatchObject({ acknowledged_org_ids: [], company_id: ID.co1, name: "Fictional Lantern Events", roles: ["agency"], country_code: "AE", website: "https://www.lanternevents.example/about", place: "Dubai" });
     expect(w.registered).toHaveLength(1);
     expect(w.orgs.filter((o) => o.name === "Fictional Lantern Events")).toHaveLength(1);
     // JARVIS sets no owner, lead source, exhibition or contacts
@@ -122,7 +123,14 @@ describe("execute: only the explicit confirmation registers, once", () => {
     expect(calls()).toHaveLength(0);
     expect(refusal(await confirm(r, { matchIds: ["00000000-0000-4000-8000-0000000000aa"] })).code).toBe("needs_review");
     expect(calls()).toHaveLength(0);
+    // an unrelated id ADDED to the correct one is refused too: the acknowledgement must be exactly the matches
+    expect(refusal(await confirm(r, { matchIds: [twin.id, "00000000-0000-4000-8000-0000000000aa"] })).code).toBe("needs_review");
+    expect(refusal(await confirm(r, { matchIds: ["not-a-uuid"] })).code).toBe("needs_review");
+    expect(calls()).toHaveLength(0);
     expect(await confirm(r, { matchIds: [twin.id] })).toMatchObject({ ok: true });
+    // the acknowledgement travelled INSIDE the signed payload text, nowhere else
+    expect(JSON.parse(calls()[0]!.args.p_payload as string).acknowledged_org_ids).toEqual([twin.id]);
+    expect(Object.keys(calls()[0]!.args).sort()).toEqual(["p_company", "p_confirmation", "p_expires", "p_mac", "p_payload", "p_target", "p_version"]);
     expect(w.orgs.filter((o) => o.name === "Fictional Lantern Events")).toHaveLength(2);
   });
   it("tampered values (name, type, country, website, company) are refused with nothing registered; unknown keys are dropped", async () => {

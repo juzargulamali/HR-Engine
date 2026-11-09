@@ -108,7 +108,7 @@ export const changeStage: JarvisActionDefinition<ChangeStageInput, StageValues, 
 
   async execute(ctx, input) {
     if (input.target.kind !== "record" || input.target.version === null) return { kind: "refused", code: "needs_review", message: "This review is not bound to a version of the enquiry. Review the details again." };
-    const r = await ctx.supabase.rpc("jarvis_change_stage", proofRpcArgs(input.proof)).abortSignal(AbortSignal.timeout(20_000));
+    const r = await ctx.supabase.rpc("jarvis_change_stage", proofRpcArgs(input.proofFor())).abortSignal(AbortSignal.timeout(20_000));
     return rpcOutcome(r, "The stage could not be changed.");
   },
 
