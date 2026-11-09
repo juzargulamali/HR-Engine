@@ -103,7 +103,7 @@ export type StatusResult =
   | { ok: true; state: "not_recorded" }
   | JarvisRefusal;
 
-export interface LauncherState { available: boolean; writes: boolean; companies: { id: string; name: string }[] }
+export interface LauncherState { available: boolean; writes: boolean; companies: { id: string; name: string }[]; maxInputChars: number }
 
 export interface ContextView {
   company: { id: string; name: string } | null;

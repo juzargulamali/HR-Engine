@@ -152,11 +152,17 @@ export const createEnquiryFromBrief: JarvisActionDefinition<CreateFromBriefInput
 
   async execute(ctx, input) {
     const v = input.values;
-    // A likely duplicate must have been acknowledged on the card (by id); a failed check fails closed.
-    const dup = await findDuplicateEnquiries(ctx.supabase, v);
-    if (!dup.ok) return { kind: "refused", code: "needs_review", message: "Could not check for similar enquiries just now. Press Review changes to try again." };
-    const acknowledged = Array.isArray(input.acknowledgements.duplicateIds) ? (input.acknowledgements.duplicateIds as unknown[]).filter((x): x is string => typeof x === "string") : [];
-    if (dup.matches.some((m) => m.level === "likely" && !acknowledged.includes(m.id))) return { kind: "refused", code: "needs_review", message: "A similar enquiry now exists. Review the details again and say whether it is the same one." };
+    // A repeat of a confirmation the ledger already knows (double click, retry after a timeout, restart) goes straight to the database, which returns the ORIGINAL result:
+    // re-running the duplicate check there would find the very enquiry this confirmation created and wrongly refuse the repeat.
+    const known = await ctx.supabase.from("jarvis_action_ledger").select("status").eq("confirmation_id", input.confirmationId).maybeSingle();
+    if (known.error) return { kind: "ambiguous" };
+    if (!known.data) {
+      // A likely duplicate must have been acknowledged on the card (by id); a failed check fails closed.
+      const dup = await findDuplicateEnquiries(ctx.supabase, v);
+      if (!dup.ok) return { kind: "refused", code: "needs_review", message: "Could not check for similar enquiries just now. Press Review changes to try again." };
+      const acknowledged = Array.isArray(input.acknowledgements.duplicateIds) ? (input.acknowledgements.duplicateIds as unknown[]).filter((x): x is string => typeof x === "string") : [];
+      if (dup.matches.some((m) => m.level === "likely" && !acknowledged.includes(m.id))) return { kind: "refused", code: "needs_review", message: "A similar enquiry now exists. Review the details again and say whether it is the same one." };
+    }
     const due = dubaiDateTimeToIso(v.nextDate, v.nextTime);
     if (!due) return { kind: "refused", code: "invalid_input", message: "The next action needs a valid date and time." };
     const args = {

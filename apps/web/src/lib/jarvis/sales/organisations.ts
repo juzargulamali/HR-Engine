@@ -34,7 +34,7 @@ export async function lookupOrganisation(supabase: SupabaseClient, f: OrgField, 
   if (!name) return empty(f, null);
   const key = organisationNameKey(name);
   const rows = await candidates(supabase, name);
-  const matches = rows.filter((o) => o.name_key === key || (key.length >= 5 && o.name_key.includes(key)) || (o.name_key.length >= 5 && key.includes(o.name_key)));
+  const matches = rows.filter((o) => o.name_key === key || (key.length >= 4 && o.name_key.includes(key)) || (o.name_key.length >= 5 && key.includes(o.name_key)));
   const roleOk = matches.filter((o) => hasRoleFor(o, field(f)));
   const exact = roleOk.filter((o) => o.name_key === key);
   const base = empty(f, name);

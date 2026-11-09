@@ -177,21 +177,26 @@ export function createDispatcher(deps: JarvisDeps) {
     };
   }
 
-  /** The interface asks this to decide whether to show the launcher at all. Hiding the launcher is NOT access control: every call above checks again. */
-  async function availability(): Promise<LauncherState> {
-    const none: LauncherState = { available: false, writes: false, companies: [] };
+  /**
+   * The interface asks this to decide whether to show the launcher at all. Hiding the launcher is NOT access control: every call above checks again.
+   * `knownUserId` is the layout's own authenticated session (saves a second sign-in round trip on every page); it only decides visibility.
+   */
+  async function availability(knownUserId?: string): Promise<LauncherState> {
+    const none: LauncherState = { available: false, writes: false, companies: [], maxInputChars: 0 };
     const config = deps.config();
     if (configUnavailableReason(config, { needsProvider: true, needsSecret: true })) return none;
     if (!deps.provider(config)) return none;
-    const id = await deps.identity();
-    if (!id) return none;
+    const userId = knownUserId ?? (await deps.identity())?.userId;
+    if (!userId) return none;
     const supabase = await deps.supabase();
     const acc = await supabase.rpc("jarvis_my_access", { p_company_id: null });
+    // PGRST202 = the function does not exist yet (the migration is not applied): JARVIS is simply unavailable, quietly.
+    if (acc.error && (acc.error as { code?: string }).code !== "PGRST202") jarvisLog({ event: "availability", code: "access_unreadable" });
     const row = (Array.isArray(acc.data) ? acc.data[0] : acc.data) as { is_available?: boolean; writes_allowed?: boolean } | null | undefined;
     if (acc.error || !row?.is_available) return none;
-    const companies = await deps.companies({ supabase, userId: id.userId });
+    const companies = await deps.companies({ supabase, userId });
     if (companies === "error" || companies.length === 0) return none;
-    return { available: true, writes: !!row.writes_allowed, companies };
+    return { available: true, writes: !!row.writes_allowed, companies, maxInputChars: config.maxInputChars };
   }
 
   return { authorize, propose, execute, status, help, availability };

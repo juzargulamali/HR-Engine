@@ -53,8 +53,8 @@ export function createAssistant(deps: JarvisDeps) {
       return asCard(await d.propose({ actionId: CREATE_FROM_BRIEF_ID, companyId: req.companyId, input: { mode: "extract", brief: text } }));
     },
 
-    async review(req: { companyId: string; fields: Record<string, unknown>; typed?: { agency?: string | null; client?: string | null }; search?: { agency?: string | null; client?: string | null }; fromBrief?: string[] }): Promise<SendResult> {
-      return asCard(await d.propose({ actionId: CREATE_FROM_BRIEF_ID, companyId: req.companyId, input: { mode: "revise", fields: req.fields, typed: req.typed, search: req.search, fromBrief: req.fromBrief } }));
+    async review(req: { companyId: string; fields: object; typed?: { agency?: string | null; client?: string | null }; search?: { agency?: string | null; client?: string | null }; fromBrief?: string[] }): Promise<SendResult> {
+      return asCard(await d.propose({ actionId: CREATE_FROM_BRIEF_ID, companyId: req.companyId, input: { mode: "revise", fields: req.fields as Record<string, unknown>, typed: req.typed, search: req.search, fromBrief: req.fromBrief } }));
     },
 
     async confirm(req: { companyId: string; token: string; values: unknown; duplicateIds?: string[] }): Promise<ConfirmResult> {

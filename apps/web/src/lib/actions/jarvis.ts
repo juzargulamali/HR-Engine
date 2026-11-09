@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { getJarvis } from "@/lib/jarvis/runtime";
-import type { ConfirmResult, ContextView, JarvisRefusal, LauncherState, SendResult, StatusResult } from "@/lib/jarvis/protocol";
+import type { ConfirmResult, ContextView, JarvisRefusal, SendResult, StatusResult } from "@/lib/jarvis/protocol";
 
 /**
  * JARVIS server actions: the ONLY endpoints the panel calls. Each re-derives the person from their session and re-checks the pilot switches, the company and the module grant on
@@ -11,10 +11,6 @@ import type { ConfirmResult, ContextView, JarvisRefusal, LauncherState, SendResu
  */
 const uuid = z.string().uuid();
 const bad = (message: string): JarvisRefusal => ({ ok: false, code: "invalid_input", message });
-
-export async function jarvisLauncherState(): Promise<LauncherState> {
-  try { return await getJarvis().availability(); } catch { return { available: false, writes: false, companies: [] }; }
-}
 
 export async function jarvisContext(input: { companyId: string | null; enquiryId: string | null }): Promise<{ ok: true; view: ContextView } | JarvisRefusal> {
   const p = z.object({ companyId: uuid.nullable(), enquiryId: z.string().max(64).nullable() }).safeParse(input);
