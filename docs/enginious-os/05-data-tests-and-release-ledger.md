@@ -199,7 +199,7 @@ Rules: apply in file-name order; #9 needs #3 (`user_is_active`). The batch (`lau
 * **Approvals and routing:** `approval_routing_scope`, `executive_requests`, `recovery_decider_card`, `module_access_managers`.
 * **Attendance and Recovery Leave:** `attendance_clocking_and_recovery_routing`, `attendance_presence_sync`, `clock_lead_candidates`, `recovery_leave_stage2_cutover`, `recovery_windows_engine`, `recovery_windows_lifecycle`, `recovery_windows_operations`, `recovery_windows_policy`.
 * **Accounts and privileges:** `account_deactivation`, `account_security_controls`, `profiles_status_columns`, `access_grant_rules`, `access_grant_rules_preservation`, `balance_views_security`, `ledger_privilege_hardening`, `public_privilege_hardening`, `letters_pending_storage`.
-* **Sales & CRM:** `crm`; **JARVIS:** `jarvis` (pilot controls, atomic create wrapper, ledger, concurrency, usage limit, owner pack, rollback).
+* **Sales & CRM:** `crm`; **JARVIS:** `jarvis` (pilot controls, the atomic ledger-backed wrappers of every write action, ledger, concurrency, stale versions, usage limit, owner pack, rollback: `jarvis.rls.test.ts` and `jarvis-actions.rls.test.ts`).
 * **Projects:** `projects`, `project_block_notifies_pm`, `project_scope_decider`, `project_scope_decision_context`.
 * **Inventory:** `inventory_stock`, `inventory_planning`, `inventory_counts`, `inventory_employees`, `inventory_employee_reserve_issue`, `inventory_shared`, `inventory_transfer_location`, `inventory_replay`, `inventory_disable`, `inventory_preservation`, `inventory_project_notes` (39 tests per `docs/launch-p3-deployment.md`), `inventory_cross_company_receiving`.
 * **Budget:** `project_budget`, `pbx_waiting_and_pm_state`.

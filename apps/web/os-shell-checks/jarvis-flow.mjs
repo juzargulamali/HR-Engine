@@ -1,4 +1,4 @@
-// JARVIS part 1 walk-through in a real browser. LOCAL STACK ONLY, fictional data only, SIMULATED provider only (no AI provider is called). Needs `seed/jarvis.sh` (JARVIS OFF, Sales grants,
+// JARVIS part 1 walk-through (the other Sales actions are walked by jarvis-sales-flow.mjs) in a real browser. LOCAL STACK ONLY, fictional data only, SIMULATED provider only (no AI provider is called). Needs `seed/jarvis.sh` (JARVIS OFF, Sales grants,
 // two companies, two fictional organisations) and an app started with JARVIS_PROVIDER=simulated JARVIS_ALLOW_SIMULATED_ON_LOCAL_STACK=1 JARVIS_CONFIRMATION_SECRET=<32+ characters>
 // (see README). It WRITES to the database it drives: reseed before every run. Run:
 //   node os-shell-checks/jarvis-flow.mjs       (SHOTS_DIR, default /tmp/jarvis-shots; desktop 1440x900 and phone 390x844, light and dark)
@@ -87,11 +87,12 @@ await step("keyboard: Enter on the launcher opens the panel and focus lands in t
   await launcher().focus(); await page.keyboard.press("Enter"); await panel().waitFor();
   await page.waitForFunction(() => document.activeElement?.tagName === "TEXTAREA");
 });
-await step("'What can you do?' answers without any provider call: one enabled action, the others marked Not available yet", async () => {
+await step("'What can you do?' answers without any provider call: every Sales action listed as available (part 2 enabled them all), nothing marked Not available yet", async () => {
   await page.getByRole("button", { name: "What can you do?" }).click();
   const help = page.getByTestId("jarvis-help"); await help.waitFor();
   const t = flat(await help.innerText());
-  if (!t.includes("Create an enquiry from a brief") || !t.includes("Not available yet") || !t.includes("Draft a client email or reply") || !t.includes("Register a client or agency")) throw new Error(t);
+  for (const title of ["Create an enquiry from a brief", "Draft a client email or reply", "Answer Enginious OS questions", "Register a client or agency", "Update an enquiry", "Change an enquiry's status", "Turn meeting notes into an activity and follow-up"]) if (!t.includes(title)) throw new Error(`missing ${title}: ${t}`);
+  if (t.includes("Not available yet")) throw new Error("an action is still marked Not available yet");
   if (sql("select count(*) from jarvis_usage") !== "0") throw new Error("help counted against the daily allowance");
 });
 

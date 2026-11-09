@@ -591,6 +591,7 @@ describe("change status", () => {
     const api = fakeApi({ send: async () => stageResult(stageCard()), confirmAction: async (): Promise<ActionConfirmResult> => ({ ok: true, status: "done", confirmationId: "s-1", actionId: STG_ID, reference: "OPP-UAE-2026-0007", href: `/sales/opportunities/${ENQ}`, summary: "OPP-UAE-2026-0007 was moved from New enquiry to Qualified, and you approved it.", replayed: false }) });
     await open(api);
     expect(screen.getByTestId("stage-from-to").textContent).toMatch(/New enquiry.*Qualified/);
+    expect(screen.getByTestId("stage-disabled").textContent).toMatch(/Moves not available from here/);
     expect(screen.getByTestId("transition-proposal_sent").textContent).toMatch(/skips stages/);
     expect((within(screen.getByTestId("transition-proposal_sent")).getByRole("button") as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId("stage-evidence").textContent).toMatch(/no extra evidence/);

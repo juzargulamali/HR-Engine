@@ -37,8 +37,8 @@ All switches are rows the owner changes in the Supabase SQL Editor (there is no 
 
 ## 4. Data handling
 
-* **Sent to the AI provider**: only what a person pastes into the panel, fixed instructions, today's date and the field schema. No enquiries, organisations, ids, company data or other modules.
-* **Kept by Enginious OS**: the enquiry the person approved (with a short summary as its Brief); a ledger row (who approved, company, action, the created enquiry's reference, timestamps, no text); a usage counter. **Not kept**: the pasted text, prompts, model output, chat history. Logs carry no text.
+* **Sent to the AI provider**: only what a person pastes into the panel, fixed instructions, today's date and the field schema. For the enquiry actions also the minimum facts of the ONE enquiry the person chose: a reply draft gets the enquiry's reply-relevant facts (title, organisation names, dates, location, technologies, scope, summary, the client's budget note; never the internal value, owner or ids), an update request gets the current values of the ten editable fields, meeting notes get only the notes. A help question about the app is answered from reviewed guidance with nothing sent; a general question sends only the question. Change status and registering an organisation use no provider. No other enquiries, ids, company data or other modules.
+* **Kept by Enginious OS**: the enquiry the person approved (with a short summary as its Brief); a ledger row (who approved, company, action, the record's id and reference, ids of what was created, timestamps, no text); a usage counter. **Not kept**: the pasted text, prompts, model output, chat history. Logs carry no text.
 * **Real client briefs need separate owner approval.** Until the owner says so, use fictional briefs only. Anthropic's own retention and training terms depend on the owner's agreement and settings: not verified here. Check them before real briefs are pasted.
 * A person can only ever do through JARVIS what their own Sales grant lets them do; JARVIS cannot read salaries, leave, payroll, other modules, configuration, credentials or permissions, and cannot delete anything.
 

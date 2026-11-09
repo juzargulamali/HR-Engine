@@ -1015,7 +1015,97 @@ JARVIS is the Enginious OS assistant (OFF by default, owner-switched pilot; **no
 | (10) Retry | **Idempotent per confirmation id**: a repeat (double click, retry after a timeout, restart) returns the ORIGINAL result and creates nothing; a different reviewed value needs a new review. After an unknown answer use the read-only status ("Checking the original result"); never create again |
 | (11) Surface | **JARVIS action** (UI-only, through the panel); not callable by the model or by chat text |
 
-Disabled (registered, **not available yet**, every call refused): `jarvis.sales.email.draft_reply` (read-only draft of a client email or reply; never sends), `jarvis.sales.help.ask` (general Enginious OS questions; the deterministic "what can you do?" help is built in and needs no action), `jarvis.sales.organisation.register` (register a client or agency; today JARVIS only says "register it in Clients & Agencies first"), `jarvis.sales.enquiry.update`, `jarvis.sales.enquiry.change_status`, `jarvis.sales.meeting.notes_to_activity`. Each needs its own checks before it is enabled.
+Part 2 added the other six Sales actions, **all enabled when the pilot is on** (simulated provider only; live provider unverified). They share the platform of the entry above: `propose` never writes; a server-signed confirmation binds person, company, action, target, the hash of the reviewed values and (update, status) the record version; every write is ONE definer wrapper (`20261223000100_jarvis_platform.sql`, helpers `jarvis_ledger_enter/_done/_fail`) that records the ledger row and calls the existing function(s) in the same transaction. Stop-and-ask is "yes" for every write. Reference: [`jarvis.md`](./jarvis.md) section 2.
+
+#### `jarvis.sales.draft_reply`
+| Field | Entry |
+|---|---|
+| (1) Reached | JARVIS panel, mode "Draft a reply", on an enquiry page (or with its reference); `apps/web/src/lib/jarvis/sales/draft-reply.ts` |
+| (2) Record | None written. Read: the enquiry and its organisation names (the person's own session) |
+| (3) Inputs | An authorised enquiry plus the pasted conversation (provider gets the enquiry's reply facts and the text; never the internal value, owner or ids) |
+| (4) Permissions | JARVIS pilot on (global switch, allowlist, company list) and an active Sales grant for the company; the enquiry visible in the selected company. No write switch needed (it writes nothing) |
+| (5) Starting states | Any enquiry the person can see, not of another company |
+| (6) Changes | Nothing |
+| (7) Side effects | None. A draft (subject, body) with a Copy button; unconfirmed prices, dates, availability and promises listed above it by code |
+| (8) Verify | Panel only |
+| (9) STOP | No confirmation exists (nothing to confirm); the person reads and copies. Never sent: JARVIS has no send and no inbox |
+| (10) Retry | Not a write: repeat freely (each draft counts one against the daily limit) |
+| (11) Surface | **JARVIS action** (UI-only, through the panel); not callable by the model or by chat text |
+
+#### `jarvis.sales.help.answer`
+| Field | Entry |
+|---|---|
+| (1) Reached | JARVIS panel, mode "Ask how something works" or a short how-to sentence; `sales/help-answer.ts`, `help/guidance.ts` |
+| (2) Record | None; reads no record |
+| (3) Inputs | A question (max 1000 characters). Answered from reviewed guidance (no provider) or, for a general non-app question, by the model with the question alone |
+| (4) Permissions | JARVIS pilot on (global switch, allowlist, company list) and an active Sales grant for the company (to open the panel) |
+| (5) Starting states | Any |
+| (6) Changes | Nothing |
+| (7) Side effects | None. Shows the guidance with links to real screens |
+| (8) Verify | Panel only |
+| (9) STOP | No confirmation (read only) |
+| (10) Retry | Read only: repeat freely |
+| (11) Surface | **JARVIS action** (UI-only, through the panel); not callable by the model or by chat text |
+
+#### `jarvis.sales.organisation.register`
+| Field | Entry |
+|---|---|
+| (1) Reached | JARVIS panel, mode "Register a client or agency"; `sales/organisation-register.ts`; wrapper `jarvis_register_organisation` |
+| (2) Record | New `crm_organisations` row with this company's account profile (same as the Clients & Agencies create); a ledger row |
+| (3) Inputs | Name, then (separate step) type (agency, direct, end client, technology; at least one), country, website, place, note. No owner, lead source, exhibition or contacts |
+| (4) Permissions | JARVIS pilot on (global switch, allowlist, company list) and an active Sales grant for the company + the write switch; then the existing rules of `crm_create_organisation_profile` |
+| (5) Starting states | No same-name or same-website organisation unless the person ticked it as different |
+| (6) Changes | As Clients & Agencies create (organisation, profile) |
+| (7) Side effects | None beyond the ledger |
+| (8) Verify | The panel shows the real name only after reading the organisation back; a link to its account page |
+| (9) STOP | **Yes**: the details card has its own button; a same-name organisation needs an explicit "different" tick |
+| (10) Retry | **Idempotent per confirmation id**: a repeat returns the ORIGINAL result; N parallel calls create one; after an unknown answer use the read-only status |
+| (11) Surface | **JARVIS action** (UI-only, through the panel); not callable by the model or by chat text |
+
+#### `jarvis.sales.enquiry.update`
+| Field | Entry |
+|---|---|
+| (1) Reached | JARVIS panel, mode "Update an enquiry", on an enquiry page; `sales/enquiry-update.ts`; wrapper `jarvis_update_enquiry` |
+| (2) Record | The enquiry (existing row); a ledger row |
+| (3) Inputs | ONLY: title, brief, event start, event end, installation, location, technologies, scope, waiting on, budget note (the allowlist, in code and SQL). Not: owner, stage, agency, end client, value, currency, payment terms, exclusions, risks, evidence, files, proposals, Zoho, handover, closure |
+| (4) Permissions | JARVIS pilot on (global switch, allowlist, company list) and an active Sales grant for the company + the write switch; then `crm_update_opportunity`: the owner or a Sales founder; refused for a Lost enquiry |
+| (5) Starting states | The record version must still be the reviewed one |
+| (6) Changes | As `sales.enquiry.edit_details` for those fields (version +1) |
+| (7) Side effects | The usual "Details changed" event plus one "Changed through JARVIS" event (actor = approver) |
+| (8) Verify | Read back; the card showed before -> after |
+| (9) STOP | **Yes**: Save changes; a changed enquiry needs a fresh review |
+| (10) Retry | **Idempotent per confirmation id**; a repeat returns the original although the version moved on; a stale version is refused (also by the database) and shown |
+| (11) Surface | **JARVIS action** (UI-only, through the panel); not callable by the model or by chat text |
+
+#### `jarvis.sales.enquiry.change_stage`
+| Field | Entry |
+|---|---|
+| (1) Reached | JARVIS panel, mode "Change status", on an enquiry page; `sales/enquiry-stage.ts`; wrapper `jarvis_change_stage` |
+| (2) Record | The enquiry; a ledger row |
+| (3) Inputs | The stage, ONE step in either direction among the six working stages. Proposal sent only with a proposal recorded as sent or accepted; Quote sent only with the Zoho quote reference. Won, Lost, On hold, reopen, handover: never (see `jarvis.md` section 2.2) |
+| (4) Permissions | JARVIS pilot on (global switch, allowlist, company list) and an active Sales grant for the company + the write switch; then `crm_move_stage`: the owner or a Sales founder; closed or on-hold refused |
+| (5) Starting states | The record version must still be the reviewed one |
+| (6) Changes | As `sales.enquiry.move_stage` (stage, stage_changed_at, version +1) |
+| (7) Side effects | The usual "Stage changed" event plus one JARVIS event; the open follow-up is untouched |
+| (8) Verify | Read back; the card showed current and proposed stage, the evidence and the effects |
+| (9) STOP | **Yes**: Move; a changed enquiry needs a fresh review |
+| (10) Retry | **Idempotent per confirmation id**; stale version refused; the database's own gates apply and are shown |
+| (11) Surface | **JARVIS action** (UI-only, through the panel); not callable by the model or by chat text |
+
+#### `jarvis.sales.meeting.record`
+| Field | Entry |
+|---|---|
+| (1) Reached | JARVIS panel, mode "Meeting notes", on an enquiry page; `sales/meeting-record.ts`; wrapper `jarvis_record_meeting` |
+| (2) Record | A `crm_activities` row and (optionally) a `crm_follow_ups` row on the enquiry; a ledger row |
+| (3) Inputs | Notes (provider gets only the notes). Activity: type, text, optional date, internal flag. Follow-up: title, date, time, type, assigned to the approver. A date is accepted only if the notes state it; otherwise the card asks |
+| (4) Permissions | JARVIS pilot on (global switch, allowlist, company list) and an active Sales grant for the company + the write switch; then `crm_add_activity` (any Sales access; Lost refused) and `crm_create_follow_up` (a Won or Lost enquiry has none) |
+| (5) Starting states | Not Lost; no follow-up on a Won enquiry |
+| (6) Changes | As Add update with Plan the next step, in one transaction |
+| (7) Side effects | One "through JARVIS" event |
+| (8) Verify | Read back; the card showed both items |
+| (9) STOP | **Yes**: ONE button saves both or neither (no half-state) |
+| (10) Retry | **Idempotent per confirmation id**; both writes commit together or not at all |
+| (11) Surface | **JARVIS action** (UI-only, through the panel); not callable by the model or by chat text |
 
 ## 4. Actions that communicate outside the system
 

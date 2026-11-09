@@ -397,15 +397,28 @@ function StageView(p: ActionCardProps & { card: EnquiryStageCard; confirmation: 
       </p>
       <div className="space-y-1" role="group" aria-label="Stages you can move to">
         <p className="text-xs font-medium">One step at a time:</p>
-        <ul className="space-y-1">
-          {card.transitions.map((t) => (
-            <li key={t.to} className="flex flex-wrap items-start gap-2 text-xs" data-testid={`transition-${t.to}`} data-enabled={t.enabled}>
-              <Button type="button" size="sm" variant={card.to === t.to ? "secondary" : "outline"} disabled={!t.enabled || busy || saved} aria-pressed={card.to === t.to}
+        <ul className="flex flex-wrap gap-2">
+          {card.transitions.filter((t) => t.enabled).map((t) => (
+            <li key={t.to} data-testid={`transition-${t.to}`} data-enabled="true">
+              <Button type="button" size="sm" variant={card.to === t.to ? "secondary" : "outline"} disabled={busy || saved} aria-pressed={card.to === t.to}
                 onClick={() => void run({ mode: "propose", enquiryId: card.enquiry.id, to: t.to })}>{t.direction === "back" ? "Back to " : "Forward to "}{t.toLabel}</Button>
-              {!t.enabled && t.reason ? <span className="min-w-0 flex-1 pt-1 text-muted-foreground">{t.reason}</span> : null}
             </li>
           ))}
         </ul>
+        {card.transitions.some((t) => t.enabled) ? null : <p className="text-xs text-muted-foreground">No move is available from here through JARVIS.</p>}
+        {card.transitions.some((t) => !t.enabled) ? (
+          <details className="rounded-md border border-border p-2 text-xs" data-testid="stage-disabled">
+            <summary className="cursor-pointer font-medium">Moves not available from here, and why</summary>
+            <ul className="mt-2 space-y-1.5">
+              {card.transitions.filter((t) => !t.enabled).map((t) => (
+                <li key={t.to} data-testid={`transition-${t.to}`} data-enabled="false">
+                  <Button type="button" size="sm" variant="outline" disabled aria-disabled>{t.direction === "back" ? "Back to " : "Forward to "}{t.toLabel}</Button>
+                  <span className="ml-2 text-muted-foreground">{t.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
       </div>
       {card.evidence.length > 0 ? (
         <ul className="space-y-1 text-xs" data-testid="stage-evidence">
