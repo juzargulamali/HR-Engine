@@ -17,6 +17,16 @@ begin
   end if;
 end $$;
 
+-- jarvis_*: migration 20261223000100 takes every table privilege back from the API roles and gives signed-in users SELECT on their own ledger rows only (row level
+-- security is the second wall). The blanket grant above would silently undo that in the test database, which production does not do, so re-apply it here.
+do $$
+begin
+  if to_regclass('public.jarvis_settings') is not null then
+    revoke all on table jarvis_settings, jarvis_pilot_users, jarvis_pilot_companies, jarvis_action_ledger, jarvis_usage from public, anon, authenticated;
+    grant select on table jarvis_action_ledger to authenticated;
+  end if;
+end $$;
+
 -- Keep future tables covered automatically without editing this file again.
 alter default privileges in schema public
   grant select, insert, update, delete on tables to anon, authenticated;
