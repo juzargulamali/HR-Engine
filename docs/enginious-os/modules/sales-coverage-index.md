@@ -136,7 +136,7 @@ The Sales overview that `/sales` used to show is gone; its parts live on Follow-
 
 **Not Sales screens and not covered here**: People & Access grants (`../03-roles-access-and-approvals.md`), the Projects pages reached after acceptance, Inventory pages, My Day.
 
-## 4. Gaps fixed since the baseline (2026-11-08, branch `fix/sales-crm-staff-readiness`; hosted: not applied)
+## 4. Gaps fixed since the baseline (2026-11-08, PR #68, merged as `ca3e4483ce4745e359ddb3377b52748175f3881f`; migration applied on hosted V2 per the owner, owner-run verification 2026-11-09; Vercel Production not verified by Claude)
 
 The six named verification gaps (rows 30, 38, 43, 46, 62 and 70, see the count under section 3) are **unchanged**: row 38's gap is the Zoho Books side, which is still outside the app and unverifiable here. These reported code observations are fixed, each with a test, and recorded in `../06-change-log.md`:
 

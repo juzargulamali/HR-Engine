@@ -1,6 +1,6 @@
 # Sales & CRM action catalogue
 
-Status: built from the code at `main` `d4a9dc325dc669990e146ebb15eeb0cc3d2c11d4` (`../README.md` stamp row "Sales & CRM app map completed"). **Code read only; nothing was run** (no app, database or hosted project), **except** the three entries changed on 2026-11-08 by the write-rules fixes (`sales.zoho.save_references`, `sales.proposal.supersede`, `sales.enquiry.mark_won`: migration `20261222000100`, **not applied on any hosted project**, guide `../../sales-crm-write-rules-deployment.md`; exercised on a throwaway local database and the local-stack walk-through). This is a lookup table of every Sales & CRM action that changes data, advances a workflow or communicates outside the system, so a person or an AI worker can decide what an action does before anyone does it. The per-screen references are linked from each entry's "Reached through" line; the screen-by-screen index is [`sales-coverage-index.md`](./sales-coverage-index.md). Conventions as in `../README.md`: every claim cites a source; `Unverified` marks what code reading could not confirm.
+Status: built from the code at `main` `d4a9dc325dc669990e146ebb15eeb0cc3d2c11d4` (`../README.md` stamp row "Sales & CRM app map completed"). **Code read only; nothing was run** (no app, database or hosted project), **except** the three entries changed on 2026-11-08 by the write-rules fixes (`sales.zoho.save_references`, `sales.proposal.supersede`, `sales.enquiry.mark_won`: migration `20261222000100`, **applied on hosted V2 per the owner (owner-run verification, owner-reported 2026-11-09)**, guide `../../sales-crm-write-rules-deployment.md`; exercised on a throwaway local database and the local-stack walk-through). This is a lookup table of every Sales & CRM action that changes data, advances a workflow or communicates outside the system, so a person or an AI worker can decide what an action does before anyone does it. The per-screen references are linked from each entry's "Reached through" line; the screen-by-screen index is [`sales-coverage-index.md`](./sales-coverage-index.md). Conventions as in `../README.md`: every claim cites a source; `Unverified` marks what code reading could not confirm.
 
 ## 0. What this catalogue is NOT (read first)
 
@@ -282,7 +282,7 @@ Shared meanings:
 |---|---|
 | (1) Reached | `markWon` (`crm.ts`); `crm_mark_won`; Close page and dialogs |
 | (2) Record | `crm_opportunities` |
-| (3) Inputs | Evidence type (purchase order or authorised email), reference, document date (**not after the Dubai day**: the form's `max` and, since migration `20261222000100` (not applied on hosted), `crm_mark_won` itself, SQLSTATE `22023`; a refused call changes nothing), optional note; the enquiry must have a value |
+| (3) Inputs | Evidence type (purchase order or authorised email), reference, document date (**not after the Dubai day**: the form's `max` and, since migration `20261222000100` (applied on hosted V2 per the owner (owner-run verification, owner-reported 2026-11-09)), `crm_mark_won` itself, SQLSTATE `22023`; a refused call changes nothing), optional note; the enquiry must have a value |
 | (4) Permissions | Owner/founder |
 | (5) Starting states | A working stage (not On hold) |
 | (6) Changes | Stage `won`, evidence columns, `closed_at`, `closed_by`, `stage_before_close`; new `crm_closures` row; **all open follow-ups cancelled**; an empty `crm_handovers` row (kept if one exists) |
@@ -483,7 +483,7 @@ Shared meanings:
 | (2) Record | `crm_proposals` row |
 | (3) Inputs | None |
 | (4) Permissions | Owner/founder |
-| (5) Starting states | `draft` or `sent` only: the UI offers it for those, and the database now refuses `accepted` and already `superseded` versions (SQLSTATE `23514`; migration `20261222000100`, **not applied on hosted**, where the old function still accepts any starting status). The enquiry must be open |
+| (5) Starting states | `draft` or `sent` only: the UI offers it for those, and the database now refuses `accepted` and already `superseded` versions (SQLSTATE `23514`; migration `20261222000100`, **applied on hosted V2 per the owner (owner-run verification, owner-reported 2026-11-09)**; a database without the migration still accepts any starting status). The enquiry must be open |
 | (6) Changes | `status superseded` |
 | (7) Side effects | Event `proposal` |
 | (8) Verify | "Superseded" badge |
@@ -494,7 +494,7 @@ Shared meanings:
 #### `sales.zoho.save_references`
 | Field | Entry |
 |---|---|
-| (1) Reached | `saveZohoReference` (`crm.ts`); `crm_save_zoho_reference` (migration `20261222000100`, **not applied on hosted**); **there is no fallback**: with the old database the app shows "Saving Zoho Books references is temporarily unavailable" and writes nothing (references stay readable) |
+| (1) Reached | `saveZohoReference` (`crm.ts`); `crm_save_zoho_reference` (migration `20261222000100`, **applied on hosted V2 per the owner (owner-run verification, owner-reported 2026-11-09)**); **there is no fallback**: with the old database the app shows "Saving Zoho Books references is temporarily unavailable" and writes nothing (references stay readable) |
 | (2) Record | `crm_zoho_references` row (one per enquiry) |
 | (3) Inputs | Quote reference, quote sent on, invoice reference, invoice issued on, payment received on, amount paid. **Only the fields the person changed are sent**, each with the value they saw; an emptied field is an intentional clear, an untouched field is never sent (so never cleared) |
 | (4) Permissions | Owner/founder |
