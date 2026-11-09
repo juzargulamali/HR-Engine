@@ -1,4 +1,4 @@
--- READ-ONLY. Run AFTER 20261223000100_jarvis_platform.sql. One result table; every row must say OK (rows marked INFORMATION show the current state and are not pass/fail).
+-- READ-ONLY. Run AFTER 20261223000100_jarvis_platform.sql and 20261223000200_jarvis_helper_privileges.sql. One result table; every row must say OK (rows marked INFORMATION show the current state and are not pass/fail).
 -- It creates no row and changes nothing.
 select item, result from (
   select 1 as ord, 'table ' || t || ' exists with row level security ON' as item,
