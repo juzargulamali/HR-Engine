@@ -425,4 +425,130 @@ describe("JARVIS part 2: write wrappers", () => {
       expect((await rejection(move(U.sara, conf, other, "qualified", await ver(other)))).code).toBe("42501");
     });
   });
+
+  // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+  describe("jarvis_record_meeting (activity + follow-up, atomic)", () => {
+    const HASH = sha("meeting values A");
+    const activity = (over: Record<string, unknown> = {}) => ({ kind: "meeting", body: "SECRET-MEETING-NOTES-4242 agreed two LED walls", occurred_at: null, internal: false, ...over });
+    const followUp = (over: Record<string, unknown> = {}) => ({ title: "SECRET-FOLLOWUP-TITLE send proposal", due_at: new Date(Date.now() + 3 * 86_400_000).toISOString(), kind: "proposal", ...over });
+    const rec = (user: string, conf: string, oid: string, act: unknown = activity(), fu: unknown = followUp(), hash = HASH) =>
+      commit<{ r: Record<string, unknown> }>(user, `select jarvis_record_meeting($1::uuid, $2, $3::uuid, $4::jsonb, $5::jsonb) as r`, [conf, hash, oid, j(act), fu === null ? null : j(fu)]);
+    type R = { status: string; result_id: string | null; reference: string | null; extra: { company_id: string; activity_id: string; follow_up_id: string | null } | null; replayed: boolean; error_code: string | null; error_message: string | null };
+    const counts = async (oid: string) => (await admin<{ a: string; f: string; o: string }>(`select (select count(*) from crm_activities where opportunity_id = '${oid}')::text a, (select count(*) from crm_follow_ups where opportunity_id = '${oid}')::text f, (select count(*) from crm_follow_ups where opportunity_id = '${oid}' and status = 'open')::text o`))[0];
+
+    it("saves the activity AND the follow-up in one transaction through the EXISTING functions, the follow-up assigned to the caller, plus the ledger row and the JARVIS timeline line", async () => {
+      await ensureOrgs();
+      const oid = await newEnquiry(U.sara);
+      const before = await counts(oid);
+      const conf = id();
+      const r = (await rec(U.sara, conf, oid))[0].r as R;
+      expect(r).toMatchObject({ status: "done", replayed: false, result_id: oid });
+      expect(r.extra!.follow_up_id).toBeTruthy();
+      const after = await counts(oid);
+      expect(Number(after.a)).toBe(Number(before.a) + 1);
+      expect(Number(after.f)).toBe(Number(before.f) + 1);
+      const act = (await admin<Record<string, unknown>>(`select kind, created_by, is_internal from crm_activities where id = '${r.extra!.activity_id}'`))[0];
+      expect(act).toMatchObject({ kind: "meeting", created_by: U.sara, is_internal: false });
+      expect((await admin<Record<string, unknown>>(`select assigned_to, created_by, kind, status from crm_follow_ups where id = '${r.extra!.follow_up_id}'`))[0]).toMatchObject({ assigned_to: U.sara, created_by: U.sara, kind: "proposal", status: "open" });
+      expect((await events(oid)).find((e) => e.from_value === "jarvis")).toMatchObject({ kind: "details_changed", to_value: "meeting", reason: "activity and follow-up", actor_id: U.sara });
+      expect((await admin<Record<string, unknown>>(`select action_id, target, status, result_id from jarvis_action_ledger where confirmation_id = '${conf}'`))[0]).toMatchObject({ action_id: "jarvis.sales.meeting.record", target: oid, status: "done", result_id: oid });
+    });
+    it("the ledger holds neither the notes nor the follow-up title", async () => {
+      const dump = JSON.stringify(await admin(`select * from jarvis_action_ledger`));
+      for (const needle of ["SECRET-MEETING-NOTES-4242", "SECRET-FOLLOWUP-TITLE", "LED walls"]) expect(dump).not.toContain(needle);
+    });
+    it("activity only (no follow-up) records the activity alone", async () => {
+      const oid = await newEnquiry(U.sara);
+      const before = await counts(oid);
+      const r = (await rec(U.sara, id(), oid, activity({ kind: "call" }), null))[0].r as R;
+      expect(r).toMatchObject({ status: "done" });
+      expect(r.extra!.follow_up_id).toBeNull();
+      expect(await counts(oid)).toEqual({ a: String(Number(before.a) + 1), f: before.f, o: before.o });
+    });
+    it("ATOMIC: when the follow-up is refused (a Won enquiry has none) NOTHING is saved, not even the activity; the refusal is recorded once and replayed", async () => {
+      const oid = await newEnquiry(U.sara);
+      await admin(`update crm_opportunities set stage = 'negotiation' where id = '${oid}'`);
+      await commit(U.sara, `select crm_mark_won($1::uuid, 'purchase_order', 'PO-1', current_date, null, 1000)`, [oid]).catch(() => null);
+      let stage = (await opp(oid)).stage;
+      if (stage !== "won") { await admin(`update crm_opportunities set stage = 'won', stage_changed_at = now(), closed_at = now(), closed_by = '${U.sara}', evidence_type = 'purchase_order', evidence_reference = 'PO-1', evidence_date = current_date, value = 1000, currency = 'AED' where id = '${oid}'`).catch(() => null); stage = (await opp(oid)).stage; }
+      expect(stage).toBe("won");
+      const before = await counts(oid);
+      const conf = id();
+      const f = (await rec(U.sara, conf, oid))[0].r as R;
+      expect(f).toMatchObject({ status: "failed", error_code: "23514", replayed: false });
+      expect(f.error_message).toMatch(/closed opportunity has no follow-ups/);
+      expect(await counts(oid)).toEqual(before);
+      expect((await rec(U.sara, conf, oid))[0].r).toMatchObject({ status: "failed", replayed: true });
+      expect(await counts(oid)).toEqual(before);
+      // the activity alone IS allowed on a Won enquiry
+      expect(((await rec(U.sara, id(), oid, activity(), null))[0].r as R).status).toBe("done");
+    });
+    it("ATOMIC the other way: a future-dated activity is refused and the follow-up is not saved either; a Lost enquiry takes neither", async () => {
+      const oid = await newEnquiry(U.sara);
+      const before = await counts(oid);
+      const f = (await rec(U.sara, id(), oid, activity({ occurred_at: new Date(Date.now() + 3 * 86_400_000).toISOString() })))[0].r as R;
+      expect(f).toMatchObject({ status: "failed", error_code: "22023" });
+      expect(await counts(oid)).toEqual(before);
+      const lost = await newEnquiry(U.sara);
+      await commit(U.sara, `select crm_mark_lost($1::uuid, 'Event cancelled')`, [lost]);
+      const b2 = await counts(lost);
+      expect(((await rec(U.sara, id(), lost))[0].r as R)).toMatchObject({ status: "failed", error_code: "23514" });
+      expect(await counts(lost)).toEqual(b2);
+    });
+    it("a repeat returns the ORIGINAL result and records nothing more; N parallel calls with one confirmation id record exactly ONE activity and ONE follow-up", async () => {
+      const oid = await newEnquiry(U.sara);
+      const conf = id();
+      const first = (await rec(U.sara, conf, oid))[0].r as R;
+      const after = await counts(oid);
+      for (let i = 0; i < 3; i++) expect((await rec(U.sara, conf, oid))[0].r).toMatchObject({ status: "done", replayed: true, extra: first.extra });
+      expect(await counts(oid)).toEqual(after);
+      const oid2 = await newEnquiry(U.sara);
+      const b2 = await counts(oid2);
+      const par = id();
+      const rs = (await Promise.all(Array.from({ length: 12 }, () => rec(U.sara, par, oid2)))).map((x) => x[0].r as R);
+      expect(rs.filter((r) => !r.replayed).length).toBe(1);
+      expect(new Set(rs.map((r) => r.extra!.activity_id)).size).toBe(1);
+      expect(await counts(oid2)).toEqual({ a: String(Number(b2.a) + 1), f: String(Number(b2.f) + 1), o: String(Number(b2.o) + 1) });
+    });
+    it("malformed requests are refused with no ledger row (type, text, follow-up without title or date, not objects)", async () => {
+      const oid = await newEnquiry(U.sara);
+      const l = await ledgerCount();
+      for (const [a, f] of [[activity({ kind: "fax" }), followUp()], [activity({ body: "  " }), followUp()], [activity({ body: "x".repeat(4001) }), followUp()], [activity(), followUp({ title: "" })], [activity(), followUp({ due_at: null })], [activity(), [1]]] as [unknown, unknown][]) {
+        expect(["22023", "22P02"]).toContain((await rejection(rec(U.sara, id(), oid, a, f))).code);
+      }
+      expect((await rejection(commit(U.sara, `select jarvis_record_meeting($1::uuid, $2, $3::uuid, '[1]'::jsonb, null)`, [id(), HASH, oid]))).code).toBe("22023");
+      expect(await ledgerCount()).toBe(l);
+    });
+    it("the follow-up is always the caller's: there is no way to name an assignee through the wrapper", async () => {
+      const oid = await newEnquiry(U.sara);
+      const r = (await rec(U.omar, id(), oid, activity(), { ...followUp(), assigned_to: U.sara, assignee: U.sara }))[0].r as R;
+      expect(r.status).toBe("done");
+      expect((await admin<{ assigned_to: string }>(`select assigned_to from crm_follow_ups where id = '${r.extra!.follow_up_id}'`))[0].assigned_to).toBe(U.omar);
+    });
+    it("cannot bypass visibility or switches: no grant, another company, a forged id, revoked grant, JARVIS or writes off; no ledger row, nothing saved", async () => {
+      const oid = await newEnquiry(U.sara);
+      const before = await counts(oid); const l = await ledgerCount();
+      expect((await rejection(rec(U.noGrant, id(), oid))).code).toBe("P0002");
+      expect((await rejection(rec(U.ksaStaff, id(), oid))).code).toBe("P0002");
+      expect((await rejection(rec(U.sara, id(), id()))).code).toBe("P0002");
+      await admin(`update jarvis_settings set writes_enabled = false`);
+      expect((await rejection(rec(U.sara, id(), oid))).code).toBe("42501");
+      await admin(`update jarvis_settings set writes_enabled = true, enabled = false`);
+      expect((await rejection(rec(U.sara, id(), oid))).code).toBe("42501");
+      await admin(`update jarvis_settings set enabled = true`);
+      await admin(`update crm_company_grants set revoked_at = now() where user_id = '${U.sara}'`);
+      expect((await rejection(rec(U.sara, id(), oid))).code).toBe("P0002");
+      await admin(`update crm_company_grants set revoked_at = null where user_id = '${U.sara}'`);
+      expect(await counts(oid)).toEqual(before);
+      expect(await ledgerCount()).toBe(l);
+    });
+    it("another person, another enquiry or different reviewed values on a used confirmation id are refused", async () => {
+      const oid = await newEnquiry(U.sara);
+      const conf = id();
+      await rec(U.sara, conf, oid);
+      expect((await rejection(rec(U.omar, conf, oid))).code).toBe("42501");
+      expect((await rejection(rec(U.sara, conf, oid, activity(), followUp(), sha("other")))).code).toBe("42501");
+      expect((await rejection(rec(U.sara, conf, await newEnquiry(U.sara)))).code).toBe("42501");
+    });
+  });
 });

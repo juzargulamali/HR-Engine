@@ -12,7 +12,7 @@ vi.mock("@/lib/actions/jarvis", () => ({ jarvisSend: vi.fn(), jarvisContext: vi.
 
 import { JarvisLauncher, type JarvisClientApi } from "./jarvis-launcher";
 import { JarvisMark } from "./jarvis-mark";
-import type { ActionConfirmResult, ConfirmResult, EnquiryCard, EnquiryValues, EnquiryStageCard, EnquiryUpdateCard, OrgRegisterCard, ReplyDraftCard, SendResult, StatusResult } from "@/lib/jarvis/protocol";
+import type { ActionConfirmResult, ConfirmResult, EnquiryCard, EnquiryValues, EnquiryStageCard, EnquiryUpdateCard, MeetingCard, OrgRegisterCard, ReplyDraftCard, SendResult, StatusResult } from "@/lib/jarvis/protocol";
 
 const CO1 = "11111111-1111-4111-8111-111111111111";
 const CO2 = "22222222-2222-4222-8222-222222222222";
@@ -614,5 +614,56 @@ describe("change status", () => {
     await waitFor(() => expect((screen.getByTestId("save-stage") as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByTestId("save-stage"));
     expect((await screen.findByTestId("card-failed")).textContent).toMatch(/changed by someone else/);
+  });
+});
+
+const MEET_ID = "jarvis.sales.meeting.record";
+const meetValues = { companyId: CO1, enquiryId: ENQ, kind: "meeting" as const, body: "Met the agency about the gala.", occurredOn: null, internal: false, planFollowUp: true, followUpTitle: "Send the proposal", followUpDate: "2026-11-20", followUpTime: "10:00", followUpKind: "proposal" as const };
+const meetCard = (over: Partial<MeetingCard> = {}): MeetingCard => ({ kind: "meeting.record", enquiry: { id: ENQ, reference: "OPP-UAE-2026-0007", title: "Harbour gala LED wall", stage: "qualified", stageLabel: "Qualified", companyId: CO1 }, values: meetValues, questions: [], problems: [], valid: true, ...over });
+const meetResult = (c: MeetingCard, confirmation: ReturnType<typeof conf> | null = conf("m-1")): SendResult => ({ ok: true, kind: "action", actionId: MEET_ID, card: c, confirmation });
+
+describe("meeting notes", () => {
+  async function open(api: ReturnType<typeof fakeApi>) {
+    mount(api, { enabledActionIds: [...IDS, MEET_ID] });
+    openPanel();
+    fireEvent.click(screen.getByTestId("mode-meeting"));
+    fireEvent.change(screen.getByLabelText("Paste a brief or ask a question"), { target: { value: "Met the agency." } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByTestId("jarvis-meeting-card");
+  }
+  it("shows the activity and the follow-up with ONE save button that saves both once, and says they are saved together", async () => {
+    const api = fakeApi({ send: async () => meetResult(meetCard()), confirmAction: async (): Promise<ActionConfirmResult> => ({ ok: true, status: "done", confirmationId: "m-1", actionId: MEET_ID, reference: "OPP-UAE-2026-0007", href: `/sales/opportunities/${ENQ}`, summary: "OPP-UAE-2026-0007: the activity and the follow-up were recorded together, and you approved them.", replayed: false }) });
+    await open(api);
+    expect(screen.getByText(/saved together when you press Save, or not at all/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save update and follow-up" })).toBeTruthy();
+    const save = screen.getByTestId("save-meeting");
+    fireEvent.click(save); fireEvent.click(save);
+    expect((await screen.findByTestId("jarvis-result")).textContent).toMatch(/recorded together/);
+    expect(api.calls.confirmAction).toHaveLength(1);
+    expect(api.calls.confirmAction[0]![0]).toMatchObject({ actionId: MEET_ID, token: "tok-m-1", values: { followUpTitle: "Send the proposal", followUpDate: "2026-11-20" } });
+  });
+  it("an unknown date is a question, not a guess: no confirmation, Save disabled until the person picks one and reviews", async () => {
+    const api = fakeApi({
+      send: async () => meetResult(meetCard({ valid: false, values: { ...meetValues, followUpDate: "" }, questions: [{ field: "followUpDate", text: "When is the follow-up due? The notes do not give an exact date, so JARVIS has not guessed one." }], problems: [{ field: "followUpDate", message: "Choose the date of the follow-up." }] }), null),
+      act: async () => meetResult(meetCard(), conf("m-2")),
+    });
+    await open(api);
+    expect(screen.getByTestId("card-questions").textContent).toMatch(/has not guessed one/);
+    expect((screen.getByTestId("save-meeting") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Due") as HTMLInputElement).value).toBe("");
+    fireEvent.change(screen.getByLabelText("Due"), { target: { value: "2026-11-20" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    await waitFor(() => expect(api.calls.act).toHaveLength(1));
+    expect(api.calls.act[0]![0]).toMatchObject({ actionId: MEET_ID, input: { mode: "revise", enquiryId: ENQ, fields: { followUpDate: "2026-11-20" } } });
+    await waitFor(() => expect((screen.getByTestId("save-meeting") as HTMLButtonElement).disabled).toBe(false));
+  });
+  it("turning the follow-up off hides its fields and a refused save is shown in words with nothing recorded", async () => {
+    const api = fakeApi({ send: async () => meetResult(meetCard()), confirmAction: async (): Promise<ActionConfirmResult> => ({ ok: false, code: "save_failed", message: "A closed opportunity has no follow-ups" }) });
+    await open(api);
+    fireEvent.click(screen.getByTestId("plan-follow-up"));
+    expect(screen.queryByLabelText("Due")).toBeNull();
+    fireEvent.click(screen.getByTestId("plan-follow-up"));
+    fireEvent.click(screen.getByTestId("save-meeting"));
+    expect((await screen.findByTestId("card-failed")).textContent).toMatch(/closed opportunity has no follow-ups/);
   });
 });

@@ -217,4 +217,22 @@ export interface EnquiryStageCard {
   valid: boolean;
 }
 
-export type ActionCard = ReplyDraftCard | HelpAnswerCard | OrgRegisterCard | EnquiryUpdateCard | EnquiryStageCard;
+/** `jarvis.sales.meeting.record`: meeting notes become ONE proposed activity and (optionally) ONE follow-up for you, saved together or not at all. */
+export type ActivityKind = "call" | "email" | "meeting" | "note" | "client_response";
+export type FollowUpKind = "call" | "email" | "meeting" | "proposal" | "other";
+export interface MeetingValues {
+  companyId: string; enquiryId: string;
+  kind: ActivityKind; body: string; occurredOn: string | null; internal: boolean;
+  planFollowUp: boolean; followUpTitle: string; followUpDate: string; followUpTime: string; followUpKind: FollowUpKind;
+}
+export interface MeetingCard {
+  kind: "meeting.record";
+  enquiry: EnquiryRef;
+  values: MeetingValues;
+  /** The follow-up date was not stated in the notes: JARVIS asks instead of guessing. */
+  questions: CardQuestion[];
+  problems: CardProblem[];
+  valid: boolean;
+}
+
+export type ActionCard = ReplyDraftCard | HelpAnswerCard | OrgRegisterCard | EnquiryUpdateCard | EnquiryStageCard | MeetingCard;

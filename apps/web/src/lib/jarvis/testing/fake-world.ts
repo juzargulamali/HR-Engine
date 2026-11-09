@@ -57,6 +57,10 @@ export interface World {
   zoho: { opportunity_id: string; quote_ref: string | null }[];
   moves: { id: string; from: string; to: string; version: number }[];
   evidenceFails: boolean;
+  /** The activities and follow-ups the meeting wrapper stored (both or neither). */
+  activities: { id: string; opportunity_id: string; kind: string; body: string; occurred_at: string | null; internal: boolean; created_by: string }[];
+  followUps: { id: string; opportunity_id: string; title: string; due_at: string; kind: string; assigned_to: string }[];
+  meetingFailAfterActivity: boolean;
   counter: number;
 }
 
@@ -66,7 +70,7 @@ export function newWorld(): World {
     signedIn: ID.u1, settings: { enabled: true, writes: true }, pilot: new Set([ID.u1, ID.u2, ID.u3]), pilotCompanies: new Set(),
     grants: [{ user_id: ID.u1, company_id: ID.co1, capabilities: [], revoked_at: null }, { user_id: ID.u1, company_id: ID.co2, capabilities: [], revoked_at: null }, { user_id: ID.u2, company_id: ID.co2, capabilities: [], revoked_at: null }],
     companies: [{ id: ID.co1, legal_name: "Fictional Enginious UAE LLC" }, { id: ID.co2, legal_name: "Fictional Enginious KSA LLC" }],
-    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], readLog: [], createdArgs: [], registered: [], updates: [], proposals: [], zoho: [], moves: [], evidenceFails: false, counter: 0,
+    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], readLog: [], createdArgs: [], registered: [], updates: [], proposals: [], zoho: [], moves: [], evidenceFails: false, activities: [], followUps: [], meetingFailAfterActivity: false, counter: 0,
   };
 }
 
@@ -170,6 +174,34 @@ function rpc(w: World, user: string, name: string, args: Record<string, unknown>
         w.ledger.set(cid, { confirmation_id: cid, user_id: user, company_id: p.company_id, values_hash: args.p_values_hash as string, status: "done", result_id: id, result_ref: reference, error_message: null, action_id: "jarvis.sales.enquiry.create_from_brief", target: "new", result_extra: null });
         if (w.createMode === "lost") return { data: null, error: { message: "TypeError: fetch failed" } };
         return { data: { status: "done", confirmation_id: cid, opportunity_id: id, reference, replayed: false, error_message: null }, error: null };
+      }
+      case "jarvis_record_meeting": {
+        const opp = w.opps.find((o) => o.id === args.p_enquiry_id);
+        const has = grantedCompanies(w, user);
+        if (!opp || !has.has(opp.company_id)) return { data: null, error: { message: "Opportunity not found", code: "P0002" } };
+        const act = args.p_activity as { kind: string; body: string; occurred_at: string | null; internal: boolean } | null;
+        const fu = args.p_follow_up as { title: string; due_at: string; kind: string } | null;
+        if (!act || !["call", "email", "meeting", "note", "client_response"].includes(act.kind) || !(act.body ?? "").trim()) return { data: null, error: { message: "Write what happened", code: "22023" } };
+        if (fu && (!(fu.title ?? "").trim() || !fu.due_at)) return { data: null, error: { message: "The follow-up needs a title and a due date", code: "22023" } };
+        const gate = gateWrite(w, user, opp.company_id);
+        if (gate) return gate;
+        const cid = args.p_confirmation_id as string;
+        const prior = replay(w, user, cid, opp.company_id, "jarvis.sales.meeting.record", opp.id, args.p_values_hash as string);
+        if (prior) return prior;
+        if (w.createMode === "network") return { data: null, error: { message: "TypeError: fetch failed" } };
+        const fail = (code: string, message: string) => ({ data: json(ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.meeting.record", opp.id, args.p_values_hash as string, { status: "failed", error_code: code, error_message: message }), false), error: null });
+        // ATOMIC: every refusal is decided before anything is stored, exactly as the database transaction rolls both back.
+        if (opp.stage === "lost") return fail("23514", "A lost opportunity can no longer be updated");
+        if (act.occurred_at && Date.parse(act.occurred_at) > Date.now() + 5 * 60_000) return fail("22023", "An activity cannot be dated in the future");
+        if (fu && (opp.stage === "won" || opp.stage === "lost")) return fail("23514", "A closed opportunity has no follow-ups");
+        if (w.meetingFailAfterActivity) return fail("XX000", "simulated failure of the second write");
+        const activityId = randomUUID();
+        w.activities.push({ id: activityId, opportunity_id: opp.id, kind: act.kind, body: act.body, occurred_at: act.occurred_at, internal: !!act.internal, created_by: user });
+        let followUpId: string | null = null;
+        if (fu) { followUpId = randomUUID(); w.followUps.push({ id: followUpId, opportunity_id: opp.id, title: fu.title, due_at: fu.due_at, kind: fu.kind, assigned_to: user }); }
+        const row = ledgerRow(w, user, cid, opp.company_id, "jarvis.sales.meeting.record", opp.id, args.p_values_hash as string, { status: "done", result_id: opp.id, result_ref: opp.reference, result_extra: { company_id: opp.company_id, activity_id: activityId, follow_up_id: followUpId } });
+        if (w.createMode === "lost") return { data: null, error: { message: "TypeError: fetch failed" } };
+        return { data: json(row, false), error: null };
       }
       case "jarvis_change_stage": {
         const opp = w.opps.find((o) => o.id === args.p_enquiry_id);

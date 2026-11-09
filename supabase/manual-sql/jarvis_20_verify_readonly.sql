@@ -28,13 +28,13 @@ select item, result from (
   union all select 7, 'function ' || f || ' exists, SECURITY DEFINER with a fixed search_path',
          case when exists (select 1 from pg_proc where oid = to_regprocedure('public.' || f) and prosecdef and exists (select 1 from unnest(proconfig) c where c = 'search_path=public')) then 'OK' else 'MISSING or wrong shape' end
     from unnest(array['jarvis_my_access(uuid)', 'jarvis_usage_take(integer)', 'jarvis_create_enquiry(uuid, text, jsonb)', 'jarvis_ledger_enter(uuid, text, text, uuid, text)',
-                      'jarvis_ledger_done(uuid, uuid, text, jsonb)', 'jarvis_ledger_fail(uuid, text, text)', 'jarvis_register_organisation(uuid, text, jsonb)', 'jarvis_update_enquiry(uuid, text, uuid, integer, jsonb)', 'jarvis_change_stage(uuid, text, uuid, text, integer)']) f
+                      'jarvis_ledger_done(uuid, uuid, text, jsonb)', 'jarvis_ledger_fail(uuid, text, text)', 'jarvis_register_organisation(uuid, text, jsonb)', 'jarvis_update_enquiry(uuid, text, uuid, integer, jsonb)', 'jarvis_change_stage(uuid, text, uuid, text, integer)', 'jarvis_record_meeting(uuid, text, uuid, jsonb, jsonb)']) f
   union all select 8, 'signed-in users can call ' || f || '; anon and public cannot',
          case when to_regprocedure('public.' || f) is not null
                 and has_function_privilege('authenticated', to_regprocedure('public.' || f)::oid, 'execute')
                 and not has_function_privilege('anon', to_regprocedure('public.' || f)::oid, 'execute')
                 and not exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where p.oid = to_regprocedure('public.' || f) and a.grantee = 0) then 'OK' else 'FAIL - privileges differ' end
-    from unnest(array['jarvis_my_access(uuid)', 'jarvis_usage_take(integer)', 'jarvis_create_enquiry(uuid, text, jsonb)', 'jarvis_register_organisation(uuid, text, jsonb)', 'jarvis_update_enquiry(uuid, text, uuid, integer, jsonb)', 'jarvis_change_stage(uuid, text, uuid, text, integer)']) f
+    from unnest(array['jarvis_my_access(uuid)', 'jarvis_usage_take(integer)', 'jarvis_create_enquiry(uuid, text, jsonb)', 'jarvis_register_organisation(uuid, text, jsonb)', 'jarvis_update_enquiry(uuid, text, uuid, integer, jsonb)', 'jarvis_change_stage(uuid, text, uuid, text, integer)', 'jarvis_record_meeting(uuid, text, uuid, jsonb, jsonb)']) f
   union all select 8, 'the internal helper ' || f || ' is NOT callable by signed-in users or anon (only the wrappers, which run as their owner, use it)',
          case when to_regprocedure('public.' || f) is not null
                 and not has_function_privilege('authenticated', to_regprocedure('public.' || f)::oid, 'execute')
@@ -53,6 +53,10 @@ select item, result from (
   union all select 9, 'jarvis_change_stage calls the EXISTING crm_move_stage with the expected version, one step at a time between the working stages (definition text)',
          case when exists (select 1 from pg_proc where proname = 'jarvis_change_stage' and pronamespace = 'public'::regnamespace
                               and prosrc like '%crm_move_stage(%' and prosrc like '%p_expected_version%' and prosrc like '%abs(v_to - v_from) <> 1%' and prosrc like '%jarvis_ledger_enter(%') then 'OK' else 'WRONG TEXT' end
+  union all select 9, 'jarvis_record_meeting calls the EXISTING crm_add_activity and crm_create_follow_up in ONE function (so one transaction), with no assignee argument (definition text)',
+         case when exists (select 1 from pg_proc where proname = 'jarvis_record_meeting' and pronamespace = 'public'::regnamespace
+                              and prosrc like '%crm_add_activity(%' and prosrc like '%crm_create_follow_up(%' and prosrc like '%jarvis_ledger_enter(%' and prosrc like '%, null);%'
+                              and prosrc not like '%assigned_to%' and prosrc not like '%assignee%') then 'OK' else 'WRONG TEXT' end
   union all select 10, 'the wrapper stores no enquiry text: the ledger has no column for a brief, prompt or model output',
          case when not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jarvis_action_ledger' and column_name in ('brief', 'prompt', 'args', 'body', 'text', 'content', 'output', 'values'))
               then 'OK' else 'FAIL - an unexpected text column exists' end

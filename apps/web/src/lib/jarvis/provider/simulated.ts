@@ -104,6 +104,26 @@ function enquiryUpdate(input: string): Record<string, unknown> {
   return out;
 }
 
+/** Meeting notes: reads labelled lines ("Summary:", "Type:", "Meeting date:", "Next:", "Due:"). Markers: "[[invent-date]]" makes it return a follow-up date the notes never state; a vague phrase ("next week", "soon") makes it GUESS one, to prove the server drops it. */
+function meetingNotes(input: string, instructions: string): Record<string, unknown> {
+  const notes = /<notes>\n([\s\S]*?)\n<\/notes>/.exec(input)?.[1] ?? input;
+  const today = /Today \(Dubai\) is (\d{4}-\d{2}-\d{2})/.exec(instructions)?.[1] ?? "2026-01-01";
+  const free = notes.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^[A-Za-z][A-Za-z ]{1,24}:\s*\S/.test(l));
+  const type = (labelled(notes, ["type", "kind"]) ?? "meeting").toLowerCase().replace(/[^a-z_]/g, "");
+  const next = labelled(notes, ["next", "next step", "follow up", "follow-up"]);
+  let date = iso(labelled(notes, ["due", "next date"])) ?? iso(next);
+  if (!date && /tomorrow/i.test(next ?? "")) date = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  if (!date && /next week|soon|end of the month|after the event/i.test(next ?? "")) date = new Date(Date.parse(`${today}T00:00:00Z`) + 7 * 86_400_000).toISOString().slice(0, 10);
+  if (notes.includes("[[invent-date]]")) date = "2099-03-03";
+  const out: Record<string, unknown> = {
+    activityKind: ["meeting", "call", "email", "note", "client_response"].includes(type) ? type : "meeting",
+    summary: labelled(notes, ["summary"]) ?? free.join(" ").slice(0, 1500), meetingDate: iso(labelled(notes, ["meeting date", "date"])),
+    followUpTitle: next ? next.replace(/\s+(?:on|by)\s+\d{4}-\d{2}-\d{2}.*$/i, "").trim() || null : null, followUpDate: date, followUpKind: next ? (/\bemail\b/i.test(next) ? "email" : /\bmeet/i.test(next) ? "meeting" : /\bcall\b/i.test(next) ? "call" : /\bproposal\b/i.test(next) ? "proposal" : "other") : null,
+  };
+  if (/ignore (all )?previous instructions/i.test(notes)) Object.assign(out, { execute: true, confirmed: true, assignee: "00000000-0000-4000-8000-0000000000cc", stage: "won", value: 1 });
+  return out;
+}
+
 /** A general (non-app) answer: deterministic text that echoes nothing of the question except that it was general. */
 function generalAnswer(input: string): Record<string, unknown> {
   const out: Record<string, unknown> = { answer: "This is a general answer (simulated): I can only give general information here, with no access to any company data." };
@@ -121,6 +141,7 @@ export function createSimulatedProvider(): JarvisProvider {
       if (req.task === "reply_draft") return draftReply(req.input);
       if (req.task === "help_general") return generalAnswer(req.input);
       if (req.task === "enquiry_update") return enquiryUpdate(req.input);
+      if (req.task === "meeting_notes") return meetingNotes(req.input, req.instructions);
       if (req.task !== "enquiry_fields") throw new JarvisProviderError("malformed");
       const out = extractEnquiry(req.input);
       if (/ignore (all )?previous instructions/i.test(req.input)) {

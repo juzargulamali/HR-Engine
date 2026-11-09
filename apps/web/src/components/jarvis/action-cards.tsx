@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
-import type { ActionCard, ActionConfirmResult, ConfirmationView, EnquiryStageCard, EnquiryUpdateCard, HelpAnswerCard, OrgRegisterCard, OrgRole, OrgValues, ReplyDraftCard, SendResult, StatusResult, UpdateForm } from "@/lib/jarvis/protocol";
+import type { ActionCard, ActionConfirmResult, ConfirmationView, EnquiryStageCard, EnquiryUpdateCard, HelpAnswerCard, MeetingCard, MeetingValues, OrgRegisterCard, OrgRole, OrgValues, ReplyDraftCard, SendResult, StatusResult, UpdateForm } from "@/lib/jarvis/protocol";
 
 /** What the cards of the other actions call. Each is a server action that re-authorises the person on every call; this file decides nothing about access. */
 export interface ActionApi {
@@ -33,6 +33,7 @@ export function ActionCardView(p: ActionCardProps) {
     case "reply.draft": return <ReplyDraftView card={p.state.card} companyStale={p.companyStale} />;
     case "help.answer": return <HelpAnswerView card={p.state.card} />;
     case "org.register": return <OrgRegisterView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
+    case "meeting.record": return <MeetingView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
     case "enquiry.stage": return <StageView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
     case "enquiry.update": return <UpdateView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
     default: return null;
@@ -417,6 +418,75 @@ function StageView(p: ActionCardProps & { card: EnquiryStageCard; confirmation: 
       {error ? <Alert variant="destructive" role="alert">{error}</Alert> : null}
       <SaveBox actionId={p.actionId} companyId={p.companyId} confirmation={confirmation} values={card.values} canSave={canSave} label={card.toLabel ? `Move to ${card.toLabel}` : "Move"} busyLabel="Moving…" api={p.api} testId="save-stage" onSettled={setSaved} />
       {confirmation && card.valid && !saved ? <p className="text-[11px] text-muted-foreground">This review is for version {card.enquiry.version}. If anyone changes the enquiry first you will be asked to review again.</p> : null}
+    </section>
+  );
+}
+
+
+const ACTIVITY_OPTIONS = [["meeting", "Meeting"], ["call", "Call"], ["email", "Email"], ["note", "Note"], ["client_response", "Client response"]] as const;
+const FOLLOW_UP_OPTIONS = [["call", "Call"], ["email", "Email"], ["meeting", "Meeting"], ["proposal", "Proposal work"], ["other", "Other"]] as const;
+
+/** Meeting notes: ONE proposed activity and ONE follow-up for you, saved together by the one button (both or neither). The date is asked for, never guessed. */
+function MeetingView(p: ActionCardProps & { card: MeetingCard; confirmation: ConfirmationView | null }) {
+  const { card, confirmation } = p;
+  const [draft, setDraft] = useState<MeetingValues>(card.values);
+  const [saved, setSaved] = useState(false);
+  const { busy, error, run } = usePropose(p);
+  const dirty = !same(draft, card.values);
+  const canSave = card.valid && !!confirmation && !dirty && !p.companyStale;
+  const set = <K extends keyof MeetingValues>(k: K, v: MeetingValues[K]) => setDraft((d) => ({ ...d, [k]: v }));
+  const err = (f: string) => card.problems.find((x) => x.field === f)?.message;
+  const key = card.enquiry.id.slice(0, 8);
+  const off = busy || saved;
+  const line = (id: string, label: string, control: React.ReactNode) => (
+    <div className="space-y-1"><label htmlFor={`${key}-${id}`} className="text-xs font-medium text-muted-foreground">{label}</label>{control}{err(id) ? <p className="text-xs text-destructive" data-testid={`problem-${id}`}>{err(id)}</p> : null}</div>
+  );
+  if (p.companyStale && !saved) return <Alert variant="warning">The company changed after this review, so it can no longer be used. Ask again for the new company.</Alert>;
+  return (
+    <section aria-label="Review the meeting record" className="space-y-3 rounded-lg border border-border bg-card p-3 text-sm" data-testid="jarvis-meeting-card">
+      <header className="space-y-1">
+        <h3 className="font-heading text-sm font-semibold">Review before anything is saved</h3>
+        <p className="text-xs text-muted-foreground">For <Link href={`/sales/opportunities/${card.enquiry.id}`} className="font-medium text-foreground underline underline-offset-2">{card.enquiry.reference}</Link> · {card.enquiry.title} · {card.enquiry.stageLabel}. The update and the follow-up are saved together when you press Save, or not at all.</p>
+      </header>
+      {card.questions.length > 0 ? (
+        <div className="space-y-1 rounded-md border border-warning/40 bg-warning/10 p-2" data-testid="card-questions">
+          <p className="text-xs font-medium">JARVIS needs your answer:</p>
+          <ul className="list-disc space-y-0.5 pl-4 text-xs">{card.questions.map((q) => <li key={q.field}>{q.text}</li>)}</ul>
+        </div>
+      ) : null}
+      <fieldset className="space-y-3 rounded-md border border-border p-2">
+        <legend className="px-1 text-xs font-semibold">Update on the timeline</legend>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {line("kind", "Type", <Select id={`${key}-kind`} value={draft.kind} disabled={off} onChange={(e) => set("kind", e.target.value as MeetingValues["kind"])}>{ACTIVITY_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select>)}
+          {line("occurredOn", "Happened on (optional, today if empty)", <Input id={`${key}-occurredOn`} type="date" value={draft.occurredOn ?? ""} disabled={off} onChange={(e) => set("occurredOn", e.target.value || null)} />)}
+        </div>
+        {line("body", "What happened", <Textarea id={`${key}-body`} rows={5} maxLength={4000} value={draft.body} disabled={off} onChange={(e) => set("body", e.target.value)} />)}
+        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={draft.internal} disabled={off} onChange={(e) => set("internal", e.target.checked)} />Internal note (still visible to everyone with Sales access to the company)</label>
+      </fieldset>
+      <fieldset className="space-y-3 rounded-md border border-border p-2">
+        <legend className="px-1 text-xs font-semibold">Follow-up for you</legend>
+        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={draft.planFollowUp} disabled={off} onChange={(e) => set("planFollowUp", e.target.checked)} data-testid="plan-follow-up" />Plan the next step</label>
+        {err("planFollowUp") ? <p className="text-xs text-destructive" data-testid="problem-planFollowUp">{err("planFollowUp")}</p> : null}
+        {draft.planFollowUp ? (
+          <>
+            {line("followUpTitle", "What to do", <Input id={`${key}-followUpTitle`} value={draft.followUpTitle} maxLength={300} disabled={off} onChange={(e) => set("followUpTitle", e.target.value)} />)}
+            <div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-3 sm:grid-cols-[minmax(0,1fr)_6rem_minmax(0,1fr)]">
+              {line("followUpDate", "Due", <Input id={`${key}-followUpDate`} type="date" value={draft.followUpDate} disabled={off} onChange={(e) => set("followUpDate", e.target.value)} />)}
+              {line("followUpTime", "Time (Dubai)", <Input id={`${key}-followUpTime`} type="time" value={draft.followUpTime} disabled={off} onChange={(e) => set("followUpTime", e.target.value)} />)}
+              {line("followUpKind", "Type", <Select id={`${key}-followUpKind`} value={draft.followUpKind} disabled={off} onChange={(e) => set("followUpKind", e.target.value as MeetingValues["followUpKind"])}>{FOLLOW_UP_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select>)}
+            </div>
+            <p className="text-xs text-muted-foreground">The follow-up is on your list. To give it to someone else, use Add follow-up on the enquiry.</p>
+          </>
+        ) : null}
+      </fieldset>
+      {error ? <Alert variant="destructive" role="alert">{error}</Alert> : null}
+      {!saved ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {dirty || !card.valid || !confirmation ? <Button type="button" variant="secondary" size="sm" disabled={busy || (!dirty && card.valid && !!confirmation)} onClick={() => void run({ mode: "revise", enquiryId: card.enquiry.id, fields: draft })}>{busy ? "Reviewing…" : "Review changes"}</Button> : null}
+          {dirty ? <span className="text-xs text-muted-foreground">You changed something: review the changes first.</span> : null}
+        </div>
+      ) : null}
+      <SaveBox actionId={p.actionId} companyId={p.companyId} confirmation={confirmation} values={card.values} canSave={canSave} label={card.values.planFollowUp ? "Save update and follow-up" : "Save update"} busyLabel="Saving…" api={p.api} testId="save-meeting" onSettled={setSaved} />
     </section>
   );
 }

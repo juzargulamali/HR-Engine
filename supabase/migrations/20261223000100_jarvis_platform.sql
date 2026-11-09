@@ -478,8 +478,59 @@ begin
 end;
 $$;
 
-revoke all on function jarvis_my_access(uuid), jarvis_usage_take(integer), jarvis_create_enquiry(uuid, text, jsonb), jarvis_register_organisation(uuid, text, jsonb), jarvis_update_enquiry(uuid, text, uuid, integer, jsonb), jarvis_change_stage(uuid, text, uuid, text, integer) from public, anon;
-grant execute on function jarvis_my_access(uuid), jarvis_usage_take(integer), jarvis_create_enquiry(uuid, text, jsonb), jarvis_register_organisation(uuid, text, jsonb), jarvis_update_enquiry(uuid, text, uuid, integer, jsonb), jarvis_change_stage(uuid, text, uuid, text, integer) to authenticated;
+-- -----------------------------------------------------------------------------
+-- Record a meeting through JARVIS: an ACTIVITY and (optionally) a FOLLOW-UP, ATOMICALLY, exactly once per confirmation id (jarvis.sales.meeting.record).
+--   * The activity is written by the EXISTING crm_add_activity and the follow-up by the EXISTING crm_create_follow_up, both under the caller's own identity and in the SAME
+--     transaction as the ledger row: if either is refused (a closed enquiry has no follow-ups, the date is in the future, no Sales access...) NEITHER is saved and the ledger
+--     records the refusal once. There is no half-state. One confirmation covers both.
+--   * The follow-up is always for the caller (assignee = the person approving); handing it to someone else is a separate decision JARVIS does not make.
+--   * No record version is bound: neither function uses one. The enquiry's own rules (not Lost for an activity; not Won or Lost for a follow-up) decide.
+-- p_activity {kind, body, occurred_at (null = now), internal}; p_follow_up null or {title, due_at, kind}. Returns the ledger result: {status, result_id (the enquiry), reference,
+-- extra{company_id, activity_id, follow_up_id}, replayed, ...}.
+-- -----------------------------------------------------------------------------
+create or replace function jarvis_record_meeting(p_confirmation_id uuid, p_values_hash text, p_enquiry_id uuid, p_activity jsonb, p_follow_up jsonb)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v crm_opportunities;
+  v_replay jsonb;
+  v_act uuid;
+  v_fu uuid;
+  v_msg text;
+  v_state text;
+begin
+  if p_enquiry_id is null or p_activity is null or jsonb_typeof(p_activity) <> 'object' then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
+  if p_activity->>'kind' is null or p_activity->>'kind' not in ('call', 'email', 'meeting', 'note', 'client_response') then raise exception 'Choose the type of activity' using errcode = '22023'; end if;
+  if length(btrim(coalesce(p_activity->>'body', ''))) = 0 or length(p_activity->>'body') > 4000 then raise exception 'Write what happened (4000 characters at most)' using errcode = '22023'; end if;
+  if p_follow_up is not null then
+    if jsonb_typeof(p_follow_up) <> 'object' or length(btrim(coalesce(p_follow_up->>'title', ''))) = 0 or length(p_follow_up->>'title') > 300 or nullif(p_follow_up->>'due_at', '') is null then
+      raise exception 'The follow-up needs a title and a due date' using errcode = '22023';
+    end if;
+  end if;
+  v := crm_lock_opportunity(p_enquiry_id);
+
+  v_replay := jarvis_ledger_enter(p_confirmation_id, p_values_hash, 'jarvis.sales.meeting.record', v.company_id, p_enquiry_id::text);
+  if v_replay is not null then return v_replay; end if;
+
+  begin
+    v_act := crm_add_activity(p_enquiry_id, p_activity->>'kind', p_activity->>'body', coalesce(nullif(p_activity->>'occurred_at', '')::timestamptz, now()), coalesce((p_activity->>'internal')::boolean, false));
+    if p_follow_up is not null then
+      v_fu := crm_create_follow_up(p_enquiry_id, p_follow_up->>'title', (p_follow_up->>'due_at')::timestamptz, coalesce(nullif(p_follow_up->>'kind', ''), 'other'), null);
+    end if;
+    insert into crm_opportunity_events (opportunity_id, company_id, kind, from_value, to_value, reason, actor_id)
+    values (p_enquiry_id, v.company_id, 'details_changed', 'jarvis', 'meeting', case when v_fu is null then 'activity' else 'activity and follow-up' end, auth.uid());
+    return jarvis_ledger_done(p_confirmation_id, p_enquiry_id, v.reference, jsonb_build_object('company_id', v.company_id, 'activity_id', v_act, 'follow_up_id', v_fu));
+  exception when others then
+    get stacked diagnostics v_msg = message_text, v_state = returned_sqlstate;
+    return jarvis_ledger_fail(p_confirmation_id, v_state, v_msg);
+  end;
+end;
+$$;
+
+revoke all on function jarvis_my_access(uuid), jarvis_usage_take(integer), jarvis_create_enquiry(uuid, text, jsonb), jarvis_register_organisation(uuid, text, jsonb), jarvis_update_enquiry(uuid, text, uuid, integer, jsonb), jarvis_change_stage(uuid, text, uuid, text, integer), jarvis_record_meeting(uuid, text, uuid, jsonb, jsonb) from public, anon;
+grant execute on function jarvis_my_access(uuid), jarvis_usage_take(integer), jarvis_create_enquiry(uuid, text, jsonb), jarvis_register_organisation(uuid, text, jsonb), jarvis_update_enquiry(uuid, text, uuid, integer, jsonb), jarvis_change_stage(uuid, text, uuid, text, integer), jarvis_record_meeting(uuid, text, uuid, jsonb, jsonb) to authenticated;
 -- The internal helpers are NOT callable by anyone through the API (the wrappers above run as their owner and may call them).
 revoke all on function jarvis_ledger_json(jarvis_action_ledger, boolean), jarvis_ledger_enter(uuid, text, text, uuid, text), jarvis_ledger_done(uuid, uuid, text, jsonb), jarvis_ledger_fail(uuid, text, text) from public, anon, authenticated;
 
