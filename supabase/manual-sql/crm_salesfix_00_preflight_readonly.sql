@@ -3,6 +3,7 @@
 -- HOW TO READ IT: every section B row must say OK, and the last B row must say the change is NOT yet applied. Section C is information only
 -- (it shows existing data the migration will NOT change, so nothing in it is a problem to fix first).
 -- Needs the Estimates-only guard migration (20261221000100) first. No applied migration is edited by this change.
+-- Section C row 1002 lists existing Quote sent / Negotiation / Won enquiries with a MISSING quote reference: information only. The migration does not backfill them and does not block them.
 
 select section, item, detail from (
   select 'A session' as section, 1 as ord, 'running as' as item, current_user::text as detail
@@ -26,16 +27,31 @@ select section, item, detail from (
          case when exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname = 'crm_mark_won' and prosrc not like '%cannot be in the future%')
               then 'OK' else 'UNEXPECTED - not the function this change expects (already replaced?). Do not continue; send this result.' end
   union all select 'B prerequisites', 300, 'applied already?',
-         case when exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname = 'crm_save_zoho_reference')
+         case when exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname in ('crm_save_zoho_reference', 'crm_zoho_quote_ref_protected', 'crm_zoho_quote_ref_guard'))
+              or exists (select 1 from pg_trigger where tgname = 'crm_zoho_quote_ref_guard' and not tgisinternal)
               then 'ALREADY APPLIED - not a first run; run crm_salesfix_20_verify_readonly.sql instead'
               else 'OK - not applied yet' end
   union all select 'C what exists today', 1000, 'proposals by status',
          (xpath('/row/t/text()', query_to_xml($q$select coalesce(string_agg(status || ': ' || n, ', ' order by status), 'none') as t from (select status, count(*) as n from crm_proposals group by status) x$q$, false, true, '')))[1]::text
   union all select 'C what exists today', 1001, 'Zoho Books reference rows (total; with a quote reference; with an invoice reference)',
          (xpath('/row/t/text()', query_to_xml($q$select count(*)::text || '; ' || count(*) filter (where length(btrim(coalesce(quote_ref, ''))) > 0)::text || '; ' || count(*) filter (where length(btrim(coalesce(invoice_ref, ''))) > 0)::text as t from crm_zoho_references$q$, false, true, '')))[1]::text
-  union all select 'C what exists today', 1002, 'enquiries at or past Quote sent WITHOUT a quote reference today (information; the migration does not change this)',
-         (xpath('/row/t/text()', query_to_xml($q$select count(*)::text as t from crm_opportunities o where o.stage in ('quote_sent', 'negotiation', 'won')
-                     and not exists (select 1 from crm_zoho_references z where z.opportunity_id = o.id and length(btrim(coalesce(z.quote_ref, ''))) > 0)$q$, false, true, '')))[1]::text
+  union all select 'C what exists today', 1002, 'Quote sent / Negotiation / Won enquiries (and On hold from them) WITHOUT a quote reference, by stage (INFORMATION, not a failure: they are NOT backfilled and NOT blocked; an edit that does not touch the quote reference, or that sets a first value, works on them as before)',
+         (xpath('/row/t/text()', query_to_xml($q$select coalesce(string_agg(s || ': ' || n, ', ' order by s), 'none') as t from (
+             select case when o.stage = 'on_hold' then 'on_hold (from ' || o.stage_before_hold || ')' else o.stage end as s, count(*) as n
+               from crm_opportunities o
+              where (o.stage in ('quote_sent', 'negotiation', 'won') or (o.stage = 'on_hold' and o.stage_before_hold in ('quote_sent', 'negotiation')))
+                and not exists (select 1 from crm_zoho_references z where z.opportunity_id = o.id and length(btrim(coalesce(z.quote_ref, ''))) > 0)
+              group by 1) x$q$, false, true, '')))[1]::text
+  union all select 'C what exists today', 1006, 'the enquiry references of those records (reference codes only; first 50)',
+         (xpath('/row/t/text()', query_to_xml($q$select coalesce(string_agg(reference, ', ' order by reference), 'none') as t from (
+             select o.reference from crm_opportunities o
+              where (o.stage in ('quote_sent', 'negotiation', 'won') or (o.stage = 'on_hold' and o.stage_before_hold in ('quote_sent', 'negotiation')))
+                and not exists (select 1 from crm_zoho_references z where z.opportunity_id = o.id and length(btrim(coalesce(z.quote_ref, ''))) > 0)
+              order by o.reference limit 50) x$q$, false, true, '')))[1]::text
+  union all select 'C what exists today', 1007, 'Quote sent / Negotiation / Won enquiries (and On hold from them) WITH a quote reference: after the migration that reference cannot be cleared (it can be corrected to another one)',
+         (xpath('/row/t/text()', query_to_xml($q$select count(*)::text as t from crm_opportunities o
+              where (o.stage in ('quote_sent', 'negotiation', 'won') or (o.stage = 'on_hold' and o.stage_before_hold in ('quote_sent', 'negotiation')))
+                and exists (select 1 from crm_zoho_references z where z.opportunity_id = o.id and length(btrim(coalesce(z.quote_ref, ''))) > 0)$q$, false, true, '')))[1]::text
   union all select 'C what exists today', 1003, 'Won enquiries whose evidence date is in the future (information; the migration refuses NEW future dates only and changes no stored row)',
          (xpath('/row/t/text()', query_to_xml($q$select count(*)::text as t from crm_opportunities where stage = 'won' and evidence_date > (now() at time zone 'Asia/Dubai')::date$q$, false, true, '')))[1]::text
   union all select 'C what exists today', 1004, 'accepted proposals (cannot be marked superseded after the migration; they stay as they are)',

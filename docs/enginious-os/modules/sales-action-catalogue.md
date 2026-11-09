@@ -494,16 +494,16 @@ Shared meanings:
 #### `sales.zoho.save_references`
 | Field | Entry |
 |---|---|
-| (1) Reached | `saveZohoReference` (`crm.ts`); `crm_save_zoho_reference` (migration `20261222000100`, **not applied on hosted**); until that migration is applied the app falls back to `crm_upsert_zoho_reference` |
+| (1) Reached | `saveZohoReference` (`crm.ts`); `crm_save_zoho_reference` (migration `20261222000100`, **not applied on hosted**); **there is no fallback**: with the old database the app shows "Saving Zoho Books references is temporarily unavailable" and writes nothing (references stay readable) |
 | (2) Record | `crm_zoho_references` row (one per enquiry) |
 | (3) Inputs | Quote reference, quote sent on, invoice reference, invoice issued on, payment received on, amount paid. **Only the fields the person changed are sent**, each with the value they saw; an emptied field is an intentional clear, an untouched field is never sent (so never cleared) |
 | (4) Permissions | Owner/founder |
-| (5) Starting states | Open, on-hold and Won enquiries; **a Lost enquiry is refused** (SQLSTATE `23514`). **Not defined, so not enforced: clearing the quote reference after Quote sent** (decision needed, see `../../sales-crm-write-rules-deployment.md`) |
+| (5) Starting states | Open, on-hold and Won enquiries; **a Lost enquiry is refused** (SQLSTATE `23514`). **Decision B: clearing an existing quote reference is refused at Quote sent, Negotiation and Won (and on hold from Quote sent or Negotiation)**, SQLSTATE `23514`; correcting it to another non-blank value, other fields (invoice and payment on Won), an omitted quote reference and a first value are allowed; records at those stages with a missing reference are not backfilled and not blocked (`../../sales-crm-write-rules-deployment.md`) |
 | (6) Changes | The changed fields of the row (field-level merge under the opportunity row lock); `updated_by`, `updated_at` |
 | (7) Side effects | A non-blank quote reference unlocks the Quote sent stage move; reports show the references; **nothing is sent to or read from Zoho Books** |
 | (8) Verify | Commercial tab shows the saved values and "Last updated"; Reports invoice and payment table |
 | (9) STOP | **Yes**: records references and can unlock a stage gate. Approver: the enquiry owner, with the Zoho Books quote number from the accounting record. The Zoho side is `Unverified` |
-| (10) Retry | Safe: a repeat sets the same fields to the same values; a change made by someone else to another field is kept; a stale edit of the same field is refused ("Someone else changed ... Reload to see their change"), so read the Commercial tab again before retrying that |
+| (10) Retry | Safe: a repeat sets the same fields to the same values; a change made by someone else to another field is kept; a stale edit of the same field is refused ("Someone else changed ... Reload to see their change"), so read the Commercial tab again before retrying that. A refused clear of the quote reference is not retried: enter the correct reference instead. **Unavailable state:** if the database function is not installed, nothing is written and retrying does not help until the migration is applied |
 | (11) Surface | UI over DB function |
 
 #### `sales.availability.request`

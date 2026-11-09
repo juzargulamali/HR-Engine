@@ -1,8 +1,8 @@
 -- WRITES. OWNER-RUN ROLLBACK of 20261222000100_crm_sales_write_rules.sql. Safe to run twice.
 -- It restores the EXACT previous bodies of crm_upsert_zoho_reference (overwrites every field), crm_set_proposal_status (no starting-status check for superseded)
--- and crm_mark_won (no future-date check), and drops the new crm_save_zoho_reference. Grants are unchanged (create or replace keeps them).
+-- and crm_mark_won (no future-date check), and drops the new crm_save_zoho_reference, the quote-reference trigger crm_zoho_quote_ref_guard and its two helper functions (decision B: after rollback a quote reference can be cleared at any stage again). Grants are unchanged (create or replace keeps them).
 -- It changes no stored row: no proposal, Zoho reference, closure, handover or enquiry. Data entered while the migration was in place stays as it is.
--- AFTER rollback the app still works (it falls back to the old function when the new one is missing, see docs/sales-crm-write-rules-deployment.md), but a stale form can again overwrite fields.
+-- AFTER rollback the NEW app cannot save Zoho references (by design it has no fallback: it shows "saving is temporarily unavailable" while references stay readable); the OLD app works again, with the old overwrite-all behaviour. See docs/sales-crm-write-rules-deployment.md.
 -- The restored bodies are copied unchanged from 20261115000200_crm_workflow_functions.sql (crm_mark_won) and 20261115000300_crm_proposals_files_reminders.sql (the other two).
 begin;
 
@@ -112,6 +112,10 @@ begin
 end;
 $$;
 
+-- Decision B objects: the trigger first, then the functions that use the helper.
+drop trigger if exists crm_zoho_quote_ref_guard on crm_zoho_references;
 drop function if exists crm_save_zoho_reference(uuid, jsonb, jsonb);
+drop function if exists crm_zoho_quote_ref_guard();
+drop function if exists crm_zoho_quote_ref_protected(text, text);
 
 commit;

@@ -6,7 +6,7 @@
 //   1. emp@ (Sales owner) creates the enquiry on the screen; My Day's "due today" link lands on the Follow-ups TODAY view with only today's rows;
 //   2. emp@ builds and finalises an estimate (freezes only: stage, status and every other table unchanged);
 //   3. an ordinary proposal is recorded as sent (an estimate is not, EST01); replacement and the superseded starting statuses are enforced by the database;
-//   4. Zoho Books references: two people saving DIFFERENT fields at the same time keep both changes, a stale edit of the SAME field is refused, an emptied field is an
+//   4. Zoho Books references: (decision B: emptying the quote reference at Quote sent is refused; with the save function missing the form says saving is unavailable and writes nothing) two people saving DIFFERENT fields at the same time keep both changes, a stale edit of the SAME field is refused, an emptied field is an
 //      intentional clear, an untouched field is never cleared; Quote sent is refused without the reference and works with it;
 //   5. Mark Won with a purchase order: the form's date limit is the Dubai day, the DATABASE refuses a future date and leaves every row as it was;
 //   6. handover: emp@ saves and submits (nothing is accepted by submitting), the founder assigns the PM, a colleague who is not the PM and even the founder cannot accept,
@@ -201,6 +201,30 @@ await step("with the quote reference recorded, Quote sent works on the screen", 
   await dlg.getByRole("button", { name: /^move stage$/i }).click();
   await page.waitForFunction(() => !document.querySelector("dialog[open]"));
   if (sql(`select stage from crm_opportunities where id='${OPP}'`) !== "quote_sent") throw new Error("stage not moved");
+});
+await step("decision B: at Quote sent, emptying the quote reference is refused in words and changes nothing; correcting it to another reference works", async () => {
+  await go(`/sales/opportunities/${OPP}?tab=commercial`);
+  const w = world(OPP); const z0 = sql(`select md5(z::text) from crm_zoho_references z where opportunity_id='${OPP}'`);
+  await page.locator("#z-qref").fill(""); await page.getByRole("button", { name: "Save references" }).click();
+  await page.getByRole("alert").filter({ hasText: /quote reference cannot be cleared once the enquiry has reached Quote sent/ }).waitFor({ timeout: 10000 });
+  if (sql(`select md5(z::text) from crm_zoho_references z where opportunity_id='${OPP}'`) !== z0 || world(OPP) !== w) throw new Error("the refused clear changed something");
+  await shot("2-zoho-clear-refused-at-quote-sent");
+  await page.locator("#z-qref").fill("QT-2001-C"); await page.getByRole("button", { name: "Save references" }).click();
+  await page.getByRole("alert").waitFor({ state: "detached", timeout: 10000 }).catch(() => {}); await page.waitForTimeout(1500);
+  if (sql(`select quote_ref from crm_zoho_references where opportunity_id='${OPP}'`) !== "QT-2001-C") throw new Error("the correction was not saved");
+});
+await step("no fallback: with the save function not installed the form says saving is temporarily unavailable, nothing is written, and the references stay readable", async () => {
+  psqlInput("alter function crm_save_zoho_reference(uuid, jsonb, jsonb) rename to crm_save_zoho_reference_off;\nnotify pgrst, 'reload schema';\n"); await page.waitForTimeout(2500);
+  try {
+    const z0 = sql(`select md5(z::text) from crm_zoho_references z where opportunity_id='${OPP}'`);
+    await go(`/sales/opportunities/${OPP}?tab=commercial`);
+    if ((await page.locator("#z-qref").inputValue()) !== "QT-2001-C") throw new Error("the stored reference is not readable");
+    await page.locator("#z-iref").fill("INV-77-X"); await page.getByRole("button", { name: "Save references" }).click();
+    const alertText = flat(await page.getByRole("alert").filter({ hasText: /Saving Zoho Books references is temporarily unavailable/ }).innerText({ timeout: 10000 }));
+    if (/Someone else changed|cannot be cleared|could not save/i.test(alertText) || /try again\./i.test(alertText.replace("Trying again will not help", ""))) throw new Error(`the message looks like a refusal or invites a retry: ${alertText}`);
+    if (sql(`select md5(z::text) from crm_zoho_references z where opportunity_id='${OPP}'`) !== z0) throw new Error("something was written");
+    await shot("2-zoho-save-unavailable");
+  } finally { psqlInput("alter function crm_save_zoho_reference_off(uuid, jsonb, jsonb) rename to crm_save_zoho_reference;\nnotify pgrst, 'reload schema';\n"); await page.waitForTimeout(2500); }
 });
 
 // ---- 5. Mark Won ----------------------------------------------------------------------------------------------------------------------------------------------------

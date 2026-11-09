@@ -48,15 +48,13 @@ export function diffZohoForm(form: Record<string, unknown>): ZohoChange | null {
   return any ? change : null;
 }
 
-/** Plain-language names for messages. */
-export const ZOHO_LABELS: Record<ZohoField, string> = {
-  quote_ref: "the quote reference", quote_sent_on: "the quote sent date", invoice_ref: "the invoice reference", invoice_issued_on: "the invoice date", payment_received_on: "the payment date", paid_amount: "the amount paid",
-};
-
 /**
- * Used ONLY against a database that has not got `crm_save_zoho_reference` yet: the changed fields whose stored value is no longer the one the
- * person saw (somebody else changed that same field meanwhile).
+ * Shown when the database function that saves Zoho references is not installed (the app was released before the Sales database update). There is NO other write
+ * path: nothing is attempted, nothing is saved, and retrying cannot help until the update is installed. The references stay readable on the page.
  */
-export function staleFields(change: ZohoChange, current: Partial<Record<ZohoField, unknown>> | null): ZohoField[] {
-  return (Object.keys(change.fields) as ZohoField[]).filter((f) => normalise(f, change.expected[f]) !== normalise(f, current?.[f] ?? null));
-}
+export const ZOHO_SAVE_UNAVAILABLE =
+  "Saving Zoho Books references is temporarily unavailable, so nothing was saved. Trying again will not help until a required database update is installed. The references shown are the ones stored. Ask the system owner to complete the Sales database update.";
+
+/** PostgREST answers PGRST202 and Postgres 42883 when the function is not there. */
+export const isMissingDatabaseFunction = (e: { code?: string; message?: string }) =>
+  e.code === "PGRST202" || e.code === "42883" || /Could not find the function/i.test(e.message ?? "");

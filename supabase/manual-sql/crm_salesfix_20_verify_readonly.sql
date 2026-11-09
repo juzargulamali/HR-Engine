@@ -47,4 +47,20 @@ select item, result from (
                                  where p.oid = 'public.crm_mark_won(uuid, text, text, date, text, integer)'::regprocedure and a.grantee = 0) then 'OK' else 'FAIL' end
   union all select 14, 'the Quote sent gate (crm_move_stage) was not touched: it still needs a non-blank Zoho quote reference',
          case when exists (select 1 from pg_proc where proname = 'crm_move_stage' and pronamespace = 'public'::regnamespace and prosrc like '%Record the Zoho Books quote reference before moving to Quote sent%') then 'OK' else 'CHANGED' end
+  union all select 15, 'decision B: the BEFORE UPDATE trigger crm_zoho_quote_ref_guard is installed on crm_zoho_references and enabled (fires only when a non-blank quote_ref becomes blank)',
+         case when exists (select 1 from pg_trigger t where t.tgname = 'crm_zoho_quote_ref_guard' and not t.tgisinternal and t.tgrelid = 'public.crm_zoho_references'::regclass and t.tgenabled in ('O', 'A')
+                              and (t.tgtype & 2) = 2 and (t.tgtype & 16) = 16 and (t.tgtype & 1) = 1
+                              and pg_get_triggerdef(t.oid) like '%UPDATE OF quote_ref%') then 'OK' else 'MISSING, disabled or wrong shape' end
+  union all select 16, 'decision B: the trigger function and the stage list say Quote sent, Negotiation, Won (and On hold from them) and refuse with SQLSTATE 23514 (definition text)',
+         case when exists (select 1 from pg_proc where proname = 'crm_zoho_quote_ref_guard' and pronamespace = 'public'::regnamespace and prosrc like '%crm_zoho_quote_ref_protected%' and prosrc like '%cannot be cleared once the enquiry has reached Quote sent%' and prosrc like '%23514%')
+               and exists (select 1 from pg_proc where proname = 'crm_zoho_quote_ref_protected' and pronamespace = 'public'::regnamespace and prosrc like '%''quote_sent'', ''negotiation'', ''won''%' and prosrc like '%on_hold%') then 'OK' else 'WRONG TEXT' end
+  union all select 17, 'decision B: crm_save_zoho_reference refuses clearing a non-blank quote reference at those stages, and still allows a change to another value, an omitted quote reference and a first value (definition text)',
+         case when exists (select 1 from pg_proc where proname = 'crm_save_zoho_reference' and pronamespace = 'public'::regnamespace
+                              and prosrc like '%crm_zoho_quote_ref_protected(v.stage, v.stage_before_hold)%' and prosrc like '%cannot be cleared once the enquiry has reached Quote sent%'
+                              and prosrc like '%p_fields ? ''quote_ref'' and nullif(btrim(p_fields->>''quote_ref''), '''') is null%' and prosrc like '%is not null%') then 'OK' else 'WRONG TEXT' end
+  union all select 18, 'decision B: the two helper functions are internal (neither signed-in users, anon nor public can call them)',
+         case when not exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('crm_zoho_quote_ref_protected', 'crm_zoho_quote_ref_guard')
+                                  and (has_function_privilege('authenticated', p.oid, 'execute') or has_function_privilege('anon', p.oid, 'execute')
+                                       or exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where a.grantee = 0)))
+                and (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('crm_zoho_quote_ref_protected', 'crm_zoho_quote_ref_guard')) = 2 then 'OK' else 'FAIL - missing or callable' end
 ) r order by ord, item;

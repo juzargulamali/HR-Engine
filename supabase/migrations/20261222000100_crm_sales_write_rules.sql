@@ -11,7 +11,13 @@
 --      hides the form on Lost; every sibling function refuses a closed enquiry; Won stays editable because invoice and payment references follow a win).
 --      The OLD signature crm_upsert_zoho_reference(uuid, text, date, text, date, date, numeric) is KEPT (same grants) and now delegates to the new function with
 --      NULL meaning "leave as it is", so an old caller can no longer wipe a field it did not mean to touch (it cannot clear one either: clearing needs the new function).
---      NOT decided here (no rule exists in the code or docs): whether the quote reference may be CLEARED once the enquiry is at or past Quote sent. See the deployment guide.
+--      OWNER DECISION B: once the enquiry has reached Quote sent (stage quote_sent, negotiation or won; and on_hold when it was put on hold from one of them,
+--      crm_opportunities.stage_before_hold) an existing non-blank quote reference cannot be CLEARED (set to null or blank): it is the evidence that unlocked
+--      the stage (crm_move_stage). Correcting it to ANOTHER non-blank reference is allowed there; clearing at earlier stages is allowed as before; a save that
+--      omits the quote reference, or sets a first value on a record that has none, is never refused by this rule (existing advanced-stage records with a
+--      missing reference are NOT backfilled and do not block unrelated edits); the invoice and payment fields stay editable on Won. Refused with SQLSTATE 23514.
+--      Enforced twice: in crm_save_zoho_reference (clear message, before anything is written) and in a BEFORE UPDATE trigger on crm_zoho_references, so no other
+--      path (the old signature, which delegates; a future function; an owner/admin UPDATE) can clear it. Authenticated users have SELECT only on the table.
 --   2. crm_set_proposal_status: marking a proposal SUPERSEDED is only allowed from draft or sent (the same starting statuses crm_quote_issue supersedes and the only
 --      ones the proposals panel offers). accepted and already-superseded proposals are refused (SQLSTATE 23514). The proposal is re-read AFTER the opportunity lock,
 --      so a concurrent "accepted" cannot be overwritten by a stale read. Everything else in the function is byte-for-byte the applied body; the estimate guard
@@ -23,6 +29,16 @@
 -- -----------------------------------------------------------------------------
 -- 1. Zoho Books references: field-level merge
 -- -----------------------------------------------------------------------------
+-- Stages at which an existing quote reference is protected from being cleared (decision B): Quote sent, Negotiation, Won, and On hold put there from one of them.
+create or replace function crm_zoho_quote_ref_protected(p_stage text, p_stage_before_hold text)
+returns boolean
+language sql immutable
+set search_path = public
+as $$
+  select p_stage in ('quote_sent', 'negotiation', 'won')
+      or (p_stage = 'on_hold' and p_stage_before_hold in ('quote_sent', 'negotiation'));
+$$;
+
 create or replace function crm_save_zoho_reference(p_opportunity_id uuid, p_fields jsonb, p_expected jsonb default null)
 returns void
 language plpgsql security definer
@@ -71,6 +87,14 @@ begin
     end if;
   end if;
 
+  -- Decision B: an existing non-blank quote reference cannot be cleared once the enquiry has reached Quote sent. Changing it to another non-blank value is allowed,
+  -- and so is leaving it out of the save, or clearing one that is already blank (nothing to clear). The trigger below is the backstop for any other path.
+  if p_fields ? 'quote_ref' and nullif(btrim(p_fields->>'quote_ref'), '') is null
+     and nullif(btrim(coalesce(z.quote_ref, '')), '') is not null
+     and crm_zoho_quote_ref_protected(v.stage, v.stage_before_hold) then
+    raise exception 'The Zoho Books quote reference cannot be cleared once the enquiry has reached Quote sent (Quote sent, Negotiation, Won, or on hold from one of them). Replace it with the correct reference instead.' using errcode = '23514';
+  end if;
+
   -- A present key is applied (JSON null or blank = intentional clear); an absent key keeps what is stored.
   v_quote_ref := case when p_fields ? 'quote_ref' then nullif(btrim(p_fields->>'quote_ref'), '') else z.quote_ref end;
   v_quote_sent_on := case when p_fields ? 'quote_sent_on' then nullif(btrim(p_fields->>'quote_sent_on'), '')::date else z.quote_sent_on end;
@@ -94,6 +118,32 @@ $$;
 
 revoke all on function crm_save_zoho_reference(uuid, jsonb, jsonb) from public, anon, authenticated;
 grant execute on function crm_save_zoho_reference(uuid, jsonb, jsonb) to authenticated;
+
+-- Backstop for decision B on the table itself: whatever function or statement updates the row, a non-blank quote reference is not cleared at a protected stage.
+create or replace function crm_zoho_quote_ref_guard()
+returns trigger
+language plpgsql security definer
+set search_path = public
+as $$
+declare o crm_opportunities;
+begin
+  select * into o from crm_opportunities where id = new.opportunity_id;
+  if found and crm_zoho_quote_ref_protected(o.stage, o.stage_before_hold) then
+    raise exception 'The Zoho Books quote reference cannot be cleared once the enquiry has reached Quote sent (Quote sent, Negotiation, Won, or on hold from one of them). Replace it with the correct reference instead.' using errcode = '23514';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists crm_zoho_quote_ref_guard on crm_zoho_references;
+create trigger crm_zoho_quote_ref_guard before update of quote_ref on crm_zoho_references
+  for each row
+  when (nullif(btrim(coalesce(old.quote_ref, '')), '') is not null and nullif(btrim(coalesce(new.quote_ref, '')), '') is null)
+  execute function crm_zoho_quote_ref_guard();
+
+-- The two helpers are internal: nobody calls them directly (the trigger and the SECURITY DEFINER function above do).
+revoke all on function crm_zoho_quote_ref_protected(text, text) from public, anon, authenticated;
+revoke all on function crm_zoho_quote_ref_guard() from public, anon, authenticated;
 
 -- The old signature stays (same grants, kept by create or replace). A NULL argument now means "leave as it is".
 create or replace function crm_upsert_zoho_reference(
@@ -205,4 +255,4 @@ begin
 end;
 $$;
 
--- Grants of the three replaced functions are unchanged (create or replace keeps them).
+-- Grants of the three replaced functions are unchanged (create or replace keeps them). The two new helper functions are internal (revoked below).

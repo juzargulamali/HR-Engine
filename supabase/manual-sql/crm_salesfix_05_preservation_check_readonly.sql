@@ -1,6 +1,6 @@
 -- READ-ONLY. Run BEFORE the migration 20261222000100_crm_sales_write_rules.sql, and again AFTER it. Compare the two results row by row.
 -- Every row must be IDENTICAL before and after EXCEPT the rows marked "(INTENDED TO CHANGE)": the three replaced functions (crm_upsert_zoho_reference,
--- crm_set_proposal_status, crm_mark_won) and the new function crm_save_zoho_reference (absent before, present after).
+-- crm_set_proposal_status, crm_mark_won) and the new objects (crm_save_zoho_reference, crm_zoho_quote_ref_protected, crm_zoho_quote_ref_guard and the trigger of that name on crm_zoho_references; absent before, present after).
 -- The migration changes functions only: it must not change a stored proposal, Zoho reference, closure, handover, follow-up, enquiry or event row, or any other function.
 select item, n, fingerprint from (
   select 1 as ord, 'function ' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')'
@@ -13,6 +13,12 @@ select item, n, fingerprint from (
                        'crm_estimate_sent_guard', 'crm_update_handover', 'crm_request_approval', 'crm_decide_approval')
   union all select 2, 'new function crm_save_zoho_reference (INTENDED TO CHANGE: absent before, present after)',
          (select count(*)::text from pg_proc where pronamespace = 'public'::regnamespace and proname = 'crm_save_zoho_reference'), '-'
+  union all select 2, 'new function crm_zoho_quote_ref_protected (INTENDED TO CHANGE: absent before, present after)',
+         (select count(*)::text from pg_proc where pronamespace = 'public'::regnamespace and proname = 'crm_zoho_quote_ref_protected'), '-'
+  union all select 2, 'new function crm_zoho_quote_ref_guard (INTENDED TO CHANGE: absent before, present after)',
+         (select count(*)::text from pg_proc where pronamespace = 'public'::regnamespace and proname = 'crm_zoho_quote_ref_guard'), '-'
+  union all select 2, 'new trigger crm_zoho_quote_ref_guard on crm_zoho_references (INTENDED TO CHANGE: absent before, present after)',
+         (select count(*)::text from pg_trigger where tgname = 'crm_zoho_quote_ref_guard' and not tgisinternal), '-'
   union all select 3, 'estimate guard trigger on crm_proposals', (select count(*)::text from pg_trigger where tgname = 'crm_proposals_estimate_sent_guard' and not tgisinternal), '-'
   union all select 4, 'proposals (id, status, version, sent_on, note)', count(*)::text,
          coalesce(md5(string_agg(id::text || status || version::text || coalesce(sent_on::text, '') || coalesce(note, ''), ',' order by id)), '-') from crm_proposals

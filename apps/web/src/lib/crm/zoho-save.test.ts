@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffZohoForm, staleFields, ZOHO_FIELDS } from "./zoho-save";
+import { diffZohoForm, isMissingDatabaseFunction, ZOHO_FIELDS } from "./zoho-save";
 
 const seen = { seen_quoteRef: "QT-1", seen_quoteSentOn: "2026-11-02", seen_invoiceRef: "INV-1", seen_invoiceIssuedOn: "", seen_paymentReceivedOn: "", seen_paidAmount: "12.50" };
 const same = { quoteRef: "QT-1", quoteSentOn: "2026-11-02", invoiceRef: "INV-1", invoiceIssuedOn: "", paymentReceivedOn: "", paidAmount: "12.5" };
@@ -21,10 +21,11 @@ describe("which Zoho fields did the person change", () => {
   it("covers every column", () => {
     expect(ZOHO_FIELDS).toHaveLength(6);
   });
-  it("finds the fields somebody else changed meanwhile (old database only)", () => {
-    const change = diffZohoForm({ ...seen, ...same, quoteRef: "QT-MINE", invoiceRef: "INV-2" })!;
-    expect(staleFields(change, { quote_ref: "QT-1", invoice_ref: "INV-THEIRS" })).toEqual(["invoice_ref"]);
-    expect(staleFields(change, { quote_ref: "QT-1", invoice_ref: "INV-1" })).toEqual([]);
-    expect(staleFields(change, null)).toEqual(["quote_ref", "invoice_ref"]);
+  it("recognises a missing database function (and nothing else)", () => {
+    expect(isMissingDatabaseFunction({ code: "PGRST202", message: "x" })).toBe(true);
+    expect(isMissingDatabaseFunction({ code: "42883", message: "x" })).toBe(true);
+    expect(isMissingDatabaseFunction({ message: "Could not find the function public.crm_save_zoho_reference" })).toBe(true);
+    expect(isMissingDatabaseFunction({ code: "23514", message: "The Zoho Books quote reference cannot be cleared" })).toBe(false);
+    expect(isMissingDatabaseFunction({ code: "40001", message: "Someone else changed" })).toBe(false);
   });
 });

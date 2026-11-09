@@ -143,7 +143,7 @@ The six named verification gaps (rows 30, 38, 43, 46, 62 and 70, see the count u
 | Row | What was wrong | Now |
 |---|---|---|
 | 18, 39, 42 (enquiry, close, handover pages) | A failed detail read landed on the generic error page | "Could not load this enquiry" with Try again, distinct from not found, no access and an empty result; no dependent action is offered; per-section "Could not load" ([E section 4](./sales-enquiries.md), [H sections 1 and 2](./sales-close-and-handover.md)) |
-| 38 (Zoho references) | The save overwrote every field | Field-level merge, intentional clear, row lock, stale-field refusal, Lost read-only (migration `20261222000100`, [Z section 2.3](./sales-proposals-and-zoho.md)). **Decision still open:** whether the quote reference may be emptied after Quote sent |
+| 38 (Zoho references) | The save overwrote every field | Field-level merge, intentional clear, row lock, stale-field refusal, Lost read-only, and owner decision B (the quote reference cannot be cleared from Quote sent; the new app has no write fallback) (migration `20261222000100`, [Z section 2.3](./sales-proposals-and-zoho.md)) |
 | 34 (Mark superseded) | The database accepted any starting status | Only draft or sent (same migration) |
 | 39 (Won date) | The no-future-date rule was only in the form | `crm_mark_won` refuses a date after the Dubai day (same migration) |
 | 59 (Reports) | Stored source ids shown; a failed closures read ignored; failed reads looked like zeros | Readable names; per-card "Could not load" and an "incomplete" notice ([R sections 3, 4 and 6](./sales-reports.md)) |

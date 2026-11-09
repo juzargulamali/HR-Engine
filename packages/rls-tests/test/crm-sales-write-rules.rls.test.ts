@@ -8,6 +8,9 @@ import { RlsTestDatabase } from "../src/harness";
 //   1. Zoho Books references: a field that is not sent is kept, an intentional clear is applied, two people saving different fields at once both keep their change,
 //      a stale edit of the same field is refused, the old signature can no longer wipe a field, a Lost enquiry is read-only, Won stays editable, a refused role stays refused,
 //      and the Quote sent gate (a non-blank quote reference) is unchanged;
+//   1b. owner decision B: an existing quote reference cannot be CLEARED at Quote sent, Negotiation or Won (nor On hold from them), by the owner or a founder, through the new
+//      function, the old signature or a direct UPDATE of the table (trigger backstop); a correction to another value, unrelated edits (also on records with a MISSING
+//      reference, which are not backfilled), a first value, the invoice and payment fields on Won, clearing at earlier stages, Lost read-only and the Quote sent gate hold;
 //   2. proposals: superseded only from draft or sent (accepted and already superseded refused, also under a concurrent "accepted"), normal replacement, estimate
 //      finalisation (including a legacy revision already sent) and the estimate-sent guard (EST01) unchanged;
 //   3. Won: a future evidence date (Dubai day) is refused with NO side effect; today and past dates work; a refused role stays refused;
@@ -51,6 +54,8 @@ describe("Sales & CRM write rules", () => {
 
   let clientId: string; let vat: Record<string, string>;
   let legacy: { p: string; opp: string };
+  /** Enquiries that already sat at an advanced stage BEFORE the migration (as hosted data may): without a quote reference, and one with it. */
+  let adv: { q: string; n: string; w: string; hold: string; withRef: string; refsMissing: string[] };
   let oldFp: Record<"upsert" | "status" | "won", string>;
   let preflight: { section: string; item: string; detail: string }[] = [];
   let before: { item: string; n: string; fingerprint: string }[] = [];
@@ -111,6 +116,15 @@ describe("Sales & CRM write rules", () => {
     await issue(p);
     await legacySent(p);
     legacy = { p, opp };
+    const mk = async (title: string) => { const o = await newOpp(title); await withValue(o); return o; };
+    adv = { q: await mk("Pre-existing Quote sent without reference"), n: await mk("Pre-existing Negotiation without reference"), w: await mk("Pre-existing Won without reference"),
+            hold: await mk("Pre-existing hold from Quote sent without reference"), withRef: await mk("Pre-existing Quote sent with reference"), refsMissing: [] };
+    await admin(`update crm_opportunities set stage = 'quote_sent' where id = '${adv.q}'; update crm_opportunities set stage = 'negotiation' where id = '${adv.n}';
+      update crm_opportunities set stage = 'on_hold', stage_before_hold = 'quote_sent', hold_reason = 'Client postponed', hold_review_date = current_date + 10 where id = '${adv.hold}';
+      update crm_opportunities set stage = 'quote_sent' where id = '${adv.withRef}'`);
+    await commit(U.sara, `select crm_upsert_zoho_reference('${adv.withRef}', 'QT-LEGACY-1')`);
+    await commit(U.sara, `select crm_mark_won('${adv.w}', 'purchase_order', 'PO-LEGACY', ${today})`);
+    adv.refsMissing = (await admin<{ reference: string }>(`select reference from crm_opportunities where id in ('${adv.q}', '${adv.n}', '${adv.w}', '${adv.hold}') order by reference`)).map((r) => r.reference);
     oldFp = { upsert: await fingerprint(FN.upsert), status: await fingerprint(FN.status), won: await fingerprint(FN.won) };
     // Owner pack, BEFORE the migration.
     preflight = (await db.seed(pack("crm_salesfix_00_preflight_readonly.sql"))).rows as typeof preflight;
@@ -128,14 +142,21 @@ describe("Sales & CRM write rules", () => {
       expect(b.filter((r) => !/^OK/.test(r.detail))).toEqual([]);
       expect(b.find((r) => r.item === "applied already?")!.detail).toBe("OK - not applied yet");
       const info = Object.fromEntries(preflight.filter((r) => r.section === "C what exists today").map((r) => [r.item, r.detail]));
-      expect(Object.keys(info).length).toBe(6);
+      expect(Object.keys(info).length).toBe(8);
+      const missing = Object.entries(info).filter(([k]) => /WITHOUT a quote reference, by stage/.test(k));
+      expect(missing).toHaveLength(1);
+      expect(missing[0]![0]).toMatch(/NOT backfilled and NOT blocked/);
+      // the rehearsal's pre-existing advanced-stage records without a quote reference are REPORTED (information rows, not failures), by stage and by reference code
+      expect(missing[0]![1]).toBe("negotiation: 1, on_hold (from quote_sent): 1, quote_sent: 1, won: 1");
+      expect(info["the enquiry references of those records (reference codes only; first 50)"]).toBe(adv.refsMissing.join(", "));
+      expect(Object.entries(info).find(([k]) => /WITH a quote reference/.test(k))![1]).toBe("1");
     });
     it("the verify pack FAILS before the migration (it is a real check) and says OK on every row after it", () => {
       expect(verifyBefore.filter((r) => !/^OK/.test(r.result)).length).toBeGreaterThanOrEqual(5);
-      expect(verifyRows.length).toBeGreaterThanOrEqual(14);
+      expect(verifyRows.length).toBe(18);
       expect(verifyRows.filter((r) => !/^OK/.test(r.result))).toEqual([]);
     });
-    it("the preservation check is identical before and after, except the three replaced functions and the new one (as intended)", async () => {
+    it("the preservation check is identical before and after, except the three replaced functions and the new objects (as intended)", async () => {
       const after = (await db.seed(pack("crm_salesfix_05_preservation_check_readonly.sql"))).rows as typeof before;
       const key = (r: { item: string }) => r.item;
       // the new function row is the only row that exists only in the AFTER result? No: it is present in both with a count, so the lists have the same items
@@ -146,6 +167,9 @@ describe("Sales & CRM write rules", () => {
         "function crm_set_proposal_status(p_proposal_id uuid, p_status text, p_sent_on date) (INTENDED TO CHANGE)",
         "function crm_upsert_zoho_reference(p_opportunity_id uuid, p_quote_ref text, p_quote_sent_on date, p_invoice_ref text, p_invoice_issued_on date, p_payment_received_on date, p_paid_amount numeric) (INTENDED TO CHANGE)",
         "new function crm_save_zoho_reference (INTENDED TO CHANGE: absent before, present after)",
+        "new function crm_zoho_quote_ref_guard (INTENDED TO CHANGE: absent before, present after)",
+        "new function crm_zoho_quote_ref_protected (INTENDED TO CHANGE: absent before, present after)",
+        "new trigger crm_zoho_quote_ref_guard on crm_zoho_references (INTENDED TO CHANGE: absent before, present after)",
       ].sort());
     });
     it("applying the migration a second time changes nothing and the verify pack stays OK", async () => {
@@ -315,6 +339,238 @@ describe("Sales & CRM write rules", () => {
       await commit(U.sara, `select crm_move_stage('${opp}', 'quote_sent')`);
       expect(await stage(opp)).toBe("quote_sent");
       expect((await zoho(opp)).invoice_ref).toBe("INV-ONLY");
+    });
+  });
+
+  describe("1b. Owner decision B: an existing quote reference cannot be cleared once the enquiry has reached Quote sent", () => {
+    const PROTECTED = ["quote_sent", "negotiation", "won"] as const;
+    const CLEAR_REFUSAL = /cannot be cleared once the enquiry has reached Quote sent/;
+    /** A real enquiry taken through the real gates to the stage, with a quote reference and an invoice reference recorded. */
+    const reach = async (to: (typeof PROTECTED)[number], ref: string | null = "QT-B-1") => {
+      const opp = await newOpp(`Decision B ${to} ${randomUUID().slice(0, 6)}`);
+      await withValue(opp);
+      if (to === "won") {
+        if (ref) await save(U.sara, opp, { quote_ref: ref, invoice_ref: "INV-B-1" });
+        await commit(U.sara, `select crm_mark_won('${opp}', 'purchase_order', 'PO-B-1', ${today})`);
+        return opp;
+      }
+      if (ref) {
+        const prop = await addProposal(opp, "Proposal for decision B");
+        await commit(U.sara, `select crm_move_stage('${opp}', 'proposal_prep')`);
+        await setStatus(U.sara, prop, "sent");
+        await commit(U.sara, `select crm_move_stage('${opp}', 'proposal_sent')`);
+        await save(U.sara, opp, { quote_ref: ref, invoice_ref: "INV-B-1" });
+        await commit(U.sara, `select crm_move_stage('${opp}', 'quote_sent')`);
+        if (to === "negotiation") await commit(U.sara, `select crm_move_stage('${opp}', 'negotiation')`);
+      } else {
+        // An existing record from before the gate: it is at the stage with NO quote reference at all.
+        await admin(`update crm_opportunities set stage = '${to}' where id = '${opp}'`);
+      }
+      expect(await stage(opp)).toBe(to);
+      return opp;
+    };
+    const attempts: [string, (who: string, opp: string) => Promise<unknown>][] = [
+      ["new function, JSON null", (who, opp) => save(who, opp, { quote_ref: null })],
+      ["new function, empty string", (who, opp) => save(who, opp, { quote_ref: "" })],
+      ["new function, blank string", (who, opp) => save(who, opp, { quote_ref: "   " })],
+      ["new function, with the seen value (the app's form)", (who, opp) => save(who, opp, { quote_ref: null }, { quote_ref: "QT-B-1" })],
+      ["new function, clearing together with another change", (who, opp) => save(who, opp, { quote_ref: null, invoice_ref: "INV-CHANGED" })],
+      ["OLD signature with an empty string (the compatibility path)", (who, opp) => commit(who, `select crm_upsert_zoho_reference('${opp}', '')`)],
+      ["OLD signature with an empty string and another field", (who, opp) => commit(who, `select crm_upsert_zoho_reference('${opp}', '  ', null, 'INV-CHANGED')`)],
+    ];
+
+    for (const st of PROTECTED) {
+      it(`${st}: clearing an existing quote reference is refused (23514, clear message) for the owner and a founder, through every route, and NOTHING changes`, async () => {
+        const opp = await reach(st);
+        const w0 = await world(opp);
+        for (const who of [U.sara, U.founder]) {
+          for (const [name, run] of attempts) {
+            const e = await rejection(run(who, opp));
+            expect(e.code, `${name}: ${e.message}`).toBe("23514");
+            expect(e.message, name).toMatch(CLEAR_REFUSAL);
+            expect(e.code).not.toBe("40001");
+          }
+        }
+        expect(await world(opp)).toEqual(w0);
+        expect(await zoho(opp)).toMatchObject({ quote_ref: "QT-B-1", invoice_ref: "INV-B-1" });
+      });
+      it(`${st}: correcting to ANOTHER non-blank reference works, as does an unrelated edit, an omitted quote reference and re-sending the same reference`, async () => {
+        const opp = await reach(st);
+        await save(U.sara, opp, { quote_ref: "QT-B-2" });
+        expect((await zoho(opp)).quote_ref).toBe("QT-B-2");
+        await save(U.founder, opp, { quote_ref: "  QT-B-3  " }, { quote_ref: "QT-B-2" });
+        expect((await zoho(opp)).quote_ref).toBe("QT-B-3");
+        await save(U.sara, opp, { quote_ref: "QT-B-3", quote_sent_on: "2026-11-05" });          // the same value is not a clear
+        await save(U.sara, opp, { invoice_ref: "INV-B-2" });                                    // quote_ref omitted
+        await save(U.sara, opp, { invoice_issued_on: "2026-11-10", payment_received_on: "2026-11-20", paid_amount: 100 });
+        await commit(U.founder, `select crm_upsert_zoho_reference('${opp}', null, null, 'INV-B-3')`);   // old signature leaving the quote reference alone
+        await commit(U.sara, `select crm_upsert_zoho_reference('${opp}', 'QT-B-4')`);                    // old signature correcting it
+        expect(await zoho(opp)).toMatchObject({ quote_ref: "QT-B-4", quote_sent_on: "2026-11-05", invoice_ref: "INV-B-3", invoice_issued_on: "2026-11-10", payment_received_on: "2026-11-20", paid_amount: "100.00" });
+        expect(await stage(opp)).toBe(st);
+      });
+      it(`${st}: an existing record with a MISSING quote reference is not backfilled and does not block edits (other fields, a no-op blank, a first value)`, async () => {
+        const opp = await reach(st, null);
+        expect((await admin<{ n: string }>(`select count(*) n from crm_zoho_references where opportunity_id = '${opp}'`))[0].n).toBe("0");   // nothing was backfilled
+        await save(U.sara, opp, { invoice_ref: "INV-LEGACY" });
+        expect(await zoho(opp)).toMatchObject({ quote_ref: null, invoice_ref: "INV-LEGACY" });
+        await save(U.sara, opp, { quote_ref: null, paid_amount: 5 });                           // clearing what is already empty is not a clear
+        await save(U.founder, opp, { quote_ref: "", invoice_issued_on: "2026-11-12" });
+        await commit(U.sara, `select crm_upsert_zoho_reference('${opp}', '', null, 'INV-LEGACY-2')`);
+        expect(await zoho(opp)).toMatchObject({ quote_ref: null, invoice_ref: "INV-LEGACY-2", paid_amount: "5.00" });
+        await save(U.sara, opp, { quote_ref: "QT-FIRST" });                                      // setting a first value works
+        expect((await zoho(opp)).quote_ref).toBe("QT-FIRST");
+        const e = await rejection(save(U.sara, opp, { quote_ref: null }));                       // and from then on it is protected
+        expect(e.code).toBe("23514");
+        expect(await stage(opp)).toBe(st);
+      });
+    }
+
+    it("records that sat at an advanced stage WITHOUT a quote reference before the migration are untouched by it (no row created), and unrelated edits and a first value work on them", async () => {
+      const zohoRows = await admin<{ n: string }>(`select count(*)::text n from crm_zoho_references where opportunity_id in ('${adv.q}', '${adv.n}', '${adv.w}', '${adv.hold}')`);
+      expect(zohoRows[0].n).toBe("0");                                                          // nothing was backfilled by the migration (it changes no row)
+      expect(await stage(adv.q)).toBe("quote_sent"); expect(await stage(adv.n)).toBe("negotiation"); expect(await stage(adv.w)).toBe("won"); expect(await stage(adv.hold)).toBe("on_hold");
+      for (const o of [adv.q, adv.n, adv.w, adv.hold]) await save(U.sara, o, { invoice_ref: "INV-PRE-EXISTING" });
+      await save(U.sara, adv.q, { quote_ref: "QT-FIRST-VALUE" });
+      expect((await zoho(adv.q)).quote_ref).toBe("QT-FIRST-VALUE");
+      // the one that had a reference before is protected from now on, and a correction works
+      await expect(save(U.sara, adv.withRef, { quote_ref: null })).rejects.toThrow(CLEAR_REFUSAL);
+      await save(U.sara, adv.withRef, { quote_ref: "QT-LEGACY-1-CORRECTED" });
+      expect((await zoho(adv.withRef)).quote_ref).toBe("QT-LEGACY-1-CORRECTED");
+    });
+
+    it("won: invoice and payment updates stay available, the enquiry stays Won, and clearing the invoice or payment fields is still allowed (only the quote reference is protected)", async () => {
+      const opp = await reach("won");
+      await save(U.sara, opp, { invoice_ref: "INV-W-2", invoice_issued_on: "2026-12-01", payment_received_on: "2026-12-20", paid_amount: 900 });
+      await save(U.sara, opp, { invoice_ref: null, invoice_issued_on: null, payment_received_on: null, paid_amount: null, quote_sent_on: null });
+      expect(await zoho(opp)).toMatchObject({ quote_ref: "QT-B-1", invoice_ref: null, invoice_issued_on: null, payment_received_on: null, paid_amount: null, quote_sent_on: null });
+      expect(await stage(opp)).toBe("won");
+    });
+
+    it("on hold: a hold put on from Quote sent / Negotiation keeps the protection (no clear while held), a hold from an earlier stage does not, and Resume returns with the reference intact", async () => {
+      const q = await reach("quote_sent");
+      await commit(U.sara, `select crm_hold_opportunity('${q}', 'Client postponed', current_date + 14)`);
+      expect(await stage(q)).toBe("on_hold");
+      const e = await rejection(save(U.sara, q, { quote_ref: null }));
+      expect(e.code).toBe("23514"); expect(e.message).toMatch(CLEAR_REFUSAL);
+      await save(U.sara, q, { quote_ref: "QT-B-HOLD", invoice_ref: "INV-HELD" });
+      await commit(U.sara, `select crm_resume_opportunity('${q}', 'Check in', ${soon})`);
+      expect(await stage(q)).toBe("quote_sent");
+      expect(await zoho(q)).toMatchObject({ quote_ref: "QT-B-HOLD", invoice_ref: "INV-HELD" });
+      const early = await newOpp("Decision B hold from an early stage");
+      await save(U.sara, early, { quote_ref: "QT-EARLY" });
+      await commit(U.sara, `select crm_hold_opportunity('${early}', 'Client postponed', current_date + 14)`);
+      await save(U.sara, early, { quote_ref: null });
+      expect((await zoho(early)).quote_ref).toBeNull();
+    });
+
+    it("earlier stages behave as before: the quote reference can be cleared at New, Qualified, Proposal prep and Proposal sent (the Quote sent gate then needs it again)", async () => {
+      const opp = await newOpp("Decision B earlier stages");
+      await withValue(opp);
+      await save(U.sara, opp, { quote_ref: "QT-E-1" });
+      await save(U.sara, opp, { quote_ref: null });
+      expect((await zoho(opp)).quote_ref).toBeNull();
+      await save(U.sara, opp, { quote_ref: "QT-E-2" });
+      for (const stg of ["qualified", "proposal_prep", "proposal_sent"]) {
+        await save(U.sara, opp, { quote_ref: "QT-E-3" });
+        await admin(`update crm_opportunities set stage = '${stg}' where id = '${opp}'`);
+        await save(U.sara, opp, { quote_ref: null });
+        expect((await zoho(opp)).quote_ref, stg).toBeNull();
+      }
+      await save(U.sara, opp, { quote_ref: "QT-E-4" });
+      await commit(U.sara, `select crm_upsert_zoho_reference('${opp}', '')`);                  // the old signature given an empty STRING clears below Quote sent, as it did before
+      expect((await zoho(opp)).quote_ref).toBeNull();
+    });
+
+    it("the Quote sent gate still behaves both ways: without a quote reference the move is refused; with one it works; stepping back one stage allows a clear and the gate then asks again", async () => {
+      const opp = await newOpp("Decision B gate");
+      const prop = await addProposal(opp, "Gate proposal");
+      await commit(U.sara, `select crm_move_stage('${opp}', 'proposal_prep')`);
+      await setStatus(U.sara, prop, "sent");
+      await commit(U.sara, `select crm_move_stage('${opp}', 'proposal_sent')`);
+      await expect(commit(U.sara, `select crm_move_stage('${opp}', 'quote_sent')`)).rejects.toThrow(/Zoho Books quote reference/);
+      await save(U.sara, opp, { quote_ref: "QT-G-1" });
+      await commit(U.sara, `select crm_move_stage('${opp}', 'quote_sent')`);
+      await expect(save(U.sara, opp, { quote_ref: null })).rejects.toThrow(CLEAR_REFUSAL);
+      await commit(U.sara, `select crm_move_stage('${opp}', 'proposal_sent')`);                // one step back is an existing rule
+      await save(U.sara, opp, { quote_ref: null });                                            // now an earlier stage: allowed as before
+      await expect(commit(U.sara, `select crm_move_stage('${opp}', 'quote_sent')`)).rejects.toThrow(/Zoho Books quote reference/);
+      await save(U.sara, opp, { quote_ref: "QT-G-2" });
+      await commit(U.sara, `select crm_move_stage('${opp}', 'quote_sent')`);
+      expect(await stage(opp)).toBe("quote_sent");
+    });
+
+    it("a LOST enquiry stays read-only (any save refused with the read-only message, also one that would clear), whichever stage it was lost from", async () => {
+      for (const from of ["quote_sent", "negotiation"] as const) {
+        const opp = await reach(from);
+        await commit(U.sara, `select crm_mark_lost('${opp}', 'Went with another supplier')`);
+        const w0 = await world(opp);
+        for (const who of [U.sara, U.founder]) {
+          await expect(save(who, opp, { quote_ref: null })).rejects.toThrow(/lost opportunity's Zoho Books references are read-only/);
+          await expect(save(who, opp, { invoice_ref: "X" })).rejects.toThrow(/read-only/);
+          await expect(commit(who, `select crm_upsert_zoho_reference('${opp}', 'X')`)).rejects.toThrow(/read-only/);
+        }
+        expect(await world(opp)).toEqual(w0);
+      }
+    });
+
+    it("who may save is unchanged: another person of the company, a person of another company and a stranger are refused (permission first), and stay refused", async () => {
+      const opp = await reach("negotiation");
+      const w0 = await world(opp);
+      await expect(save(U.omar, opp, { quote_ref: null })).rejects.toThrow(/Only the owner/);
+      await expect(save(U.ksaStaff, opp, { quote_ref: null })).rejects.toThrow(/Opportunity not found/);
+      await expect(save(U.outsider, opp, { quote_ref: null })).rejects.toThrow();
+      await expect(save(U.omar, opp, { quote_ref: "QT-X" })).rejects.toThrow(/Only the owner/);
+      expect(await world(opp)).toEqual(w0);
+    });
+
+    it("no other path can clear it: a direct UPDATE of the table (owner or admin, trigger backstop) is refused at those stages, allowed for a correction and at earlier stages; signed-in users cannot update the table at all", async () => {
+      const opp = await reach("negotiation");
+      const w0 = await world(opp);
+      for (const sql of [`update crm_zoho_references set quote_ref = null where opportunity_id = '${opp}'`,
+                         `update crm_zoho_references set quote_ref = '  ' where opportunity_id = '${opp}'`,
+                         `update crm_zoho_references set quote_ref = '', invoice_ref = 'INV-DIRECT' where opportunity_id = '${opp}'`]) {
+        const e = await rejection(admin(sql));
+        expect(e.code, e.message).toBe("23514");
+        expect(e.message).toMatch(CLEAR_REFUSAL);
+      }
+      expect(await world(opp)).toEqual(w0);
+      // a correction and another column are fine for the table owner
+      await admin(`update crm_zoho_references set quote_ref = 'QT-DIRECT' where opportunity_id = '${opp}'`);
+      await admin(`update crm_zoho_references set invoice_ref = null where opportunity_id = '${opp}'`);
+      expect(await zoho(opp)).toMatchObject({ quote_ref: "QT-DIRECT", invoice_ref: null });
+      // signed-in users: no update policy, so a direct UPDATE touches no row (the table grants SELECT only in production; the harness also grants UPDATE)
+      const n = await commit<{ n: string }>(U.sara, `with u as (update crm_zoho_references set quote_ref = null where opportunity_id = '${opp}' returning 1) select count(*)::text as n from u`);
+      expect(n[0].n).toBe("0");
+      expect((await zoho(opp)).quote_ref).toBe("QT-DIRECT");
+      // at an earlier stage the table owner can still clear (the trigger only protects the stages above)
+      await admin(`update crm_opportunities set stage = 'proposal_prep' where id = '${opp}'`);
+      await admin(`update crm_zoho_references set quote_ref = null where opportunity_id = '${opp}'`);
+      expect((await zoho(opp)).quote_ref).toBeNull();
+    });
+
+    it("signed-in users have no INSERT, UPDATE or DELETE policy on the table: rows are only written by the SECURITY DEFINER functions (so there is no other write route to guard)", async () => {
+      const [r] = await admin<{ n: string }>(`select count(*)::text n from pg_policies where tablename = 'crm_zoho_references' and cmd in ('INSERT', 'UPDATE', 'DELETE', 'ALL')`);
+      expect(r.n).toBe("0");
+      // every function in the database that INSERTs, UPDATEs or DELETEs rows of the table: only the new save function (the old signature delegates to it)
+      const writers = await admin<{ proname: string }>(`select proname from pg_proc where pronamespace = 'public'::regnamespace and prosrc ~* '(insert\\s+into|update|delete\\s+from)\\s+(public\\.)?crm_zoho_references' order by 1`);
+      expect(writers.map((w) => w.proname)).toEqual(["crm_save_zoho_reference"]);
+      const old = await admin<{ s: string }>(`select prosrc s from pg_proc where oid = to_regprocedure('${FN.upsert.replace("public.", "")}')`);
+      expect(old[0].s).toMatch(/crm_save_zoho_reference/);
+    });
+  });
+
+  describe("1c. The OLD app against the MIGRATED database (the old signature is kept as a compatibility function)", () => {
+    it("an old form sends the whole form: blank fields arrive as NULL = leave as is, so it cannot clear anything; nonblank fields overwrite what is stored, including another person's concurrent edit (documented residual risk)", async () => {
+      const opp = await newOpp("Old app new database");
+      await save(U.sara, opp, { quote_ref: "QT-O-1", invoice_ref: "INV-O-1", paid_amount: 10 });
+      // Sara's OLD screen opened with these values; meanwhile the founder corrects the invoice reference.
+      await save(U.founder, opp, { invoice_ref: "INV-O-FOUNDER" });
+      // Sara saves her old form untouched except the quote sent date: the old app sends EVERY nonblank field with the values it loaded.
+      await commit(U.sara, `select crm_upsert_zoho_reference('${opp}', 'QT-O-1', '2026-11-03', 'INV-O-1', null, null, 10)`);
+      expect(await zoho(opp)).toMatchObject({ quote_ref: "QT-O-1", quote_sent_on: "2026-11-03", invoice_ref: "INV-O-1" });   // the founder's change is overwritten
+      // Blank (the old app sends NULL for an emptied field) leaves the field as it is: it cannot clear it.
+      await commit(U.sara, `select crm_upsert_zoho_reference('${opp}', null, null, null, null, null, null)`);
+      expect(await zoho(opp)).toMatchObject({ quote_ref: "QT-O-1", invoice_ref: "INV-O-1", paid_amount: "10.00" });
     });
   });
 
@@ -491,7 +747,8 @@ describe("Sales & CRM write rules", () => {
       expect(await fingerprint(FN.upsert)).toBe(oldFp.upsert);
       expect(await fingerprint(FN.status)).toBe(oldFp.status);
       expect(await fingerprint(FN.won)).toBe(oldFp.won);
-      expect((await admin<{ n: string }>(`select count(*) n from pg_proc where proname = 'crm_save_zoho_reference'`))[0].n).toBe("0");
+      expect((await admin<{ n: string }>(`select count(*) n from pg_proc where proname in ('crm_save_zoho_reference', 'crm_zoho_quote_ref_protected', 'crm_zoho_quote_ref_guard')`))[0].n).toBe("0");
+      expect((await admin<{ n: string }>(`select count(*) n from pg_trigger where tgname = 'crm_zoho_quote_ref_guard'`))[0].n).toBe("0");
       expect(await allRows()).toBe(rowsBefore);
       expect(await world(legacy.opp)).toEqual(dataBefore);
       for (const fn of [FN.upsert, FN.status, FN.won]) {
@@ -504,6 +761,11 @@ describe("Sales & CRM write rules", () => {
       await commit(U.sara, `select crm_upsert_zoho_reference('${opp}', 'QT-R', null, 'INV-R')`);
       await commit(U.sara, `select crm_upsert_zoho_reference('${opp}', 'QT-R2')`);
       expect((await zoho(opp)).invoice_ref).toBeNull();
+      // decision B is rolled back with it: a quote reference at Negotiation can be cleared again through the old function
+      await admin(`update crm_opportunities set stage = 'negotiation' where id = '${opp}'`);
+      await admin(`update crm_zoho_references set quote_ref = null where opportunity_id = '${opp}'`);
+      expect((await zoho(opp)).quote_ref).toBeNull();
+      await admin(`update crm_opportunities set stage = 'new' where id = '${opp}'`);
       const a = await addProposal(opp, "v1"); await setStatus(U.sara, a, "sent"); await setStatus(U.sara, a, "accepted"); await setStatus(U.sara, a, "superseded");
       expect(await pstatus(a)).toBe("superseded");
       await commit(U.sara, `select crm_mark_won('${opp}', 'purchase_order', 'PO-R', ${today} + 5)`);
@@ -516,6 +778,9 @@ describe("Sales & CRM write rules", () => {
       await save(U.sara, o2, { quote_ref: "QT-A", invoice_ref: "INV-A" });
       await save(U.sara, o2, { quote_ref: "QT-B" });
       expect((await zoho(o2)).invoice_ref).toBe("INV-A");
+      // ... and decision B is back after the re-apply
+      await admin(`update crm_opportunities set stage = 'negotiation' where id = '${o2}'`);
+      await expect(save(U.sara, o2, { quote_ref: null })).rejects.toThrow(/cannot be cleared once the enquiry has reached Quote sent/);
     });
   });
 });
