@@ -397,6 +397,170 @@ describe("JARVIS confirmation boundary: server-issued proof verified inside the 
   });
 
   // -----------------------------------------------------------------------------------------------------------------------------------------------------------
+  // TWO ARTEFACTS. What the browser holds after the PROPOSAL is a review token. It must be useless against every wrapper, however it is presented.
+  describe.each(KINDS)("$name: the REVIEW TOKEN the browser holds is not a database proof (called DIRECTLY by an eligible pilot person)", (k) => {
+    it("(a) the review token's MAC used as p_mac, with otherwise perfectly valid fields (its own jti, expiry, target, version, payload) is refused: no record, no confirmed ledger entry", async () => {
+      const { call } = await k.make(U.sara);
+      const rv = reviewCall({ user: U.sara, company: call.company, action: k.action, target: call.target, version: call.version, payload: call.payload, jti: call.jti, expires: call.expires });
+      const before = await world();
+      expect(rv.mac).not.toBe(call.mac);
+      expect((await rejection(send(k, U.sara, callArgs({ ...call, mac: rv.mac })))).code).toBe("JV002");
+      await sameWorld(before);
+      // the very same call with the genuine database proof does work: the only difference is the artefact
+      expect((await send(k, U.sara, callArgs(call)))[0].r).toMatchObject({ status: "done" });
+    });
+    it("(b) every other arrangement of the token is refused as well: its reviewed expiry, a fresh confirmation id, the whole token text, the decoded body as payload, the payload hash, another wrapper's token", async () => {
+      const { call } = await k.make(U.sara);
+      const before = await world();
+      const tok = (over: Partial<ProofCall> = {}) => reviewCall({ user: U.sara, company: call.company, action: k.action, target: call.target, version: call.version, payload: call.payload, jti: call.jti, expires: call.expires, ...over });
+      const base = tok();
+      const body = Buffer.from(base.token.split(".")[0]!, "base64url").toString("utf8");
+      const attempts: [string, unknown[]][] = [
+        ["review expiry (fifteen minutes) with the review MAC", callArgs({ ...call, expires: Math.floor(Date.now() / 1000) + 900, mac: tok({ expires: Math.floor(Date.now() / 1000) + 900 }).mac })],
+        ["a fresh jti with a review MAC made for it", (() => { const j2 = id(); return callArgs({ ...call, jti: j2, mac: tok({ jti: j2 }).mac }); })()],
+        ["the whole token text as the MAC", callArgs({ ...call, mac: base.token })],
+        ["the token's body (decoded) as the payload", callArgs({ ...call, payload: body, mac: base.mac })],
+        ["the token's body (base64) as the payload", callArgs({ ...call, payload: base.token.split(".")[0]!, mac: base.mac })],
+        ["the payload hash as the MAC", callArgs({ ...call, mac: sha256Hex(call.payload) })],
+        ["the review MAC under the proof's own payload text with a version of zero", callArgs({ ...call, version: call.version === null ? null : 0, mac: base.mac })],
+        ["a review token issued for another wrapper's action", callArgs({ ...call, mac: reviewCall({ user: U.sara, company: call.company, action: KINDS.find((x) => x.action !== k.action)!.action, target: call.target, version: call.version, payload: call.payload, jti: call.jti, expires: call.expires }).mac })],
+      ];
+      for (const [name, params] of attempts) expect((await rejection(send(k, U.sara, params))).code, name).toBe("JV002");
+      await sameWorld(before);
+    });
+    it("(c) a MAC made with the wrong KEY or the wrong DOMAIN is refused: review key over the proof text, proof key over the review text, the underived secret over either text", async () => {
+      const { call } = await k.make(U.sara);
+      const before = await world();
+      const f = { jti: call.jti, user: U.sara, company: call.company, action: k.action, target: call.target, version: call.version, expires: call.expires, payload: call.payload };
+      const mac = (key: Buffer | string, text: string) => createHmac("sha256", key).update(text, "utf8").digest("hex");
+      const proofT = proofText(f);
+      const reviewT = proofText(f, "JARVIS-REVIEW-V1");
+      // the one combination that IS the proof (proof key, proof domain) is the control: it works
+      expect(mac(deriveProofKey(PROOF_KEY), proofT)).toBe(call.mac);
+      for (const [name, m] of [
+        ["review key + proof domain", mac(deriveReviewKey(PROOF_KEY), proofT)],
+        ["proof key + review domain", mac(deriveProofKey(PROOF_KEY), reviewT)],
+        ["review key + review domain (the review token itself)", mac(deriveReviewKey(PROOF_KEY), reviewT)],
+        ["underived secret + proof domain (the earlier design)", mac(PROOF_KEY, proofT)],
+        ["underived secret + review domain", mac(PROOF_KEY, reviewT)],
+      ] as const) expect((await rejection(send(k, U.sara, callArgs({ ...call, mac: m })))).code, name).toBe("JV002");
+      await sameWorld(before);
+    });
+  });
+
+  // -----------------------------------------------------------------------------------------------------------------------------------------------------------
+  // THE DUPLICATE ACKNOWLEDGEMENT IS SIGNED AND ENFORCED IN SQL (register organisation).
+  describe("register organisation: the duplicate acknowledgement is part of the signed payload and the DATABASE decides", () => {
+    const k = KINDS[1]!;
+    let dupId = ""; let dupId2 = "";
+    const dupName = "Fictional Duplicate Studio";
+    const reg = (payload: Record<string, unknown>, o: { user?: string; jti?: string; signedAs?: Record<string, unknown> } = {}) => {
+      const user = o.user ?? U.sara;
+      // `signedAs`: the payload the proof was signed for, when it differs from the payload sent
+      const call = proofCall({ user, company: CO.uae, action: REGISTER, target: "new", payload: o.signedAs ?? payload, ...(o.jti ? { jti: o.jti } : {}) });
+      const params = callArgs({ ...call, payload: JSON.stringify(payload) });
+      return { call, params, send: () => send(k, user, params) };
+    };
+    const registerOk = (name: string, ack: string[]) => reg(orgPayload({ name, acknowledged_org_ids: ack }));
+    beforeAll(async () => {
+      dupId = (await commit<{ id: string }>(U.founder, `select crm_create_organisation_profile(p_name => '${dupName}', p_roles => '{agency}', p_country_code => 'AE', p_website => 'https://www.duplicate-studio.example') as id`))[0].id;
+      dupId2 = (await commit<{ id: string }>(U.founder, `select crm_create_organisation_profile(p_name => 'Fictional Second Duplicate', p_roles => '{client}', p_country_code => 'AE', p_website => 'https://second-duplicate.example') as id`))[0].id;
+    });
+
+    it("the wrapper takes ONLY the seven signed arguments: the eight-argument form with a separate acknowledgement no longer exists", async () => {
+      const before = await world();
+      expect((await rejection(commit(U.sara, `select jarvis_register_organisation($1::uuid, $2::uuid, 'new', null, 5::bigint, $3, $4, '[]'::jsonb)`, [id(), CO.uae, "a".repeat(64), "{}"]))).code).toBe("42883");
+      for (const w of KINDS) {
+        const r = await admin<{ n: number; names: string[] }>(`select pronargs::int as n, proargnames as names from pg_proc where proname = '${w.fn}' and pronamespace = 'public'::regnamespace`);
+        expect(r, w.fn).toHaveLength(1);
+        expect(r[0]).toEqual({ n: 7, names: ["p_confirmation", "p_company", "p_target", "p_version", "p_expires", "p_mac", "p_payload"] });
+      }
+      await sameWorld(before);
+    });
+    it("OMITTING the required acknowledgement (an empty list, or no list at all) is refused with a valid proof: no organisation, no ledger row", async () => {
+      const before = await world();
+      expect((await rejection(registerOk(dupName, []).send())).code).toBe("JV001");
+      const { acknowledged_org_ids: _drop, ...noList } = orgPayload({ name: dupName });
+      void _drop;
+      expect((await rejection(reg(noList).send())).code).toBe("22023");
+      await sameWorld(before);
+    });
+    it("CHANGING the acknowledgement (other ids), or ADDING an unrelated id to the correct one, is refused with a valid proof: nothing written", async () => {
+      const before = await world();
+      for (const ack of [[id()], [dupId2], [dupId, id()], [dupId, dupId2], [id(), id()]]) {
+        const e = await rejection(registerOk(dupName, ack).send());
+        expect(e.code, JSON.stringify(ack)).toBe("JV001");
+        expect(e.message).toMatch(/acknowledgement does not match/);
+      }
+      await sameWorld(before);
+    });
+    it("a proof issued for a DIFFERENT acknowledgement is refused: the acknowledgement is inside the hash (signed for [] but sent with the ids, or the reverse)", async () => {
+      const before = await world();
+      const sentWithIds = reg(orgPayload({ name: dupName, acknowledged_org_ids: [dupId] }), { signedAs: orgPayload({ name: dupName, acknowledged_org_ids: [] }) });
+      expect((await rejection(sentWithIds.send())).code).toBe("JV002");
+      const sentEmpty = reg(orgPayload({ name: dupName, acknowledged_org_ids: [] }), { signedAs: orgPayload({ name: dupName, acknowledged_org_ids: [dupId] }) });
+      expect((await rejection(sentEmpty.send())).code).toBe("JV002");
+      // the same ids in another order is a different text too
+      const reordered = reg(orgPayload({ name: dupName, acknowledged_org_ids: [dupId, dupId2] }), { signedAs: orgPayload({ name: dupName, acknowledged_org_ids: [dupId2, dupId] }) });
+      expect((await rejection(reordered.send())).code).toBe("JV002");
+      await sameWorld(before);
+    });
+    it("the CORRECT acknowledgement succeeds: exactly the organisations with the same name or website (by name, by website, or both at once)", async () => {
+      const byName = (await registerOk("fictional duplicate studio", [dupId]).send())[0].r as { status: string; result_id: string };
+      expect(byName.status).toBe("done");
+      const byWebsite = (await reg(orgPayload({ name: "A Brand New Name", website: "http://duplicate-studio.example/", acknowledged_org_ids: [dupId] })).send())[0].r as { status: string };
+      expect(byWebsite.status).toBe("done");
+      // now THREE organisations share that website/name: the same acknowledgement is no longer enough (the new ones appeared after the review)
+      const both = orgPayload({ name: "Fictional Second Duplicate", website: "https://duplicate-studio.example", acknowledged_org_ids: [dupId] });
+      const before = await world();
+      expect((await rejection(reg(both).send())).code).toBe("JV001");
+      await sameWorld(before);
+    });
+    it("a duplicate that APPEARED AFTER REVIEW needs a fresh review: the proof was valid and acknowledged nothing, the database refuses; a fresh proof naming it works", async () => {
+      const name = `Fictional Late Arrival ${randomBytes(3).toString("hex")}`;
+      const reviewed = registerOk(name, []); // reviewed and signed while no such organisation existed
+      const late = (await commit<{ id: string }>(U.founder, `select crm_create_organisation_profile(p_name => '${name}', p_roles => '{agency}', p_country_code => 'AE') as id`))[0].id;
+      const before = await world();
+      expect((await rejection(reviewed.send())).code).toBe("JV001");
+      await sameWorld(before);
+      expect((await registerOk(name, [late]).send())[0].r).toMatchObject({ status: "done" });
+    });
+    it("no duplicate exists and an acknowledgement is nevertheless supplied: refused (an acknowledgement names real matches only)", async () => {
+      const before = await world();
+      expect((await rejection(registerOk(`Fictional Unique Name ${randomBytes(3).toString("hex")}`, [dupId]).send())).code).toBe("JV001");
+      await sameWorld(before);
+    });
+    it("a retry of a SAVED confirmation returns the ORIGINAL result before the duplicate check (the organisation it created now matches itself), with the same jti and a fresh proof", async () => {
+      const name = `Fictional Retry Studio ${randomBytes(3).toString("hex")}`;
+      const jti = id();
+      const payload = orgPayload({ name });
+      const first = (await reg(payload, { jti }).send())[0].r as { status: string; result_id: string; replayed: boolean };
+      expect(first).toMatchObject({ status: "done", replayed: false });
+      const after = await world();
+      // FRESH proofs (new expiries, so new MACs) with the same jti and the same payload text: the ORIGINAL result, nothing written
+      for (const expires of [Math.floor(Date.now() / 1000) + 120, Math.floor(Date.now() / 1000) + 121]) {
+        const fresh = proofCall({ user: U.sara, company: CO.uae, action: REGISTER, target: "new", payload, jti, expires });
+        expect((await send(k, U.sara, callArgs(fresh)))[0].r).toMatchObject({ status: "done", replayed: true, result_id: first.result_id });
+      }
+      await sameWorld(after);
+    });
+    it("the acknowledgement is read from the verified payload only: a payload with a malformed list (not an array, not uuids) is refused and writes nothing", async () => {
+      const before = await world();
+      for (const bad of ["x", 7, { a: 1 }, ["not-a-uuid"], [null]]) {
+        const e = await rejection(reg(orgPayload({ name: dupName, acknowledged_org_ids: bad })).send());
+        expect(["22023", "22P02"], JSON.stringify(bad)).toContain(e.code);
+      }
+      await sameWorld(before);
+    });
+    it("the proof the server issues for a confirmed acknowledgement is bound to the person and company as always (another person presenting it is refused)", async () => {
+      const r = registerOk(dupName, [dupId]);
+      const before = await world();
+      expect((await rejection(send(k, U.omar, r.params))).code).toBe("JV002");
+      await sameWorld(before);
+    });
+  });
+
+  // -----------------------------------------------------------------------------------------------------------------------------------------------------------
   describe("versioned actions: the signed version must be the record's current version", () => {
     for (const k of KINDS.filter((x) => x.versioned)) {
       it(`${k.name}: a proof signed for the version the person reviewed is refused with NOTHING written once someone else changed the record; a different version than signed is not valid`, async () => {

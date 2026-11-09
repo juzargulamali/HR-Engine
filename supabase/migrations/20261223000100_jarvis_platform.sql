@@ -493,6 +493,7 @@ begin
   if not (v_roles <@ array['agency', 'direct', 'client', 'technology']::text[]) then raise exception 'One of the roles is not allowed' using errcode = '22023'; end if;
   -- The acknowledgement comes ONLY from the verified payload (a missing or malformed list is an incomplete confirmation).
   if jsonb_typeof(v_args->'acknowledged_org_ids') is distinct from 'array' then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
+  if exists (select 1 from jsonb_array_elements(v_args->'acknowledged_org_ids') x where jsonb_typeof(x) <> 'string') then raise exception 'The confirmation is incomplete' using errcode = '22023'; end if;
   select coalesce(array_agg(distinct x::uuid), '{}') into v_ack from jsonb_array_elements_text(v_args->'acknowledged_org_ids') x;
 
   v_replay := jarvis_ledger_enter(p_confirmation, v_hash, 'jarvis.sales.organisation.register', p_company, 'new');
