@@ -20,6 +20,8 @@ drop function if exists crm_update_observation(uuid, text, uuid, boolean, text, 
 drop function if exists crm_record_observation(uuid, uuid, text, uuid, boolean, text, text, text, text);
 drop function if exists crm_observation_check(text, uuid, uuid, boolean, text, text, text);
 drop function if exists crm_import_events(jsonb, boolean, integer);
+drop function if exists crm_event_import_diff(text, text, text, text, text, text);
+drop function if exists crm_event_import_norm(text);
 drop function if exists crm_event_import_date(text);
 drop function if exists crm_archive_event(uuid);
 drop function if exists crm_archive_edition(uuid);

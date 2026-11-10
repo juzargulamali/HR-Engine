@@ -395,7 +395,8 @@ $$;
 --    Rules (the same as adding by hand, plus the review flags):
 --      event name  = same name_key as a LIVE event -> that event. Never merged otherwise. A name that only matches an ARCHIVED event is flagged (archived is never reopened).
 --                    A short name contained in the names of two or more live events is ambiguous. Exactly one near match is noted, not blocked.
---      edition     = (event, start date). Same start and end = already present (skipped). Same start, different end, or overlapping dates = conflict (never overwritten).
+--      edition     = (event, start date). Same start and end = already present (skipped) ONLY when the country, city and venue the row states also match after
+--                    normalisation (case, spaces, punctuation); a mismatch is flagged for review and blocks the batch. Same start, different end, or overlapping dates = conflict (never overwritten).
 --                    An archived edition with that start date is flagged, never reopened. Repeated rows in the file collapse the same way.
 --    Re-running the same file finds everything present and adds nothing. Any Sales grant may import (the same right as adding an event and an edition).
 -- -----------------------------------------------------------------------------
@@ -409,6 +410,37 @@ begin
   return p::date;
 exception when others then
   return null;
+end;
+$$;
+
+-- Text compared the way event names are: case, spaces and punctuation are ignored (letters of every alphabet are kept).
+create or replace function crm_event_import_norm(p text)
+returns text
+language sql immutable
+set search_path = public
+as $$
+  select regexp_replace(lower(coalesce(p, '')), '[\s[:punct:]]+', '', 'g');
+$$;
+
+-- What differs between a recorded (or earlier) edition and a row for the SAME dates: null when everything the row states matches after normalisation. A blank city or
+-- venue in the row states nothing and cannot differ; a value the row states must equal what is recorded (a recorded blank counts as different). Country is always stated.
+create or replace function crm_event_import_diff(p_old_country text, p_old_city text, p_old_venue text, p_new_country text, p_new_city text, p_new_venue text)
+returns text
+language plpgsql immutable
+set search_path = public
+as $$
+declare v text[] := '{}';
+begin
+  if upper(btrim(coalesce(p_new_country, ''))) <> '' and upper(btrim(coalesce(p_old_country, ''))) is distinct from upper(btrim(p_new_country)) then
+    v := v || ('country (recorded ' || coalesce(nullif(btrim(p_old_country), ''), 'none') || ', file ' || upper(btrim(p_new_country)) || ')');
+  end if;
+  if crm_event_import_norm(p_new_city) <> '' and crm_event_import_norm(p_old_city) <> crm_event_import_norm(p_new_city) then
+    v := v || ('city (recorded ' || coalesce(nullif(btrim(p_old_city), ''), 'none') || ', file ' || btrim(p_new_city) || ')');
+  end if;
+  if crm_event_import_norm(p_new_venue) <> '' and crm_event_import_norm(p_old_venue) <> crm_event_import_norm(p_new_venue) then
+    v := v || ('venue (recorded ' || coalesce(nullif(btrim(p_old_venue), ''), 'none') || ', file ' || btrim(p_new_venue) || ')');
+  end if;
+  return case when cardinality(v) = 0 then null else array_to_string(v, '; ') end;
 end;
 $$;
 
@@ -426,7 +458,7 @@ declare
   v_start date; v_end date; v_reason text; v_note text; v_status text;
   v_event_id uuid; v_event_name text; v_event_new boolean;
   ex record; cand record;
-  v_near_count integer; v_near_names text;
+  v_near_count integer; v_near_names text; v_diff text;
   v_created jsonb := '{}'::jsonb;
   v_new_events integer; v_new_editions integer; v_blocking integer;
   v_made_events integer := 0; v_made_editions integer := 0;
@@ -505,14 +537,16 @@ begin
 
     -- 3. which edition (same event: recorded editions first, then earlier rows of this file)
     if v_event_id is not null then
-      for cand in select d.start_date, d.end_date, d.city, d.venue from crm_event_editions d
+      for cand in select d.start_date, d.end_date, d.city, d.venue, d.country_code from crm_event_editions d
                    where d.event_id = v_event_id and d.archived_at is null order by d.start_date loop
         if cand.start_date = v_start and cand.end_date = v_end then
-          v_status := 'present';
-          v_reason := 'Already recorded: ' || to_char(v_start, 'YYYY-MM-DD') || ' to ' || to_char(v_end, 'YYYY-MM-DD');
-          if (v_city is not null and cand.city is not null and lower(v_city) <> lower(cand.city))
-             or (v_venue is not null and cand.venue is not null and lower(v_venue) <> lower(cand.venue)) then
-            v_note := 'The city or venue in the file differs from the recorded edition; the recorded details are kept.';
+          v_diff := crm_event_import_diff(cand.country_code, cand.city, cand.venue, v_country, v_city, v_venue);
+          if v_diff is null then
+            v_status := 'present';
+            v_reason := 'Already recorded: ' || to_char(v_start, 'YYYY-MM-DD') || ' to ' || to_char(v_end, 'YYYY-MM-DD');
+          else
+            v_status := 'review';
+            v_reason := 'The dates match an existing edition of this event but the ' || v_diff || ' differs. It is not treated as already present and nothing is overwritten: correct the row, or edit the recorded edition by hand if the file is right.';
           end if;
           exit;
         elsif cand.start_date = v_start then
@@ -532,10 +566,16 @@ begin
       end if;
     end if;
     if v_status is null then
-      for cand in select r.row_no, r.s as start_date, r.e as end_date from crm_imp_rows r
+      for cand in select r.row_no, r.s as start_date, r.e as end_date, r.country, r.city, r.venue from crm_imp_rows r
                    where r.key = v_key and r.status in ('new_event', 'new_edition') order by r.idx loop
         if cand.start_date = v_start and cand.end_date = v_end then
-          v_status := 'present'; v_reason := 'Repeated: the same edition is on row ' || cand.row_no || ' of this file'; exit;
+          v_diff := crm_event_import_diff(cand.country, cand.city, cand.venue, v_country, v_city, v_venue);
+          if v_diff is null then
+            v_status := 'present'; v_reason := 'Repeated: the same edition is on row ' || cand.row_no || ' of this file';
+          else
+            v_status := 'review'; v_reason := 'The dates match row ' || cand.row_no || ' of this file for the same event but the ' || v_diff || ' differs. Correct one of the rows.';
+          end if;
+          exit;
         elsif cand.start_date = v_start or (cand.start_date <= v_end and v_start <= cand.end_date) then
           v_status := 'conflict';
           v_reason := 'Conflicts with row ' || cand.row_no || ' of this file (' || to_char(cand.start_date, 'YYYY-MM-DD') || ' to ' || to_char(cand.end_date, 'YYYY-MM-DD') || ') for the same event';
@@ -589,7 +629,7 @@ $$;
 revoke all on function
   crm_set_outreach_priority(uuid, integer), crm_can_edit_event_record(uuid), crm_save_event(uuid, text, text, text, text),
   crm_save_edition(uuid, uuid, date, date, text, text, text, text), crm_archive_edition(uuid), crm_archive_event(uuid),
-  crm_event_import_date(text), crm_import_events(jsonb, boolean, integer),
+  crm_event_import_date(text), crm_event_import_norm(text), crm_event_import_diff(text, text, text, text, text, text), crm_import_events(jsonb, boolean, integer),
   crm_observation_check(text, uuid, uuid, boolean, text, text, text), crm_record_observation(uuid, uuid, text, uuid, boolean, text, text, text, text),
   crm_update_observation(uuid, text, uuid, boolean, text, text, text, text), crm_remove_observation(uuid), crm_set_opportunity_edition(uuid, uuid, integer)
   from public, anon, authenticated;

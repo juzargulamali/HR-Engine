@@ -29,8 +29,8 @@ select item, result from (
               ('public.crm_update_observation(uuid, text, uuid, boolean, text, text, text, text)'), ('public.crm_remove_observation(uuid)'), ('public.crm_set_opportunity_edition(uuid, uuid, integer)')) f(sig)
               where to_regprocedure(f.sig) is not null and has_function_privilege('authenticated', f.sig, 'execute') and not has_function_privilege('anon', f.sig, 'execute')
                 and not exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where p.oid = to_regprocedure(f.sig) and a.grantee = 0)) = 10 then 'OK' else 'FAIL - missing or privileges differ' end
-  union all select 9, 'the helper functions are NOT callable by signed-in users, anon or public (crm_can_edit_event_record, crm_event_import_date, crm_observation_check)',
-         case when has_function_privilege('authenticated', 'public.crm_can_edit_event_record(uuid)', 'execute') or has_function_privilege('authenticated', 'public.crm_event_import_date(text)', 'execute')
+  union all select 9, 'the helper functions are NOT callable by signed-in users, anon or public (crm_can_edit_event_record, crm_event_import_date, crm_event_import_norm, crm_event_import_diff, crm_observation_check)',
+         case when has_function_privilege('authenticated', 'public.crm_can_edit_event_record(uuid)', 'execute') or has_function_privilege('authenticated', 'public.crm_event_import_date(text)', 'execute') or has_function_privilege('authenticated', 'public.crm_event_import_norm(text)', 'execute') or has_function_privilege('authenticated', 'public.crm_event_import_diff(text, text, text, text, text, text)', 'execute')
                 or has_function_privilege('authenticated', 'public.crm_observation_check(text, uuid, uuid, boolean, text, text, text)', 'execute') then 'FAIL - callable' else 'OK' end
   union all select 10, 'crm_create_opportunity and crm_update_opportunity were NOT replaced (no event text in their bodies)',
          case when exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname = 'crm_create_opportunity' and prosrc not like '%event_edition%')

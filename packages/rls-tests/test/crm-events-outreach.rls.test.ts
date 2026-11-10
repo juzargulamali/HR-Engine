@@ -341,6 +341,32 @@ describe("Events & Exhibitions, observations and outreach priority", () => {
       expect(again.rows.every((x) => x.status === "present")).toBe(true);
       expect(await counts()).toEqual({ events: before.events + 1, editions: before.editions + 3 });
     });
+    it("same dates count as ALREADY PRESENT only when country, city and venue match after normalisation; a mismatch needs review and blocks the batch (recorded editions and rows in one file)", async () => {
+      const before = await counts();
+      const rec = (over: Partial<ReturnType<typeof r>>) => ({ ...r(2, "Fictional Import Show", "2026-03-10", "2026-03-12"), ...over });
+      const status = async (rows: unknown[]) => Object.fromEntries((await imp(U.sara, rows)).rows.map((x) => [x.row, x.status]));
+      // matches after normalisation (case, spaces, punctuation) and a blank city / venue states nothing: present
+      expect(await status([rec({ row: 2, city: "  DUBAI ", venue: "fictional  hall." }), rec({ row: 3, city: "", venue: "" })])).toEqual({ 2: "present", 3: "present" });
+      // the same dates with another country (the UAE edition recorded, a KSA row), city or venue are flagged for review, not skipped
+      const kinds = await imp(U.sara, [rec({ row: 2, country: "SA" }), rec({ row: 3, city: "Abu Dhabi" }), rec({ row: 4, venue: "Another Hall" })]);
+      expect(kinds.rows.map((x) => x.status)).toEqual(["review", "review", "review"]);
+      expect(kinds.rows[0]!.reason).toMatch(/country \(recorded AE, file SA\)/);
+      expect(kinds.rows[1]!.reason).toMatch(/city \(recorded Dubai, file Abu Dhabi\)/);
+      expect(kinds.rows[2]!.reason).toMatch(/venue \(recorded Fictional Hall, file Another Hall\)/);
+      expect(kinds.rows.every((x) => /not treated as already present/.test(x.reason ?? ""))).toBe(true);
+      // a mismatch blocks the WHOLE file: the valid new row beside it is not written either
+      const mixed = [rec({ row: 2, country: "SA" }), r(3, "Fictional Import Show", "2029-03-09", "2029-03-11")];
+      expect(await imp(U.sara, mixed, true)).toMatchObject({ applied: false, blocked: true, createdEditions: 0 });
+      expect(await counts()).toEqual(before);
+      // rows inside one file: same event and dates; a different country / city / venue is flagged, an identical row is a clean repeat
+      const inFile = await imp(U.sara, [r(2, "Fictional Twin Expo", "2033-04-01", "2033-04-03", "AE", "Dubai", "Hall A"), r(3, "fictional twin-expo", "2033-04-01", "2033-04-03", "SA", "Dubai", "Hall A"),
+        r(4, "Fictional Twin Expo", "2033-04-01", "2033-04-03", "AE", "Sharjah", "Hall A"), r(5, "Fictional Twin Expo", "2033-04-01", "2033-04-03", "AE", "dubai", "HALL A")]);
+      expect(inFile.rows.map((x) => x.status)).toEqual(["new_event", "review", "review", "present"]);
+      expect(inFile.rows[1]!.reason).toMatch(/row 2 of this file.*country \(recorded AE, file SA\)/);
+      expect(inFile.rows[2]!.reason).toMatch(/city \(recorded Dubai, file Sharjah\)/);
+      expect(await imp(U.sara, [r(2, "Fictional Twin Expo", "2033-04-01", "2033-04-03", "AE", "Dubai", "Hall A"), r(3, "Fictional Twin Expo", "2033-04-01", "2033-04-03", "SA", "Dubai", "Hall A")], true)).toMatchObject({ applied: false, blocked: true });
+      expect(await counts()).toEqual(before);
+    });
     it("needs a Sales grant; the whole batch rolls back with a clear message when a rule is broken underneath", async () => {
       await expect(imp(U.hr, [r(2, "Fictional No Grant Expo", "2030-01-01", "2030-01-02")])).rejects.toThrow(/Sales access|No CRM access/i);
       await expect(imp(U.stranger, [r(2, "Fictional No Grant Expo", "2030-01-01", "2030-01-02")], true)).rejects.toThrow(/Sales access|No CRM access/i);
