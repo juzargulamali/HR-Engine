@@ -30,7 +30,7 @@ export function parseGuidance(markdown, file = "guidance") {
     const meta = {}; const steps = []; const summary = [];
     for (const raw of lines) {
       const line = raw.trim();
-      const m = /^- (id|area|status|keywords|links):\s*(.*)$/.exec(line);
+      const m = /^- (id|area|status|keywords|links|screens):\s*(.*)$/.exec(line);
       const s = /^\d+\.\s+(.*)$/.exec(line);
       if (m) meta[m[1]] = m[2].trim();
       else if (s) steps.push(s[1].trim());
@@ -46,8 +46,11 @@ export function parseGuidance(markdown, file = "guidance") {
       if (!p) fail(`link "${l}" must be "Label -> /path"`);
       return { label: p[1].trim(), href: p[2] };
     });
+    // The screens this topic is the guide FOR (route patterns as the app has them, e.g. /sales/events/[id]): lets JARVIS answer "what can I do here?" for that screen.
+    const screens = (meta.screens ?? "").split(";").map((x) => x.trim()).filter(Boolean);
+    for (const sc of screens) if (!/^\/[A-Za-z0-9\-/\[\]]*$/.test(sc)) fail(`screen "${sc}" must be a route such as /sales/events or /sales/events/[id]`);
     if (keywords.length === 0 || summary.length === 0) fail("needs keywords and a summary");
-    topics.push({ id: meta.id, area: meta.area, status: meta.status, title, keywords, summary: summary.join(" "), steps, links });
+    topics.push({ id: meta.id, area: meta.area, status: meta.status, title, keywords, summary: summary.join(" "), steps, links, screens });
   }
   return topics;
 }

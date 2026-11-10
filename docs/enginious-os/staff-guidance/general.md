@@ -8,6 +8,7 @@ Approved, staff-facing guidance. JARVIS answers "how do I" questions from the to
 - status: published
 - keywords: my day; home page; homepage; what is waiting for me; what do i need to do; dashboard; start page; today
 - links: My Day -> /
+- screens: /
 
 My Day is the home page. It shows what needs you today, according to what you have access to.
 
@@ -19,6 +20,7 @@ My Day is the home page. It shows what needs you today, according to what you ha
 - status: published
 - keywords: approval; approvals; approve; decision; decisions waiting; waiting for my approval; waiting on me; needs me
 - links: Approvals -> /approvals
+- screens: /approvals
 
 Decisions that are waiting for you are listed on the Approvals page. The page is empty when nothing is waiting.
 

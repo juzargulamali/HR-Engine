@@ -405,6 +405,22 @@ describe("the help card", () => {
 });
 
 describe("general chat, clarifying question, lookup and memory in the panel", () => {
+  it("sends the address path of the current screen with a message (the server reduces it to an approved identifier), and a 'which do you mean?' card offers the guides as choices", async () => {
+    path = "/sales/events";
+    const choose: SendResult = { ok: true, kind: "action", actionId: "jarvis.sales.help.answer", confirmation: null, card: { kind: "help.answer", mode: "choose", entries: [], topics: [], note: "More than one guide fits. Which do you mean?", question: "How do I register a new customer?", choices: [{ id: "sales-clients-agencies", title: "Find or add a client or agency" }, { id: "sales-outreach", title: "Outreach: accounts assigned to you to approach" }] } };
+    const answer: SendResult = { ok: true, kind: "action", actionId: "jarvis.sales.help.answer", confirmation: null, card: { kind: "help.answer", mode: "guidance", topics: [], note: "From the published guidance.", screen: { label: "Events & Exhibitions" }, entries: [{ id: "sales-clients-agencies", title: "Find or add a client or agency", summary: "Summary.", steps: ["Open Clients & Agencies."], links: [{ label: "Clients & Agencies", href: "/sales/accounts" }] }] } };
+    const api = fakeApi({ send: async () => choose, act: async () => answer });
+    mount(api, { enabledActionIds: [...ALL_IDS, "jarvis.sales.help.answer"] });
+    openPanel();
+    fireEvent.change(screen.getByLabelText("Paste a brief or ask a question"), { target: { value: "How do I register a new customer?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    const c = await screen.findByTestId("jarvis-help-card");
+    expect(api.calls.send[0]![0]).toMatchObject({ screen: "/sales/events" });
+    expect(within(c).getByTestId("help-choose").textContent).toMatch(/Which do you mean/);
+    fireEvent.click(within(c).getByRole("button", { name: "Find or add a client or agency" }));
+    await waitFor(() => expect(screen.getByTestId("help-screen").textContent).toMatch(/Events & Exhibitions/));
+    expect(api.calls.act[0]![0]).toMatchObject({ actionId: "jarvis.sales.help.answer", input: { question: "How do I register a new customer?", topicId: "sales-clients-agencies" } });
+  });
   const type = (text: string) => { fireEvent.change(screen.getByLabelText("Paste a brief or ask a question"), { target: { value: text } }); fireEvent.click(screen.getByRole("button", { name: "Send" })); };
   const chat = (text: string, draft = true): SendResult => ({ ok: true, kind: "action", actionId: "jarvis.sales.chat.reply", confirmation: null, card: { kind: "chat.reply", text, draft, applied: [] } });
   it("a draft is shown with Copy and no send button, and the NEXT message carries only the chat turns as context (never cards or lookups)", async () => {

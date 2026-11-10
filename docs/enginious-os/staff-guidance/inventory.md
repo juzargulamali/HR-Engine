@@ -8,6 +8,7 @@ Approved, staff-facing guidance. JARVIS answers "how do I" questions from the to
 - status: published
 - keywords: inventory; warehouse; equipment; stock; request equipment; equipment request; scan; qr; transfer; my equipment; book equipment; return equipment
 - links: Inventory -> /inventory; Equipment requests -> /inventory/requests; My equipment -> /inventory/mine
+- screens: /inventory; /inventory/requests; /inventory/mine; /inventory/stock
 
 Inventory is where equipment is requested, sent out and received back. The equipment assigned to you is under My equipment. JARVIS cannot read or change inventory: use the screens.
 

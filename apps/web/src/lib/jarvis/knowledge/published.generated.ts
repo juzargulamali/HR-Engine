@@ -26,6 +26,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "My Day",
         "href": "/"
       }
+    ],
+    "screens": [
+      "/"
     ]
   },
   {
@@ -51,6 +54,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "Approvals",
         "href": "/approvals"
       }
+    ],
+    "screens": [
+      "/approvals"
     ]
   },
   {
@@ -83,7 +89,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "Follow-ups",
         "href": "/sales/follow-ups"
       }
-    ]
+    ],
+    "screens": []
   },
   {
     "id": "jarvis-memory",
@@ -108,7 +115,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "My Day",
         "href": "/"
       }
-    ]
+    ],
+    "screens": []
   },
   {
     "id": "inventory-where",
@@ -147,6 +155,12 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "My equipment",
         "href": "/inventory/mine"
       }
+    ],
+    "screens": [
+      "/inventory",
+      "/inventory/requests",
+      "/inventory/mine",
+      "/inventory/stock"
     ]
   },
   {
@@ -178,6 +192,10 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "New leave request",
         "href": "/leave/new"
       }
+    ],
+    "screens": [
+      "/leave",
+      "/leave/new"
     ]
   },
   {
@@ -208,6 +226,10 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "My Attendance",
         "href": "/attendance"
       }
+    ],
+    "screens": [
+      "/attendance-clock",
+      "/attendance"
     ]
   },
   {
@@ -234,6 +256,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "My Reimbursements",
         "href": "/reimbursements"
       }
+    ],
+    "screens": [
+      "/reimbursements"
     ]
   },
   {
@@ -262,6 +287,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "People & Access",
         "href": "/people-access"
       }
+    ],
+    "screens": [
+      "/people-access"
     ]
   },
   {
@@ -299,6 +327,11 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "Project calendar",
         "href": "/projects/calendar"
       }
+    ],
+    "screens": [
+      "/projects",
+      "/projects/work",
+      "/projects/calendar"
     ]
   },
   {
@@ -345,6 +378,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "Reports",
         "href": "/sales/reports"
       }
+    ],
+    "screens": [
+      "/sales"
     ]
   },
   {
@@ -370,6 +406,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "Follow-ups",
         "href": "/sales/follow-ups"
       }
+    ],
+    "screens": [
+      "/sales/follow-ups"
     ]
   },
   {
@@ -406,6 +445,10 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "Full new-enquiry form",
         "href": "/sales/new"
       }
+    ],
+    "screens": [
+      "/sales/opportunities",
+      "/sales/new"
     ]
   },
   {
@@ -442,6 +485,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "Enquiries",
         "href": "/sales/opportunities"
       }
+    ],
+    "screens": [
+      "/sales/follow-ups"
     ]
   },
   {
@@ -475,6 +521,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "Enquiries",
         "href": "/sales/opportunities"
       }
+    ],
+    "screens": [
+      "/sales/opportunities/[id]"
     ]
   },
   {
@@ -504,6 +553,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "Enquiries",
         "href": "/sales/opportunities"
       }
+    ],
+    "screens": [
+      "/sales/opportunities/[id]"
     ]
   },
   {
@@ -542,6 +594,10 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "Board view",
         "href": "/sales/opportunities?view=board"
       }
+    ],
+    "screens": [
+      "/sales/opportunities/[id]",
+      "/sales/pipeline"
     ]
   },
   {
@@ -573,6 +629,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "Enquiries",
         "href": "/sales/opportunities"
       }
+    ],
+    "screens": [
+      "/sales/opportunities/[id]"
     ]
   },
   {
@@ -611,6 +670,11 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "Import from Excel",
         "href": "/sales/accounts/import"
       }
+    ],
+    "screens": [
+      "/sales/accounts",
+      "/sales/accounts/import",
+      "/sales/clients"
     ]
   },
   {
@@ -641,6 +705,155 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "Enquiries",
         "href": "/sales/opportunities"
       }
+    ],
+    "screens": [
+      "/sales/proposals"
+    ]
+  },
+  {
+    "id": "sales-events",
+    "area": "sales",
+    "title": "Events & Exhibitions",
+    "keywords": [
+      "events and exhibitions",
+      "exhibitions",
+      "trade shows",
+      "trade fair",
+      "expo",
+      "upcoming shows",
+      "event calendar",
+      "add an event",
+      "add an edition",
+      "which shows are coming",
+      "conference"
+    ],
+    "summary": "Events & Exhibitions is the shared calendar of shows, one row per edition, with how many enquiries are linked to each. It opens on upcoming editions; you can filter by name, country and dates, or switch to past editions. Everyone in Sales sees the same calendar; the enquiry figures count only the enquiries you can see.",
+    "steps": [
+      "Open Events & Exhibitions in Sales.",
+      "Use the filters to find a show, then open it to see its editions, who exhibited and the agencies to contact.",
+      "Press Add event for a show that is not listed, or Add edition for its next year.",
+      "To add many at once, use Import events with the template."
+    ],
+    "links": [
+      {
+        "label": "Events & Exhibitions",
+        "href": "/sales/events"
+      },
+      {
+        "label": "Import events",
+        "href": "/sales/events/import"
+      }
+    ],
+    "screens": [
+      "/sales/events"
+    ]
+  },
+  {
+    "id": "sales-event-page",
+    "area": "sales",
+    "title": "Work one event: who exhibited, agencies to contact, observations",
+    "keywords": [
+      "record an observation",
+      "who exhibited",
+      "which agency built the stand",
+      "agencies to contact",
+      "exhibitor history",
+      "stand builder",
+      "event page",
+      "add next edition",
+      "archive an event",
+      "outreach priority"
+    ],
+    "summary": "An event page shows the same show across its editions: who exhibited each year and with which agency, the agencies worth contacting for the next edition (highest outreach priority first), and the enquiries linked to it. At the show you can record what you see on your phone without creating an enquiry.",
+    "steps": [
+      "Press Record an observation, choose the edition and the exhibitor, then the agency (or Agency unknown).",
+      "Read Who exhibited, and with which agency to compare the years.",
+      "Under Agencies to contact, set the outreach priority and open the account to start outreach or a follow-up.",
+      "Press Add next edition when the next dates are known. Archive keeps the history; nothing is deleted."
+    ],
+    "links": [
+      {
+        "label": "Events & Exhibitions",
+        "href": "/sales/events"
+      },
+      {
+        "label": "Clients & Agencies",
+        "href": "/sales/accounts"
+      }
+    ],
+    "screens": [
+      "/sales/events/[id]"
+    ]
+  },
+  {
+    "id": "sales-events-import",
+    "area": "sales",
+    "title": "Import events from a spreadsheet",
+    "keywords": [
+      "import events",
+      "upload events",
+      "bulk add events",
+      "events spreadsheet",
+      "events template",
+      "excel events",
+      "csv events"
+    ],
+    "summary": "Import events adds many shows and editions to the shared calendar from one file. Each row is one edition and needs the event name, country, start date and end date. Nothing is saved until you confirm the preview.",
+    "steps": [
+      "Download the template and fill one row per edition (dates as YYYY-MM-DD).",
+      "Upload the file and read the preview: each row is marked new, adds an edition, already present or needs correction.",
+      "Correct any row that needs it and upload again.",
+      "Press Confirm. All rows are saved together or none."
+    ],
+    "links": [
+      {
+        "label": "Import events",
+        "href": "/sales/events/import"
+      },
+      {
+        "label": "Events & Exhibitions",
+        "href": "/sales/events"
+      }
+    ],
+    "screens": [
+      "/sales/events/import"
+    ]
+  },
+  {
+    "id": "sales-outreach",
+    "area": "sales",
+    "title": "Outreach: accounts assigned to you to approach",
+    "keywords": [
+      "outreach",
+      "my outreach",
+      "prospects",
+      "prospecting",
+      "accounts to approach",
+      "assigned accounts",
+      "log outreach",
+      "cold approach",
+      "re-engage a client",
+      "assign outreach"
+    ],
+    "summary": "Outreach is your list of accounts to approach before any enquiry exists. Each card shows the objective, the target date, the last contact and the next action, with overdue ones marked. It never creates an enquiry by itself; you create one from the account when the client is ready.",
+    "steps": [
+      "Open Outreach in Sales to see what is assigned to you.",
+      "Open an account from its card to log what you did and set the next action.",
+      "Filter by status or Overdue only to choose what to do first.",
+      "Accounts are assigned from Clients & Agencies by the people who manage Sales assignments."
+    ],
+    "links": [
+      {
+        "label": "Outreach",
+        "href": "/sales/outreach"
+      },
+      {
+        "label": "Clients & Agencies",
+        "href": "/sales/accounts"
+      }
+    ],
+    "screens": [
+      "/sales/outreach"
     ]
   },
   {
@@ -667,6 +880,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "Sales reports",
         "href": "/sales/reports"
       }
+    ],
+    "screens": [
+      "/sales/reports"
     ]
   },
   {
@@ -692,6 +908,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
         "label": "Sales settings",
         "href": "/sales/settings"
       }
+    ],
+    "screens": [
+      "/sales/settings"
     ]
   }
 ];

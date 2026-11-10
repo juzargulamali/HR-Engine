@@ -19,7 +19,7 @@ import { JarvisMark } from "./jarvis-mark";
 import { ReviewCard, type CardApi, type CardState } from "./review-card";
 
 export interface JarvisClientApi extends CardApi, ActionApi {
-  send: (a: { companyId: string; text: string; intent?: string | null; enquiryId?: string | null; context?: SendContext | null; briefOutbound?: string | null }) => Promise<SendResult>;
+  send: (a: { companyId: string; text: string; intent?: string | null; enquiryId?: string | null; context?: SendContext | null; briefOutbound?: string | null; screen?: string | null }) => Promise<SendResult>;
   memory?: (a: { op: "list" } | { op: "set"; key: string; value: string } | { op: "delete"; key: string }) => Promise<SendResult>;
   context: (a: { companyId: string | null; enquiryId: string | null }) => Promise<{ ok: true; view: ContextView } | JarvisRefusal>;
 }
@@ -69,7 +69,7 @@ function useIsPhone() {
 }
 
 /** Tells the launcher which enquiry the page is about (the route, or the side panel's ?open=). A HINT: it is never permission and never retargets a review. */
-function RouteWatcher({ onEnquiry }: { onEnquiry: (id: string | null) => void }) {
+function RouteWatcher({ onEnquiry, onScreen }: { onEnquiry: (id: string | null) => void; onScreen: (path: string | null) => void }) {
   const path = usePathname();
   const search = useSearchParams();
   const open = search?.get("open") ?? null;
@@ -77,7 +77,9 @@ function RouteWatcher({ onEnquiry }: { onEnquiry: (id: string | null) => void })
     const fromPath = ENQUIRY_PATH.exec(path ?? "")?.[1] ?? null;
     const fromPanel = path?.startsWith("/sales/opportunities") && open && UUID.test(open) ? open : null;
     onEnquiry(fromPath ?? fromPanel);
-  }, [path, open, onEnquiry]);
+    // Which screen the person is on: the address path only (no query, no content). The server reduces it to an approved screen identifier before any use.
+    onScreen(path ?? null);
+  }, [path, open, onEnquiry, onScreen]);
   return null;
 }
 
@@ -156,6 +158,8 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
   }, [routeEnquiry, api]);
 
   const onRouteEnquiry = useCallback((id: string | null) => setRouteEnquiry(id), []);
+  const screenRef = useRef<string | null>(null);
+  const onScreen = useCallback((path: string | null) => { screenRef.current = path; }, []);
   const push = (m: NewMsg) => setMessages((ms) => [...ms, { ...m, id: nextId++ } as Msg]);
 
   async function send(raw: string, forced?: { intent: string; briefOutbound?: string }) {
@@ -166,7 +170,7 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
     if (!forced) push({ role: "user", text: t.length > 160 ? `${t.slice(0, 160)}… (${t.length} characters)` : t });
     setText("");
     try {
-      const r = await api.send({ companyId, text: t, intent: forced ? forced.intent : mode?.key ?? null, enquiryId: chip?.id ?? null, context: { turns: turnsRef.current, lastLookup: lookupRef.current }, briefOutbound: forced?.briefOutbound ?? null });
+      const r = await api.send({ companyId, text: t, intent: forced ? forced.intent : mode?.key ?? null, enquiryId: chip?.id ?? null, context: { turns: turnsRef.current, lastLookup: lookupRef.current }, briefOutbound: forced?.briefOutbound ?? null, screen: screenRef.current });
       if (!r.ok) push({ role: "jarvis", kind: "text", tone: "error", text: r.message });
       else if (r.kind === "help") push({ role: "jarvis", kind: "help", help: r.help });
       else if (r.kind === "not_available") push({ role: "jarvis", kind: "text", tone: "info", text: `${r.title}: ${r.reason}` });
@@ -221,7 +225,7 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
 
   return (
     <>
-      <Suspense fallback={null}><RouteWatcher onEnquiry={onRouteEnquiry} /></Suspense>
+      <Suspense fallback={null}><RouteWatcher onEnquiry={onRouteEnquiry} onScreen={onScreen} /></Suspense>
       <button
         ref={launcherRef}
         type="button"

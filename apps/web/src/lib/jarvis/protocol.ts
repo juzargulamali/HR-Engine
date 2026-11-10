@@ -157,7 +157,15 @@ export interface ReplyDraftCard {
 /** `jarvis.sales.help.answer`: an answer from reviewed guidance (with the screens it links to) or, for a general question, a plain model answer that says so. Reads nothing. */
 export interface HelpAnswerCard {
   kind: "help.answer";
-  mode: "guidance" | "no_guidance";
+  /** "choose": two or more guides fit about equally, so the person is asked ONE short question (`choices`). */
+  mode: "guidance" | "no_guidance" | "choose";
+  /** The screen the answer is for, when the person asked about the screen they are on (the navigation's own name for it; never its contents). */
+  screen?: { label: string } | null;
+  /** For "choose": the guides to pick from. For "no guidance": screens whose NAME the question used, from the navigation. */
+  choices?: { id: string; title: string }[];
+  places?: { label: string; href: string }[];
+  /** The question as asked, so a choice can be sent back with it. */
+  question?: string;
   entries: { id: string; title: string; summary: string; steps: string[]; links: { label: string; href: string }[] }[];
   /** For "no reviewed guidance": the topics there is guidance for. */
   topics: { id: string; title: string }[];

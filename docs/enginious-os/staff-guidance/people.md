@@ -8,6 +8,7 @@ Approved, staff-facing guidance. JARVIS answers "how do I" questions from the to
 - status: published
 - keywords: leave; request leave; annual leave; holiday request; time off; leave balance; sick leave; new leave request; day off
 - links: My Leave -> /leave; New leave request -> /leave/new
+- screens: /leave; /leave/new
 
 Your own leave balances and requests are on the My Leave page, and a new request starts from there. JARVIS cannot read or change leave: use the screens.
 
@@ -20,6 +21,7 @@ Your own leave balances and requests are on the My Leave page, and a new request
 - status: published
 - keywords: clock in; clock out; attendance; check in; check-in; check out; timesheet; working hours
 - links: My Attendance Clock -> /attendance-clock; My Attendance -> /attendance
+- screens: /attendance-clock; /attendance
 
 Your own clock in and clock out are on My Attendance Clock; your own attendance record is on My Attendance.
 
@@ -32,6 +34,7 @@ Your own clock in and clock out are on My Attendance Clock; your own attendance 
 - status: published
 - keywords: expense; expenses; reimbursement; reimbursements; claim; claims; receipt; expense claim; refund
 - links: My Reimbursements -> /reimbursements
+- screens: /reimbursements
 
 Your own expense claims are on the My Reimbursements page, and each claim opens for its details.
 
@@ -43,6 +46,7 @@ Your own expense claims are on the My Reimbursements page, and each claim opens 
 - status: published
 - keywords: access; no access; permission; can't see; cannot see; give me access; who can give access; module access; grant access; why can't i; not allowed
 - links: People & Access -> /people-access
+- screens: /people-access
 
 Access to a module (Sales, Projects, Inventory and so on) is given by the people who manage People & Access: a System Administrator, an HR Admin, or a module access manager. If a screen says you do not have access, ask one of them. JARVIS cannot change anyone's access.
 

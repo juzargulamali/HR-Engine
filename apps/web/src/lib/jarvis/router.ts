@@ -1,5 +1,6 @@
 import { classifyRequest, HOW_TO, type ExclusionCategory } from "./classifier";
-import { APP_QUESTION } from "./help/guidance";
+import { APP_QUESTION, guidanceIndex } from "./help/guidance";
+import { matchByMeaning } from "./help/match";
 import type { JarvisModeKey } from "./modes";
 import { ENQUIRY_REFERENCE } from "./modes";
 import { findProtectedContent, protectedTopic, type ProtectedCategory } from "./protected";
@@ -28,7 +29,11 @@ export type Route =
   | { kind: "clarify" };
 
 export type LiveArea = "sales" | "projects" | "delivered" | "inventory" | "people" | "finance" | "approvals";
-export interface RouteContext { intent?: JarvisModeKey | null; hasChatContext?: boolean; lastLookup?: boolean; hasEnquiry?: boolean }
+export interface RouteContext {
+  intent?: JarvisModeKey | null; hasChatContext?: boolean; lastLookup?: boolean; hasEnquiry?: boolean;
+  /** The APPROVED identifier of the screen the person is on (lib/jarvis/help/screens.ts), or null. A hint for choosing guidance; never permission. */
+  screen?: string | null;
+}
 
 const CAPABILITIES = /^\s*(?:help|what can (?:you|jarvis) do|what do you do|what are you able to do|capabilit(?:y|ies)|what are your capabilit(?:y|ies)|options)\s*[?!.]*\s*$/i;
 const HELLO = /^\s*(?:hi|hello|hey|hiya|good\s+(?:morning|afternoon|evening|day)|salam|salaam|marhaba|greetings)(?:\s+(?:jarvis|there|team))?\s*[!.,]*\s*$/i;
@@ -54,7 +59,7 @@ export const periodIn = (text: string): LookupPeriod | null => PERIODS.find((p) 
 
 const LIVE: { area: LiveArea; re: RegExp }[] = [
   { area: "delivered", re: /\b(?:deliver(?:ed|y|ies|ing)?|completed\s+projects?|finished\s+projects?|projects?\s+(?:done|completed|finished))\b/i },
-  { area: "sales", re: /\b(?:enquir(?:y|ies)|inquir(?:y|ies)|opportunit(?:y|ies)|pipeline|leads?|clients?|agenc(?:y|ies)|accounts?|proposals?|follow[-\s]?ups?|deals?|won|lost|sales\s+(?:numbers?|figures?|results?|summary|report|trend|performance)|conversion|outreach)\b/i },
+  { area: "sales", re: /\b(?:enquir(?:y|ies)|inquir(?:y|ies)|opportunit(?:y|ies)|pipeline|leads?|clients?|agenc(?:y|ies)|accounts?|proposals?|follow[-\s]?ups?|deals?|won|lost|sales\s+(?:numbers?|figures?|results?|summary|report|trend|performance)|conversion|outreach|events?|exhibitions?|editions?|observations?)\b/i },
   { area: "projects", re: /\b(?:projects?|tasks?|milestones?|handovers?)\b/i },
   { area: "inventory", re: /\b(?:inventory|stock|warehouse|equipment|items?\s+in\s+stock)\b/i },
   { area: "finance", re: /\b(?:budgets?|expenses?|purchase\s+orders?|invoices?)\b/i },
@@ -76,6 +81,10 @@ const LABELLED = /^\s*(?:agency|client|end client|brand|event|event dates?|venue
 const WRITE = /^\s*(?:please\s+)?(?:can\s+you\s+|could\s+you\s+|help\s+me\s+(?:to\s+)?)?(?:draft|write|compose|rewrite|rephrase|reword|proofread|polish|improve|summari[sz]e|translate|shorten|tidy|prepare)\b/i;
 const REVISE = /^\s*(?:please\s+)?(?:make|keep)\s+(?:it|this|that)\b|^\s*(?:please\s+)?(?:shorter|longer|simpler|more\s+\w+|less\s+\w+|try\s+again|another\s+(?:version|one|go)|again\b|in\s+(?:british|american|arabic|english)\b|add\b|remove\b|change\b|use\b|now\b)/i;
 const QUESTION = /\?\s*$|^\s*(?:what|why|how|when|where|who|which|can|could|should|would|is|are|do|does|did|explain|tell\s+me|give\s+me|define|compare|suggest|recommend)\b/i;
+/** How well a guide must fit for a plain question (not phrased as "how do I") to be answered from the guidance instead of general chat. */
+const STRONG_GUIDE = 0.75;
+/** The person is asking about the screen in front of them rather than naming a subject. */
+export const ABOUT_THIS_SCREEN = /\b(?:here|this\s+(?:page|screen|view|tab|section|list|form|one)|on\s+this|current\s+(?:page|screen)|where\s+am\s+i|what\s+am\s+i\s+looking\s+at)\b/i;
 const ABOUT_APP = /\b(?:enginious(?:\s+os)?|jarvis|this\s+(?:app|system|software)|the\s+(?:app|system)|sales\s*(?:&|and)\s*crm|the\s+crm|module)\b/i;
 
 /** How strongly a pasted text looks like a client brief for a new enquiry (0 = not at all). */
@@ -133,7 +142,12 @@ export function routeMessage(raw: string, ctx: RouteContext = {}): Route {
     if (MEM_FORGET.test(text) && /\b(?:preferences?|memory|remember)\b/i.test(text)) return { kind: "memory", op: "forget" };
     if (MEM_SAVE.test(text)) return { kind: "memory", op: "save" };
   }
-  if (!howTo && text.length <= 200) {
+  // Does the published guidance answer this, by meaning? (No list of trigger sentences: lib/jarvis/help/match.ts compares what the question is about with the guides.)
+  const guide = text.length <= 300 && !WRITE.test(text) ? matchByMeaning(guidanceIndex(), text, ctx.screen ?? null) : ({ kind: "none" } as const);
+  const strongGuide = guide.kind !== "none" && guide.score >= STRONG_GUIDE;
+  const aboutScreen = text.length <= 160 && !WRITE.test(text) && ABOUT_THIS_SCREEN.test(text) && (QUESTION.test(text) || /\bhelp\b/i.test(text));
+  const askingHow = strongGuide && /^\s*(?:which|what|who|where)\b/i.test(text);
+  if (!howTo && !aboutScreen && !askingHow && text.length <= 200) {
     if (OVERDUE.test(text)) return { kind: "lookup", period: periodIn(text) ?? "all" };
     // A follow-up to the lookup the person just ran ("show last month instead"): the lookup runs again, under today's permissions.
     if (ctx.lastLookup && text.length <= 60 && periodIn(text) && !WRITE.test(text)) return { kind: "lookup", period: periodIn(text)! };
@@ -155,6 +169,7 @@ export function routeMessage(raw: string, ctx: RouteContext = {}): Route {
   if (brief >= 4) return { kind: "brief" };
   if (brief >= 2 && !QUESTION.test(text)) return { kind: "clarify_brief" };
 
+  if (aboutScreen || (strongGuide && (QUESTION.test(text) || /^\s*(?:explain|describe)\b/i.test(text)))) return { kind: "knowledge" };
   if (howTo || ((QUESTION.test(text) || /^\s*(?:explain|describe)\b/i.test(text)) && (ABOUT_APP.test(text) || (APP_QUESTION.test(text) && text.length <= 160 && !WRITE.test(text))))) return { kind: "knowledge" };
   if (WRITE.test(text)) return { kind: "chat", draft: true };
   if (ctx.hasChatContext && text.length <= 200 && REVISE.test(text)) return { kind: "chat", draft: true };

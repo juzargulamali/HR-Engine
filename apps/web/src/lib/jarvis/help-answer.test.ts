@@ -196,3 +196,127 @@ describe("jarvis.sales.help.answer: refusals", () => {
     expect(refusal(await a.execute({ actionId: "jarvis.sales.help.answer", companyId: ID.co1, token: "x.y", values: { question: "hi" } })).code).toBe("action_disabled");
   });
 });
+
+/**
+ * NAVIGATION AND "WHAT CAN I DO HERE?" as a reusable capability: questions are matched to the published guidance BY MEANING and to the approved identifier of the screen the
+ * person is on. The sentences below are acceptance examples, not triggers: none of them appears in the code, and a guide added to the Map is found the same way.
+ */
+describe("navigation guidance: matched by meaning and by the current screen", () => {
+  const on = (text: string, screen: string | null, intent: string | null = null) => a.send({ companyId: ID.co1, text, intent, screen });
+  const ids = (r: SendResult) => cardOf(r).entries.map((e) => e.id);
+  const UUID = "3f2b8c1e-1111-4111-8111-111111111111";
+
+  it("paraphrases reach the same guide, whatever the wording, with no screen needed", async () => {
+    const cases: [string, string[]][] = [
+      ["sales-events", ["Where can I see upcoming trade shows?", "How do I add an exhibition?", "Where is the calendar of expos?", "How do I put a new conference into the system?", "Where do I find Events & Exhibitions?"]],
+      ["sales-event-page", ["Which agencies should I contact for a show?", "How do I record what I saw at an expo?", "How do I see who exhibited last year?", "Where do I note which agency built a stand?"]],
+      ["sales-events-import", ["How do I upload a list of events?", "Can I bulk add shows from a spreadsheet?", "Where is the template for importing exhibitions?"]],
+      ["sales-outreach", ["Where are the accounts assigned to me to approach?", "How do I see my prospecting list?", "Where do I log outreach to a prospect?"]],
+      ["sales-follow-ups", ["How do I log a follow-up?", "Where do I see my reminders?", "How do I plan the next action?"]],
+      ["people-leave", ["How do I request leave?", "Where do I book a holiday?", "How can I ask for time off?"]],
+      ["people-claims", ["How do I claim expenses?", "Where do I submit a receipt to be reimbursed?"]],
+      ["inventory-where", ["How do I book inventory?", "Where do I find equipment requests?"]],
+      ["sales-reports", ["Where are the sales numbers?", "How do I see pipeline figures?"]],
+    ];
+    for (const [id, questions] of cases) for (const q of questions) expect(ids(await on(q, null)), q).toContain(id);
+    expect(simulatedProviderCalls).toHaveLength(0);
+    expect(w.usage.size).toBe(0);
+  });
+
+  it("'What can I do here?' is answered for the screen the person is on, on several screens, and names that screen", async () => {
+    w.readLog.length = 0;
+    const screens: [string, string, string][] = [
+      ["/sales/events", "sales-events", "Events & Exhibitions"],
+      [`/sales/events/${UUID}`, "sales-event-page", "Events & Exhibitions (the page of one record)"],
+      ["/sales/outreach", "sales-outreach", "Outreach"],
+      ["/sales/follow-ups", "sales-overdue-follow-ups", "Follow-ups"],
+      ["/leave", "people-leave", "My Leave"],
+      ["/inventory/requests", "inventory-where", "Requests"],
+      ["/", "my-day", "My Day"],
+    ];
+    for (const [path, id, label] of screens) {
+      for (const q of ["What can I do here?", "What is this page for?", "Help me with this screen", "How does this page work?"]) {
+        const c = cardOf(await on(q, path));
+        expect(c.mode, `${q} @ ${path}`).toBe("guidance");
+        expect([...c.entries.map((e) => e.id), ...(c.choices ?? []).map((x) => x.id)], `${q} @ ${path}`).toContain(id);
+        expect(c.screen, `${q} @ ${path}`).toEqual({ label });
+      }
+    }
+    // a screen with several guides (an enquiry's page): the first in full, the others offered by title; choosing one answers it
+    const enquiry = cardOf(await on("What can I do here?", `/sales/opportunities/${UUID}`));
+    expect(enquiry.entries).toHaveLength(1);
+    expect([enquiry.entries[0]!.id, ...(enquiry.choices ?? []).map((x) => x.id)].sort()).toEqual(["sales-close-handover", "sales-edit-details", "sales-log-update", "sales-move-stage"]);
+    const picked = await a.act({ companyId: ID.co1, actionId: "jarvis.sales.help.answer", input: { question: "What can I do here?", topicId: "sales-move-stage" } });
+    expect(ids(picked)).toEqual(["sales-move-stage"]);
+    // nothing was read and nothing left the app: the screen is an identifier, not its contents
+    expect(w.readLog).toEqual([]);
+    expect(simulatedProviderCalls).toHaveLength(0);
+  });
+
+  it("the current screen makes the most specific guide win, and a question with its own subject is not hijacked by the screen", async () => {
+    // "add one" has no subject of its own: on the events list it means an event; with no screen JARVIS does not guess
+    expect(ids(await on("How do I add one here?", "/sales/events"))).toEqual(["sales-events"]);
+    expect(ids(await on("How do I add one here?", "/leave"))).toEqual(["people-leave"]);
+    // the same words about events resolve to the list guide on the list and to the event guide on an event's page
+    expect(ids(await on("How do I add the next edition?", "/sales/events"))[0]).toBe("sales-events");
+    expect(ids(await on("How do I add the next edition?", `/sales/events/${UUID}`))[0]).toBe("sales-event-page");
+    // a specific guide beats the module overview
+    const specific = ids(await on("How do follow-ups work in Sales?", null));
+    expect(specific.every((id) => /follow-ups$/.test(id)), specific.join()).toBe(true); // a follow-ups guide, not the Sales overview
+    expect(ids(await on("How does Sales & CRM work?", "/sales/events"))[0]).toBe("sales-overview");
+    // being on one screen does not stop a question about another subject
+    expect(ids(await on("How do I request leave?", "/sales/events"))).toEqual(["people-leave"]);
+    expect(ids(await on("Where do I record an observation at a show?", "/leave"))[0]).toBe("sales-event-page");
+  });
+
+  it("an ambiguous question gets ONE short question with the candidates; choosing one answers it", async () => {
+    const c = cardOf(await on("How do I register a new customer?", null));
+    expect(c.mode).toBe("choose");
+    expect(c.entries).toEqual([]);
+    expect(c.choices!.length).toBeGreaterThanOrEqual(2);
+    expect(c.choices!.length).toBeLessThanOrEqual(3);
+    expect(c.choices!.map((x) => x.id)).toContain("sales-clients-agencies");
+    const chosen = await a.act({ companyId: ID.co1, actionId: "jarvis.sales.help.answer", input: { question: c.question, topicId: "sales-clients-agencies" } });
+    expect(ids(chosen)).toEqual(["sales-clients-agencies"]);
+    expect(simulatedProviderCalls).toHaveLength(0);
+  });
+
+  it("no guide: says so honestly, names the screen, offers the menu's own entries the question named; an unknown or forged screen is nothing", async () => {
+    const none = cardOf(await on("What can I do here?", "/audit-log"));
+    expect(none.mode).toBe("no_guidance");
+    expect(none.note).toMatch(/no approved guidance for Audit Log yet/);
+    const unknown = cardOf(await on("What can I do here?", "/not/a/real/page"));
+    expect(unknown.mode).toBe("no_guidance");
+    expect(unknown.note).toMatch(/cannot tell which screen/);
+    expect(JSON.stringify(unknown)).not.toContain("/not/a/real/page"); // not echoed
+    for (const forged of ["javascript:alert(1)", "/sales/events<script>", "https://example.com/sales/events", "x".repeat(400), "/sales/../../etc/passwd"]) {
+      expect(cardOf(await on("What can I do here?", forged)).mode, forged).toBe("no_guidance");
+    }
+    expect(cardOf(await on("What can I do here?", null)).note).toMatch(/cannot tell which screen/);
+    const place = cardOf(await on("Where is the pipeline board?", null, "help"));
+    expect([...(place.places ?? []).map((x) => x.href), ...place.entries.flatMap((e) => e.links.map((l) => l.href))].join(" ")).toMatch(/\/sales\/(pipeline|opportunities)/);
+  });
+
+  it("the outbound rules are untouched: the screen never reaches the provider, no record is read for guidance, protected requests and restricted text behave as before on any screen", async () => {
+    w.opps.push(mkOpp({ company_id: ID.co1, title: "SECRET enquiry title" }));
+    w.readLog.length = 0;
+    // a general question asked while on a screen goes to chat WITHOUT the screen
+    const chat = await on("What is the capital of France?", `/sales/events/${UUID}`);
+    expect(chat.ok && chat.kind === "action" && chat.card.kind).toBe("chat.reply");
+    expect(simulatedProviderCalls).toHaveLength(1);
+    const payload = JSON.stringify(simulatedProviderCalls[0]);
+    for (const leak of ["/sales/events", UUID, "Events & Exhibitions", "SECRET"]) expect(payload).not.toContain(leak);
+    expect(simulatedProviderCalls[0]!.sources).toEqual(["user_text"]);
+    simulatedProviderCalls.length = 0;
+    // guidance reads no record, whatever the screen
+    cardOf(await on("What can I do here?", `/sales/opportunities/${UUID}`));
+    expect(w.readLog).toEqual([]);
+    // protected and restricted requests are not turned into guidance by being "here"
+    expect(await on("What is Sara's salary here?", "/payroll")).toMatchObject({ ok: true, kind: "reply" });
+    expect(await on("External sharing prohibited.\nWhat can I do here?", "/sales/events")).toMatchObject({ ok: true, kind: "reply" });
+    // and no new live lookup: asking for records on a screen still explains the limit
+    expect(await on("Show me all events this month", "/sales/events")).toMatchObject({ ok: true });
+    expect(w.readLog.filter((t) => t !== "crm_company_grants")).toEqual([]);
+    expect(simulatedProviderCalls).toHaveLength(0);
+  });
+});

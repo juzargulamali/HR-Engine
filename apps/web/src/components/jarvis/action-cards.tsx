@@ -33,7 +33,7 @@ export interface ActionCardProps {
 export function ActionCardView(p: ActionCardProps) {
   switch (p.state.card.kind) {
     case "reply.draft": return <ReplyDraftView card={p.state.card} companyStale={p.companyStale} />;
-    case "help.answer": return <HelpAnswerView card={p.state.card} api={p.api} />;
+    case "help.answer": return <HelpAnswerView card={p.state.card} api={p.api} companyId={p.companyId} actionId={p.actionId} onState={p.onState} />;
     case "chat.reply": return <ChatReplyView card={p.state.card} />;
     case "lookup.followups": return <FollowUpsView card={p.state.card} />;
     case "org.register": return <OrgRegisterView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
@@ -241,7 +241,15 @@ function OrgRegisterView(p: ActionCardProps & { card: OrgRegisterCard; confirmat
 }
 
 /** An answer from the published guidance, with links to the real screens. Reads and writes nothing. A correction can be suggested: it goes for review, not into the answer. */
-function HelpAnswerView({ card, api }: { card: HelpAnswerCard; api: ActionApi }) {
+function HelpAnswerView({ card, api, companyId, actionId, onState }: { card: HelpAnswerCard; api: ActionApi; companyId: string; actionId: string; onState: (s: ActionCardState) => void }) {
+  const [choosing, setChoosing] = useState(false);
+  /** The person picks which guide they meant: the same question goes back with that guide named (no new routing, no provider). */
+  async function choose(topicId: string) {
+    setChoosing(true);
+    const r = await api.act({ companyId, actionId, input: { question: card.question ?? "", topicId } }).catch(() => null);
+    setChoosing(false);
+    if (r && r.ok && r.kind === "action") onState({ card: r.card, confirmation: r.confirmation });
+  }
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [state, setState] = useState<{ kind: "idle" | "busy" } | { kind: "done" | "error"; message: string }>({ kind: "idle" });
@@ -255,6 +263,8 @@ function HelpAnswerView({ card, api }: { card: HelpAnswerCard; api: ActionApi })
   }
   return (
     <section aria-label="Answer" className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm" data-testid="jarvis-help-card" data-mode={card.mode}>
+      {card.screen ? <p className="text-xs text-muted-foreground" data-testid="help-screen">For the screen you are on: <strong>{card.screen.label}</strong></p> : null}
+      {card.mode === "choose" ? <p data-testid="help-choose">{card.note}</p> : null}
       {card.entries.map((e) => (
         <div key={e.id} className="space-y-1" data-testid={`help-entry-${e.id}`}>
           <h3 className="font-heading text-sm font-semibold">{e.title}</h3>
@@ -264,7 +274,14 @@ function HelpAnswerView({ card, api }: { card: HelpAnswerCard; api: ActionApi })
         </div>
       ))}
       {card.topics.length > 0 ? <ul className="list-disc space-y-0.5 pl-5 text-xs" data-testid="help-topics">{card.topics.map((t) => <li key={t.id}>{t.title}</li>)}</ul> : null}
-      <p className="text-xs text-muted-foreground">{card.note}</p>
+      {card.choices && card.choices.length > 0 ? (
+        <div className="space-y-1" data-testid="help-choices">
+          {card.mode === "guidance" ? <p className="text-xs text-muted-foreground">Also on this screen:</p> : null}
+          <div className="flex flex-wrap gap-2">{card.choices.map((c) => <Button key={c.id} type="button" size="sm" variant="outline" disabled={choosing} onClick={() => void choose(c.id)}>{c.title}</Button>)}</div>
+        </div>
+      ) : null}
+      {card.places && card.places.length > 0 ? <p className="flex flex-wrap gap-x-3 gap-y-1 text-xs" data-testid="help-places">{card.places.map((l) => <Link key={l.href} href={l.href} className="font-medium underline underline-offset-2">{l.label}</Link>)}</p> : null}
+      {card.mode !== "choose" ? <p className="text-xs text-muted-foreground">{card.note}</p> : null}
       {api.suggest && topicId && state.kind !== "done" ? (
         open ? (
           <div className="space-y-2" data-testid="suggest-form">

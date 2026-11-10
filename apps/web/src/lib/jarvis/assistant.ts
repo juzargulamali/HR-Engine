@@ -1,10 +1,11 @@
 import "server-only";
 import { EXCLUSION_MESSAGE } from "./classifier";
 import { matchGuidance } from "./help/guidance";
+import { resolveScreen } from "./help/screens";
 import { isPreference, parsePreferences, PREFERENCES, PREFERENCE_HELP, preferenceKeysNamed, toPreferenceViews, type PreferenceKey, type PreferenceView } from "./preferences";
 import { RESTRICTED_TEXT_MESSAGE } from "./outbound-messages";
 import { describeProtected, findProtectedContent, PROTECTED_LABEL, wholeTextRestricted, type ProtectedCategory } from "./protected";
-import { routeMessage, type LiveArea } from "./router";
+import { ABOUT_THIS_SCREEN, routeMessage, type LiveArea } from "./router";
 import { prepareBrief, RESTRICTED_BRIEF_MESSAGE } from "./sales/brief-outbound";
 import { CHAT_ID } from "./sales/chat";
 import { OVERDUE_FOLLOWUPS_ID } from "./sales/followups-overdue";
@@ -165,7 +166,7 @@ export function createAssistant(deps: JarvisDeps) {
   return {
     ...d,
 
-    async send(req: { companyId: string; text: string; intent?: string | null; enquiryId?: string | null; context?: SendContext | null; briefOutbound?: string | null }): Promise<SendResult> {
+    async send(req: { companyId: string; text: string; intent?: string | null; enquiryId?: string | null; context?: SendContext | null; briefOutbound?: string | null; screen?: string | null }): Promise<SendResult> {
       const text = (req.text ?? "").trim();
       if (!text) return { ok: false, code: "invalid_input", message: "Type a question or a request." };
       // "chat" is the answer to a clarifying question ("just answer it"): the text is a general message, still subject to every exclusion and protected-content rule below.
@@ -184,7 +185,7 @@ export function createAssistant(deps: JarvisDeps) {
         jarvisLog({ event: "outbound", outcome: "blocked", code: "sharing_restricted" });
         return { ok: true, kind: "reply", text: wholeTextRestricted(text) ? RESTRICTED_BRIEF_MESSAGE : `${RESTRICTED_TEXT_MESSAGE} It is in the earlier part of this conversation: press Clear to start again without it.`, links: [{ label: "New-enquiry form", href: "/sales/new" }] };
       }
-      const routed = routeMessage(text, { intent: intent?.key ?? null, hasChatContext: turns.length > 0, lastLookup: !!req.context?.lastLookup, hasEnquiry: !!req.enquiryId });
+      const routed = routeMessage(text, { intent: intent?.key ?? null, hasChatContext: turns.length > 0, lastLookup: !!req.context?.lastLookup, hasEnquiry: !!req.enquiryId, screen: resolveScreen(req.screen ?? null)?.id ?? null });
       jarvisLog({ event: "route", outcome: routed.kind });
       const reply = (t: string, links: ReplyLink[] = []): SendResult => ({ ok: true, kind: "reply", text: t, links });
       const proposeFor = async (actionId: string, input: unknown) => asAction(actionId, await d.propose({ actionId, companyId: req.companyId, input }));
@@ -221,8 +222,9 @@ export function createAssistant(deps: JarvisDeps) {
         case "brief": return brief();
         case "knowledge":
           // A question that only sounds like the app ("what makes a good follow-up email?") and has no guidance is a general question.
-          if (!intent && matchGuidance(text).length === 0 && !ABOUT_APP.test(text) && !APP_HOW.test(text)) return chat(false);
-          return proposeFor(HELP_ANSWER_ID, { question: text });
+          if (!intent && matchGuidance(text, 2, resolveScreen(req.screen ?? null)?.id ?? null).length === 0 && !ABOUT_APP.test(text) && !APP_HOW.test(text) && !ABOUT_THIS_SCREEN.test(text)) return chat(false);
+          // The current screen goes ONLY to the guidance action (which reduces it to an approved identifier and calls no provider). It is never part of a chat request.
+          return proposeFor(HELP_ANSWER_ID, { question: text, screen: req.screen ?? null });
         case "chat": return chat(routed.draft);
         case "mode": {
           const mode = JARVIS_MODES.find((m) => m.key === routed.key)!;

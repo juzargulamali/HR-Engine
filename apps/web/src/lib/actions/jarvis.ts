@@ -24,8 +24,8 @@ const sendContext = z.object({
   lastLookup: z.object({ period: z.enum(["all", "last_month", "this_month", "last_7_days", "last_30_days"]) }).nullable().optional(),
 }).nullable().optional();
 
-export async function jarvisSend(input: { companyId: string; text: string; intent?: string | null; enquiryId?: string | null; context?: SendContext | null; briefOutbound?: string | null }): Promise<SendResult> {
-  const p = z.object({ companyId: uuid, text: z.string().max(60_000), intent: z.string().max(20).nullable().optional(), enquiryId: z.string().max(64).nullable().optional(), context: sendContext, briefOutbound: z.string().max(60_000).nullable().optional() }).safeParse(input);
+export async function jarvisSend(input: { companyId: string; text: string; intent?: string | null; enquiryId?: string | null; context?: SendContext | null; briefOutbound?: string | null; screen?: string | null }): Promise<SendResult> {
+  const p = z.object({ companyId: uuid, text: z.string().max(60_000), intent: z.string().max(20).nullable().optional(), enquiryId: z.string().max(64).nullable().optional(), context: sendContext, briefOutbound: z.string().max(60_000).nullable().optional(), screen: z.string().max(2000).nullable().optional() }).safeParse(input);
   if (!p.success) return bad("Choose a company and type your message.");
   try { return await getJarvis().send(p.data); } catch { return { ok: false, code: "unavailable", message: "JARVIS is not available right now. Sales & CRM is not affected." }; }
 }

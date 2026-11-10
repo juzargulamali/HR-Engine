@@ -4,7 +4,7 @@ These files are part of the Enginious Map. They are the **only** Enginious OS kn
 
 | File | Area |
 |---|---|
-| [`sales.md`](./sales.md) | Sales & CRM (the first module with detailed guidance and live JARVIS actions) |
+| [`sales.md`](./sales.md) | Sales & CRM (the first module with detailed guidance and live JARVIS actions), including Events & Exhibitions and Outreach |
 | [`people.md`](./people.md) | People & HR ("where to find it" only) |
 | [`projects.md`](./projects.md) | Projects & Tasks ("where to find it" only) |
 | [`inventory.md`](./inventory.md) | Inventory ("where to find it" only) |
@@ -19,6 +19,7 @@ These files are part of the Enginious Map. They are the **only** Enginious OS kn
 - status: published | draft          (only published topics reach JARVIS)
 - keywords: phrase one; phrase two   (the words people really type)
 - links: Label -> /path; Label -> /path   (real screens only)
+- screens: /path; /path/[id]             (the screens this topic is the guide FOR, as the app's routes; a record's own page is written with [id])
 
 One or two sentences of summary.
 
@@ -32,5 +33,7 @@ One or two sentences of summary.
 3. Run `npm run build:jarvis-knowledge`. It writes `apps/web/src/lib/jarvis/knowledge/published.generated.ts` from the `published` topics.
 4. Open a pull request with both files. The web tests fail if the generated file does not match these files, so an unpublished edit cannot merge half-done.
 5. After review and merge, the normal deployment makes it live. JARVIS reads the generated file: nothing is retrained and no suggestion becomes shared knowledge before this.
+
+**How a topic is found.** JARVIS matches a question to these topics by meaning (the title, the keywords, the summary and the menu's name for the topic's screens all count), and uses `screens` to answer "What can I do here?" for the page the person is on. Write the title and keywords in the words people use; list every screen the topic explains. A screen with no topic gets an honest "no approved guidance yet".
 
 Personal preferences ("What JARVIS remembers") are separate: they are per person, stored in the database, and never become shared knowledge.
