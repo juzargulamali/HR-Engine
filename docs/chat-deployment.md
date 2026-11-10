@@ -1,6 +1,8 @@
 # Chat (Sales groups): owner deployment pack
 
-Draft PR `feat/app-chat`. **Nothing here has been applied to any hosted project.** One additive migration, no change to any existing table, function, policy or grant.
+**Current status (2026-11-10):** PR #73 is **merged on `main` as PR #73** (merge `296b74814b8851c08b20a73b19e82d5eecea167f`, 2026-11-10; required CI `lint-typecheck-test` and `rls-policies` green on head `ab89a98846747dd0f721f52adfd9d1acbde8aeff`). Migration `20261225000100_chat_sales_groups.sql` is **applied on hosted V2 by the owner** (owner-reported: `chat_20_verify_readonly.sql` passed **7 of 7 checks**; Claude ran no hosted SQL and did not see the rows). **Vercel Production is not verified by Claude**. Details: "Owner-run result" below; install order: `docs/launch-refinement-install-order.md` row 22.
+
+One additive migration, no change to any existing table, function, policy or grant. **Nothing here was run against a hosted project by Claude**: the hosted run is the owner's. *(Corrected 2026-11-10: this paragraph used to say "Draft PR. Nothing here has been applied to any hosted project.")*
 
 ## What changes
 | Item | Detail |
@@ -19,6 +21,13 @@ A person is a member of "Sales — UAE / KSA / Europe" exactly when they hold an
 1. Apply the migration in the SQL editor (or the usual migration path). It is idempotent where PostgreSQL allows.
 2. Run `supabase/manual-sql/chat_20_verify_readonly.sql`: rows 1-4 and 9-11 must say **OK**; the INFO rows list each group's company and its current member count (check that Europe shows the Poland company and that the counts are the people you expect). Row 4 saying UNBOUND means a country has zero or several active companies: tell me which.
 3. Deploy the app. The floating Chat button appears for anyone who is a member of at least one group, and for nobody else. Before the migration is applied the button simply does not appear.
+
+## Owner-run result (Enginious HR Engine V2; owner-reported, not seen by Claude)
+- **Applied:** `20261225000100_chat_sales_groups.sql`, by the owner, on Enginious HR Engine V2. It was not edited or re-run by the merge, and no further migration was added.
+- **Verifier:** `supabase/manual-sql/chat_20_verify_readonly.sql`: **all 7 checks passed** (rows 1 to 4 and 9 to 11), including that signed-in users have no direct access to the chat tables.
+- **Groups at verification time (informational rows):** Sales — UAE bound to the UAE company (4 members), Sales — KSA to the KSA company (1), Sales — Europe to the Poland company (1); zero messages.
+- **Merge:** PR #73 merged on 2026-11-10 as `296b74814b8851c08b20a73b19e82d5eecea167f`; required CI (`lint-typecheck-test`, `rls-policies`) was green on its head `ab89a98846747dd0f721f52adfd9d1acbde8aeff` (checked on GitHub).
+- **Production:** whether the Vercel Production domain serves this merge, and the Chat button and group list as a signed-in person there, are **not verified by Claude** (the owner's check after deployment).
 
 ## Rollback
 `supabase/manual-sql/chat_90_rollback.sql` (export `chat_messages` first; it reports how many messages it deletes). The previous app version never calls these functions, so the app can be rolled back without the SQL.

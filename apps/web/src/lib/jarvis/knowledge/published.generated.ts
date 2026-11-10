@@ -727,7 +727,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "which shows are coming",
       "conference"
     ],
-    "summary": "Events & Exhibitions is the shared calendar of shows, one row per edition, with how many enquiries are linked to each. It opens on upcoming editions; you can filter by name, country and dates, or switch to past editions. Everyone in Sales sees the same calendar; the enquiry figures count only the enquiries you can see.",
+    "summary": "Events & Exhibitions is the shared calendar of shows, one row per edition, with how many enquiries are linked to each. It opens on upcoming editions; you can filter by name, country and dates, or switch to past editions. Everyone in Sales sees the same calendar; the enquiry figures count only the enquiries you can see. It helps you see which shows are coming up, how much business each one has brought, and which to prepare for.",
     "steps": [
       "Open Events & Exhibitions in Sales.",
       "Use the filters to find a show, then open it to see its editions, who exhibited and the agencies to contact.",
