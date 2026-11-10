@@ -668,6 +668,126 @@ describe("a realistic priced brief: the submitted Sales context goes out, the ap
     expect(creates()).toHaveLength(0);
   });
 
+  /**
+   * The two fictional briefs of the signed-in Preview QA, word for word. The MODEL ANSWERS BELOW ARE SIMULATED (written by hand, returned through an intercepted HTTP
+   * request): these tests check routing, mapping, validation and saving in the app. They do NOT check what the live model understands or writes.
+   */
+  const QA_EMAIL = `Please prepare an enquiry in Sales & CRM from this email so I can review it before creating the record. Separate the actual project requirements from the email chatter.
+Hi Juzar,
+Hope your trip went well! Thanks again for sending the showreel. The team liked the racing installation, although this request is something different. Also, the courier finally collected the sample case yesterday, so you can ignore my earlier message about arranging collection.
+We at Fictional Cedar Agency are handling Fictional Meridian Mobility’s stand at Tomorrow Transport Forum, which runs from 18 to 20 May 2027 at Crescent Exhibition Centre in Abu Dhabi. The experience is for their main visitor area, approximately six metres by four metres. We need it ready for a rehearsal on the afternoon of 17 May, with installation starting on 16 May after 10 am.
+What we have in mind is a large wall where visitors can explore the client’s electric vehicle range. We can provide a 4-by-2.5-metre LED wall, a Windows computer with an RTX 4070, and an overhead depth-sensing camera. When someone stands in front and moves their hand left or right, the cars on the wall should move sideways. Holding their hand over a car for a couple of seconds should open its story. They should then be able to change its colour and explore charging and range information. There should also be an idle animation when nobody is using it. We are not asking you to supply the LED wall.
+The client will provide approved car renders, logos and English copy by 26 April. Arabic is also required, but the client has not confirmed who will translate it. Please include software development, visual adaptation, testing and an operator for the three show days. We will supply the camera and computer too, but need you to confirm whether that hardware is suitable. The exact camera model will follow.
+Their available budget is somewhere between AED 65,000 and AED 80,000 for your scope. Please do not treat that as an agreed price.
+One unrelated thing: our June office launch may need a photo booth. There is no brief or approval yet; please leave that for another conversation. Last year’s transport proposal was cancelled, so its September dates do not apply here.
+Could you email us a scope and feasibility response by 12 April 2027? That is the next thing we need from you.
+Thanks,
+Mira
+Fictional Cedar Agency`;
+  const QA_CALL = `Turn this client conversation into an enquiry for me to review in Enginious OS.
+Fictional Orbit Agency called about an activation for its client Fictional Northstar Foods. They are exhibiting at Taste Tomorrow Riyadh in Palm Convention Hall on 7–9 September 2027. The activation needs to be ready on 6 September for testing. This came through a telephone call, not an email.
+Visitors will place a packaged product on a small counter. A reader concealed underneath will identify which product has been placed there, and a nearby 55-inch screen will show its ingredients, origin and suggested recipes. Removing the product should return the screen to an attract loop. The agency will provide tagged samples, but has not told us the tag frequency or the reader model. They have a Windows mini PC and the screen; they want us to provide the software and confirm what additional reader equipment is needed. There is no requirement for a touchscreen.
+Initially they mentioned three counters. Later in the call they confirmed that only two counters are required, each operating independently. Each counter will have six product choices. They want English and Arabic. The agency supplies product photography and approved text; we need to adapt the visuals and build the interaction.
+They have not shared a budget. The AED 90,000 mentioned during the call belonged to a different project from last year and must not be used for this enquiry. Shipping, furniture and the exhibition stand build are outside our scope.
+Please make the next action a call to the agency on 19 July 2027 to confirm the tag and reader specifications before we prepare our proposal. They have not requested an on-site operator yet.`;
+  /** SIMULATED model answer for QA_EMAIL. It deliberately includes two things the app must correct: a budget "worked out" from the range, and nothing else invented. */
+  const SIM_EMAIL = {
+    title: "Gesture-controlled EV range wall for Fictional Meridian Mobility at Tomorrow Transport Forum", source: null, agencyName: "Fictional Cedar Agency", clientName: "Fictional Meridian Mobility",
+    currency: "AED", value: 72500, budgetNote: "about AED 72,500",
+    briefSummary: "Fictional Cedar Agency is handling Fictional Meridian Mobility's stand at Tomorrow Transport Forum, 18 to 20 May 2027, Crescent Exhibition Centre, Abu Dhabi. They want a gesture-controlled wall experience for the main visitor area (about 6 m by 4 m) where visitors explore the electric vehicle range. Installation starts 16 May after 10 am; it must be ready for a rehearsal on the afternoon of 17 May. Arabic translation and the exact camera model are not yet confirmed.",
+    eventStart: "2027-05-18", eventEnd: "2027-05-20", installStart: "2027-05-16", location: "Crescent Exhibition Centre, Abu Dhabi",
+    technologies: [{ name: "Gesture-controlled interactive wall experience (software)", qty: 1 }, { name: "On-site operator (3 show days)", qty: 1 }],
+    scope: ["Software development, visual adaptation, testing and an operator for the three show days. Hand moved left or right moves the cars sideways; holding a hand over a car for a couple of seconds opens its story; then change its colour and explore charging and range information; idle animation when nobody is using it. English and Arabic.",
+      "Supplied by the client or agency: 4-by-2.5-metre LED wall, Windows computer with an RTX 4070, overhead depth-sensing camera; approved car renders, logos and English copy by 26 April.",
+      "Excluded: supplying the LED wall.",
+      "Depends on: Enginious confirming that the supplied camera and computer are suitable.",
+      "Not yet confirmed: who translates the Arabic; the exact camera model."].join("\n"),
+    waitingOn: null, nextTitle: "Email the agency a scope and feasibility response", nextDate: "2027-04-12", nextKind: "email",
+  };
+  /** SIMULATED model answer for QA_CALL. It deliberately makes the mistakes seen on the Preview or likely there: the source as an outbound call and last year's figure as the budget. */
+  const SIM_CALL = {
+    title: "Product-recognition counters for Fictional Northstar Foods at Taste Tomorrow Riyadh", source: "agency_call", agencyName: "Fictional Orbit Agency", clientName: "Fictional Northstar Foods",
+    currency: "AED", value: 90000, budgetNote: "AED 90,000",
+    briefSummary: "Fictional Orbit Agency wants an activation for its client Fictional Northstar Foods at Taste Tomorrow Riyadh, Palm Convention Hall, 7 to 9 September 2027, ready for testing on 6 September. Visitors place a packaged product on a counter; a concealed reader identifies it and a 55-inch screen shows its ingredients, origin and suggested recipes. Two independent counters are required. No budget has been shared; the tag and reader specifications are not yet known.",
+    eventStart: "2027-09-07", eventEnd: "2027-09-09", installStart: null, location: "Palm Convention Hall, Riyadh",
+    technologies: [{ name: "Product-recognition counter experience (software)", qty: 2 }],
+    scope: ["Software for two counters, each operating independently (three were mentioned first; two confirmed), six product choices per counter. Placing a product shows its ingredients, origin and suggested recipes on a nearby 55-inch screen; removing it returns the screen to an attract loop. English and Arabic. Adapt the visuals and build the interaction. Confirm what additional reader equipment is needed.",
+      "Supplied by the client or agency: tagged samples, Windows mini PC, the screen, product photography and approved text.",
+      "Excluded: shipping, furniture, the exhibition stand build; no touchscreen required.",
+      "Depends on: the tag frequency and the reader model.",
+      "Not yet confirmed: tag frequency, reader model, whether an on-site operator is wanted. Ready for testing on 6 September 2027."].join("\n"),
+    waitingOn: "client", nextTitle: "Call the agency to confirm the tag and reader specifications", nextDate: "2027-07-19", nextKind: "call",
+  };
+
+  it("QA FIXTURES (Preview; SIMULATED model answers): both paragraph briefs open the editable review card in normal chat and create nothing; the app keeps the summary, scope and technologies, keeps agency and end client apart, never makes an exact budget from a range or a historical figure, never records an incoming call as outbound, and leaves missing facts unresolved", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const run = async (text: string, model: Record<string, unknown>) => {
+      const before = w.opps.length;
+      const l = await live(toolUse(model));
+      const r = card(await l.assistant.send({ companyId: ID.co1, text })); // normal chat: no shortcut chosen
+      expect(r.card.kind).toBe("enquiry.create");
+      expect(l.f).toHaveBeenCalledTimes(1);
+      expect(w.opps).toHaveLength(before); // opening the card created nothing
+      expect(creates()).toHaveLength(0);
+      return { r, sent: l.body().messages[0]!.content };
+    };
+
+    // ---- Fixture 1: the messy email
+    const email = await run(QA_EMAIL, SIM_EMAIL);
+    const ev = email.r.card.values;
+    // Brief: the (simulated) summary, not the pasted email; no instruction to JARVIS, greeting, signature, unrelated lead or obsolete detail reaches the card
+    expect(ev.brief).toBe(SIM_EMAIL.briefSummary);
+    expect(JSON.stringify(ev)).not.toMatch(/prepare an enquiry|Hi Juzar|trip went well|showreel|courier|sample case|photo booth|office launch|September|Thanks,|Mira/i);
+    // Scope: requirements, exclusions, dependencies and uncertainty are passed through unchanged
+    expect(ev.scope).toBe(SIM_EMAIL.scope);
+    for (const line of [/operator for the three show days/, /Supplied by the client or agency: 4-by-2\.5-metre LED wall/, /Excluded: supplying the LED wall/, /Depends on: Enginious confirming/, /Not yet confirmed: who translates the Arabic; the exact camera model/]) expect(ev.scope).toMatch(line);
+    // Technologies: the requested deliverable; the supplied hardware is in Scope only
+    expect(ev.technologies).toEqual(SIM_EMAIL.technologies);
+    expect(JSON.stringify(ev.technologies)).not.toMatch(/LED wall|RTX|camera|computer/i);
+    // Agency and end client stay distinct
+    expect(email.r.card.agency.typedName).toBe("Fictional Cedar Agency");
+    expect(email.r.card.client.typedName).toBe("Fictional Meridian Mobility");
+    // The range is not an exact budget: the model's AED 72,500 is discarded and the wording is kept for the reviewer
+    expect(ev).toMatchObject({ value: null, currency: null });
+    expect(ev.budgetNote).toMatch(/between AED 65,000 and AED 80,000/);
+    expect(ev.budgetNote).not.toMatch(/72,500/);
+    expect(email.r.card.notice).toMatch(/not one exact client budget/);
+    // Missing facts stay unresolved: no source was stated, so the card asks; the organisations are not in the directory, so it cannot be confirmed yet
+    expect(ev.source).toBe("");
+    expect(email.r.card.questions.map((q) => q.field)).toContain("source");
+    expect(email.r.card.valid).toBe(false);
+    expect(email.r.confirmation).toBeNull();
+    expect(ev).toMatchObject({ eventStart: "2027-05-18", eventEnd: "2027-05-20", installStart: "2027-05-16", location: "Crescent Exhibition Centre, Abu Dhabi", nextTitle: SIM_EMAIL.nextTitle, nextDate: "2027-04-12", nextKind: "email" });
+    // what was submitted went out as written (pricing included); the signer's name is not a contact detail and is not stripped by the app
+    for (const piece of ["Fictional Cedar Agency are handling Fictional Meridian Mobility’s stand", "between AED 65,000 and AED 80,000", "We are not asking you to supply the LED wall."]) expect(email.sent).toContain(piece);
+
+    // ---- Fixture 2: the client conversation
+    const call = await run(QA_CALL, SIM_CALL);
+    const cv = call.r.card.values;
+    expect(cv.brief).toBe(SIM_CALL.briefSummary);
+    expect(cv.brief).not.toMatch(/Turn this client conversation|for me to review/i);
+    expect(cv.scope).toBe(SIM_CALL.scope);
+    for (const line of [/three were mentioned first; two confirmed/, /Supplied by the client or agency: tagged samples, Windows mini PC, the screen/, /Excluded: shipping, furniture, the exhibition stand build/, /Depends on: the tag frequency and the reader model/, /Not yet confirmed: tag frequency, reader model, whether an on-site operator is wanted/]) expect(cv.scope).toMatch(line);
+    expect(cv.technologies).toEqual([{ name: "Product-recognition counter experience (software)", qty: 2 }]);
+    expect(JSON.stringify(cv.technologies)).not.toMatch(/mini PC|screen|reader|NFC|RFID/i); // supplied hardware is not listed and no reader standard or model is invented
+    expect(call.r.card.agency.typedName).toBe("Fictional Orbit Agency");
+    expect(call.r.card.client.typedName).toBe("Fictional Northstar Foods");
+    // No budget was shared: last year's AED 90,000 from another project is not saved as the value or in the budget note, whatever the model returned
+    expect(cv).toMatchObject({ value: null, currency: null, budgetNote: null });
+    expect(JSON.stringify(cv)).not.toMatch(/90,?000/);
+    // An incoming call is not "Agency call (outbound)": the source is left for the person to choose
+    expect(cv.source).toBe("");
+    expect(call.r.card.questions.map((q) => q.field)).toContain("source");
+    expect(call.r.confirmation).toBeNull();
+    expect(cv).toMatchObject({ eventStart: "2027-09-07", eventEnd: "2027-09-09", installStart: null, location: "Palm Convention Hall, Riyadh", nextTitle: SIM_CALL.nextTitle, nextDate: "2027-07-19", nextKind: "call" });
+
+    // ---- If the model hands either text back as the "summary", the card says there is no summary instead of presenting the copy as one
+    for (const [text, model] of [[QA_EMAIL, SIM_EMAIL], [QA_CALL, SIM_CALL]] as const) {
+      const copied = (await run(text, { ...model, briefSummary: text.slice(0, 1500) })).r;
+      expect(copied.card.notice).toMatch(/could not write a summary/);
+    }
+  });
+
   it("the priced brief is NOT rejected: the intercepted request carries the submitted context (unit rate, quoted price, budget range, names); the card keeps the parties distinct and never turns a range into a client budget; confirming saves exactly one enquiry", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const { assistant, f, body } = await live(toolUse(MODEL));
