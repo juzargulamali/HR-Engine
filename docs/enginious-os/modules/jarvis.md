@@ -4,9 +4,9 @@ Status: written from the code on branch `feat/jarvis` (from `main` `e5610d7`, wh
 
 Related: setup and environment variables [`../../jarvis-setup.md`](../../jarvis-setup.md); owner pack and rollout [`../../jarvis-deployment.md`](../../jarvis-deployment.md); the action entries [`sales-action-catalogue.md`](./sales-action-catalogue.md) section 3.9; the create-enquiry reference [`sales-enquiries.md`](./sales-enquiries.md) section 3.
 
-## 0. Milestone 3: a general assistant with a rulebook, memory and one live lookup (branch `claude/admiring-cray-uky379`, draft PR; read this first)
+## 0. Milestone 3: a general assistant with a rulebook, memory and one live lookup (PR #74, merged 2026-11-10 as `b7fc31e`; read this first)
 
-**Verified on the branch with unit tests against the simulated or an intercepted provider and with the database tests on a local PostgreSQL 16. No live AI provider was called, nothing was applied or changed on hosted, and the browser walk-throughs (`jarvis-flow.mjs`, `jarvis-sales-flow.mjs`) were NOT re-run.** Where this section and an older section below disagree, this section is current; the older lines that became false were corrected in place.
+**Verified on the branch with unit tests against the simulated or an intercepted provider and with the database tests on a local PostgreSQL 16. No live AI provider was called, nothing was applied or changed on hosted, and the browser walk-throughs (`jarvis-flow.mjs`, `jarvis-sales-flow.mjs`) were NOT re-run.** **Release status:** merged (GitHub); required CI green on head `6302a67`; Production deployment `Unverified`; hosted database (the memory migration, the pilot scope) not determined by Claude; the last two fixes (Brief summary by the live model, "here" keeps the current screen) have automated coverage only and were not retested signed-in. Where this section and an older section below disagree, this section is current; the older lines that became false were corrected in place.
 
 | What | Now | Source |
 |---|---|---|

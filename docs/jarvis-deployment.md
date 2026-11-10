@@ -251,6 +251,39 @@ Fictional data only; no real client data is entered or needed. **Writes stay off
 7. The Preview built from the verified `feat/jarvis` head, pointing at V2.
 8. Optionally, the targeted `service_role` revoke migration outlined above, applied before the test (independent of it, not during it).
 
+## Release of PR #74 (2026-11-10): status and the owner's checks
+
+Four facts, kept apart:
+
+| Fact | Status | Evidence |
+|---|---|---|
+| Merged | PR #74 merged as `b7fc31e079cac0a7d53180b52d80d01e1feb1692` (head `6302a6727d7167072d9bb975a0843ff5f70764b7`) | GitHub, read by Claude |
+| Required CI on the exact head | `lint-typecheck-test` success, `rls-policies` success | GitHub, read by Claude before merging |
+| Production deployment | **`Unverified`** | Claude has no Vercel access; a Ready Preview is not evidence |
+| Hosted database (memory migration; pilot scope) | **Not determined** | Claude ran no hosted SQL; the pilot scope is the owner's earlier report |
+
+Nothing was applied, enabled, added, rotated or reprovisioned by Claude. No earlier platform migration or secret step needs repeating for this release.
+
+**1. Production deployment (owner, in Vercel; changes nothing).** Project `hr-engine-web`, Deployments, filter Environment = Production. The top row must be **Ready**, marked **Current**, with Source `main` and commit `b7fc31e` ("Merge pull request #74"). If the top row is an older commit, Production has not deployed the merge. If it is Error, open its build log. Then open the Production address signed in as the pilot user: the JARVIS panel shows a general message box and the line "The text you submit for this task is sent to Anthropic to prepare a draft."
+
+**2. Pilot scope (owner; READ ONLY, SQL Editor of the project Production uses; written for this release and not run by Claude).** Expected: JARVIS and writes on; exactly one pilot user (the owner's own sign-in) and exactly one pilot company (Enginious LLC FZ).
+
+```sql
+select enabled, writes_enabled from jarvis_settings;
+select u.email from jarvis_pilot_users p join auth.users u on u.id = p.user_id;
+select c.legal_name from jarvis_pilot_companies p join companies c on c.id = p.company_id;
+```
+
+If any result differs (another user or company, more than one row, or a switch off), stop and report it before changing anything. The proof key is not shown by these queries and must not be reprovisioned.
+
+**3. Memory migration `20261226000100_jarvis_memory_suggestions.sql` (install-order row 23): status not determined.**
+* Find out first (READ ONLY): `supabase/manual-sql/jarvis_memory_00_preflight_readonly.sql`. Rows 1 and 2 must say `OK`. Rows 3 and 4 say `already installed` or `not installed yet`.
+* **Already installed:** do not run the migration again. Run `jarvis_memory_20_verify_readonly.sql` (rows 1 to 6 `OK`) and stop.
+* **Not installed yet:** apply `supabase/migrations/20261226000100_jarvis_memory_suggestions.sql` exactly as it is at commit `b7fc31e079cac0a7d53180b52d80d01e1feb1692` (additive, idempotent; this step changes the database), then `jarvis_memory_20_verify_readonly.sql` (rows 1 to 6 `OK`; row 7 is a count) and `jarvis_20_verify_readonly.sql` (all `OK`).
+* **Until it is verified, unavailable:** "What JARVIS remembers" (saving, listing and deleting personal preferences; no preference is applied to chat) and "Suggest a correction". They answer "not set up in this environment yet". Everything else (chat, guidance, the overdue follow-ups lookup, enquiry briefs, the existing confirmed writes) needs only the deployment.
+
+**4. Live QA gaps accepted for this release.** Not retested signed-in with the live model: the Brief summary, Scope lines and Technologies rows it writes (checklist step 25 below), and the "here" follow-up keeping the current screen's guide (step 24). Both have automated coverage with simulated model answers only. Earlier signed-in Preview results were owner-reported.
+
 ## Milestone 3 (general assistant, rulebook, memory, lookup): what a Preview or Production needs, exactly
 
 **Nothing here was applied, enabled or changed on hosted by Claude. The production pilot is untouched until the owner merges and deploys.**
