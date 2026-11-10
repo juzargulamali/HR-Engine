@@ -1,30 +1,33 @@
 /**
- * Protected information, in code (rulebook section 3: docs/enginious-os/modules/jarvis-rulebook.md).
+ * Restricted information, in code (rulebook section 3: docs/enginious-os/modules/jarvis-rulebook.md).
  *
- * Salaries and payroll, reimbursements, medical and insurance details, personal IDs, private leave details, quote and estimate amounts, unit rates, discounts, margins and
- * project financials never appear in a JARVIS response and never go to the AI provider. Credentials and embedded files never go either.
+ * What a person deliberately types or pastes for a task is theirs to submit: Sales context such as project and company names, the client, agency and end client, the venue,
+ * dates, quantities, quoted prices, unit rates and client budgets is ALLOWED to go to the AI provider for that task. A figure is not a reason to refuse.
  *
- * This file is the CONTENT layer of that rule, and it is deliberately not the only layer (a pattern list can miss an unusual phrasing):
- *   1. structure: a provider call can carry only the sources its rulebook entry approves (lib/jarvis/outbound.ts); database rows are never one of them: lookups are computed and
- *      shown inside the app and never call the provider; record facts go out only through per-action field allowlists; memory is a closed set of values, never free text;
- *   2. content: everything that IS allowed to go out (what the person typed or pasted, the bounded conversation context) is screened here, and so is what comes back;
- *   3. fail closed: when the screen finds something, or cannot separate it, nothing is sent and the person is asked for a version without those details.
+ * Genuinely restricted material stays inside Enginious OS even when it is pasted: employee documents, salaries and payroll, reimbursements, medical and insurance records,
+ * private leave details, personal IDs and bank details, credentials, company financial statements and ledgers, internal costing (cost breakdowns, margins, mark-ups) and
+ * embedded files. This file finds that material. It is the CONTENT layer and deliberately not the only one:
+ *   1. structure: a provider call can carry only the sources its rulebook entry approves (lib/jarvis/outbound.ts), and those are ONLY what the person typed, the bounded chat
+ *      context and fixed preference sentences. Nothing the app reads from the database (records, saved quotes, historical prices, budgets, notes) is ever a source: lookups
+ *      are computed and shown inside the app and never call the provider;
+ *   2. content: everything that goes out is screened here, and so is what comes back;
+ *   3. fail closed: when the screen finds restricted material, nothing is sent and the person provides a clean excerpt or continues manually.
  *
  * Plain data and pure functions: no server imports, no model. Two questions are answered here:
- *   - findProtectedContent(text): does this text CONTAIN protected details (a value, an identifier, a private fact)?
- *   - protectedTopic(text):       is the person ASKING ABOUT a protected area (with or without a value)?
+ *   - findProtectedContent(text): does this text CONTAIN restricted material?
+ *   - protectedTopic(text):       is the person ASKING to be told something JARVIS does not retrieve (pay, personal data, saved prices, project financials)?
  */
 export type ProtectedCategory =
   | "compensation" | "reimbursement" | "medical_insurance" | "personal_id" | "private_leave" | "pricing" | "project_financials" | "credential" | "attachment";
 
 export const PROTECTED_LABEL: Record<ProtectedCategory, string> = {
-  compensation: "salary or payroll details",
+  compensation: "salary, payroll or employee-document details",
   reimbursement: "reimbursement amounts",
   medical_insurance: "medical or insurance details",
   personal_id: "personal ID or bank details",
   private_leave: "private leave details",
-  pricing: "quote, estimate, rate, discount or margin figures",
-  project_financials: "project financial figures",
+  pricing: "saved quotes, prices, rates or discounts",
+  project_financials: "company financial or internal costing figures",
   credential: "a password, key or other credential",
   attachment: "an embedded file",
 };
@@ -40,9 +43,6 @@ const PERSONAL = /\b(?:his|her|their|my)\b|[a-z]['’]s\b/i;
 const T = {
   compensation: /\b(?:salar(?:y|ies)|payroll|pay\s?slips?|pay\s?checks?|wages?|bonus(?:es)?|gratuity|end[-\s]of[-\s]service|remuneration|compensation\s+package|pay\s+(?:rise|raise|grade|scale)|increment|ctc|housing\s+allowance|transport\s+allowance|allowances?)\b/gi,
   reimbursement: /\b(?:reimburse(?:d|ment|ments)?|expense\s+claims?|claims?\s+(?:amount|total)|petty\s+cash)\b/gi,
-  pricingStrong: /\b(?:quot(?:e|es|ed|ation|ations)|estimates?|estimated\s+(?:price|cost|value)|proposal\s+(?:value|amount|total|price)|unit\s+(?:rates?|prices?|costs?)|rate\s+cards?|day\s+rates?|hourly\s+rates?|discount(?:s|ed)?|margins?|mark-?ups?|cost\s+price|selling\s+price|net\s+price|gross\s+profit|profit|price\s+lists?|invoice(?:d|s)?)\b/gi,
-  pricingWeak: /\b(?:prices?|priced|pricing|costs?|costing|rates?|fees?|charges?|charged)\b/gi,
-  projectFin: /\b(?:project\s+budgets?|budget\s+(?:vs\.?|versus)\s+actuals?|actuals?\s+(?:vs\.?|versus)\s+budget|p\s?&\s?l|profit\s+and\s+loss|project\s+(?:costs?|expenses?|financials?|profitability|spend|profit)|purchase\s+orders?|expenses?|spent|overspend|cost\s+to\s+date)\b/gi,
 };
 
 /** Private facts that are protected whenever they appear at all (no figure needed). */
@@ -59,31 +59,11 @@ const BIRTH = /\b(?:date\s+of\s+birth|d\.?o\.?b\.?|born\s+on)\b[^.\n]{0,20}\d/i;
 const CREDENTIAL = /\b(?:pass(?:word|code|phrase)|api[\s_-]?key|secret(?:\s+key)?|access\s+token|auth(?:orization)?\s+token|bearer|private\s+key|service[\s_-]?role(?:\s+key)?|pin(?:\s+code)?)\b\s*(?:is|was|=|:)\s*\S{4,}|\bsk-[A-Za-z0-9_-]{16,}|\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/i;
 const ATTACHMENT = /data:[a-z]+\/[a-z0-9.+-]+;base64,|(?:^|\s)[A-Za-z0-9+/]{240,}={0,2}(?:\s|$)/i;
 
-/**
- * A commercial amount written WITHOUT a currency ("Our final quote is 85000", "cost: 85,000", "budget around 85k"): a figure that the words next to it identify as a quote,
- * cost, price, rate, fee or budget. Ordinary operational numbers are not amounts: dates and years, and numbers with a unit of quantity, size or time ("12 minutes", "4 tables",
- * "600 guests", "3840 px").
- */
-const COMMERCIAL_WORD = /\b(?:quot(?:e|es|ed|ation|ations)|estimate[ds]?|budget(?:s|ed)?|costs?|costing|prices?|priced|pricing|rates?|fees?|charges?|charged|discount(?:s|ed)?|margins?|mark-?ups?|invoice[ds]?|deposit|commission|payment)\b/gi;
-const BARE_FIGURE = /(?<![\w.,/-])(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{3,}(?:\.\d+)?|\d+(?:\.\d+)?\s?k)(?![\w/-]|[.,]\d)/gi;
-const UNIT_AFTER = /^\s?(?:x\b|×|pcs\b|pieces?\b|units?\b|screens?\b|walls?\b|panels?\b|tables?\b|stations?\b|kiosks?\b|sqm\b|sq\.?\s?m\b|m2\b|m\b|cm\b|mm\b|ft\b|feet\b|inch(?:es)?\b|"|minutes?\b|mins?\b|seconds?\b|secs?\b|hours?\b|hrs?\b|days?\b|weeks?\b|nights?\b|people\b|persons?\b|guests?\b|visitors?\b|players?\b|attendees?\b|pax\b|teams?\b|groups?\b|hz\b|fps\b|px\b|pixels?\b|nits\b|lumens?\b|kg\b|kw\b|w\b|gb\b|mbps\b)/i;
-const YEAR_BEFORE = /(?:\b(?:in|by|for|since|during|year|jan\w*|feb\w*|mar\w*|apr\w*|may|jun\w*|jul\w*|aug\w*|sep\w*|oct\w*|nov\w*|dec\w*)|\d(?:st|nd|rd|th)?)\s+$/i;
-export function hasCommercialFigure(text: string): boolean {
-  const words = [...text.matchAll(COMMERCIAL_WORD)];
-  if (words.length === 0) return false;
-  for (const n of text.matchAll(BARE_FIGURE)) {
-    const start = n.index!, end = start + n[0].length;
-    if (UNIT_AFTER.test(text.slice(end, end + 12))) continue;
-    if (/^(?:19|20|21)\d{2}$/.test(n[0]) && YEAR_BEFORE.test(text.slice(Math.max(0, start - 14), start))) continue;
-    for (const w of words) {
-      const ws = w.index!, we = ws + w[0].length;
-      const between = ws < start ? text.slice(we, start) : text.slice(end, ws);
-      // the same sentence, and close: "quote is 85000", "85000 budget", "cost of roughly 85,000"
-      if (between.length <= 40 && !/[.!?\n]/.test(between)) return true;
-    }
-  }
-  return false;
-}
+/** Documents that are restricted whatever they contain. */
+const EMPLOYEE_DOC = /\b(?:pay\s?slips?|employment\s+contracts?|offer\s+letters?|salary\s+(?:certificates?|slips?|sheets?)|appraisals?|performance\s+reviews?|disciplinary\s+(?:letters?|records?|notes?)|warning\s+letters?|termination\s+letters?|personnel\s+files?|employee\s+(?:files?|records?|documents?))\b/i;
+const FINANCIAL_DOC = /\b(?:financial\s+statements?|balance\s+sheets?|general\s+ledgers?|ledgers?|trial\s+balances?|management\s+accounts|cash\s?flow\s+statements?|profit\s+and\s+loss|p\s?&\s?l|costing\s+(?:sheets?|workbooks?|models?|files?)|cost\s+breakdowns?|internal\s+costings?)\b/i;
+/** Internal costing: what a job costs US and what we make on it (not the price or budget a client sees). */
+const INTERNAL_COST = /\b(?:internal\s+(?:budgets?|costs?|rates?|prices?)|our\s+(?:own\s+)?(?:costs?|margins?)|cost\s+price|cost\s+to\s+us|supplier\s+costs?|margins?|mark-?ups?|gross\s+profit|net\s+profit|profit(?:ability)?|budget\s+(?:vs\.?|versus)\s+actuals?|actuals?\s+(?:vs\.?|versus)\s+budget|project\s+(?:costs?|expenses?|financials?|spend)|overspend|cost\s+to\s+date)\b/gi;
 
 const WINDOW = 70;
 function near(text: string, a: RegExp, b: RegExp, window = WINDOW): boolean {
@@ -115,22 +95,9 @@ export function findProtectedContent(raw: string): ProtectedCategory[] {
   if (LEAVE.test(text) || near(text, LEAVE_BALANCE, /\b\d+(?:\.\d+)?\b/g, 30)) found.add("private_leave");
   if (EMIRATES_ID.test(text) || IBAN.test(text) || CARD.test(text) || BIRTH.test(text) || near(text, ID_WORD, ID_TOKEN, 40)) found.add("personal_id");
 
-  if (near(text, T.pricingStrong, MONEY) || near(text, T.pricingStrong, PERCENT, 50) || hasCommercialFigure(text)) found.add("pricing");
-  else {
-    // A plain "price / cost / rate / fee" next to a money amount.
-    const money = [...text.matchAll(MONEY)];
-    for (const m of money) {
-      const before = text.slice(Math.max(0, m.index! - 60), m.index!);
-      const after = text.slice(m.index! + m[0].length, m.index! + m[0].length + 30);
-      const weak = new RegExp(T.pricingWeak.source, "i");
-      if (!(weak.test(before) || weak.test(after))) continue;
-      found.add("pricing");
-      break;
-    }
-    // A money amount next to a budget, total or value word cannot be told apart from a price.
-    if (!found.has("pricing") && money.length > 0 && /\b(?:budget|total|value|worth|deal|contract|amount)\b/i.test(text)) found.add("pricing");
-  }
-  if (near(text, T.projectFin, MONEY) || near(text, T.projectFin, PERCENT, 40)) found.add("project_financials");
+  if (EMPLOYEE_DOC.test(text)) found.add("compensation");
+  // Company financials and internal costing. Quoted prices, unit rates, discounts and client budgets are NOT here: they are Sales context the person may submit.
+  if (FINANCIAL_DOC.test(text) || near(text, INTERNAL_COST, MONEY, 50) || near(text, INTERNAL_COST, PERCENT, 50) || near(text, INTERNAL_COST, FIGURE, 40)) found.add("project_financials");
   return [...found];
 }
 

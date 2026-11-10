@@ -12,6 +12,7 @@ Related: how JARVIS works [`jarvis.md`](./jarvis.md); the Sales actions [`sales-
 4. **The model never decides.** Messages are routed locally by fixed rules (`lib/jarvis/router.ts`); no provider call classifies intent. The model can only return a proposal or a text; it has no tool that reads or writes anything.
 5. **Writes need the person's confirmation** on a review card, bound to the reviewed values and verified in the database (`jarvis.md` section 6). A chat message such as "confirmed" saves nothing. A repeated confirmation returns the original result.
 6. **JARVIS sends no messages.** A draft is text for the person to review and copy.
+7. **What the person submits for a task may go to Anthropic; what Enginious OS holds may not; genuinely restricted material stays inside even when pasted** (section 3).
 
 ## 2. The capabilities
 
@@ -20,15 +21,15 @@ Related: how JARVIS works [`jarvis.md`](./jarvis.md); the Sales actions [`sales-
 | Capability (`id`) | Who | Company and records | May display | May go to Anthropic | Confirmation | Paused by |
 |---|---|---|---|---|---|---|
 | Greetings, thanks, one short clarifying question `jarvis.local.conversation` | Anyone who may open JARVIS | None | Fixed sentences written in the app | **Nothing** (no provider call) | None | main switch |
-| General questions and writing help `jarvis.sales.chat.reply` | Sales grant | **No records.** The person's own message, at most four earlier turns of the same conversation, their own saved preferences | The answer or draft, after it is screened; which preferences were applied | The message; at most four earlier turns (each cut to 3,000 characters); fixed preference sentences. All screened for protected content first | None (nothing is saved or sent) | main switch, `chat` |
+| General questions and writing help `jarvis.sales.chat.reply` | Sales grant | **No records.** The person's own message, at most four earlier turns of the same general conversation, their own saved preferences | The answer or draft, after it is screened; which preferences were applied | The message as written (prices and other figures the person gives are allowed); at most four earlier turns (each cut to 3,000 characters); fixed preference sentences. Screened for restricted material first. Never lookup results, cards or text submitted for a Sales task | None (nothing is saved or sent) | main switch, `chat` |
 | How Enginious OS works `jarvis.sales.help.answer` | Sales grant | The published staff guidance only. No records | Guidance title, summary, steps, links to screens | **Nothing** | None | main switch, `help` |
-| Show my overdue Sales follow-ups `jarvis.sales.followups.overdue` | Sales grant | The selected company; open follow-ups assigned to the signed-in person whose due time has passed; the enquiries they belong to | Follow-up title (hidden if it contains protected details), type, due date, days overdue; enquiry reference, title and link; company name; cutoff time; count | **Nothing.** Computed and shown inside Enginious OS | None (read only) | main switch, `lookups` |
-| Create an enquiry from a brief `jarvis.sales.enquiry.create_from_brief` | Sales grant (the existing rules of creating an enquiry) | One new enquiry in the selected company; organisations the person can see | The proposed form fields; matching organisations (name, place); possible duplicates (reference, title, stage); the saved reference and link | **The full non-sensitive narrative of the brief**, prepared locally before the call (section 3.1): event context, venue, dates, visitor or game journey, technical requirements, equipment, deliverables. Never pricing, budgets, costs, margins, contacts, personal or employee data, credentials, contract or restricted material; labelled client, end-client and agency names go as placeholders | Review card, plus acknowledgement of a likely duplicate | main switch, `writes` |
-| Draft a reply about an enquiry `jarvis.sales.draft_reply` | Sales grant | One enquiry of the selected company that the person can see | The draft subject and body; what to confirm; the enquiry reference and title | The pasted conversation, screened; the enquiry's reference, title, agency and end-client names, event and installation dates, location, technologies, scope and brief summary. **Never** its value, currency, budget note, owner, ids, estimates or proposals | None (a draft; nothing is sent) | main switch |
+| Show my overdue Sales follow-ups `jarvis.sales.followups.overdue` | Sales grant | The selected company; open follow-ups assigned to the signed-in person whose due time has passed; the enquiries they belong to | Follow-up title (hidden only if it contains restricted personal data), type, due date, days overdue; enquiry reference, title and link; company name; cutoff time; count | **Nothing.** Computed and shown inside Enginious OS; the results are never put into a later provider request | None (read only) | main switch, `lookups` |
+| Create an enquiry from a brief `jarvis.sales.enquiry.create_from_brief` | Sales grant (the existing rules of creating an enquiry) | One new enquiry in the selected company; organisations the person can see (matched inside Enginious OS) | The proposed form fields; matching organisations (name, place); possible duplicates (reference, title, stage); the saved reference and link | **The brief as the person submitted it** (section 3.1): project and company names, client, agency and end client, venue, dates, game journey, technical requirements, quantities, quoted prices, unit rates and client budgets. Not sent: a brief restricted as a whole; genuinely restricted material; contact details. Nothing from the database | Review card, plus acknowledgement of a likely duplicate | main switch, `writes` |
+| Draft a reply about an enquiry `jarvis.sales.draft_reply` | Sales grant | One enquiry of the selected company that the person can see (read to check access, label the card and check the draft locally) | The draft subject and body; what to confirm; the enquiry reference and title | **Only the text the person pasted for this reply**, as written (prices, rates and budgets included), screened for restricted material. **Nothing from the enquiry record is attached**: no title, parties, dates, venue, value, budget note, owner, estimates or proposals | None (a draft; nothing is sent) | main switch |
 | Register a client or agency `jarvis.sales.organisation.register` | Sales grant (the existing rules of Clients & Agencies) | One new organisation; existing organisations the person can see | Matching organisations (name, type, place, country, website); the proposed details; the saved name and link | **Nothing** | Review card, plus acknowledgement of a same-name or same-website organisation | main switch, `writes` |
-| Update an enquiry `jarvis.sales.enquiry.update` | The enquiry's owner or a Sales founder of its company | One enquiry; ten fields only: title, brief, event start and end, installation start, location, technologies, scope, waiting on, budget note | Each change, before and after | The request, screened; the current values of those fields except the budget note | Review card, bound to the record version | main switch, `writes` |
+| Update an enquiry `jarvis.sales.enquiry.update` | The enquiry's owner or a Sales founder of its company | One enquiry; ten fields only: title, brief, event start and end, installation start, location, technologies, scope, waiting on, budget note | Each change, before and after (compared with the current values inside Enginious OS) | **Only the request**, screened. The enquiry's current values are not attached | Review card, bound to the record version | main switch, `writes` |
 | Change an enquiry's status `jarvis.sales.enquiry.change_stage` | The enquiry's owner or a Sales founder | One enquiry; one step between the six working stages; never Won, Lost, On hold, reopen or handover | Current and proposed stage; whether the evidence is recorded | **Nothing** | Review card, bound to the record version | main switch, `writes` |
-| Meeting notes to an activity and follow-up `jarvis.sales.meeting.record` | Sales grant | One enquiry; one activity and one follow-up for the signed-in person | The proposed activity and follow-up | The pasted notes only, screened | Review card (both saved together or neither) | main switch, `writes` |
+| Meeting notes to an activity and follow-up `jarvis.sales.meeting.record` | Sales grant | One enquiry; one activity and one follow-up for the signed-in person | The proposed activity and follow-up | The notes the person pasted for this task, as written, screened for restricted material | Review card (both saved together or neither) | main switch, `writes` |
 | What JARVIS remembers `jarvis.memory.preferences` | Anyone who may open JARVIS; **their own preferences only** | The person's own rows of a closed set of preferences (section 4) | The person's own preferences | Nothing when saving, listing or deleting. A saved preference reaches the provider only as its fixed sentence inside a general chat request | None | main switch, `memory` (saving only; seeing and deleting stay available) |
 | Suggest a correction to the guidance `jarvis.knowledge.suggest_correction` | Anyone who may open JARVIS | One suggestion row of their own, for review | That it was sent for review | **Nothing** | None | main switch, `help` |
 | Requests about protected information `jarvis.protected.guide` | Anyone who may open JARVIS | **Only the person's own access** (roles and grants). Never the protected records | That JARVIS cannot show it; the screen to use when the person has access; that they have no access (without saying whether a record exists); or that access could not be checked | **Nothing** | None | main switch |
@@ -36,41 +37,55 @@ Related: how JARVIS works [`jarvis.md`](./jarvis.md); the Sales actions [`sales-
 
 Not in the table = not approved. In particular there is **no live record access to Projects & Tasks, Inventory, Finance, People & HR or Approvals**, no summaries or counts, and no client or project creation beyond the rows above (see section 7).
 
-## 3. Protected information
+## 3. What may leave Enginious OS, and what may not
 
-**Salaries and payroll, reimbursements, medical and insurance details, personal IDs and bank details, private leave details, quote and estimate amounts, unit rates, discounts, margins and project financials never appear in a JARVIS response and never go to Anthropic. Passwords, keys and embedded files never go either.**
+There are three kinds of information, and the rule differs for each.
 
-How that is enforced, in layers (a word list alone would not be enough, so it is only the last layer):
+| Kind | Rule |
+|---|---|
+| **A. What the person deliberately submits for a task** (typed or pasted): Sales context such as project and company names, the client, agency and end client, venue, dates, game journey, technical requirements, quantities, **quoted prices, unit rates and client budgets** | **Allowed** to go to Anthropic for that task, as written. A figure such as "85 per item" or "AED 50,000–65,000" is not a reason to refuse, and useful sentences are not stripped. The panel says so next to the input: "The text you submit for this task is sent to Anthropic to prepare a draft." There is no extra confirmation before a routine brief; saving an enquiry still needs the review card and its confirmation |
+| **B. What Enginious OS holds** (CRM records, saved quotes, historical prices, margins, budgets, notes, lookup results) | **Never attached by the app.** Anthropic has no database access. No capability has an outbound source that carries a record: the only sources are the person's text, the bounded general-chat context and fixed preference sentences (`OutboundSource`, `lib/jarvis/rulebook.ts`). Live lookups run under the signed-in person's permissions through the app's own server code, are shown inside Enginious OS, and are not passed back through chat history. Text submitted for one Sales task is not memory and does not carry into another task |
+| **C. Genuinely restricted material, even when pasted**: employee documents, salaries and payroll, reimbursements, medical and insurance records, private leave details, personal IDs and bank details, credentials, company financial statements and ledgers, internal costing (cost breakdowns, internal budgets, margins, mark-ups), embedded files, and anything marked as not for external sharing | **Stays inside Enginious OS.** It is never sent and never shown in an answer |
 
-1. **No path carries records to the provider.** The lookup calls no provider. The Sales actions send only the per-action field lists in section 2. Memory is a closed set of values. The Map is never sent: guidance answers call no provider.
-2. **Declared sources.** Every provider request states what it is built from; the gate refuses a source the capability's rule does not list. Adding a record field, a database row or an attachment to a request therefore needs this rulebook to change first.
-3. **Screening of everything that may go out** (`lib/jarvis/protected.ts`): what the person typed or pasted, and the earlier turns, on every call. If protected details are found, or the text is too long or contains an embedded file, **nothing is sent** and the person is asked for a version without those details or pointed to the screen.
-4. **Screening of what comes back.** A model answer that contains protected details is withheld. Free-text fields of a lookup are screened before display and replaced by "Details hidden here. Open the record to see them."
-5. **Logs are blind.** Only event names, capability ids, outcome codes and durations are logged; never text, values, provider payloads or chat.
+How C is enforced, in layers (a word list alone would not be enough, so it is only the last layer):
 
-### 3.1 An enquiry brief (the one place a long pasted text is the point)
+1. **Declared sources.** Every provider request states what it is built from and the gate (`lib/jarvis/outbound.ts`) refuses a source the capability's rule does not list. No rule lists a record source, so adding one needs this rulebook to change first.
+2. **Screening of everything that goes out** (`lib/jarvis/protected.ts`): the person's text and the earlier general-chat turns, on every call. If restricted material is found, or the text is too long or contains an embedded file, **nothing is sent**.
+3. **Screening of what comes back.** A model answer that contains restricted material is withheld. A lookup's free text is screened before display and restricted personal data is replaced by "Details hidden here. Open the record to see them."
+4. **Logs are blind.** Only event names, capability ids, outcome codes and durations are logged; never text, values, provider payloads or chat.
+5. **This release is pasted text only.** No file is uploaded to Anthropic.
 
-An explicit request to create an enquiry, or a text that clearly is a client brief, is separated **locally, before any provider call** (`apps/web/src/lib/jarvis/sales/brief-outbound.ts`). The model is never relied on to remove anything.
+### 3.1 An enquiry brief
+
+Decided **locally, before any provider call** (`apps/web/src/lib/jarvis/sales/brief-outbound.ts`). The model is never relied on to remove anything.
 
 | In the brief | What happens |
 |---|---|
-| Event context, venue, dates, visitor or game journey, technical requirements, equipment, deliverables, public names in the narrative | Sent in full. Nothing is summarised or cut before the model sees it |
-| A labelled money line (`Budget:`, `Price:`, `Cost:` ...) and any sentence about a price, quote, budget, discount, rate or margin, **with or without a currency** ("Our final quote is 85000") | Withheld whole. A stray figure in a narrative sentence is replaced by `[amount withheld]`. Dates, quantities, sizes and durations ("12 minutes", "600 guests", "4 tables") are not amounts and stay |
-| Budgets | **None is ever sent.** The review card's value, currency and budget note are filled only from a budget the words explicitly call the client's ("Client budget: ...", "the client's budget is ...", "their budget") and only when there is exactly one such figure. An unlabelled "Budget:", an internal budget, or two different client budgets leave the fields blank for the reviewer, and the card says so |
-| A restriction on the **whole** brief: an NDA, confidential, internal-only, do-not-share, restricted, embargoed or privileged marking in the heading (first three lines), as a short notice line, or a sentence saying the brief itself is confidential or under NDA | **No provider call at all, in any version.** The editable preview is not offered (it cannot lift the restriction). The person is pointed to the new-enquiry form |
-| Email addresses and phone numbers | Replaced by `[contact withheld]` |
-| Personal or employee data, credentials, contract or client-restricted material (contract, NDA, confidential, penalties ...) | The sentence is withheld whole |
-| The agency, client and end client named on labelled lines | Sent as `[AGENCY]`, `[CLIENT]`, `[END CLIENT]`; matched to organisations inside Enginious OS; put back in the returned fields |
+| The Sales context of kind A, including quoted prices, unit rates and client budgets | Sent as written. Nothing is summarised, stripped or cut |
+| A restriction on the **whole** brief: "External sharing prohibited", "Internal use only", "NDA", "Confidential", "Do not share", "Restricted", "Embargoed", "Privileged", in the heading (first three lines), as a short notice line, or said of the brief itself | **Zero provider calls, in any version.** The editable preview is not offered and an edited text is refused: it cannot lift the restriction. The person is pointed to the new-enquiry form |
+| Restricted material of kind C mixed into an otherwise usable brief | The brief is **not sent automatically**. The panel shows a clean excerpt (the brief without those sentences) for the person to check, edit and send, with the new-enquiry form as the other way. Restricted text put back into the edited version is refused again |
+| Email addresses and phone numbers | Replaced by `[contact withheld]` (not needed to prepare an enquiry) |
 
-The separated text is screened again. **If anything protected is still in it, nothing is sent**: the panel shows the text that would be sent for the person to edit, with a link to the new-enquiry form as the other way. The **original brief stays in Enginious OS**: it fills the review card's Brief field (a brief longer than the field keeps a summary there and the card says so; nothing is cut silently) and is saved only by the confirmed enquiry. The review card says what was kept inside. If the model's answer cannot be used, the card is built from what was read locally and asks only for what is missing.
+**What the model reads is separate from what the app saves.**
 
-**A request about protected information** ("What is Sara's salary?") is answered by `jarvis.protected.guide`: JARVIS checks the person's own access inside Enginious OS and then
+| On the review card | Comes from |
+|---|---|
+| Client, end client and agency | The labelled lines of the brief, read by Enginious OS and matched to organisations the person can see. "Client" next to an "End client" is the agency field; alone it is the end client. The model's answer does not override a labelled name |
+| Value and currency | **Only one clearly stated client budget** ("Client budget: AED 85,000", "the client's budget is ..."). A range, an approximate figure, conflicting values, an internal figure or a budget not said to be the client's leave the numbers **blank**. The model's figures are never used |
+| Budget note | The original wording of the budget, for the reviewer (an internal figure is not copied) |
+| Brief | The original brief (a brief longer than the field keeps a summary there and the card says so; nothing is cut silently) |
+
+Nothing is saved until the person confirms the card; a repeated confirmation returns the original result. If the model's answer cannot be used, the card is built from what was read locally and asks only for what is missing.
+
+**A request to be told protected information** ("What is Sara's salary?", "What discount did we give on the last quotation?") is answered by `jarvis.protected.guide`: JARVIS does not retrieve it. It checks the person's own access inside Enginious OS and then
 
 | The person | Is told |
 |---|---|
-| Has access (Payroll: HR admin, Finance, CEO, CTO. Project budgets: a budget grant for the company. Prices: a Sales grant for the company. Own leave, claims and profile: everyone) | That JARVIS cannot show or discuss it, and which screen to open (a link) |
+| Has access (Payroll: HR admin, Finance, CEO, CTO. Project budgets: a budget grant for the company. Saved prices: a Sales grant for the company. Own leave, claims and profile: everyone) | That JARVIS cannot show or discuss it, and which screen to open (a link) |
 | Has no access | That they do not have access. **The words are the same whether or not the record or the person exists** |
 | Access could not be checked | That it could not be checked, and no screen is suggested |
+
+Asking for a draft that mentions a price the person supplies ("draft a reply offering 85 per item") is ordinary writing, not such a request.
 
 ## 4. Memory and knowledge
 
@@ -94,10 +109,12 @@ Requests are bounded: message length (`JARVIS_MAX_INPUT_CHARS`), at most four co
 
 ## 6. Decisions and gaps for the owner
 
-1. **Budgets never go to the provider, in any action.** In an enquiry brief only an explicitly identified, unambiguous client budget is read locally and shown on the review card (it is the person's own pasted text, going into the enquiry form's own value and budget-note fields, and is saved only on confirmation). The owner should confirm that showing it on that card is acceptable; the alternative is to leave those fields blank for the person to fill. Consequences for the other actions: a client conversation, a set of meeting notes or an update request that contains a price or budget figure is **refused** (fail safe) and the person removes the figure or uses the screen; the draft-reply action no longer receives the enquiry's budget note; the update action can no longer change the budget note from a figure in the request.
-2. **The screen is a pattern list.** It can miss an unusual phrasing and can stop a harmless text. That is why it is the last layer and why it fails closed.
-3. **What Anthropic retains** is governed by the owner's agreement with Anthropic: `Unverified` here.
-4. **Reviewing suggestions** is an owner-run query (`supabase/manual-sql/jarvis_memory_30_suggestions_review_readonly.sql`); there is no review screen yet.
+1. **Internal figures in a brief** (an "internal budget", "our cost", a margin) are treated as internal costing, kind C: the brief is not sent automatically and the person sends a clean excerpt. If the owner wants those to go as ordinary Sales context, remove them from the internal-costing list in `lib/jarvis/protected.ts`.
+2. **Contact details** (email addresses, phone numbers) in a brief are replaced before sending. They are not on the restricted list; this is data minimisation and can be dropped if the owner prefers the brief untouched.
+3. **Reply and update no longer receive the enquiry record.** A drafted reply is written from the pasted text only, so it does not know the enquiry's recorded dates or venue unless the person includes them; the update action must be told the new value in full.
+4. **The screen is a pattern list.** It can miss an unusual phrasing and can stop a harmless text. That is why it is the last layer and why it fails closed.
+5. **What Anthropic retains** is governed by the owner's agreement with Anthropic: `Unverified` here.
+6. **Reviewing suggestions** is an owner-run query (`supabase/manual-sql/jarvis_memory_30_suggestions_review_readonly.sql`); there is no review screen yet.
 
 ## 7. Next increments (not built)
 

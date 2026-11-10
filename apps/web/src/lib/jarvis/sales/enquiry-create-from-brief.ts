@@ -12,7 +12,7 @@ import { findDuplicateEnquiries } from "./duplicates";
 import { emptyValues, enquiryValuesSchema, LIMITS, questionFor, validateEnquiry } from "./enquiry-values";
 import { EXTRACTION_INSTRUCTIONS, EXTRACTION_JSON_SCHEMA, EXTRACTION_TASK, sanitiseExtraction, type Extraction } from "./extraction";
 import { findProtectedContent } from "../protected";
-import { BUDGET_UNCLEAR_NOTE, prepareBrief, RESTRICTED_BRIEF_MESSAGE, restoreNames, withheldNote } from "./brief-outbound";
+import { BUDGET_UNCLEAR_NOTE, prepareBrief, RESTRICTED_BRIEF_MESSAGE, withheldNote } from "./brief-outbound";
 import { emptyChoice, lookupOrganisation, OrgLookupError, selectedChoice, verifyOrganisation } from "./organisations";
 
 export const CREATE_FROM_BRIEF_ID = "jarvis.sales.enquiry.create_from_brief";
@@ -113,13 +113,13 @@ export const createEnquiryFromBrief: JarvisActionDefinition<CreateFromBriefInput
         // The deterministic refusal list runs BEFORE any provider call or usage count: the text never leaves the app.
         if (!classifyRequest(input.brief).allowed) throw new JarvisRefusalError("excluded_request", EXCLUSION_MESSAGE);
         if (!ctx.provider) throw new JarvisRefusalError("unavailable", "JARVIS is not available right now. Sales & CRM is not affected.");
-        // The brief is separated LOCALLY first (sales/brief-outbound.ts): pricing, budgets, contacts, personal data, credentials and contract or restricted material never
-        // leave; labelled party names go as placeholders. The original stays here for the review card. The outbound gate screens the result again.
+        // The text the person submits for this task goes out as written (names, prices, unit rates and client budgets included). Decided LOCALLY first
+        // (sales/brief-outbound.ts): a brief restricted as a whole, or one that contains genuinely restricted material, is not sent. The outbound gate screens again.
         const prepared = prepareBrief(input.brief);
         // A restriction on the WHOLE brief is final: no provider call in any version (an edited outbound text does not lift it). The person uses the form.
         if (prepared.restricted) throw new JarvisRefusalError("protected_content", RESTRICTED_BRIEF_MESSAGE);
         const outbound = input.outbound ?? prepared.outbound;
-        if (input.outbound ? findProtectedContent(outbound).length > 0 : !prepared.separable) throw new JarvisRefusalError("protected_content", "This brief mixes details JARVIS keeps inside Enginious OS with the rest, and they could not be separated safely. Review and edit the text that would be sent, or use the new-enquiry form.");
+        if (input.outbound ? findProtectedContent(outbound).length > 0 : !prepared.separable) throw new JarvisRefusalError("protected_content", "This brief contains material that stays inside Enginious OS. Send a clean excerpt without it, or use the new-enquiry form.");
         // The daily allowance is counted only now: a brief that is refused or needs editing made no provider call.
         const usage = await ctx.takeUsage();
         if ("error" in usage) throw new JarvisRefusalError("unavailable", "JARVIS could not check your daily allowance. Try again in a moment.");
@@ -136,8 +136,9 @@ export const createEnquiryFromBrief: JarvisActionDefinition<CreateFromBriefInput
           if (e instanceof JarvisProviderError && e.kind === "malformed") fallback = true;
           else throw new JarvisRefusalError("provider_error", PROVIDER_WORDS[e instanceof JarvisProviderError ? e.kind : "network"]!);
         }
-        const ex: { -readonly [K in keyof Extraction]: Extraction[K] } = { ...restoreNames(sanitiseExtraction(raw), prepared.placeholders) };
-        // Identities and the budget are resolved inside Enginious OS: the labelled names win over anything the model returned, and the model never saw the budget.
+        const ex: { -readonly [K in keyof Extraction]: Extraction[K] } = { ...sanitiseExtraction(raw) };
+        // What the model reads is separate from what the app saves: the labelled parties and the budget are read by Enginious OS itself, never taken from the model
+        // (a range, conflicting values or an internal cost never becomes an exact client budget).
         if (prepared.parties.agency) ex.agencyName = prepared.parties.agency;
         if (prepared.parties.client) ex.clientName = prepared.parties.client;
         if (ex.agencyName && ex.clientName && ex.agencyName === ex.clientName && !prepared.parties.agency) ex.agencyName = null;

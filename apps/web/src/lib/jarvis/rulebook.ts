@@ -13,14 +13,15 @@
 export type JarvisSwitch = "jarvis" | "writes" | "help" | "lookups" | "chat" | "memory";
 
 /**
- * What a provider request may be built from. A request DECLARES its sources and the gate refuses any that the capability does not approve.
- *   user_text             what the person typed or pasted in THIS message (screened for protected content first)
- *   conversation_context  the last few turns of the current general conversation, as the browser holds them (bounded, screened again on every call; never stored)
+ * What a provider request may be built from. A request DECLARES its sources and the gate refuses any that the capability does not approve. ONLY these exist: nothing the app
+ * reads from the database (a CRM record, a saved quote, a historical price, a margin, a budget, a note) is a source, so none of it can be attached to a request.
+ *   user_text             what the person typed or pasted for THIS task, as they wrote it: Sales context (names, venue, dates, quantities, quoted prices, unit rates, client
+ *                         budgets) is allowed; genuinely restricted material is screened out first (lib/jarvis/protected.ts)
+ *   conversation_context  the last few turns of the current GENERAL conversation, as the browser holds them (bounded, screened again on every call; never stored). Cards,
+ *                         lookups and text submitted for a Sales task are never part of it
  *   preferences           fixed sentences chosen by the person's saved, structured preferences (never free text)
- *   enquiry_reply_facts   the reply-relevant facts of ONE enquiry the person can see (reference, title, parties, dates, place, technologies, scope, brief summary)
- *   enquiry_update_fields the current values of the ten updatable fields of ONE enquiry the person can see
  */
-export type OutboundSource = "user_text" | "conversation_context" | "preferences" | "enquiry_reply_facts" | "enquiry_update_fields";
+export type OutboundSource = "user_text" | "conversation_context" | "preferences";
 
 export interface JarvisRule {
   id: string;
@@ -52,7 +53,7 @@ export const JARVIS_RULES: JarvisRule[] = [
     id: "jarvis.sales.chat.reply", title: "General questions and writing help (drafts to copy)", kind: "conversation",
     who: SALES, scope: "No records are read. Only the person's own message, the last few turns of the same conversation and their own saved preferences",
     display: ["the model's answer or draft (screened for protected details before it is shown)", "which saved preferences were applied"],
-    outbound: { provider: true, sources: ["user_text", "conversation_context", "preferences"], note: "The message, at most four earlier turns of the same conversation and fixed preference sentences. Never records, the Map, attachments or other people's data." },
+    outbound: { provider: true, sources: ["user_text", "conversation_context", "preferences"], note: "The message as written (figures the person gives are allowed), at most four earlier turns of the same general conversation and fixed preference sentences. Never records, lookup results, the Map, attachments or other people's data." },
     confirmation: "none", pausedBy: ["jarvis", "chat"],
   },
   {
@@ -70,14 +71,14 @@ export const JARVIS_RULES: JarvisRule[] = [
     id: "jarvis.sales.enquiry.create_from_brief", title: "Create an enquiry from a brief", kind: "write",
     who: `${SALES} (the existing rules of creating an enquiry)`, scope: "One new enquiry in the selected company; organisations the person can see",
     display: ["the enquiry form's fields as proposed", "matching organisations (name, place)", "possible duplicates (reference, title, stage)", "the saved reference and link"],
-    outbound: { provider: true, sources: ["user_text"], note: "The brief's non-sensitive narrative, prepared locally: pricing, budgets, costs, contacts, personal data, credentials and contract or restricted material are withheld or replaced before the call; labelled client and agency names go as placeholders." },
+    outbound: { provider: true, sources: ["user_text"], note: "The brief as the person submitted it: names, venue, dates, journey, requirements, quantities, quoted prices, unit rates and client budgets. Not sent: a brief restricted as a whole; genuinely restricted material (the person then sends a clean excerpt or uses the form); contact details." },
     confirmation: "review_card_and_acknowledgement", pausedBy: ["jarvis", "writes"],
   },
   {
     id: "jarvis.sales.draft_reply", title: "Draft a reply to a client about an enquiry", kind: "draft",
     who: SALES, scope: "One enquiry of the selected company that the person can see",
     display: ["the draft subject and body", "what to confirm before sending", "the enquiry reference and title"],
-    outbound: { provider: true, sources: ["user_text", "enquiry_reply_facts"], note: "The pasted conversation and the enquiry's reply-relevant facts. Never the enquiry's value, budget note, owner, ids, estimates, proposals or any other record." },
+    outbound: { provider: true, sources: ["user_text"], note: "The text the person pasted for this reply only. None of the enquiry's recorded facts (value, budget note, owner, dates, parties, estimates, proposals) is attached." },
     confirmation: "none", pausedBy: ["jarvis"],
   },
   {
@@ -90,7 +91,7 @@ export const JARVIS_RULES: JarvisRule[] = [
     id: "jarvis.sales.enquiry.update", title: "Update an enquiry (ten fields)", kind: "write",
     who: "The enquiry's owner or a Sales founder of its company", scope: "One enquiry of the selected company; title, brief, event dates, installation date, location, technologies, scope, waiting on, budget note",
     display: ["each changed field, before and after", "the enquiry reference and title"],
-    outbound: { provider: true, sources: ["user_text", "enquiry_update_fields"], note: "The request and the current values of the updatable fields of that one enquiry, except the budget note." },
+    outbound: { provider: true, sources: ["user_text"], note: "The request only. The enquiry's current values are not attached." },
     confirmation: "review_card", pausedBy: ["jarvis", "writes"],
   },
   {
@@ -103,7 +104,7 @@ export const JARVIS_RULES: JarvisRule[] = [
     id: "jarvis.sales.meeting.record", title: "Turn meeting notes into an activity and a follow-up", kind: "write",
     who: SALES, scope: "One enquiry of the selected company; one activity and one follow-up for the signed-in person",
     display: ["the proposed activity and follow-up", "the enquiry reference and title"],
-    outbound: { provider: true, sources: ["user_text"], note: "The pasted notes only." },
+    outbound: { provider: true, sources: ["user_text"], note: "The notes the person pasted for this task only." },
     confirmation: "review_card", pausedBy: ["jarvis", "writes"],
   },
   {
@@ -135,5 +136,6 @@ const BY_ID = new Map(JARVIS_RULES.map((r) => [r.id, r]));
 export const ruleFor = (id: string | null | undefined): JarvisRule | null => (id ? BY_ID.get(id) ?? null : null);
 
 /** The information that never appears in a JARVIS response and never goes to the provider, in the rulebook's words. */
+/** What stays inside Enginious OS even when it is pasted, in the rulebook's words. */
 export const PROTECTED_SUMMARY =
-  "salaries, payroll, reimbursements, medical and insurance details, personal IDs, private leave details, quote and estimate amounts, unit rates, discounts, margins and project financials";
+  "employee documents, salaries and payroll, reimbursements, medical and insurance records, private leave details, personal IDs and bank details, credentials, company financial statements and ledgers, internal costing and margins, and anything marked as not for external sharing";

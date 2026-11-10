@@ -362,7 +362,7 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
                   <Button type="submit" size="sm" disabled={busy || text.trim() === ""}>Send</Button>
                 </div>
               </div>
-              <p className="text-[11px] text-muted-foreground">General questions, drafts and briefs go to the AI model; lookups and guidance stay inside Enginious OS. Do not include salaries, personal IDs, medical details or prices: JARVIS will not send them. Nothing is saved until you confirm a review card, and this conversation is not stored.</p>
+              <p className="text-[11px] text-muted-foreground"><span data-testid="jarvis-anthropic-notice">The text you submit for this task is sent to Anthropic to prepare a draft.</span> Lookups and guidance stay inside Enginious OS, and records are never attached. Do not paste salaries, personal IDs, bank or medical details, or internal costings: JARVIS will not send them. Nothing is saved until you confirm a review card, JARVIS does not send emails, and this conversation is not stored.</p>
             </form>
           </div>
         </>
@@ -434,7 +434,7 @@ function HelpList({ help }: { help: HelpView }) {
           </ul>
         </>
       ) : null}
-      <p className="text-xs text-muted-foreground">JARVIS never shows or sends salaries, payroll, reimbursements, medical or insurance details, personal IDs, private leave details, prices, rates, discounts, margins or project financials, and it never changes settings or permissions.</p>
+      <p className="text-xs text-muted-foreground">JARVIS never looks up or sends salaries, payroll, reimbursements, medical or insurance details, personal IDs, bank details, private leave details, saved prices, internal costings or company financials, and it never changes settings or permissions.</p>
     </section>
   );
 }

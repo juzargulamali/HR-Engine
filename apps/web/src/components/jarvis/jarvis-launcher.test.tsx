@@ -74,6 +74,7 @@ describe("launcher and panel", () => {
     expect(within(d).getByText("Enginious OS assistant")).toBeTruthy();
     expect(within(d).getByTestId("jarvis-capability").textContent).toBe("Sales & CRM");
     expect(within(d).getByTestId("jarvis-welcome").textContent).toMatch(/^Ask me anything/);
+    expect(within(d).getByTestId("jarvis-anthropic-notice").textContent).toBe("The text you submit for this task is sent to Anthropic to prepare a draft.");
     expect(l.getAttribute("aria-expanded")).toBe("true");
   });
   it("moves focus into the panel on open, closes on Escape and returns focus to the launcher; also closes with the Close button", async () => {

@@ -68,7 +68,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "chatbot",
       "who are you"
     ],
-    "summary": "JARVIS is the Enginious OS assistant. Ask it a general question, ask for a draft to copy, ask how something works, or ask for your overdue Sales follow-ups. In Sales & CRM it can also prepare an enquiry, an update, a status change or meeting notes for you to review. It saves nothing until you confirm its card and never sends messages. It does not show or discuss pay, personal or medical details, prices or project financials: use the screens for those. Other modules have guidance only for now.",
+    "summary": "JARVIS is the Enginious OS assistant. Ask it a question, ask for a draft to copy, ask how something works, or ask for your overdue Sales follow-ups. In Sales & CRM it prepares enquiries, updates and meeting notes for you to review; nothing is saved until you confirm, and it never sends messages. The text you submit for a task is sent to Anthropic to prepare a draft; records in Enginious OS are never attached. It does not look up saved prices and does not handle pay, personal or medical details: use the screens.",
     "steps": [
       "Open JARVIS from the button on the right edge.",
       "Type what you need in plain words, or use one of the shortcuts.",

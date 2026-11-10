@@ -190,10 +190,10 @@ export function createAssistant(deps: JarvisDeps) {
           jarvisLog({ event: "outbound", actionId: CREATE_FROM_BRIEF_ID, outcome: "blocked", code: "brief_restricted" });
           return { ok: true, kind: "reply", text: RESTRICTED_BRIEF_MESSAGE, links: [{ label: "New-enquiry form", href: "/sales/new" }] };
         }
-        const left = edited ? findProtectedContent(edited) : prepared.separable ? [] : prepared.remaining;
+        const left = edited ? findProtectedContent(edited) : prepared.separable ? [] : findProtectedContent(text);
         if (left.length > 0 || (!edited && !prepared.separable)) {
           jarvisLog({ event: "outbound", actionId: CREATE_FROM_BRIEF_ID, outcome: "blocked", code: "brief_needs_review" });
-          return { ok: true, kind: "brief_review", outbound: edited ?? prepared.outbound, formHref: "/sales/new", text: `I have not sent anything. This text still seems to contain ${describeProtected(left.length > 0 ? left : ["pricing"])}, which JARVIS keeps inside Enginious OS. Edit the text below so it no longer includes those details and send it, or use the new-enquiry form. Your original brief stays here for the review card.` };
+          return { ok: true, kind: "brief_review", outbound: edited ?? prepared.outbound, formHref: "/sales/new", text: `I have not sent anything. This brief seems to contain ${describeProtected(left.length > 0 ? left : prepared.remaining)}, which stays inside Enginious OS. Below is the brief without those parts: check it, edit it if needed and send that clean excerpt, or use the new-enquiry form. Your original brief stays here for the review card.` };
         }
         return asCard(await d.propose({ actionId: CREATE_FROM_BRIEF_ID, companyId: req.companyId, input: { mode: "extract", brief: text, ...(edited ? { outbound: edited } : {}) } }));
       };

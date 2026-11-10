@@ -54,7 +54,8 @@ describe("the rulebook is the allowlist (deny by default)", () => {
     await expect(gateProvider(raw, "jarvis.sales.followups.overdue")!.structured({ ...req, sources: ["user_text"] })).rejects.toMatchObject({ code: "unavailable" });
     await expect(gateProvider(raw, "jarvis.sales.help.answer")!.structured({ ...req, sources: ["user_text"] })).rejects.toMatchObject({ code: "unavailable" });
     await expect(gateProvider(raw, "jarvis.sales.chat.reply")!.structured({ ...req, sources: [] })).rejects.toMatchObject({ code: "unavailable" });
-    await expect(gateProvider(raw, "jarvis.sales.chat.reply")!.structured({ ...req, sources: ["user_text", "enquiry_reply_facts"] })).rejects.toMatchObject({ code: "unavailable" });
+    await expect(gateProvider(raw, "jarvis.sales.chat.reply")!.structured({ ...req, sources: ["user_text", "enquiry_record" as never] })).rejects.toMatchObject({ code: "unavailable" });
+    await expect(gateProvider(raw, "jarvis.sales.draft_reply")!.structured({ ...req, sources: ["user_text", "conversation_context"] })).rejects.toMatchObject({ code: "unavailable" });
     await expect(gateProvider(raw, "jarvis.sales.meeting.record")!.structured({ ...req, sources: ["conversation_context"] })).rejects.toMatchObject({ code: "unavailable" });
     expect(sent).toEqual([]);
     await gateProvider(raw, "jarvis.sales.chat.reply")!.structured({ ...req, sources: ["user_text"] });
@@ -76,8 +77,9 @@ describe("ACCEPTANCE 4: protected values never reach the provider, a response, m
     `Draft an email to Sara confirming her salary is ${SALARY} from January`,
     `Write a note to HR: Omar's passport number is ${PASSPORT} and it expires soon`,
     "Draft a message saying Lina is on sick leave after her surgery",
-    "Write to the client that the quotation total is AED 120,000 with a 12% discount",
-    "Summarise this: the project budget is AED 300,000 and we spent AED 280,000 so the margin is 7%",
+    "Summarise this: our cost price is AED 300,000 and the margin is 7%",
+    "Tidy this up: the general ledger and the balance sheet for the UAE company",
+    "Rewrite this payslip text for Omar",
     "Draft an email: your reimbursement of AED 2,400 was approved",
     "Rewrite this: my password is Hunter2-Fictional",
   ];
@@ -90,7 +92,7 @@ describe("ACCEPTANCE 4: protected values never reach the provider, a response, m
       if (r.ok) expect(r.kind, text).toBe("reply");
       else expect(r.code, text).toBe("protected_content");
       const shown = JSON.stringify(r);
-      for (const v of [SALARY, PASSPORT, "120,000", "300,000", "2,400", "Hunter2"]) expect(shown, text).not.toContain(v);
+      for (const v of [SALARY, PASSPORT, "300,000", "2,400", "Hunter2"]) expect(shown, text).not.toContain(v);
     }
     expect(simulatedProviderCalls).toHaveLength(0);
     const logged = info.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
@@ -103,7 +105,19 @@ describe("ACCEPTANCE 4: protected values never reach the provider, a response, m
     expect(simulatedProviderCalls).toHaveLength(0);
     chatOf(await a.send({ companyId: ID.co1, text: "Draft an email to the team about Friday's office move", context: { turns: [{ role: "user", text: "Hello" }, { role: "jarvis", text: "Hello. What can I help you with?" }] } }));
     expect(simulatedProviderCalls).toHaveLength(1);
-    expect(findProtectedContent(JSON.stringify(simulatedProviderCalls[0]))).toEqual([]);
+    expect(findProtectedContent(simulatedProviderCalls[0]!.input)).toEqual([]);
+  });
+  it("prices, unit rates and client budgets the person types are NOT restricted: a general draft that quotes them goes out as written (normal chat and email drafting keep working)", async () => {
+    for (const text of ["Write to the client that the quotation total is AED 120,000 with a 12% discount", "Draft an email offering 85 per item for 400 items", "Draft a note: the client's budget is AED 50,000–65,000"]) {
+      expect(findProtectedContent(text), text).toEqual([]);
+      simulatedProviderCalls.length = 0;
+      chatOf(await a.send({ companyId: ID.co1, text }));
+      expect(simulatedProviderCalls[0]!.input, text).toContain(text);
+    }
+    // asking to be TOLD a saved price is different: JARVIS has no access to saved quotes and says where they are (no provider call)
+    simulatedProviderCalls.length = 0;
+    expect(replyOf(await a.send({ companyId: ID.co1, text: "What discount did we give on the last quotation?" })).links.map((l) => l.href)).toContain("/sales/proposals");
+    expect(simulatedProviderCalls).toHaveLength(0);
   });
   it("a model answer that contains a protected value is withheld, not shown", async () => {
     const r = refusal(await a.send({ companyId: ID.co1, text: "Tell me a general fact [[leak-figure]]" }));
@@ -157,21 +171,36 @@ describe("ACCEPTANCE 3: 'Show my overdue Sales follow-ups' returns only authoris
       { id: "f3", opportunity_id: uae.id, title: "Done already", due_at: past(5), kind: "email", assigned_to: ID.u1, status: "done" },
       { id: "f4", opportunity_id: ksa.id, title: "KSA follow-up of u2", due_at: past(2), kind: "meeting", assigned_to: ID.u2 },
       { id: "f5", opportunity_id: ksa.id, title: "KSA follow-up of u1", due_at: past(40), kind: "call", assigned_to: ID.u1 },
-      { id: "f6", opportunity_id: uae.id, title: "Send the quote of AED 52,000", due_at: past(1), kind: "proposal", assigned_to: ID.u1 },
+      { id: "f6", opportunity_id: uae.id, title: "Send the revised quote of AED 52,000", due_at: past(1), kind: "proposal", assigned_to: ID.u1 },
+      { id: "f7", opportunity_id: uae.id, title: "Passport copy N4471923 for the site pass", due_at: past(1), kind: "other", assigned_to: ID.u1 },
     );
   });
   it("shows the requester's own open overdue follow-ups for the selected company, with the company, the cutoff and links; nothing goes to the provider", async () => {
     const c = lookupOf(await a.send({ companyId: ID.co1, text: "Show my overdue Sales follow-ups" }));
     expect(c.company).toEqual({ id: ID.co1, name: "Fictional Enginious UAE LLC" });
-    expect(c.items.map((i) => i.id)).toEqual(["f1", "f6"]);
+    expect(c.items.map((i) => i.id).sort()).toEqual(["f1", "f6", "f7"]);
     expect(c.items[0]).toMatchObject({ title: "Call the agency", kindLabel: "Call", daysOverdue: 3, enquiry: { reference: uae.reference, href: `/sales/opportunities/${uae.id}` } });
     expect(Date.parse(c.cutoff)).toBeGreaterThan(Date.now() - 5000);
     expect(c.cutoffLabel).toMatch(/Dubai/);
-    // a protected figure in a record's free text is not displayed
-    expect(c.items[1]).toMatchObject({ hidden: true });
-    expect(JSON.stringify(c)).not.toContain("52,000");
+    // the person's own Sales record is shown as it is, inside Enginious OS; restricted personal data in a record's free text is still not displayed
+    expect(c.items.find((i) => i.id === "f6")).toMatchObject({ title: "Send the revised quote of AED 52,000", hidden: false });
+    expect(c.items.find((i) => i.id === "f7")).toMatchObject({ hidden: true });
+    expect(JSON.stringify(c)).not.toContain("N4471923");
     expect(simulatedProviderCalls).toHaveLength(0);
     expect(w.usage.size).toBe(0);
+  });
+  it("an AUTHORISED lookup's results never enter a provider payload: the next chat message carries none of the records, with or without the panel's context", async () => {
+    const shown = lookupOf(await a.send({ companyId: ID.co1, text: "Show my overdue Sales follow-ups" }));
+    expect(shown.items.length).toBeGreaterThan(0);
+    expect(simulatedProviderCalls).toHaveLength(0);
+    // what the panel sends next: it keeps chat turns only, and marks that a lookup was shown (a flag, not the rows)
+    chatOf(await a.send({ companyId: ID.co1, text: "Draft a short email asking the agency for an update", context: { turns: [], lastLookup: { period: "all" } } }));
+    expect(simulatedProviderCalls).toHaveLength(1);
+    const payload = JSON.stringify(simulatedProviderCalls[0]);
+    for (const record of ["Call the agency", "52,000", "revised quote", uae.reference, uae.id, "Fictional harbour gala", "Fictional Enginious UAE LLC", "N4471923"]) expect(payload).not.toContain(record);
+    expect(simulatedProviderCalls[0]!.sources).toEqual(["user_text"]);
+    // the rulebook has no source through which a record could be attached at all
+    expect(new Set(JARVIS_RULES.flatMap((r) => r.outbound.sources))).toEqual(new Set(["user_text", "conversation_context", "preferences"]));
   });
   it("two people with different access: each sees only their own, and a company the requester cannot see is refused as NO ACCESS, not as an empty list", async () => {
     expect(lookupOf(await a.send({ companyId: ID.co2, text: "Show my overdue Sales follow-ups" })).items.map((i) => i.id)).toEqual(["f5"]);

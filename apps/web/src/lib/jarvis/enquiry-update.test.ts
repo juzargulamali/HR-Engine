@@ -51,15 +51,16 @@ describe("propose: the request becomes before -> after (nothing is written)", ()
     expect(w.opps[0]!.location).toBe("Harbour Hall");
     expect(w.opps[0]!.version).toBe(3);
   });
-  it("sends the provider ONLY the allowlisted current values of this enquiry and the person's request: no value, owner, organisation, id or other enquiry", async () => {
+  it("sends the provider ONLY the person's request: none of the enquiry's current values, and no value, owner, organisation, id or other enquiry", async () => {
     w.opps.push(mkOpp({ company_id: ID.co1, title: "SECRET other enquiry", location: "Secret Venue" }));
     await ask("Location: Marina Arena");
     expect(simulatedProviderCalls).toHaveLength(1);
     const call = simulatedProviderCalls[0]!;
     expect(call.task).toBe("enquiry_update");
     const payload = JSON.stringify(call);
-    expect(call.input).toContain("Harbour Hall");
-    expect(call.input).toContain("Marina Arena");
+    expect(call.sources).toEqual(["user_text"]);
+    expect(call.input).toBe("<request>\nLocation: Marina Arena\n</request>");
+    expect(payload).not.toContain("Harbour Hall");
     for (const forbidden of ["987654", "AED", "SECRET", "Secret Venue", e.id, ID.u1, ID.co1, e.agency_org_id!, e.client_org_id!, e.reference, "Fictional Wave Agency", "owner_id"]) expect(payload).not.toContain(forbidden);
   });
   it("a request that changes nothing (or only says nothing useful) is not confirmable", async () => {

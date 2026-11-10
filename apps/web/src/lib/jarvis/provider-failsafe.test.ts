@@ -31,8 +31,8 @@ let w: World;
 let enquiryId: string;
 const callers: Caller[] = [
   { id: "jarvis.sales.enquiry.create_from_brief", label: "create from brief", ask: (a) => a.send({ companyId: ID.co1, text: `Title: Harbour gala\n${MARK}` }), valid: { title: "Harbour gala LED wall", source: "whatsapp" }, cardKind: "enquiry", tag: "brief", tags: ["brief"] },
-  { id: "jarvis.sales.draft_reply", label: "draft reply", ask: (a) => a.send({ companyId: ID.co1, text: `Please can you quote for two LED walls? ${MARK}`, intent: "reply", enquiryId }), valid: { subject: "Re: gala", body: "Thank you for your message." }, cardKind: "reply.draft", tag: null, tags: ["enquiry", "conversation"] },
-  { id: "jarvis.sales.enquiry.update", label: "update enquiry", ask: (a) => a.send({ companyId: ID.co1, text: `venue is Harbour Hall ${MARK}`, intent: "update", enquiryId }), valid: { location: "Harbour Hall" }, cardKind: "enquiry.update", tag: null, tags: ["current", "request"] },
+  { id: "jarvis.sales.draft_reply", label: "draft reply", ask: (a) => a.send({ companyId: ID.co1, text: `Please can you quote for two LED walls? ${MARK}`, intent: "reply", enquiryId }), valid: { subject: "Re: gala", body: "Thank you for your message." }, cardKind: "reply.draft", tag: null, tags: ["conversation"] },
+  { id: "jarvis.sales.enquiry.update", label: "update enquiry", ask: (a) => a.send({ companyId: ID.co1, text: `venue is Harbour Hall ${MARK}`, intent: "update", enquiryId }), valid: { location: "Harbour Hall" }, cardKind: "enquiry.update", tag: null, tags: ["request"] },
   { id: "jarvis.sales.meeting.record", label: "meeting notes", ask: (a) => a.send({ companyId: ID.co1, text: `Met the agency about the gala. ${MARK}`, intent: "meeting", enquiryId }), valid: { activityKind: "meeting", summary: "Met the agency about the gala." }, cardKind: "meeting.record", tag: "notes", tags: ["notes"] },
   { id: "jarvis.sales.chat.reply", label: "general chat", ask: (a) => a.send({ companyId: ID.co1, text: `What is the capital of France? ${MARK}` }), valid: { reply: "Paris is the capital of France." }, cardKind: "chat.reply", tag: null, tags: ["message"] },
 ];

@@ -110,7 +110,10 @@ export function routeMessage(raw: string, ctx: RouteContext = {}): Route {
   // A text that clearly is a client brief (or an explicit "create an enquiry" request) goes to the enquiry flow even when it mentions a price or a contact: that flow
   // separates those details locally and never sends them (sales/brief-outbound.ts). It is not a request to be told protected information.
   const clearBrief = !intent && (briefScore(text) >= 4 || (CREATE_ENQUIRY.test(text) && text.length >= 60));
-  const topic = clearBrief ? null : protectedTopic(text);
+  let topic = clearBrief ? null : protectedTopic(text);
+  // Prices are only a "protected request" when the person asks to be TOLD a saved one ("what discount did we give?"). Asking for a draft that mentions a price the person
+  // supplies ("draft a reply offering 85 per item") is ordinary writing.
+  if (topic === "pricing" && (WRITE.test(text) || !(LIVE_ASK.test(text) || /\?\s*$/.test(text)))) topic = null;
   // (Inside a chosen Sales shortcut the text is material for that action: the outbound gate screens it and refuses it there.)
   if ((!intent || intent === "help") && topic && topic !== "credential" && topic !== "attachment" && !(howTo && findProtectedContent(text).length === 0)) return { kind: "protected", category: topic };
   if (intent && intent !== "help") return { kind: "mode", key: intent, chosen: true };
