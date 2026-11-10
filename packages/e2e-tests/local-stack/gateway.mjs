@@ -1,6 +1,7 @@
 // LOCAL-ONLY stand-in for the two Supabase services the app talks to, so the REAL Next.js app can be driven by a REAL
 // browser against a REAL Postgres without any hosted project:
 //   /rest/v1/*  -> PostgREST (the same component Supabase uses), enforcing the real RLS policies
+//   /storage/v1/* -> a minimal in-memory object store for the private-file flows (local-storage.mjs; NOT Supabase Storage)
 //   /auth/v1/*  -> a minimal token service (sign-in, refresh, user, logout, plus the invite / recover / admin endpoints the account
 //                  controls use: see local-auth.mjs) that signs HS256 JWTs with the same secret PostgREST verifies. A user without a
 //                  password of their own accepts one fixed local password. It is NOT Supabase Auth and never touches a real account.
@@ -11,6 +12,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { Pool } = require("pg");
 import { createLocalAuth } from "./local-auth.mjs";
+import { createLocalStorage } from "./local-storage.mjs";
 
 const PORT = Number(process.env.GATEWAY_PORT ?? 54321);
 const PGRST = Number(process.env.POSTGREST_PORT ?? 3001);
@@ -37,6 +39,7 @@ const send = (res, code, obj) => { res.writeHead(code, { "content-type": "applic
 const readBody = (req) => new Promise((ok) => { const c = []; req.on("data", (d) => c.push(d)); req.on("end", () => ok(Buffer.concat(c))); });
 
 const localAuth = createLocalAuth({ pool, sign, verify, fixedPassword: PASSWORD, send, readBody });
+const localStorage = createLocalStorage({ pool, send, readBody });
 
 // Print the anon/service keys the app needs and exit: node gateway.mjs --keys
 if (process.argv.includes("--keys")) {
@@ -59,6 +62,7 @@ http.createServer(async (req, res) => {
       req.pipe(upstream);
       return;
     }
+    if (await localStorage(req, res, url)) return;
     if (await localAuth(req, res, url)) return;
     send(res, 404, { msg: `local stack: ${req.method} ${url.pathname} is not implemented` });
   } catch (e) {
