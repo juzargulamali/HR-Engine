@@ -155,7 +155,7 @@ describe("JARVIS corrective migration: internal ledger helpers closed to the ser
       }
       for (const f of PROOF_MACHINERY) for (const role of ["service_role", "anon", "authenticated"]) expect(await canRun(role, f), `${role} on ${f}`).toBe(false);
       // the only functions signed-in users can execute are still exactly the seven named (no stray jarvis_* function appeared)
-      const exec = (await admin<{ sig: string }>(`select p.oid::regprocedure::text as sig from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'jarvis\\_%' and has_function_privilege('authenticated', p.oid, 'execute') order by 1`)).length;
+      const exec = (await admin<{ sig: string }>(`select p.oid::regprocedure::text as sig from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'jarvis\\_%' and p.proname not in ('jarvis_pref_list','jarvis_pref_set','jarvis_pref_delete','jarvis_suggest_correction') and has_function_privilege('authenticated', p.oid, 'execute') order by 1`)).length;
       expect(exec).toBe(AUTHORISED.length);
     });
 

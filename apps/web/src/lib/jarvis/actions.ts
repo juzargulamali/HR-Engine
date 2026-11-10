@@ -6,6 +6,8 @@ import { draftReply } from "./sales/draft-reply";
 import { changeStage } from "./sales/enquiry-stage";
 import { recordMeeting } from "./sales/meeting-record";
 import { updateEnquiry } from "./sales/enquiry-update";
+import { chatReply } from "./sales/chat";
+import { overdueFollowUps } from "./sales/followups-overdue";
 import { helpAnswer } from "./sales/help-answer";
 import { registerOrganisation } from "./sales/organisation-register";
 
@@ -20,7 +22,7 @@ export function registerAllJarvisActions(): void {
   if (done) return;
   done = true;
   registerJarvisAction(createEnquiryFromBrief);
-  const implemented = [draftReply, helpAnswer, registerOrganisation, updateEnquiry, changeStage, recordMeeting];
+  const implemented = [draftReply, helpAnswer, registerOrganisation, updateEnquiry, changeStage, recordMeeting, chatReply, overdueFollowUps];
   for (const a of implemented) registerJarvisAction(a);
   registerDisabledSalesActions(implemented.map((a) => a.id));
 }

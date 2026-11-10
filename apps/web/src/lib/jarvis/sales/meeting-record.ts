@@ -88,10 +88,11 @@ export const recordMeeting: JarvisActionDefinition<RecordMeetingInput, MeetingVa
     try {
       // Only the fixed instructions, today's date and the person's pasted notes: no enquiry record, no organisation, no id.
       raw = await ctx.provider.structured({
-        task: MEETING_TASK, instructions: `${MEETING_INSTRUCTIONS}\nToday (Dubai) is ${today}.`, input: input.notes.replace(/<\/?\s*notes\s*>/gi, ""), inputTag: "notes",
+        task: MEETING_TASK, sources: ["user_text"], instructions: `${MEETING_INSTRUCTIONS}\nToday (Dubai) is ${today}.`, input: input.notes.replace(/<\/?\s*notes\s*>/gi, ""), inputTag: "notes",
         jsonSchema: MEETING_JSON_SCHEMA, maxOutputTokens: ctx.config.maxOutputTokens, timeoutMs: ctx.config.timeoutMs,
       });
     } catch (err) {
+      if (err instanceof JarvisRefusalError) throw err;
       throw new JarvisRefusalError("provider_error", WORDS[err instanceof JarvisProviderError ? err.kind : "network"]!);
     }
     const values = sanitiseMeeting(raw, input.notes, today, base);

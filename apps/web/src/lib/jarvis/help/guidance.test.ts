@@ -29,6 +29,11 @@ describe("reviewed guidance", () => {
       expect(known.some((r) => r === p || new RegExp(`^${r.replace(/\[[^\]]+\]/g, "[^/]+")}$`).test(p)), `${g.id}: no page for ${l.href}`).toBe(true);
     }
   });
+  it("every screen a guide is written for is a real page route, and every published guide names at least one screen or is general", () => {
+    const known = routes();
+    for (const g of GUIDANCE) for (const sc of g.screens ?? []) expect(known, `${g.id}: no page for screen ${sc}`).toContain(sc);
+    expect(GUIDANCE.filter((g) => (g.screens ?? []).length === 0).map((g) => g.id).sort()).toEqual(["jarvis-about", "jarvis-memory"]);
+  });
   it("is staff-facing: no code paths, SQL, migration names, table or function names, or permission internals", () => {
     const text = JSON.stringify(GUIDANCE.map(({ keywords: _k, ...visible }) => visible));
     expect(text).not.toMatch(/\.tsx?\b|\.sql\b|migration|\bsql\b|\brls\b|\bcrm_[a-z_]+|\bjarvis_[a-z_]+|supabase|apps\/web|packages\/|server action|\/api\/|security definer|row.level|\bgrants?\b|capabilit|assign_owner|service.role|catalogue|app map|ledger|HMAC|confirmation token/i);

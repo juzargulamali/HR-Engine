@@ -6,9 +6,11 @@ import { configUnavailableReason } from "./config";
 import { canonicalJson } from "./canonical";
 import { jarvisLog } from "./log";
 import type { HelpView, JarvisRefusal, JarvisRefusalCode, LauncherState, StatusResult } from "./protocol";
+import { gateProvider } from "./outbound";
 import { withProviderDiagnostics } from "./provider/diagnostics";
 import type { JarvisProvider } from "./provider/types";
 import { listJarvisActions, resolveJarvisAction } from "./registry";
+import { ruleFor } from "./rulebook";
 import { issueDbProof, issueReview, payloadHash, verifyReview, type ProofCall } from "./token";
 import { JarvisRefusalError, type AnyJarvisAction, type JarvisContext, type JarvisModuleId, type JarvisTarget } from "./types";
 
@@ -21,6 +23,8 @@ export interface JarvisDeps {
   /** The signed-in person's OWN Supabase client. There is no service-role client in JARVIS. */
   supabase: () => Promise<SupabaseClient>;
   /** Does this person hold the module grant (and capability) for THIS company? `"error"` = could not be read (never read as "no access"). */
+  /** The person's own access to the PROTECTED areas (payroll, employee records, budgets), read through their own session. Used only to choose between "open this screen" and "you do not have access". */
+  protectedAccess?: (a: { supabase: SupabaseClient; userId: string; companyId: string }) => Promise<{ roles: string[]; budget: boolean } | "error">;
   moduleGrant: (a: { module: JarvisModuleId; supabase: SupabaseClient; userId: string; companyId: string; capability?: string }) => Promise<boolean | "error">;
   /** The companies this person could use JARVIS for (any module grant), for the interface's company picker. */
   companies: (a: { supabase: SupabaseClient; userId: string }) => Promise<{ id: string; name: string }[] | "error">;
@@ -30,6 +34,13 @@ export interface JarvisDeps {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const refuse = (code: JarvisRefusalCode, message: string): JarvisRefusal => ({ ok: false, code, message });
+const PAUSED_WORDS: Record<string, string> = {
+  help: "Answers about how Enginious OS works are paused right now. The rest of JARVIS and Enginious OS are not affected.",
+  lookups: "Live lookups are paused right now. You can still open the screen yourself.",
+  chat: "General questions and writing help are paused right now. The rest of JARVIS is not affected.",
+  memory: "Saving preferences is paused right now. You can still see and delete what JARVIS remembers.",
+  writes: "JARVIS cannot create or change records right now. Sales & CRM itself is not affected: you can still do it yourself.",
+};
 const CONFIG_MESSAGE = "JARVIS is not available right now. Sales & CRM is not affected.";
 
 export type ProposeOutcome<TCard = unknown> =
@@ -55,6 +66,9 @@ export function createDispatcher(deps: JarvisDeps) {
       jarvisLog({ event: "refused", actionId: action?.id, code: "unavailable" });
       return refuse("unavailable", CONFIG_MESSAGE);
     }
+    // The independent pauses (rulebook: pausedBy). Help, lookups, chat and memory are paused by JARVIS_PAUSE; writes by it or by the database write switch below.
+    const pause = action ? (ruleFor(action.id)?.pausedBy ?? []).find((s) => s !== "jarvis" && (config.paused as string[]).includes(s)) : undefined;
+    if (pause) { jarvisLog({ event: "refused", actionId: action?.id, code: `paused_${pause}` }); return refuse("paused", PAUSED_WORDS[pause] ?? "That is paused right now."); }
     const id = await deps.identity();
     if (!id) return refuse("signed_out", "Sign in to use JARVIS.");
     if (companyId !== null && !UUID.test(companyId)) return refuse("invalid_input", "Choose a company first.");
@@ -71,7 +85,8 @@ export function createDispatcher(deps: JarvisDeps) {
       if (!g) { jarvisLog({ event: "refused", actionId: action.id, code: "no_module_access" }); return refuse("no_module_access", "You do not have access to that module for this company."); }
     }
     const ctx: JarvisContext = {
-      userId: id.userId, companyId: companyId ?? "", supabase, config, provider: action ? withProviderDiagnostics(provider, action.id) : provider, now: deps.now(),
+      userId: id.userId, companyId: companyId ?? "", supabase, config, // The provider an action receives is ALWAYS behind the outbound gate (rulebook sources + protected-content screen); without an action there is no provider at all.
+      provider: action ? gateProvider(withProviderDiagnostics(provider, action.id), action.id) : null, now: deps.now(),
       takeUsage: async () => {
         const r = await supabase.rpc("jarvis_usage_take", { p_limit: config.dailyLimit });
         const u = (Array.isArray(r.data) ? r.data[0] : r.data) as { allowed?: boolean } | null | undefined;

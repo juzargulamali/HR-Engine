@@ -6,7 +6,7 @@ import "server-only";
  * identifier-like token is dropped, so a mistaken call cannot leak the text.
  */
 export interface JarvisLogFields {
-  event: "availability" | "message" | "propose" | "execute" | "status" | "provider" | "refused";
+  event: "availability" | "message" | "propose" | "execute" | "status" | "provider" | "refused" | "outbound" | "memory" | "route";
   actionId?: string;
   code?: string;
   outcome?: string;

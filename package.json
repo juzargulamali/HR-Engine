@@ -14,6 +14,8 @@
     "test": "npm run test --workspaces --if-present",
     "test:rls": "npm run test:rls -w @enginious-hr/rls-tests",
     "check:secrets": "node scripts/check-no-secrets-in-client-bundle.mjs",
+    "build:jarvis-knowledge": "node scripts/build-jarvis-knowledge.mjs",
+    "check:jarvis-knowledge": "node scripts/build-jarvis-knowledge.mjs --check",
     "check:launch-batch": "node scripts/build-launch-batch.mjs --check",
     "db:types": "supabase gen types typescript --local > apps/web/src/types/database.types.ts"
   },

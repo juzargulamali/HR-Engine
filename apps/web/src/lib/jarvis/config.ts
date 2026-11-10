@@ -16,6 +16,8 @@ import "server-only";
  *   JARVIS_DAILY_LIMIT_PER_USER       default 30       provider requests per person per Dubai day (counted in the database)
  *   JARVIS_CONFIRMATION_TTL_MINUTES   default 15       how long a reviewed card can be confirmed (the review token's life)
  *   JARVIS_PROOF_TTL_SECONDS          default 120      how long the database proof issued INSIDE a confirmation request is valid (30 to 600)
+ *   JARVIS_PAUSE                      a comma-separated list of what to pause independently: help, lookups, chat, memory, writes (e.g. "chat,lookups"). Unknown words are ignored.
+ *                                     Writes also have the database switch (jarvis_settings.writes_enabled); either one pauses them
  *   JARVIS_ALLOW_SIMULATED_ON_LOCAL_STACK=1   lets the isolated local test stack (a production build against a loopback database, never on Vercel) use the simulated provider
  */
 export const DEFAULT_JARVIS_MODEL = "claude-sonnet-5-5";
@@ -38,6 +40,8 @@ export interface JarvisConfig {
   /** null = not configured (in production-like environments the assistant then refuses to operate). */
   confirmationSecret: string | null;
   productionLike: boolean;
+  /** What is paused independently of the main switch (JARVIS_PAUSE). */
+  paused: ("help" | "lookups" | "chat" | "memory" | "writes")[];
 }
 
 type Env = Record<string, string | undefined>;
@@ -93,6 +97,7 @@ export function readJarvisConfig(env: Env = process.env): JarvisConfig {
     proofTtlMs: clampInt(env.JARVIS_PROOF_TTL_SECONDS, 120, 30, 600) * 1000,
     confirmationSecret,
     productionLike,
+    paused: (env.JARVIS_PAUSE ?? "").toLowerCase().split(/[\s,]+/).filter((x): x is JarvisConfig["paused"][number] => ["help", "lookups", "chat", "memory", "writes"].includes(x)),
   };
 }
 

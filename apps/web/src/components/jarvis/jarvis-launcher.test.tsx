@@ -73,7 +73,8 @@ describe("launcher and panel", () => {
     const d = screen.getByRole("dialog", { name: "JARVIS" });
     expect(within(d).getByText("Enginious OS assistant")).toBeTruthy();
     expect(within(d).getByTestId("jarvis-capability").textContent).toBe("Sales & CRM");
-    expect(within(d).getByTestId("jarvis-welcome").textContent).toBe("Paste a brief and I'll turn it into an enquiry for you to review.");
+    expect(within(d).getByTestId("jarvis-welcome").textContent).toMatch(/^Ask me anything/);
+    expect(within(d).getByTestId("jarvis-anthropic-notice").textContent).toBe("The text you submit for this task is sent to Anthropic to prepare a draft.");
     expect(l.getAttribute("aria-expanded")).toBe("true");
   });
   it("moves focus into the panel on open, closes on Escape and returns focus to the launcher; also closes with the Close button", async () => {
@@ -389,7 +390,7 @@ describe("modes and the draft-reply card", () => {
 
 describe("the help card", () => {
   it("shows the reviewed guidance with real links and the note, and no confirm button", async () => {
-    const api = fakeApi({ send: async () => ({ ok: true, kind: "action", actionId: "jarvis.sales.help.answer", confirmation: null, card: { kind: "help.answer", mode: "guidance", answer: null, topics: [], note: "From Enginious OS's reviewed guidance.", entries: [{ id: "sales-follow-ups", title: "See and plan follow-ups", summary: "The Follow-ups page lists what is next.", steps: ["Open Follow-ups in Sales."], links: [{ label: "Follow-ups", href: "/sales/follow-ups" }] }] } }) });
+    const api = fakeApi({ send: async () => ({ ok: true, kind: "action", actionId: "jarvis.sales.help.answer", confirmation: null, card: { kind: "help.answer", mode: "guidance", topics: [], note: "From Enginious OS's reviewed guidance.", entries: [{ id: "sales-follow-ups", title: "See and plan follow-ups", summary: "The Follow-ups page lists what is next.", steps: ["Open Follow-ups in Sales."], links: [{ label: "Follow-ups", href: "/sales/follow-ups" }] }] } }) });
     mount(api, { enabledActionIds: [...ALL_IDS, "jarvis.sales.help.answer"] });
     openPanel();
     fireEvent.click(screen.getByTestId("mode-help"));
@@ -400,6 +401,100 @@ describe("the help card", () => {
     expect(within(c).getByText(/Open Follow-ups in Sales/)).toBeTruthy();
     expect(within(c).queryByRole("button")).toBeNull();
     expect(api.calls.send[0]![0]).toMatchObject({ intent: "help" });
+  });
+});
+
+describe("general chat, clarifying question, lookup and memory in the panel", () => {
+  it("sends the address path of the current screen with a message (the server reduces it to an approved identifier), and a 'which do you mean?' card offers the guides as choices", async () => {
+    path = "/sales/events";
+    const choose: SendResult = { ok: true, kind: "action", actionId: "jarvis.sales.help.answer", confirmation: null, card: { kind: "help.answer", mode: "choose", entries: [], topics: [], note: "More than one guide fits. Which do you mean?", question: "How do I register a new customer?", choices: [{ id: "sales-clients-agencies", title: "Find or add a client or agency" }, { id: "sales-outreach", title: "Outreach: accounts assigned to you to approach" }] } };
+    const answer: SendResult = { ok: true, kind: "action", actionId: "jarvis.sales.help.answer", confirmation: null, card: { kind: "help.answer", mode: "guidance", topics: [], note: "From the published guidance.", screen: { label: "Events & Exhibitions" }, entries: [{ id: "sales-clients-agencies", title: "Find or add a client or agency", summary: "Summary.", steps: ["Open Clients & Agencies."], links: [{ label: "Clients & Agencies", href: "/sales/accounts" }] }] } };
+    const api = fakeApi({ send: async () => choose, act: async () => answer });
+    mount(api, { enabledActionIds: [...ALL_IDS, "jarvis.sales.help.answer"] });
+    openPanel();
+    fireEvent.change(screen.getByLabelText("Paste a brief or ask a question"), { target: { value: "How do I register a new customer?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    const c = await screen.findByTestId("jarvis-help-card");
+    expect(api.calls.send[0]![0]).toMatchObject({ screen: "/sales/events" });
+    expect(within(c).getByTestId("help-choose").textContent).toMatch(/Which do you mean/);
+    fireEvent.click(within(c).getByRole("button", { name: "Find or add a client or agency" }));
+    await waitFor(() => expect(screen.getByTestId("help-screen").textContent).toMatch(/Events & Exhibitions/));
+    expect(api.calls.act[0]![0]).toMatchObject({ actionId: "jarvis.sales.help.answer", input: { question: "How do I register a new customer?", topicId: "sales-clients-agencies" } });
+  });
+  const type = (text: string) => { fireEvent.change(screen.getByLabelText("Paste a brief or ask a question"), { target: { value: text } }); fireEvent.click(screen.getByRole("button", { name: "Send" })); };
+  const chat = (text: string, draft = true): SendResult => ({ ok: true, kind: "action", actionId: "jarvis.sales.chat.reply", confirmation: null, card: { kind: "chat.reply", text, draft, applied: [] } });
+  it("a draft is shown with Copy and no send button, and the NEXT message carries only the chat turns as context (never cards or lookups)", async () => {
+    const replies: SendResult[] = [chat("Hello [name],\nFirst draft."), chat("Short draft.")];
+    const api = fakeApi({ send: async () => replies.shift()! });
+    mount(api);
+    openPanel();
+    type("Draft an email to a supplier");
+    const first = await screen.findByTestId("jarvis-chat-reply");
+    expect(within(first).getByTestId("chat-text").textContent).toContain("First draft.");
+    expect(within(first).getByRole("button", { name: "Copy" })).toBeTruthy();
+    expect(within(first).queryByRole("button", { name: /send/i })).toBeNull();
+    expect(screen.queryByTestId("jarvis-card")).toBeNull();
+    expect((api.calls.send[0]![0] as { intent: unknown; context: { turns: unknown[] } })).toMatchObject({ intent: null, context: { turns: [] } });
+    type("make it shorter");
+    await waitFor(() => expect(screen.getAllByTestId("jarvis-chat-reply")).toHaveLength(2));
+    expect((api.calls.send[1]![0] as { context: { turns: unknown[] } }).context.turns).toEqual([{ role: "user", text: "Draft an email to a supplier" }, { role: "jarvis", text: "Hello [name],\nFirst draft." }]);
+  });
+  it("a clarifying question offers choices; choosing one sends the SAME text with that choice and opens nothing by itself", async () => {
+    const api = fakeApi({ send: async (a) => ((a as { intent: string | null }).intent === "chat" ? chat("An answer.", false) : { ok: true, kind: "clarify", text: "Is this a client brief you want turned into a new enquiry?", options: [{ label: "Yes, prepare an enquiry", intent: "enquiry" }, { label: "No, just answer it", intent: "chat" }] }) });
+    mount(api);
+    openPanel();
+    type("We need screens for an event");
+    const q = await screen.findByTestId("jarvis-clarify");
+    expect(screen.queryByTestId("jarvis-card")).toBeNull();
+    fireEvent.click(within(q).getByRole("button", { name: "No, just answer it" }));
+    await screen.findByTestId("jarvis-chat-reply");
+    expect(api.calls.send[1]![0]).toMatchObject({ text: "We need screens for an event", intent: "chat" });
+  });
+  it("a lookup shows the company, the cutoff, links to the records and 'no matching records' in words; an error is shown as an error", async () => {
+    const lookup = (items: unknown[]): SendResult => ({ ok: true, kind: "action", actionId: "jarvis.sales.followups.overdue", confirmation: null, card: { kind: "lookup.followups", company: { id: "co-1", name: "Fictional Enginious UAE LLC" }, period: "all", periodLabel: "overdue now (any due date)", cutoff: new Date().toISOString(), cutoffLabel: "10 Nov 2026, 14:00 (Dubai)", total: items.length, truncated: false, items: items as never, followUpsHref: "/sales/follow-ups" } });
+    const replies: SendResult[] = [lookup([{ id: "f1", title: "Call the agency", hidden: false, kindLabel: "Call", dueDate: "2026-11-07", daysOverdue: 3, enquiry: { reference: "OPP-UAE-2026-0001", title: "Fictional harbour gala", href: "/sales/opportunities/o1" } }]), lookup([]), { ok: false, code: "lookup_failed", message: "I could not load your follow-ups just now. This is a failed lookup, not an empty list." }];
+    const api = fakeApi({ send: async () => replies.shift()! });
+    mount(api);
+    openPanel();
+    type("Show my overdue Sales follow-ups");
+    const c = await screen.findByTestId("jarvis-lookup");
+    expect(within(c).getByTestId("lookup-scope").textContent).toMatch(/Fictional Enginious UAE LLC.*as of 10 Nov 2026, 14:00 \(Dubai\)/);
+    expect(within(c).getByRole("link", { name: /OPP-UAE-2026-0001/ }).getAttribute("href")).toBe("/sales/opportunities/o1");
+    type("show last month instead");
+    await waitFor(() => expect(screen.getAllByTestId("jarvis-lookup")).toHaveLength(2));
+    expect(api.calls.send[1]![0]).toMatchObject({ context: { lastLookup: { period: "all" } } });
+    expect(screen.getByTestId("lookup-empty").textContent).toMatch(/No matching follow-ups/);
+    type("show this month");
+    expect((await screen.findByTestId("jarvis-error")).textContent).toMatch(/failed lookup, not an empty list/);
+  });
+  it("a brief that could not be separated shows the text that WOULD be sent, editable, with the form as the other way; sending it carries the original text and the edited version", async () => {
+    const api = fakeApi({ send: async (a) => ((a as { briefOutbound: string | null }).briefOutbound ? cardResult() : { ok: true, kind: "brief_review", text: "I have not sent anything.", outbound: "Title: Gala\nThe crew bonus is AED 5,000.", formHref: "/sales/new" }) });
+    mount(api);
+    openPanel();
+    type("Title: Gala\nThe crew bonus is AED 5,000.");
+    const r = await screen.findByTestId("jarvis-brief-review");
+    expect(within(r).getByRole("link", { name: "Use the new-enquiry form instead" }).getAttribute("href")).toBe("/sales/new");
+    expect(screen.queryByTestId("jarvis-card")).toBeNull();
+    fireEvent.change(within(r).getByLabelText("Text that would be sent to the AI model"), { target: { value: "Title: Gala" } });
+    fireEvent.click(within(r).getByTestId("brief-review-send"));
+    await screen.findByTestId("jarvis-card");
+    expect(api.calls.send[1]![0]).toMatchObject({ text: "Title: Gala\nThe crew bonus is AED 5,000.", intent: "enquiry", briefOutbound: "Title: Gala" });
+  });
+  it("What JARVIS remembers: lists the person's preferences, each can be changed or deleted, and the view is replaced (not duplicated) after a change", async () => {
+    const pref = { key: "english", label: "English spelling", value: "british", valueLabel: "British English", options: [{ value: "british", label: "British English" }, { value: "american", label: "American English" }] };
+    const memoryCalls: unknown[] = [];
+    const api = { ...fakeApi(), memory: async (a: { op: string }) => { memoryCalls.push(a); return { ok: true as const, kind: "memory" as const, text: a.op === "delete" ? "I am not remembering anything for you." : "This is what I remember for you. Only you can see it.", preferences: a.op === "delete" ? [] : [pref] }; } } as JarvisClientApi;
+    mount(api as never);
+    openPanel();
+    fireEvent.click(screen.getByTestId("jarvis-memory-open"));
+    const v = await screen.findByTestId("jarvis-memory");
+    expect((within(v).getByLabelText("English spelling") as HTMLSelectElement).value).toBe("british");
+    fireEvent.change(within(v).getByLabelText("English spelling"), { target: { value: "american" } });
+    await waitFor(() => expect(memoryCalls).toContainEqual({ op: "set", key: "english", value: "american" }));
+    fireEvent.click(within(await screen.findByTestId("jarvis-memory")).getByRole("button", { name: "Delete English spelling" }));
+    await waitFor(() => expect(screen.getByTestId("memory-text").textContent).toMatch(/not remembering anything/));
+    expect(memoryCalls).toContainEqual({ op: "delete", key: "english" });
+    expect(screen.getAllByTestId("jarvis-memory")).toHaveLength(1);
   });
 });
 

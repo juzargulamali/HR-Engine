@@ -19,6 +19,7 @@ import { fakeDeps, ID, mkOpp, newWorld, type World } from "./testing/fake-world"
 const KEY = "sk-ant-FICTIONAL-KEY-sentinel-0000";
 const MARK = "ZEBRA-MARKER-4471";
 const ERR_MSG = "SENTINEL-ERROR-MESSAGE-555";
+const CREATE = "jarvis.sales.enquiry.create_from_brief";
 const BODY_SENTINEL = "SENTINEL-RESPONSE-BODY-777";
 
 type Fetch = ReturnType<typeof vi.fn>;
@@ -30,10 +31,10 @@ let w: World;
 let enquiryId: string;
 const callers: Caller[] = [
   { id: "jarvis.sales.enquiry.create_from_brief", label: "create from brief", ask: (a) => a.send({ companyId: ID.co1, text: `Title: Harbour gala\n${MARK}` }), valid: { title: "Harbour gala LED wall", source: "whatsapp" }, cardKind: "enquiry", tag: "brief", tags: ["brief"] },
-  { id: "jarvis.sales.draft_reply", label: "draft reply", ask: (a) => a.send({ companyId: ID.co1, text: `Please can you quote for two LED walls? ${MARK}`, intent: "reply", enquiryId }), valid: { subject: "Re: gala", body: "Thank you for your message." }, cardKind: "reply.draft", tag: null, tags: ["enquiry", "conversation"] },
-  { id: "jarvis.sales.enquiry.update", label: "update enquiry", ask: (a) => a.send({ companyId: ID.co1, text: `venue is Harbour Hall ${MARK}`, intent: "update", enquiryId }), valid: { location: "Harbour Hall" }, cardKind: "enquiry.update", tag: null, tags: ["current", "request"] },
+  { id: "jarvis.sales.draft_reply", label: "draft reply", ask: (a) => a.send({ companyId: ID.co1, text: `Please can you quote for two LED walls? ${MARK}`, intent: "reply", enquiryId }), valid: { subject: "Re: gala", body: "Thank you for your message." }, cardKind: "reply.draft", tag: null, tags: ["conversation"] },
+  { id: "jarvis.sales.enquiry.update", label: "update enquiry", ask: (a) => a.send({ companyId: ID.co1, text: `venue is Harbour Hall ${MARK}`, intent: "update", enquiryId }), valid: { location: "Harbour Hall" }, cardKind: "enquiry.update", tag: null, tags: ["request"] },
   { id: "jarvis.sales.meeting.record", label: "meeting notes", ask: (a) => a.send({ companyId: ID.co1, text: `Met the agency about the gala. ${MARK}`, intent: "meeting", enquiryId }), valid: { activityKind: "meeting", summary: "Met the agency about the gala." }, cardKind: "meeting.record", tag: "notes", tags: ["notes"] },
-  { id: "jarvis.sales.help.answer", label: "general help", ask: (a) => a.send({ companyId: ID.co1, text: `What is the capital of France? ${MARK}`, intent: "help" }), valid: { answer: "Paris is the capital of France." }, cardKind: "help.answer", tag: null, tags: ["question"] },
+  { id: "jarvis.sales.chat.reply", label: "general chat", ask: (a) => a.send({ companyId: ID.co1, text: `What is the capital of France? ${MARK}` }), valid: { reply: "Paris is the capital of France." }, cardKind: "chat.reply", tag: null, tags: ["message"] },
 ];
 
 let f: Fetch;
@@ -42,7 +43,7 @@ const make = (fetchImpl: Fetch) => createAssistant(fakeDeps(w, { provider: creat
 const bodyOf = (n = 0) => JSON.parse(((f.mock.calls[n] as unknown as [string, RequestInit])[1]).body as string);
 const providerLogs = () => info.mock.calls.map((c) => { try { return JSON.parse(String(c[0])) as Record<string, unknown>; } catch { return null; } }).filter((l): l is Record<string, unknown> => !!l && l.event === "provider");
 const allLogged = () => info.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
-const writes = () => w.rpcLog.filter((c) => !["jarvis_my_access", "jarvis_usage_take"].includes(c.name));
+const writes = () => w.rpcLog.filter((c) => !["jarvis_my_access", "jarvis_usage_take", "jarvis_pref_list"].includes(c.name));
 
 beforeAll(() => registerAllJarvisActions());
 beforeEach(() => {
@@ -111,9 +112,15 @@ describe.each(callers)("fail safe: $label", (c) => {
   it.each(variants)("%s: malformed, no review card, no write, no usage beyond the one request, fetch called exactly once", async (_n, response) => {
     f = vi.fn(async () => json(response));
     const r = await c.ask(make(f));
-    expect(r).toMatchObject({ ok: false, code: "provider_error" });
-    expect((r as { message: string }).message).toMatch(/could not make sense/);
-    expect("card" in r).toBe(false);
+    if (c.id === CREATE) {
+      // Creating an enquiry is not a dead end: the card is built from what Enginious OS read itself, says so, and cannot be confirmed until the person completes it.
+      expect(r).toMatchObject({ ok: true, kind: "card", confirmation: null });
+      expect((r as { card: { notice: string; valid: boolean } }).card).toMatchObject({ valid: false, notice: expect.stringMatching(/could not be used/) });
+    } else {
+      expect(r).toMatchObject({ ok: false, code: "provider_error" });
+      expect((r as { message: string }).message).toMatch(/could not make sense/);
+      expect("card" in r).toBe(false);
+    }
     expect(f).toHaveBeenCalledTimes(1);
     expect(writes()).toEqual([]);
     expect(w.ledger.size).toBe(0);
@@ -191,7 +198,7 @@ describe("diagnostics: one sanitised event per failure", () => {
   });
   it("the provider error carries only sanitised fields and never the key or the body", async () => {
     const p = createAnthropicProvider({ apiKey: KEY, model: "m", fetchImpl: (async () => json({ error: { type: "invalid_request_error", message: `${ERR_MSG} ${KEY}` } }, 400)) as unknown as typeof fetch });
-    const req: StructuredRequest = { task: "t", instructions: "SENTINEL-INSTRUCTION-TEXT", input: MARK, jsonSchema: { type: "object", properties: { title: { type: "string" } } }, maxOutputTokens: 100, timeoutMs: 1000 };
+    const req: StructuredRequest = { sources: ["user_text"], task: "t", instructions: "SENTINEL-INSTRUCTION-TEXT", input: MARK, jsonSchema: { type: "object", properties: { title: { type: "string" } } }, maxOutputTokens: 100, timeoutMs: 1000 };
     const e = (await p.structured(req).catch((x) => x)) as JarvisProviderError;
     expect(e).toBeInstanceOf(JarvisProviderError);
     expect(e).toMatchObject({ kind: "http", status: 400, apiErrorType: "invalid_request_error" });
@@ -205,12 +212,12 @@ describe("diagnostics: one sanitised event per failure", () => {
     await a.send({ companyId: ID.co1, text: "Title: x\n[[provider-timeout]]" });
     expect(providerLogs().map((l) => [l.failureClass, l.status])).toEqual([["http", 500], ["timeout", null]]);
   });
-  it("post-provider malformed results (an empty draft body, an empty help answer) are logged once too", async () => {
+  it("post-provider malformed results (an empty draft body, an empty chat answer) are logged once too", async () => {
     f = vi.fn(async () => json(toolUse({ subject: "x", body: "" })));
     expect(await callers[1]!.ask(make(f))).toMatchObject({ ok: false, code: "provider_error" });
-    f = vi.fn(async () => json(toolUse({ answer: "   " })));
+    f = vi.fn(async () => json(toolUse({ reply: "   " })));
     expect(await callers[4]!.ask(make(f))).toMatchObject({ ok: false, code: "provider_error" });
-    expect(providerLogs().map((l) => [l.actionId, l.failureClass])).toEqual([["jarvis.sales.draft_reply", "malformed"], ["jarvis.sales.help.answer", "malformed"]]);
+    expect(providerLogs().map((l) => [l.actionId, l.failureClass])).toEqual([["jarvis.sales.draft_reply", "malformed"], ["jarvis.sales.chat.reply", "malformed"]]);
   });
 });
 
@@ -228,7 +235,8 @@ describe("no automatic retry anywhere: fetch is called exactly once per request"
     for (const c of callers) {
       f = vi.fn(impl);
       const r = await c.ask(make(f));
-      expect(r).toMatchObject({ ok: false, code: "provider_error" });
+      if (_n === "malformed" && c.id === CREATE) expect(r).toMatchObject({ ok: true, kind: "card", confirmation: null });
+      else expect(r).toMatchObject({ ok: false, code: "provider_error" });
       expect(f, c.id).toHaveBeenCalledTimes(1);
       expect(writes(), c.id).toEqual([]);
     }

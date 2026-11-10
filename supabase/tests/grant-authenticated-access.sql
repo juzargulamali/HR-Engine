@@ -25,6 +25,10 @@ begin
     revoke all on table jarvis_settings, jarvis_pilot_users, jarvis_pilot_companies, jarvis_action_ledger, jarvis_usage, jarvis_proof_key from public, anon, authenticated;
     grant select on table jarvis_action_ledger to authenticated;
   end if;
+  -- migration 20261226000100: no table privilege at all (the functions are the only way in).
+  if to_regclass('public.jarvis_preferences') is not null then
+    revoke all on table jarvis_preferences, jarvis_knowledge_suggestions from public, anon, authenticated;
+  end if;
 end $$;
 
 -- Keep future tables covered automatically without editing this file again.

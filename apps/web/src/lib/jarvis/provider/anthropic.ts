@@ -21,7 +21,9 @@ function toolInput(body: unknown, jsonSchema: Record<string, unknown>): Record<s
   const b = body as { content?: unknown; stop_reason?: unknown };
   if (b.stop_reason === "max_tokens" || !Array.isArray(b.content)) return null;
   const block = b.content.find((x): x is { input?: unknown } => !!x && typeof x === "object" && (x as { type?: unknown }).type === "tool_use" && (x as { name?: unknown }).name === TOOL);
-  const input = block?.input;
+  // With `tool_choice: auto` the model sometimes writes the object as text instead of calling the tool (seen with long, detailed briefs). A text block that IS one JSON
+  // object is accepted on the same terms as the tool input (a plain object with at least one expected key); prose is still rejected.
+  const input = block?.input ?? jsonFromText(b.content);
   if (!input || typeof input !== "object" || Array.isArray(input)) return null;
   const proto = Object.getPrototypeOf(input);
   if (proto !== Object.prototype && proto !== null) return null;
@@ -29,6 +31,17 @@ function toolInput(body: unknown, jsonSchema: Record<string, unknown>): Record<s
   const expected = props && typeof props === "object" ? Object.keys(props) : [];
   if (expected.length > 0 && !expected.some((k) => Object.prototype.hasOwnProperty.call(input, k))) return null;
   return input as Record<string, unknown>;
+}
+
+function jsonFromText(content: unknown[]): unknown {
+  for (const x of content) {
+    const text = x && typeof x === "object" && (x as { type?: unknown }).type === "text" ? (x as { text?: unknown }).text : null;
+    if (typeof text !== "string") continue;
+    const m = /^\s*(?:```(?:json)?\s*)?(\{[\s\S]*\})\s*(?:```)?\s*$/.exec(text);
+    if (!m) continue;
+    try { return JSON.parse(m[1]!); } catch { /* not JSON: keep looking */ }
+  }
+  return undefined;
 }
 
 /** The API's `error.type` and nothing else from the error body (its message is never read), only when it is a short lowercase token. */
