@@ -51,7 +51,7 @@ function extractEnquiry(text: string): Record<string, unknown> {
   out.nextTitle = next ? next.replace(/\s+on\s+\d{4}-\d{2}-\d{2}.*$/i, "").trim() || null : null;
   out.nextDate = iso(labelled(text, ["due", "next date"])) ?? iso(next);
   out.nextKind = next ? (/\bemail\b/i.test(next) ? "email" : /\bmeet/i.test(next) ? "meeting" : /\bcall\b/i.test(next) ? "call" : /\bproposal\b/i.test(next) ? "proposal" : "other") : null;
-  const summary = free.slice(out.title && free[0] === out.title ? 1 : 0).join(" ").slice(0, 400);
+  const summary = free.slice(out.title && free[0] === out.title ? 1 : 0).join(" ");
   out.briefSummary = summary || labelled(text, ["summary", "brief"]);
   return out;
 }

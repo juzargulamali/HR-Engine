@@ -216,6 +216,14 @@ export function hasSubject(text: string): boolean {
   return concepts(text, true).some((c) => !VERBS.has(c));
 }
 
+/**
+ * Does the question NAME a subject the app knows: one of the concepts above (an enquiry, a follow-up, leave), beyond what to do with it? Ordinary words the matcher has no
+ * concept for ("next", "year", "work") do not name one. Used to decide whether a question that points at the current screen ("here") is about something else.
+ */
+export function namesKnownSubject(text: string): boolean {
+  return concepts(text, true).some((c) => !VERBS.has(c) && Object.prototype.hasOwnProperty.call(CONCEPTS, c));
+}
+
 /** The published guides written for a screen, in the Map's order: the fallback for any question about the screen the person is on. */
 export function screenGuides(index: GuidanceIndex, screen: string | null): GuidanceEntry[] {
   return screen ? index.items.filter((i) => i.entry.screens?.includes(screen)).map((i) => i.entry) : [];

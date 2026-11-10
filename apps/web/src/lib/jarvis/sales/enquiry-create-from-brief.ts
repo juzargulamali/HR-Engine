@@ -12,7 +12,7 @@ import { findDuplicateEnquiries } from "./duplicates";
 import { emptyValues, enquiryValuesSchema, LIMITS, questionFor, validateEnquiry } from "./enquiry-values";
 import { EXTRACTION_INSTRUCTIONS, EXTRACTION_JSON_SCHEMA, EXTRACTION_TASK, sanitiseExtraction, type Extraction } from "./extraction";
 import { findProtectedContent } from "../protected";
-import { BUDGET_UNCLEAR_NOTE, prepareBrief, RESTRICTED_BRIEF_MESSAGE, withheldNote } from "./brief-outbound";
+import { BUDGET_UNCLEAR_NOTE, madeOutboundContact, NO_SUMMARY_NOTE, NO_SUMMARY_TOO_LONG_NOTE, prepareBrief, projectBrief, RESTRICTED_BRIEF_MESSAGE, withheldNote } from "./brief-outbound";
 import { emptyChoice, lookupOrganisation, OrgLookupError, selectedChoice, verifyOrganisation } from "./organisations";
 
 export const CREATE_FROM_BRIEF_ID = "jarvis.sales.enquiry.create_from_brief";
@@ -143,25 +143,32 @@ export const createEnquiryFromBrief: JarvisActionDefinition<CreateFromBriefInput
         if (prepared.parties.client) ex.clientName = prepared.parties.client;
         if (ex.agencyName && ex.clientName && ex.agencyName === ex.clientName && !prepared.parties.agency) ex.agencyName = null;
         ex.currency = prepared.budget.currency; ex.value = prepared.budget.value; ex.budgetNote = prepared.budget.note;
-        // The ORIGINAL brief is what the review card holds (nothing is cut): only a brief longer than the field keeps the summary there, and the card says so.
+        // "Agency call (outbound)" only when the text shows Enginious made the contact: an incoming call is never recorded as outbound. Left empty, the card asks.
+        if (ex.source === "agency_call" && !madeOutboundContact(input.brief)) ex.source = null;
+        // The Brief field takes the model's SUMMARY, and only when it is one (not the pasted text again, no instruction to JARVIS). When there is none, the card says so
+        // and holds the person's own text, labelled as such: copied input is never presented as a summary. Nothing is shortened to fit.
+        const summary = fallback ? null : projectBrief(ex.briefSummary, input.brief);
         const fits = input.brief.trim().length <= LIMITS.brief;
+        const given = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+        const dropped = (["scope", "briefSummary"] as const).filter((k) => typeof given[k] === "string" && (given[k] as string).trim() !== "" && ex[k] === null);
         const notices = [
           fallback ? "The AI model's answer could not be used, so I filled in only what I could read myself. Please complete the rest below, or use the new-enquiry form." : null,
+          summary ? null : fits ? NO_SUMMARY_NOTE : NO_SUMMARY_TOO_LONG_NOTE,
+          dropped.includes("scope") ? "The scope the AI model wrote was too long for the field, so it was not used and nothing was shortened silently. Write the scope below." : null,
           prepared.budgetUnclear ? BUDGET_UNCLEAR_NOTE : null,
-          input.outbound ? "The AI model received the version you reviewed. Your original brief is kept below and is saved only when you create the enquiry." : withheldNote(prepared),
-          fits ? null : `Your brief is longer than the Brief field holds (${input.brief.trim().length} of ${LIMITS.brief} characters), so the field has a summary. Nothing was cut from what you pasted: attach the full text to the enquiry after creating it.`,
+          input.outbound ? "The AI model received the version you reviewed. The Brief below is a summary; your pasted text is not saved." : withheldNote(prepared),
         ].filter((x): x is string => !!x);
+        ex.briefSummary = summary;
         const agency = await choiceFor(ctx, "agency", null, ex.agencyName, undefined);
         const client = await choiceFor(ctx, "client", null, ex.clientName, undefined);
         const values: EnquiryValues = {
           ...emptyValues(ctx.companyId), title: ex.title ?? "", source: ex.source ?? "", agencyOrgId: agency.id, clientOrgId: client.id, currency: ex.currency, value: ex.value,
-          budgetNote: ex.budgetNote, brief: fits ? input.brief.trim() : ex.briefSummary, eventStart: ex.eventStart, eventEnd: ex.eventEnd, installStart: ex.installStart, location: ex.location,
+          budgetNote: ex.budgetNote, brief: summary ?? (fits ? input.brief.trim() : null), eventStart: ex.eventStart, eventEnd: ex.eventEnd, installStart: ex.installStart, location: ex.location,
           technologies: ex.technologies, scope: ex.scope, waitingOn: ex.waitingOn, nextTitle: ex.nextTitle ?? "", nextDate: ex.nextDate ?? "", nextKind: ex.nextKind ?? "other",
         };
         const fromBrief = Object.entries(ex).filter(([k, v]) => k !== "agencyName" && k !== "clientName" && v !== null && v !== "" && !(Array.isArray(v) && v.length === 0)).map(([k]) => k);
         if (agency.choice.typedName) fromBrief.push("agencyOrgId");
         if (client.choice.typedName) fromBrief.push("clientOrgId");
-        if (fits && !fromBrief.includes("briefSummary")) fromBrief.push("briefSummary");
         const built = await build(ctx, values, agency.choice, client.choice, fromBrief);
         return { ...built, card: { ...built.card, notice: notices.join(" ") || null } };
       }

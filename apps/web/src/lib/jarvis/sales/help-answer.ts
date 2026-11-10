@@ -2,7 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { classifyRequest, EXCLUSION_MESSAGE } from "../classifier";
 import { GUIDANCE, guidanceIndex, type GuidanceEntry } from "../help/guidance";
-import { asksPurpose, hasSubject, matchByMeaning, screenGuides } from "../help/match";
+import { asksPurpose, hasSubject, matchByMeaning, namesKnownSubject, screenGuides } from "../help/match";
 import { approvedScreens, placesNamed, resolveScreen } from "../help/screens";
 import { ABOUT_THIS_SCREEN } from "../router";
 import type { HelpAnswerCard } from "../protocol";
@@ -64,12 +64,16 @@ export const helpAnswer: JarvisActionDefinition<HelpAnswerInput, HelpAnswerInput
       const [first, ...rest] = entries;
       return done({ mode: "guidance", topics: [], note: NOTE_GUIDANCE, screen: forScreen ? { label: screen!.label } : null, lead: lead(first!, forScreen), entries: rest.length > 1 ? [view(first!)] : entries.map(view), choices: rest.length > 1 ? rest.map((g) => ({ id: g.id, title: g.title })) : [], question: input.question });
     };
+    const here = screenGuides(index, screen?.id ?? null);
+    // A question that points at the current screen ("here", "this page") KEEPS that screen as its subject unless the person explicitly names another one: a subject the
+    // app knows (an enquiry, a follow-up, leave) or another screen by its name. Ordinary words around it ("... get work next year?") do not change the subject.
+    const namesOther = namesKnownSubject(input.question) || placesNamed(input.question).some((p) => p.href !== screen?.id);
+    if (aboutHere && here.length > 0 && !namesOther) return answer(here.slice(0, 4), true);
     const m = matchByMeaning(index, input.question, screen?.id ?? null);
     // An explicit question about something (this screen or another) is answered by the guide that fits it.
     if (m.kind === "answer") return answer(m.entries, !!screen && m.entries.some((g) => g.screens?.includes(screen.id)) && (aboutHere || purpose || m.score >= 1));
     // Nothing fits on its own, but the person is asking about the screen they are on (or what it is for) and that screen HAS a published guide: that guide is the answer.
     // "No approved guidance" is said only when there really is none.
-    const here = screenGuides(index, screen?.id ?? null);
     if (here.length > 0 && (aboutHere || purpose || !hasSubject(input.question))) return answer(here.slice(0, 4), true);
     if (m.kind === "ambiguous") return done({ mode: "choose", entries: [], topics: [], note: NOTE_CHOOSE, choices: m.options.map((g) => ({ id: g.id, title: g.title })), question: input.question });
     // Nothing fits. Say so honestly: name the screen if that was the question, offer the navigation's own entries the question named, and the closest topics.

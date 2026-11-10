@@ -1,5 +1,6 @@
 import { describeProtected, findProtectedContent, wholeTextRestricted, type ProtectedCategory } from "../protected";
 import { RESTRICTED_TEXT_MESSAGE } from "../outbound-messages";
+import { intendedOutcome } from "../router";
 import { LIMITS } from "./enquiry-values";
 
 /**
@@ -17,7 +18,7 @@ import { LIMITS } from "./enquiry-values";
  *   - email addresses and phone numbers: replaced by "[contact withheld]" (they are not needed to prepare an enquiry).
  *
  * What the model reads is separate from what the app saves: the client, agency and end client named on labelled lines and the client's budget are read HERE, not taken from
- * the model. The original brief stays in Enginious OS for the review card and is saved only by the confirmed enquiry.
+ * the model. The Brief field of the card takes the model's SUMMARY only after `projectBrief` below has checked it is one; otherwise the card says so.
  */
 export interface PreparedBrief {
   /** The text for the provider (when `separable`), or the proposed clean excerpt for the person to review (when not). */
@@ -135,5 +136,29 @@ export const BUDGET_UNCLEAR_NOTE = "The brief mentions a budget that is not one 
 
 export const withheldNote = (p: Pick<PreparedBrief, "withheld">): string | null => {
   const parts = p.withheld.map((w) => `${w.label} (${w.count})`);
-  return parts.length === 0 ? null : `Not sent to Anthropic: ${parts.join("; ")}. Your original brief is kept below and is saved only when you create the enquiry.`;
+  return parts.length === 0 ? null : `Not sent to Anthropic: ${parts.join("; ")}. The Brief below is a summary; your pasted text is not saved.`;
 };
+
+const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * The model's summary, accepted as the enquiry's Brief only when it IS a summary. Returns null (the card then says no summary could be written) when it is empty or is the
+ * pasted text again (nearly as long as it, or a long verbatim run of it). A sentence that is an instruction to JARVIS ("Turn this conversation into an enquiry ...") is
+ * dropped: it is not a fact about the project. Nothing is cut to fit: the length limit is enforced earlier and an over-long summary is not used at all.
+ */
+export function projectBrief(summary: string | null, original: string): string | null {
+  if (!summary) return null;
+  const kept = summary.split(/(?<=[.!?:])\s+/).filter((s) => intendedOutcome(s) === null && !/\bjarvis\b/i.test(s)).join(" ").trim();
+  const s = norm(kept), o = norm(original);
+  if (!s) return null;
+  if (o.length >= 300 && (s.length >= 0.8 * o.length || (s.length >= 240 && o.includes(s)))) return null;
+  return kept;
+}
+
+/** Does the text show that Enginious itself made the call or the approach? Only then is "Agency call (outbound)" a source the model may choose. */
+export function madeOutboundContact(text: string): boolean {
+  return /\b(?:i|we|our\s+team|enginious)\s+(?:just\s+|have\s+|had\s+)?(?:called|rang|phoned|cold[-\s]?called|reached\s+out|contacted|approached)\b|\boutbound\b|\bcold[-\s]?call/i.test(text);
+}
+
+export const NO_SUMMARY_NOTE = "I could not write a summary of this brief, so the Brief field holds your text as you pasted it, not a summary. Edit it down before you create the enquiry.";
+export const NO_SUMMARY_TOO_LONG_NOTE = "I could not write a summary of this brief and your text is longer than the Brief field holds, so the Brief field is empty. Write a short brief below; nothing was cut from what you pasted.";

@@ -273,6 +273,15 @@ describe("navigation guidance: matched by meaning and by the current screen", ()
         expect(c.lead, `${q} @ ${path}`).toBe(`What ${label} helps you do`);
       }
     }
+    // REGRESSION (Preview): a follow-up that says "here" keeps the current screen as its subject; ordinary words around it ("next", "year", "work") do not select another guide
+    for (const q of ["what is benifit here? How does it help us get work next year?", "How does this page help us get more work next year?", "what should I see here first thing next week?"]) {
+      for (const [path, id] of [["/sales/events", "sales-events"], ["/sales/outreach", "sales-outreach"], ["/leave", "people-leave"]] as const) {
+        const c = cardOf(await on(q, path));
+        expect(c.mode, `${q} @ ${path}`).toBe("guidance");
+        expect(c.entries[0]!.id, `${q} @ ${path}`).toBe(id);
+      }
+    }
+    expect(ids(await on("how do follow-ups help us here next year?", "/sales/events"))[0]).toMatch(/follow-ups$/); // another subject, explicitly named, still wins
     // the nearest alternative: an explicit question about ANOTHER screen takes precedence over the current one
     expect(ids(await on("what is the benefit of outreach here?", "/sales/events"))[0]).toBe("sales-outreach");
     expect(ids(await on("What is the purpose of follow-ups?", "/sales/events"))[0]).toMatch(/follow-ups$/);

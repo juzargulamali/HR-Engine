@@ -619,7 +619,8 @@ describe("a realistic priced brief: the submitted Sales context goes out, the ap
     expect(cut.body().max_tokens).toBeGreaterThanOrEqual(2500);
     expect(r1.confirmation).toBeNull();
     expect(r1.card.notice).toMatch(/could not be used/);
-    expect(r1.card.values).toMatchObject({ brief: REAL, value: null, currency: null }); // read locally: the original brief is kept, the range is not turned into a number
+    expect(r1.card.notice).toMatch(/holds your text as you pasted it, not a summary/); // copied input is never presented as a summary
+    expect(r1.card.values).toMatchObject({ brief: REAL, value: null, currency: null }); // read locally: the person's own text, labelled as such; the range is not turned into a number
     expect(r1.card.agency.selectedName).toBe("Fictional Wave Agency");
     expect(r1.card.questions.map((q) => q.field)).toEqual(expect.arrayContaining(["title", "source"])); // asks only for what is missing
     // Cause 2: with tool_choice "auto" the model may write the object as text instead of calling the tool. Now: one JSON object in a text block is accepted on the same terms.
@@ -628,6 +629,42 @@ describe("a realistic priced brief: the submitted Sales context goes out, the ap
     // Prose is still not accepted as data.
     const prose = await live({ content: [{ type: "text", text: "I would need more information to do that." }] });
     expect(card(await prose.assistant.send({ companyId: ID.co1, text: REAL, intent: "enquiry" })).card.notice).toMatch(/could not be used/);
+    expect(creates()).toHaveLength(0);
+  });
+
+  it("REGRESSION (Preview): the Brief field is a SUMMARY, never the pasted text presented as one; an instruction to JARVIS is not part of it; an incoming call is not 'Agency call (outbound)'; nothing is shortened silently", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const ask = async (model: Record<string, unknown>, text = REAL) => { const l = await live(toolUse({ ...MODEL, ...model })); return { r: card(await l.assistant.send({ companyId: ID.co1, text, intent: "enquiry" })), body: l.body }; };
+    // 1. a real summary is what the Brief holds; the request tells the model what a brief is and what to leave out
+    const ok = await ask({});
+    expect(ok.r.card.values.brief).toBe(MODEL.briefSummary);
+    expect(ok.r.card.notice ?? "").not.toMatch(/not a summary/);
+    for (const rule of [/instructions addressed to you or to JARVIS/, /greetings, sign-offs and signatures/, /other leads or projects/, /no longer apply/, /corrected fact only/, /Never copy the text/, /Do not drop a requirement/, /Supplied by the client or agency/, /Excluded:/, /Depends on:/, /Not yet confirmed:/, /asked to PROVIDE/, /do not add a model, a standard or a quantity/, /agency_call means Enginious made the call/]) expect(ok.body().system).toMatch(rule);
+    // 2. the model hands the pasted text back (whole, or a long verbatim run of it): NOT accepted as a summary, and the card says so
+    for (const copied of [REAL, REAL.split("\n").slice(10, 12).join(" ")]) {
+      const c = (await ask({ briefSummary: copied.slice(0, 1500) })).r;
+      expect(c.card.notice).toMatch(/could not write a summary[\s\S]*holds your text as you pasted it, not a summary/);
+      expect(c.card.values.brief).toBe(REAL);
+    }
+    // 3. an instruction to JARVIS that the model carried into the summary is dropped; the facts stay
+    const instructed = (await ask({ briefSummary: "Turn this client conversation into an enquiry for review. Interactive treasure hunt with four stations for Fictional Harbour Brands." }, `Turn this client conversation into an enquiry for review.\n${REAL}`)).r;
+    expect(instructed.card.values.brief).toBe("Interactive treasure hunt with four stations for Fictional Harbour Brands.");
+    // 4. a summary or scope longer than its field is not cut to fit: it is not used, and the card says so
+    const long = (await ask({ briefSummary: "A fact about the job. ".repeat(100), scope: "Requirement. ".repeat(400) })).r;
+    expect(long.card.values.scope).toBeNull();
+    expect(long.card.notice).toMatch(/scope the AI model wrote was too long[\s\S]*nothing was shortened silently/);
+    expect(long.card.notice).toMatch(/not a summary/);
+    // 5. source: an incoming call is never "Agency call (outbound)"; left unresolved, the card asks. An outbound call the text states is kept.
+    const incoming = (await ask({ source: "agency_call" }, REAL.replace("Source: Referral", "Fictional Wave Agency called this morning about the job."))).r;
+    expect(incoming.card.values.source).toBe("");
+    expect(incoming.card.questions.map((q) => q.field)).toContain("source");
+    expect(incoming.confirmation).toBeNull();
+    const outboundCall = (await ask({ source: "agency_call" }, REAL.replace("Source: Referral", "We called Fictional Wave Agency this morning and they briefed us."))).r;
+    expect(outboundCall.card.values.source).toBe("agency_call");
+    // 6. technologies and scope are the model's, passed through unchanged: what Enginious provides in the rows, what the agency supplies in the scope
+    const tech = (await ask({ technologies: [{ name: "Gesture-controlled experience", qty: 1 }], scope: "One gesture-controlled experience.\nSupplied by the client or agency: LED wall x2.\nNot yet confirmed: number of stations." })).r;
+    expect(tech.card.values.technologies).toEqual([{ name: "Gesture-controlled experience", qty: 1 }]);
+    expect(tech.card.values.scope).toMatch(/Supplied by the client or agency: LED wall x2\.\nNot yet confirmed/);
     expect(creates()).toHaveLength(0);
   });
 
@@ -644,7 +681,7 @@ describe("a realistic priced brief: the submitted Sales context goes out, the ap
     expect(r.card.values).toMatchObject({
       title: "Harbour Quest interactive treasure hunt", source: "referral", location: "Fictional Harbour Hall, Dubai", eventStart: "2099-02-05", eventEnd: "2099-02-07", installStart: "2099-02-03",
       technologies: [{ name: "LED wall", qty: 2 }, { name: "Touch table", qty: 4 }, { name: "RFID wristband reader", qty: 12 }],
-      nextTitle: "Call the agency to confirm the floor plan", nextDate: DUE, nextKind: "call", currency: null, value: null, brief: REAL,
+      nextTitle: "Call the agency to confirm the floor plan", nextDate: DUE, nextKind: "call", currency: null, value: null, brief: MODEL.briefSummary,
     });
     expect(r.card.values.budgetNote).toBe("Client budget: AED 50,000–65,000 for the game build."); // the original wording, for the reviewer
     expect(r.card.agency).toMatchObject({ status: "matched", selectedName: "Fictional Wave Agency" });   // the client the brief comes through
@@ -660,7 +697,7 @@ describe("a realistic priced brief: the submitted Sales context goes out, the ap
     expect(await assistant.confirm(args)).toMatchObject({ ok: true, status: "done", replayed: true });
     expect(w.opps).toHaveLength(1);
     expect(w.createdArgs).toHaveLength(1);
-    expect(w.createdArgs[0]).toMatchObject({ title: MODEL.title, brief: REAL, value: null, currency: null, budget_note: "Client budget: AED 50,000–65,000 for the game build.", event_start: "2099-02-05", install_start: "2099-02-03" });
+    expect(w.createdArgs[0]).toMatchObject({ title: MODEL.title, brief: MODEL.briefSummary, value: null, currency: null, budget_note: "Client budget: AED 50,000–65,000 for the game build.", event_start: "2099-02-05", install_start: "2099-02-03" });
     // and the logs hold none of the text
     const logged = info.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
     for (const p of ["185,000", "85 per item", "Harbour Quest", "wristband", "Fictional Wave Agency"]) expect(logged).not.toContain(p);
@@ -687,8 +724,8 @@ describe("a realistic priced brief: the submitted Sales context goes out, the ap
     expect(f).toHaveBeenCalledTimes(1);
     // the submitted Sales context went out as written, pricing and the budget range included
     for (const piece of ["Project: Fictional Harbour Quest treasure hunt", "Venue: Fictional Harbour Hall, Dubai", "Dates: 2099-02-05 to 2099-02-07", "wristbands 85 per item; client budget AED 50,000-65,000"]) expect(body().messages[0]!.content).toContain(piece);
-    // an EDITABLE card: the parties in their own fields, the range not turned into one exact budget, the original brief kept, and it asks only for what is missing
-    expect(r.card.values).toMatchObject({ title: "Fictional Harbour Quest treasure hunt", location: "Fictional Harbour Hall, Dubai", eventStart: "2099-02-05", eventEnd: "2099-02-07", value: null, currency: null, brief });
+    // an EDITABLE card: the parties in their own fields, the range not turned into one exact budget, the Brief a summary (not the pasted text), and it asks only for what is missing
+    expect(r.card.values).toMatchObject({ title: "Fictional Harbour Quest treasure hunt", location: "Fictional Harbour Hall, Dubai", eventStart: "2099-02-05", eventEnd: "2099-02-07", value: null, currency: null, brief: MODEL.briefSummary });
     expect(r.card.values.budgetNote).toMatch(/50,000-65,000/);
     expect(r.card.agency.selectedName).toBe("Fictional Wave Agency");
     expect(r.card.client.selectedName).toBe("Fictional Harbour Brands");
@@ -856,7 +893,7 @@ describe("a realistic priced brief: the submitted Sales context goes out, the ap
     for (const t of ["Client budget: AED 50000-65000", "Budget 50000 - 65000 AED", "Client budget: 120000-150000", "Quote 185000 for 12000 items", "Event 2099-02-05 to 2099-02-07", "Hall 2 is 1200 sqm, stand 3040-3041"]) expect(prepareBrief(`Title: X\n${t}`).outbound, t).toContain(t);
   });
 
-  it("a brief that mixes usable Sales text with restricted material is NOT sent as it is: the person gets a clean excerpt to send (or the form), restricted text in the edited version is refused, and the original still reaches the card", async () => {
+  it("a brief that mixes usable Sales text with restricted material is NOT sent as it is: the person gets a clean excerpt to send (or the form), restricted text in the edited version is refused, and the restricted sentences do not reach the card", async () => {
     const mixed = "Title: Fictional staff party\nAgency: Fictional Wave Agency\nNext: Call on 2099-01-12\nThe walls must be up by noon at 85 per item. The organiser Lina is recovering from surgery. Crew salary bonus is AED 5,000 each, IBAN AE07 0331 2345 6789 0123 456.";
     const review = await a.send({ companyId: ID.co1, text: mixed });
     if (!review.ok || review.kind !== "brief_review") throw new Error(`expected a review of the outbound text, got ${JSON.stringify(review).slice(0, 200)}`);
@@ -871,7 +908,8 @@ describe("a realistic priced brief: the submitted Sales context goes out, the ap
     const edited = card(await a.send({ companyId: ID.co1, text: mixed, intent: "enquiry", briefOutbound: review.outbound }));
     expect(simulatedProviderCalls).toHaveLength(1);
     expect(simulatedProviderCalls[0]!.input).toBe(review.outbound);
-    expect(edited.card.values.brief).toBe(mixed); // the ORIGINAL is what the review card holds
+    expect(edited.card.values.brief).toBe("The walls must be up by noon at 85 per item."); // a summary of the version that was sent: the restricted sentences are not on the card
+    expect(JSON.stringify(edited.card.values)).not.toMatch(/surgery|IBAN|AE07/);
     expect(edited.card.notice).toMatch(/version you reviewed/);
     expect(await a.propose({ actionId: "jarvis.sales.enquiry.create_from_brief", companyId: ID.co1, input: { mode: "extract", brief: mixed, outbound: "salary bonus AED 5,000" } })).toMatchObject({ ok: false, code: "protected_content" });
     expect(creates()).toHaveLength(0);

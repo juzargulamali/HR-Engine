@@ -13,8 +13,10 @@ export const EXTRACTION_INSTRUCTIONS = [
   "You read a pasted WhatsApp message, email or rough brief for an events and technology company and extract the fields of a new sales enquiry.",
   "AGENCY = the intermediary company that sends the brief on behalf of someone else. END CLIENT = the brand or organisation the event or work is actually for. If only one party appears, fill only that one and leave the other null. Never put the same organisation in both unless the text says so.",
   "Dates must be YYYY-MM-DD. If a date has no year, assume the next occurrence after the given today date. Do not invent a next action, a date, a value or a source the text does not give.",
-  "briefSummary: a neutral summary of what is wanted, at most 600 characters, using only facts from the text.",
-  "scope: the deliverables, the visitor or game journey and the technical requirements, kept specific, at most 1500 characters. technologies: each piece of equipment or technology with its quantity (1 when not stated).",
+  "source: choose a listed source only when the text shows it. agency_call means Enginious made the call to the agency (outbound). When someone called, wrote or came to Enginious and no listed source clearly fits, return null: the person chooses.",
+  "briefSummary: a concise, factual project brief in plain sentences, at most 1200 characters: what is wanted, for whom, where and when, and what is still undecided. Write it in your own words from the CURRENT facts: where the text corrects itself, give the corrected fact only. Leave out instructions addressed to you or to JARVIS, greetings, sign-offs and signatures, small talk, other leads or projects, and details the text says no longer apply. Never copy the text.",
+  "scope: what Enginious is asked to deliver: the deliverables, the visitor or game journey and the technical requirements with the quantities stated, kept specific, at most 3500 characters. Do not drop a requirement to save space. Then, each on its own line and only when the text gives it: 'Supplied by the client or agency: ...', 'Excluded: ...', 'Depends on: ...', 'Not yet confirmed: ...'.",
+  "technologies: what Enginious is asked to PROVIDE (each requested experience, technology or piece of equipment) with the quantity the text states; use 1 only when no quantity is given. Do not list equipment the client or agency supplies themselves (that belongs in scope), and do not add a model, a standard or a quantity the text does not give.",
   "[contact withheld] marks contact details you are not given: never guess them. Leave currency, value and budgetNote null: the budget is read separately, so do not turn a quoted price, a unit rate or a range into a value.",
 ].join("\n");
 
@@ -48,7 +50,7 @@ const shape = {
   title: s(LIMITS.title), source: z.enum(SOURCE_IDS as [string, ...string[]]).nullable(), agencyName: s(200), clientName: s(200),
   currency: z.preprocess((v) => (typeof v === "string" ? v.trim().toUpperCase() : null), z.string().regex(/^[A-Z]{3}$/).nullable()),
   value: z.preprocess((v) => (typeof v === "number" ? v : null), z.number().finite().min(0).max(1e12).nullable()),
-  budgetNote: s(LIMITS.budgetNote), briefSummary: s(600),
+  budgetNote: s(LIMITS.budgetNote), briefSummary: s(1500),
   eventStart: z.preprocess((v) => calendarDate(v), z.string().nullable()), eventEnd: z.preprocess((v) => calendarDate(v), z.string().nullable()), installStart: z.preprocess((v) => calendarDate(v), z.string().nullable()),
   location: s(LIMITS.location),
   technologies: z.array(z.object({ name: z.string().trim().min(1).max(LIMITS.techName), qty: z.coerce.number().int().min(1).max(100000) })).max(LIMITS.techRows),
