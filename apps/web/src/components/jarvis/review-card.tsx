@@ -140,6 +140,7 @@ export function ReviewCard({ state, companyStale, api, onState, onRegisterOrg }:
         <p className="text-xs text-muted-foreground">New enquiry for <strong className="text-foreground" data-testid="card-company">{card.company.name}</strong>. You will be the owner. Nothing is created until you press Create enquiry.</p>
       </header>
 
+      {card.notice ? <p className="rounded-md border border-border bg-secondary/50 px-2 py-1.5 text-xs" data-testid="card-notice">{card.notice}</p> : null}
       {companyStale ? <Alert variant="warning">The company changed after this review, so it can no longer be used. Paste the brief again for the new company.</Alert> : null}
       {card.questions.length > 0 && !companyStale ? (
         <div className="space-y-1 rounded-md border border-warning/40 bg-warning/10 p-2" data-testid="card-questions">
@@ -202,7 +203,7 @@ export function ReviewCard({ state, companyStale, api, onState, onRegisterOrg }:
               <option value="">Nobody</option><option value="client">The client</option><option value="internal">Our own team</option>
             </Select>
           ))}
-          {field("brief", "Brief (summary)", <Textarea id={idf("brief")} rows={3} maxLength={4000} value={draft.brief ?? ""} onChange={(e) => set("brief", e.target.value || null)} disabled={busy} />, "JARVIS keeps a short summary, not the pasted text.")}
+          {field("brief", "Brief", <Textarea id={idf("brief")} rows={3} maxLength={4000} value={draft.brief ?? ""} onChange={(e) => set("brief", e.target.value || null)} disabled={busy} />, "JARVIS keeps a short summary, not the pasted text.")}
           {field("scope", "Scope", <Textarea id={idf("scope")} rows={2} maxLength={4000} value={draft.scope ?? ""} onChange={(e) => set("scope", e.target.value || null)} disabled={busy} />)}
         </div>
       </details>

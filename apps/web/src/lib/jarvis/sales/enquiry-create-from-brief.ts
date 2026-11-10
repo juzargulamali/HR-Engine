@@ -9,15 +9,18 @@ import { proofRpcArgs } from "../token";
 import { proofRefusal } from "./rpc-outcome";
 import { JarvisRefusalError, type JarvisActionDefinition, type JarvisContext } from "../types";
 import { findDuplicateEnquiries } from "./duplicates";
-import { emptyValues, enquiryValuesSchema, questionFor, validateEnquiry } from "./enquiry-values";
-import { EXTRACTION_INSTRUCTIONS, EXTRACTION_JSON_SCHEMA, EXTRACTION_TASK, sanitiseExtraction } from "./extraction";
+import { emptyValues, enquiryValuesSchema, LIMITS, questionFor, validateEnquiry } from "./enquiry-values";
+import { EXTRACTION_INSTRUCTIONS, EXTRACTION_JSON_SCHEMA, EXTRACTION_TASK, sanitiseExtraction, type Extraction } from "./extraction";
+import { findProtectedContent } from "../protected";
+import { prepareBrief, restoreNames, withheldNote } from "./brief-outbound";
 import { emptyChoice, lookupOrganisation, OrgLookupError, selectedChoice, verifyOrganisation } from "./organisations";
 
 export const CREATE_FROM_BRIEF_ID = "jarvis.sales.enquiry.create_from_brief";
 
 const typedName = z.string().trim().max(200).nullable().optional();
 const inputSchema = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("extract"), brief: z.string().min(1).max(50_000) }),
+  // `outbound`: the text the person reviewed and edited to be sent instead of the automatic separation (only offered when the brief could not be separated safely).
+  z.object({ mode: z.literal("extract"), brief: z.string().min(1).max(50_000), outbound: z.string().min(1).max(50_000).optional() }),
   z.object({
     mode: z.literal("revise"),
     fields: z.record(z.string(), z.unknown()),
@@ -32,7 +35,7 @@ const FIELD_KEY: Record<OrgField, "agencyOrgId" | "clientOrgId"> = { agency: "ag
 const PROVIDER_WORDS: Record<string, string> = {
   timeout: "JARVIS took too long to read that. Try again, or add the enquiry yourself: Sales & CRM is not affected.",
   http: "JARVIS could not read that just now. Try again in a moment, or add the enquiry yourself: Sales & CRM is not affected.",
-  malformed: "JARVIS could not make sense of that. Try again, or add the enquiry yourself.",
+  malformed: "JARVIS could not make sense of that. Try again, or add the enquiry yourself with the new-enquiry form in Sales.",
   network: "JARVIS could not be reached just now. Try again in a moment, or add the enquiry yourself: Sales & CRM is not affected.",
 };
 
@@ -113,25 +116,49 @@ export const createEnquiryFromBrief: JarvisActionDefinition<CreateFromBriefInput
         const usage = await ctx.takeUsage();
         if ("error" in usage) throw new JarvisRefusalError("unavailable", "JARVIS could not check your daily allowance. Try again in a moment.");
         if (!usage.allowed) throw new JarvisRefusalError("limit_reached", "You have reached today's JARVIS limit. Sales & CRM works as usual; JARVIS is available again tomorrow (Dubai time).");
-        let raw: unknown;
+        // The brief is separated LOCALLY first (sales/brief-outbound.ts): pricing, budgets, contacts, personal data, credentials and contract or restricted material never
+        // leave; labelled party names go as placeholders. The original stays here for the review card. The outbound gate screens the result again.
+        const prepared = prepareBrief(input.brief);
+        const outbound = input.outbound ?? prepared.outbound;
+        if (input.outbound ? findProtectedContent(outbound).length > 0 : !prepared.separable) throw new JarvisRefusalError("protected_content", "This brief mixes details JARVIS keeps inside Enginious OS with the rest, and they could not be separated safely. Review and edit the text that would be sent, or use the new-enquiry form.");
+        let raw: unknown = null;
+        let fallback = false;
         try {
-          // Only the pasted text, the fixed instructions and the field schema are sent. No records, no organisations, no other module.
-          raw = await ctx.provider.structured({ task: EXTRACTION_TASK, instructions: `${EXTRACTION_INSTRUCTIONS}\nToday (Dubai) is ${crmToday(ctx.now)}.`, input: input.brief, jsonSchema: EXTRACTION_JSON_SCHEMA, maxOutputTokens: ctx.config.maxOutputTokens, timeoutMs: ctx.config.timeoutMs });
+          // Only the prepared narrative, the fixed instructions and the field schema are sent. No records, no organisations, no other module.
+          // The model returns short fields only (the narrative is kept here, not echoed back), with room to answer: a cut-off answer cannot be used at all.
+          raw = await ctx.provider.structured({ task: EXTRACTION_TASK, sources: ["user_text"], instructions: `${EXTRACTION_INSTRUCTIONS}\nToday (Dubai) is ${crmToday(ctx.now)}.`, input: outbound, jsonSchema: EXTRACTION_JSON_SCHEMA, maxOutputTokens: Math.min(4000, Math.max(ctx.config.maxOutputTokens, 2500)), timeoutMs: ctx.config.timeoutMs });
         } catch (e) {
-          throw new JarvisRefusalError("provider_error", PROVIDER_WORDS[e instanceof JarvisProviderError ? e.kind : "network"]!);
+          if (e instanceof JarvisRefusalError) throw e;
+          // An answer that could not be used is not a dead end: the card is built from what Enginious OS read itself and asks for the rest.
+          if (e instanceof JarvisProviderError && e.kind === "malformed") fallback = true;
+          else throw new JarvisRefusalError("provider_error", PROVIDER_WORDS[e instanceof JarvisProviderError ? e.kind : "network"]!);
         }
-        const ex = sanitiseExtraction(raw);
+        const ex: { -readonly [K in keyof Extraction]: Extraction[K] } = { ...restoreNames(sanitiseExtraction(raw), prepared.placeholders) };
+        // Identities and the budget are resolved inside Enginious OS: the labelled names win over anything the model returned, and the model never saw the budget.
+        if (prepared.parties.agency) ex.agencyName = prepared.parties.agency;
+        if (prepared.parties.client) ex.clientName = prepared.parties.client;
+        if (ex.agencyName && ex.clientName && ex.agencyName === ex.clientName && !prepared.parties.agency) ex.agencyName = null;
+        ex.currency = prepared.budget.currency; ex.value = prepared.budget.value; ex.budgetNote = prepared.budget.note;
+        // The ORIGINAL brief is what the review card holds (nothing is cut): only a brief longer than the field keeps the summary there, and the card says so.
+        const fits = input.brief.trim().length <= LIMITS.brief;
+        const notices = [
+          fallback ? "The AI model's answer could not be used, so I filled in only what I could read myself. Please complete the rest below, or use the new-enquiry form." : null,
+          input.outbound ? "The AI model received the version you reviewed. Your original brief is kept below and is saved only when you create the enquiry." : withheldNote(prepared),
+          fits ? null : `Your brief is longer than the Brief field holds (${input.brief.trim().length} of ${LIMITS.brief} characters), so the field has a summary. Nothing was cut from what you pasted: attach the full text to the enquiry after creating it.`,
+        ].filter((x): x is string => !!x);
         const agency = await choiceFor(ctx, "agency", null, ex.agencyName, undefined);
         const client = await choiceFor(ctx, "client", null, ex.clientName, undefined);
         const values: EnquiryValues = {
           ...emptyValues(ctx.companyId), title: ex.title ?? "", source: ex.source ?? "", agencyOrgId: agency.id, clientOrgId: client.id, currency: ex.currency, value: ex.value,
-          budgetNote: ex.budgetNote, brief: ex.briefSummary, eventStart: ex.eventStart, eventEnd: ex.eventEnd, installStart: ex.installStart, location: ex.location,
+          budgetNote: ex.budgetNote, brief: fits ? input.brief.trim() : ex.briefSummary, eventStart: ex.eventStart, eventEnd: ex.eventEnd, installStart: ex.installStart, location: ex.location,
           technologies: ex.technologies, scope: ex.scope, waitingOn: ex.waitingOn, nextTitle: ex.nextTitle ?? "", nextDate: ex.nextDate ?? "", nextKind: ex.nextKind ?? "other",
         };
         const fromBrief = Object.entries(ex).filter(([k, v]) => k !== "agencyName" && k !== "clientName" && v !== null && v !== "" && !(Array.isArray(v) && v.length === 0)).map(([k]) => k);
         if (agency.choice.typedName) fromBrief.push("agencyOrgId");
         if (client.choice.typedName) fromBrief.push("clientOrgId");
-        return build(ctx, values, agency.choice, client.choice, fromBrief);
+        if (fits && !fromBrief.includes("briefSummary")) fromBrief.push("briefSummary");
+        const built = await build(ctx, values, agency.choice, client.choice, fromBrief);
+        return { ...built, card: { ...built.card, notice: notices.join(" ") || null } };
       }
       // revise: the person edited the card (or answered a question). No provider call and no usage: only the same checks again.
       const parsed = enquiryValuesSchema.safeParse({ ...input.fields, companyId: ctx.companyId });

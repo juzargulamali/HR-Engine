@@ -14,6 +14,8 @@ export const EXTRACTION_INSTRUCTIONS = [
   "AGENCY = the intermediary company that sends the brief on behalf of someone else. END CLIENT = the brand or organisation the event or work is actually for. If only one party appears, fill only that one and leave the other null. Never put the same organisation in both unless the text says so.",
   "Dates must be YYYY-MM-DD. If a date has no year, assume the next occurrence after the given today date. Do not invent a next action, a date, a value or a source the text does not give.",
   "briefSummary: a neutral summary of what is wanted, at most 600 characters, using only facts from the text.",
+  "scope: the deliverables, the visitor or game journey and the technical requirements, kept specific, at most 1500 characters. technologies: each piece of equipment or technology with its quantity (1 when not stated).",
+  "The text was prepared before you received it. [AGENCY], [CLIENT] and [END CLIENT] are placeholders for organisations: return a placeholder exactly as written when it is the agency or the end client. [amount withheld] and [contact withheld] mark details you are not given: never guess them; leave currency, value and budgetNote null.",
 ].join("\n");
 
 export const EXTRACTION_JSON_SCHEMA: Record<string, unknown> = {

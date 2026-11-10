@@ -20,6 +20,14 @@ begin
 end $$;
 
 -- Current signatures first (and the earlier, eight-argument register-organisation signature that carried the unsigned acknowledgement), then the signatures of the earlier draft of this migration (never applied hosted; dropped here only so a database that ever had them is left clean).
+-- The memory and suggestion objects of 20261226000100 depend on JARVIS being there (jarvis_my_access), so a full JARVIS rollback removes them too.
+-- (To remove ONLY those and keep JARVIS, run jarvis_memory_90_rollback.sql instead.)
+drop function if exists jarvis_suggest_correction(text, text);
+drop function if exists jarvis_pref_delete(text);
+drop function if exists jarvis_pref_set(text, text);
+drop function if exists jarvis_pref_list();
+drop table if exists jarvis_knowledge_suggestions;
+drop table if exists jarvis_preferences;
 drop function if exists jarvis_record_meeting(uuid, uuid, text, integer, bigint, text, text);
 drop function if exists jarvis_change_stage(uuid, uuid, text, integer, bigint, text, text);
 drop function if exists jarvis_update_enquiry(uuid, uuid, text, integer, bigint, text, text);

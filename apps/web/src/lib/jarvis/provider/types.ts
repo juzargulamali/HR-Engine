@@ -4,6 +4,8 @@
  * no way to act: the only thing it can do is return a proposal object.
  */
 export interface StructuredRequest {
+  /** What the request is built from. The outbound gate (lib/jarvis/outbound.ts) refuses a request whose sources the rulebook does not approve for the capability. */
+  sources: import("../rulebook").OutboundSource[];
   /** What is being asked, e.g. "enquiry_fields". */
   task: string;
   /** The fixed instruction text of the task (never built from user text). */

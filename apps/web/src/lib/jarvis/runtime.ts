@@ -24,6 +24,15 @@ export const defaultJarvisDeps: JarvisDeps = {
   // One checker per module. Projects, Inventory and People & HR register theirs here when their actions are added (they are not part of JARVIS yet: no grant ever passes for them).
   moduleGrant: async ({ module, supabase, userId, companyId, capability }) => (module === "sales" ? hasSalesGrant(supabase, userId, companyId, capability) : false),
   companies: ({ supabase, userId }) => salesCompanies(supabase, userId),
+  // The person's own HR roles and budget grant, through their own session: the same facts the navigation uses to offer Payroll, Employees and Project budgets.
+  protectedAccess: async ({ supabase, userId, companyId }) => {
+    const [roles, budget] = await Promise.all([
+      supabase.from("user_roles").select("role").eq("user_id", userId).is("revoked_at", null),
+      supabase.from("pbx_company_grants").select("company_id").eq("user_id", userId).eq("company_id", companyId).is("revoked_at", null),
+    ]);
+    if (roles.error || budget.error) return "error";
+    return { roles: ((roles.data ?? []) as { role: string }[]).map((r) => r.role), budget: (budget.data ?? []).length > 0 };
+  },
   now: () => new Date(),
   newId: defaultNewId,
 };

@@ -44,8 +44,12 @@ describe("jarvis.sales.draft_reply: a draft only, nothing sent, nothing written"
     expect(JSON.stringify(w.opps[0])).toBe(JSON.stringify(enquiry));
   });
   it("lists what the draft used and where it came from, and does not flag values that really are in the enquiry or the text", async () => {
-    const c = cardOf(await reply(`${CONVO}\nOur budget is AED 40,000.`));
-    expect(c.used).toEqual(expect.arrayContaining([{ value: "2026-12-05", source: "enquiry" }, { value: "2026-12-07", source: "enquiry" }, { value: "AED 40,000", source: "your text" }]));
+    const c = cardOf(await reply(CONVO));
+    expect(c.used).toEqual(expect.arrayContaining([{ value: "2026-12-05", source: "enquiry" }, { value: "2026-12-07", source: "enquiry" }]));
+    // a conversation that carries a budget or price figure is not sent at all (rulebook section 3): the person removes the figure or writes the reply themselves
+    simulatedProviderCalls.length = 0;
+    expect(refusal(await reply(`${CONVO}\nOur budget is AED 40,000.`)).code).toBe("protected_content");
+    expect(simulatedProviderCalls).toHaveLength(0);
     expect(c.toConfirm.filter((t) => t.kind === "price" || t.kind === "date")).toEqual([]);
   });
   it("flags every UNCONFIRMED price, date and availability promise that the model invented, by code, not only by the model's own list", async () => {
@@ -67,7 +71,7 @@ describe("jarvis.sales.draft_reply: a draft only, nothing sent, nothing written"
     expect(simulatedProviderCalls).toHaveLength(1);
     const call = simulatedProviderCalls[0]!;
     expect(call.task).toBe("reply_draft");
-    expect(Object.keys(call).sort()).toEqual(["guard", "input", "inputTag", "instructions", "jsonSchema", "maxOutputTokens", "task", "timeoutMs"]);
+    expect(Object.keys(call).sort()).toEqual(["guard", "input", "inputTag", "instructions", "jsonSchema", "maxOutputTokens", "sources", "task", "timeoutMs"]);
     const payload = JSON.stringify(call);
     expect(call.input).toContain("Harbour gala LED wall");
     expect(call.input).toContain("Harbour Hall");
@@ -167,11 +171,11 @@ describe("jarvis.sales.draft_reply: refusals", () => {
     expect(byRef.enquiry.id).toBe(enquiry.id);
     expect(refusal(await reply(`${CONVO} OPP-UAE-2099-9999`, { enquiryId: enquiry.id })).code).toBe("not_permitted");
   });
-  it("typing a short request without choosing the mode only explains how to start (no provider call)", async () => {
+  it("typing a short request on an enquiry page without choosing the mode only explains how to start (no provider call)", async () => {
     const r = await a.send({ companyId: ID.co1, text: "Draft a reply to the client email", enquiryId: enquiry.id });
     expect(r).toMatchObject({ ok: true, kind: "info" });
     expect(simulatedProviderCalls).toHaveLength(0);
-    expect(routeMessage("Draft a reply to the client email")).toEqual({ kind: "mode", key: "reply", chosen: false });
+    expect(routeMessage("Draft a reply to the client email", { hasEnquiry: true })).toEqual({ kind: "mode", key: "reply", chosen: false });
   });
 });
 

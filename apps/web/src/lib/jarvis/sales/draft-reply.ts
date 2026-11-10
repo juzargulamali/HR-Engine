@@ -45,7 +45,6 @@ export function enquiryFacts(e: EnquiryRow, names: Map<string, string>): string 
   add("Technologies requested", (e.technologies ?? []).map((t) => `${t.name} x${t.qty}`).join("; "));
   add("Scope", e.scope);
   add("Summary of the brief", e.brief);
-  add("Client's budget note", e.budget_note);
   return L.join("\n");
 }
 
@@ -69,12 +68,13 @@ async function build(ctx: JarvisContext, input: DraftReplyInput): Promise<ReplyD
   try {
     // Only: the fixed instructions, today's date, the authorised enquiry's reply-relevant facts and the person's own pasted text.
     raw = await ctx.provider.structured({
-      task: REPLY_TASK, instructions: `${REPLY_INSTRUCTIONS}\nToday (Dubai) is ${crmToday(ctx.now)}.`,
+      task: REPLY_TASK, sources: ["user_text", "enquiry_reply_facts"], instructions: `${REPLY_INSTRUCTIONS}\nToday (Dubai) is ${crmToday(ctx.now)}.`,
       input: `<enquiry>\n${untag(facts)}\n</enquiry>\n<conversation>\n${untag(input.conversation)}\n</conversation>`, inputTag: null,
       guard: "Return the draft only by calling the record_fields tool. Leave toConfirm empty only if every figure and date in the draft comes from <enquiry> or <conversation>.",
       jsonSchema: REPLY_JSON_SCHEMA, maxOutputTokens: ctx.config.maxOutputTokens, timeoutMs: ctx.config.timeoutMs,
     });
   } catch (err) {
+    if (err instanceof JarvisRefusalError) throw err;
     throw new JarvisRefusalError("provider_error", WORDS[err instanceof JarvisProviderError ? err.kind : "network"]!);
   }
   const draft = sanitiseReply(raw);

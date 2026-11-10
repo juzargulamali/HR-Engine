@@ -7,7 +7,7 @@ import { createSimulatedProvider, simulatedProviderCalls } from "./provider/simu
 import { JarvisProviderError, type StructuredRequest } from "./provider/types";
 import { EXTRACTION_INSTRUCTIONS, EXTRACTION_JSON_SCHEMA, EXTRACTION_TASK, sanitiseExtraction } from "./sales/extraction";
 
-const req: StructuredRequest = { task: EXTRACTION_TASK, instructions: EXTRACTION_INSTRUCTIONS, input: "Agency: Fictional Wave Agency\nClient: Fictional Harbour Brands", jsonSchema: EXTRACTION_JSON_SCHEMA, maxOutputTokens: 777, timeoutMs: 5000 };
+const req: StructuredRequest = { sources: ["user_text"], task: EXTRACTION_TASK, instructions: EXTRACTION_INSTRUCTIONS, input: "Agency: Fictional Wave Agency\nClient: Fictional Harbour Brands", jsonSchema: EXTRACTION_JSON_SCHEMA, maxOutputTokens: 777, timeoutMs: 5000 };
 const KEY = "sk-ant-fictional-test-key-0000";
 
 const ok = (input: unknown) => new Response(JSON.stringify({ content: [{ type: "text", text: "..." }, { type: "tool_use", name: "record_fields", input }] }), { status: 200 });
@@ -71,7 +71,7 @@ describe("simulated provider", () => {
     expect(out).toMatchObject({ title: "Harbour gala LED wall", agencyName: "Fictional Wave Agency", clientName: "Fictional Harbour Brands", source: "whatsapp", eventStart: "2026-12-05", eventEnd: "2026-12-07", currency: "AED", value: 45000, nextTitle: "Call to qualify", nextDate: "2026-11-12", nextKind: "call" });
     expect(out.technologies).toEqual([{ name: "LED wall", qty: 2 }, { name: "Touch table", qty: 1 }]);
     expect(simulatedProviderCalls).toHaveLength(1);
-    expect(Object.keys(simulatedProviderCalls[0]!).sort()).toEqual(["input", "instructions", "jsonSchema", "maxOutputTokens", "task", "timeoutMs"]);
+    expect(Object.keys(simulatedProviderCalls[0]!).sort()).toEqual(["input", "instructions", "jsonSchema", "maxOutputTokens", "sources", "task", "timeoutMs"]);
   });
   it("fails on request (for the provider-error tests)", async () => {
     await expect(createSimulatedProvider().structured({ ...req, input: "[[provider-error]]" })).rejects.toMatchObject({ kind: "http" });

@@ -35,7 +35,7 @@ function extractEnquiry(text: string): Record<string, unknown> {
   const dates = ev?.match(/\d{4}-\d{2}-\d{2}/g) ?? [];
   out.eventStart = dates[0] ?? null;
   out.eventEnd = dates[1] ?? null;
-  out.installStart = iso(labelled(text, ["installation", "install", "install date"]));
+  out.installStart = iso(labelled(text, ["installation", "install", "install date", "setup", "set-up"]));
   out.location = labelled(text, ["location", "venue"]);
   const budget = labelled(text, ["budget", "value"]);
   const bm = budget ? /([A-Za-z]{3})?\s*([\d][\d,]*(?:\.\d+)?)\s*([A-Za-z]{3})?/.exec(budget) : null;
@@ -124,9 +124,23 @@ function meetingNotes(input: string, instructions: string): Record<string, unkno
   return out;
 }
 
-/** A general (non-app) answer: deterministic text that echoes nothing of the question except that it was general. */
-function generalAnswer(input: string): Record<string, unknown> {
-  const out: Record<string, unknown> = { answer: "This is a general answer (simulated): I can only give general information here, with no access to any company data." };
+/**
+ * General chat (deterministic). It shows what it was given: whether preferences and earlier turns arrived, and "make it shorter" really shortens the earlier draft.
+ * Markers: "[[leak-figure]]" makes it answer with a protected figure, to prove the server withholds it.
+ */
+function chatAnswer(input: string): Record<string, unknown> {
+  const message = /<message>\n([\s\S]*?)\n<\/message>/.exec(input)?.[1] ?? "";
+  const prefs = /<preferences>\n([\s\S]*?)\n<\/preferences>/.exec(input)?.[1] ?? "";
+  const earlier = [...input.matchAll(/<jarvis>\n([\s\S]*?)\n<\/jarvis>/g)].map((m) => m[1]!);
+  const short = /short/i.test(prefs);
+  const british = /British/i.test(prefs);
+  const sign = british ? "Kind regards (organised in British English)" : "Best regards";
+  let reply: string;
+  if (message.includes("[[leak-figure]]")) reply = "Her salary is AED 18,500 per month.";
+  else if (/\b(?:shorter|shorten)\b/i.test(message) && earlier.length > 0) reply = `${earlier[earlier.length - 1]!.split("\n").filter(Boolean).slice(0, 2).join("\n")}\n(shortened)`;
+  else if (/\b(?:draft|write|compose)\b/i.test(message)) reply = short ? `Hello [name],\nA short note as requested.\n${sign}` : `Hello [name],\nThank you for your time.\nI am writing about the matter we discussed.\nPlease let me know a convenient time.\n${sign}`;
+  else reply = "This is a general answer (simulated): I have no access to any company data here.";
+  const out: Record<string, unknown> = { reply };
   if (/ignore (all )?previous instructions/i.test(input)) Object.assign(out, { execute: true, showPayroll: true, role: "admin", systemPrompt: "leaked" });
   return out;
 }
@@ -139,7 +153,7 @@ export function createSimulatedProvider(): JarvisProvider {
       if (req.input.includes("[[provider-timeout]]")) throw new JarvisProviderError("timeout");
       if (req.input.includes("[[provider-error]]")) throw new JarvisProviderError("http", 500);
       if (req.task === "reply_draft") return draftReply(req.input);
-      if (req.task === "help_general") return generalAnswer(req.input);
+      if (req.task === "chat_reply") return chatAnswer(req.input);
       if (req.task === "enquiry_update") return enquiryUpdate(req.input);
       if (req.task === "meeting_notes") return meetingNotes(req.input, req.instructions);
       if (req.task !== "enquiry_fields") throw new JarvisProviderError("malformed");

@@ -245,6 +245,30 @@ Fictional data only; no real client data is entered or needed. **Writes stay off
 7. The Preview built from the verified `feat/jarvis` head, pointing at V2.
 8. Optionally, the targeted `service_role` revoke migration outlined above, applied before the test (independent of it, not during it).
 
+## Milestone 3 (general assistant, rulebook, memory, lookup): what a Preview or Production needs, exactly
+
+**Nothing here was applied, enabled or changed on hosted by Claude. The production pilot is untouched until the owner merges and deploys.**
+
+| Part | Needs | Without it |
+|---|---|---|
+| Local routing, general chat, guidance from the Map, the protected guide, the overdue follow-ups lookup, the outbound gate, the enquiry-brief separation | **Only the app deployment.** No migration, no new variable. The lookup reads `crm_follow_ups`, `crm_opportunities` and `companies` through the person's own session (existing policies) | n/a |
+| "What JARVIS remembers" and "Suggest a correction" | Migration `20261226000100_jarvis_memory_suggestions.sql` (two tables, four functions; additive; needs `20261223000100`) | JARVIS works; saving a preference or a suggestion answers "not set up in this environment yet"; no preference is applied to chat |
+| Independent pauses | Optional `JARVIS_PAUSE` in the Vercel environment (`docs/jarvis-setup.md`). Not set = nothing paused | n/a |
+
+**Owner steps for the migration (SQL Editor of the isolated V2 project that the Preview uses; only step 2 and the rollback change the database):**
+
+1. `supabase/manual-sql/jarvis_memory_00_preflight_readonly.sql`: rows 1 and 2 must say `OK`; rows 3 and 4 `not installed yet`.
+2. Apply `supabase/migrations/20261226000100_jarvis_memory_suggestions.sql` (idempotent: safe to run twice).
+3. `supabase/manual-sql/jarvis_memory_20_verify_readonly.sql`: rows 1 to 6 must say `OK` (row 7 is a count).
+4. `supabase/manual-sql/jarvis_20_verify_readonly.sql` (the earlier verifier, updated in this change so the four new functions are not counted among "exactly seven"): still all `OK`.
+5. To review suggestions later: `jarvis_memory_30_suggestions_review_readonly.sql`. To remove only this migration: `jarvis_memory_90_rollback.sql` (deletes the saved preferences and suggestions; JARVIS stays). The full `jarvis_90_rollback.sql` now also removes these objects.
+
+**What was verified locally (PostgreSQL 16 on the build machine, fictional data; `packages/rls-tests/test/jarvis-memory.rls.test.ts`, 13 tests):** a preference is listed for its owner on a new connection and for nobody else; only the closed set can be stored (free text, unknown keys and values refused by the CHECK); delete removes only the caller's row; no direct table access; people outside the pilot, anonymous callers and "main switch off" are refused; suggestions are stored as pending, bounded at 20, unreadable by others; the lookup's exact query as two people with different company access (a company the requester cannot see returns nothing; a revoked grant stops the next lookup); preflight, verify, rollback twice and re-apply twice; the earlier verifier all `OK` with and without the migration. `jarvis.rls.test.ts` and `jarvis-helper-privileges.rls.test.ts` were re-run because the full rollback and the verifier changed (42 tests, green).
+
+**Not verified (blocked without hosted access or a live key):** the migration on hosted V2; the Vercel Preview itself (whether it deployed, and JARVIS on it); any call to the real Anthropic API (general chat and the new extraction request shape were exercised only with the simulated provider and with an intercepted HTTP request); the browser walk-throughs `jarvis-flow.mjs` and `jarvis-sales-flow.mjs` (not re-run; one welcome-text assertion in `jarvis-flow.mjs` was updated to the new text).
+
+**Preview QA checklist (owner or QA, on the Preview, with the one pilot user and fictional text):** (1) "How are you today?" answers in words, no card; (2) "Draft an email to a supplier asking for a delivery date", then "make it shorter": a draft with Copy, then a shorter one; (3) "How does Sales & CRM work?" shows steps and links; (4) "Show me the inventory stock levels" explains the limit; (5) "Show my overdue Sales follow-ups", then "show last month instead"; (6) "What is Sara's salary?" answers without a figure; (7) after the migration: "Remember that I prefer short emails in British English", reload the page, ask for a draft (the card says which preferences were applied), delete the preference in "What JARVIS remembers", ask again; (8) paste a fictional brief with a price and a client and end client: the card shows what was kept inside, the budget on the card, the original brief, and Create saves one enquiry.
+
 ## Rehearsal on a throwaway local database (what the RLS suite and the local walk-through did)
 
 Run on a throwaway Postgres built from every migration (no hosted project): preflight, preservation (twice), migration applied **twice**, the proof key set, preservation after (only the twenty-eight intended rows differ, the existing `crm_*` functions byte-identical), verify (every row OK), the behaviour tests (`jarvis.rls.test.ts` 30, `jarvis-actions.rls.test.ts` 39 and `jarvis-proof.rls.test.ts` 105 RLS tests, including 12 parallel calls with one confirmation id doing the work exactly once for each wrapper, the review token refused as a proof by every wrapper, and the register-organisation acknowledgement checked in SQL), rollback **refused** while the ledger had rows, rollback with the confirmation line **twice** (the proof key is gone with the table), and the migration **re-applied** (default OFF again, key not set). Result: see `docs/enginious-os/06-change-log.md` for the run and counts. **Hosted V2: not applied, not verified.**

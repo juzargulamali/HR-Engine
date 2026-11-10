@@ -92,12 +92,13 @@ export const updateEnquiry: JarvisActionDefinition<UpdateEnquiryInput, UpdateVal
     try {
       // Only: the fixed instructions, today's date, the CURRENT values of the allowlisted fields of this one enquiry and the person's request. No owner, value, organisation or id.
       raw = await ctx.provider.structured({
-        task: UPDATE_TASK, instructions: `${UPDATE_INSTRUCTIONS}\nToday (Dubai) is ${crmToday(ctx.now)}.`,
-        input: `<current>\n${JSON.stringify(current).replace(/<\/?\s*(?:current|request)\s*>/gi, "")}\n</current>\n<request>\n${input.text.replace(/<\/?\s*(?:current|request)\s*>/gi, "")}\n</request>`, inputTag: null,
+        task: UPDATE_TASK, sources: ["user_text", "enquiry_update_fields"], instructions: `${UPDATE_INSTRUCTIONS}\nToday (Dubai) is ${crmToday(ctx.now)}.`,
+        input: `<current>\n${JSON.stringify({ ...current, budgetNote: undefined }).replace(/<\/?\s*(?:current|request)\s*>/gi, "")}\n</current>\n<request>\n${input.text.replace(/<\/?\s*(?:current|request)\s*>/gi, "")}\n</request>`, inputTag: null,
         guard: "Return the changes only by calling the record_fields tool. Leave out every field the request does not change.",
         jsonSchema: UPDATE_JSON_SCHEMA, maxOutputTokens: ctx.config.maxOutputTokens, timeoutMs: ctx.config.timeoutMs,
       });
     } catch (err) {
+      if (err instanceof JarvisRefusalError) throw err;
       throw new JarvisRefusalError("provider_error", WORDS[err instanceof JarvisProviderError ? err.kind : "network"]!);
     }
     const patch = sanitiseUpdate(raw, current);

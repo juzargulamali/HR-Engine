@@ -59,7 +59,16 @@ export interface World {
   evidenceFails: boolean;
   /** The activities and follow-ups the meeting wrapper stored (both or neither). */
   activities: { id: string; opportunity_id: string; kind: string; body: string; occurred_at: string | null; internal: boolean; created_by: string }[];
-  followUps: { id: string; opportunity_id: string; title: string; due_at: string; kind: string; assigned_to: string }[];
+  followUps: { id: string; opportunity_id: string | null; title: string; due_at: string; kind: string; assigned_to: string; company_id?: string; status?: string }[];
+  /** Personal memory (jarvis_preferences) and suggestions; `memoryFn` mimics the migration not being applied or a failed read. */
+  prefs: { user_id: string; pref_key: string; pref_value: string }[];
+  suggestions: { user_id: string; topic_id: string; body: string; status: string }[];
+  memoryFn: "ok" | "missing" | "error";
+  followUpReadFails: boolean;
+  /** HR roles and budget grants (what the protected-access check reads through the person's session). */
+  roles: { user_id: string; role: string }[];
+  budgetGrants: { user_id: string; company_id: string }[];
+  protectedAccessFails: boolean;
   meetingFailAfterActivity: boolean;
   counter: number;
   /** The secret the owner gave the fake database with jarvis_set_proof_key (the database stores and uses only the DERIVED proof key). null = not set: every write wrapper fails closed. */
@@ -74,7 +83,7 @@ export function newWorld(): World {
     signedIn: ID.u1, settings: { enabled: true, writes: true }, pilot: new Set([ID.u1, ID.u2, ID.u3]), pilotCompanies: new Set(),
     grants: [{ user_id: ID.u1, company_id: ID.co1, capabilities: [], revoked_at: null }, { user_id: ID.u1, company_id: ID.co2, capabilities: [], revoked_at: null }, { user_id: ID.u2, company_id: ID.co2, capabilities: [], revoked_at: null }],
     companies: [{ id: ID.co1, legal_name: "Fictional Enginious UAE LLC" }, { id: ID.co2, legal_name: "Fictional Enginious KSA LLC" }],
-    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], readLog: [], createdArgs: [], registered: [], updates: [], proposals: [], zoho: [], moves: [], evidenceFails: false, activities: [], followUps: [], meetingFailAfterActivity: false, counter: 0, proofKey: SECRET, dbNow: () => new Date(),
+    orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], readLog: [], createdArgs: [], registered: [], updates: [], proposals: [], zoho: [], moves: [], evidenceFails: false, activities: [], followUps: [], meetingFailAfterActivity: false, prefs: [], suggestions: [], memoryFn: "ok", followUpReadFails: false, roles: [], budgetGrants: [], protectedAccessFails: false, counter: 0, proofKey: SECRET, dbNow: () => new Date(),
   };
 }
 
@@ -90,6 +99,7 @@ function table(w: World, user: string, name: string): Row[] {
     case "crm_opportunities": return w.opps.filter((o) => has.has(o.company_id)) as unknown as Row[];
     case "crm_proposals": return w.proposals.filter((p) => w.opps.some((o) => o.id === p.opportunity_id && has.has(o.company_id))) as unknown as Row[];
     case "crm_zoho_references": return w.zoho.filter((p) => w.opps.some((o) => o.id === p.opportunity_id && has.has(o.company_id))) as unknown as Row[];
+    case "crm_follow_ups": return w.followUps.map((f) => ({ status: "open", ...f, company_id: f.company_id ?? w.opps.find((o) => o.id === f.opportunity_id)?.company_id })).filter((f) => has.has(f.company_id as string)) as unknown as Row[];
     case "jarvis_action_ledger": return [...w.ledger.values()].filter((l) => l.user_id === user) as unknown as Row[];
     default: return [];
   }
@@ -98,14 +108,16 @@ function table(w: World, user: string, name: string): Row[] {
 function builder(w: World, user: string, name: string) {
   w.readLog.push(name);
   let rows = table(w, user, name).slice();
-  let error: { message: string; code?: string } | null = (name === "crm_organisations" && w.orgReadFails) || ((name === "crm_proposals" || name === "crm_zoho_references") && w.evidenceFails) ? { message: "unreadable" } : null;
+  let error: { message: string; code?: string } | null = (name === "crm_organisations" && w.orgReadFails) || ((name === "crm_proposals" || name === "crm_zoho_references") && w.evidenceFails) || (name === "crm_follow_ups" && w.followUpReadFails) ? { message: "unreadable" } : null;
   const api = {
     select() { return api; },
     eq(c: string, v: unknown) { rows = rows.filter((r) => r[c] === v); return api; },
     is(c: string, v: unknown) { rows = rows.filter((r) => (r[c] ?? null) === v); return api; },
+    lt(c: string, v: string) { rows = rows.filter((r) => String(r[c]) < v); return api; },
+    gte(c: string, v: string) { rows = rows.filter((r) => String(r[c]) >= v); return api; },
     in(c: string, vs: unknown[]) { rows = rows.filter((r) => vs.includes(r[c])); return api; },
     ilike(c: string, p: string) { const needle = p.replace(/%/g, "").toLowerCase(); rows = rows.filter((r) => String(r[c] ?? "").toLowerCase().includes(needle)); return api; },
-    order() { return api; },
+    order(c?: string) { if (c) rows = rows.slice().sort((a, b) => String(a[c]).localeCompare(String(b[c]))); return api; },
     limit(n: number) { rows = rows.slice(0, n); return api; },
     maybeSingle() { return Promise.resolve({ data: error ? null : (rows[0] ?? null), error }); },
     then(res: (v: { data: Row[] | null; error: typeof error }) => unknown) { return Promise.resolve({ data: error ? null : rows, error }).then(res); },
@@ -174,6 +186,21 @@ function rpc(w: World, user: string, name: string, args: Record<string, unknown>
         if (used >= limit) return { data: [{ allowed: false, used, remaining: 0 }], error: null };
         w.usage.set(user, used + 1);
         return { data: [{ allowed: true, used: used + 1, remaining: limit - used - 1 }], error: null };
+      }
+      case "jarvis_pref_list": case "jarvis_pref_set": case "jarvis_pref_delete": case "jarvis_suggest_correction": {
+        if (w.memoryFn === "missing") return { data: null, error: { message: `Could not find the function public.${name}`, code: "PGRST202" } };
+        if (w.memoryFn === "error") return { data: null, error: { message: "boom", code: "XX000" } };
+        if (!access(w, user, null).is_available) return { data: null, error: { message: "JARVIS is not available to you", code: "42501" } };
+        if (name === "jarvis_pref_list") return { data: w.prefs.filter((p) => p.user_id === user).map((p) => ({ pref_key: p.pref_key, pref_value: p.pref_value })), error: null };
+        if (name === "jarvis_suggest_correction") { w.suggestions.push({ user_id: user, topic_id: args.p_topic as string, body: args.p_text as string, status: "pending" }); return { data: randomUUID(), error: null }; }
+        w.prefs = w.prefs.filter((p) => !(p.user_id === user && p.pref_key === args.p_key));
+        if (name === "jarvis_pref_set") {
+          // The same closed set as the table CHECK.
+          const ok: Record<string, string[]> = { email_length: ["short", "medium", "detailed"], english: ["british", "american"], tone: ["formal", "friendly", "neutral"], answer_length: ["brief", "detailed"] };
+          if (!ok[args.p_key as string]?.includes(args.p_value as string)) return { data: null, error: { message: "violates check constraint", code: "23514" } };
+          w.prefs.push({ user_id: user, pref_key: args.p_key as string, pref_value: args.p_value as string });
+        }
+        return { data: null, error: null };
       }
       case "crm_find_duplicate_candidates": {
         if (w.dupFails) return { data: null, error: { message: "boom", code: "XX000" } };
@@ -336,7 +363,7 @@ export function fakeSupabase(w: World, user: string): SupabaseClient {
 export const SECRET = "x".repeat(40);
 export const testConfig = (over: Partial<JarvisConfig> = {}): JarvisConfig => ({
   disabled: false, providerKind: "simulated", providerNote: null, apiKey: null, model: "test-model", maxInputChars: 6000, maxOutputTokens: 1200, timeoutMs: 20000, dailyLimit: 30,
-  confirmationTtlMs: 15 * 60_000, proofTtlMs: 120_000, confirmationSecret: SECRET, productionLike: false, ...over,
+  confirmationTtlMs: 15 * 60_000, proofTtlMs: 120_000, confirmationSecret: SECRET, productionLike: false, paused: [], ...over,
 });
 
 export function fakeDeps(w: World, over: { config?: Partial<JarvisConfig>; provider?: JarvisProvider | null; now?: () => Date } = {}): JarvisDeps {
@@ -347,6 +374,7 @@ export function fakeDeps(w: World, over: { config?: Partial<JarvisConfig>; provi
     identity: async () => (w.signedIn ? { userId: w.signedIn } : null),
     supabase: async () => fakeSupabase(w, w.signedIn ?? ID.u1),
     moduleGrant: async ({ module, userId, companyId }) => module === "sales" && grantedCompanies(w, userId).has(companyId),
+    protectedAccess: async ({ userId, companyId }) => (w.protectedAccessFails ? "error" : { roles: w.roles.filter((r) => r.user_id === userId).map((r) => r.role), budget: w.budgetGrants.some((g) => g.user_id === userId && g.company_id === companyId) }),
     companies: async ({ userId }) => w.companies.filter((c) => grantedCompanies(w, userId).has(c.id)).map((c) => ({ id: c.id, name: c.legal_name })),
     now: over.now ?? (() => new Date()),
     newId: () => randomUUID(),

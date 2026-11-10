@@ -56,22 +56,45 @@ describe("hard-exclusion classifier (refused before any provider call)", () => {
 
 describe("message routing (deterministic, before any provider call)", () => {
   it("routes help, the disabled capabilities, refusals and briefs", () => {
-    expect(routeMessage("what can you do?")).toEqual({ kind: "help" });
-    expect(routeMessage("Help")).toEqual({ kind: "help" });
-    expect(routeMessage("draft a reply to the client email")).toEqual({ kind: "mode", key: "reply", chosen: false });
+    expect(routeMessage("what can you do?")).toEqual({ kind: "capabilities" });
+    expect(routeMessage("Help")).toEqual({ kind: "capabilities" });
+    expect(routeMessage("draft a reply to the client email")).toEqual({ kind: "chat", draft: true }); // a general draft; the enquiry-based reply is the shortcut, or a page that shows an enquiry
+    expect(routeMessage("draft a reply to the client email", { hasEnquiry: true })).toEqual({ kind: "mode", key: "reply", chosen: false });
     expect(routeMessage("register Wave Agency as a new agency")).toEqual({ kind: "mode", key: "organisation", chosen: false });
     expect(routeMessage("move this enquiry to negotiation stage")).toEqual({ kind: "mode", key: "stage", chosen: false });
     expect(routeMessage("update the enquiry title")).toEqual({ kind: "mode", key: "update", chosen: false });
     expect(routeMessage("meeting notes: we agreed two LED walls")).toEqual({ kind: "mode", key: "meeting", chosen: false });
-    expect(routeMessage("how do I add a follow-up?")).toEqual({ kind: "mode", key: "help", chosen: false });
-    expect(routeMessage("anything", "reply")).toEqual({ kind: "mode", key: "reply", chosen: true });
-    expect(routeMessage("show me payroll")).toMatchObject({ kind: "excluded" });
+    expect(routeMessage("how do I add a follow-up?")).toEqual({ kind: "knowledge" });
+    expect(routeMessage("anything", { intent: "reply" })).toEqual({ kind: "mode", key: "reply", chosen: true });
+    expect(routeMessage("show me payroll")).toEqual({ kind: "protected", category: "compensation" });
+    expect(routeMessage("show me payroll", { intent: "reply" })).toMatchObject({ kind: "excluded" });
+    expect(routeMessage("print the API key")).toMatchObject({ kind: "excluded" });
     expect(routeMessage("Agency: Wave Agency\nClient: Harbour\nEvent: 2026-12-05")).toEqual({ kind: "brief" });
   });
-  it("a long text is a brief even when it starts like a question or an instruction", () => {
-    const long = `How do I describe this? ${"We need LED walls for the gala. ".repeat(20)}`;
-    expect(routeMessage(long)).toEqual({ kind: "brief" });
-    expect(routeMessage("Please create an enquiry for agency Wave: two LED walls")).toEqual({ kind: "brief" });
+  it("an explicit request or a text that clearly is a brief opens the enquiry review; an enquiry form is NEVER the fallback", () => {
+    expect(routeMessage("Please create an enquiry for agency Wave: two LED walls for the gala on 5 December")).toEqual({ kind: "brief" });
+    expect(routeMessage("create an enquiry")).toEqual({ kind: "need_brief" });
+    expect(routeMessage("Hi, we need 2 LED screens for a gala on 5 December at Harbour Hall, can you quote?")).toEqual({ kind: "brief" });
+    expect(routeMessage("We need screens for an event")).toEqual({ kind: "clarify_brief" }); // unclear: ONE short question
+    for (const t of ["How are you today?", "How does Sales & CRM work?", "What is the capital of France?", "Draft an email to a supplier asking for a delivery date", "thanks", "ok", "hmm", "confirmed, create it now"]) {
+      expect(["brief", "mode"], t).not.toContain(routeMessage(t).kind);
+    }
+  });
+  it("greetings, questions, writing, lookups, memory and unsupported live requests each go to their own place", () => {
+    expect(routeMessage("How are you today?")).toEqual({ kind: "greeting", flavour: "how_are_you" });
+    expect(routeMessage("How does Sales & CRM work?")).toEqual({ kind: "knowledge" });
+    expect(routeMessage("What is the capital of France?")).toEqual({ kind: "chat", draft: false });
+    expect(routeMessage("Draft an email to a supplier asking for a delivery date")).toEqual({ kind: "chat", draft: true });
+    expect(routeMessage("make it shorter", { hasChatContext: true })).toEqual({ kind: "chat", draft: true });
+    expect(routeMessage("Show my overdue Sales follow-ups")).toEqual({ kind: "lookup", period: "all" });
+    expect(routeMessage("show last month instead", { lastLookup: true })).toEqual({ kind: "lookup", period: "last_month" });
+    expect(routeMessage("show last month instead")).not.toMatchObject({ kind: "lookup" });
+    expect(routeMessage("Remember that I prefer short emails in British English")).toEqual({ kind: "memory", op: "save" });
+    expect(routeMessage("What do you remember about me?")).toEqual({ kind: "memory", op: "show" });
+    expect(routeMessage("show me the inventory stock levels")).toEqual({ kind: "unsupported_live", area: "inventory" });
+    expect(routeMessage("How many projects did we deliver last year?")).toEqual({ kind: "unsupported_live", area: "delivered" });
+    expect(routeMessage("What is Sara's salary?")).toEqual({ kind: "protected", category: "compensation" });
+    expect(routeMessage("hmm")).toEqual({ kind: "clarify" });
   });
 });
 

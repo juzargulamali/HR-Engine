@@ -23,6 +23,9 @@ export type JarvisRefusalCode =
   | "needs_review"       // something changed since the review (a duplicate, a record, a permission): review again
   | "not_permitted"      // the existing rule of the action refused it
   | "save_failed"
+  | "paused"             // this kind of request (help, lookups, chat or memory) is paused by the operator
+  | "protected_content"  // the text contains protected details: nothing was sent to the provider
+  | "lookup_failed"      // a lookup could not be read: NOT the same as "no matching records" or "no access"
   | "ambiguous";         // the answer to the save was lost: check the original result, never create again
 
 export interface JarvisRefusal { ok: false; code: JarvisRefusalCode; message: string }
@@ -86,6 +89,8 @@ export interface EnquiryCard {
   valid: boolean;
   /** Everything the model returned that was kept, by field: lets the card show "from your brief" and leave the rest blank. */
   fromBrief: string[];
+  /** What was kept inside Enginious OS instead of being sent to the AI model, and anything else the person should know about how the card was filled. */
+  notice?: string | null;
 }
 
 export interface ConfirmationView { id: string; token: string; expiresAt: string }
@@ -94,6 +99,14 @@ export type SendResult =
   | { ok: true; kind: "help"; help: HelpView }
   | { ok: true; kind: "not_available"; title: string; reason: string }
   | { ok: true; kind: "info"; text: string }
+  /** A plain answer written by the app itself (a greeting, a limit, where to find something): no model, no record. */
+  | { ok: true; kind: "reply"; text: string; links: ReplyLink[] }
+  /** ONE short question when the intent is unclear. Each option sends the same text again with that choice ("chat" = just answer it as a general message). */
+  | { ok: true; kind: "clarify"; text: string; options: { label: string; intent: string }[] }
+  /** A brief that mixes protected details with the rest and could not be separated safely: the person reviews and edits the text that WOULD be sent (nothing has been sent), or uses the form. */
+  | { ok: true; kind: "brief_review"; text: string; outbound: string; formHref: string }
+  /** What JARVIS remembers for this person (their own preferences only). */
+  | { ok: true; kind: "memory"; text: string; preferences: import("./preferences").PreferenceView[] }
   | { ok: true; kind: "card"; card: EnquiryCard; confirmation: ConfirmationView | null }
   /** Any other registered action (draft a reply, help, register an organisation, update, change stage, meeting notes): the card is that action's own. */
   | { ok: true; kind: "action"; actionId: string; card: ActionCard; confirmation: ConfirmationView | null }
@@ -144,9 +157,7 @@ export interface ReplyDraftCard {
 /** `jarvis.sales.help.answer`: an answer from reviewed guidance (with the screens it links to) or, for a general question, a plain model answer that says so. Reads nothing. */
 export interface HelpAnswerCard {
   kind: "help.answer";
-  mode: "guidance" | "no_guidance" | "general";
-  /** Only for a general (non-app) question: the model's short answer. */
-  answer: string | null;
+  mode: "guidance" | "no_guidance";
   entries: { id: string; title: string; summary: string; steps: string[]; links: { label: string; href: string }[] }[];
   /** For "no reviewed guidance": the topics there is guidance for. */
   topics: { id: string; title: string }[];
@@ -235,4 +246,38 @@ export interface MeetingCard {
   valid: boolean;
 }
 
-export type ActionCard = ReplyDraftCard | HelpAnswerCard | OrgRegisterCard | EnquiryUpdateCard | EnquiryStageCard | MeetingCard;
+export interface ReplyLink { label: string; href: string }
+
+/** `jarvis.sales.chat.reply`: a general answer or a draft for the person to copy. Nothing is sent or saved; no record is read. */
+export interface ChatReplyCard {
+  kind: "chat.reply";
+  text: string;
+  /** True for something to copy and use (an email, a message); false for an answer. */
+  draft: boolean;
+  /** The saved preferences that were applied, in words (empty = none). */
+  applied: string[];
+}
+
+/** The bounded context the panel sends with a message: the last few turns of the general conversation, and whether a lookup was just shown. Never stored; never treated as permission. */
+export interface ChatTurn { role: "user" | "jarvis"; text: string }
+export interface SendContext { turns?: ChatTurn[]; lastLookup?: { period: LookupPeriod } | null }
+
+/** `jarvis.sales.followups.overdue`: computed and shown inside Enginious OS; nothing goes to the provider. An empty `items` means NO MATCHING RECORDS (a failed read and no access are refusals, never an empty list). */
+export type LookupPeriod = "all" | "last_month" | "this_month" | "last_7_days" | "last_30_days";
+export interface FollowUpsLookupCard {
+  kind: "lookup.followups";
+  company: { id: string; name: string };
+  period: LookupPeriod;
+  /** e.g. "that fell due in October 2026". */
+  periodLabel: string;
+  /** The moment the list was computed (ISO) and the same in words, Dubai time. */
+  cutoff: string;
+  cutoffLabel: string;
+  total: number;
+  /** More than the shown number exist: the Follow-ups page has them all. */
+  truncated: boolean;
+  items: { id: string; title: string; hidden: boolean; kindLabel: string; dueDate: string; daysOverdue: number; enquiry: { reference: string; title: string; href: string } | null }[];
+  followUpsHref: string;
+}
+
+export type ActionCard = ReplyDraftCard | HelpAnswerCard | OrgRegisterCard | EnquiryUpdateCard | EnquiryStageCard | MeetingCard | ChatReplyCard | FollowUpsLookupCard;

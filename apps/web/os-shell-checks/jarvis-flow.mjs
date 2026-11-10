@@ -91,7 +91,7 @@ await step("launcher: present for a pilot person with a Sales grant; absent for 
 await step("click opens the panel: title JARVIS, subtitle, Sales & CRM badge, the first action up front; Escape closes and focus returns to the launcher", async () => {
   await launcher().click(); await panel().waitFor();
   const t = flat(await panel().innerText());
-  for (const s of ["JARVIS", "Enginious OS assistant", "Sales & CRM", "Paste a brief and I'll turn it into an enquiry for you to review."]) if (!t.includes(s)) throw new Error(`missing "${s}"`);
+  for (const s of ["JARVIS", "Enginious OS assistant", "Sales & CRM", "Ask me anything"]) if (!t.includes(s)) throw new Error(`missing "${s}"`);
   if (!(await page.getByTestId("jarvis-company").isVisible()) && (await page.getByLabel("Company for JARVIS").count()) === 0) throw new Error("the active company is not shown");
   await page.keyboard.press("Escape"); await panel().waitFor({ state: "hidden" });
   const focused = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));

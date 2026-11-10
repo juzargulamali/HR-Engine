@@ -7,13 +7,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
-import type { ActionCard, ActionConfirmResult, ConfirmationView, EnquiryStageCard, EnquiryUpdateCard, HelpAnswerCard, MeetingCard, MeetingValues, OrgRegisterCard, OrgRole, OrgValues, ReplyDraftCard, SendResult, StatusResult, UpdateForm } from "@/lib/jarvis/protocol";
+import type { ActionCard, ActionConfirmResult, ChatReplyCard, ConfirmationView, FollowUpsLookupCard, EnquiryStageCard, EnquiryUpdateCard, HelpAnswerCard, MeetingCard, MeetingValues, OrgRegisterCard, OrgRole, OrgValues, ReplyDraftCard, SendResult, StatusResult, UpdateForm } from "@/lib/jarvis/protocol";
 
 /** What the cards of the other actions call. Each is a server action that re-authorises the person on every call; this file decides nothing about access. */
 export interface ActionApi {
   act: (a: { companyId: string; actionId: string; input: unknown }) => Promise<SendResult>;
   confirmAction: (a: { companyId: string; actionId: string; token: string; values: unknown; acknowledgements?: Record<string, unknown> }) => Promise<ActionConfirmResult>;
   status: (confirmationId: string) => Promise<StatusResult>;
+  /** Sends a suggested correction to a guidance topic for review. */
+  suggest?: (a: { topicId: string; text: string }) => Promise<SendResult>;
 }
 
 export interface ActionCardState { card: ActionCard; confirmation: ConfirmationView | null }
@@ -31,7 +33,9 @@ export interface ActionCardProps {
 export function ActionCardView(p: ActionCardProps) {
   switch (p.state.card.kind) {
     case "reply.draft": return <ReplyDraftView card={p.state.card} companyStale={p.companyStale} />;
-    case "help.answer": return <HelpAnswerView card={p.state.card} />;
+    case "help.answer": return <HelpAnswerView card={p.state.card} api={p.api} />;
+    case "chat.reply": return <ChatReplyView card={p.state.card} />;
+    case "lookup.followups": return <FollowUpsView card={p.state.card} />;
     case "org.register": return <OrgRegisterView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
     case "meeting.record": return <MeetingView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
     case "enquiry.stage": return <StageView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
@@ -236,11 +240,21 @@ function OrgRegisterView(p: ActionCardProps & { card: OrgRegisterCard; confirmat
   );
 }
 
-/** An answer from reviewed guidance, with links to the real screens. Reads and writes nothing. */
-function HelpAnswerView({ card }: { card: HelpAnswerCard }) {
+/** An answer from the published guidance, with links to the real screens. Reads and writes nothing. A correction can be suggested: it goes for review, not into the answer. */
+function HelpAnswerView({ card, api }: { card: HelpAnswerCard; api: ActionApi }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [state, setState] = useState<{ kind: "idle" | "busy" } | { kind: "done" | "error"; message: string }>({ kind: "idle" });
+  const topicId = card.entries[0]?.id ?? null;
+  async function send() {
+    if (!api.suggest || !topicId) return;
+    setState({ kind: "busy" });
+    const r = await api.suggest({ topicId, text }).catch(() => null);
+    if (r && r.ok && r.kind === "reply") { setState({ kind: "done", message: r.text }); setOpen(false); setText(""); }
+    else setState({ kind: "error", message: r && !r.ok ? r.message : "Could not send your suggestion just now." });
+  }
   return (
     <section aria-label="Answer" className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm" data-testid="jarvis-help-card" data-mode={card.mode}>
-      {card.answer ? <p className="whitespace-pre-wrap" data-testid="help-general-answer">{card.answer}</p> : null}
       {card.entries.map((e) => (
         <div key={e.id} className="space-y-1" data-testid={`help-entry-${e.id}`}>
           <h3 className="font-heading text-sm font-semibold">{e.title}</h3>
@@ -251,6 +265,62 @@ function HelpAnswerView({ card }: { card: HelpAnswerCard }) {
       ))}
       {card.topics.length > 0 ? <ul className="list-disc space-y-0.5 pl-5 text-xs" data-testid="help-topics">{card.topics.map((t) => <li key={t.id}>{t.title}</li>)}</ul> : null}
       <p className="text-xs text-muted-foreground">{card.note}</p>
+      {api.suggest && topicId && state.kind !== "done" ? (
+        open ? (
+          <div className="space-y-2" data-testid="suggest-form">
+            <label htmlFor="jarvis-suggest" className="text-xs font-medium">What should be corrected?</label>
+            <Textarea id="jarvis-suggest" rows={2} maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
+            <div className="flex gap-2">
+              <Button type="button" size="sm" disabled={state.kind === "busy" || text.trim().length < 5} onClick={() => void send()} data-testid="suggest-send">Send for review</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+            </div>
+          </div>
+        ) : <button type="button" className="text-xs text-muted-foreground underline underline-offset-2" onClick={() => setOpen(true)} data-testid="suggest-open">Suggest a correction</button>
+      ) : null}
+      {state.kind === "done" ? <p className="text-xs" role="status" data-testid="suggest-done">{state.message}</p> : null}
+      {state.kind === "error" ? <Alert variant="destructive" role="alert">{state.message}</Alert> : null}
+    </section>
+  );
+}
+
+/** A general answer, or a draft to copy. There is no send button: JARVIS never sends anything. */
+function ChatReplyView({ card }: { card: ChatReplyCard }) {
+  const [copied, setCopied] = useState<"idle" | "yes" | "no">("idle");
+  async function copy() {
+    try { await navigator.clipboard.writeText(card.text); setCopied("yes"); } catch { setCopied("no"); }
+  }
+  return (
+    <section aria-label={card.draft ? "Draft" : "Answer"} className="space-y-2 rounded-lg bg-secondary/60 px-3 py-2 text-sm" data-testid="jarvis-chat-reply" data-draft={card.draft ? "yes" : "no"}>
+      <p className="whitespace-pre-wrap break-words" data-testid="chat-text">{card.text}</p>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        {card.draft ? <Button type="button" size="sm" variant="outline" onClick={() => void copy()} data-testid="chat-copy">{copied === "yes" ? "Copied" : "Copy"}</Button> : null}
+        {copied === "no" ? <span>Could not copy: select the text instead.</span> : null}
+        {card.draft ? <span>A draft for you to review and send yourself. JARVIS does not send messages.</span> : null}
+        {card.applied.length > 0 ? <span data-testid="chat-applied">Your preferences applied: {card.applied.join("; ")}.</span> : null}
+      </div>
+    </section>
+  );
+}
+
+/** A live lookup, computed inside Enginious OS: the company, the cutoff and links to the records. An empty list means no matching records (a failed read is shown as an error instead). */
+function FollowUpsView({ card }: { card: FollowUpsLookupCard }) {
+  return (
+    <section aria-label="Overdue follow-ups" className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm" data-testid="jarvis-lookup" data-period={card.period} data-count={card.total}>
+      <h3 className="font-heading text-sm font-semibold">Your overdue Sales follow-ups</h3>
+      <p className="text-xs text-muted-foreground" data-testid="lookup-scope">{card.company.name} · assigned to you · still open · {card.periodLabel} · as of {card.cutoffLabel}</p>
+      {card.items.length === 0 ? <p data-testid="lookup-empty">No matching follow-ups: nothing assigned to you in {card.company.name} is overdue for these dates.</p> : (
+        <ul className="space-y-1.5" data-testid="lookup-items">
+          {card.items.map((f) => (
+            <li key={f.id} className="rounded-md border border-border px-2 py-1.5">
+              <p className={f.hidden ? "text-muted-foreground" : "font-medium"}>{f.title}</p>
+              <p className="text-xs text-muted-foreground">{f.kindLabel} · due {f.dueDate} · {f.daysOverdue === 0 ? "overdue today" : `${f.daysOverdue} day${f.daysOverdue === 1 ? "" : "s"} overdue`}</p>
+              {f.enquiry ? <Link href={f.enquiry.href} className="text-xs font-medium underline underline-offset-2">{f.enquiry.reference} · {f.enquiry.title}</Link> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      {card.truncated ? <p className="text-xs text-muted-foreground">Showing the {card.total} oldest. The Follow-ups page has them all.</p> : null}
+      <p className="text-xs"><Link href={card.followUpsHref} className="font-medium underline underline-offset-2">Open Follow-ups</Link> <span className="text-muted-foreground">· Say &quot;show last month instead&quot; to change the dates.</span></p>
     </section>
   );
 }
