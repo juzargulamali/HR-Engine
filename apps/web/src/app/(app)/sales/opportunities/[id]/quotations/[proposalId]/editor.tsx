@@ -1,17 +1,19 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, Check, Download, ImagePlus, Pencil, Plus, Trash2 } from "lucide-react";
 import { BUDGETARY_NOTICE, NOTE_HEADINGS, QUOTATION_CURRENCIES, REVIEW_PRICING_LABEL, clausesToNotes, isUnsectionedTitle, noteParagraphs, reviewPricingSentence, validateQuotationImageMeta, type PaymentMilestone } from "@enginious-hr/domain";
 import {
-  createQuotationRevision, decideQuotationApproval, deleteQuotationLine, deleteQuotationSection, issueQuotation, reorderQuotation, requestQuotationApproval, saveEstimateDraft,
+  checkEstimateReady, createQuotationRevision, decideQuotationApproval, deleteQuotationLine, deleteQuotationSection, issueQuotation, reorderQuotation, requestQuotationApproval, saveEstimateDraft,
   saveQuotationSection, setQuotationLineImage,
 } from "@/lib/actions/quotations";
+import type { ActionState } from "@/lib/actions/companies";
 import { finalizeCrmUpload, prepareCrmUpload } from "@/lib/actions/crmFiles";
 import { createClient } from "@/lib/supabase/client";
-import { applyPartial, applySaved, buildDraftPayload, initialDetails, isRowDirty, liveCalc, rowIssue, rowsFromServer, savedDetails, type DetailsState, type NotesState, type RowState } from "@/lib/crm/quotations/builder-state";
+import { applyWritten, buildDraftPayload, initialDetails, isBlankNewRow, isRowDirty, liveCalc, rowIssue, rowsFromServer, savedDetails, splitRows, type DetailsState, type NotesState, type RowState } from "@/lib/crm/quotations/builder-state";
+import { createSaveQueue, type SaveOutcome } from "@/lib/crm/quotations/save-queue";
 import { toVat, type QuotationHeader, type QuotationLineRow, type QuotationSectionRow, type RecipientSuggestion, type VatChoiceRow } from "@/lib/crm/quotations/model";
 import { Alert } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -70,70 +72,226 @@ export interface BuilderProps {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
-// The builder: three steps, one draft, one Save draft button
+// The builder: three steps, one draft, saved automatically as the person works
 // ---------------------------------------------------------------------------------------------------------------------------------
-type SaveState = { kind: "idle" } | { kind: "saving" } | { kind: "saved" } | { kind: "error"; message: string };
+/** The working copy. It lives in a ref (the authority, read by the saves) and is mirrored into state for drawing, so a save that starts a moment after a keystroke sees that keystroke. */
+interface Work { details: DetailsState; notes: NotesState; rows: RowState[]; baseDetails: DetailsState; baseNotes: NotesState }
+
+/** Typing is saved this long after the last keystroke (structural steps, Save draft and Finalise save at once). */
+const AUTOSAVE_MS = 800;
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+/** True when a save would send something: the details or notes differ from what is saved, or a COMPLETE item is new or changed. */
+const hasUnsaved = (w: Work) => !same(w.details, w.baseDetails) || !same(w.notes, w.baseNotes) || splitRows(w.rows).ready.some(isRowDirty);
+/** A sentence about items kept on screen because they cannot be saved as typed (null when there are none). */
+function attentionOf(rows: readonly RowState[]): string | null {
+  const { incomplete } = splitRows(rows);
+  if (incomplete.length === 0) return null;
+  const first = incomplete[0]!;
+  const name = first.row.description.trim() ? `Item “${first.row.description.trim().slice(0, 40)}”` : "A new item";
+  return `${name} is not saved yet: ${first.issue}${incomplete.length > 1 ? ` (and ${incomplete.length - 1} more)` : ""}`;
+}
+
+/** A photo that could not be added. The file is kept so "Try again" needs no new pick; nothing is finalised or sent for approval until it is retried or discarded. */
+interface PhotoFailure { label: string; message: string }
+type PhotoFailureView = PhotoFailure & { key: string };
+
+/** What the sections, pictures and Finalise parts of the screen may do to the saved draft. Each is queued behind the saves before it, so nothing is saved or created twice. */
+interface Ops {
+  /** Save now (typed changes included) and say how it went. */
+  saveNow: () => Promise<SaveOutcome>;
+  /** Run a step that changes the saved draft (add a section, move, delete) after the saves already queued. */
+  exclusive: <T>(task: () => Promise<T>) => Promise<T>;
+  /** Delete one item (saved or not) in order with the saves; a message when it failed. */
+  removeRow: (key: string) => Promise<string | null>;
+  dropSectionRows: (sectionId: string) => void;
+  /** Upload a picture and attach it to the item, saving the item first when it is not saved yet; a message when it failed. */
+  attachPicture: (key: string, file: File, onPhase: (text: string) => void) => Promise<string | null>;
+  removePicture: (key: string) => Promise<string | null>;
+  /** Try a photo that failed again with the same file (a message when it failed again). */
+  retryPhoto: (key: string, onPhase?: (text: string) => void) => Promise<string | null>;
+  /** Give up on a photo that failed: the item stays, without a photo, and finishing is no longer held back by it. */
+  discardPhoto: (key: string) => void;
+  /** Wait for every save and upload; null when all is saved and no photo failed, otherwise what needs attention. */
+  settle: () => Promise<string | null>;
+}
 
 export function EstimateBuilder(p: BuilderProps) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("details");
-  const [baseDetails, setBaseDetails] = useState<DetailsState>(() => savedDetails(p.header));
-  const [details, setDetails] = useState<DetailsState>(() => initialDetails(p.header, p.suggestion.kind === "single" ? p.suggestion.orgId : "", p.suggestedCurrency));
-  const [baseNotes, setBaseNotes] = useState<NotesState>(() => notesOf(p.header));
-  const [notes, setNotes] = useState<NotesState>(() => notesOf(p.header));
-  const [rows, setRows] = useState<RowState[]>(() => rowsFromServer(p.lines, p.sections));
-  const [save, setSave] = useState<SaveState>({ kind: "idle" });
+  const [initial] = useState<Work>(() => ({
+    details: initialDetails(p.header, p.suggestion.kind === "single" ? p.suggestion.orgId : "", p.suggestedCurrency), baseDetails: savedDetails(p.header),
+    notes: notesOf(p.header), baseNotes: notesOf(p.header), rows: rowsFromServer(p.lines, p.sections),
+  }));
+  const work = useRef<Work>(initial);
+  const [w, setW] = useState<Work>(initial);
+  const commit = (f: (x: Work) => Work) => { work.current = f(work.current); setW(work.current); };
   const [touched, setTouched] = useState(false);
+  const [waiting, setWaiting] = useState(false);
   const [recipientChecked, setRecipientChecked] = useState(false);
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const newKey = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Photos that failed, by item key: the map (with the files) is what the finish reads, the list is what the screen draws.
+  const failedPhotos = useRef(new Map<string, PhotoFailure & { file: File }>());
+  const [photoFailures, setPhotoFailures] = useState<(PhotoFailure & { key: string })[]>([]);
+  const syncFailures = () => setPhotoFailures([...failedPhotos.current].map(([k, f]) => ({ key: k, label: f.label, message: f.message })));
+  const setFailure = (key: string, failure: (PhotoFailure & { file: File }) | null) => {
+    if (failure) failedPhotos.current.set(key, failure); else failedPhotos.current.delete(key);
+    syncFailures();
+  };
 
-  const patchDetails = (patch: Partial<DetailsState>) => { setDetails((d) => ({ ...d, ...patch })); edited(); };
-  const patchNotes = (patch: Partial<NotesState>) => { setNotes((n) => ({ ...n, ...patch })); edited(); };
-  const edited = () => { setTouched(true); setSave((s) => (s.kind === "saving" ? s : { kind: "idle" })); };
+  // The one save: everything typed that can be saved as typed. Items that are incomplete stay on screen and are left out; items the server wrote take their id (and keep their key).
+  const runSave = async (): Promise<SaveOutcome> => {
+    const cur = work.current;
+    const { ready } = splitRows(cur.rows);
+    const payload = buildDraftPayload(p.ids, cur.details, cur.notes, ready);
+    const lines = payload.lines ?? [];
+    const attention = attentionOf(cur.rows);
+    if (lines.length === 0 && same(cur.details, cur.baseDetails) && same(cur.notes, cur.baseNotes)) return { ok: true, attention };
+    const result = await saveEstimateDraft(payload);
+    // The baseline is what was SENT: anything typed while this save ran is still unsaved afterwards and goes in the next run.
+    commit((x) => ({ ...x, rows: applyWritten(x.rows, lines, result.created), ...(result.error ? {} : { baseDetails: cur.details, baseNotes: cur.notes }) }));
+    return result.error ? { ok: false, message: result.error } : { ok: true, attention };
+  };
+  // The queue is made once and always runs the latest `runSave` (which reads the working copy from `work`, so it never sees a stale render).
+  const runSaveRef = useRef<() => Promise<SaveOutcome>>(runSave);
+  useEffect(() => { runSaveRef.current = runSave; });
+  // eslint-disable-next-line react-hooks/refs -- the ref is read when a save runs (an event), never while rendering
+  const [queue] = useState(() => createSaveQueue(() => runSaveRef.current()));
+  const busy = useSyncExternalStore(queue.subscribe, () => queue.busy, () => false);
+  const last = useSyncExternalStore(queue.subscribe, () => queue.last, () => queue.last);
 
-  const dirtyDetails = JSON.stringify(details) !== JSON.stringify(baseDetails);
-  const dirtyNotes = JSON.stringify(notes) !== JSON.stringify(baseNotes);
-  const dirtyRows = rows.some(isRowDirty);
-  const dirty = dirtyDetails || dirtyNotes || dirtyRows;
-  useUnsavedChanges(useId(), touched && dirty);
+  const clearTimer = () => { if (timer.current) clearTimeout(timer.current); timer.current = null; };
+  useEffect(() => clearTimer, []);
+  const saveNow = () => { clearTimer(); setWaiting(false); return queue.save(); };
+  const scheduleSave = () => { clearTimer(); setWaiting(true); timer.current = setTimeout(() => { timer.current = null; setWaiting(false); void queue.save(); }, AUTOSAVE_MS); };
+  const edited = () => { setTouched(true); scheduleSave(); };
+
+  const patchDetails = (patch: Partial<DetailsState>) => { commit((x) => ({ ...x, details: { ...x.details, ...patch } })); edited(); };
+  const patchNotes = (patch: Partial<NotesState>) => { commit((x) => ({ ...x, notes: { ...x.notes, ...patch } })); edited(); };
+  const patchRow = (key: string, patch: Partial<RowState>) => { commit((x) => ({ ...x, rows: x.rows.map((r) => (r.key === key ? { ...r, ...patch } : r)) })); edited(); };
+  const addRow = (sectionId: string | null) => {
+    const key = `new-${(newKey.current += 1)}`;
+    commit((x) => ({ ...x, rows: [...x.rows, { key, id: null, sectionId, description: "", unit: "", quantity: "1", unitPrice: "", vatChoiceId: "", saved: null }] }));
+    setFocusKey(key);
+    setStep("boq");
+  };
+
+  const rowOf = (key: string) => work.current.rows.find((r) => r.key === key);
+  const refreshed = () => router.refresh();
+  /** The whole of adding a photo; a message when it did not work. Run through `attachPicture`, which records a failure BEFORE the work counts as finished. */
+  const attachBody = async (key: string, file: File, onPhase: (text: string) => void): Promise<string | null> => {
+    const problem = validateQuotationImageMeta({ name: file.name, size: file.size, type: file.type });
+    if (problem) return problem;
+    const row = rowOf(key);
+    if (!row) return "That item was removed, so the photo was not added.";
+    // An item that cannot be saved as typed has nothing to attach the photo to: say what is missing before uploading anything.
+    const issue = isBlankNewRow(row) ? "Describe the item." : rowIssue(row);
+    if (issue) return `Finish this item first, then add the photo. ${issue}`;
+    try {
+      const early = saveNow();   // the item is saved while the file uploads, so nothing waits twice
+      onPhase("Checking…");
+      const prepared = await prepareCrmUpload({ opportunityId: p.ids.opportunityId, name: file.name, size: file.size, type: file.type, purpose: "proposal", label: "Estimate item photo" });
+      if (prepared.error !== null) return prepared.error;
+      onPhase("Uploading privately…");
+      const { error: up } = await createClient().storage.from("crm-quarantine").uploadToSignedUrl(prepared.path, prepared.token, file, { contentType: file.type });
+      if (up) return "The upload did not complete. Check your connection, then try again.";
+      onPhase("Checking the file's contents…");
+      const done = await finalizeCrmUpload(prepared.intentId);
+      if (done.error || !done.fileId) return done.error ?? "The photo could not be added. Try again.";
+      const fileId = done.fileId;
+      await early;
+      onPhase("Saving the item…");
+      if (!rowOf(key)?.id) await saveNow();
+      onPhase("Attaching…");
+      const attached = await queue.exclusive(async () => {
+        const cur = rowOf(key);
+        if (!cur) return "That item was removed, so the photo was not added.";
+        if (!cur.id) return "The item could not be saved, so the photo was not added. Check the item and try again.";
+        return (await setQuotationLineImage(p.ids.opportunityId, p.ids.proposalId, cur.id, cur.sectionId, fileId)).error;
+      });
+      if (!attached) refreshed();
+      return attached;
+    } catch {
+      return "Something went wrong while adding the photo. Your item is still here; try again.";
+    }
+  };
+  const attachPicture = (key: string, file: File, onPhase: (text: string) => void): Promise<string | null> => queue.track((async () => {
+    const problem = await attachBody(key, file, onPhase);
+    // Recorded inside the tracked work: when "wait for everything" returns, a failed photo is already on record.
+    const row = rowOf(key);
+    const name = row?.description.trim();
+    if (problem && row) setFailure(key, { file, message: problem, label: name ? `Item “${name.slice(0, 40)}”` : "A new item" });
+    else setFailure(key, null);
+    return problem;
+  })());
+  const ops: Ops = {
+    saveNow,
+    exclusive: (task) => { void saveNow(); return queue.exclusive(task); },
+    removeRow: (key) => queue.exclusive(async () => {
+      const r = rowOf(key);
+      if (!r) return null;
+      if (r.id) {
+        const res = await deleteQuotationLine(p.ids.opportunityId, p.ids.proposalId, r.id);
+        if (res.error) return res.error;
+      }
+      commit((x) => ({ ...x, rows: x.rows.filter((y) => y.key !== key) }));
+      setFailure(key, null);
+      return null;
+    }),
+    dropSectionRows: (sectionId) => {
+      for (const r of work.current.rows) if (r.sectionId === sectionId) failedPhotos.current.delete(r.key);
+      commit((x) => ({ ...x, rows: x.rows.filter((r) => r.sectionId !== sectionId) }));
+      syncFailures();
+    },
+    attachPicture,
+    removePicture: (key) => queue.exclusive(async () => {
+      const cur = rowOf(key);
+      if (!cur?.id) return null;
+      const res = await setQuotationLineImage(p.ids.opportunityId, p.ids.proposalId, cur.id, cur.sectionId, null);
+      if (!res.error) refreshed();
+      return res.error;
+    }),
+    retryPhoto: (key, onPhase) => {
+      const failure = failedPhotos.current.get(key);
+      return failure ? attachPicture(key, failure.file, onPhase ?? (() => undefined)) : Promise.resolve(null);
+    },
+    discardPhoto: (key) => setFailure(key, null),
+    settle: async () => {
+      // A few rounds: typing during the wait is saved too. Each round saves everything typed so far, then waits for pictures and steps still running.
+      for (let round = 0; round < 3; round += 1) {
+        const out = await saveNow();
+        await queue.idle();
+        if (!out.ok) return out.message;
+        if (!queue.last.ok) return queue.last.message;
+        // A photo that failed (or whose item is gone) stops the finish until it is retried or discarded; the estimate stays an editable draft.
+        const live = new Set(work.current.rows.map((r) => r.key));
+        for (const k of [...failedPhotos.current.keys()]) if (!live.has(k)) setFailure(k, null);
+        const failedFirst = [...failedPhotos.current.values()][0];
+        if (failedFirst) return `${failedFirst.label}: the photo was not added. ${failedFirst.message} Try again or discard the photo, then continue.${failedPhotos.current.size > 1 ? ` (${failedPhotos.current.size - 1} more photo${failedPhotos.current.size > 2 ? "s" : ""} failed too.)` : ""}`;
+        const attention = attentionOf(work.current.rows);
+        if (attention) return `${attention} Fix it or delete it, then try again.`;
+        if (!hasUnsaved(work.current)) return null;
+      }
+      return "Your changes kept changing while saving. Wait a moment, then try again.";
+    },
+  };
+
+  const { details, notes, rows } = w;
+  const incomplete = splitRows(rows).incomplete;
+  const unsaved = hasUnsaved(w);
+  const pendingWork = busy || waiting || unsaved;
+  useUnsavedChanges(useId(), touched && (pendingWork || incomplete.length > 0));
 
   const vat = useMemo(() => { const v = p.vatChoices.find((x) => x.id === details.vatChoiceId); return v ? toVat(v.kind, v.label, v.rate) : null; }, [p.vatChoices, details.vatChoiceId]);
   const { calc, numbers } = useMemo(() => liveCalc(rows, p.sections, details.currency, vat, p.vatChoices), [rows, p.sections, details.currency, vat, p.vatChoices]);
   const cur = details.currency;
 
-  const onSave = async () => {
-    const bad = rows.map((r, i) => ({ r, i })).find(({ r }) => isRowDirty(r) && rowIssue(r));
-    if (bad) { setSave({ kind: "error", message: `Item ${numbers.get(bad.r.key) ?? bad.i + 1}: ${rowIssue(bad.r)}` }); setStep("boq"); return; }
-    setSave({ kind: "saving" });
-    try {
-      const result = await saveEstimateDraft(buildDraftPayload(p.ids, details, notes, rows));
-      if (result.error) {
-        setRows((r) => applyPartial(r, result.created));
-        setSave({ kind: "error", message: result.error });
-        return;
-      }
-      setBaseDetails(details);
-      setBaseNotes(notes);
-      setRows((r) => applySaved(r, result.created));
-      setSave({ kind: "saved" });
-      router.refresh();
-    } catch {
-      setSave({ kind: "error", message: "The save did not reach the server. Check your connection." });
-    }
-  };
-
-  const addRow = (sectionId: string | null) => {
-    const key = `new-${(newKey.current += 1)}`;
-    setRows((r) => [...r, { key, id: null, sectionId, description: "", unit: "", quantity: "1", unitPrice: "", vatChoiceId: "", saved: null }]);
-    setFocusKey(key);
-    setStep("boq");
-  };
-  const patchRow = (key: string, patch: Partial<RowState>) => { setRows((r) => r.map((x) => (x.key === key ? { ...x, ...patch } : x))); edited(); };
-  const dropLocalRow = (key: string) => setRows((r) => r.filter((x) => x.key !== key));
-
   const stepIndex = STEPS.findIndex((s) => s.id === step);
-  const statusText = save.kind === "saving" ? "Saving…" : save.kind === "saved" && !dirty ? "Saved" : save.kind === "error" ? "Could not save, try again." : dirty ? "Unsaved changes" : "Nothing to save";
+  const saving = busy || waiting;
+  const failed = !saving && !last.ok;
+  const status = saving ? "Saving…" : failed ? "Could not save" : incomplete.length > 0 ? "Not saved yet" : touched ? "Saved" : "Changes are saved automatically";
+  const detail = saving ? null : failed ? (last.ok ? null : last.message) : attentionOf(rows);
 
   return (
     <div className="space-y-4">
@@ -161,10 +319,10 @@ export function EstimateBuilder(p: BuilderProps) {
         <DetailsStep p={p} details={details} patch={patchDetails} notes={notes} patchNotes={patchNotes} />
       ) : null}
       {step === "boq" ? (
-        <BoqStep p={p} rows={rows} numbers={numbers} calc={calc} cur={cur} dirty={dirty} patchRow={patchRow} addRow={addRow} dropLocalRow={dropLocalRow} focusKey={focusKey} />
+        <BoqStep p={p} rows={rows} numbers={numbers} calc={calc} cur={cur} locked={pendingWork || incomplete.length > 0} hasIncomplete={incomplete.length > 0} saving={saving} patchRow={patchRow} addRow={addRow} ops={ops} focusKey={focusKey} photoFailures={photoFailures} />
       ) : null}
       {step === "finalise" ? (
-        <FinaliseStep p={p} details={details} notes={notes} patchNotes={patchNotes} calc={calc} cur={cur} dirty={dirty} recipientChecked={recipientChecked} setRecipientChecked={setRecipientChecked} />
+        <FinaliseStep p={p} details={details} notes={notes} patchNotes={patchNotes} calc={calc} cur={cur} pendingWork={pendingWork} recipientChecked={recipientChecked} setRecipientChecked={setRecipientChecked} ops={ops} photoFailures={photoFailures} />
       ) : null}
 
       <div className="sticky bottom-0 z-10 -mx-1 space-y-2 rounded-lg border border-border bg-card/95 p-3 shadow-sm backdrop-blur" data-testid="builder-bar">
@@ -175,15 +333,16 @@ export function EstimateBuilder(p: BuilderProps) {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p
-            role={save.kind === "error" ? "alert" : "status"}
+            role={failed ? "alert" : "status"}
             data-testid="save-state"
-            className={cn("text-sm font-medium", save.kind === "error" ? "text-destructive" : save.kind === "saved" && !dirty ? "text-[hsl(var(--os-green))]" : "text-muted-foreground")}>
-            {statusText}
-            {save.kind === "error" ? <span className="block font-normal">{save.message}</span> : null}
+            className={cn("text-sm font-medium", failed ? "text-destructive" : status === "Saved" ? "text-[hsl(var(--os-green))]" : "text-muted-foreground")}>
+            {status}
+            {detail ? <span className="block font-normal">{detail}</span> : null}
+            {failed ? <span className="block font-normal">Your changes are still on screen. They are saved again as soon as you press Save draft or keep editing.</span> : null}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" variant="ghost" disabled={stepIndex === 0} onClick={() => setStep(STEPS[stepIndex - 1]!.id)}>Back</Button>
-            <Button type="button" variant="outline" disabled={save.kind === "saving"} onClick={onSave}>{save.kind === "saving" ? "Saving…" : "Save draft"}</Button>
+            <Button type="button" variant="outline" disabled={saving} onClick={() => { setTouched(true); void saveNow(); }}>{saving ? "Saving…" : "Save draft"}</Button>
             {stepIndex < STEPS.length - 1 ? <Button type="button" onClick={() => setStep(STEPS[stepIndex + 1]!.id)}>Next: {STEPS[stepIndex + 1]!.label}</Button> : null}
           </div>
         </div>
@@ -349,19 +508,28 @@ function PaymentDetails({ notes, patchNotes }: { notes: NotesState; patchNotes: 
 // ---------------------------------------------------------------------------------------------------------------------------------
 // Step 2: BOQ (items inline, sections optional)
 // ---------------------------------------------------------------------------------------------------------------------------------
-function BoqStep({ p, rows, numbers, calc, cur, dirty, patchRow, addRow, dropLocalRow, focusKey }: {
-  p: BuilderProps; rows: RowState[]; numbers: Map<string, string>; calc: ReturnType<typeof liveCalc>["calc"]; cur: string; dirty: boolean;
-  patchRow: (key: string, patch: Partial<RowState>) => void; addRow: (sectionId: string | null) => void; dropLocalRow: (key: string) => void; focusKey: string | null;
+function BoqStep({ p, rows, numbers, calc, cur, locked, hasIncomplete, saving, patchRow, addRow, ops, focusKey, photoFailures }: {
+  p: BuilderProps; rows: RowState[]; numbers: Map<string, string>; calc: ReturnType<typeof liveCalc>["calc"]; cur: string;
+  /** True while something is unsaved or saving: moving things around and deleting a section wait for the save. */
+  locked: boolean; hasIncomplete: boolean; saving: boolean;
+  patchRow: (key: string, patch: Partial<RowState>) => void; addRow: (sectionId: string | null) => void; ops: Ops; focusKey: string | null; photoFailures: PhotoFailureView[];
 }) {
+  const router = useRouter();
   const { run, pending, error } = useRun();
   const titled = [...p.sections].filter((s) => !isUnsectionedTitle(s.title)).sort((a, b) => a.position - b.position);
   const loose = p.sections.find((s) => isUnsectionedTitle(s.title)) ?? null;
   const looseRows = rows.filter((r) => r.sectionId === null);
-  const move = (i: number, d: -1 | 1) => run(() => reorderQuotation(p.ids.opportunityId, p.ids.proposalId, "sections", null, swap(p.sections.map((s) => s.id), p.sections.findIndex((s) => s.id === titled[i]!.id), p.sections.findIndex((s) => s.id === titled[i + d]!.id))));
+  const move = (i: number, d: -1 | 1) => run(() => ops.exclusive(() => reorderQuotation(p.ids.opportunityId, p.ids.proposalId, "sections", null, swap(p.sections.map((s) => s.id), p.sections.findIndex((s) => s.id === titled[i]!.id), p.sections.findIndex((s) => s.id === titled[i + d]!.id)))));
   const calcOf = (id: string | null) => calc.sections.find((s) => (id === null ? s.unsectioned : s.id === id));
+  // Adding a section needs no Save draft: whatever is typed is saved first (queued ahead of the step), then the section is created once.
+  const addSection = async (_prev: ActionState, formData: FormData): Promise<ActionState> => {
+    const result = await ops.exclusive(() => saveQuotationSection(_prev, formData));
+    if (!result.error) router.refresh();
+    return result;
+  };
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">Type each item straight into its row. Sections are optional: add items first, and add a section only if you want headings. Line totals and subtotals update as you type.</p>
+      <p className="text-sm text-muted-foreground">Type each item straight into its row. Everything is saved as you go. Sections are optional: add items first, and add a section only if you want headings. Line totals and subtotals update as you type.</p>
       {error ? <Alert variant="destructive" role="alert">{error}</Alert> : null}
 
       <div aria-hidden className="hidden gap-2 px-3 text-xs font-medium text-muted-foreground lg:grid lg:grid-cols-[2.5rem_minmax(0,1fr)_4.5rem_5rem_7rem_9rem_auto]">
@@ -370,7 +538,7 @@ function BoqStep({ p, rows, numbers, calc, cur, dirty, patchRow, addRow, dropLoc
       <section aria-label="Items without a section" className="rounded-lg border border-border">
         {looseRows.length === 0 ? <p className="px-3 py-3 text-sm text-muted-foreground">No items yet. Add the first item below.</p> : (
           <ul className="divide-y divide-border/70">
-            {looseRows.map((r) => <ItemRow key={r.key} p={p} row={r} number={numbers.get(r.key) ?? ""} cur={cur} patchRow={patchRow} dropLocalRow={dropLocalRow} autoFocus={focusKey === r.key} dirty={dirty} siblings={looseRows} scopeId={loose?.id ?? null} />)}
+            {looseRows.map((r) => <ItemRow key={r.key} p={p} row={r} number={numbers.get(r.key) ?? ""} cur={cur} patchRow={patchRow} ops={ops} autoFocus={focusKey === r.key} locked={locked} photoFailure={photoFailures.find((f) => f.key === r.key) ?? null} siblings={looseRows} scopeId={loose?.id ?? null} />)}
           </ul>
         )}
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-2">
@@ -387,13 +555,13 @@ function BoqStep({ p, rows, numbers, calc, cur, dirty, patchRow, addRow, dropLoc
             <div className="flex flex-wrap items-center gap-2 border-b border-border bg-secondary/40 px-3 py-2">
               <h3 className="min-w-0 flex-1 break-words text-sm font-semibold">{s.title}</h3>
               <RenameSection ids={p.ids} section={s} />
-              <Button type="button" variant="ghost" size="sm" disabled={pending || dirty || i === 0} onClick={() => move(i, -1)} aria-label={`Move section ${s.title} up`}><ArrowUp className="h-4 w-4" aria-hidden /></Button>
-              <Button type="button" variant="ghost" size="sm" disabled={pending || dirty || i === titled.length - 1} onClick={() => move(i, 1)} aria-label={`Move section ${s.title} down`}><ArrowDown className="h-4 w-4" aria-hidden /></Button>
-              <Button type="button" variant="ghost" size="sm" disabled={pending || dirty} onClick={() => { if (confirm(`Delete the section "${s.title}" and its ${secRows.length} item(s)?`)) run(() => deleteQuotationSection(p.ids.opportunityId, p.ids.proposalId, s.id)); }} aria-label={`Delete section ${s.title}`}><Trash2 className="h-4 w-4" aria-hidden /></Button>
+              <Button type="button" variant="ghost" size="sm" disabled={pending || locked || i === 0} onClick={() => move(i, -1)} aria-label={`Move section ${s.title} up`}><ArrowUp className="h-4 w-4" aria-hidden /></Button>
+              <Button type="button" variant="ghost" size="sm" disabled={pending || locked || i === titled.length - 1} onClick={() => move(i, 1)} aria-label={`Move section ${s.title} down`}><ArrowDown className="h-4 w-4" aria-hidden /></Button>
+              <Button type="button" variant="ghost" size="sm" disabled={pending || locked} onClick={() => { if (confirm(`Delete the section "${s.title}" and its ${secRows.length} item(s)?`)) run(() => ops.exclusive(() => deleteQuotationSection(p.ids.opportunityId, p.ids.proposalId, s.id)), () => ops.dropSectionRows(s.id)); }} aria-label={`Delete section ${s.title}`}><Trash2 className="h-4 w-4" aria-hidden /></Button>
             </div>
             {secRows.length > 0 ? (
               <ul className="divide-y divide-border/70">
-                {secRows.map((r) => <ItemRow key={r.key} p={p} row={r} number={numbers.get(r.key) ?? ""} cur={cur} patchRow={patchRow} dropLocalRow={dropLocalRow} autoFocus={focusKey === r.key} dirty={dirty} siblings={secRows} scopeId={s.id} />)}
+                {secRows.map((r) => <ItemRow key={r.key} p={p} row={r} number={numbers.get(r.key) ?? ""} cur={cur} patchRow={patchRow} ops={ops} autoFocus={focusKey === r.key} locked={locked} photoFailure={photoFailures.find((f) => f.key === r.key) ?? null} siblings={secRows} scopeId={s.id} />)}
               </ul>
             ) : <p className="px-3 py-3 text-sm text-muted-foreground">No items in this section yet.</p>}
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-2">
@@ -403,14 +571,14 @@ function BoqStep({ p, rows, numbers, calc, cur, dirty, patchRow, addRow, dropLoc
           </section>
         );
       })}
-      {dirty ? <p className="text-sm text-muted-foreground">Save the draft before adding a section, deleting a section or moving things around.</p> : null}
-      <AddSection ids={p.ids} disabled={dirty} />
+      {hasIncomplete && !saving ? <p className="text-sm text-muted-foreground">Moving items or sections and deleting a section wait until every item is complete (or removed), because they work on the saved draft.</p> : null}
+      <AddSection ids={p.ids} action={addSection} />
     </div>
   );
 }
 
-function ItemRow({ p, row, number, cur, patchRow, dropLocalRow, autoFocus, dirty, siblings, scopeId }: {
-  p: BuilderProps; row: RowState; number: string; cur: string; patchRow: (k: string, x: Partial<RowState>) => void; dropLocalRow: (k: string) => void; autoFocus: boolean; dirty: boolean;
+function ItemRow({ p, row, number, cur, patchRow, ops, autoFocus, locked, photoFailure, siblings, scopeId }: {
+  p: BuilderProps; row: RowState; number: string; cur: string; patchRow: (k: string, x: Partial<RowState>) => void; ops: Ops; autoFocus: boolean; locked: boolean; photoFailure: PhotoFailureView | null;
   siblings: RowState[]; scopeId: string | null;
 }) {
   const { run, pending, error } = useRun();
@@ -418,8 +586,11 @@ function ItemRow({ p, row, number, cur, patchRow, dropLocalRow, autoFocus, dirty
   useEffect(() => { if (autoFocus) ref.current?.focus(); }, [autoFocus]);
   const issue = row.description || row.quantity || row.unitPrice ? rowIssue(row) : null;
   const savedLine = row.id ? p.lines.find((l) => l.id === row.id) : undefined;
-  const idx = siblings.findIndex((x) => x.key === row.key);
+  // Reordering works on the saved items only (a blank new row has no id yet).
+  const savedSiblings = siblings.filter((x) => x.id);
+  const idx = savedSiblings.findIndex((x) => x.key === row.key);
   const label = number || "new item";
+  const reorder = (to: number) => run(() => ops.exclusive(() => reorderQuotation(p.ids.opportunityId, p.ids.proposalId, "lines", scopeId, swap(savedSiblings.map((x) => x.id!), idx, to))));
   return (
     <li className="grid gap-2 px-3 py-3 lg:grid-cols-[2.5rem_minmax(0,1fr)_4.5rem_5rem_7rem_9rem_auto]">
       <span className="pt-2 text-sm font-semibold tabular-nums" aria-label="Item number">{number}</span>
@@ -432,15 +603,17 @@ function ItemRow({ p, row, number, cur, patchRow, dropLocalRow, autoFocus, dirty
         {p.vatChoices.filter((v) => v.active || v.id === row.vatChoiceId).map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
       </Select>
       <div className="flex items-start justify-end gap-1">
-        <Button type="button" variant="ghost" size="sm" disabled={pending || dirty || idx <= 0 || !row.id} onClick={() => run(() => reorderQuotation(p.ids.opportunityId, p.ids.proposalId, "lines", scopeId, swap(siblings.map((x) => x.id!), idx, idx - 1)))} aria-label={`Move item ${label} up`}><ArrowUp className="h-4 w-4" aria-hidden /></Button>
-        <Button type="button" variant="ghost" size="sm" disabled={pending || dirty || idx === siblings.length - 1 || !row.id} onClick={() => run(() => reorderQuotation(p.ids.opportunityId, p.ids.proposalId, "lines", scopeId, swap(siblings.map((x) => x.id!), idx, idx + 1)))} aria-label={`Move item ${label} down`}><ArrowDown className="h-4 w-4" aria-hidden /></Button>
+        <Button type="button" variant="ghost" size="sm" disabled={pending || locked || idx <= 0 || !row.id} onClick={() => reorder(idx - 1)} aria-label={`Move item ${label} up`}><ArrowUp className="h-4 w-4" aria-hidden /></Button>
+        <Button type="button" variant="ghost" size="sm" disabled={pending || locked || idx === savedSiblings.length - 1 || !row.id} onClick={() => reorder(idx + 1)} aria-label={`Move item ${label} down`}><ArrowDown className="h-4 w-4" aria-hidden /></Button>
         <Button type="button" variant="ghost" size="sm" disabled={pending} aria-label={`Delete item ${label}`}
-          onClick={() => { if (!row.id) return dropLocalRow(row.key); if (confirm(`Delete item ${label}?`)) run(() => deleteQuotationLine(p.ids.opportunityId, p.ids.proposalId, row.id!), () => dropLocalRow(row.key)); }}><Trash2 className="h-4 w-4" aria-hidden /></Button>
+          onClick={() => { if (row.id && !confirm(`Delete item ${label}?`)) return; run(async () => ({ error: await ops.removeRow(row.key) })); }}><Trash2 className="h-4 w-4" aria-hidden /></Button>
       </div>
       <div className="min-w-0 space-y-1 lg:col-start-2 lg:col-end-8">
         <ItemFigures p={p} row={row} cur={cur} />
         {issue ? <p className="text-sm text-destructive" role="status">{issue}</p> : null}
-        {savedLine ? <LinePicture ids={p.ids} line={savedLine} url={p.imageUrls[savedLine.image_file_id ?? ""] ?? null} name={p.imageNames[savedLine.image_file_id ?? ""] ?? null} /> : <p className="text-sm text-muted-foreground">Save the draft to add a photo to this item.</p>}
+        <LinePicture imageFileId={savedLine?.image_file_id ?? null} url={p.imageUrls[savedLine?.image_file_id ?? ""] ?? null} name={p.imageNames[savedLine?.image_file_id ?? ""] ?? null}
+          attach={(file, onPhase) => ops.attachPicture(row.key, file, onPhase)} remove={() => ops.removePicture(row.key)}
+          failure={photoFailure} retry={(onPhase) => ops.retryPhoto(row.key, onPhase)} discard={() => ops.discardPhoto(row.key)} />
         {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
       </div>
     </li>
@@ -458,12 +631,12 @@ function ItemFigures({ p, row, cur }: { p: BuilderProps; row: RowState; cur: str
   return <p className="text-sm tabular-nums">Line total <strong>{money(l.net, cur)}</strong> <span className="text-muted-foreground">excl. VAT{row.vatChoiceId ? "" : " (VAT is added at the estimate's rate in the totals)"}</span></p>;
 }
 
-function AddSection({ ids, disabled }: { ids: Ids; disabled: boolean }) {
+function AddSection({ ids, action }: { ids: Ids; action: (prev: ActionState, formData: FormData) => Promise<ActionState> }) {
   return (
-    <ActionForm action={saveQuotationSection} submitLabel="Add section" resetOnSuccess disabled={disabled}>
+    <ActionForm action={action} submitLabel="Add section" resetOnSuccess>
       <input type="hidden" name="opportunityId" value={ids.opportunityId} />
       <input type="hidden" name="proposalId" value={ids.proposalId} />
-      <Field label="Add a section (optional)" htmlFor="est-new-section" hint="Only if you want headings, for example Fabrication, AV or Installation. Items can stay without a section."><Input id="est-new-section" name="title" required maxLength={120} placeholder="e.g. Fabrication" autoComplete="off" /></Field>
+      <Field label="Add a section (optional)" htmlFor="est-new-section" hint="Only if you want headings, for example Fabrication, AV or Installation. Items can stay without a section. No need to save the draft first."><Input id="est-new-section" name="title" required maxLength={120} placeholder="e.g. Fabrication" autoComplete="off" /></Field>
     </ActionForm>
   );
 }
@@ -485,51 +658,65 @@ function RenameSection({ ids, section }: { ids: Ids; section: QuotationSectionRo
   );
 }
 
-/** The photo beside an item: upload through the existing CRM file flow (quarantine, server checks), then attach. */
-function LinePicture({ ids, line, url, name }: { ids: Ids; line: QuotationLineRow; url: string | null; name: string | null }) {
-  const { run, pending, error, setError } = useRun();
-  const [phase, setPhase] = useState<string>("");
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+/**
+ * The photo beside an item. The upload itself (private quarantine, server checks) and the attaching are done by the builder, which saves the item first when it is not
+ * saved yet and queues the attach behind the saves. A failed upload keeps the chosen file here, so "Try again" needs no new pick.
+ */
+function LinePicture({ imageFileId, url, name, attach, remove, failure, retry, discard }: {
+  imageFileId: string | null; url: string | null; name: string | null;
+  attach: (file: File, onPhase: (text: string) => void) => Promise<string | null>; remove: () => Promise<string | null>;
+  /** The builder keeps a failed photo (and its file) even when this item is not on screen; finishing is held until it is retried or discarded. */
+  failure: { message: string } | null; retry: (onPhase: (text: string) => void) => Promise<string | null>; discard: () => void;
+}) {
+  const [phase, setPhase] = useState("");
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const [added, setAdded] = useState(false);
+  const working = useRef(false);
+  async function run(task: () => Promise<string | null>, first: string) {
+    if (working.current) return;
+    working.current = true;
+    setRemoveError(null); setAdded(false);
+    setPhase(first);
+    try { const problem = await task(); if (!problem) setAdded(true); } finally { working.current = false; setPhase(""); }
+  }
+  async function onRemove() {
+    if (working.current) return;
+    working.current = true;
+    setRemoveError(null); setAdded(false);
+    setPhase("Removing…");
+    try { const problem = await remove(); if (problem) setRemoveError(problem); } finally { working.current = false; setPhase(""); }
+  }
+  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file) return;
-    setError(null);
-    const problem = validateQuotationImageMeta({ name: file.name, size: file.size, type: file.type });
-    if (problem) return setError(problem);
-    try {
-      setPhase("Checking…");
-      const prepared = await prepareCrmUpload({ opportunityId: ids.opportunityId, name: file.name, size: file.size, type: file.type, purpose: "proposal", label: "Estimate item photo" });
-      if (prepared.error !== null) return setError(prepared.error);
-      setPhase("Uploading privately…");
-      const { error: up } = await createClient().storage.from("crm-quarantine").uploadToSignedUrl(prepared.path, prepared.token, file, { contentType: file.type });
-      if (up) return setError("The upload did not complete. Check your connection and try again.");
-      setPhase("Checking the file's contents…");
-      const done = await finalizeCrmUpload(prepared.intentId);
-      if (done.error || !done.fileId) return setError(done.error ?? "The photo could not be added.");
-      run(() => setQuotationLineImage(ids.opportunityId, ids.proposalId, line.id, line.section_id, done.fileId!));
-    } catch {
-      setError("Something went wrong while uploading. Try again.");
-    } finally {
-      setPhase("");
-    }
-  }
+    if (file) void run(() => attach(file, setPhase), "Checking…");
+  };
   return (
     <div className="space-y-1">
-      {line.image_file_id ? (
+      {imageFileId ? (
         <div className="flex items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           {url ? <img src={url} alt={name ? `Photo: ${name}` : "Item photo"} className="h-14 w-14 rounded border border-border object-contain" /> : null}
           <span className="text-sm text-muted-foreground">{name ?? "Photo attached"}</span>
-          <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => run(() => setQuotationLineImage(ids.opportunityId, ids.proposalId, line.id, line.section_id, null))}>Remove photo</Button>
+          <Button type="button" variant="ghost" size="sm" disabled={!!phase} onClick={onRemove}>Remove photo</Button>
         </div>
       ) : (
         <label className="inline-flex min-h-8 cursor-pointer items-center gap-1.5 text-sm text-primary underline-offset-2 hover:underline">
           <ImagePlus className="h-4 w-4" aria-hidden /> Add photo
-          <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={onFile} disabled={pending || !!phase} />
+          <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={onFile} disabled={!!phase} />
         </label>
       )}
       {phase ? <p className="text-sm text-muted-foreground" role="status">{phase}</p> : null}
-      {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+      {added && !imageFileId && !phase && !failure ? <p className="text-sm text-muted-foreground" role="status">Photo added.</p> : null}
+      {failure && !phase ? (
+        <p className="text-sm text-destructive" role="alert" data-testid="photo-failed">
+          The photo was not added. {failure.message}{" "}
+          <button type="button" className="font-medium underline underline-offset-2" onClick={() => void run(() => retry(setPhase), "Checking…")}>Try again</button>
+          {" · "}
+          <button type="button" className="font-medium underline underline-offset-2" onClick={discard}>Discard photo</button>
+        </p>
+      ) : null}
+      {removeError ? <p className="text-sm text-destructive" role="alert">{removeError}</p> : null}
     </div>
   );
 }
@@ -539,19 +726,58 @@ function LinePicture({ ids, line, url, name }: { ids: Ids; line: QuotationLineRo
 // ---------------------------------------------------------------------------------------------------------------------------------
 const excerpt = (text: string, n = 180) => { const t = text.replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n).trimEnd()}…` : t; };
 
-function FinaliseStep({ p, details, notes, patchNotes, calc, cur, dirty, recipientChecked, setRecipientChecked }: {
-  p: BuilderProps; details: DetailsState; notes: NotesState; patchNotes: (x: Partial<NotesState>) => void; calc: ReturnType<typeof liveCalc>["calc"]; cur: string; dirty: boolean;
-  recipientChecked: boolean; setRecipientChecked: (v: boolean) => void;
+function FinaliseStep({ p, details, notes, patchNotes, calc, cur, pendingWork, recipientChecked, setRecipientChecked, ops, photoFailures }: {
+  p: BuilderProps; details: DetailsState; notes: NotesState; patchNotes: (x: Partial<NotesState>) => void; calc: ReturnType<typeof liveCalc>["calc"]; cur: string;
+  /** True while a save or upload is running or waiting, or something typed is not saved yet. */
+  pendingWork: boolean; recipientChecked: boolean; setRecipientChecked: (v: boolean) => void; ops: Ops; photoFailures: PhotoFailureView[];
 }) {
-  const { run, pending, error } = useRun();
+  const router = useRouter();
+  const [refreshing, startRefresh] = useTransition();
+  const [phase, setPhase] = useState<"" | "waiting" | "checking" | "working">("");
+  const [problem, setProblem] = useState<{ message: string; blockers: string[] } | null>(null);
   const [editing, setEditing] = useState(false);
   const recipient = [...p.parties, ...p.others].find((o) => o.id === details.billToOrgId);
   const vatLabel = p.vatChoices.find((v) => v.id === details.vatChoiceId)?.label;
   const items = calc.sections.reduce((n, s) => n + s.lines.length, 0);
   const assumptions = noteParagraphs(notes.assumptions);
   const nextSteps = noteParagraphs(notes.nextSteps);
-  const blockers = [...(dirty ? ["Save the draft first: finalising uses what is saved."] : []), ...p.blockers];
-  const canFinalise = blockers.length === 0 && recipientChecked && !pending;
+  const running = phase !== "" || refreshing;
+  // While anything is saving or unsaved the list below (read from the SAVED draft) would be out of date: Finalise waits for the save and checks the saved estimate afresh.
+  const blockers = pendingWork ? [] : p.blockers;
+  const photoHeld = photoFailures.length > 0;   // a photo that failed holds back both buttons until it is retried or discarded
+  const [retrying, setRetrying] = useState<string | null>(null);
+  const canFinalise = recipientChecked && !running && !photoHeld && (pendingWork || blockers.length === 0);
+  const done = () => startRefresh(() => router.refresh());
+
+  /** Wait for every save and upload, then run `then`. Anything missing or failed is explained here and the estimate stays editable. */
+  async function afterSaves(then: () => Promise<{ error: string | null; blockers?: string[] }>) {
+    setProblem(null);
+    setPhase("waiting");
+    try {
+      const why = await ops.settle();
+      if (why) { setProblem({ message: why, blockers: [] }); return; }
+      setPhase("checking");
+      const r = await then();
+      if (r.error || (r.blockers && r.blockers.length)) setProblem({ message: r.error ?? "This estimate cannot be finalised yet.", blockers: r.blockers ?? [] });
+      done();
+    } catch {
+      setProblem({ message: "Something went wrong, so nothing was finalised. Your changes are saved; try again.", blockers: [] });
+    } finally {
+      setPhase("");
+    }
+  }
+  const finalise = () => {
+    if (!confirm("Finalise this estimate? A frozen copy is made and this draft becomes read-only. Nothing is sent to anyone, and nothing is reserved or promised.")) return;
+    void afterSaves(async () => {
+      const ready = await checkEstimateReady(p.ids.opportunityId, p.ids.proposalId);   // read fresh from what was just saved
+      if (ready.error || ready.blockers.length) return ready;
+      setPhase("working");
+      return issueQuotation(p.ids.opportunityId, p.ids.proposalId);
+    });
+  };
+  const requestApproval = () => void afterSaves(() => requestQuotationApproval(p.ids.opportunityId, p.ids.proposalId));
+  const waitText = phase === "waiting" ? "Waiting for your changes and photos to finish saving…" : phase === "checking" ? "Checking the saved estimate…" : phase === "working" ? "Finalising…" : null;
+
   return (
     <div className="space-y-4">
       <section aria-label="Summary" className="grid gap-3 rounded-lg border border-border p-3 text-sm sm:grid-cols-2">
@@ -585,7 +811,7 @@ function FinaliseStep({ p, details, notes, patchNotes, calc, cur, dirty, recipie
           <div className="space-y-4">
             <ClientNotesFields notes={notes} patchNotes={patchNotes} />
             <div className="flex justify-end"><Button type="button" onClick={() => setEditing(false)}>Done</Button></div>
-            <p className="text-sm text-muted-foreground">Changes are kept in the draft; press Save draft to store them.</p>
+            <p className="text-sm text-muted-foreground">Changes are saved automatically.</p>
           </div>
         </Modal>
       </section>
@@ -598,22 +824,46 @@ function FinaliseStep({ p, details, notes, patchNotes, calc, cur, dirty, recipie
 
       <section aria-label="Finalise" className="space-y-3 rounded-lg border border-border p-3">
         <h3 className="text-sm font-semibold">Finalise</h3>
-        {blockers.length ? (
+        {pendingWork ? (
+          <p className="text-sm text-muted-foreground" data-testid="finalise-pending">Your latest changes are still being saved. Finalise waits for them (and for any photo upload), then checks the saved estimate.</p>
+        ) : blockers.length ? (
           <div>
             <p className="text-sm font-medium">Before this can be finalised</p>
             <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-muted-foreground">{blockers.map((b) => <li key={b}>{b}</li>)}</ul>
           </div>
         ) : <p className="text-sm text-muted-foreground">Everything needed to finalise is in place.</p>}
-        {error ? <Alert variant="destructive" role="alert">{error}</Alert> : null}
+        {photoHeld ? (
+          <div className="space-y-2 rounded-md border border-destructive/40 p-3" role="alert" data-testid="photo-failures">
+            <p className="text-sm font-medium">{photoFailures.length === 1 ? "A photo was not added, so this cannot be finalised or sent for approval yet." : `${photoFailures.length} photos were not added, so this cannot be finalised or sent for approval yet.`}</p>
+            <ul className="space-y-1.5 text-sm">
+              {photoFailures.map((f) => (
+                <li key={f.key} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span><strong>{f.label}</strong>: {f.message}</span>
+                  <Button type="button" variant="outline" size="sm" disabled={retrying !== null} onClick={async () => { setRetrying(f.key); try { await ops.retryPhoto(f.key); } finally { setRetrying(null); } }}>{retrying === f.key ? "Trying…" : "Try again"}</Button>
+                  <Button type="button" variant="ghost" size="sm" disabled={retrying !== null} onClick={() => ops.discardPhoto(f.key)}>Discard photo</Button>
+                </li>
+              ))}
+            </ul>
+            <p className="text-sm text-muted-foreground">Discarding keeps the item and leaves it without a photo. The estimate stays a draft until you choose.</p>
+          </div>
+        ) : null}
+        {waitText ? <p className="text-sm font-medium" role="status" data-testid="finalise-wait">{waitText}</p> : null}
+        {problem ? (
+          <Alert variant="destructive" role="alert" data-testid="finalise-problem">
+            <p>{problem.message}</p>
+            {problem.blockers.length ? <ul className="mt-1 list-disc space-y-0.5 pl-5">{problem.blockers.map((b) => <li key={b}>{b}</li>)}</ul> : null}
+            <p className="mt-1">The estimate is still a draft and can be edited.</p>
+          </Alert>
+        ) : null}
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[hsl(var(--primary))]" checked={recipientChecked} onChange={(e) => setRecipientChecked(e.target.checked)} />
           <span>I have checked who this estimate is addressed to{recipient ? ` (${recipient.name})` : ""}, and the currency and VAT.</span>
         </label>
         <div className="flex flex-wrap gap-2">
           {p.needsApproval && !p.approvalPending ? (
-            <Button type="button" variant="outline" disabled={pending || dirty} onClick={() => run(() => requestQuotationApproval(p.ids.opportunityId, p.ids.proposalId))}>Request approval</Button>
+            <Button type="button" variant="outline" disabled={running || photoHeld} onClick={requestApproval}>Request approval</Button>
           ) : null}
-          <Button type="button" disabled={!canFinalise} onClick={() => { if (confirm("Finalise this estimate? A frozen copy is made and this draft becomes read-only. Nothing is sent to anyone, and nothing is reserved or promised.")) run(() => issueQuotation(p.ids.opportunityId, p.ids.proposalId)); }}>Finalise estimate</Button>
+          <Button type="button" disabled={!canFinalise} onClick={finalise}>Finalise estimate</Button>
         </div>
         {p.needsApproval ? <p className="text-sm text-muted-foreground">This company needs approval of the exact version before it is finalised. Editing the draft after approval asks for it again.</p> : null}
         <p className="text-sm text-muted-foreground">Finalising freezes this version only. It does not reserve equipment, stock or dates, does not record anything as sent, and does not move the enquiry.</p>

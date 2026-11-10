@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyPartial, applySaved, buildDraftPayload, initialDetails, isBlankNewRow, isRowDirty, liveCalc, rowIssue, rowsFromServer, type RowState } from "./builder-state";
+import { applyWritten, buildDraftPayload, initialDetails, isBlankNewRow, isRowDirty, liveCalc, rowIssue, rowsFromServer, splitRows, type RowState } from "./builder-state";
 import type { QuotationHeader, QuotationLineRow, QuotationSectionRow, VatChoiceRow } from "./model";
 
 const H: QuotationHeader = {
@@ -68,18 +68,40 @@ describe("Save draft payload and its outcome", () => {
     expect(p.details).toEqual({ billToOrgId: "org-a", currency: "EUR", vatChoiceId: null, reviewPricingAfter: null });
     expect(p.lines.map((l) => l.key)).toEqual(["new-1"]);
   });
-  it("after a full save new rows take their ids and everything becomes clean; blank rows are dropped", () => {
-    const rows = applySaved([row(), row({ key: "new-2", description: "", quantity: "", unitPrice: "" })], { "new-1": "L9" });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ id: "L9", key: "L9" });
-    expect(isRowDirty(rows[0]!)).toBe(false);
+  const payloadOf = (rows: RowState[]) => buildDraftPayload({ opportunityId: "o1", proposalId: "p1" }, d, notes, rows);
+  it("after a save a new row takes its id but KEEPS its key (no remount, no lost focus); a blank new row stays untouched", () => {
+    const rows = [row(), row({ key: "new-2", description: "", quantity: "", unitPrice: "" })];
+    const next = applyWritten(rows, payloadOf(rows).lines, { "new-1": "L9" });
+    expect(next).toHaveLength(2);
+    expect(next[0]).toMatchObject({ id: "L9", key: "new-1" });
+    expect(isRowDirty(next[0]!)).toBe(false);
+    expect(next[1]).toMatchObject({ id: null, key: "new-2" });
   });
-  it("after a PARTLY failed save only the rows the server wrote get ids, so pressing Save again cannot create them twice", () => {
-    const rows = applyPartial([row({ key: "a" }), row({ key: "b", description: "Second" })], { a: "L1" });
-    expect(rows[0]).toMatchObject({ id: "L1" });
-    expect(isRowDirty(rows[0]!)).toBe(false);
-    expect(rows[1]).toMatchObject({ id: null, key: "b" });
-    expect(isRowDirty(rows[1]!)).toBe(true);
-    expect(buildDraftPayload({ opportunityId: "o1", proposalId: "p1" }, d, notes, rows).lines.map((l) => [l.key, l.id])).toEqual([["b", null]]);
+  it("the baseline is what was SENT: an edit typed while the save was running is still unsaved afterwards", () => {
+    const sentRows = [row({ key: "a", quantity: "3" })];
+    const sent = payloadOf(sentRows).lines;
+    const typedMeanwhile = [row({ key: "a", quantity: "30" })];
+    const next = applyWritten(typedMeanwhile, sent, { a: "L1" });
+    expect(next[0]).toMatchObject({ id: "L1", quantity: "30" });
+    expect(isRowDirty(next[0]!)).toBe(true);
+    expect(payloadOf(next).lines.map((l) => [l.key, l.id, l.quantity])).toEqual([["a", "L1", "30"]]);
+  });
+  it("after a PARTLY failed save only the rows the server wrote get ids, so saving again cannot create them twice", () => {
+    const rows = [row({ key: "a" }), row({ key: "b", description: "Second" })];
+    const next = applyWritten(rows, payloadOf(rows).lines, { a: "L1" });
+    expect(next[0]).toMatchObject({ id: "L1" });
+    expect(isRowDirty(next[0]!)).toBe(false);
+    expect(next[1]).toMatchObject({ id: null, key: "b" });
+    expect(payloadOf(next).lines.map((l) => [l.key, l.id])).toEqual([["b", null]]);
+  });
+  it("incomplete changed rows are set aside (kept on screen with a sentence) and the complete ones are ready; unchanged rows are neither", () => {
+    const clean = row({ key: "l1", id: "l1", saved: { description: "Stage deck", unit: "m2", quantity: "3", unitPrice: "33.33", vatChoiceId: "" } });
+    const half = row({ key: "half", description: "Truss", quantity: "", unitPrice: "" });
+    const blank = row({ key: "blank", description: "", quantity: "", unitPrice: "" });
+    const r = splitRows([clean, half, row({ key: "ok" }), blank]);
+    expect(r.incomplete.map((x) => x.row.key)).toEqual(["half"]);
+    expect(r.incomplete[0]!.issue).toMatch(/Quantity/);
+    expect(r.ready.map((x) => x.key)).toEqual(["l1", "ok", "blank"]);
+    expect(payloadOf(r.ready).lines.map((l) => l.key)).toEqual(["ok"]);
   });
 });

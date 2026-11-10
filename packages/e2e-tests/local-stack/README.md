@@ -11,6 +11,8 @@ Chromium  ->  Next.js app (apps/web, built + started locally)
               throwaway Postgres database  (stubs + every migration + grants + seed.sql)
 ```
 
+`local-storage.mjs` (served by the gateway under `/storage/v1`) is a small in-memory stand-in for the file calls the private-upload flows make (signed upload, download, remove, signed links) and keeps the stub `storage.objects` table in step; it is not Supabase Storage, keeps nothing after the gateway stops and enforces nothing.
+
 `gateway.mjs` accepts one fixed local password for users that exist in the throwaway database (or the password a test set for them) and signs HS256 tokens PostgREST
 verifies. It exists only so the app can sign in locally. **It never talks to Supabase and no credential from any real
 environment is used or needed.** `env.sh` refuses to continue unless the base URL is local and drops every role it does not seed.

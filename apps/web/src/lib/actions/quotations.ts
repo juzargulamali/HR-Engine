@@ -6,7 +6,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { CLIENT_NOTE_MAX, ESTIMATE_FORMAT_MARKER, QUOTATION_CURRENCIES, UNSECTIONED_TITLE, clausesToNotes, isUnsectionedTitle, notesToClauses } from "@enginious-hr/domain";
 import { loadQuotation } from "@/lib/crm/quotations/data";
-import { calculate } from "@/lib/crm/quotations/model";
+import { calculate, issueBlockers } from "@/lib/crm/quotations/model";
+import { getCrmContext } from "@/lib/crm/context";
+import { todayInDubai } from "@/components/sales/format";
 import { estimateWording } from "@/lib/crm/quotations/wording";
 import { pinAssets } from "@/lib/crm/quotations/pin-assets";
 import { createClient } from "@/lib/supabase/server";
@@ -184,13 +186,42 @@ export async function deleteQuotationLine(opportunityId: string, proposalId: str
   return { error: null };
 }
 
-/** Attaches (or, with no file, removes) the picture of one item. The file must already have passed the CRM upload checks; the database repeats the type and size limits. */
-export async function setQuotationLineImage(opportunityId: string, proposalId: string, lineId: string, sectionId: string, fileId: string | null): Promise<ActionState> {
-  if (![opportunityId, proposalId, lineId, sectionId].every((x) => uuid.safeParse(x).success) || (fileId !== null && !uuid.safeParse(fileId).success)) return { error: "Missing item." };
-  const { error } = await (await db()).rpc("crm_quote_save_line", { p_proposal: proposalId, p_line: lineId, p_section: sectionId, p_patch: { image_file_id: fileId } });
+/**
+ * Attaches (or, with no file, removes) the picture of one item. The file must already have passed the CRM upload checks; the database repeats the type and size limits.
+ * The screen may not know the item's section (an item typed a moment ago and saved by the automatic save): with `sectionId` null the section is read from the saved
+ * item itself, and an item that is not saved on this estimate is refused in words.
+ */
+export async function setQuotationLineImage(opportunityId: string, proposalId: string, lineId: string, sectionId: string | null, fileId: string | null): Promise<ActionState> {
+  if (![opportunityId, proposalId, lineId].every((x) => uuid.safeParse(x).success) || (sectionId !== null && !uuid.safeParse(sectionId).success) || (fileId !== null && !uuid.safeParse(fileId).success)) return { error: "Missing item." };
+  const client = await db();
+  let section = sectionId;
+  if (!section) {
+    const found = await client.from("crm_quotation_lines").select("section_id").eq("id", lineId).eq("proposal_id", proposalId).maybeSingle();
+    if (found.error) return { error: "Could not check the item, so the picture was not attached. Try again." };
+    section = (found.data as { section_id: string } | null)?.section_id ?? null;
+    if (!section) return { error: "This item is not saved yet, so the picture was not attached. Try again." };
+  }
+  const { error } = await client.rpc("crm_quote_save_line", { p_proposal: proposalId, p_line: lineId, p_section: section, p_patch: { image_file_id: fileId } });
   if (error) return fail(error.message);
   refresh(opportunityId, proposalId);
   return { error: null };
+}
+
+/**
+ * What still stands between the SAVED estimate and finalising it, read fresh from the database (the same checks the page shows: `issueBlockers`). The editor calls this
+ * after its pending saves and uploads have finished, so the answer reflects exactly what was saved. It changes nothing and decides nothing: finalising itself
+ * (`issueQuotation`) and the database repeat every check.
+ */
+export async function checkEstimateReady(opportunityId: string, proposalId: string): Promise<{ error: string | null; blockers: string[] }> {
+  if (![opportunityId, proposalId].every((x) => uuid.safeParse(x).success)) return { error: "Missing estimate.", blockers: [] };
+  const couldNot = { error: "Could not check the saved estimate, so nothing was finalised. Try again.", blockers: [] as string[] };
+  let bundle: Awaited<ReturnType<typeof loadQuotation>>;
+  let ctx: Awaited<ReturnType<typeof getCrmContext>>;
+  try { [bundle, ctx] = await Promise.all([loadQuotation(proposalId), getCrmContext()]); } catch { return couldNot; }
+  if (!bundle || bundle.header.opportunity_id !== opportunityId) return { error: "Estimate not found.", blockers: [] };
+  if (!ctx || ctx.loadFailed) return couldNot;
+  const policy = ctx.companies.find((c) => c.id === bundle.header.company_id)?.settings?.approval_policy ?? "not_configured";
+  return { error: null, blockers: issueBlockers(bundle.header, bundle.sections, bundle.lines, bundle.approvals, policy, todayInDubai(), bundle.contentHash) };
 }
 
 /** Moves a section (kind "sections") or an item inside its section (kind "lines", scope = the section) to the given order. */

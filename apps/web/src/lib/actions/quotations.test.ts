@@ -18,10 +18,12 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc, from
 
 let bundle: unknown;
 vi.mock("@/lib/crm/quotations/data", () => ({ loadQuotation: async () => bundle }));
+let crmCtx: unknown;
+vi.mock("@/lib/crm/context", () => ({ getCrmContext: async () => crmCtx }));
 const pinAssets = vi.fn();
 vi.mock("@/lib/crm/quotations/pin-assets", () => ({ pinAssets: (...a: unknown[]) => pinAssets(...a) }));
 
-import { createQuotation, decideQuotationApproval, issueQuotation, requestQuotationApproval, saveEstimateDraft, saveQuotationSection, deleteQuotationLine, type EstimateDraftInput } from "./quotations";
+import { createQuotation, decideQuotationApproval, issueQuotation, requestQuotationApproval, saveEstimateDraft, saveQuotationSection, deleteQuotationLine, setQuotationLineImage, checkEstimateReady, type EstimateDraftInput } from "./quotations";
 
 const OPP = "11111111-1111-4111-8111-111111111111";
 const P = "22222222-2222-4222-8222-222222222222";
@@ -39,6 +41,7 @@ beforeEach(() => {
   rpc.mockReset().mockResolvedValue({ data: P, error: null });
   tables = { crm_quotations: MARKED, crm_quotation_sections: { data: [], error: null }, crm_quotation_lines: { data: [], error: null } };
   bundle = { header: { opportunity_id: OPP, internal_notes: null }, sections: [], lines: [], files: [], issuer: { logo_path: null } };
+  crmCtx = { companies: [{ id: "c1", settings: { approval_policy: "not_required" } }] };
   pinAssets.mockReset().mockResolvedValue({ assets: { logo: null, lines: {} } });
 });
 
@@ -165,5 +168,61 @@ describe("finalising and approval", () => {
     expect(rpc).toHaveBeenCalledWith("crm_quote_decide_approval", { p_approval: S, p_state: "approved", p_instruction: null, p_seen_hash: "abc123" });
     rpc.mockResolvedValue({ data: null, error: { message: "This quotation changed after you opened it. Review the latest version; a fresh approval request is needed" } });
     expect((await decideQuotationApproval(OPP, P, S, "approved", "", "old")).error).toBe("This estimate changed after you opened it. Review the latest version; a fresh approval request is needed");
+  });
+});
+
+describe("picture of an item saved a moment ago (no section known on screen)", () => {
+  const FILE = "66666666-6666-4666-8666-666666666666";
+  it("with a section id it attaches directly, as before", async () => {
+    expect(await setQuotationLineImage(OPP, P, L1, S, FILE)).toEqual({ error: null });
+    expect(calls("crm_quote_save_line")).toEqual([{ p_proposal: P, p_line: L1, p_section: S, p_patch: { image_file_id: FILE } }]);
+  });
+  it("with no section id the section is read from the SAVED item, then the picture is attached to that item (never a new one)", async () => {
+    tables.crm_quotation_lines = { data: { section_id: S }, error: null };
+    expect(await setQuotationLineImage(OPP, P, L1, null, FILE)).toEqual({ error: null });
+    expect(calls("crm_quote_save_line")).toEqual([{ p_proposal: P, p_line: L1, p_section: S, p_patch: { image_file_id: FILE } }]);
+  });
+  it("an item that is not saved on this estimate is refused in words and nothing is written; a failed lookup says so", async () => {
+    tables.crm_quotation_lines = { data: null, error: null };
+    expect((await setQuotationLineImage(OPP, P, L1, null, FILE)).error).toMatch(/not saved yet/);
+    tables.crm_quotation_lines = { data: null, error: { message: "down" } };
+    expect((await setQuotationLineImage(OPP, P, L1, null, FILE)).error).toMatch(/Could not check the item/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("a malformed id is refused before anything is read", async () => {
+    expect((await setQuotationLineImage(OPP, P, "nope", null, FILE)).error).toBe("Missing item.");
+    expect(rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("checking the saved estimate before finishing", () => {
+  const header = { opportunity_id: OPP, proposal_id: P, company_id: "c1", currency: "EUR", vat_kind: "rate", vat_rate: 5, vat_label: "5%", bill_to_org_id: S, validity_date: null, milestones: [], issued_at: null };
+  const sec = { id: S, proposal_id: P, position: 1, title: "AV" };
+  const line = { id: L1, proposal_id: P, section_id: S, position: 1, description: "LED", image_file_id: null, unit: null, quantity: 1, unit_price: 10, vat_choice_id: null, vat_kind: null, vat_label: null, vat_rate: null };
+  it("lists what is missing in the saved data, changing nothing", async () => {
+    bundle = { header: { ...header, currency: null }, sections: [sec], lines: [], files: [], issuer: {}, approvals: [], contentHash: null };
+    const r = await checkEstimateReady(OPP, P);
+    expect(r.error).toBeNull();
+    expect(r.blockers).toEqual(expect.arrayContaining(["Choose the currency.", "Add at least one item.", "A section has no items: add items or delete it."]));
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("is empty when the saved estimate is complete and no approval is needed", async () => {
+    bundle = { header, sections: [sec], lines: [line], files: [], issuer: {}, approvals: [], contentHash: "h" };
+    expect(await checkEstimateReady(OPP, P)).toEqual({ error: null, blockers: [] });
+  });
+  it("still asks for approval when the company requires it and the saved version has none (the approval gate is not bypassed)", async () => {
+    crmCtx = { companies: [{ id: "c1", settings: { approval_policy: "required" } }] };
+    bundle = { header, sections: [sec], lines: [line], files: [], issuer: {}, approvals: [], contentHash: "h" };
+    expect((await checkEstimateReady(OPP, P)).blockers.join(" ")).toMatch(/approval/i);
+  });
+  it("says it could not check (and lists no blockers) when the estimate or the Sales context cannot be read", async () => {
+    bundle = { header, sections: [sec], lines: [line], files: [], issuer: {}, approvals: [], contentHash: "h" };
+    crmCtx = { companies: [], loadFailed: true };
+    expect((await checkEstimateReady(OPP, P)).error).toMatch(/Could not check/);
+    crmCtx = null;
+    expect((await checkEstimateReady(OPP, P)).error).toMatch(/Could not check/);
+    bundle = null;
+    crmCtx = { companies: [] };
+    expect((await checkEstimateReady(OPP, P)).error).toBe("Estimate not found.");
   });
 });

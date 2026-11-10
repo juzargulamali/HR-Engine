@@ -95,17 +95,24 @@ export function buildDraftPayload(ids: { opportunityId: string; proposalId: stri
   };
 }
 
-/** After a successful save: new rows take their saved ids, and every row's baseline becomes what was just written. */
-export function applySaved(rows: readonly RowState[], created: Record<string, string>): RowState[] {
-  return rows.filter((r) => !isBlankNewRow(r)).map((r) => {
-    const id = r.id ?? created[r.key] ?? null;
-    return { ...r, id, key: id ?? r.key, saved: { description: r.description, unit: r.unit, quantity: r.quantity, unitPrice: r.unitPrice, vatChoiceId: r.vatChoiceId } };
-  });
-}
-/** After a partly failed save: only the rows the server reports as written take their ids and baselines (so Save again cannot create them twice). */
-export function applyPartial(rows: readonly RowState[], created: Record<string, string>): RowState[] {
+/**
+ * After a save (complete or partly failed): every row the server reports as written takes its saved id and its baseline becomes what was SENT (not what is typed now),
+ * so an edit made while the save was running still counts as unsaved and is saved by the next run. A row keeps its client key (the screen does not remount it, so a
+ * person typing in it never loses focus), and a blank new row is left alone. Only rows listed in `created` change: a row the server did not write stays unsaved.
+ */
+export function applyWritten(rows: readonly RowState[], sent: EstimateDraftInput["lines"], created: Record<string, string>): RowState[] {
+  const sentByKey = new Map((sent ?? []).map((l) => [l.key, l]));
   return rows.map((r) => {
     const id = created[r.key];
-    return id ? { ...r, id, key: id, saved: { description: r.description, unit: r.unit, quantity: r.quantity, unitPrice: r.unitPrice, vatChoiceId: r.vatChoiceId } } : r;
+    const l = sentByKey.get(r.key);
+    if (!id || !l) return r;
+    return { ...r, id, saved: { description: l.description, unit: l.unit, quantity: l.quantity, unitPrice: l.unitPrice, vatChoiceId: String(l.vatChoiceId ?? "") } };
   });
+}
+
+/** Rows that can be saved as typed (complete) and rows kept on screen because they are incomplete; both count only rows that differ from what is saved. */
+export function splitRows(rows: readonly RowState[]): { ready: RowState[]; incomplete: { row: RowState; issue: string }[] } {
+  const incomplete = rows.flatMap((row) => { const issue = isRowDirty(row) ? rowIssue(row) : null; return issue ? [{ row, issue }] : []; });
+  const bad = new Set(incomplete.map((x) => x.row.key));
+  return { ready: rows.filter((r) => !bad.has(r.key)), incomplete };
 }
