@@ -111,6 +111,12 @@ The owner applied `20261223000200_jarvis_helper_privileges.sql` on hosted Engini
 
 **This closes the hosted ledger-helper privilege issue.** It does **not** verify the hosted JARVIS workflow: nothing has been enabled, no proof key has been set, no live provider call has been made from hosted V2, and no pilot has run. Those remain **unverified**. The Production project is untouched.
 
+## Later hosted V2 pilot (owner-reported; recorded 2026-11-10)
+
+The section above is the **original migration verification** and is historical: at that time both switches were off, there were no pilot users and the proof key was unset.
+
+**Later, the owner reported a one-user pilot on hosted V2:** JARVIS and JARVIS writes were enabled for **one pilot user and one company**, the **database proof key was set**, and that pilot created an enquiry after review and confirmation. This is the owner's report. Claude did not run any hosted SQL, did not see the rows, and did not verify it independently. It says nothing about the state of the switches at any later time, and nothing about Vercel Production. No secret value is recorded in this repository.
+
 ## Review of the remaining service_role grants (read-only review; nothing changed)
 
 **Correction.** The earlier version of this section said "nine functions". That was a counting error: the signed-in app calls **seven** JARVIS functions (five write wrappers, `jarvis_my_access` and `jarvis_usage_take`), and those seven are what still carry the platform-default `service_role` grant. The four ledger helpers were closed by `20261223000200` (verified on hosted V2) and the three proof functions were never open to it. All 14 `jarvis_*` functions, by exact SQL signature:
