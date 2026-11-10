@@ -32,7 +32,7 @@ export function matchOptions<T extends ComboOption>(options: readonly T[], query
  * a highlighted match. Built to the ARIA combobox pattern (input role=combobox + listbox of options, focus stays in the input).
  */
 export function SearchCombobox({
-  id, name, label, hint, options, value, onChange, placeholder = "Type to search", emptyText, disabled = false, required = false, footer, optionBadge,
+  id, name, label, hint, options, value, onChange, placeholder = "Type to search", emptyText, disabled = false, required = false, footer, optionBadge, onQueryChange,
 }: {
   id: string;
   /** The hidden input that posts the chosen id. Leave it out (undefined) and nothing is posted: used for a field that is posted only when it changed. */
@@ -52,6 +52,8 @@ export function SearchCombobox({
   footer?: React.ReactNode;
   /** A short extra on the right of each option (for example a priority). */
   optionBadge?: (o: ComboOption) => React.ReactNode;
+  /** Called with the text as it is typed, for a list that is searched on the server instead of held in `options`. */
+  onQueryChange?: (text: string) => void;
 }) {
   const listId = useId();
   const chosen = options.find((o) => o.id === value) ?? null;
@@ -102,7 +104,7 @@ export function SearchCombobox({
           id={id} role="combobox" aria-expanded={open} aria-controls={listId} aria-autocomplete="list" aria-activedescendant={open && matches[active] ? optionId(active) : undefined}
           autoComplete="off" autoCapitalize="off" spellCheck={false} enterKeyHint="search" placeholder={placeholder} disabled={disabled} value={text} className={cn("min-h-11", chosen && "pr-10")}
           onFocus={() => { setActive(0); setOpen(true); }}
-          onChange={(e) => { setText(e.target.value); setActive(0); setOpen(true); if (value) { lastValue.current = ""; onChange(""); } }}
+          onChange={(e) => { setText(e.target.value); setActive(0); setOpen(true); onQueryChange?.(e.target.value); if (value) { lastValue.current = ""; onChange(""); } }}
           onKeyDown={onKey}
         />
         {chosen && !disabled ? (

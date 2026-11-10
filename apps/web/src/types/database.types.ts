@@ -1832,6 +1832,11 @@ export interface Database {
       crm_set_outreach_priority: { Args: { p_org: string; p_priority: number | null }; Returns: undefined };
       crm_save_event: { Args: { p_id: string | null; p_name: string; p_kind?: string; p_website?: string | null; p_note?: string | null }; Returns: string };
       crm_save_edition: { Args: { p_id: string | null; p_event: string | null; p_start: string; p_end: string; p_city?: string | null; p_country?: string | null; p_venue?: string | null; p_note?: string | null }; Returns: string };
+      chat_my_groups: { Args: Record<string, never>; Returns: { gid: string; gkey: string; gname: string; unread: number; mentions: number; last_at: string | null; last_sender: string | null; last_preview: string | null }[] };
+      chat_group_members: { Args: { p_group: string }; Returns: { user_id: string; name: string }[] };
+      chat_messages: { Args: { p_group: string; p_before?: number | null; p_after?: number | null; p_limit?: number }; Returns: unknown };
+      chat_post: { Args: { p_group: string; p_body: string; p_mentions?: string[]; p_ref_type?: string | null; p_ref_id?: string | null; p_client_key?: string | null }; Returns: unknown };
+      chat_mark_read: { Args: { p_group: string; p_seq: number }; Returns: undefined };
       crm_archive_edition: { Args: { p_id: string }; Returns: string };
       crm_archive_event: { Args: { p_id: string }; Returns: string };
       crm_import_events: { Args: { p_rows: unknown; p_apply?: boolean; p_expect?: number | null }; Returns: unknown };
