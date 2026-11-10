@@ -65,6 +65,41 @@ const FINANCIAL_DOC = /\b(?:financial\s+statements?|balance\s+sheets?|general\s+
 /** Internal costing: what a job costs US and what we make on it (not the price or budget a client sees). */
 const INTERNAL_COST = /\b(?:internal\s+(?:budgets?|costs?|rates?|prices?)|our\s+(?:own\s+)?(?:costs?|margins?)|cost\s+price|cost\s+to\s+us|supplier\s+costs?|margins?|mark-?ups?|gross\s+profit|net\s+profit|profit(?:ability)?|budget\s+(?:vs\.?|versus)\s+actuals?|actuals?\s+(?:vs\.?|versus)\s+budget|project\s+(?:costs?|expenses?|financials?|spend)|overspend|cost\s+to\s+date)\b/gi;
 
+/** An amount the words explicitly call OUR cost ("Our cost is 85 per item", "cost price 12", "it costs us 40"): restricted with any number, with or without a currency. */
+const INTERNAL_EXPLICIT = /\b(?:internal\s+(?:budgets?|costs?|rates?|prices?)|our\s+(?:own\s+|unit\s+|actual\s+|real\s+|net\s+)?costs?|cost\s+price|cost\s+to\s+us|costs?\s+us|supplier\s+(?:costs?|prices?|rates?)|buy(?:ing)?\s+price|purchase\s+(?:cost|price)|we\s+(?:pay|paid|buy|bought)(?:\s+\w+){0,3}\s+(?:at|for))\b/gi;
+const ANY_NUMBER = /\b\d+(?:[.,]\d+)*\b/g;
+/** Same sentence, and close. */
+function nearInSentence(text: string, a: RegExp, b: RegExp, window: number): boolean {
+  return text.split(/(?<=[.!?])\s+|\n/).some((s) => near(s, a, b, window));
+}
+
+/**
+ * A marking that restricts a WHOLE text from external sharing ("External sharing prohibited", "Internal use only", "NDA", "Confidential", "Do not forward"). It is not a
+ * detail that can be cut out: a text that carries one is not sent to the provider at all, in any mode, in any edited version, and not as earlier context either. Enforced at
+ * the common outbound gate (lib/jarvis/outbound.ts), so no route can bypass it.
+ *   - an explicit phrase counts wherever it appears;
+ *   - a one-word marking ("Confidential", "Restricted", "Privileged") counts as a heading or a short notice, not inside an ordinary sentence ("parking is restricted");
+ *   - a sentence saying the text itself is confidential or under NDA counts.
+ */
+const SHARING_PHRASE = /\b(?:nda|non-?disclosure\s+agreement|non-?disclosure|internal\s+(?:use\s+)?only|for\s+internal\s+use|external\s+sharing\s+(?:is\s+)?(?:prohibited|forbidden|not\s+(?:allowed|permitted))|(?:prohibited|barred)\s+from\s+external\s+sharing|not\s+(?:for|to\s+be)\s+(?:shared\s+externally|external(?:ly)?\s+(?:sharing|shared|use|distribution|circulation))|do\s+not\s+(?:share|forward|distribute|circulate)|not\s+for\s+(?:distribution|sharing|circulation|onward\s+sharing)|client[-\s]restricted|strictly\s+(?:private|confidential)|private\s+(?:and|&)\s+confidential|under\s+embargo|embargoed)\b/i;
+const SHARING_WORD = /\b(?:confidential(?:ity)?|restricted|privileged|classified)\b/i;
+const SHARING_STATEMENT = /\b(?:this|the)\s+(?:brief|document|e-?mail|message|information|material|project|text|thread)\b[^.\n]{0,40}\b(?:is|are|remains?|must)\b[^.\n]{0,30}\b(?:confidential|restricted|privileged|embargoed|not\s+be\s+shared)\b/i;
+const LABELLED_FIELD = /^\s*[A-Za-z][A-Za-z ]{1,24}:\s*\S/;
+export function wholeTextRestricted(raw: string): boolean {
+  const text = raw.normalize("NFKC");
+  if (SHARING_PHRASE.test(text) || SHARING_STATEMENT.test(text)) return true;
+  // The tags the app wraps text in are not content.
+  const lines = text.split("\n").map((l) => l.trim()).filter((l) => l && !/^<\/?[a-z ]+>$/i.test(l));
+  return lines.some((l, i) => {
+    if (!SHARING_WORD.test(l)) return false;
+    const marking = /^\s*(?:classification|status|notice|note|marking|confidentiality|subject|re)\s*:/i.test(l);
+    if (LABELLED_FIELD.test(l) && !marking) return false;
+    const words = l.replace(/^[^:]{1,24}:\s*/, "").split(/\s+/).length;
+    // a short notice line anywhere, or a marking in the heading
+    return words <= 4 || (i < 3 && (marking || l.length <= 60) && /[(\[–—-]|^\W*(?:confidential|restricted|privileged|classified)\b|\b(?:confidential|restricted|privileged|classified)\W*$/i.test(l));
+  });
+}
+
 const WINDOW = 70;
 function near(text: string, a: RegExp, b: RegExp, window = WINDOW): boolean {
   const as = [...text.matchAll(new RegExp(a.source, a.flags.includes("g") ? a.flags : `${a.flags}g`))];
@@ -97,7 +132,7 @@ export function findProtectedContent(raw: string): ProtectedCategory[] {
 
   if (EMPLOYEE_DOC.test(text)) found.add("compensation");
   // Company financials and internal costing. Quoted prices, unit rates, discounts and client budgets are NOT here: they are Sales context the person may submit.
-  if (FINANCIAL_DOC.test(text) || near(text, INTERNAL_COST, MONEY, 50) || near(text, INTERNAL_COST, PERCENT, 50) || near(text, INTERNAL_COST, FIGURE, 40)) found.add("project_financials");
+  if (FINANCIAL_DOC.test(text) || nearInSentence(text, INTERNAL_EXPLICIT, ANY_NUMBER, 40) || near(text, INTERNAL_COST, MONEY, 50) || near(text, INTERNAL_COST, PERCENT, 50) || near(text, INTERNAL_COST, FIGURE, 40)) found.add("project_financials");
   return [...found];
 }
 

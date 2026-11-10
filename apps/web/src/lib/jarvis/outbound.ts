@@ -1,6 +1,7 @@
 import "server-only";
 import { jarvisLog } from "./log";
-import { describeProtected, findProtectedContent, type ProtectedCategory } from "./protected";
+import { RESTRICTED_TEXT_MESSAGE } from "./outbound-messages";
+import { describeProtected, findProtectedContent, wholeTextRestricted, type ProtectedCategory } from "./protected";
 import type { JarvisProvider, StructuredRequest } from "./provider/types";
 import { ruleFor } from "./rulebook";
 import { JarvisRefusalError } from "./types";
@@ -11,7 +12,8 @@ import { JarvisRefusalError } from "./types";
  *   1. the capability must have a rulebook entry that approves a provider call (deny by default: no entry, no call);
  *   2. the request must declare its sources, and each must be one the entry approves (so a record field, a database row, the Map or an attachment cannot be added later
  *      without the rulebook changing);
- *   3. the whole outgoing text is screened for protected content (and the person's free text again, whatever earlier check ran); a hit, or a text that is too long to judge,
+ *   3. a text marked as not for external sharing ("External sharing prohibited", "Internal use only", "NDA") is refused outright, for every capability;
+ *   4. the whole outgoing text is screened for protected content (and the person's free text again, whatever earlier check ran); a hit, or a text that is too long to judge,
  *      is NOT sent: the person is asked for a version without those details.
  * There is no provider call that classifies intent: routing is done locally (lib/jarvis/router.ts). Nothing here logs text: only the capability id and category tokens.
  */
@@ -42,6 +44,12 @@ export function gateProvider(provider: JarvisProvider | null, actionId: string):
       if (req.input.length > OUTBOUND_MAX_CHARS) {
         jarvisLog({ event: "outbound", actionId, outcome: "blocked", code: "too_long" });
         throw new JarvisRefusalError("invalid_input", "That is too long for JARVIS to check safely. Send a shorter version.");
+      }
+      // A sharing restriction on the text is absolute and is checked HERE, for every capability: whatever mode was chosen, whatever was edited, and whether the marking
+      // sits in the message or in the earlier context, a text marked as not for external sharing makes no provider call.
+      if (wholeTextRestricted(req.input)) {
+        jarvisLog({ event: "outbound", actionId, outcome: "blocked", code: "sharing_restricted" });
+        throw new JarvisRefusalError("protected_content", `${RESTRICTED_TEXT_MESSAGE} Continue in Enginious OS yourself (for an enquiry, use the new-enquiry form).`);
       }
       const found = findProtectedContent(req.input);
       if (found.length > 0) {

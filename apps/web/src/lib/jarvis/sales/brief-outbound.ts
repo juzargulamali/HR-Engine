@@ -1,4 +1,5 @@
-import { describeProtected, findProtectedContent, type ProtectedCategory } from "../protected";
+import { describeProtected, findProtectedContent, wholeTextRestricted, type ProtectedCategory } from "../protected";
+import { RESTRICTED_TEXT_MESSAGE } from "../outbound-messages";
 import { LIMITS } from "./enquiry-values";
 
 /**
@@ -8,7 +9,7 @@ import { LIMITS } from "./enquiry-values";
  * journey, technical requirements, quantities, quoted prices, unit rates and client budgets. Nothing useful is stripped, summarised or cut.
  *
  * Three things do not go:
- *   - a brief restricted AS A WHOLE ("External sharing prohibited", "Internal use only", "NDA", "Confidential" in the heading, as a notice line, or said of the brief itself):
+ *   - a brief restricted AS A WHOLE ("External sharing prohibited", "Internal use only", "NDA", "Confidential": `wholeTextRestricted`, enforced again at the outbound gate):
  *     no provider call in any version; the person uses the new-enquiry form; an edited text does not lift the restriction;
  *   - genuinely restricted material inside an otherwise usable brief (employee documents, salaries, medical records, personal IDs, bank details, credentials, company
  *     financial statements, internal costing and margins): the brief is NOT sent automatically. The person is shown a clean excerpt (the brief without those sentences) to
@@ -38,21 +39,20 @@ export interface PreparedBrief {
 const CUR = "(?:aed|usd|sar|eur|gbp|qar|omr|kwd|bhd|dhs?|dirhams?|riyals?|dollars?|euros?|pounds?)";
 const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
 const PHONE = /(?<![\w-])\+?\d[\d\s().-]{7,16}\d(?![\w-])/g;
-const NOT_PHONE = /^\d{4}-\d{2}-\d{2}$|^\d{4}\s*(?:-|to)\s*\d{4}$|^\d{1,3}(?:[,.]\d{3})+$|^\d{1,3}(?:,\d{3})+\s*[-–]\s*\d{1,3}(?:,\d{3})+$/;
-const PARTY = /^\s*(agency|end[\s-]?client|brand|client|customer)\s*:\s*(.+?)\s*$/i;
-
-/** A restriction that covers the whole brief, not one sentence. */
-const WHOLE_MARK = /\b(?:nda|non-?disclosure|confidential(?:ity)?|strictly\s+private|internal\s+(?:use\s+)?only|external\s+sharing\s+(?:is\s+)?(?:prohibited|not\s+(?:allowed|permitted))|(?:prohibited|barred)\s+from\s+external\s+sharing|not\s+for\s+external\s+(?:sharing|use|distribution|circulation)|do\s+not\s+(?:share|forward|distribute|circulate)|not\s+for\s+(?:distribution|sharing|circulation)|client[-\s]restricted|restricted|under\s+embargo|embargoed|privileged)\b/i;
-const WHOLE_STATEMENT = /\b(?:this|the)\s+(?:brief|document|e-?mail|message|information|material|project)\b[^.\n]{0,40}\b(?:is|are|remains?|must)\b[^.\n]{0,30}\b(?:confidential|under\s+(?:an?\s+)?nda|restricted|privileged|embargoed|not\s+be\s+shared\s+externally)\b|\b(?:covered\s+by|subject\s+to|under)\s+(?:an?\s+|the\s+|our\s+)?(?:nda|non-?disclosure)\b/i;
-const FIELD_LINE = /^\s*[A-Za-z][A-Za-z ]{1,24}:\s*\S/;
-
-/** Is the brief as a whole marked restricted? A marking in the heading (the first three lines), a short standalone notice line anywhere, or a sentence saying the brief itself is restricted. */
-export function wholeBriefRestricted(original: string): boolean {
-  const lines = original.replace(/\r\n?/g, "\n").split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.slice(0, 3).some((l) => WHOLE_MARK.test(l))) return true;
-  if (lines.some((l) => l.length <= 90 && WHOLE_MARK.test(l) && (!FIELD_LINE.test(l) || /^\s*(?:classification|status|notice|note|marking|confidentiality)\s*:/i.test(l)))) return true;
-  return WHOLE_STATEMENT.test(original);
+/**
+ * Is this run of digits really a phone number? A budget range ("AED 50000-65000"), an amount, a date or a pair of years is not. A phone number has 8 to 15 digits and looks
+ * like one: an international or trunk prefix (+, 00, 0), brackets, or digits grouped by spaces; it does not follow a currency.
+ */
+function isPhone(match: string, before: string): boolean {
+  const m = match.trim();
+  const digits = m.replace(/\D/g, "").length;
+  if (digits < 8 || digits > 15) return false;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(m) || /^\d{1,3}(?:[,.]\d{3})+/.test(m)) return false;
+  if (new RegExp(`(?:${CUR}|[$€£])\\.?\\s?$`, "i").test(before)) return false;   // "AED 50000-65000"
+  if (/^[1-9]\d{2,6}\s?[-–.]\s?[1-9]\d{2,6}$/.test(m)) return false;                 // two plain numbers: a range, not a number to call
+  return /^(?:\+|00|0)/.test(m) || /[()]/.test(m) || /\d\s+\d/.test(m) || digits >= 10;
 }
+const PARTY = /^\s*(agency|end[\s-]?client|brand|client|customer)\s*:\s*(.+?)\s*$/i;
 
 const SCALE: Record<string, number> = { k: 1e3, thousand: 1e3, m: 1e6, mn: 1e6, million: 1e6 };
 const AMT = new RegExp(`(${CUR})\\.?\\s?(\\d[\\d,]*(?:\\.\\d+)?)\\s?(k|m|mn|million|thousand)?\\b|(\\d[\\d,]*(?:\\.\\d+)?)\\s?(k|m|mn|million|thousand)?(?:\\s?(${CUR})\\b)?`, "i");
@@ -114,7 +114,7 @@ export function prepareBrief(original: string): PreparedBrief {
     for (const sentence of line.split(/(?<=[.!?])\s+(?=[A-Z0-9"'(\[])/)) {
       const s = sentence
         .replace(EMAIL, () => { hold("contact details"); return "[contact withheld]"; })
-        .replace(PHONE, (m) => (NOT_PHONE.test(m.trim()) ? m : (hold("contact details"), "[contact withheld]")));
+        .replace(PHONE, (m, offset: number, whole: string) => (isPhone(m, whole.slice(Math.max(0, offset - 12), offset)) ? (hold("contact details"), "[contact withheld]") : m));
       const cats = findProtectedContent(s);
       if (cats.length > 0) { found = true; hold(describeProtected(cats)); continue; }
       kept.push(s);
@@ -123,14 +123,14 @@ export function prepareBrief(original: string): PreparedBrief {
   }
   const outbound = out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   const remaining = findProtectedContent(outbound);
-  const restricted = wholeBriefRestricted(original);
+  const restricted = wholeTextRestricted(original);
   return {
     outbound: restricted ? "" : outbound, withheld: [...counts].map(([label, count]) => ({ label, count })), parties: { agency, client }, budget, budgetUnclear,
     separable: !restricted && !found && remaining.length === 0 && outbound.length > 0, remaining, restricted,
   };
 }
 
-export const RESTRICTED_BRIEF_MESSAGE = "This brief is marked as restricted from external sharing (for example NDA, confidential, internal use only or external sharing prohibited), so I have not sent any of it to Anthropic and will not prepare it here. Enter it yourself with the new-enquiry form.";
+export const RESTRICTED_BRIEF_MESSAGE = `${RESTRICTED_TEXT_MESSAGE} To add an enquiry, enter it yourself with the new-enquiry form.`;
 export const BUDGET_UNCLEAR_NOTE = "The brief mentions a budget that is not one exact client budget (a range, more than one value, or not clearly the client's), so I left the value blank and kept the wording in the budget note for you to check.";
 
 export const withheldNote = (p: Pick<PreparedBrief, "withheld">): string | null => {

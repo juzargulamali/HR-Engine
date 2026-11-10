@@ -9,7 +9,7 @@ import { registerAllJarvisActions } from "./actions";
 import { createAssistant, type JarvisAssistant } from "./assistant";
 import { simulatedProviderCalls } from "./provider/simulated";
 import type { ConfirmResult, EnquiryCard, SendResult } from "./protocol";
-import { fakeDeps, ID, mkOrg, newWorld, sha, type World } from "./testing/fake-world";
+import { fakeDeps, ID, mkOpp, mkOrg, newWorld, sha, type World } from "./testing/fake-world";
 
 const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const NEXT = addDays(crmToday(), 3);
@@ -713,6 +713,86 @@ describe("a realistic priced brief: the submitted Sales context goes out, the ap
     expect((await a.send({ companyId: ID.co1, text: body })).ok).toBe(true);
     expect(simulatedProviderCalls).toHaveLength(1);
     expect(simulatedProviderCalls[0]!.input).toBe(body);
+  });
+
+  it("QA 1: 'External sharing prohibited.' is enforced at the COMMON outbound boundary: no mode, edited text or earlier context reaches the provider (intercepted), and the manual enquiry form is still offered", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const e = mkOpp({ company_id: ID.co1, owner_id: ID.u1 }); w.opps.push(e);
+    const marked = "External sharing prohibited.\nThe client asks whether two LED walls are available on 2099-02-05 at 85 per item.";
+    const { assistant, f } = await live(toolUse(MODEL));
+    // every way in: no shortcut, each Sales shortcut (reply is the one QA got through), general chat, and the edited-text path
+    for (const extra of [{}, { intent: "enquiry" }, { intent: "reply", enquiryId: e.id }, { intent: "update", enquiryId: e.id }, { intent: "meeting", enquiryId: e.id }, { intent: "chat" }, { intent: "enquiry", briefOutbound: "The client asks whether two LED walls are available." }]) {
+      const r = await assistant.send({ companyId: ID.co1, text: marked, ...extra });
+      if (!r.ok || r.kind !== "reply") throw new Error(`expected the restricted answer for ${JSON.stringify(extra)}, got ${JSON.stringify(r).slice(0, 160)}`);
+      expect(r.text).toMatch(/restricted from external sharing/);
+      expect(r.links).toEqual([{ label: "New-enquiry form", href: "/sales/new" }]); // the manual enquiry fallback
+    }
+    // the marking only in the EARLIER context, with a harmless new message
+    const viaContext = await assistant.send({ companyId: ID.co1, text: "make it shorter", context: { turns: [{ role: "user", text: marked }, { role: "jarvis", text: "Dear [name], two LED walls are available." }] } });
+    expect(viaContext).toMatchObject({ ok: true, kind: "reply" });
+    // the boundary itself, called directly for every provider-backed action (so a route that skipped the assistant's own check would still be stopped)
+    for (const [actionId, input] of [
+      ["jarvis.sales.draft_reply", { enquiryId: e.id, conversation: marked }],
+      ["jarvis.sales.enquiry.update", { mode: "extract", enquiryId: e.id, text: marked }],
+      ["jarvis.sales.meeting.record", { mode: "extract", enquiryId: e.id, notes: marked }],
+      ["jarvis.sales.chat.reply", { message: marked, draft: true, turns: [] }],
+      ["jarvis.sales.chat.reply", { message: "make it shorter", draft: true, turns: [{ role: "user", text: marked }] }],
+      ["jarvis.sales.chat.reply", { message: "Summarise:\nINTERNAL USE ONLY\nthe agenda for Friday", draft: false, turns: [] }],
+      ["jarvis.sales.enquiry.create_from_brief", { mode: "extract", brief: "Title: Gala\nAgency: Fictional Wave Agency", outbound: marked }],
+    ] as const) {
+      const r = await assistant.propose({ actionId, companyId: ID.co1, input });
+      expect(r, actionId).toMatchObject({ ok: false, code: "protected_content" });
+    }
+    expect(f).toHaveBeenCalledTimes(0); // not one request left the app
+    expect(creates()).toHaveLength(0);
+    // an ordinary sentence that merely contains such a word is not a marking, and the same reply without the marking goes out with its price
+    const { wholeTextRestricted } = await import("./protected");
+    for (const t of ["Parking is restricted to the loading bay after 18:00.", "Access to the hall is restricted during set-up, so plan the crew for the morning.", "Venue: Fictional Harbour Hall"]) expect(wholeTextRestricted(t), t).toBe(false);
+    for (const t of ["External sharing prohibited.", "Internal use only", "NDA — internal use only", "CONFIDENTIAL", "Do not forward this outside the company.", "This document is confidential."]) expect(wholeTextRestricted(t), t).toBe(true);
+    const ok = await live({ content: [{ type: "tool_use", id: "t", name: "record_fields", input: { subject: "Re: LED walls", body: "Thank you. We will confirm availability.", toConfirm: [], usedValues: [] } }] });
+    expect((await ok.assistant.send({ companyId: ID.co1, intent: "reply", enquiryId: e.id, text: marked.replace("External sharing prohibited.\n", "") })).ok).toBe(true);
+    expect(ok.body().messages[0]!.content).toContain("available on 2099-02-05 at 85 per item");
+  });
+
+  it("QA 2: an amount explicitly identified as OUR cost is restricted with any number and no currency ('Our cost is 85 per item.'); 'Offer the client 85 per item' stays allowed (intercepted)", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const { findProtectedContent } = await import("./protected");
+    for (const t of ["Our cost is 85 per item.", "Internal cost: 85 each", "Cost price 12 per unit.", "It costs us 40 per wristband.", "Supplier cost 7.5 per metre."]) expect(findProtectedContent(t), t).toContain("project_financials");
+    for (const t of ["Offer the client 85 per item.", "The price is 85 per item for 1,200 items.", "We quoted 85 per item.", "Client budget: AED 50000-65000", "Our team arrives 3 hours before doors."]) expect(findProtectedContent(t), t).toEqual([]);
+    const e = mkOpp({ company_id: ID.co1, owner_id: ID.u1 }); w.opps.push(e);
+    const { assistant, f, body } = await live({ content: [{ type: "tool_use", id: "t", name: "record_fields", input: { subject: "Re: wristbands", body: "We can offer 85 per item.", toConfirm: [], usedValues: [] } }] });
+    // the internal cost stops the Sales reply and the general draft: nothing is sent
+    expect(await assistant.send({ companyId: ID.co1, intent: "reply", enquiryId: e.id, text: "They asked for a price. Our cost is 85 per item." })).toMatchObject({ ok: false, code: "protected_content" });
+    expect(await assistant.send({ companyId: ID.co1, text: "Draft an email to the client. Our cost is 85 per item." })).toMatchObject({ ok: false, code: "protected_content" });
+    expect(f).toHaveBeenCalledTimes(0);
+    // in a brief it is left out of the clean excerpt, which is offered instead of being sent
+    const brief = await assistant.send({ companyId: ID.co1, text: "Title: Fictional gala\nAgency: Fictional Wave Agency\nNext: Call on 2099-01-12\nOffer the client 85 per item. Our cost is 85 per item." });
+    if (!brief.ok || brief.kind !== "brief_review") throw new Error("expected the clean-excerpt step");
+    expect(brief.outbound).toContain("Offer the client 85 per item.");
+    expect(brief.outbound).not.toContain("Our cost");
+    expect(f).toHaveBeenCalledTimes(0);
+    // the client-facing price is allowed and reaches the provider as written
+    expect((await assistant.send({ companyId: ID.co1, intent: "reply", enquiryId: e.id, text: "They asked for a price. Offer the client 85 per item." })).ok).toBe(true);
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(body().messages[0]!.content).toContain("Offer the client 85 per item.");
+  });
+
+  it("QA 3: 'Client budget: AED 50000-65000' is a budget range, not a phone number: it stays in the provider input and in the budget note, the exact budget stays blank, and real phone numbers and email addresses are still masked (intercepted)", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const text = "Title: Fictional harbour gala\nAgency: Fictional Wave Agency\nNext: Call on 2099-01-12\nClient budget: AED 50000-65000\nWe need 1200 wristbands at 85 per item between 2099-02-05 and 2099-02-07.\nCall Fictional Producer on +971 50 555 0100 or 04 555 0199, or 0505550100, or write to fictional.producer@wave-agency.example.";
+    const { assistant, f, body } = await live(toolUse({ ...MODEL, title: "Fictional harbour gala", agencyName: "Fictional Wave Agency", clientName: null }));
+    const r = card(await assistant.send({ companyId: ID.co1, text }));
+    expect(f).toHaveBeenCalledTimes(1);
+    const sent = body().messages[0]!.content;
+    expect(sent).toContain("Client budget: AED 50000-65000");
+    expect(sent).toContain("We need 1200 wristbands at 85 per item between 2099-02-05 and 2099-02-07.");
+    for (const contact of ["555 0100", "555 0199", "0505550100", "fictional.producer@wave-agency.example"]) expect(sent, contact).not.toContain(contact);
+    expect(sent.match(/\[contact withheld\]/g)).toHaveLength(4);
+    expect(r.card.values).toMatchObject({ value: null, currency: null, budgetNote: "Client budget: AED 50000-65000" });
+    expect(r.card.notice).toMatch(/not one exact client budget/);
+    // other ranges and amounts are not mistaken for phone numbers either
+    const { prepareBrief } = await import("./sales/brief-outbound");
+    for (const t of ["Client budget: AED 50000-65000", "Budget 50000 - 65000 AED", "Client budget: 120000-150000", "Quote 185000 for 12000 items", "Event 2099-02-05 to 2099-02-07", "Hall 2 is 1200 sqm, stand 3040-3041"]) expect(prepareBrief(`Title: X\n${t}`).outbound, t).toContain(t);
   });
 
   it("a brief that mixes usable Sales text with restricted material is NOT sent as it is: the person gets a clean excerpt to send (or the form), restricted text in the edited version is refused, and the original still reaches the card", async () => {

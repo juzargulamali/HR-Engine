@@ -2,7 +2,8 @@ import "server-only";
 import { EXCLUSION_MESSAGE } from "./classifier";
 import { matchGuidance } from "./help/guidance";
 import { isPreference, parsePreferences, PREFERENCES, PREFERENCE_HELP, preferenceKeysNamed, toPreferenceViews, type PreferenceKey, type PreferenceView } from "./preferences";
-import { describeProtected, findProtectedContent, PROTECTED_LABEL, type ProtectedCategory } from "./protected";
+import { RESTRICTED_TEXT_MESSAGE } from "./outbound-messages";
+import { describeProtected, findProtectedContent, PROTECTED_LABEL, wholeTextRestricted, type ProtectedCategory } from "./protected";
 import { routeMessage, type LiveArea } from "./router";
 import { prepareBrief, RESTRICTED_BRIEF_MESSAGE } from "./sales/brief-outbound";
 import { CHAT_ID } from "./sales/chat";
@@ -177,6 +178,12 @@ export function createAssistant(deps: JarvisDeps) {
       if (!auth.ok) return auth;
       if (text.length > auth.ctx.config.maxInputChars) return { ok: false, code: "invalid_input", message: `That is too long (${text.length} characters; the limit is ${auth.ctx.config.maxInputChars}).` };
       const turns = (req.context?.turns ?? []).filter((t) => t && (t.role === "user" || t.role === "jarvis") && typeof t.text === "string");
+      // A sharing restriction on the text (or on the earlier turns the panel sent) is answered here in words, with the manual way forward, before any routing. The outbound
+      // gate enforces the same rule for every capability, so this is the friendly copy, not the wall.
+      if (wholeTextRestricted(text) || turns.some((t) => wholeTextRestricted(t.text))) {
+        jarvisLog({ event: "outbound", outcome: "blocked", code: "sharing_restricted" });
+        return { ok: true, kind: "reply", text: wholeTextRestricted(text) ? RESTRICTED_BRIEF_MESSAGE : `${RESTRICTED_TEXT_MESSAGE} It is in the earlier part of this conversation: press Clear to start again without it.`, links: [{ label: "New-enquiry form", href: "/sales/new" }] };
+      }
       const routed = routeMessage(text, { intent: intent?.key ?? null, hasChatContext: turns.length > 0, lastLookup: !!req.context?.lastLookup, hasEnquiry: !!req.enquiryId });
       jarvisLog({ event: "route", outcome: routed.kind });
       const reply = (t: string, links: ReplyLink[] = []): SendResult => ({ ok: true, kind: "reply", text: t, links });
