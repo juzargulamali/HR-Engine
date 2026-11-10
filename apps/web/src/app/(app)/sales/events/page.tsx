@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarDays } from "lucide-react";
+import { CalendarDays, Upload } from "lucide-react";
 import { AlertTriangle } from "lucide-react";
 import { OsBadge } from "@/components/os/pills";
 import { Alert } from "@/components/ui/alert";
@@ -63,6 +63,7 @@ export default async function EventsPage({ searchParams }: { searchParams: Promi
         {heading}
         <div className="flex flex-wrap gap-2">
           <AddEventButton />
+          <Link href="/sales/events/import" className={buttonVariants({ variant: "outline" })}><Upload className="h-4 w-4" aria-hidden /> Import events</Link>
           <EditionButton events={liveEvents.map((e) => ({ id: e.id, name: e.name }))} label="Add edition" />
         </div>
       </div>

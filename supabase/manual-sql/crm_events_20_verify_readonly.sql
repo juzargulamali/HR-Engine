@@ -22,15 +22,15 @@ select item, result from (
               then 'OK' else 'MISSING or wrong action' end
   union all select 7, 'no existing enquiry was relinked: every enquiry has no edition unless someone linked one through the app (count shown)',
          'OK (' || (select count(*) from crm_opportunities where event_edition_id is not null)::text || ' linked of ' || (select count(*) from crm_opportunities)::text || ')'
-  union all select 8, 'the nine functions exist and signed-in users can call them; anon and public cannot',
+  union all select 8, 'the ten functions exist and signed-in users can call them; anon and public cannot',
          case when (select count(*) from (values
               ('public.crm_set_outreach_priority(uuid, integer)'), ('public.crm_save_event(uuid, text, text, text, text)'), ('public.crm_save_edition(uuid, uuid, date, date, text, text, text, text)'),
-              ('public.crm_remove_edition(uuid)'), ('public.crm_remove_event(uuid)'), ('public.crm_record_observation(uuid, uuid, text, uuid, boolean, text, text, text, text)'),
+              ('public.crm_archive_edition(uuid)'), ('public.crm_archive_event(uuid)'), ('public.crm_import_events(jsonb, boolean, integer)'), ('public.crm_record_observation(uuid, uuid, text, uuid, boolean, text, text, text, text)'),
               ('public.crm_update_observation(uuid, text, uuid, boolean, text, text, text, text)'), ('public.crm_remove_observation(uuid)'), ('public.crm_set_opportunity_edition(uuid, uuid, integer)')) f(sig)
               where to_regprocedure(f.sig) is not null and has_function_privilege('authenticated', f.sig, 'execute') and not has_function_privilege('anon', f.sig, 'execute')
-                and not exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where p.oid = to_regprocedure(f.sig) and a.grantee = 0)) = 9 then 'OK' else 'FAIL - missing or privileges differ' end
-  union all select 9, 'the helper functions are NOT callable by signed-in users, anon or public (crm_can_edit_event_record, crm_edition_in_use, crm_observation_check)',
-         case when has_function_privilege('authenticated', 'public.crm_can_edit_event_record(uuid)', 'execute') or has_function_privilege('authenticated', 'public.crm_edition_in_use(uuid)', 'execute')
+                and not exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where p.oid = to_regprocedure(f.sig) and a.grantee = 0)) = 10 then 'OK' else 'FAIL - missing or privileges differ' end
+  union all select 9, 'the helper functions are NOT callable by signed-in users, anon or public (crm_can_edit_event_record, crm_event_import_date, crm_observation_check)',
+         case when has_function_privilege('authenticated', 'public.crm_can_edit_event_record(uuid)', 'execute') or has_function_privilege('authenticated', 'public.crm_event_import_date(text)', 'execute')
                 or has_function_privilege('authenticated', 'public.crm_observation_check(text, uuid, uuid, boolean, text, text, text)', 'execute') then 'FAIL - callable' else 'OK' end
   union all select 10, 'crm_create_opportunity and crm_update_opportunity were NOT replaced (no event text in their bodies)',
          case when exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname = 'crm_create_opportunity' and prosrc not like '%event_edition%')
@@ -39,4 +39,7 @@ select item, result from (
          case when (select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname = 'crm_create_opportunity') = 1 then 'OK' else 'MORE THAN ONE' end
   union all select 12, 'the audit trigger is on each new table',
          case when (select count(*) from pg_trigger where not tgisinternal and tgname in ('crm_events_audit', 'crm_event_editions_audit', 'crm_event_observations_audit')) = 3 then 'OK' else 'MISSING' end
+  union all select 13, 'nothing can be deleted from the three event tables by signed-in users (select only; archive is the only removal)',
+         case when has_table_privilege('authenticated', 'public.crm_events', 'delete') or has_table_privilege('authenticated', 'public.crm_event_editions', 'delete')
+                or has_table_privilege('authenticated', 'public.crm_event_observations', 'delete') then 'FAIL - delete granted' else 'OK' end
 ) x order by ord;

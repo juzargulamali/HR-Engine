@@ -1832,8 +1832,9 @@ export interface Database {
       crm_set_outreach_priority: { Args: { p_org: string; p_priority: number | null }; Returns: undefined };
       crm_save_event: { Args: { p_id: string | null; p_name: string; p_kind?: string; p_website?: string | null; p_note?: string | null }; Returns: string };
       crm_save_edition: { Args: { p_id: string | null; p_event: string | null; p_start: string; p_end: string; p_city?: string | null; p_country?: string | null; p_venue?: string | null; p_note?: string | null }; Returns: string };
-      crm_remove_edition: { Args: { p_id: string }; Returns: string };
-      crm_remove_event: { Args: { p_id: string }; Returns: string };
+      crm_archive_edition: { Args: { p_id: string }; Returns: string };
+      crm_archive_event: { Args: { p_id: string }; Returns: string };
+      crm_import_events: { Args: { p_rows: unknown; p_apply?: boolean; p_expect?: number | null }; Returns: unknown };
       crm_record_observation: { Args: { p_edition: string; p_exhibitor: string; p_kind?: string; p_agency?: string | null; p_agency_unknown?: boolean; p_stand?: string | null; p_role?: string | null; p_note?: string | null; p_verification?: string }; Returns: string };
       crm_update_observation: { Args: { p_id: string; p_kind: string; p_agency?: string | null; p_agency_unknown?: boolean; p_stand?: string | null; p_role?: string | null; p_note?: string | null; p_verification?: string }; Returns: undefined };
       crm_remove_observation: { Args: { p_id: string }; Returns: undefined };

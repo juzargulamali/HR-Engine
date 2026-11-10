@@ -11,7 +11,8 @@ import { RlsTestDatabase } from "../src/harness";
 //     exhibitor shows a DIFFERENT agency in two years;
 //   * an enquiry is linked to an edition only by its owner or a founder; edition counts come from the enquiries the VIEWER can read, so an enquiry of a company
 //     the viewer has no grant for contributes nothing;
-//   * removal deletes what is unused and ARCHIVES what has enquiries or observations, keeping every link;
+//   * ARCHIVE is the only removal and gives the same result whatever is attached (an empty edition and one linked only to another company's enquiry look the same);
+//     every edition, observation and link is kept and nothing can be deleted; bulk import classifies, never overwrites or reopens, adds in one batch and is idempotent;
 //   * crm_create_opportunity is untouched (an enquiry without an edition still works).
 
 const MIGRATIONS = [
@@ -201,36 +202,150 @@ describe("Events & Exhibitions, observations and outreach priority", () => {
     });
   });
 
-  describe("removal keeps what is used", () => {
-    it("deletes an unused edition and archives a used one (enquiry link and observations stay)", async () => {
-      const spare = (await commit<{ id: string }>(U.sara, `select crm_save_edition(null, '${event}', '2030-10-14', '2030-10-18') as id`))[0].id;
-      expect((await commit<{ r: string }>(U.sara, `select crm_remove_edition('${spare}') r`))[0].r).toBe("deleted");
-      expect(await admin(`select 1 from crm_event_editions where id = '${spare}'`)).toHaveLength(0);
-      await expect(commit(U.omar, `select crm_remove_edition('${e2026}')`)).rejects.toThrow(/Only the person who added/);
-      expect((await commit<{ r: string }>(U.sara, `select crm_remove_edition('${e2026}') r`))[0].r).toBe("archived");
-      expect((await admin<{ a: boolean }>(`select archived_at is not null a from crm_event_editions where id = '${e2026}'`))[0].a).toBe(true);
-      expect((await admin<{ e: string }>(`select event_edition_id e from crm_opportunities where id = '${uaeOpp}'`))[0].e).toBe(e2026);
-      expect(Number((await admin<{ n: string }>(`select count(*) n from crm_event_observations where edition_id = '${e2026}'`))[0].n)).toBe(2);
-      // an archived edition takes no new link and no new observation, but an existing link can be kept
-      await expect(commit(U.sara, `select crm_set_opportunity_edition('${ksaOpp}', null)`)).rejects.toThrow(/not found/i);   // another company's enquiry is invisible to her
-      await expect(commit(U.sara, `select crm_record_observation('${e2026}', '${client}', 'exhibited', null, true)`)).rejects.toThrow(/archived edition/);
-      await commit(U.sara, `select crm_set_opportunity_edition('${uaeOpp}', '${e2026}')`);
+  describe("archive is the only removal, and it is the same whatever is attached", () => {
+    it("an empty edition and one linked only to ANOTHER company's enquiry give the same result, the link stays, and nothing can be deleted", async () => {
+      const add = async (s: string, e: string) => (await commit<{ id: string }>(U.sara, `select crm_save_edition(null, '${event}', '${s}', '${e}', 'Dubai', 'AE') as id`))[0].id;
+      const empty = await add("2030-10-14", "2030-10-18");
+      const ksaOnly = await add("2031-10-14", "2031-10-18");
+      await commit(U.faisal, `select crm_set_opportunity_edition('${ksaOpp}', '${ksaOnly}')`);
+      // the UAE person cannot see the KSA enquiry at all, so the two editions look identical to her: both show no enquiry
+      expect(await q(U.sara, `select id from crm_opportunities where event_edition_id = '${ksaOnly}'`)).toHaveLength(0);
+      const r1 = (await commit<{ r: string }>(U.sara, `select crm_archive_edition('${empty}') r`))[0].r;
+      const r2 = (await commit<{ r: string }>(U.sara, `select crm_archive_edition('${ksaOnly}') r`))[0].r;
+      expect(r1).toBe("archived");
+      expect(r2).toBe(r1);
+      const rows = await admin<{ id: string; a: boolean }>(`select id, archived_at is not null a from crm_event_editions where id = any (array['${empty}','${ksaOnly}']::uuid[])`);
+      expect(rows).toHaveLength(2);                                                    // nothing was deleted
+      expect(rows.every((x) => x.a)).toBe(true);
+      expect((await admin<{ e: string }>(`select event_edition_id e from crm_opportunities where id = '${ksaOpp}'`))[0].e).toBe(ksaOnly);   // the KSA link is preserved
+      // archiving again changes nothing and says the same
+      expect((await commit<{ r: string }>(U.sara, `select crm_archive_edition('${ksaOnly}') r`))[0].r).toBe("archived");
+      // there is no delete path: the function does not exist and a direct delete removes nothing
+      await expect(commit(U.sara, `select crm_remove_edition('${empty}')`)).rejects.toThrow(/does not exist/);
+      await commit(U.sara, `delete from crm_event_editions where id = '${empty}'`);
+      expect(await admin(`select 1 from crm_event_editions where id = '${empty}'`)).toHaveLength(1);
+      // only the person who added it, or a founder, archives
+      const mine = await add("2032-10-14", "2032-10-18");
+      await expect(commit(U.omar, `select crm_archive_edition('${mine}')`)).rejects.toThrow(/Only the person who added/);
+      await expect(commit(U.hr, `select crm_archive_edition('${mine}')`)).rejects.toThrow(/Only the person who added|Sales access|No CRM access/i);
+      await commit(U.founder, `select crm_archive_edition('${mine}')`);
+      await expect(commit(U.sara, `select crm_archive_edition('${id()}')`)).rejects.toThrow(/Edition not found/);
     });
-    it("an edition can never be deleted directly while an enquiry is linked (restrict), and an event with used editions is archived with them", async () => {
+    it("an archived edition stays readable, keeps its observations and takes no NEW enquiry link or observation; clearing an existing link still works", async () => {
+      const [ed] = await admin<{ id: string }>(`select event_edition_id id from crm_opportunities where id = '${ksaOpp}'`);
+      expect(await q(U.faisal, `select id from crm_event_editions where id = '${ed.id}'`)).toHaveLength(1);
+      await expect(commit(U.sara, `select crm_set_opportunity_edition('${uaeOpp}', '${ed.id}')`)).rejects.toThrow(/Choose an edition from the list/);
+      await expect(commit(U.sara, `select crm_record_observation('${ed.id}', '${client}', 'exhibited', null, true)`)).rejects.toThrow(/archived edition/);
+      await commit(U.faisal, `select crm_set_opportunity_edition('${ksaOpp}', null)`);
+      expect((await admin<{ e: string | null }>(`select event_edition_id e from crm_opportunities where id = '${ksaOpp}'`))[0].e).toBeNull();
+    });
+    it("archiving an event keeps ALL its editions, observations and enquiry links exactly as they were; they are no longer offered for new links", async () => {
+      const before = await admin<{ id: string; a: boolean }>(`select id, archived_at is not null a from crm_event_editions where event_id = '${event}' order by start_date`);
+      const obsBefore = (await admin<{ n: string }>(`select count(*) n from crm_event_observations where edition_id = any (select id from crm_event_editions where event_id = '${event}')`))[0].n;
+      await expect(commit(U.omar, `select crm_archive_event('${event}')`)).rejects.toThrow(/Only the person who added/);
+      expect((await commit<{ r: string }>(U.sara, `select crm_archive_event('${event}') r`))[0].r).toBe("archived");
+      expect((await admin<{ a: boolean }>(`select archived_at is not null a from crm_events where id = '${event}'`))[0].a).toBe(true);
+      const after = await admin<{ id: string; a: boolean }>(`select id, archived_at is not null a from crm_event_editions where event_id = '${event}' order by start_date`);
+      expect(after).toEqual(before);                                                   // not one edition was changed or removed
+      expect((await admin<{ n: string }>(`select count(*) n from crm_event_observations where edition_id = any (select id from crm_event_editions where event_id = '${event}')`))[0].n).toBe(obsBefore);
+      expect((await admin<{ e: string }>(`select event_edition_id e from crm_opportunities where id = '${uaeOpp}'`))[0].e).toBe(e2026);
+      // an edition of an archived event is not offered for a new link, and the archived event takes no new edition
+      await expect(commit(U.sara, `select crm_set_opportunity_edition('${ksaOpp}', '${e2027}')`)).rejects.toThrow(/not found|Choose an edition|Only the owner/i);
+      await expect(commit(U.faisal, `select crm_set_opportunity_edition('${ksaOpp}', '${e2027}')`)).rejects.toThrow(/Choose an edition from the list/);
+      await expect(commit(U.sara, `select crm_save_edition(null, '${event}', '2040-01-01', '2040-01-02')`)).rejects.toThrow(/archived event/);
+      // an edition can still never be deleted while an enquiry is linked to it
       await expect(admin(`delete from crm_event_editions where id = '${e2026}'`)).rejects.toThrow(/violates foreign key/);
-      expect((await commit<{ r: string }>(U.sara, `select crm_remove_event('${event}') r`))[0].r).toBe("archived");
-      const eds = await admin<{ id: string; a: boolean }>(`select id, archived_at is not null a from crm_event_editions where event_id = '${event}' order by start_date`);
-      expect(eds.map((e) => e.id)).toEqual([e2025, e2026, e2027]);
-      expect(eds.every((e) => e.a)).toBe(true);
-      expect((await admin<{ n: string }>(`select count(*) n from crm_event_observations where edition_id = any (array['${e2025}','${e2026}','${e2027}']::uuid[])`))[0].n).toBe("4");
-      // the name can be used again by a new event once the old one is archived
+      // the name can be used again by a NEW event once the old one is archived
       await commit(U.sara, `select crm_save_event(null, 'Fictional Expo Global', 'exhibition')`);
     });
-    it("an event nobody used is deleted with its editions", async () => {
-      const ev = (await commit<{ id: string }>(U.sara, `select crm_save_event(null, 'Fictional Unused Show', 'other') as id`))[0].id;
-      await commit(U.sara, `select crm_save_edition(null, '${ev}', '2031-01-10', '2031-01-12')`);
-      expect((await commit<{ r: string }>(U.sara, `select crm_remove_event('${ev}') r`))[0].r).toBe("deleted");
-      expect(await admin(`select 1 from crm_events where id = '${ev}'`)).toHaveLength(0);
+  });
+
+  describe("bulk import of the shared calendar", () => {
+    type Row = { row: number; status: string; reason: string | null; note: string | null; event: string; eventIsNew: boolean };
+    type Result = { applied: boolean; blocked: boolean; stale: boolean; createdEvents: number; createdEditions: number; summary: Record<string, number>; rows: Row[] };
+    const imp = (who: string, rows: unknown[], apply = false, expect_?: number) =>
+      commit<{ r: Result }>(who, `select crm_import_events('${JSON.stringify(rows).replace(/'/g, "''")}'::jsonb, ${apply}, ${expect_ ?? "null"}) r`).then((x) => x[0].r);
+    const r = (row: number, name: string, start: string, end: string, country = "AE", city = "Dubai", venue = "Fictional Hall") => ({ row, name, country, city, venue, start, end });
+    const counts = async () => ({
+      events: Number((await admin<{ n: string }>(`select count(*) n from crm_events`))[0].n),
+      editions: Number((await admin<{ n: string }>(`select count(*) n from crm_event_editions`))[0].n),
+    });
+    let show: string;
+
+    it("classifies every row without writing: new event, added edition, already present, conflicts, ambiguous, archived and invalid rows", async () => {
+      show = (await commit<{ id: string }>(U.sara, `select crm_save_event(null, 'Fictional Import Show', 'exhibition') as id`))[0].id;
+      await commit(U.sara, `select crm_save_edition(null, '${show}', '2026-03-10', '2026-03-12', 'Dubai', 'AE', 'Fictional Hall')`);
+      await commit(U.sara, `select crm_save_event(null, 'Fictional Gulf Mega Expo', 'exhibition')`);
+      await commit(U.sara, `select crm_save_event(null, 'Fictional Gulf Mini Expo', 'exhibition')`);
+      const old = (await commit<{ id: string }>(U.sara, `select crm_save_event(null, 'Fictional Retired Show', 'other') as id`))[0].id;
+      await commit(U.sara, `select crm_archive_event('${old}')`);
+      const arch = (await commit<{ id: string }>(U.sara, `select crm_save_event(null, 'Fictional Archived Date Show', 'other') as id`))[0].id;
+      const archEd = (await commit<{ id: string }>(U.sara, `select crm_save_edition(null, '${arch}', '2026-09-01', '2026-09-03') as id`))[0].id;
+      await commit(U.sara, `select crm_archive_edition('${archEd}')`);
+      const before = await counts();
+      const rows = [
+        r(2, "Fictional Import Show", "2026-03-10", "2026-03-12"),                        // already present
+        r(3, "Fictional Import Show", "2027-03-09", "2027-03-11"),                        // new edition of an existing event
+        r(4, "Fictional New Expo", "2027-05-01", "2027-05-03", "SA", "Riyadh"),            // new event
+        r(5, "fictional new-expo", "2028-05-01", "2028-05-03", "SA", "Riyadh"),            // another edition of the SAME new event (same name key)
+        r(6, "Fictional Import Show", "2026-03-10", "2026-03-14"),                        // same start, different end: conflict
+        r(7, "Fictional Import Show", "2026-03-11", "2026-03-13"),                        // overlaps the recorded edition: conflict
+        r(8, "Fictional Retired Show", "2027-01-01", "2027-01-02"),                       // only an archived event has this name: review
+        r(9, "Fictional Archived Date Show", "2026-09-01", "2026-09-03"),                 // an archived edition has this start: review
+        r(10, "Gulf", "2027-02-01", "2027-02-02"),                                        // could be either Gulf expo: ambiguous
+        r(11, "", "2027-02-01", "2027-02-02"),                                            // no name
+        r(12, "Fictional Bad Date", "2026-02-30", "2026-03-01"),                          // not a real date
+        r(13, "Fictional Bad Range", "2026-04-05", "2026-04-01"),                         // end before start
+        r(14, "Fictional No Country", "2026-04-01", "2026-04-02", ""),                    // no country
+        r(15, "Fictional New Expo", "2027-05-01", "2027-05-03", "SA", "Riyadh"),          // repeated in the file
+      ];
+      const res = await imp(U.sara, rows);
+      const status = Object.fromEntries(res.rows.map((x) => [x.row, x.status]));
+      expect(status).toEqual({ 2: "present", 3: "new_edition", 4: "new_event", 5: "new_edition", 6: "conflict", 7: "conflict", 8: "review", 9: "review", 10: "ambiguous", 11: "invalid", 12: "invalid", 13: "invalid", 14: "invalid", 15: "present" });
+      expect(res.rows.find((x) => x.row === 5)!.eventIsNew).toBe(true);
+      expect(res.rows.find((x) => x.row === 6)!.reason).toMatch(/Dates are never overwritten/);
+      expect(res.rows.find((x) => x.row === 8)!.reason).toMatch(/never reopens an archived event/);
+      expect(res.rows.find((x) => x.row === 9)!.reason).toMatch(/never reopens an archived edition/);
+      expect(res.rows.find((x) => x.row === 10)!.reason).toMatch(/Mega Expo.*Mini Expo|Mini Expo.*Mega Expo/);
+      expect(res.rows.find((x) => x.row === 12)!.reason).toMatch(/real date/);
+      expect(res.summary).toMatchObject({ rows: 14, newEvents: 1, newEditions: 3, present: 2, conflict: 2, review: 2, ambiguous: 1, invalid: 4, blocking: 9 });
+      expect(res.applied).toBe(false);
+      expect(await counts()).toEqual(before);                                              // a preview writes nothing
+      // asking to APPLY a file that has rows to correct writes nothing either
+      const blocked = await imp(U.sara, rows, true);
+      expect(blocked).toMatchObject({ applied: false, blocked: true });
+      expect(await counts()).toEqual(before);
+    });
+    it("applies a clean file in one batch under ONE event, visible to another company, and re-importing the same file adds nothing", async () => {
+      const clean = [
+        r(2, "Fictional Import Show", "2026-03-10", "2026-03-12"),
+        r(3, "Fictional Import Show", "2027-03-09", "2027-03-11"),
+        r(4, "Fictional New Expo", "2027-05-01", "2027-05-03", "SA", "Riyadh"),
+        r(5, "fictional new-expo", "2028-05-01", "2028-05-03", "SA", "Riyadh"),
+      ];
+      const before = await counts();
+      // a stale expectation (someone changed the calendar since the preview) writes nothing
+      expect(await imp(U.sara, clean, true, 7)).toMatchObject({ applied: false, stale: true });
+      expect(await counts()).toEqual(before);
+      const done = await imp(U.sara, clean, true, 3);
+      expect(done).toMatchObject({ applied: true, createdEvents: 1, createdEditions: 3 });
+      expect(await counts()).toEqual({ events: before.events + 1, editions: before.editions + 3 });
+      const mine = await admin<{ n: string; c: string }>(`select count(distinct d.event_id) n, count(*) c from crm_event_editions d join crm_events e on e.id = d.event_id where e.name = 'Fictional New Expo'`);
+      expect(mine[0]).toMatchObject({ n: "1", c: "2" });                                   // both editions under ONE event, spelled as the first row
+      expect((await admin<{ created_by: string }>(`select created_by from crm_events where name = 'Fictional New Expo'`))[0].created_by).toBe(U.sara);
+      // another company's person (KSA only) sees the imported calendar
+      expect(await q(U.faisal, `select d.id from crm_event_editions d join crm_events e on e.id = d.event_id where e.name = 'Fictional New Expo'`)).toHaveLength(2);
+      // the same file again: everything is present, nothing is added, nothing duplicates
+      const again = await imp(U.sara, clean, true);
+      expect(again).toMatchObject({ applied: true, createdEvents: 0, createdEditions: 0 });
+      expect(again.rows.every((x) => x.status === "present")).toBe(true);
+      expect(await counts()).toEqual({ events: before.events + 1, editions: before.editions + 3 });
+    });
+    it("needs a Sales grant; the whole batch rolls back with a clear message when a rule is broken underneath", async () => {
+      await expect(imp(U.hr, [r(2, "Fictional No Grant Expo", "2030-01-01", "2030-01-02")])).rejects.toThrow(/Sales access|No CRM access/i);
+      await expect(imp(U.stranger, [r(2, "Fictional No Grant Expo", "2030-01-01", "2030-01-02")], true)).rejects.toThrow(/Sales access|No CRM access/i);
+      await expect(imp(U.sara, [])).rejects.toThrow(/no rows/);
+      expect(await admin(`select 1 from crm_events where name = 'Fictional No Grant Expo'`)).toHaveLength(0);
     });
   });
 });

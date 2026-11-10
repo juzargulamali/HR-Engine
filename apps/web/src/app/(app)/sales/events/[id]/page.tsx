@@ -18,7 +18,7 @@ import {
 } from "@/lib/crm/events/model";
 import { countryLabel } from "@/lib/crm/clients-agencies/normalise";
 import { PriorityControl } from "../../accounts/priority-control";
-import { EditEventButton, EditionButton, RemoveButton } from "../event-forms";
+import { ArchiveButton, EditEventButton, EditionButton } from "../event-forms";
 import { RecordObservationButton, RemoveObservationButton, type ObservationValues } from "../observation-form";
 import { eventsScope } from "../scope";
 import { EditObservationDialog } from "./edit-observation-dialog";
@@ -124,7 +124,7 @@ export default async function EventPage({ params, searchParams }: { params: Prom
           {live.length > 0 ? <RecordObservationButton editions={editionChoices} orgs={orgsForForm} editionId={selected && !selected.archived_at ? selected.id : undefined} /> : null}
           {!event.archived_at ? <EditionButton eventId={event.id} label="Add next edition" variant="outline" /> : null}
           <EditEventButton values={{ id: event.id, name: event.name, kind: event.kind, website: event.website ?? "", note: event.note ?? "" }} />
-          <RemoveButton kind="event" id={event.id} name={event.name} />
+          {!event.archived_at ? <ArchiveButton kind="event" id={event.id} name={event.name} /> : null}
         </div>
       </div>
 
@@ -165,7 +165,7 @@ export default async function EventPage({ params, searchParams }: { params: Prom
                           <td className="py-2 pr-3">{placeText(d, countryLabel) || <span className="text-muted-foreground">Not recorded</span>}</td>
                           <td className="py-2 pr-3"><span className="flex flex-wrap gap-1"><OsBadge tone={phase === "past" ? "quiet" : phase === "ongoing" ? "green" : "blue"}>{PHASE_LABEL[phase]}</OsBadge>{d.archived_at ? <OsBadge tone="amber">Archived</OsBadge> : null}</span></td>
                           <td className="py-2 pr-3 tabular-nums">{c.total}</td><td className="py-2 pr-3 tabular-nums">{c.open}</td><td className="py-2 pr-3 tabular-nums">{c.closed}</td><td className="py-2 pr-3 tabular-nums">{c.won}</td><td className="py-2 pr-3 tabular-nums">{c.lost}</td>
-                          <td className="py-2"><span className="flex items-center justify-end">{!d.archived_at ? <EditionButton values={{ id: d.id, start: d.start_date, end: d.end_date, city: d.city ?? "", country: d.country_code ?? "", venue: d.venue ?? "", note: "" }} /> : null}<RemoveButton kind="edition" id={d.id} name={editionLabel(event, d)} /></span></td>
+                          <td className="py-2"><span className="flex items-center justify-end">{!d.archived_at ? <EditionButton values={{ id: d.id, start: d.start_date, end: d.end_date, city: d.city ?? "", country: d.country_code ?? "", venue: d.venue ?? "", note: "" }} /> : null}{!d.archived_at ? <ArchiveButton kind="edition" id={d.id} name={editionLabel(event, d)} /> : null}</span></td>
                         </tr>
                       );
                     })}

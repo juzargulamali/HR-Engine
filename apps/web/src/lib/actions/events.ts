@@ -9,8 +9,7 @@ import type { ActionState } from "./companies";
 
 /**
  * Events & Exhibitions server actions (migration 20261224000100). Thin wrappers over the crm_* functions: the function, not this file, decides who may add, edit or
- * remove (any Sales grant adds; the person who added it or a founder edits or removes), keeps the shape of an observation and archives rather than deletes whatever has
- * enquiries or observations. This layer parses the form and turns database errors into sentences.
+ * archive (any Sales grant adds; the person who added it or a founder edits or archives; nothing is ever deleted), keeps the shape of an observation. This layer parses the form and turns database errors into sentences.
  */
 const uuid = z.string().uuid();
 const fail = (message: string): ActionState => ({ error: friendlyCrmError(message) });
@@ -64,21 +63,25 @@ export async function saveEdition(_prev: ActionState & { id?: string }, formData
   return { error: null, id: String(data) };
 }
 
-/** Removes an unused edition, or archives one that has enquiries or observations (every link and observation stays). Says which in words. */
-export async function removeEdition(editionId: string): Promise<ActionState & { archived?: boolean }> {
+/**
+ * ARCHIVES an edition: the standard (and only) removal. It is archived whatever is attached, so the result never reveals whether an enquiry the person cannot see is linked;
+ * every observation and enquiry link stays; the edition stays in history but is no longer offered for new enquiry links.
+ */
+export async function archiveEdition(editionId: string): Promise<ActionState> {
   if (!uuid.safeParse(editionId).success) return { error: "Missing edition." };
-  const { data, error } = await (await createClient()).rpc("crm_remove_edition", { p_id: editionId });
+  const { error } = await (await createClient()).rpc("crm_archive_edition", { p_id: editionId });
   if (error) return fail(error.message);
   refresh();
-  return { error: null, archived: data === "archived" };
+  return { error: null };
 }
 
-export async function removeEvent(eventId: string): Promise<ActionState & { archived?: boolean }> {
+/** ARCHIVES an event. Its editions, observations and enquiry links are all kept exactly as they were; they are no longer offered for new links. */
+export async function archiveEvent(eventId: string): Promise<ActionState> {
   if (!uuid.safeParse(eventId).success) return { error: "Missing event." };
-  const { data, error } = await (await createClient()).rpc("crm_remove_event", { p_id: eventId });
+  const { error } = await (await createClient()).rpc("crm_archive_event", { p_id: eventId });
   if (error) return fail(error.message);
   refresh();
-  return { error: null, archived: data === "archived" };
+  return { error: null };
 }
 
 const observationSchema = z.object({

@@ -5,7 +5,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 const rpc = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc }) }));
 
-import { removeEdition, removeEvent, removeObservation, saveEdition, saveEvent, saveObservation, setOpportunityEdition, setOutreachPriority } from "./events";
+import { archiveEdition, archiveEvent, removeObservation, saveEdition, saveEvent, saveObservation, setOpportunityEdition, setOutreachPriority } from "./events";
 
 const A = "11111111-1111-4111-8111-111111111111"; // edition
 const B = "22222222-2222-4222-8222-222222222222"; // exhibitor
@@ -53,12 +53,16 @@ describe("events and editions", () => {
     await saveEdition({ error: null }, fd({ id: A, start: "2026-10-12", end: "2026-10-17" }));
     expect(calls("crm_save_edition")[0]).toMatchObject({ p_id: A, p_event: null });
   });
-  it("says whether a removal deleted or archived", async () => {
+  it("archives an edition or an event with the same answer whatever is attached, and has no delete action", async () => {
     rpc.mockResolvedValueOnce({ data: "archived", error: null });
-    expect(await removeEdition(A)).toEqual({ error: null, archived: true });
-    rpc.mockResolvedValueOnce({ data: "deleted", error: null });
-    expect(await removeEvent(E)).toEqual({ error: null, archived: false });
-    expect((await removeEdition("nope")).error).toBe("Missing edition.");
+    expect(await archiveEdition(A)).toEqual({ error: null });
+    rpc.mockResolvedValueOnce({ data: "archived", error: null });
+    expect(await archiveEvent(E)).toEqual({ error: null });
+    expect(calls("crm_archive_edition")[0]).toEqual({ p_id: A });
+    expect(calls("crm_archive_event")[0]).toEqual({ p_id: E });
+    expect((await archiveEdition("nope")).error).toBe("Missing edition.");
+    expect((await archiveEvent("nope")).error).toBe("Missing event.");
+    expect(calls("crm_remove_edition")).toHaveLength(0);
   });
 });
 

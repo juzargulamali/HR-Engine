@@ -159,4 +159,5 @@ The six named verification gaps (rows 30, 38, 43, 46, 62 and 70, see the count u
 | 71 | Event page (editions, exhibitors compared, agencies to contact, linked enquiries) | `/sales/events/[id]` | Sales grant | [X section 3.2](./sales-events-and-exhibitions.md) |
 | 72 | Record an observation (phone-first dialog) | event page | Sales grant | [X section 3.3](./sales-events-and-exhibitions.md) |
 | 73 | Outreach priority (directory column, filter, sort; account card; lead control) | `/sales/accounts`, `/sales/accounts/[id]`, event page | Sales grant | [X section 4](./sales-events-and-exhibitions.md) |
+| 74 | Import events (template, preview, confirm; archive on events and editions) | `/sales/events/import`, `/sales/events`, event page | Sales grant | [X sections 3.2, 3.4](./sales-events-and-exhibitions.md) |
 | 74 | Event / Exhibition field on New enquiry, Quick add and Edit details; event line on Scope & dates | `/sales/new`, quick add, enquiry page | Sales grant; link: owner or founder | [E section 3.4](./sales-enquiries.md) |

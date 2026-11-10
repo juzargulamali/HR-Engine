@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Plus, Trash2 } from "lucide-react";
-import { removeEdition, removeEvent, saveEdition, saveEvent } from "@/lib/actions/events";
+import { Archive, Pencil, Plus } from "lucide-react";
+import { archiveEdition, archiveEvent, saveEdition, saveEvent } from "@/lib/actions/events";
 import { EVENT_KIND_LABEL } from "@/lib/crm/events/model";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -98,24 +98,27 @@ export function EditionButton({ events, values, eventId, label, variant = "outli
   );
 }
 
-/** Removes an unused edition or event, and ARCHIVES one with linked enquiries or observations (every link and observation stays). Says which happened. */
-export function RemoveButton({ kind, id, name }: { kind: "event" | "edition"; id: string; name: string }) {
+/**
+ * ARCHIVE: the standard action for an event or an edition, and the only removal in Sales (nothing is deleted). The question and the answer are the same whatever is
+ * attached, so they never reveal an enquiry the person cannot see. Everything stays in history and keeps its links; it is only no longer offered for NEW enquiry links.
+ */
+export function ArchiveButton({ kind, id, name }: { kind: "event" | "edition"; id: string; name: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ error?: string; note?: string } | null>(null);
   async function run() {
-    const what = kind === "event" ? "this event and its editions" : "this edition";
-    if (!confirm(`Remove ${name}?\n\nIf nothing uses ${what} it is deleted. If enquiries or observations are linked to it, it is archived instead and every link and observation stays.`)) return;
+    const what = kind === "event" ? "this event and all its editions" : "this edition";
+    if (!confirm(`Archive ${name}?\n\nNothing is deleted: ${what}, their observations and every enquiry link stay in history. It will no longer be offered when linking a new enquiry.`)) return;
     setBusy(true); setResult(null);
     try {
-      const r = kind === "event" ? await removeEvent(id) : await removeEdition(id);
+      const r = kind === "event" ? await archiveEvent(id) : await archiveEdition(id);
       if (r.error) setResult({ error: r.error });
-      else { setResult({ note: r.archived ? "Archived: it has enquiries or observations, which are kept." : "Removed." }); router.refresh(); }
+      else { setResult({ note: "Archived. It stays in history." }); router.refresh(); }
     } finally { setBusy(false); }
   }
   return (
     <span className="inline-flex flex-col items-start">
-      <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={run} aria-label={`Remove ${kind} ${name}`}><Trash2 className="h-4 w-4" aria-hidden /></Button>
+      <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={run} aria-label={`Archive ${kind} ${name}`}><Archive className="h-4 w-4" aria-hidden /></Button>
       {result?.error ? <Alert variant="destructive" role="alert" className="mt-1 px-2 py-1 text-xs">{result.error}</Alert> : null}
       {result?.note ? <span role="status" className="text-xs text-muted-foreground">{result.note}</span> : null}
     </span>

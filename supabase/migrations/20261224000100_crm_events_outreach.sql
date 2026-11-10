@@ -15,9 +15,13 @@
 --   outreach priority      any Sales grant may set it (it is the team's rating, not a record edit); who set it and when is stored. The existing organisation edit rule
 --                          (creator / founder / owner of an open enquiry) is NOT applied to this one field.
 --   add event / edition / observation   any Sales grant (needed at a show, on a phone).
---   edit or remove one     the person who added it, or a founder in any company.
+--   edit or archive one    the person who added it, or a founder in any company.
 --   link an enquiry to an edition      the enquiry owner or a founder of its company (the rule crm_update_opportunity already applies), not on a lost enquiry.
---   remove event / edition  deleted only when nothing uses it; with linked enquiries or observations it is ARCHIVED and every link and observation stays.
+--   archive event / edition ARCHIVE is the only removal: nothing is deleted from the ordinary Sales workflow (no delete grant, no delete function). Archiving always
+--                          gives the same result whatever is attached; every edition, observation and enquiry link stays; archived entries stay in history and are
+--                          not offered for NEW enquiry links.
+--   import events          any Sales grant (the same right as adding an event and an edition): bulk-adds events and editions to the ONE shared calendar; never overwrites
+--                          dates, never reopens an archived record, never merges distinct events; rows that need correcting block the whole batch.
 --
 -- ROLLBACK: supabase/manual-sql/crm_events_90_rollback.sql (export the four tables first).
 
@@ -223,18 +227,11 @@ begin
 end;
 $$;
 
--- An edition is USED when an enquiry is linked to it or an observation was recorded at it. (Counts here see every company: it decides safety, it returns no figures.)
-create or replace function crm_edition_in_use(p_edition uuid)
-returns boolean
-language sql stable security definer
-set search_path = public
-as $$
-  select exists (select 1 from crm_opportunities where event_edition_id = p_edition)
-      or exists (select 1 from crm_event_observations where edition_id = p_edition);
-$$;
-
--- Removes an unused edition, archives a used one (links and observations stay). Returns 'deleted' or 'archived'.
-create or replace function crm_remove_edition(p_id uuid)
+-- ARCHIVE is the only way an event or an edition leaves the live calendar: nothing is ever deleted from the ordinary Sales workflow (the tables grant select only and
+-- there is no delete function). An archived edition keeps every observation and every enquiry link; an archived event keeps ALL its editions (each exactly as it was).
+-- The result never depends on what is attached, so a person who cannot see an enquiry linked to an edition gets the same answer as for an empty edition.
+-- Archived entries stay readable (history, counts, drill-downs) and are refused as a NEW enquiry link by crm_set_opportunity_edition.
+create or replace function crm_archive_edition(p_id uuid)
 returns text
 language plpgsql security definer
 set search_path = public
@@ -245,45 +242,29 @@ begin
   select * into v from crm_event_editions where id = p_id for update;
   if not found then raise exception 'Edition not found' using errcode = 'P0002'; end if;
   if not crm_can_edit_event_record(v.created_by) then
-    raise exception 'Only the person who added this edition, or a founder, can remove it' using errcode = '42501';
+    raise exception 'Only the person who added this edition, or a founder, can archive it' using errcode = '42501';
   end if;
-  if crm_edition_in_use(p_id) then
-    update crm_event_editions set archived_at = coalesce(archived_at, now()) where id = p_id;
-    return 'archived';
-  end if;
-  delete from crm_event_editions where id = p_id;
-  return 'deleted';
+  update crm_event_editions set archived_at = coalesce(archived_at, now()) where id = p_id;
+  return 'archived';
 end;
 $$;
 
--- Removes an unused event with its unused editions; with anything used it is archived together with the used editions (the unused ones are deleted). Returns 'deleted' or 'archived'.
-create or replace function crm_remove_event(p_id uuid)
+create or replace function crm_archive_event(p_id uuid)
 returns text
 language plpgsql security definer
 set search_path = public
 as $$
-declare v crm_events; e record; v_used boolean := false;
+declare v crm_events;
 begin
   perform crm_require_user();
   select * into v from crm_events where id = p_id for update;
   if not found then raise exception 'Event not found' using errcode = 'P0002'; end if;
   if not crm_can_edit_event_record(v.created_by) then
-    raise exception 'Only the person who added this event, or a founder, can remove it' using errcode = '42501';
+    raise exception 'Only the person who added this event, or a founder, can archive it' using errcode = '42501';
   end if;
-  for e in select id from crm_event_editions where event_id = p_id loop
-    if crm_edition_in_use(e.id) then
-      v_used := true;
-      update crm_event_editions set archived_at = coalesce(archived_at, now()) where id = e.id;
-    else
-      delete from crm_event_editions where id = e.id;
-    end if;
-  end loop;
-  if v_used then
-    update crm_events set archived_at = coalesce(archived_at, now()) where id = p_id;
-    return 'archived';
-  end if;
-  delete from crm_events where id = p_id;
-  return 'deleted';
+  -- Only the event is marked. Its editions, observations and enquiry links are not touched; they are no longer offered because their event is archived.
+  update crm_events set archived_at = coalesce(archived_at, now()) where id = p_id;
+  return 'archived';
 end;
 $$;
 
@@ -408,14 +389,212 @@ begin
 end;
 $$;
 
+-- -----------------------------------------------------------------------------
+-- 5. Bulk import of the shared event calendar (events and editions only). ONE function classifies every row and, only when p_apply is true AND nothing needs correcting,
+--    writes them all in one transaction. The preview calls it with p_apply = false (writes nothing), so what the person sees is what the rules decide.
+--    Rules (the same as adding by hand, plus the review flags):
+--      event name  = same name_key as a LIVE event -> that event. Never merged otherwise. A name that only matches an ARCHIVED event is flagged (archived is never reopened).
+--                    A short name contained in the names of two or more live events is ambiguous. Exactly one near match is noted, not blocked.
+--      edition     = (event, start date). Same start and end = already present (skipped). Same start, different end, or overlapping dates = conflict (never overwritten).
+--                    An archived edition with that start date is flagged, never reopened. Repeated rows in the file collapse the same way.
+--    Re-running the same file finds everything present and adds nothing. Any Sales grant may import (the same right as adding an event and an edition).
+-- -----------------------------------------------------------------------------
+create or replace function crm_event_import_date(p text)
+returns date
+language plpgsql immutable
+set search_path = public
+as $$
+begin
+  if p is null or p !~ '^\d{4}-\d{2}-\d{2}$' then return null; end if;
+  return p::date;
+exception when others then
+  return null;
+end;
+$$;
+
+create or replace function crm_import_events(p_rows jsonb, p_apply boolean default false, p_expect integer default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_user uuid := crm_require_user();
+  v_n integer;
+  i integer;
+  j jsonb;
+  v_row integer; v_name text; v_key text; v_country text; v_city text; v_venue text;
+  v_start date; v_end date; v_reason text; v_note text; v_status text;
+  v_event_id uuid; v_event_name text; v_event_new boolean;
+  ex record; cand record;
+  v_near_count integer; v_near_names text;
+  v_created jsonb := '{}'::jsonb;
+  v_new_events integer; v_new_editions integer; v_blocking integer;
+  v_made_events integer := 0; v_made_editions integer := 0;
+  v_summary jsonb; v_rows jsonb;
+begin
+  if not crm_has_any_access() then raise exception 'You do not have Sales access' using errcode = '42501'; end if;
+  if p_rows is null or jsonb_typeof(p_rows) <> 'array' then raise exception 'Send the rows as a list' using errcode = '22023'; end if;
+  v_n := jsonb_array_length(p_rows);
+  if v_n = 0 then raise exception 'The file has no rows to import' using errcode = '22023'; end if;
+  if v_n > 2000 then raise exception 'An import can have at most 2000 rows' using errcode = '22023'; end if;
+  -- One import at a time: two people importing the same calendar cannot both add the same edition.
+  perform pg_advisory_xact_lock(hashtext('crm_import_events'));
+
+  create temporary table if not exists crm_imp_rows (
+    idx integer, row_no integer, name text, key text, country text, city text, venue text, s date, e date,
+    status text, reason text, note text, event_id uuid, event_name text, event_new boolean
+  ) on commit drop;
+  truncate crm_imp_rows;
+
+  for i in 0 .. v_n - 1 loop
+    j := p_rows -> i;
+    v_row := coalesce(nullif(j ->> 'row', '')::integer, i + 1);
+    v_name := btrim(coalesce(j ->> 'name', ''));
+    v_key := lower(regexp_replace(v_name, '[^A-Za-z0-9]+', '', 'g'));
+    v_country := nullif(upper(btrim(coalesce(j ->> 'country', ''))), '');
+    v_city := nullif(btrim(coalesce(j ->> 'city', '')), '');
+    v_venue := nullif(btrim(coalesce(j ->> 'venue', '')), '');
+    v_start := crm_event_import_date(btrim(coalesce(j ->> 'start', '')));
+    v_end := crm_event_import_date(btrim(coalesce(j ->> 'end', '')));
+    v_reason := null; v_note := null; v_status := null; v_event_id := null; v_event_name := v_name; v_event_new := false;
+
+    -- 1. shape
+    if v_name = '' then v_reason := 'Event name is required';
+    elsif length(v_name) > 200 then v_reason := 'Event name is longer than 200 characters';
+    elsif v_key = '' then v_reason := 'Event name needs letters or digits';
+    elsif v_country is null then v_reason := 'Country is required';
+    elsif v_country !~ '^[A-Z]{2}$' then v_reason := 'Country is not a valid two-letter code';
+    elsif v_start is null then v_reason := 'Start date is required as a real date (YYYY-MM-DD)';
+    elsif v_end is null then v_reason := 'End date is required as a real date (YYYY-MM-DD)';
+    elsif extract(year from v_start) not between 2000 and 2100 or extract(year from v_end) not between 2000 and 2100 then v_reason := 'Dates must be between the years 2000 and 2100';
+    elsif v_end < v_start then v_reason := 'End date is before the start date';
+    elsif v_city is not null and length(v_city) > 100 then v_reason := 'City is longer than 100 characters';
+    elsif v_venue is not null and length(v_venue) > 200 then v_reason := 'Venue is longer than 200 characters';
+    end if;
+    if v_reason is not null then
+      insert into crm_imp_rows values (i, v_row, v_name, v_key, v_country, v_city, v_venue, v_start, v_end, 'invalid', v_reason, null, null, v_name, false);
+      continue;
+    end if;
+
+    -- 2. which event
+    select e.id, e.name into v_event_id, v_event_name from crm_events e where e.archived_at is null and e.name_key = v_key;
+    if v_event_id is null then
+      select r.event_name into v_event_name from crm_imp_rows r where r.key = v_key and r.status in ('new_event', 'new_edition', 'present') and r.event_id is null order by r.idx limit 1;
+      if found then
+        v_event_new := true;                       -- the event is created by an earlier row of this same file
+      else
+        v_event_name := v_name;
+        if exists (select 1 from crm_events e where e.archived_at is not null and e.name_key = v_key) then
+          insert into crm_imp_rows values (i, v_row, v_name, v_key, v_country, v_city, v_venue, v_start, v_end, 'review',
+            'An archived event with this name exists. Import never reopens an archived event: add the event by hand, or correct the name.', null, null, v_name, false);
+          continue;
+        end if;
+        select count(*), string_agg(e.name, '; ' order by e.name) into v_near_count, v_near_names
+          from crm_events e where e.archived_at is null and length(v_key) >= 4 and e.name_key like '%' || v_key || '%' and e.name_key <> v_key;
+        if v_near_count >= 2 then
+          insert into crm_imp_rows values (i, v_row, v_name, v_key, v_country, v_city, v_venue, v_start, v_end, 'ambiguous',
+            'This name could be any of: ' || v_near_names || '. Use the full event name so it is not matched to the wrong event.', null, null, v_name, false);
+          continue;
+        end if;
+        select count(*), string_agg(e.name, '; ' order by e.name) into v_near_count, v_near_names
+          from crm_events e where e.archived_at is null and e.name_key <> v_key
+           and ((length(v_key) >= 4 and e.name_key like '%' || v_key || '%') or (length(e.name_key) >= 4 and v_key like '%' || e.name_key || '%'));
+        if v_near_count = 1 then v_note := 'Kept as a separate new event. Similar existing event: ' || v_near_names; end if;
+      end if;
+    end if;
+
+    -- 3. which edition (same event: recorded editions first, then earlier rows of this file)
+    if v_event_id is not null then
+      for cand in select d.start_date, d.end_date, d.city, d.venue from crm_event_editions d
+                   where d.event_id = v_event_id and d.archived_at is null order by d.start_date loop
+        if cand.start_date = v_start and cand.end_date = v_end then
+          v_status := 'present';
+          v_reason := 'Already recorded: ' || to_char(v_start, 'YYYY-MM-DD') || ' to ' || to_char(v_end, 'YYYY-MM-DD');
+          if (v_city is not null and cand.city is not null and lower(v_city) <> lower(cand.city))
+             or (v_venue is not null and cand.venue is not null and lower(v_venue) <> lower(cand.venue)) then
+            v_note := 'The city or venue in the file differs from the recorded edition; the recorded details are kept.';
+          end if;
+          exit;
+        elsif cand.start_date = v_start then
+          v_status := 'conflict';
+          v_reason := 'This event already has an edition starting ' || to_char(v_start, 'YYYY-MM-DD') || ' that ends ' || to_char(cand.end_date, 'YYYY-MM-DD')
+                      || ', the file says ' || to_char(v_end, 'YYYY-MM-DD') || '. Dates are never overwritten: correct the edition by hand if the file is right.';
+          exit;
+        elsif cand.start_date <= v_end and v_start <= cand.end_date then
+          v_status := 'conflict';
+          v_reason := 'Overlaps the recorded edition ' || to_char(cand.start_date, 'YYYY-MM-DD') || ' to ' || to_char(cand.end_date, 'YYYY-MM-DD') || '. Nothing was changed.';
+          exit;
+        end if;
+      end loop;
+      if v_status is null and exists (select 1 from crm_event_editions d where d.event_id = v_event_id and d.archived_at is not null and d.start_date = v_start) then
+        v_status := 'review';
+        v_reason := 'An archived edition of this event starts on this date. Import never reopens an archived edition: add it by hand, or correct the date.';
+      end if;
+    end if;
+    if v_status is null then
+      for cand in select r.row_no, r.s as start_date, r.e as end_date from crm_imp_rows r
+                   where r.key = v_key and r.status in ('new_event', 'new_edition') order by r.idx loop
+        if cand.start_date = v_start and cand.end_date = v_end then
+          v_status := 'present'; v_reason := 'Repeated: the same edition is on row ' || cand.row_no || ' of this file'; exit;
+        elsif cand.start_date = v_start or (cand.start_date <= v_end and v_start <= cand.end_date) then
+          v_status := 'conflict';
+          v_reason := 'Conflicts with row ' || cand.row_no || ' of this file (' || to_char(cand.start_date, 'YYYY-MM-DD') || ' to ' || to_char(cand.end_date, 'YYYY-MM-DD') || ') for the same event';
+          exit;
+        end if;
+      end loop;
+    end if;
+    if v_status is null then
+      v_status := case when v_event_id is null and not v_event_new then 'new_event' else 'new_edition' end;
+    end if;
+    insert into crm_imp_rows values (i, v_row, v_name, v_key, v_country, v_city, v_venue, v_start, v_end, v_status, v_reason, v_note, v_event_id, v_event_name, v_event_new);
+  end loop;
+
+  select count(*) filter (where status = 'new_event'), count(*) filter (where status in ('new_event', 'new_edition')),
+         count(*) filter (where status in ('invalid', 'conflict', 'ambiguous', 'review'))
+    into v_new_events, v_new_editions, v_blocking from crm_imp_rows;
+
+  if p_apply and v_blocking = 0 and (p_expect is null or p_expect = v_new_editions) then
+    for ex in select * from crm_imp_rows where status in ('new_event', 'new_edition') order by idx loop
+      v_event_id := ex.event_id;
+      if v_event_id is null then
+        v_event_id := nullif(v_created ->> ex.key, '')::uuid;
+        if v_event_id is null then
+          insert into crm_events (name, kind, created_by) values (ex.name, 'exhibition', v_user) returning id into v_event_id;
+          v_created := v_created || jsonb_build_object(ex.key, v_event_id);
+          v_made_events := v_made_events + 1;
+        end if;
+      end if;
+      insert into crm_event_editions (event_id, start_date, end_date, city, country_code, venue, created_by)
+      values (v_event_id, ex.s, ex.e, ex.city, ex.country, ex.venue, v_user);
+      v_made_editions := v_made_editions + 1;
+    end loop;
+  end if;
+
+  select jsonb_agg(jsonb_build_object('row', row_no, 'status', status, 'reason', reason, 'note', note, 'event', event_name, 'eventId', event_id, 'eventIsNew', event_new,
+           'start', s, 'end', e, 'country', country, 'city', city, 'venue', venue) order by idx) into v_rows from crm_imp_rows;
+  v_summary := jsonb_build_object(
+    'rows', v_n, 'newEvents', v_new_events, 'newEditions', v_new_editions, 'blocking', v_blocking,
+    'present', (select count(*) from crm_imp_rows where status = 'present'), 'conflict', (select count(*) from crm_imp_rows where status = 'conflict'),
+    'ambiguous', (select count(*) from crm_imp_rows where status = 'ambiguous'), 'review', (select count(*) from crm_imp_rows where status = 'review'),
+    'invalid', (select count(*) from crm_imp_rows where status = 'invalid'));
+  return jsonb_build_object(
+    'applied', p_apply and v_blocking = 0 and (p_expect is null or p_expect = v_new_editions),
+    'blocked', v_blocking > 0,
+    'stale', p_apply and v_blocking = 0 and p_expect is not null and p_expect <> v_new_editions,
+    'createdEvents', v_made_events, 'createdEditions', v_made_editions, 'summary', v_summary, 'rows', coalesce(v_rows, '[]'::jsonb));
+end;
+$$;
+
+
 revoke all on function
   crm_set_outreach_priority(uuid, integer), crm_can_edit_event_record(uuid), crm_save_event(uuid, text, text, text, text),
-  crm_save_edition(uuid, uuid, date, date, text, text, text, text), crm_edition_in_use(uuid), crm_remove_edition(uuid), crm_remove_event(uuid),
+  crm_save_edition(uuid, uuid, date, date, text, text, text, text), crm_archive_edition(uuid), crm_archive_event(uuid),
+  crm_event_import_date(text), crm_import_events(jsonb, boolean, integer),
   crm_observation_check(text, uuid, uuid, boolean, text, text, text), crm_record_observation(uuid, uuid, text, uuid, boolean, text, text, text, text),
   crm_update_observation(uuid, text, uuid, boolean, text, text, text, text), crm_remove_observation(uuid), crm_set_opportunity_edition(uuid, uuid, integer)
   from public, anon, authenticated;
 grant execute on function
   crm_set_outreach_priority(uuid, integer), crm_save_event(uuid, text, text, text, text), crm_save_edition(uuid, uuid, date, date, text, text, text, text),
-  crm_remove_edition(uuid), crm_remove_event(uuid), crm_record_observation(uuid, uuid, text, uuid, boolean, text, text, text, text),
+  crm_archive_edition(uuid), crm_archive_event(uuid), crm_import_events(jsonb, boolean, integer), crm_record_observation(uuid, uuid, text, uuid, boolean, text, text, text, text),
   crm_update_observation(uuid, text, uuid, boolean, text, text, text, text), crm_remove_observation(uuid), crm_set_opportunity_edition(uuid, uuid, integer)
   to authenticated;
