@@ -15,6 +15,8 @@ import { loadProjectsNavAccess } from "@/lib/projects/context";
 import { loadDirectReportsNav } from "@/lib/nav/direct-reports";
 import { getLauncherState } from "@/lib/jarvis/launcher";
 import { JarvisLauncher } from "@/components/jarvis/jarvis-launcher";
+import { loadChatGroups } from "@/lib/chat/data";
+import { ChatLauncher } from "@/components/chat/chat-launcher";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await getCurrentSession();
@@ -102,6 +104,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // configured). Any failure means no launcher and nothing else changes. Hiding it is a convenience: every JARVIS call checks the same things again on the server.
   const jarvis = await getLauncherState(session.userId);
 
+  // Chat: the button is drawn only when the server lists at least one group for this person (membership is the database function's: an active Sales grant for that company).
+  // Any failure, or the migration not being applied yet, means no button; nothing else on the page is affected.
+  const chat = await loadChatGroups().catch(() => ({ state: "error" as const }));
+
   return (
     <>
     <AppShell session={session} clockOpenSince={clockOpenSince} clockLoadFailed={clockLoadFailed} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants} projects={projects} inventory={inventory} budget={{ ...budget, ...(budgetWaiting ? { waiting: budgetWaiting } : {}) }} hasDirectReports={directReports.hasDirectReports}>
@@ -115,6 +121,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {children}
       </OsScope>
     </AppShell>
+    {chat.state === "ok" && chat.groups.length > 0 ? <ChatLauncher userId={session.userId} initialGroups={chat.groups} /> : null}
     {jarvis.available ? <JarvisLauncher companies={jarvis.companies} writes={jarvis.writes} maxInputChars={jarvis.maxInputChars} enabledActionIds={jarvis.enabledActionIds} /> : null}
     </>
   );

@@ -1,0 +1,53 @@
+# Chat (app-wide panel, Sales groups)
+
+Draft PR `feat/app-chat`; **not merged, migration `20261225000100_chat_sales_groups.sql` not applied anywhere**. This release enables the three Sales groups only. Projects discussions and JARVIS are untouched and nothing is migrated.
+
+## 1. The entry point
+| Control | What it does | Who | Behind it | Tests |
+|---|---|---|---|---|
+| **Chat button** (floating, every signed-in page; bottom-right on desktop, above the bottom bar on phones) | Opens the Chat panel over the current page: nobody leaves what they are doing. The button shows the person's **total unread** (99+ above 99; red when they were mentioned) and its spoken label carries the counts | Drawn only when the server lists at least one group for the person: **no eligible group, no button**. If the migration is not applied yet, or any read fails, the button is simply absent and nothing else on the page changes | `apps/web/src/app/(app)/layout.tsx` (`loadChatGroups`), `components/chat/chat-launcher.tsx` | `chat-launcher.test.tsx`; flow check 1 |
+| **Panel** | A list of groups, each with its **own unread count**, a mention marker, the last message preview and its age. Opening a group shows the thread in the same panel (Back returns to the list). A bottom sheet (92% height, focus held inside, Escape closes) on a phone, a 26 rem card above the button on desktop | Members only | `chat-launcher.tsx`, `chat-thread.tsx` | same |
+| Refresh | The group list refreshes every 30 s while the tab is visible and when the window regains focus; an open thread every 5 s. A group that is no longer listed closes its thread; no groups at all removes the button and panel | | `chat-launcher.tsx` | flow check 4 |
+
+The panel is built around a **list of groups** so project discussions can appear in it later. **Planned, not built:** project groups, moving Projects discussion messages, removing the Discussion panel. This release adds none of them.
+
+## 2. The three Sales groups and automatic membership
+| Group | Company it is bound to | Member when |
+|---|---|---|
+| **Sales — UAE** | the one active company with country AE | the person holds an **active Sales & CRM grant for that company** |
+| **Sales — KSA** | country SA | same, for that company |
+| **Sales — Europe** | country PL (the only European company) | same, for that company |
+
+* **No member list exists.** Membership is computed on every call from `crm_company_grants` (the Sales grant per person per company that People & Access -> Module access edits): not revoked, profile active. Someone with Sales access to all three companies is in all three groups; one company, one group. There is **no all-company Sales group**.
+* **Company access alone grants nothing.** An HR role scoped to a company, an employee record or another module's grant is not Sales access. (In this system a Sales grant already is "Sales & CRM access to that specific company", so the two conditions in the request are the one grant; there is no separate company-access table that Sales does not use.)
+* **Mismatch recorded, no wider access:** the group names are regions, the access rule is per company, and there is no company called "Europe". Europe is bound to the Poland company by country. A group binds only when **exactly one** active company has its country; otherwise it stays unbound with **no members** (fails closed). A second European company would not join automatically (see `docs/chat-deployment.md`).
+* **Removing access takes effect on the next call:** the group leaves the person's list, its history cannot be read, posting is refused, it stops counting toward unread and they can no longer be mentioned there. Restoring the grant restores the group and its history. Deactivating the person removes every group.
+
+## 3. What the server enforces (every call checks membership itself)
+| Function (granted to signed-in users) | Rule |
+|---|---|
+| `chat_my_groups()` | Only the caller's groups, with unread, mention count and last-message preview. The first time a group is listed for a person their read marker starts at the newest message (no flood of "unread" for old history) |
+| `chat_messages(group, before, after, limit)` | History, only for a member ("You are not a member of this group" otherwise). Each shared item is resolved **for this reader** |
+| `chat_post(group, body, mentions, item type, item id, client key)` | Member only; text up to 4000 characters or a shared item; **every mention must be a current member of that group**; the **sender must be able to see the item**; a client key makes a retry idempotent (never posts twice) |
+| `chat_mark_read(group, seq)` | Member only; never moves backwards; never past the newest message |
+| `chat_group_members(group)` | Member only: the people who may be mentioned |
+
+The tables themselves grant **nothing** to signed-in users or anon (RLS on, no policy, no privilege): the functions are the only way in. Details: `supabase/migrations/20261225000100_chat_sales_groups.sql`, `docs/chat-deployment.md`.
+
+## 4. Unread and mentions
+Unread for a group = messages from other people newer than the person's read marker, counted only while they are a member. Their own messages never count. A mention is counted separately (the red marker and the red button badge). The marker moves when the thread is open and the person is at the bottom (or presses "N new"); an unread message shows a **"New messages" line** on opening. In the composer, typing `@` (or the @ button, which suits a phone) lists current members; choosing one inserts `@Name`. A mention is sent only while its `@Name` is still in the text. There are no external notifications (no email, no push): the button and the panel are the notification.
+
+## 5. Share item and restricted links
+**Share item** (composer): choose Enquiry, Estimate, Client or agency, Event or Edition, then search by name or reference; the result list is the sender's own (row-level security). Only a **reference** (type + id) is stored.
+* **Sender:** `chat_post` checks the sender's own current access to the item and refuses otherwise.
+* **Each reader:** when a message is returned, the database checks that reader's **current** access: with access they get the title and a link (a normal page link: opening it uses the page's existing permissions); without it they get only `{"restricted": true}`, shown as a generic **"Restricted item"**. No title, type, reference or link is stored in the message, returned in the payload or put in the group preview (a message that only shares an item previews as "Shared an item"). An unknown id looks the same as a restricted one.
+* **Rules reused, none widened:** enquiries and estimates follow the company Sales grant of the enquiry; clients, agencies, events and editions follow any Sales grant (the Clients & Agencies directory stays shared exactly as today).
+
+## 6. Small additions beyond the request (all optional to keep)
+Day headings and times, avatars (initials), the "New messages" line, a "N new" jump-to-latest pill while scrolled up, "Load earlier messages", a quick emoji tray, a character counter near the limit, failed sends that stay on screen with Retry and Discard, Enter to send and Shift+Enter for a new line, and an additive `onQueryChange` hook on the shared search field (the share search uses it).
+
+## 7. Not covered (stated, not hidden)
+Direct messages; an all-company Sales group; project groups and Projects-discussion migration (planned); external notifications; editing or deleting messages; live push (polling only); attachments (only references to items); nothing is applied to a hosted project.
+
+## 8. Tests
+`packages/rls-tests/test/chat-sales-groups.rls.test.ts` (membership by grant only, company access alone denied, history/post/read/members/mentions refused for a non-member, unread and mention counts, restricted placeholders with no leakage, revoke and restore), `lib/chat/model.test.ts`, `components/chat/chat-launcher.test.tsx`, and the focused browser flow `apps/web/os-shell-checks/chat-sales-groups-flow.mjs`.
