@@ -12,7 +12,7 @@ import { findDuplicateEnquiries } from "./duplicates";
 import { emptyValues, enquiryValuesSchema, LIMITS, questionFor, validateEnquiry } from "./enquiry-values";
 import { EXTRACTION_INSTRUCTIONS, EXTRACTION_JSON_SCHEMA, EXTRACTION_TASK, sanitiseExtraction, type Extraction } from "./extraction";
 import { findProtectedContent } from "../protected";
-import { prepareBrief, restoreNames, withheldNote } from "./brief-outbound";
+import { BUDGET_UNCLEAR_NOTE, prepareBrief, RESTRICTED_BRIEF_MESSAGE, restoreNames, withheldNote } from "./brief-outbound";
 import { emptyChoice, lookupOrganisation, OrgLookupError, selectedChoice, verifyOrganisation } from "./organisations";
 
 export const CREATE_FROM_BRIEF_ID = "jarvis.sales.enquiry.create_from_brief";
@@ -113,14 +113,17 @@ export const createEnquiryFromBrief: JarvisActionDefinition<CreateFromBriefInput
         // The deterministic refusal list runs BEFORE any provider call or usage count: the text never leaves the app.
         if (!classifyRequest(input.brief).allowed) throw new JarvisRefusalError("excluded_request", EXCLUSION_MESSAGE);
         if (!ctx.provider) throw new JarvisRefusalError("unavailable", "JARVIS is not available right now. Sales & CRM is not affected.");
-        const usage = await ctx.takeUsage();
-        if ("error" in usage) throw new JarvisRefusalError("unavailable", "JARVIS could not check your daily allowance. Try again in a moment.");
-        if (!usage.allowed) throw new JarvisRefusalError("limit_reached", "You have reached today's JARVIS limit. Sales & CRM works as usual; JARVIS is available again tomorrow (Dubai time).");
         // The brief is separated LOCALLY first (sales/brief-outbound.ts): pricing, budgets, contacts, personal data, credentials and contract or restricted material never
         // leave; labelled party names go as placeholders. The original stays here for the review card. The outbound gate screens the result again.
         const prepared = prepareBrief(input.brief);
+        // A restriction on the WHOLE brief is final: no provider call in any version (an edited outbound text does not lift it). The person uses the form.
+        if (prepared.restricted) throw new JarvisRefusalError("protected_content", RESTRICTED_BRIEF_MESSAGE);
         const outbound = input.outbound ?? prepared.outbound;
         if (input.outbound ? findProtectedContent(outbound).length > 0 : !prepared.separable) throw new JarvisRefusalError("protected_content", "This brief mixes details JARVIS keeps inside Enginious OS with the rest, and they could not be separated safely. Review and edit the text that would be sent, or use the new-enquiry form.");
+        // The daily allowance is counted only now: a brief that is refused or needs editing made no provider call.
+        const usage = await ctx.takeUsage();
+        if ("error" in usage) throw new JarvisRefusalError("unavailable", "JARVIS could not check your daily allowance. Try again in a moment.");
+        if (!usage.allowed) throw new JarvisRefusalError("limit_reached", "You have reached today's JARVIS limit. Sales & CRM works as usual; JARVIS is available again tomorrow (Dubai time).");
         let raw: unknown = null;
         let fallback = false;
         try {
@@ -143,6 +146,7 @@ export const createEnquiryFromBrief: JarvisActionDefinition<CreateFromBriefInput
         const fits = input.brief.trim().length <= LIMITS.brief;
         const notices = [
           fallback ? "The AI model's answer could not be used, so I filled in only what I could read myself. Please complete the rest below, or use the new-enquiry form." : null,
+          prepared.budgetUnclear ? BUDGET_UNCLEAR_NOTE : null,
           input.outbound ? "The AI model received the version you reviewed. Your original brief is kept below and is saved only when you create the enquiry." : withheldNote(prepared),
           fits ? null : `Your brief is longer than the Brief field holds (${input.brief.trim().length} of ${LIMITS.brief} characters), so the field has a summary. Nothing was cut from what you pasted: attach the full text to the enquiry after creating it.`,
         ].filter((x): x is string => !!x);

@@ -4,7 +4,7 @@ import { matchGuidance } from "./help/guidance";
 import { isPreference, parsePreferences, PREFERENCES, PREFERENCE_HELP, preferenceKeysNamed, toPreferenceViews, type PreferenceKey, type PreferenceView } from "./preferences";
 import { describeProtected, findProtectedContent, PROTECTED_LABEL, type ProtectedCategory } from "./protected";
 import { routeMessage, type LiveArea } from "./router";
-import { prepareBrief } from "./sales/brief-outbound";
+import { prepareBrief, RESTRICTED_BRIEF_MESSAGE } from "./sales/brief-outbound";
 import { CHAT_ID } from "./sales/chat";
 import { OVERDUE_FOLLOWUPS_ID } from "./sales/followups-overdue";
 import { HELP_ANSWER_ID } from "./sales/help-answer";
@@ -185,6 +185,11 @@ export function createAssistant(deps: JarvisDeps) {
       const brief = async (): Promise<SendResult> => {
         const edited = typeof req.briefOutbound === "string" && req.briefOutbound.trim() ? req.briefOutbound.trim() : undefined;
         const prepared = prepareBrief(text);
+        // The whole brief is marked restricted: nothing is sent, the editable preview is NOT offered (it could not lift the restriction), and the form is the way.
+        if (prepared.restricted) {
+          jarvisLog({ event: "outbound", actionId: CREATE_FROM_BRIEF_ID, outcome: "blocked", code: "brief_restricted" });
+          return { ok: true, kind: "reply", text: RESTRICTED_BRIEF_MESSAGE, links: [{ label: "New-enquiry form", href: "/sales/new" }] };
+        }
         const left = edited ? findProtectedContent(edited) : prepared.separable ? [] : prepared.remaining;
         if (left.length > 0 || (!edited && !prepared.separable)) {
           jarvisLog({ event: "outbound", actionId: CREATE_FROM_BRIEF_ID, outcome: "blocked", code: "brief_needs_review" });

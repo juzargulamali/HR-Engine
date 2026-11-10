@@ -13,7 +13,7 @@ import { fakeDeps, ID, mkOrg, newWorld, sha, type World } from "./testing/fake-w
 
 const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const NEXT = addDays(crmToday(), 3);
-const BRIEF = `Title: Harbour gala LED wall\nAgency: Fictional Wave Agency\nClient: Fictional Harbour Brands\nSource: WhatsApp\nEvent: 2026-12-05 to 2026-12-07\nBudget: AED 45,000\nLocation: Harbour Hall\nTech: LED wall x2\nNext: Call to qualify on ${NEXT}\nThey want two LED walls for the gala dinner.`;
+const BRIEF = `Title: Harbour gala LED wall\nAgency: Fictional Wave Agency\nClient: Fictional Harbour Brands\nSource: WhatsApp\nEvent: 2026-12-05 to 2026-12-07\nClient budget: AED 45,000\nLocation: Harbour Hall\nTech: LED wall x2\nNext: Call to qualify on ${NEXT}\nThey want two LED walls for the gala dinner.`;
 
 let w: World;
 let a: JarvisAssistant;
@@ -412,7 +412,7 @@ describe("denied data never reaches the provider", () => {
     const out = simulatedProviderCalls[0]!.input;
     expect(out).toContain("They want two LED walls for the gala dinner.");
     expect(out).toContain("Agency: [AGENCY]");
-    for (const kept of ["45,000", "Budget", "Fictional Wave Agency", "Fictional Harbour Brands"]) expect(out).not.toContain(kept);
+    for (const kept of ["45,000", "budget", "Fictional Wave Agency", "Fictional Harbour Brands"]) expect(out).not.toContain(kept);
     expect(Object.keys(simulatedProviderCalls[0]!).sort()).toEqual(["input", "instructions", "jsonSchema", "maxOutputTokens", "sources", "task", "timeoutMs"]);
     expect(simulatedProviderCalls[0]!.sources).toEqual(["user_text"]);
   });
@@ -585,13 +585,15 @@ describe("a realistic brief: full safe narrative out, price and contacts kept in
     "Equipment: LED wall x2; Touch table x4; RFID wristband reader x12",
     `Next: Call the agency to confirm the floor plan on ${DUE}`,
     "",
-    "Visitors arrive at the welcome arch, collect an RFID wristband and choose a team. They follow four stations: a touch-table map puzzle, a motion-tracked rope bridge, a projection-mapped cave and a final leaderboard on the main LED wall. Each station writes the team's score to the wristband, and the journey takes about twelve minutes per group of six.",
+    "Visitors arrive at the welcome arch, collect an RFID wristband and choose a team. They follow four stations: a touch-table map puzzle, a motion-tracked rope bridge, a projection-mapped cave and a final leaderboard on the main LED wall. Each station writes the team's score to the wristband, and the journey takes about 12 minutes per group of 6.",
     "Technically we need two synchronised LED walls with a live leaderboard feed, four touch tables running the same build, offline play if the venue network drops, and a daily export of scores for the organiser. Deliverables: game build, on-site operators for three days and a highlights reel.",
-    "Last year we quoted AED 185,000 for a similar journey and the agency expects a 10% discount this time. Budget: AED 170,000 excluding VAT.",
+    "Last year we quoted AED 185,000 for a similar journey and the agency expects a 10% discount this time. Our final quote is 185500.",
+    "Internal budget: AED 150000",
+    "Client budget: AED 170,000 excluding VAT.",
     "Their producer is fictional.producer@wave-agency.example, +971 50 555 0100. The agency contract says penalties apply for late set-up.",
   ].join("\n");
-  const PRIVATE = ["185,000", "170,000", "10%", "discount", "quoted", "fictional.producer@wave-agency.example", "555 0100", "contract", "penalties", "Fictional Wave Agency", "Fictional Harbour Brands"];
-  const NARRATIVE = ["Harbour Quest interactive treasure hunt", "Fictional Harbour Hall, Dubai", "2099-02-05 to 2099-02-07", "2099-02-03", "collect an RFID wristband and choose a team", "motion-tracked rope bridge", "projection-mapped cave", "twelve minutes per group of six", "two synchronised LED walls with a live leaderboard feed", "offline play if the venue network drops", "on-site operators for three days and a highlights reel"];
+  const PRIVATE = ["185,000", "185500", "150000", "170,000", "10%", "final quote", "discount", "quoted", "fictional.producer@wave-agency.example", "555 0100", "contract", "penalties", "Fictional Wave Agency", "Fictional Harbour Brands"];
+  const NARRATIVE = ["Harbour Quest interactive treasure hunt", "Fictional Harbour Hall, Dubai", "2099-02-05 to 2099-02-07", "2099-02-03", "collect an RFID wristband and choose a team", "motion-tracked rope bridge", "projection-mapped cave", "about 12 minutes per group of 6", "two synchronised LED walls with a live leaderboard feed", "offline play if the venue network drops", "on-site operators for three days and a highlights reel"];
   /** What a careful model returns for the prepared text: short fields, with the placeholders it was given. */
   const MODEL = {
     title: "Harbour Quest interactive treasure hunt", source: "referral", agencyName: "[CLIENT]", clientName: "[END CLIENT]", currency: null, value: null, budgetNote: null,
@@ -639,6 +641,7 @@ describe("a realistic brief: full safe narrative out, price and contacts kept in
     const sent = JSON.stringify(body());
     for (const p of PRIVATE) expect(sent, p).not.toContain(p);
     for (const n of NARRATIVE) expect(body().messages[0]!.content, n).toContain(n);
+    expect(body().messages[0]!.content).not.toMatch(/budget/i); // neither the internal nor the client budget line (the word appears only in the fixed field schema)
     expect(body().messages[0]!.content).toContain("Client: [CLIENT]");
     expect(body().messages[0]!.content).toContain("End client: [END CLIENT]");
     // the review card: supported fields mapped, identities and the budget resolved inside Enginious OS, the original brief preserved (not truncated, not a summary)
@@ -665,6 +668,66 @@ describe("a realistic brief: full safe narrative out, price and contacts kept in
     // and the logs hold none of it
     const logged = info.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
     for (const p of [...PRIVATE, "Harbour Quest", "wristband"]) expect(logged).not.toContain(p);
+  });
+
+  it("QA 1: a commercial amount with NO currency is withheld when the words call it a quote, cost, rate or budget; dates, quantities and durations stay (checked on the intercepted request)", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const { findProtectedContent } = await import("./protected");
+    const { prepareBrief } = await import("./sales/brief-outbound");
+    for (const t of ["Our final quote is 85000.", "The cost is 85,000 all in.", "Day rate 4500 for the operators.", "Budget is around 85k.", "85000 is their budget."]) {
+      expect(findProtectedContent(t), t).toContain("pricing");
+      expect(prepareBrief(`Title: Fictional gala\n${t}`).outbound, t).not.toMatch(/85|4500/);
+    }
+    for (const t of ["The event is on 2099-02-05 and set-up starts 3 February 2099.", "We need 4 touch tables and 12 readers for 600 guests.", "Each play cycle lasts 180 seconds, about 12 minutes per group of 6.", "The LED wall is 3840 px wide at 120 Hz."]) {
+      expect(findProtectedContent(t), t).toEqual([]);
+      expect(prepareBrief(`Title: Fictional gala\n${t}`).outbound, t).toContain(t);
+    }
+    const text = "Title: Fictional harbour gala\nAgency: Fictional Wave Agency\nNext: Call on 2099-01-12\nWe need 4 touch tables for 600 guests on 2099-02-05; each play cycle lasts 180 seconds. Our final quote is 85000. The crew arrives 3 hours before doors.";
+    const { assistant, f, body } = await live(toolUse({ ...MODEL, title: "Fictional harbour gala" }));
+    card(await assistant.send({ companyId: ID.co1, text }));
+    expect(f).toHaveBeenCalledTimes(1);
+    const sent = body().messages[0]!.content;
+    expect(JSON.stringify(body())).not.toMatch(/85000|final quote/);
+    for (const kept of ["4 touch tables for 600 guests on 2099-02-05", "each play cycle lasts 180 seconds", "The crew arrives 3 hours before doors."]) expect(sent).toContain(kept);
+  });
+
+  it("QA 2: a restriction on the WHOLE brief (an NDA or internal-only heading or notice) means no provider call at all, the form is offered, and the editable preview cannot bypass it", async () => {
+    const body = "Title: Fictional harbour gala\nAgency: Fictional Wave Agency\nNext: Call on 2099-01-12\nWe need two LED walls for the gala dinner on 2099-02-05.";
+    for (const text of [`NDA — internal use only\n${body}`, `${body}\nCONFIDENTIAL - do not forward`, `${body}\nThis brief is confidential and covered by an NDA.`, `Subject: Fictional gala (strictly confidential)\n${body}`]) {
+      for (const extra of [{}, { intent: "enquiry" }, { intent: "enquiry", briefOutbound: "Title: Fictional harbour gala\nWe need two LED walls." }]) {
+        const r = await a.send({ companyId: ID.co1, text, ...extra });
+        if (!r.ok || r.kind !== "reply") throw new Error(`expected the restricted answer, got ${JSON.stringify(r).slice(0, 160)}`);
+        expect(r.text).toMatch(/marked as restricted/);
+        expect(r.links).toEqual([{ label: "New-enquiry form", href: "/sales/new" }]);
+      }
+      // a direct call to the action, with or without an edited outbound text, is refused too
+      for (const outbound of [undefined, "Title: Fictional harbour gala"]) expect(await a.propose({ actionId: "jarvis.sales.enquiry.create_from_brief", companyId: ID.co1, input: { mode: "extract", brief: text, ...(outbound ? { outbound } : {}) } })).toMatchObject({ ok: false, code: "protected_content" });
+    }
+    expect(simulatedProviderCalls).toHaveLength(0);
+    expect(w.usage.size).toBe(0);
+    // a contract clause inside the narrative is a sentence-level matter: that sentence is withheld and the rest still goes
+    const partial = card(await a.send({ companyId: ID.co1, text: `${body}\nThe agency contract says penalties apply for late set-up.` }));
+    expect(simulatedProviderCalls).toHaveLength(1);
+    expect(simulatedProviderCalls[0]!.input).toContain("two LED walls for the gala dinner");
+    expect(simulatedProviderCalls[0]!.input).not.toMatch(/contract|penalties/);
+    expect(partial.card.notice).toMatch(/contract or restricted material/);
+  });
+
+  it("QA 3: only an explicitly identified, unambiguous CLIENT budget is autofilled; anything else is left blank for the reviewer, and no budget of any kind is sent", async () => {
+    const base = "Title: Fictional harbour gala\nAgency: Fictional Wave Agency\nNext: Call on 2099-01-12\nWe need two LED walls for the gala dinner.";
+    const run = async (lines: string) => { simulatedProviderCalls.length = 0; const r = card(await a.send({ companyId: ID.co1, text: `${base}\n${lines}` })); expect(simulatedProviderCalls[0]!.input).not.toMatch(/budget|50000|85000|85,000|50,000/i); return r.card; };
+    // the QA case: the internal budget comes first; the client's is the one that is used
+    expect((await run("Internal budget: AED 50000\nClient budget: AED 85000")).values).toMatchObject({ value: 85000, currency: "AED" });
+    expect((await run("Client budget: AED 85000\nInternal budget: AED 50000")).values).toMatchObject({ value: 85000, currency: "AED" });
+    expect((await run("The client's budget is 85,000 AED and our internal budget is AED 50,000.")).values).toMatchObject({ value: 85000, currency: "AED" });
+    // not explicitly the client's, or ambiguous: blank, and the card says why
+    for (const lines of ["Budget: AED 85000", "Internal budget: AED 50000", "Our budget for crew is AED 50000", "Client budget: AED 85000\nClient budget: AED 90000"]) {
+      const c = await run(lines);
+      expect(c.values, lines).toMatchObject({ value: null, currency: null, budgetNote: null });
+      expect(c.notice, lines).toMatch(/left the value and budget note blank/);
+    }
+    // no budget at all: nothing said about it
+    expect((await run("Doors open at 19:00.")).notice ?? "").not.toMatch(/budget/i);
   });
 
   it("a brief that cannot be separated safely is NOT sent: the person sees the text that would go, edits it (or uses the form), and the original still reaches the card", async () => {

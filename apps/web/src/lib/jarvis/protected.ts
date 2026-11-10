@@ -59,6 +59,32 @@ const BIRTH = /\b(?:date\s+of\s+birth|d\.?o\.?b\.?|born\s+on)\b[^.\n]{0,20}\d/i;
 const CREDENTIAL = /\b(?:pass(?:word|code|phrase)|api[\s_-]?key|secret(?:\s+key)?|access\s+token|auth(?:orization)?\s+token|bearer|private\s+key|service[\s_-]?role(?:\s+key)?|pin(?:\s+code)?)\b\s*(?:is|was|=|:)\s*\S{4,}|\bsk-[A-Za-z0-9_-]{16,}|\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/i;
 const ATTACHMENT = /data:[a-z]+\/[a-z0-9.+-]+;base64,|(?:^|\s)[A-Za-z0-9+/]{240,}={0,2}(?:\s|$)/i;
 
+/**
+ * A commercial amount written WITHOUT a currency ("Our final quote is 85000", "cost: 85,000", "budget around 85k"): a figure that the words next to it identify as a quote,
+ * cost, price, rate, fee or budget. Ordinary operational numbers are not amounts: dates and years, and numbers with a unit of quantity, size or time ("12 minutes", "4 tables",
+ * "600 guests", "3840 px").
+ */
+const COMMERCIAL_WORD = /\b(?:quot(?:e|es|ed|ation|ations)|estimate[ds]?|budget(?:s|ed)?|costs?|costing|prices?|priced|pricing|rates?|fees?|charges?|charged|discount(?:s|ed)?|margins?|mark-?ups?|invoice[ds]?|deposit|commission|payment)\b/gi;
+const BARE_FIGURE = /(?<![\w.,/-])(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{3,}(?:\.\d+)?|\d+(?:\.\d+)?\s?k)(?![\w/-]|[.,]\d)/gi;
+const UNIT_AFTER = /^\s?(?:x\b|×|pcs\b|pieces?\b|units?\b|screens?\b|walls?\b|panels?\b|tables?\b|stations?\b|kiosks?\b|sqm\b|sq\.?\s?m\b|m2\b|m\b|cm\b|mm\b|ft\b|feet\b|inch(?:es)?\b|"|minutes?\b|mins?\b|seconds?\b|secs?\b|hours?\b|hrs?\b|days?\b|weeks?\b|nights?\b|people\b|persons?\b|guests?\b|visitors?\b|players?\b|attendees?\b|pax\b|teams?\b|groups?\b|hz\b|fps\b|px\b|pixels?\b|nits\b|lumens?\b|kg\b|kw\b|w\b|gb\b|mbps\b)/i;
+const YEAR_BEFORE = /(?:\b(?:in|by|for|since|during|year|jan\w*|feb\w*|mar\w*|apr\w*|may|jun\w*|jul\w*|aug\w*|sep\w*|oct\w*|nov\w*|dec\w*)|\d(?:st|nd|rd|th)?)\s+$/i;
+export function hasCommercialFigure(text: string): boolean {
+  const words = [...text.matchAll(COMMERCIAL_WORD)];
+  if (words.length === 0) return false;
+  for (const n of text.matchAll(BARE_FIGURE)) {
+    const start = n.index!, end = start + n[0].length;
+    if (UNIT_AFTER.test(text.slice(end, end + 12))) continue;
+    if (/^(?:19|20|21)\d{2}$/.test(n[0]) && YEAR_BEFORE.test(text.slice(Math.max(0, start - 14), start))) continue;
+    for (const w of words) {
+      const ws = w.index!, we = ws + w[0].length;
+      const between = ws < start ? text.slice(we, start) : text.slice(end, ws);
+      // the same sentence, and close: "quote is 85000", "85000 budget", "cost of roughly 85,000"
+      if (between.length <= 40 && !/[.!?\n]/.test(between)) return true;
+    }
+  }
+  return false;
+}
+
 const WINDOW = 70;
 function near(text: string, a: RegExp, b: RegExp, window = WINDOW): boolean {
   const as = [...text.matchAll(new RegExp(a.source, a.flags.includes("g") ? a.flags : `${a.flags}g`))];
@@ -89,7 +115,7 @@ export function findProtectedContent(raw: string): ProtectedCategory[] {
   if (LEAVE.test(text) || near(text, LEAVE_BALANCE, /\b\d+(?:\.\d+)?\b/g, 30)) found.add("private_leave");
   if (EMIRATES_ID.test(text) || IBAN.test(text) || CARD.test(text) || BIRTH.test(text) || near(text, ID_WORD, ID_TOKEN, 40)) found.add("personal_id");
 
-  if (near(text, T.pricingStrong, MONEY) || near(text, T.pricingStrong, PERCENT, 50)) found.add("pricing");
+  if (near(text, T.pricingStrong, MONEY) || near(text, T.pricingStrong, PERCENT, 50) || hasCommercialFigure(text)) found.add("pricing");
   else {
     // A plain "price / cost / rate / fee" next to a money amount.
     const money = [...text.matchAll(MONEY)];
