@@ -748,7 +748,23 @@ describe("a realistic priced brief: the submitted Sales context goes out, the ap
     // an ordinary sentence that merely contains such a word is not a marking, and the same reply without the marking goes out with its price
     const { wholeTextRestricted } = await import("./protected");
     for (const t of ["Parking is restricted to the loading bay after 18:00.", "Access to the hall is restricted during set-up, so plan the crew for the morning.", "Venue: Fictional Harbour Hall"]) expect(wholeTextRestricted(t), t).toBe(false);
-    for (const t of ["External sharing prohibited.", "Internal use only", "NDA — internal use only", "CONFIDENTIAL", "Do not forward this outside the company.", "This document is confidential."]) expect(wholeTextRestricted(t), t).toBe(true);
+    for (const t of ["External sharing prohibited.", "Internal use only", "NDA — internal use only", "CONFIDENTIAL", "Do not forward this outside the company.", "This document is confidential.", "This is an internal-only brief.", "Internal only", "internal-use-only", "For internal use"]) expect(wholeTextRestricted(t), t).toBe(true);
+    // the hyphenated wording, through every way in, against the intercepted provider: zero requests
+    const hyphen = await live(toolUse(MODEL));
+    const internalOnly = "This is an internal-only brief.\nTitle: Fictional harbour gala\nAgency: Fictional Wave Agency\nNext: Call on 2099-01-12\nTwo LED walls at 85 per item, client budget AED 50000-65000.";
+    for (const extra of [{}, { intent: "enquiry" }, { intent: "reply", enquiryId: e.id }, { intent: "update", enquiryId: e.id }, { intent: "meeting", enquiryId: e.id }, { intent: "chat" }, { intent: "enquiry", briefOutbound: "Two LED walls at 85 per item." }]) {
+      const r = await hyphen.assistant.send({ companyId: ID.co1, text: internalOnly, ...extra });
+      expect(r, JSON.stringify(extra)).toMatchObject({ ok: true, kind: "reply", links: [{ label: "New-enquiry form", href: "/sales/new" }] });
+    }
+    expect(await hyphen.assistant.send({ companyId: ID.co1, text: "make it shorter", context: { turns: [{ role: "user", text: internalOnly }] } })).toMatchObject({ ok: true, kind: "reply" });
+    for (const [actionId, input] of [["jarvis.sales.draft_reply", { enquiryId: e.id, conversation: internalOnly }], ["jarvis.sales.chat.reply", { message: internalOnly, draft: true, turns: [] }], ["jarvis.sales.enquiry.create_from_brief", { mode: "extract", brief: "Title: Gala\nAgency: Fictional Wave Agency", outbound: internalOnly }]] as const) {
+      expect(await hyphen.assistant.propose({ actionId, companyId: ID.co1, input }), actionId).toMatchObject({ ok: false, code: "protected_content" });
+    }
+    expect(hyphen.f).toHaveBeenCalledTimes(0);
+    // without the marking the same brief goes out with its price and budget range
+    expect((await hyphen.assistant.send({ companyId: ID.co1, text: internalOnly.replace("This is an internal-only brief.\n", "") })).ok).toBe(true);
+    expect(hyphen.f).toHaveBeenCalledTimes(1);
+    expect(hyphen.body().messages[0]!.content).toContain("Two LED walls at 85 per item, client budget AED 50000-65000.");
     const ok = await live({ content: [{ type: "tool_use", id: "t", name: "record_fields", input: { subject: "Re: LED walls", body: "Thank you. We will confirm availability.", toConfirm: [], usedValues: [] } }] });
     expect((await ok.assistant.send({ companyId: ID.co1, intent: "reply", enquiryId: e.id, text: marked.replace("External sharing prohibited.\n", "") })).ok).toBe(true);
     expect(ok.body().messages[0]!.content).toContain("available on 2099-02-05 at 85 per item");
