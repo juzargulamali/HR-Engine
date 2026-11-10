@@ -22,7 +22,7 @@ import type { PbxAuthorshipRow, PbxBudgetHeaderRow, PbxCompanyGrantRow, PbxJson,
 import type {
   CrmActivityRow, CrmApprovalRow, CrmAuditLogRow, CrmCompanyGrantRow, CrmCompanySettingsRow, CrmContactRow,
   CrmDuplicateCandidateRow, CrmFileRow, CrmFollowUpRow, CrmHandoverRow, CrmOpportunityContactRow, CrmOpportunityEventRow,
-  CrmAccountProfileRow, CrmOutreachEventRow, CrmOutreachRow, CrmOpportunityRow, CrmOrganisationRow, CrmProposalRow, CrmReadOnlyTable, CrmReminderEmailClaim, CrmReminderRow,
+  CrmAccountProfileRow, CrmEventEditionRow, CrmEventRow, CrmObservationRow, CrmOutreachEventRow, CrmOutreachRow, CrmOpportunityRow, CrmOrganisationRow, CrmProposalRow, CrmReadOnlyTable, CrmReminderEmailClaim, CrmReminderRow,
   CrmZohoReferenceRow, CrmClosureRow, CrmUploadIntent,
 } from "./crm";
 import type {
@@ -1715,6 +1715,9 @@ export interface Database {
       crm_company_settings: CrmReadOnlyTable<CrmCompanySettingsRow>;
       crm_organisations: CrmReadOnlyTable<CrmOrganisationRow>;
       crm_account_profiles: CrmReadOnlyTable<CrmAccountProfileRow>;
+      crm_events: CrmReadOnlyTable<CrmEventRow>;
+      crm_event_editions: CrmReadOnlyTable<CrmEventEditionRow>;
+      crm_event_observations: CrmReadOnlyTable<CrmObservationRow>;
       crm_outreach: CrmReadOnlyTable<CrmOutreachRow>;
       crm_outreach_events: CrmReadOnlyTable<CrmOutreachEventRow>;
       crm_contacts: CrmReadOnlyTable<CrmContactRow>;
@@ -1826,6 +1829,16 @@ export interface Database {
       crm_generate_reminders: { Args: { p_now?: string }; Returns: number };
       crm_claim_reminder_emails: { Args: { p_limit?: number; p_now?: string }; Returns: CrmReminderEmailClaim[] };
       crm_finish_reminder_email: { Args: { p_reminder_id: string; p_ok: boolean; p_error?: string | null }; Returns: undefined };
+      crm_set_outreach_priority: { Args: { p_org: string; p_priority: number | null }; Returns: undefined };
+      crm_save_event: { Args: { p_id: string | null; p_name: string; p_kind?: string; p_website?: string | null; p_note?: string | null }; Returns: string };
+      crm_save_edition: { Args: { p_id: string | null; p_event: string | null; p_start: string; p_end: string; p_city?: string | null; p_country?: string | null; p_venue?: string | null; p_note?: string | null }; Returns: string };
+      crm_archive_edition: { Args: { p_id: string }; Returns: string };
+      crm_archive_event: { Args: { p_id: string }; Returns: string };
+      crm_import_events: { Args: { p_rows: unknown; p_apply?: boolean; p_expect?: number | null }; Returns: unknown };
+      crm_record_observation: { Args: { p_edition: string; p_exhibitor: string; p_kind?: string; p_agency?: string | null; p_agency_unknown?: boolean; p_stand?: string | null; p_role?: string | null; p_note?: string | null; p_verification?: string }; Returns: string };
+      crm_update_observation: { Args: { p_id: string; p_kind: string; p_agency?: string | null; p_agency_unknown?: boolean; p_stand?: string | null; p_role?: string | null; p_note?: string | null; p_verification?: string }; Returns: undefined };
+      crm_remove_observation: { Args: { p_id: string }; Returns: undefined };
+      crm_set_opportunity_edition: { Args: { p_id: string; p_edition: string | null; p_expected_version?: number | null }; Returns: number };
       crm_people: { Args: Record<string, never>; Returns: { user_id: string; full_name: string | null; email: string | null; company_ids: string[] }[] };
       crm_staff_directory: { Args: Record<string, never>; Returns: { user_id: string; full_name: string | null; email: string | null }[] };
       crm_reopen_opportunity: {

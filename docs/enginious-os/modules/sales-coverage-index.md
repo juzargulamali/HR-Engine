@@ -11,7 +11,7 @@ Who can reach: "Sales grant" = any active `crm_company_grants` row (`sales/layou
 | # | Screen / trigger | URL or trigger | Who can reach it | Reference | Catalogue | Status |
 |---|---|---|---|---|---|---|
 | 1 | Sales shell: access notice, load-failure notice, tab strip on small screens | every `/sales/*` page (`sales/layout.tsx`) | Signed-in people; data only with a Sales grant | [E section 1](./sales-enquiries.md#1-who-sees-what) | none | Documented |
-| 2 | Sidebar entries Follow-ups, Enquiries, Clients & Agencies, Outreach, Reports; Manage: Settings; secondary (search only): New enquiry, Clients & contacts, Proposals & quotes, Pipeline board | `nav-groups.ts` | Sales grant; Settings: `manage_settings` or founder | [Settings S section 1](./sales-settings.md#1-reaching-the-screen-and-who-may-change-what); this index | none | Documented |
+| 2 | Sidebar entries Follow-ups, Enquiries, Clients & Agencies, Outreach, Events & Exhibitions, Reports; Manage: Settings; secondary (search only): New enquiry, Clients & contacts, Proposals & quotes, Pipeline board | `nav-groups.ts` | Sales grant; Settings: `manage_settings` or founder | [Settings S section 1](./sales-settings.md#1-reaching-the-screen-and-who-may-change-what); this index | none | Documented |
 | 3 | Phone bottom bar "Sales" (to Follow-ups) | `shell-chrome.tsx` | Sales grant | [F section 1](./sales-followups.md#1-route-and-who-sees-what) | none | Documented |
 | 4 | Landing: `/sales` redirects to `/sales/follow-ups` | `/sales` | Sales grant | section 3 below; [F section 1](./sales-followups.md#1-route-and-who-sees-what) | none | Documented |
 
@@ -151,3 +151,13 @@ The six named verification gaps (rows 30, 38, 43, 46, 62 and 70, see the count u
 | 69 (`?view=today`) | The page ignored the value My Day links to | The Today view ([F section 2](./sales-followups.md)) |
 | 60 (Settings) | The reference-code hint omitted `OPP-` | Hint names the prefix; the generator is unchanged ([S section 6](./sales-settings.md)) |
 
+## Events & Exhibitions (draft PR `feat/outreach-events`; not merged, migration not applied)
+
+| # | Screen / control | Route | Who | Reference |
+|---|---|---|---|---|
+| 70 | Events list (filters, figures, Add event, Add edition) | `/sales/events` | Sales grant | [X section 3.1](./sales-events-and-exhibitions.md) |
+| 71 | Event page (editions, exhibitors compared, agencies to contact, linked enquiries) | `/sales/events/[id]` | Sales grant | [X section 3.2](./sales-events-and-exhibitions.md) |
+| 72 | Record an observation (phone-first dialog) | event page | Sales grant | [X section 3.3](./sales-events-and-exhibitions.md) |
+| 73 | Outreach priority (directory column, filter, sort; account card; lead control) | `/sales/accounts`, `/sales/accounts/[id]`, event page | Sales grant | [X section 4](./sales-events-and-exhibitions.md) |
+| 74 | Import events (template, preview, confirm; archive on events and editions) | `/sales/events/import`, `/sales/events`, event page | Sales grant | [X sections 3.2, 3.4](./sales-events-and-exhibitions.md) |
+| 74 | Event / Exhibition field on New enquiry, Quick add and Edit details; event line on Scope & dates | `/sales/new`, quick add, enquiry page | Sales grant; link: owner or founder | [E section 3.4](./sales-enquiries.md) |

@@ -2,6 +2,8 @@ import { AvailabilityBadge } from "@/components/sales/badges";
 import { formatDate } from "@/components/sales/format";
 import { EditDetailsButton, type EditableOpportunity } from "./edit-details";
 import { dateRangeText } from "./helpers";
+import { Suspense } from "react";
+import { EventFact } from "./event-fact";
 import { Fact, Muted, Panel, SubHeading } from "./parts";
 import type { OppView } from "./view";
 
@@ -10,7 +12,7 @@ const NOT_SET = <span className="text-muted-foreground">Not recorded</span>;
 export function toEditable(view: OppView): EditableOpportunity {
   const { opp, detail } = view;
   return {
-    id: opp.id, version: opp.version, agencyOrgId: opp.agency_org_id, clientOrgId: opp.client_org_id, title: opp.title, brief: opp.brief, currency: opp.currency, value: detail.item.value, budgetNote: opp.budget_note,
+    id: opp.id, version: opp.version, agencyOrgId: opp.agency_org_id, clientOrgId: opp.client_org_id, eventEditionId: opp.event_edition_id ?? null, title: opp.title, brief: opp.brief, currency: opp.currency, value: detail.item.value, budgetNote: opp.budget_note,
     paymentTerms: opp.payment_terms, eventStart: opp.event_start, eventEnd: opp.event_end, installStart: opp.install_start, location: opp.location,
     scope: opp.scope, exclusions: opp.exclusions, waitingOn: opp.waiting_on, technologies: opp.technologies, risks: opp.risks,
   };
@@ -56,6 +58,7 @@ export function ScopePanel({ view, compact = false }: { view: OppView; compact?:
             <Fact label="Installation starts">{opp.install_start ? formatDate(opp.install_start) : <span className="text-muted-foreground">Not confirmed</span>}</Fact>
             <Fact label="Show">{show ?? <span className="text-muted-foreground">Not confirmed</span>}</Fact>
             <Fact label="Location">{opp.location ?? NOT_SET}</Fact>
+            <Fact label="Event / Exhibition"><Suspense fallback="…"><EventFact editionId={opp.event_edition_id} /></Suspense></Fact>
           </dl>
         </Panel>
         <Panel title="Money and terms">

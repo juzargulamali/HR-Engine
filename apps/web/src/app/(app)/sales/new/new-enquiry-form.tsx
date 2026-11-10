@@ -16,6 +16,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/sales/action-form";
 import { cn } from "@/lib/utils";
 import { FIELD_NOUN, hasRoleFor, offeredFor, type InquiryField } from "@/lib/crm/organisation-roles";
+import { SearchCombobox, type ComboOption } from "@/components/sales/combobox";
+import { countryLabel } from "@/lib/crm/clients-agencies/normalise";
+import type { EditionOption } from "@/lib/crm/events/data";
 import {
   AddContactDialog, AddOrganisationDialog,
   type CreatedContact, type CreatedOrganisation, type OrganisationKind,
@@ -42,6 +45,9 @@ export interface EnquiryOrganisation {
   /** Every role the record holds (agency, direct, client, technology). Empty = none recorded: it reads as its `kind`. */
   roles?: readonly string[];
   place: string | null;
+  /** Two-letter country and website, shown under the name so two similar names can be told apart (optional: an older caller may not give them). */
+  country?: string | null;
+  website?: string | null;
 }
 
 export interface EnquiryContact {
@@ -71,9 +77,14 @@ function Section({ title, description, children }: { title: string; description?
   );
 }
 
+/** What tells two similar organisations apart: country (or place) and website, in words. */
+export const organisationDetail = (o: Pick<EnquiryOrganisation, "place" | "country" | "website">): string =>
+  [o.country ? countryLabel(o.country) : o.place, o.website ? o.website.replace(/^https?:\/\/(www\.)?/i, "").replace(/\/.*$/, "") : null].filter(Boolean).join(" · ");
+
 /**
- * A plain select with a small search box above it (the list of organisations gets long). It offers only organisations that hold the role this
- * field needs: an organisation recorded as both an agency and an end client appears in BOTH pickers, one recorded as neither does not appear.
+ * ONE search-as-you-type field (no separate search box and dropdown): type, see the matches directly below, choose by mouse, touch or keyboard. It offers only
+ * organisations that hold the role this field needs: an organisation recorded as both an agency and an end client appears in BOTH fields, one recorded as neither does
+ * not appear. Typing alone never selects or creates anything. The shared directory is searched (every company's accounts).
  */
 export function OrganisationPicker({
   id, name, label, hint, value, onChange, organisations, field, onAdd,
@@ -88,24 +99,28 @@ export function OrganisationPicker({
   field: InquiryField;
   onAdd: () => void;
 }) {
-  const [search, setSearch] = useState("");
-  const needle = search.trim().toLowerCase();
-  const offered = offeredFor(organisations, field, value);
-  const matching = offered.filter((o) => needle === "" || `${o.name} ${o.place ?? ""}`.toLowerCase().includes(needle));
-  const visible = offered.filter((o) => o.id === value || matching.includes(o));
-  const option = (o: EnquiryOrganisation) => <option key={o.id} value={o.id}>{o.name}{o.place ? ` (${o.place})` : ""}</option>;
+  const options = useMemo<ComboOption[]>(() => offeredFor(organisations, field, value).map((o) => ({ id: o.id, label: o.name, detail: organisationDetail(o) })), [organisations, field, value]);
   return (
-    <div className="min-w-0 space-y-1.5">
-      <label htmlFor={id} className="text-sm font-medium leading-none">{label}</label>
-      <Input aria-label={`Search ${label.toLowerCase()}`} type="search" placeholder="Type to narrow the list" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }} />
-      <Select id={id} name={name} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">None</option>
-        {visible.map(option)}
-      </Select>
-      {needle !== "" && matching.length === 0 ? <p className="text-sm text-muted-foreground">Nothing recorded as {FIELD_NOUN[field]} matches “{search.trim()}”. Add it as a new organisation below, or give an existing one that role on its account page.</p> : null}
-      <p className="text-sm text-muted-foreground">{hint}</p>
-      <Button type="button" size="sm" variant="ghost" onClick={onAdd}><Plus className="h-4 w-4" aria-hidden /> Add organisation</Button>
-    </div>
+    <SearchCombobox
+      id={id} name={name} label={label} hint={hint} options={options} value={value} onChange={onChange} placeholder="Type a name to search"
+      emptyText={(q) => `Nothing recorded as ${FIELD_NOUN[field]} matches “${q}”. Add it as a new organisation below, or give an existing one that role on its account page.`}
+      footer={<Button type="button" size="sm" variant="ghost" onClick={onAdd}><Plus className="h-4 w-4" aria-hidden /> Add organisation</Button>}
+    />
+  );
+}
+
+/** The optional Event / Exhibition field: one specific edition from the shared database ("GITEX Global · 2027 · Dubai"). Nothing is guessed from old free text. */
+export function EventEditionPicker({ id, name = "eventEditionId", value, onChange, editions, loadError }: {
+  id: string; name?: string; value: string; onChange: (id: string) => void; editions: readonly EditionOption[]; loadError?: boolean;
+}) {
+  const options = useMemo<ComboOption[]>(() => editions.map((e) => ({ id: e.id, label: e.archived ? `${e.label} (archived)` : e.label, detail: e.detail })), [editions]);
+  if (loadError) return <p className="text-sm text-destructive" role="alert">Could not load the events, so an event cannot be linked right now. You can link it later from the enquiry.</p>;
+  return (
+    <SearchCombobox
+      id={id} name={name} label="Event / Exhibition (optional)" hint="Link the enquiry to the specific show it is for. Leave empty if it is not for an event." options={options} value={value} onChange={onChange}
+      placeholder="Type an event name or year"
+      emptyText={(q) => <>Nothing matches “{q}”. <Link href="/sales/events" className="underline underline-offset-2">Add the event or its edition</Link> in Events &amp; Exhibitions first.</>}
+    />
   );
 }
 
@@ -149,10 +164,13 @@ export function DuplicateWarning({ matches, onDismiss, checkFailed = false }: { 
 }
 
 export function NewEnquiryForm({
-  companies, organisations: serverOrganisations, contacts: serverContacts, currentUserId, currentUserName, today, prefill,
+  companies, organisations: serverOrganisations, contacts: serverContacts, currentUserId, currentUserName, today, prefill, editions = [], editionsFailed = false,
 }: {
   companies: EnquiryCompany[];
   organisations: EnquiryOrganisation[];
+  /** The editions an enquiry can be linked to (shared by every company) and whether they could not be loaded. */
+  editions?: EditionOption[];
+  editionsFailed?: boolean;
   contacts: EnquiryContact[];
   currentUserId: string;
   currentUserName: string;
@@ -185,6 +203,7 @@ export function NewEnquiryForm({
   const prefillField = prefill ? (hasRoleFor(prefill.org, "client") || !hasRoleFor(prefill.org, "agency") ? "client" : "agency") : null;
   const [agencyId, setAgencyId] = useState(prefill && prefillField === "agency" ? prefill.org.id : "");
   const [clientId, setClientId] = useState(prefill && prefillField === "client" ? prefill.org.id : "");
+  const [editionId, setEditionId] = useState("");
   const [checkedContacts, setCheckedContacts] = useState<Set<string>>(new Set());
   const [eventStart, setEventStart] = useState("");
   const [installStart, setInstallStart] = useState("");
@@ -312,6 +331,7 @@ export function NewEnquiryForm({
                 />
               </div>
               {!agencyId && !clientId ? <p className="text-sm text-muted-foreground">Required: choose at least one of agency or end client.</p> : null}
+              <EventEditionPicker id="enq-event" value={editionId} onChange={setEditionId} editions={editions} loadError={editionsFailed} />
             </fieldset>
 
             <fieldset className="space-y-2">

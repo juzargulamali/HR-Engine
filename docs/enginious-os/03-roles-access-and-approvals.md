@@ -83,6 +83,7 @@ The Module access screen offers named working profiles. A profile only saves cap
 | Inventory | Employee equipment viewer | `view_employee_custody` | |
 | Sales | Sales colleague | none (basic) | Own opportunities and follow-ups; cannot assign owners or reopen |
 | Sales | Sales lead | `assign_owner`, `reopen_closed` | |
+| Sales (draft PR, not applied) | Events, editions, observations, outreach priority | **Any Sales grant** adds events, editions and observations and sets the shared outreach priority; the person who added an event, edition or observation (or a founder in any company) edits or **archives** it (nothing is deleted); **any Sales grant imports events and editions** into the shared calendar (the same right as adding them); an enquiry is linked to an edition only by its owner or a founder; the figures an edition shows are counted from the enquiries the viewer's own grants can read. See `modules/sales-events-and-exhibitions.md` | |
 | Project budgets | Read-only / Finance / Executive approver | `view` / `finance` / `executive_approver` | Approver right still only given or removed by a CEO / CTO approver (R1) |
 | Projects | Project directory viewer | none (basic) | No company-wide PM, scope-approval or founder profile; PM assignment and team membership are managed on the project or handover |
 

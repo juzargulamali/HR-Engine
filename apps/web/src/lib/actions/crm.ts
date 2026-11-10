@@ -10,6 +10,7 @@ import type { ActionState } from "./companies";
 import { friendlyCrmError } from "@/lib/crm/errors";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadOrganisations } from "@/lib/crm/data";
+import { loadEditionOptions, type EditionOption } from "@/lib/crm/events/data";
 import { diffZohoForm, isMissingDatabaseFunction, ZOHO_FIELDS, ZOHO_FORM_NAMES, ZOHO_SAVE_UNAVAILABLE } from "@/lib/crm/zoho-save";
 
 /**
@@ -67,6 +68,7 @@ const createOpportunitySchema = z.object({
   agencyOrgId: optionalUuid,
   clientOrgId: optionalUuid,
   ownerId: optionalUuid,
+  eventEditionId: optionalUuid,
   currency: z.preprocess((v) => (v === "" ? undefined : v), z.string().length(3, "Currency must be a 3-letter code").optional()),
   value: optionalNumber,
   budgetNote: optionalText,
@@ -127,19 +129,29 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
     const link = await supabase.rpc("crm_outreach_link_inquiry", { p_outreach: fromOutreach.data, p_opportunity: data });
     if (link.error) redirect(`/sales/accounts/${d.clientOrgId ?? d.agencyOrgId}?company=${d.companyId}&outreach_link=failed`);
   }
+  // The optional Event / Exhibition: its own function (crm_set_opportunity_edition) links it. The enquiry exists either way; if the link is refused (for example the
+  // person created it for a colleague, and only the owner or a founder may link) the person lands on the enquiry, which says so and where to link it.
+  let linkFailed = false;
+  if (d.eventEditionId) {
+    const linked = await supabase.rpc("crm_set_opportunity_edition", { p_id: data, p_edition: d.eventEditionId, p_expected_version: null });
+    if (linked.error) { console.error("[crm] event link after create refused", linked.error.message); linkFailed = true; }
+  }
   // The quick-add dialog asks to land on the list with the new enquiry open in the side panel; anything else keeps the full page.
-  redirect(formData.get("after") === "panel" ? `/sales/opportunities?open=${data}` : `/sales/opportunities/${data}`);
+  redirect(linkFailed ? `/sales/opportunities/${data}?event_link=failed` : formData.get("after") === "panel" ? `/sales/opportunities?open=${data}` : `/sales/opportunities/${data}`);
 }
 
 /** The organisations the edit form's agency and end-client pickers choose from (read through the person's own session). A failed read says so; it is never an empty list. */
-export async function loadInquiryOrganisations(): Promise<
-  { ok: true; organisations: { id: string; name: string; kind: "agency" | "client" | "direct"; roles: string[]; place: string | null }[] } | { ok: false; error: string }
+export async function loadInquiryOrganisations(keepEdition?: string | null): Promise<
+  { ok: true; organisations: { id: string; name: string; kind: "agency" | "client" | "direct"; roles: string[]; place: string | null; country: string | null; website: string | null }[]; editions: EditionOption[]; editionsFailed: boolean } | { ok: false; error: string }
 > {
   const ctx = await getCrmContext();
   if (!ctx || ctx.loadFailed || ctx.companies.length === 0) return { ok: false, error: "You do not have Sales access." };
   try {
     const { organisations } = await loadOrganisations();
-    return { ok: true, organisations: organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, roles: o.roles, place: o.place })) };
+    // The editions are optional: if they cannot be read the agency and end-client pickers still work and the Event field says so.
+    let editions: EditionOption[] = []; let editionsFailed = false;
+    try { editions = await loadEditionOptions(keepEdition ?? null); } catch (e) { console.error("[crm] edit: editions load failed", e); editionsFailed = true; }
+    return { ok: true, organisations: organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, roles: o.roles, place: o.place, country: o.country_code, website: o.website })), editions, editionsFailed };
   } catch (e) {
     console.error("[crm] edit: organisations load failed", e);
     return { ok: false, error: "Could not load the organisations. Close this and try again." };
@@ -176,11 +188,30 @@ export async function updateOpportunity(_prev: ActionState, formData: FormData):
   if (formData.has("risks")) {
     patch.risks = String(formData.get("risks") ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
   }
-  if (Object.keys(patch).length === 0) return { error: "Nothing to save." };
+  // The Event / Exhibition link has its own function (the enquiry owner or a founder, same version check). An empty value clears the link; the field is posted only when changed.
+  let edition: string | null | undefined;
+  if (formData.has("event_edition_id")) {
+    const raw = String(formData.get("event_edition_id") ?? "").trim();
+    if (raw === "") edition = null;
+    else if (uuid.safeParse(raw).success) edition = raw;
+    else return { error: "Choose the event edition from the list." };
+  }
+  if (Object.keys(patch).length === 0 && edition === undefined) return { error: "Nothing to save." };
   const supabase = await createClient();
   { const stale = await staleMessage(supabase, id.data, Number.isFinite(version) ? version : null); if (stale) return { error: stale }; }
-  const { error } = await supabase.rpc("crm_update_opportunity", { p_id: id.data, p_expected_version: Number.isFinite(version) ? version : null, p_patch: patch });
-  if (error) return fail(error.message);
+  let expected: number | null = Number.isFinite(version) ? version : null;
+  if (Object.keys(patch).length > 0) {
+    const { data, error } = await supabase.rpc("crm_update_opportunity", { p_id: id.data, p_expected_version: expected, p_patch: patch });
+    if (error) return fail(error.message);
+    if (typeof data === "number") expected = data;   // the details were saved: the link is checked against the version they produced
+  }
+  if (edition !== undefined) {
+    const { error } = await supabase.rpc("crm_set_opportunity_edition", { p_id: id.data, p_edition: edition, p_expected_version: expected });
+    if (error) {
+      refresh(id.data);
+      return { error: `${Object.keys(patch).length > 0 ? "The other details were saved, but the event link was not: " : ""}${friendlyCrmError(error.message)}` };
+    }
+  }
   refresh(id.data);
   return { error: null };
 }

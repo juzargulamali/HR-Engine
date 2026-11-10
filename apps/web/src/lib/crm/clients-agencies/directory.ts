@@ -30,9 +30,28 @@ export interface DirectoryFilters {
   exhibition: string;
   /** "" = all; otherwise the one relationship badge to show. */
   rel: "" | Relationship;
+  /** The shared outreach priority: "" = any; "5" exactly 5; "4+" / "3+" = at least; "rated" = any rating; "unrated" = none given yet. */
+  priority: "" | PriorityFilter;
 }
 
-export const EMPTY_FILTERS: DirectoryFilters = { q: "", role: "", country: "", owner: "", source: "", exhibition: "", rel: "" };
+/** Outreach priority (1 to 5, 5 highest; null = Unrated): ONE shared value per account, the team's own rating of who to approach, not a public review score. */
+export const PRIORITIES = [5, 4, 3, 2, 1] as const;
+export const PRIORITY_FILTERS = ["5", "4+", "3+", "rated", "unrated"] as const;
+export type PriorityFilter = (typeof PRIORITY_FILTERS)[number];
+export const PRIORITY_FILTER_LABEL: Record<PriorityFilter, string> = { "5": "5 (highest) only", "4+": "4 and above", "3+": "3 and above", rated: "Any rating", unrated: "Unrated" };
+export const priorityLabel = (p: number | null | undefined) => (p ? `${p} of 5` : "Unrated");
+export function matchesPriority(p: number | null, f: "" | PriorityFilter): boolean {
+  switch (f) {
+    case "": return true;
+    case "unrated": return p === null;
+    case "rated": return p !== null;
+    case "5": return p === 5;
+    case "4+": return p !== null && p >= 4;
+    case "3+": return p !== null && p >= 3;
+  }
+}
+
+export const EMPTY_FILTERS: DirectoryFilters = { q: "", role: "", country: "", owner: "", source: "", exhibition: "", rel: "", priority: "" };
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
 /** Reads the filters from the page address. Anything not recognised is ignored (never trusted). */
@@ -48,6 +67,7 @@ export function filtersFromParams(sp: Record<string, string | string[] | undefin
     source: (LEAD_SOURCES as readonly string[]).includes(source) || source === NOT_RECORDED ? (source as DirectoryFilters["source"]) : "",
     exhibition: one(sp.exhibition).trim(),
     rel: (RELATIONSHIPS as readonly string[]).includes(one(sp.rel)) ? (one(sp.rel) as Relationship) : "",
+    priority: (PRIORITY_FILTERS as readonly string[]).includes(one(sp.priority)) ? (one(sp.priority) as PriorityFilter) : "",
   };
 }
 
@@ -62,6 +82,7 @@ export function filterDirectory(rows: readonly DirectoryRow[], f: DirectoryFilte
     if (f.rel && r.relationship !== f.rel) return false;
     if (f.role === NOT_RECORDED ? r.org.roles.length > 0 : f.role !== "" && !r.org.roles.includes(f.role)) return false;
     if (f.country && r.org.country_code !== f.country) return false;
+    if (!matchesPriority(r.org.outreach_priority ?? null, f.priority)) return false;
     const owner = r.profile?.owner_id ?? null;
     if (f.owner === UNASSIGNED ? owner !== null : f.owner !== "" && owner !== f.owner) return false;
     const source = r.profile?.lead_source ?? null;
@@ -111,13 +132,13 @@ export function relationshipCounts(rows: readonly DirectoryRow[]): Record<Relati
 }
 
 // ---------------------------------------------------------------------------------------------------------------- sorting
-export const SORT_KEYS = ["name", "country", "enquiries", "won", "last", "owner", "badge"] as const;
+export const SORT_KEYS = ["name", "country", "priority", "enquiries", "won", "last", "owner", "badge"] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 export type SortDir = "asc" | "desc";
 export interface DirectorySort { key: SortKey; dir: SortDir }
 export const DEFAULT_SORT: DirectorySort = { key: "name", dir: "asc" };
 /** The direction a column starts in when first clicked: counts and dates show the biggest / newest first. */
-export const firstDir = (key: SortKey): SortDir => (key === "enquiries" || key === "won" || key === "last" ? "desc" : "asc");
+export const firstDir = (key: SortKey): SortDir => (key === "enquiries" || key === "won" || key === "last" || key === "priority" ? "desc" : "asc");
 
 export function sortFromParams(sp: Record<string, string | string[] | undefined>): DirectorySort {
   const key = one(sp.sort);
@@ -140,6 +161,7 @@ export function sortDirectory(rows: readonly DirectoryRow[], sort: DirectorySort
     switch (sort.key) {
       case "name": return r.org.name.toLowerCase();
       case "country": return r.org.country_code ? countryLabel(r.org.country_code).toLowerCase() : null;
+      case "priority": return r.org.outreach_priority ?? null;
       case "enquiries": return r.stats?.total ?? null;
       case "won": return r.stats?.won ?? null;
       case "last": return r.stats ? r.stats.lastEnquiryOn : null;

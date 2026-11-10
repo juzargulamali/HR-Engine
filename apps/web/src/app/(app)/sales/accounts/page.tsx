@@ -10,7 +10,7 @@ import { Select } from "@/components/ui/select";
 import { LoadError } from "@/components/workspace/states";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadDirectory, loadStaff } from "@/lib/crm/clients-agencies/data";
-import { filterDirectory, filtersFromParams, hasFilters, NOT_RECORDED, UNASSIGNED, type DirectoryRow } from "@/lib/crm/clients-agencies/directory";
+import { filterDirectory, filtersFromParams, hasFilters, NOT_RECORDED, PRIORITY_FILTERS, PRIORITY_FILTER_LABEL, UNASSIGNED, type DirectoryRow } from "@/lib/crm/clients-agencies/directory";
 import { countryLabel, LEAD_SOURCE_LABEL, LEAD_SOURCES, ORGANISATION_ROLES, ROLE_LABEL } from "@/lib/crm/clients-agencies/normalise";
 import { selectCompany } from "@/lib/crm/clients-agencies/company";
 import { eligibleStaff, type StaffPerson } from "@/lib/crm/clients-agencies/staff";
@@ -30,7 +30,7 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
   const heading = (
     <div>
       <h1 className="text-2xl font-semibold">Clients &amp; Agencies</h1>
-      <p className="text-muted-foreground">Agencies, direct clients, end clients and technology companies, with who owns each account and what work has come through it.</p>
+      <p className="text-muted-foreground">One shared directory of agencies, direct clients, end clients and technology companies, with the team&apos;s outreach priority, who owns each account and what work has come through it.</p>
     </div>
   );
   if (!company) return <div className="space-y-4">{heading}<LoadError what="Clients & Agencies" /></div>;
@@ -90,12 +90,8 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
         {sort.key !== DEFAULT_SORT.key || sort.dir !== DEFAULT_SORT.dir ? <><input type="hidden" name="sort" value={sort.key} /><input type="hidden" name="dir" value={sort.dir} /></> : null}
         {filters.rel ? <input type="hidden" name="rel" value={filters.rel} /> : null}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {ctx.companies.length > 1 ? (
-            <div className="space-y-1.5">
-              <label htmlFor="ca-company" className="text-sm font-medium leading-none">Company</label>
-              <Select id="ca-company" name="company" defaultValue={company.id}>{ctx.companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
-            </div>
-          ) : <input type="hidden" name="company" value={company.id} />}
+          {/* No Company selector: the directory is ONE shared list of every account, whichever company added it. The company only decides which company's owner, lead source and enquiry figures are shown (see the line under the filters). */}
+          <input type="hidden" name="company" value={company.id} />
           <div className="space-y-1.5 sm:col-span-2">
             <label htmlFor="ca-q" className="text-sm font-medium leading-none">Search</label>
             <Input id="ca-q" name="q" type="search" defaultValue={filters.q} placeholder="Name, website, place, notes, contact or email" />
@@ -106,6 +102,13 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
               <option value="">Any role</option>
               {ORGANISATION_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
               <option value={NOT_RECORDED}>Role not recorded</option>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="ca-priority" className="text-sm font-medium leading-none">Outreach priority</label>
+            <Select id="ca-priority" name="priority" defaultValue={filters.priority}>
+              <option value="">Any priority</option>
+              {PRIORITY_FILTERS.map((f) => <option key={f} value={f}>{PRIORITY_FILTER_LABEL[f]}</option>)}
             </Select>
           </div>
           <div className="space-y-1.5">
@@ -158,7 +161,7 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
       ) : null}
 
       <p className="text-sm text-muted-foreground" role="status">
-        For {company.name}. {hasFilters(effective) ? `Showing ${shown.length} of ${rows.length} accounts.` : `${rows.length} ${rows.length === 1 ? "account" : "accounts"}.`} Enquiry counts are this company&apos;s only; owner, lead source and exhibition are recorded per company.
+        {hasFilters(effective) ? `Showing ${shown.length} of ${rows.length} accounts` : `${rows.length} ${rows.length === 1 ? "account" : "accounts"}`}, shared by every Enginious company (an account added by one team is here for all teams with Sales access). Outreach priority is one shared team rating. Enquiry counts, account owner, lead source and exhibition are recorded per company and shown here for {company.name}.
       </p>
 
       {rows.length === 0 ? (

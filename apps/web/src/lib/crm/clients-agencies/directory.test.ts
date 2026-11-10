@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CrmAccountProfileRow, CrmContactRow, CrmOrganisationRow } from "@/types/crm";
-import { buildDirectoryRows, EMPTY_FILTERS, filterDirectory, filtersFromParams, UNASSIGNED } from "./directory";
+import { buildDirectoryRows, EMPTY_FILTERS, filterDirectory, filtersFromParams, matchesPriority, priorityLabel, sortDirectory, sortFromParams, UNASSIGNED } from "./directory";
 import { normaliseCountry, normaliseRoles } from "./normalise";
 
 const CO_A = "aaaaaaaa-0000-4000-8000-000000000001";
@@ -9,7 +9,7 @@ const SARA = "11111111-0000-4000-8000-000000000001";
 const OMAR = "11111111-0000-4000-8000-000000000002";
 
 const org = (id: string, name: string, extra: Partial<CrmOrganisationRow> = {}): CrmOrganisationRow => ({
-  id, name, name_key: name.toLowerCase(), kind: "client", roles: [], country_code: null, website: null, website_domain: null, vat_trn: null, trade_licence_no: null, place: null, note: null,
+  id, name, name_key: name.toLowerCase(), kind: "client", roles: [], country_code: null, website: null, website_domain: null, vat_trn: null, trade_licence_no: null, place: null, note: null, outreach_priority: null, outreach_priority_by: null, outreach_priority_at: null,
   created_by: null, created_at: "", updated_at: "", archived_at: null, ...extra,
 });
 const profile = (organisation_id: string, company_id: string, extra: Partial<CrmAccountProfileRow> = {}): CrmAccountProfileRow => ({
@@ -93,5 +93,41 @@ describe("roles and countries", () => {
     expect(normaliseCountry("UK")).toBe("GB");
     expect(normaliseCountry("Atlantis")).toBeNull();
     expect(normaliseCountry("")).toBeNull();
+  });
+});
+
+describe("shared outreach priority", () => {
+  const rated = [
+    org("p1", "Fictional Five", { outreach_priority: 5 }), org("p2", "Fictional Four", { outreach_priority: 4 }), org("p3", "Fictional Two", { outreach_priority: 2 }),
+    org("p4", "Fictional Unrated A"), org("p5", "Fictional Unrated B"),
+  ];
+  const table = buildDirectoryRows({ organisations: rated, contacts: [], profiles: [], opportunities: [], companyId: CO_A });
+  const ids = (rs: readonly { org: { id: string } }[]) => rs.map((r) => r.org.id);
+
+  it("reads and writes ONE value per account in words: 1 to 5 or Unrated", () => {
+    expect(priorityLabel(5)).toBe("5 of 5"); expect(priorityLabel(null)).toBe("Unrated"); expect(priorityLabel(undefined)).toBe("Unrated");
+  });
+  it("filters: exactly 5, at least 4, at least 3, any rating, unrated; an unknown value in the address is ignored", () => {
+    const by = (priority: string) => ids(filterDirectory(table, filtersFromParams({ priority }))).sort();
+    expect(by("5")).toEqual(["p1"]);
+    expect(by("4+")).toEqual(["p1", "p2"]);
+    expect(by("3+")).toEqual(["p1", "p2"]);
+    expect(by("rated")).toEqual(["p1", "p2", "p3"]);
+    expect(by("unrated")).toEqual(["p4", "p5"]);
+    expect(by("9")).toEqual(["p1", "p2", "p3", "p4", "p5"]);
+    expect(matchesPriority(null, "3+")).toBe(false);
+    expect(filtersFromParams({ priority: "4+" }).priority).toBe("4+");
+    expect(EMPTY_FILTERS.priority).toBe("");
+  });
+  it("sorts highest first by default for the column, lowest first when flipped, and Unrated is ALWAYS last in both directions", () => {
+    const sp = (dir: string) => sortFromParams({ sort: "priority", dir });
+    expect(sortFromParams({ sort: "priority" })).toEqual({ key: "priority", dir: "desc" });
+    expect(ids(sortDirectory(table, sp("desc"), () => null))).toEqual(["p1", "p2", "p3", "p4", "p5"]);
+    expect(ids(sortDirectory(table, sp("asc"), () => null))).toEqual(["p3", "p2", "p1", "p4", "p5"]);
+  });
+  it("is the same for every company: the account carries it, not a company profile", () => {
+    const a = buildDirectoryRows({ organisations: rated, contacts: [], profiles: [], opportunities: [], companyId: CO_A });
+    const b = buildDirectoryRows({ organisations: rated, contacts: [], profiles: [], opportunities: [], companyId: CO_B });
+    expect(a.map((r) => r.org.outreach_priority)).toEqual(b.map((r) => r.org.outreach_priority));
   });
 });

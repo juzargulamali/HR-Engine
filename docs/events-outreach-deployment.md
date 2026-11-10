@@ -1,0 +1,38 @@
+# Events & Exhibitions, exhibitor history and shared outreach priority: deployment
+
+One additive migration, `supabase/migrations/20261224000100_crm_events_outreach.sql`. **Nothing here was run against a hosted project by Claude** (no hosted SQL, no deployment). The migration is exercised only by the RLS test `packages/rls-tests/test/crm-events-outreach.rls.test.ts` (a throwaway Postgres) and by the local browser flow `apps/web/os-shell-checks/events-outreach-flow.mjs`.
+
+## What it changes, and what it does not
+| Added | Notes |
+|---|---|
+| `crm_organisations.outreach_priority` (1 to 5, null = Unrated) + `outreach_priority_by`, `outreach_priority_at` | Nullable. Every existing account stays Unrated. One value per account, the same for every company. |
+| Tables `crm_events`, `crm_event_editions`, `crm_event_observations` | Shared reference data: readable with any Sales grant (`crm_has_any_access()`), written only through functions (no DML grant), audited by `crm_audit_trigger`. |
+| `crm_opportunities.event_edition_id` | Nullable, `references crm_event_editions` with NO cascade: an edition with enquiries can never be deleted. Every existing enquiry has no link; **no enquiry is relinked and nothing is guessed from old free text** (`crm_account_profiles.exhibition`, the enquiry location). |
+| Ten functions (priority, event, edition, archive event, archive edition, calendar import, observation, enquiry link) | Granted to `authenticated` only; three helpers are granted to nobody. |
+
+Not touched: `crm_create_opportunity`, `crm_update_opportunity` (so JARVIS and every other caller are unchanged: the link has its own function `crm_set_opportunity_edition`), the enquiry, estimate, follow-up and outreach tables, every existing policy and grant, and the existing account links and duplicate checks.
+
+## Who may do what (decisions to confirm)
+- **Outreach priority**: any Sales grant (it is the team's rating). This is wider than the existing "edit a shared organisation" rule (creator / founder / owner of an open enquiry), which is deliberately not applied to this one field. To tighten it, replace the `crm_has_any_access()` check in `crm_set_outreach_priority` with `crm_can_edit_organisation(p_org)`.
+- **Add** an event, edition or observation: any Sales grant (needed at a show). **Edit or archive**: the person who added it, or a founder in any company. **Import events** (bulk-add events and editions): any Sales grant.
+- **Link an enquiry to an edition**: the enquiry owner or a founder of its company (the rule editing the enquiry already uses), not on a lost enquiry.
+- **Archive is the only removal**: nothing is deleted from Sales (no delete grant, no delete function). Archiving always gives the same result whatever is attached, keeps every edition, observation and enquiry link, and an archived entry is not offered for new enquiry links. There is no un-archive yet (decision below).
+- **Import**: one function (`crm_import_events`) classifies and, only when no row needs correcting, writes the whole file in one transaction. It never overwrites dates, never reopens an archived record and never merges distinct events; a row is "already present" only when its dates AND country, city and venue match (otherwise it is flagged for review and blocks the file); re-importing a file adds nothing. It is part of this same migration (still not applied anywhere), so the install and the check below are unchanged: no extra owner step.
+
+## Install
+1. Apply the migration in the SQL editor (or the usual migration path). It is idempotent where PostgreSQL allows (`if not exists`, `create or replace`).
+2. Run `supabase/manual-sql/crm_events_20_verify_readonly.sql`: every row must say OK.
+3. Deploy the app. The new tab "Events & Exhibitions" appears for anyone with a Sales grant.
+
+## Rollback
+`supabase/manual-sql/crm_events_90_rollback.sql` (export the three tables and the new columns first; it reports how many links and observations it removes). The previous app version ignores the new columns and tables, so the app can be rolled back without the SQL.
+
+## Owner-run result (Enginious HR Engine V2)
+- **Applied:** `20261224000100_crm_events_outreach.sql` as it stands at commit `fd1e00d`, applied by the owner to Enginious HR Engine V2 (2026-11-10). It is not edited or re-run by this note, and no further migration was added.
+- **First verifier run** (`crm_events_20_verify_readonly.sql` from `fd1e00d`): every row passed except row 5, the outreach priority check.
+- **Row 5 was a false failure of the verifier, not of the database.** A separate read-only query on V2 confirmed that `crm_organisations.outreach_priority` is `smallint` and that its constraint is validated:
+  `CHECK (((outreach_priority IS NULL) OR ((outreach_priority >= 1) AND (outreach_priority <= 5))))`.
+  The old row looked for the literal text `BETWEEN 1 AND 5`, but PostgreSQL never prints BETWEEN: it shows the equivalent comparisons.
+- **Fix (verifier only):** row 5 now requires the constraint to be **validated** and compares its whole definition (case, spaces and brackets ignored) with the form PostgreSQL prints, or the BETWEEN form. A different range, a missing NULL case or an unvalidated constraint still fails. Checked against the exact definition above on a local database built from the same migration: row 5 says OK.
+- **To do (owner):** run the corrected `crm_events_20_verify_readonly.sql` on V2 once more; every row must say OK. This PR stays unmerged until that is confirmed and required CI is green on the final head. The result of that run is recorded here when reported.
+

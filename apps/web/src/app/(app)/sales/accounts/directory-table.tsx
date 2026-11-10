@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp, ChevronsUpDown, CircleDashed, CircleOff, Info, Moon
 import { OsBadge } from "@/components/os/pills";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { type DirectoryRow, type DirectorySort, type SortKey } from "@/lib/crm/clients-agencies/directory";
+import { priorityLabel, type DirectoryRow, type DirectorySort, type SortKey } from "@/lib/crm/clients-agencies/directory";
 import { countryLabel, ROLE_LABEL } from "@/lib/crm/clients-agencies/normalise";
 import { RELATIONSHIPS, RELATIONSHIP_HELP, RELATIONSHIP_LABEL, RELATIONSHIP_TONE, type Relationship } from "@/lib/crm/clients-agencies/relationship";
 import { SelectAllBox, SelectBox } from "./outreach-select";
@@ -64,7 +64,7 @@ function SortHead({ sortKey, label, sort, hrefFor, note }: { sortKey: SortKey; l
   );
 }
 
-export const SORT_LABELS: Record<SortKey, string> = { name: "Name", country: "Country", enquiries: "Enquiries", won: "Won enquiries", last: "Last enquiry", owner: "Account owner", badge: "Relationship" };
+export const SORT_LABELS: Record<SortKey, string> = { name: "Name", country: "Country", priority: "Outreach priority", enquiries: "Enquiries", won: "Won enquiries", last: "Last enquiry", owner: "Account owner", badge: "Relationship" };
 
 /** Phone only: the header row is hidden there (rows become cards), so the same sorts are offered as a short row of links. */
 export function PhoneSort({ sort, hrefFor }: { sort: DirectorySort; hrefFor: (key: SortKey) => string }) {
@@ -102,6 +102,7 @@ export function DirectoryTable({ rows, sort, hrefFor, accountHref, canSelect, ow
             </span>
           </TableHead>
           {head("country")}
+          {head("priority")}
           <TableHead>Type</TableHead>
           {head("enquiries", true)}
           {head("won")}
@@ -122,6 +123,9 @@ export function DirectoryTable({ rows, sort, hrefFor, accountHref, canSelect, ow
                 </span>
               </TableCell>
               <TableCell className="md:min-w-[7rem]">{r.org.country_code ? countryLabel(r.org.country_code) : <span className="text-muted-foreground">Not recorded</span>}</TableCell>
+              <TableCell className="tabular-nums">
+                {r.org.outreach_priority ? <OsBadge tone={r.org.outreach_priority >= 4 ? "green" : "neutral"} className="whitespace-nowrap">{priorityLabel(r.org.outreach_priority)}</OsBadge> : <span className="text-muted-foreground">Unrated</span>}
+              </TableCell>
               <TableCell>
                 <span className="flex flex-wrap gap-1.5 md:max-w-[12rem]">
                   {r.org.roles.length === 0 ? <OsBadge tone="quiet">Role not recorded</OsBadge> : r.org.roles.map((role) => <OsBadge key={role} tone={role === "agency" ? "blue" : role === "technology" ? "cyan" : "neutral"} className="whitespace-nowrap">{ROLE_LABEL[role]}</OsBadge>)}
