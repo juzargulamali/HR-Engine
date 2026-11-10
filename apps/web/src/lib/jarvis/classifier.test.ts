@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 import { classifyRequest } from "./classifier";
 import { routeMessage } from "./assistant";
+import { intendedOutcome } from "./router";
 
 const refused = [
   ["show me everyone's salary", "payroll_salary"], ["list the payroll for the UAE team", "payroll_salary"], ["What is Ahmed's salary?", "payroll_salary"], ["export all payslips", "payroll_salary"],
@@ -79,6 +80,30 @@ describe("message routing (deterministic, before any provider call)", () => {
     for (const t of ["How are you today?", "How does Sales & CRM work?", "What is the capital of France?", "Draft an email to a supplier asking for a delivery date", "thanks", "ok", "hmm", "confirmed, create it now"]) {
       expect(["brief", "mode"], t).not.toContain(routeMessage(t).kind);
     }
+  });
+  it("the INTENDED OUTCOME decides: a CRM record for review opens the enquiry flow, a piece of writing about an enquiry is a draft, and a bare 'prepare this' over a brief asks one question", () => {
+    const details = "Project: Fictional Harbour Quest\nClient: Fictional Wave Agency\nEvent: Harbour gala\nVenue: Fictional Harbour Hall\nDates: 2099-02-05 to 2099-02-07\nScope: two LED walls and four touch tables\nPricing: 85 per item, client budget AED 50,000-65,000";
+    // a record: any making verb whose object is the enquiry
+    for (const lead of ["Prepare a Sales enquiry for review", "Prepare a Sales enquiry for review.", "Please prepare an enquiry for my review:", "Draft a new enquiry from this", "Set up a CRM record for this lead", "Can you put together an enquiry for review", "Create an enquiry", "Log this as a new enquiry", "Turn this email into an enquiry", "I need you to raise an opportunity for this"]) {
+      expect(intendedOutcome(lead), lead).toBe("record");
+      expect(routeMessage(`${lead}\n${details}`), lead).toEqual({ kind: "brief" });
+    }
+    // with nothing to prepare it from, the person is asked for the brief (no card, no provider call)
+    expect(routeMessage("Prepare a Sales enquiry for review")).toEqual({ kind: "need_brief" });
+    // a piece of writing, even when it is ABOUT an enquiry and carries the same details
+    for (const lead of ["Write an email to the client about this enquiry", "Draft a reply to the agency about their enquiry", "Prepare a message for the client confirming the enquiry details", "Compose an enquiry email to the venue", "Please draft a short note about this lead", "Write a summary of this opportunity for the team"]) {
+      expect(intendedOutcome(lead), lead).toBe("message");
+      expect(routeMessage(`${lead}\n${details}`), lead).toEqual({ kind: "chat", draft: true });
+    }
+    // neither named, over a brief-shaped text: genuinely ambiguous, ONE short question; without the structure it is ordinary writing
+    expect(intendedOutcome("Prepare this for review")).toBeNull();
+    expect(routeMessage(`Prepare this for review\n${details}`)).toEqual({ kind: "clarify_brief" });
+    expect(routeMessage("Prepare a short agenda for Friday's team meeting")).toEqual({ kind: "chat", draft: true });
+    // the pasted details alone are still a brief, and a how-to question about enquiries is still guidance
+    expect(routeMessage(details)).toEqual({ kind: "brief" });
+    expect(routeMessage("How do I prepare an enquiry for review?")).toEqual({ kind: "knowledge" });
+    // on an enquiry's own page, "draft a reply ..." still means the enquiry reply shortcut
+    expect(routeMessage("Draft a reply to the client email", { hasEnquiry: true })).toEqual({ kind: "mode", key: "reply", chosen: false });
   });
   it("greetings, questions, writing, lookups, memory and unsupported live requests each go to their own place", () => {
     expect(routeMessage("How are you today?")).toEqual({ kind: "greeting", flavour: "how_are_you" });

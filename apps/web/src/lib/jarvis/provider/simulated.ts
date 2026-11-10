@@ -26,7 +26,7 @@ function extractEnquiry(text: string): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const free = lines.filter((l) => !/^[A-Za-z][A-Za-z ]{1,24}:\s*\S/.test(l));
-  out.title = labelled(text, ["title", "subject", "requirement"]) ?? (free[0] && free[0].length <= 120 ? free[0] : null);
+  out.title = labelled(text, ["title", "subject", "requirement", "project", "project name"]) ?? (free[0] && free[0].length <= 120 ? free[0] : null);
   const src = labelled(text, ["source"]);
   out.source = src ? (src.toLowerCase().replace(/[^a-z]+/g, "_").replace(/^_|_$/g, "")) : (SOURCE_WORDS.find(([re]) => re.test(text))?.[1] ?? null);
   out.agencyName = labelled(text, ["agency"]);

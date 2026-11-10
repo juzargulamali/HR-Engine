@@ -1,6 +1,6 @@
 import { classifyRequest, HOW_TO, type ExclusionCategory } from "./classifier";
 import { APP_QUESTION, guidanceIndex } from "./help/guidance";
-import { matchByMeaning } from "./help/match";
+import { asksPurpose, hasSubject, matchByMeaning } from "./help/match";
 import type { JarvisModeKey } from "./modes";
 import { ENQUIRY_REFERENCE } from "./modes";
 import { findProtectedContent, protectedTopic, type ProtectedCategory } from "./protected";
@@ -76,11 +76,35 @@ const INTENTS: { key: JarvisModeKey; re: RegExp; not?: RegExp }[] = [
   { key: "organisation", re: /^\s*(?:please\s+)?(?:register|add|create|onboard)\b.*\b(?:client|agency|organi[sz]ation|company)\b/i, not: /\b(?:enquiry|inquiry)\b/i },
 ];
 const CREATE_ENQUIRY = /^\s*(?:please\s+)?(?:can\s+you\s+|could\s+you\s+)?(?:create|add|log|open|start|make|raise|record)\b[^.\n]{0,30}\b(?:enquiry|inquiry|lead|opportunity)\b|^\s*new\s+(?:enquiry|inquiry|lead)\b|\b(?:turn|convert|make)\b[^.\n]{0,20}\binto\s+an?\s+(?:new\s+)?(?:enquiry|inquiry)\b/i;
-const LABELLED = /^\s*(?:agency|client|end client|brand|event|event dates?|venue|location|budget|source|next|next action|technolog(?:y|ies)|equipment|scope|title|requirement|installation)\s*:\s*\S/gim;
+const LABELLED = /^\s*(?:project(?:\s+name)?|title|subject|agency|client|end[\s-]?client|customer|brand|event(?:\s+(?:name|dates?))?|dates?|venue|location|city|country|budget|client\s+budget|pricing|price|rate|source|next(?:\s+(?:action|step))?|technolog(?:y|ies)|equipment|scope|deliverables|requirements?|installation|set-?up|contact)\s*:\s*\S/gim;
+
+/**
+ * WHAT THE PERSON WANTS MADE, read from the instruction (the first line), not from the pasted material: a CRM record (an enquiry prepared for review) or a piece of writing
+ * (an email, a message, a reply). The object of the instruction decides: "prepare a Sales enquiry for review" asks for a record; "write an email about this enquiry" asks
+ * for a message, even though both mention an enquiry. No particular sentence is listed here: any making verb with a record noun, or with a message noun, is read the same way.
+ */
+const MAKE_VERB = "(?:create|add|log|open|start|make|raise|record|prepare|draft|set\\s+up|enter|capture|register|build|generate|write(?:\\s+up)?|compose|put\\s+together|turn|convert)";
+const RECORD_NOUN = /\b(?:enquir(?:y|ies)|inquir(?:y|ies)|leads?|opportunit(?:y|ies)|crm\s+(?:record|entry))\b/i;
+const MESSAGE_NOUN = /\b(?:e-?mails?|messages?|repl(?:y|ies)|responses?|letters?|notes?|texts?|whatsapp|sms|posts?|summar(?:y|ies)|memos?|announcements?|scripts?|proposals?\s+text|cover(?:ing)?\s+(?:note|letter))\b/i;
+const INSTRUCTION = new RegExp(`^\\s*(?:please\\s+)?(?:can\\s+you\\s+|could\\s+you\\s+|i\\s+(?:need|want)\\s+(?:you\\s+)?to\\s+|help\\s+me\\s+(?:to\\s+)?)?${MAKE_VERB}\\b([^\\n]{0,90})`, "i");
+export function intendedOutcome(text: string): "record" | "message" | null {
+  if (/^\s*new\s+(?:enquiry|inquiry|lead)\b/i.test(text)) return "record";
+  const m = INSTRUCTION.exec(text);
+  if (!m) return null;
+  const rest = m[1]!;
+  const rec = RECORD_NOUN.exec(rest);
+  const msg = MESSAGE_NOUN.exec(rest);
+  if (!rec && !msg) return null;
+  if (rec && !msg) return "record";
+  if (msg && !rec) return "message";
+  // both named: the first one is the thing to make ("an email about the enquiry" / "an enquiry from this email"); "enquiry email" is an email
+  if (msg!.index < rec!.index) return /\b(?:into|as)\s+an?\s+(?:new\s+)?(?:sales\s+)?$/i.test(rest.slice(0, rec!.index)) || /\bfrom\s+(?:this|the|that)\s+$/i.test(rest.slice(0, msg!.index)) ? "record" : "message";
+  return msg!.index - (rec!.index + rec![0].length) <= 1 ? "message" : "record";
+}
 
 const WRITE = /^\s*(?:please\s+)?(?:can\s+you\s+|could\s+you\s+|help\s+me\s+(?:to\s+)?)?(?:draft|write|compose|rewrite|rephrase|reword|proofread|polish|improve|summari[sz]e|translate|shorten|tidy|prepare)\b/i;
 const REVISE = /^\s*(?:please\s+)?(?:make|keep)\s+(?:it|this|that)\b|^\s*(?:please\s+)?(?:shorter|longer|simpler|more\s+\w+|less\s+\w+|try\s+again|another\s+(?:version|one|go)|again\b|in\s+(?:british|american|arabic|english)\b|add\b|remove\b|change\b|use\b|now\b)/i;
-const QUESTION = /\?\s*$|^\s*(?:what|why|how|when|where|who|which|can|could|should|would|is|are|do|does|did|explain|tell\s+me|give\s+me|define|compare|suggest|recommend)\b/i;
+const QUESTION = /\?\s*$|^\s*(?:what|whats|why|how|hows|when|where|wheres|who|whos|which|can|could|should|would|is|are|do|does|did|explain|tell\s+me|give\s+me|define|compare|suggest|recommend)\b/i;
 /** How well a guide must fit for a plain question (not phrased as "how do I") to be answered from the guidance instead of general chat. */
 const STRONG_GUIDE = 0.75;
 /** The person is asking about the screen in front of them rather than naming a subject. */
@@ -89,9 +113,15 @@ const ABOUT_APP = /\b(?:enginious(?:\s+os)?|jarvis|this\s+(?:app|system|software
 
 /** How strongly a pasted text looks like a client brief for a new enquiry (0 = not at all). */
 export function briefScore(text: string): number {
-  if (WRITE.test(text) || HOW_TO.test(text) || HOW_ARE_YOU.test(text)) return 0;
+  // A request for a piece of writing is not a brief, however much detail it carries; a request for a CRM record is judged by its structure like any pasted brief.
+  if (HOW_TO.test(text) || HOW_ARE_YOU.test(text) || (WRITE.test(text) && intendedOutcome(text) !== "record")) return 0;
+  return structureScore(text);
+}
+
+/** How much a text is SHAPED like a brief (labelled lines, a requirement, an event, equipment, a date, quantities), whatever it asks for. */
+export function structureScore(text: string): number {
   const labelled = (text.match(LABELLED) ?? []).length;
-  if (labelled >= 2 || (labelled === 1 && /^\s*(?:title|agency|client|requirement)\s*:/i.test(text))) return 10;
+  if (labelled >= 2 || (labelled === 1 && /^\s*(?:title|project|agency|client|requirement)\s*:/i.test(text))) return 10;
   let score = labelled;
   if (/\b(?:we\s+(?:need|require|want|are\s+looking\s+for|would\s+like)|looking\s+for|can\s+you\s+(?:provide|supply|quote|do)|please\s+quote|request\s+for\s+(?:quotation|proposal)|rfq|rfp|need\s+a\s+quote|(?:enquiry|inquiry)\s+(?:for|about|from))\b/i.test(text)) score += 1;
   if (/\b(?:event|gala|exhibition|conference|launch|activation|booth|stand|wedding|festival|expo|summit|roadshow|ceremony|show)\b/i.test(text)) score += 1;
@@ -118,7 +148,9 @@ export function routeMessage(raw: string, ctx: RouteContext = {}): Route {
   }
   // A text that clearly is a client brief (or an explicit "create an enquiry" request) goes to the enquiry flow even when it mentions a price or a contact: that flow
   // separates those details locally and never sends them (sales/brief-outbound.ts). It is not a request to be told protected information.
-  const clearBrief = !intent && (briefScore(text) >= 4 || (CREATE_ENQUIRY.test(text) && text.length >= 60));
+  const outcome = intent ? null : intendedOutcome(text);
+  const wantsRecord = outcome === "record" || (!intent && CREATE_ENQUIRY.test(text));
+  const clearBrief = !intent && outcome !== "message" && (briefScore(text) >= 4 || (wantsRecord && text.length >= 60));
   let topic = clearBrief ? null : protectedTopic(text);
   // Prices are only a "protected request" when the person asks to be TOLD a saved one ("what discount did we give?"). Asking for a draft that mentions a price the person
   // supplies ("draft a reply offering 85 per item") is ordinary writing.
@@ -144,8 +176,10 @@ export function routeMessage(raw: string, ctx: RouteContext = {}): Route {
   }
   // Does the published guidance answer this, by meaning? (No list of trigger sentences: lib/jarvis/help/match.ts compares what the question is about with the guides.)
   const guide = text.length <= 300 && !WRITE.test(text) ? matchByMeaning(guidanceIndex(), text, ctx.screen ?? null) : ({ kind: "none" } as const);
-  const strongGuide = guide.kind !== "none" && guide.score >= STRONG_GUIDE;
   const aboutScreen = text.length <= 160 && !WRITE.test(text) && ABOUT_THIS_SCREEN.test(text) && (QUESTION.test(text) || /\bhelp\b/i.test(text));
+  // A question with no subject of its own is answered from the current screen's guide only when it is about that screen or asks what it is for ("what is the benefit?");
+  // a bare "why?" in the middle of a conversation is not.
+  const strongGuide = guide.kind !== "none" && guide.score >= STRONG_GUIDE && (hasSubject(text) || aboutScreen || (text.length <= 120 && asksPurpose(text)));
   const askingHow = strongGuide && /^\s*(?:which|what|who|where)\b/i.test(text);
   if (!howTo && !aboutScreen && !askingHow && text.length <= 200) {
     if (OVERDUE.test(text)) return { kind: "lookup", period: periodIn(text) ?? "all" };
@@ -160,11 +194,15 @@ export function routeMessage(raw: string, ctx: RouteContext = {}): Route {
   // The "Ask how something works" shortcut: published guidance (or an honest "no guidance"), after the protected, live and memory checks above.
   if (intent === "help") return { kind: "knowledge" };
 
-  if (CREATE_ENQUIRY.test(text)) return text.length >= 60 || (text.match(LABELLED) ?? []).length >= 1 ? { kind: "brief" } : { kind: "need_brief" };
+  // The intended outcome decides: a CRM record prepared for review opens the editable review card (nothing is created until the person confirms it there); a piece of
+  // writing about an enquiry is a draft to copy; a brief-shaped text under a bare "prepare this" is genuinely ambiguous, so ONE short question is asked.
+  if (wantsRecord) return text.length >= 60 || (text.match(LABELLED) ?? []).length >= 1 ? { kind: "brief" } : { kind: "need_brief" };
   if (text.length <= 240 && !howTo) {
     for (const i of INTENTS) if (i.re.test(text) && !(i.not && i.not.test(text))) return { kind: "mode", key: i.key, chosen: false };
     if (/^\s*(?:please\s+)?(?:draft|write)\b[^.\n]{0,40}\b(?:reply|response)\b/i.test(text) && (ctx.hasEnquiry || ENQUIRY_REFERENCE.test(text))) return { kind: "mode", key: "reply", chosen: false };
   }
+  if (outcome === "message") return { kind: "chat", draft: true };
+  if (WRITE.test(text) && structureScore(text) >= 4) return { kind: "clarify_brief" };
   const brief = briefScore(text);
   if (brief >= 4) return { kind: "brief" };
   if (brief >= 2 && !QUESTION.test(text)) return { kind: "clarify_brief" };

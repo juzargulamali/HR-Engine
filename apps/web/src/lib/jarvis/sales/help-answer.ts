@@ -2,7 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { classifyRequest, EXCLUSION_MESSAGE } from "../classifier";
 import { GUIDANCE, guidanceIndex, type GuidanceEntry } from "../help/guidance";
-import { matchByMeaning } from "../help/match";
+import { asksPurpose, hasSubject, matchByMeaning, screenGuides } from "../help/match";
 import { approvedScreens, placesNamed, resolveScreen } from "../help/screens";
 import { ABOUT_THIS_SCREEN } from "../router";
 import type { HelpAnswerCard } from "../protocol";
@@ -56,13 +56,21 @@ export const helpAnswer: JarvisActionDefinition<HelpAnswerInput, HelpAnswerInput
       if (chosen) return done({ mode: "guidance", topics: [], note: NOTE_GUIDANCE, entries: [view(chosen)] });
     }
     const aboutHere = ABOUT_THIS_SCREEN.test(input.question);
-    const m = matchByMeaning(index, input.question, screen?.id ?? null);
-    if (m.kind === "answer") {
-      const forScreen = !!screen && m.entries.some((g) => g.screens?.includes(screen.id)) && (aboutHere || m.score >= 1);
+    // "What is the benefit here?", "what is this for?": the guide is given as what the feature helps staff do. Grounded in the guide; nothing is made up.
+    const purpose = asksPurpose(input.question);
+    const lead = (g: GuidanceEntry, onScreen: boolean) => (purpose ? `What ${onScreen && screen ? screen.label : g.title} helps you do` : null);
+    const answer = (entries: GuidanceEntry[], forScreen: boolean) => {
       // The most specific guide is given in full; when one screen has several, the rest are listed by title to pick from.
-      const [first, ...rest] = m.entries;
-      return done({ mode: "guidance", topics: [], note: NOTE_GUIDANCE, screen: forScreen ? { label: screen!.label } : null, entries: rest.length > 1 ? [view(first!)] : m.entries.map(view), choices: rest.length > 1 ? rest.map((g) => ({ id: g.id, title: g.title })) : [], question: input.question });
-    }
+      const [first, ...rest] = entries;
+      return done({ mode: "guidance", topics: [], note: NOTE_GUIDANCE, screen: forScreen ? { label: screen!.label } : null, lead: lead(first!, forScreen), entries: rest.length > 1 ? [view(first!)] : entries.map(view), choices: rest.length > 1 ? rest.map((g) => ({ id: g.id, title: g.title })) : [], question: input.question });
+    };
+    const m = matchByMeaning(index, input.question, screen?.id ?? null);
+    // An explicit question about something (this screen or another) is answered by the guide that fits it.
+    if (m.kind === "answer") return answer(m.entries, !!screen && m.entries.some((g) => g.screens?.includes(screen.id)) && (aboutHere || purpose || m.score >= 1));
+    // Nothing fits on its own, but the person is asking about the screen they are on (or what it is for) and that screen HAS a published guide: that guide is the answer.
+    // "No approved guidance" is said only when there really is none.
+    const here = screenGuides(index, screen?.id ?? null);
+    if (here.length > 0 && (aboutHere || purpose || !hasSubject(input.question))) return answer(here.slice(0, 4), true);
     if (m.kind === "ambiguous") return done({ mode: "choose", entries: [], topics: [], note: NOTE_CHOOSE, choices: m.options.map((g) => ({ id: g.id, title: g.title })), question: input.question });
     // Nothing fits. Say so honestly: name the screen if that was the question, offer the navigation's own entries the question named, and the closest topics.
     const places = placesNamed(input.question).map((p) => ({ label: p.module && p.module !== p.label ? `${p.label} (${p.module})` : p.label, href: p.href }));

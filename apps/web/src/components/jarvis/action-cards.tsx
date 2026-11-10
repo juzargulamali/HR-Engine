@@ -265,6 +265,7 @@ function HelpAnswerView({ card, api, companyId, actionId, onState }: { card: Hel
     <section aria-label="Answer" className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm" data-testid="jarvis-help-card" data-mode={card.mode}>
       {card.screen ? <p className="text-xs text-muted-foreground" data-testid="help-screen">For the screen you are on: <strong>{card.screen.label}</strong></p> : null}
       {card.mode === "choose" ? <p data-testid="help-choose">{card.note}</p> : null}
+      {card.lead ? <p className="font-heading text-sm font-semibold" data-testid="help-lead">{card.lead}</p> : null}
       {card.entries.map((e) => (
         <div key={e.id} className="space-y-1" data-testid={`help-entry-${e.id}`}>
           <h3 className="font-heading text-sm font-semibold">{e.title}</h3>

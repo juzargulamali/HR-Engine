@@ -253,6 +253,43 @@ describe("navigation guidance: matched by meaning and by the current screen", ()
     expect(simulatedProviderCalls).toHaveLength(0);
   });
 
+  it("REGRESSION (Preview): after 'What can I do on this page?', the follow-up 'what is benifit here?' uses the SAME screen's guide and explains what it helps staff do; it never claims there is no guide", async () => {
+    w.readLog.length = 0;
+    const first = cardOf(await on("What can I do on this page?", "/sales/events"));
+    expect(first.entries[0]!.id).toBe("sales-events");
+    const followUp = cardOf(await on("what is benifit here?", "/sales/events"));
+    expect(followUp.mode).toBe("guidance");
+    expect(followUp.entries[0]!.id).toBe("sales-events");
+    expect(followUp.screen).toEqual({ label: "Events & Exhibitions" });
+    expect(followUp.lead).toBe("What Events & Exhibitions helps you do");
+    expect(followUp.entries[0]!.summary).toMatch(/shared calendar of shows/); // grounded in the published guide
+    expect(JSON.stringify(followUp)).not.toMatch(/no approved guidance/i);
+    // reusable: other wordings, typos and other screens
+    for (const q of ["what is benifit here?", "whats the benefit of this", "What is the purpse of this page?", "why would I use this screen", "what is this for", "is this usefull?", "what's the point here", "how does this help me?", "what is the advantge here"]) {
+      for (const [path, id, label] of [["/sales/events", "sales-events", "Events & Exhibitions"], ["/sales/outreach", "sales-outreach", "Outreach"], ["/leave", "people-leave", "My Leave"], ["/inventory/requests", "inventory-where", "Requests"]] as const) {
+        const c = cardOf(await on(q, path));
+        expect(c.mode, `${q} @ ${path}`).toBe("guidance");
+        expect(c.entries[0]!.id, `${q} @ ${path}`).toBe(id);
+        expect(c.lead, `${q} @ ${path}`).toBe(`What ${label} helps you do`);
+      }
+    }
+    // the nearest alternative: an explicit question about ANOTHER screen takes precedence over the current one
+    expect(ids(await on("what is the benefit of outreach here?", "/sales/events"))[0]).toBe("sales-outreach");
+    expect(ids(await on("What is the purpose of follow-ups?", "/sales/events"))[0]).toMatch(/follow-ups$/);
+    expect(ids(await on("How do I request leave?", "/sales/events"))).toEqual(["people-leave"]);
+    // "no approved guidance" is said only when there really is none for that screen, or no screen is known
+    const none = cardOf(await on("what is benifit here?", "/audit-log"));
+    expect(none.mode).toBe("no_guidance");
+    expect(none.note).toMatch(/no approved guidance for Audit Log yet/);
+    expect(cardOf(await on("what is benifit here?", null)).note).toMatch(/cannot tell which screen/);
+    // a bare "why?" in the middle of a general conversation is not hijacked by the screen
+    const why = await a.send({ companyId: ID.co1, text: "ok and then?", screen: "/sales/events", context: { turns: [{ role: "user", text: "Explain photosynthesis" }, { role: "jarvis", text: "Plants make sugar from light." }] } });
+    expect(why.ok && why.kind === "action" ? why.card.kind : why.ok && why.kind).not.toBe("help.answer");
+    // guidance stays inside Enginious OS: no record read for it, and the only provider call above is that general chat, which carries no screen
+    expect(w.readLog).toEqual([]);
+    expect(simulatedProviderCalls.every((c) => c.task === "chat_reply" && !JSON.stringify(c).includes("/sales/events"))).toBe(true);
+  });
+
   it("the current screen makes the most specific guide win, and a question with its own subject is not hijacked by the screen", async () => {
     // "add one" has no subject of its own: on the events list it means an event; with no screen JARVIS does not guess
     expect(ids(await on("How do I add one here?", "/sales/events"))).toEqual(["sales-events"]);

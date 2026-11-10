@@ -164,6 +164,8 @@ export interface HelpAnswerCard {
   /** For "choose": the guides to pick from. For "no guidance": screens whose NAME the question used, from the navigation. */
   choices?: { id: string; title: string }[];
   places?: { label: string; href: string }[];
+  /** For a question about what the screen or feature is FOR ("what is the benefit here?"): the heading the guide is given under, e.g. "What Events & Exhibitions helps you do". */
+  lead?: string | null;
   /** The question as asked, so a choice can be sent back with it. */
   question?: string;
   entries: { id: string; title: string; summary: string; steps: string[]; links: { label: string; href: string }[] }[];

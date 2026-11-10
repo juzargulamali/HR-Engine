@@ -51,6 +51,53 @@ const STOP = new Set("a an the of to in on at for from by with and or but is are
 const BY_WORD = new Map<string, string>();
 for (const [concept, words] of Object.entries(CONCEPTS)) for (const w of words) if (!BY_WORD.has(w)) BY_WORD.set(w, concept);
 
+/**
+ * Words that ask WHAT SOMETHING IS FOR (its purpose or benefit) rather than naming a subject. They are not a subject of their own: "what is the benefit here?" is a question
+ * about the current screen, answered from that screen's guide.
+ */
+const PURPOSE_WORDS = ["benefit", "benefits", "purpose", "point", "advantage", "advantages", "useful", "usefulness", "value", "reason", "worth", "gain", "goal", "aim", "why"];
+/** Every word the matcher knows: the vocabulary a misspelt word is compared with. */
+const KNOWN_WORDS = [...BY_WORD.keys(), ...PURPOSE_WORDS].filter((w) => w.length >= 5);
+
+/** Edit distance with adjacent swaps, stopped early above `max`. */
+function distance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev2: number[] = [], prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let v = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, prev2[j - 2]! + 1);
+      cur.push(v); best = Math.min(best, v);
+    }
+    if (best > max) return max + 1;
+    prev2 = prev; prev = cur;
+  }
+  return prev[b.length]!;
+}
+
+/** An ordinary typo: a word of five or more letters that is one edit (two for long words) from exactly one known word, same first letter. Short words are never guessed. */
+export function correctTypo(word: string): string | null {
+  if (word.length < 5 || /\d/.test(word)) return null;
+  const max = word.length >= 9 ? 2 : 1;
+  let found: string | null = null, at = max + 1, tie = false;
+  for (const k of KNOWN_WORDS) {
+    if (k[0] !== word[0]) continue;
+    const d = distance(word, k, max);
+    if (d < at) { found = k; at = d; tie = false; } else if (d === at && d <= max && found && BY_WORD.get(k) !== BY_WORD.get(found)) tie = true;
+  }
+  return found && at <= max && !tie ? found : null;
+}
+
+/** Does the question ask what something is for? (Tolerant of typos: "benifit", "purpse".) */
+export function asksPurpose(text: string): boolean {
+  const words = text.toLowerCase().replace(/[^a-z]+/g, " ").split(" ").filter(Boolean);
+  if (/\b(?:what(?:'s|\s+is|\s+are)?\s+(?:this|it|that|these)\s+(?:for|good\s+for|about)|what\s+does\s+(?:this|it)\s+(?:do|help)|how\s+does\s+(?:this|it)\s+help|why\s+(?:would|should|do)\s+(?:i|we)\s+use|good\s+for)\b/i.test(text)) return true;
+  return words.some((w) => PURPOSE_WORDS.includes(w) || PURPOSE_WORDS.includes(correctTypo(w) ?? ""));
+}
+
 function stem(w: string): string {
   if (w.length > 4 && w.endsWith("ies")) return `${w.slice(0, -3)}y`;
   if (w.length > 4 && w.endsWith("sses")) return w.slice(0, -2);
@@ -61,12 +108,15 @@ function stem(w: string): string {
 }
 
 /** Text -> the concepts it carries (a known concept name, or the stem itself for a word the list does not know). */
-export function concepts(text: string): string[] {
+export function concepts(text: string, fuzzy = false): string[] {
   // "show me how ..." is a request, not a trade show
   const words = text.toLowerCase().replace(/\bshow\s+(?:me|us)\b/g, " ").replace(/follow[-\s]?ups?/g, "followup").replace(/trade[-\s]?shows?/g, "tradeshow").replace(/time[-\s]off/g, "timeoff").replace(/check[-\s]in/g, "checkin").replace(/sign[-\s]off/g, "signoff").replace(/my\s+day/g, "myday").replace(/re-?engage/g, "reengage")
     .replace(/[^a-z0-9]+/g, " ").split(" ").filter((w) => w.length > 1 && !STOP.has(w));
   const out: string[] = [];
-  for (const w of words) {
+  for (const raw of words) {
+    // In a QUESTION (never in the guides' own text) an ordinary typo of a word the matcher knows is read as that word.
+    const w = !fuzzy || BY_WORD.has(raw) || BY_WORD.has(stem(raw)) || PURPOSE_WORDS.includes(raw) ? raw : correctTypo(raw) ?? raw;
+    if (PURPOSE_WORDS.includes(w)) continue; // asks what something is for: not a subject of its own
     const s = stem(w);
     const c = BY_WORD.get(w) ?? BY_WORD.get(s) ?? (s.length > 2 && !STOP.has(s) ? s : null);
     if (c) out.push(c);
@@ -116,7 +166,7 @@ export const MATCH_THRESHOLD = 0.4;
  *   - two guides that fit about equally: together when they are about the same screen, otherwise "ambiguous" so the person is asked which they mean.
  */
 export function matchByMeaning(index: GuidanceIndex, question: string, screen: string | null = null): GuidanceMatch {
-  const q = [...new Set(concepts(question))];
+  const q = [...new Set(concepts(question, true))];
   const subject = q.filter((c) => !VERBS.has(c));
   const here = screen ? index.items.filter((i) => i.entry.screens?.includes(screen)) : [];
   if (subject.length === 0) {
@@ -147,6 +197,8 @@ export function matchByMeaning(index: GuidanceIndex, question: string, screen: s
   }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score);
   const best = scored[0];
   if (!best || best.score < MATCH_THRESHOLD) return { kind: "none" };
+  // Two guides fit but one clearly not: nothing to add. (When NOTHING fits and the person asked about the screen they are on, the caller falls back to that screen's guides:
+  // see screenGuides.)
   const close = scored.filter((x) => x.score >= best.score * 0.92 && x.score >= MATCH_THRESHOLD);
   if (close.length > 1) {
     // Exactly one of them is the guide for the screen the person is on: that is the most specific one.
@@ -157,4 +209,14 @@ export function matchByMeaning(index: GuidanceIndex, question: string, screen: s
     return { kind: "ambiguous", options: close.slice(0, 3).map((x) => x.entry), score: best.score };
   }
   return { kind: "answer", entries: [best.entry], score: best.score };
+}
+
+/** Does the question name a subject of its own (beyond what to do with it)? "What is the benefit here?" and "how do I add one?" do not. */
+export function hasSubject(text: string): boolean {
+  return concepts(text, true).some((c) => !VERBS.has(c));
+}
+
+/** The published guides written for a screen, in the Map's order: the fallback for any question about the screen the person is on. */
+export function screenGuides(index: GuidanceIndex, screen: string | null): GuidanceEntry[] {
+  return screen ? index.items.filter((i) => i.entry.screens?.includes(screen)).map((i) => i.entry) : [];
 }

@@ -666,6 +666,51 @@ describe("a realistic priced brief: the submitted Sales context goes out, the ap
     for (const p of ["185,000", "85 per item", "Harbour Quest", "wristband", "Fictional Wave Agency"]) expect(logged).not.toContain(p);
   });
 
+  it("REGRESSION (Preview): 'Prepare a Sales enquiry for review' + a structured brief in NORMAL CHAT opens the editable review card, not a copyable draft; nothing is created until Create; asking for an email about it is still a draft", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const brief = [
+      "Prepare a Sales enquiry for review.",
+      "Project: Fictional Harbour Quest treasure hunt",
+      "Client: Fictional Wave Agency",
+      "End client: Fictional Harbour Brands",
+      "Event: Harbour gala weekend",
+      "Venue: Fictional Harbour Hall, Dubai",
+      "Dates: 2099-02-05 to 2099-02-07",
+      "Scope: two LED walls, four touch tables and an RFID wristband game for 600 guests",
+      "Pricing: wristbands 85 per item; client budget AED 50,000-65,000",
+    ].join("\n");
+    const { assistant, f, body } = await live(toolUse({ ...MODEL, title: "Fictional Harbour Quest treasure hunt", nextTitle: null, nextDate: null, nextKind: null }));
+    // normal chat: no shortcut, no screen
+    const r = await assistant.send({ companyId: ID.co1, text: brief });
+    if (!r.ok || r.kind !== "card") throw new Error(`expected the enquiry review card, got ${JSON.stringify(r).slice(0, 200)}`);
+    expect(r.card.kind).toBe("enquiry.create");
+    expect(f).toHaveBeenCalledTimes(1);
+    // the submitted Sales context went out as written, pricing and the budget range included
+    for (const piece of ["Project: Fictional Harbour Quest treasure hunt", "Venue: Fictional Harbour Hall, Dubai", "Dates: 2099-02-05 to 2099-02-07", "wristbands 85 per item; client budget AED 50,000-65,000"]) expect(body().messages[0]!.content).toContain(piece);
+    // an EDITABLE card: the parties in their own fields, the range not turned into one exact budget, the original brief kept, and it asks only for what is missing
+    expect(r.card.values).toMatchObject({ title: "Fictional Harbour Quest treasure hunt", location: "Fictional Harbour Hall, Dubai", eventStart: "2099-02-05", eventEnd: "2099-02-07", value: null, currency: null, brief });
+    expect(r.card.values.budgetNote).toMatch(/50,000-65,000/);
+    expect(r.card.agency.selectedName).toBe("Fictional Wave Agency");
+    expect(r.card.client.selectedName).toBe("Fictional Harbour Brands");
+    expect(r.card.questions.map((q) => q.field)).toEqual(expect.arrayContaining(["nextTitle"]));
+    // opening the card created nothing
+    expect(w.opps).toHaveLength(0);
+    expect(creates()).toHaveLength(0);
+    expect(w.ledger.size).toBe(0);
+    // the nearest alternative: the same details under a request for an email is a copyable draft, with no card and no write
+    const draft = await a.send({ companyId: ID.co1, text: brief.replace("Prepare a Sales enquiry for review.", "Write an email to the client confirming this enquiry.") });
+    expect(draft.ok && draft.kind === "action" && draft.card.kind).toBe("chat.reply");
+    expect(draft.ok && draft.kind === "action" && draft.card.kind === "chat.reply" && draft.card.draft).toBe(true);
+    // and a bare "prepare this" over the same details asks ONE question whose first choice opens the card
+    const ask = await a.send({ companyId: ID.co1, text: brief.replace("Prepare a Sales enquiry for review.", "Prepare this for review.") });
+    expect(ask).toMatchObject({ ok: true, kind: "clarify", options: [{ intent: "enquiry" }, { intent: "chat" }] });
+    expect(creates()).toHaveLength(0);
+    // a restricted brief under the same instruction still stops before any provider call
+    f.mockClear();
+    expect(await assistant.send({ companyId: ID.co1, text: `${brief}\nInternal use only` })).toMatchObject({ ok: true, kind: "reply" });
+    expect(f).toHaveBeenCalledTimes(0);
+  });
+
   it("what the app saves as the client budget: ONE clearly stated client budget fills the card; a range, conflicting values, an internal cost or an unlabelled figure leave the number blank and keep the wording", async () => {
     const base = "Title: Fictional harbour gala\nAgency: Fictional Wave Agency\nNext: Call on 2099-01-12\nWe need two LED walls for the gala dinner at 85 per item.";
     const run = async (lines: string) => { simulatedProviderCalls.length = 0; return card(await a.send({ companyId: ID.co1, text: `${base}\n${lines}` })).card; };
