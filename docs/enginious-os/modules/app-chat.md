@@ -1,6 +1,6 @@
 # Chat (app-wide panel, Sales groups)
 
-Draft PR `feat/app-chat`; **not merged, migration `20261225000100_chat_sales_groups.sql` not applied anywhere**. This release enables the three Sales groups only. Projects discussions and JARVIS are untouched and nothing is migrated.
+Status: **merged on `main` as PR #73** (merge `296b74814b8851c08b20a73b19e82d5eecea167f`, 2026-11-10; required CI `lint-typecheck-test` and `rls-policies` green on head `ab89a98846747dd0f721f52adfd9d1acbde8aeff`). Migration `20261225000100_chat_sales_groups.sql` is **applied on hosted V2 by the owner** (owner-reported: `chat_20_verify_readonly.sql` passed **7 of 7 checks**; Claude ran no hosted SQL and did not see the rows). **Vercel Production is not verified by Claude** (`docs/chat-deployment.md`, "Owner-run result"; `docs/launch-refinement-install-order.md` row 22). This release enables the three Sales groups only. Projects discussions and JARVIS are untouched and nothing is migrated. *(Corrected 2026-11-10: this line used to say "Draft PR, not merged, migration not applied anywhere".)*
 
 ## 1. The entry point
 | Control | What it does | Who | Behind it | Tests |

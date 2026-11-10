@@ -132,13 +132,13 @@ The Sales overview that `/sales` used to show is gone; its parts live on Follow-
 
 ## 5. Summary and completion check
 
-**70 rows** are the reachable surface: menu and shell (4), follow-ups (9), enquiries (17), stages, proposals and commercial controls (8), close, reopen and handover (7), estimates (3), accounts, import, export and outreach (10), reports, settings and company (4), older and redirecting routes (7) and the scheduled route (1). Of these, **64 are `Documented`** and **6 are `Documented, with named verification gap`**: rows 30 (Inventory's stock-check card), 38 (the Zoho Books side), 43 (Projects-side handover steps), 46 (estimate photo upload and storage-backed export not re-verified), 62 (Admin Companies screen beyond the two estimate controls) and 70 (hosted cron schedule and e-mail switch). **Every reachable Sales & CRM screen has a detailed reference or a named gap; none is undocumented.** Row counts and gaps are repeated in `../README.md`, `../06-change-log.md` and the pass report.
+**76 rows** are the reachable surface: the **70 baseline rows** of sections 1 to 4, namely menu and shell (4), follow-ups (9), enquiries (17), stages, proposals and commercial controls (8), close, reopen and handover (7), estimates (3), accounts, import, export and outreach (10), reports, settings and company (4), older and redirecting routes (7) and the scheduled route (1), plus the **6 rows added by PR #72** in section 7 (Events & Exhibitions, calendar import, the shared outreach priority and the enquiry's event link: rows 71 to 76). Of the 76, **70 are `Documented`** and **6 are `Documented, with named verification gap`**: rows 30 (Inventory's stock-check card), 38 (the Zoho Books side), 43 (Projects-side handover steps), 46 (estimate photo upload and storage-backed export not re-verified), 62 (Admin Companies screen beyond the two estimate controls) and 70 (hosted cron schedule and e-mail switch). **Every reachable Sales & CRM screen has a detailed reference or a named gap; none is undocumented.** Row counts and gaps are repeated in `../README.md`, `../06-change-log.md` and the pass report.
 
 **Not Sales screens and not covered here**: People & Access grants (`../03-roles-access-and-approvals.md`), the Projects pages reached after acceptance, Inventory pages, My Day.
 
-## 4. Gaps fixed since the baseline (2026-11-08, PR #68, merged as `ca3e4483ce4745e359ddb3377b52748175f3881f`; migration applied on hosted V2 per the owner, owner-run verification 2026-11-09; Vercel Production not verified by Claude)
+## 6. Gaps fixed since the baseline (2026-11-08, PR #68, merged as `ca3e4483ce4745e359ddb3377b52748175f3881f`; migration applied on hosted V2 per the owner, owner-run verification 2026-11-09; Vercel Production not verified by Claude)
 
-The six named verification gaps (rows 30, 38, 43, 46, 62 and 70, see the count under section 3) are **unchanged**: row 38's gap is the Zoho Books side, which is still outside the app and unverifiable here. These reported code observations are fixed, each with a test, and recorded in `../06-change-log.md`:
+The six named verification gaps (rows 30, 38, 43, 46, 62 and 70, see the count in section 5) are **unchanged**: row 38's gap is the Zoho Books side, which is still outside the app and unverifiable here. These reported code observations are fixed, each with a test, and recorded in `../06-change-log.md`:
 
 | Row | What was wrong | Now |
 |---|---|---|
@@ -151,13 +151,15 @@ The six named verification gaps (rows 30, 38, 43, 46, 62 and 70, see the count u
 | 69 (`?view=today`) | The page ignored the value My Day links to | The Today view ([F section 2](./sales-followups.md)) |
 | 60 (Settings) | The reference-code hint omitted `OPP-` | Hint names the prefix; the generator is unchanged ([S section 6](./sales-settings.md)) |
 
-## Events & Exhibitions (draft PR `feat/outreach-events`; not merged, migration not applied)
+## 7. Events & Exhibitions and the shared outreach priority (PR #72, merged as `0d598a9574ad5464573325f2b8200c151083b7e9`; migration `20261224000100` applied on hosted V2 per the owner, 13 of 13 checks; Vercel Production not verified by Claude)
 
-| # | Screen / control | Route | Who | Reference |
-|---|---|---|---|---|
-| 70 | Events list (filters, figures, Add event, Add edition) | `/sales/events` | Sales grant | [X section 3.1](./sales-events-and-exhibitions.md) |
-| 71 | Event page (editions, exhibitors compared, agencies to contact, linked enquiries) | `/sales/events/[id]` | Sales grant | [X section 3.2](./sales-events-and-exhibitions.md) |
-| 72 | Record an observation (phone-first dialog) | event page | Sales grant | [X section 3.3](./sales-events-and-exhibitions.md) |
-| 73 | Outreach priority (directory column, filter, sort; account card; lead control) | `/sales/accounts`, `/sales/accounts/[id]`, event page | Sales grant | [X section 4](./sales-events-and-exhibitions.md) |
-| 74 | Import events (template, preview, confirm; archive on events and editions) | `/sales/events/import`, `/sales/events`, event page | Sales grant | [X sections 3.2, 3.4](./sales-events-and-exhibitions.md) |
-| 74 | Event / Exhibition field on New enquiry, Quick add and Edit details; event line on Scope & dates | `/sales/new`, quick add, enquiry page | Sales grant; link: owner or founder | [E section 3.4](./sales-enquiries.md) |
+Added by PR #72 after the baseline. Rows continue the numbering of sections 1 to 4 (the scheduled route is row 70). Status as in the header: `Documented` = the reference was written from the code with PR #72; it was not re-read against the code in the 2026-11-10 status reconciliation.
+
+| # | Screen / control | Route | Who | Reference | Status |
+|---|---|---|---|---|---|
+| 71 | Events list (filters, figures, Add event, Add edition) | `/sales/events` | Sales grant | [X section 3.1](./sales-events-and-exhibitions.md) | Documented |
+| 72 | Event page (editions, exhibitors compared, agencies to contact, linked enquiries) | `/sales/events/[id]` | Sales grant | [X section 3.2](./sales-events-and-exhibitions.md) | Documented |
+| 73 | Record an observation (phone-first dialog) | event page | Sales grant | [X section 3.3](./sales-events-and-exhibitions.md) | Documented |
+| 74 | Outreach priority (directory column, filter, sort; account card; lead control) | `/sales/accounts`, `/sales/accounts/[id]`, event page | Sales grant | [X section 4](./sales-events-and-exhibitions.md) | Documented |
+| 75 | Import events (template, preview, confirm; archive on events and editions) | `/sales/events/import`, `/sales/events`, event page | Sales grant | [X sections 3.2, 3.4](./sales-events-and-exhibitions.md) | Documented |
+| 76 | Event / Exhibition field on New enquiry, Quick add and Edit details; event line on Scope & dates | `/sales/new`, quick add, enquiry page | Sales grant; link: owner or founder | [E section 3.4](./sales-enquiries.md) | Documented |

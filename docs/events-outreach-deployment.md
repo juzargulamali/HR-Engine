@@ -1,6 +1,8 @@
 # Events & Exhibitions, exhibitor history and shared outreach priority: deployment
 
-One additive migration, `supabase/migrations/20261224000100_crm_events_outreach.sql`. **Nothing here was run against a hosted project by Claude** (no hosted SQL, no deployment). The migration is exercised only by the RLS test `packages/rls-tests/test/crm-events-outreach.rls.test.ts` (a throwaway Postgres) and by the local browser flow `apps/web/os-shell-checks/events-outreach-flow.mjs`.
+**Current status (2026-11-10):** PR #72 is **merged on `main` as PR #72** (merge `0d598a9574ad5464573325f2b8200c151083b7e9`, 2026-11-10; required CI `lint-typecheck-test` and `rls-policies` green on head `9c316bba406d6d135f7e3f83b11bbcd9622f9f87`). Migration `20261224000100_crm_events_outreach.sql` is **applied on hosted V2 by the owner** (owner-reported: the corrected `crm_events_20_verify_readonly.sql` passed **13 of 13 checks**; Claude ran no hosted SQL and did not see the rows). **Vercel Production is not verified by Claude**. Details and dates: "Owner-run result" below; install order: `docs/launch-refinement-install-order.md` row 21.
+
+One additive migration, `supabase/migrations/20261224000100_crm_events_outreach.sql`. **Nothing here was run against a hosted project by Claude** (no hosted SQL, no deployment): the hosted run is the owner's. Claude's own evidence is the RLS test `packages/rls-tests/test/crm-events-outreach.rls.test.ts` (a throwaway Postgres) and the local browser flow `apps/web/os-shell-checks/events-outreach-flow.mjs`.
 
 ## What it changes, and what it does not
 | Added | Notes |
@@ -34,5 +36,8 @@ Not touched: `crm_create_opportunity`, `crm_update_opportunity` (so JARVIS and e
   `CHECK (((outreach_priority IS NULL) OR ((outreach_priority >= 1) AND (outreach_priority <= 5))))`.
   The old row looked for the literal text `BETWEEN 1 AND 5`, but PostgreSQL never prints BETWEEN: it shows the equivalent comparisons.
 - **Fix (verifier only):** row 5 now requires the constraint to be **validated** and compares its whole definition (case, spaces and brackets ignored) with the form PostgreSQL prints, or the BETWEEN form. A different range, a missing NULL case or an unvalidated constraint still fails. Checked against the exact definition above on a local database built from the same migration: row 5 says OK.
-- **To do (owner):** run the corrected `crm_events_20_verify_readonly.sql` on V2 once more; every row must say OK. This PR stays unmerged until that is confirmed and required CI is green on the final head. The result of that run is recorded here when reported.
+- **Corrected verifier, second run (owner-reported):** the owner ran the corrected `crm_events_20_verify_readonly.sql` on V2: **all 13 checks passed**, including the outreach priority constraint and the permission checks (select-only tables, nothing deletable, helpers not callable), and none of the existing enquiries was relinked. Claude did not run it and did not see the rows.
+- **Merge:** PR #72 merged on 2026-11-10 as `0d598a9574ad5464573325f2b8200c151083b7e9`; required CI (`lint-typecheck-test`, `rls-policies`) was green on its head `9c316bba406d6d135f7e3f83b11bbcd9622f9f87` (checked on GitHub).
+- **Production:** whether the Vercel Production domain serves this merge is **not verified by Claude**.
+- *Historical note (before the second run, kept for the record):* this line used to read "To do (owner): run the corrected verifier on V2 once more ... This PR stays unmerged until that is confirmed". That is done.
 
