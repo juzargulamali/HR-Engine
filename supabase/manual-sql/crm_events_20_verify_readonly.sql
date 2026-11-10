@@ -12,10 +12,15 @@ select item, result from (
                          or has_table_privilege('authenticated', 'public.crm_event_observations', 'insert,update,delete')
                          or has_table_privilege('anon', 'public.crm_events', 'select,insert,update,delete') or has_table_privilege('anon', 'public.crm_event_editions', 'select,insert,update,delete')
                          or has_table_privilege('anon', 'public.crm_event_observations', 'select,insert,update,delete')) then 'OK' else 'FAIL - privileges differ' end
-  union all select 5, 'crm_organisations.outreach_priority exists, smallint, with the 1 to 5 check',
+  union all select 5, 'crm_organisations.outreach_priority exists, smallint, with a validated 1 to 5 check (NULL allowed)',
          case when exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'crm_organisations' and column_name = 'outreach_priority' and data_type = 'smallint')
-                and exists (select 1 from pg_constraint where conrelid = 'public.crm_organisations'::regclass and contype = 'c' and pg_get_constraintdef(oid) like '%outreach_priority%BETWEEN 1 AND 5%')
-              then 'OK' else 'MISSING or no check' end
+                -- PostgreSQL never prints BETWEEN: it stores and shows (outreach_priority IS NULL) OR (outreach_priority >= 1 AND outreach_priority <= 5). The definition is compared as a whole
+                -- (case, spaces and brackets ignored) with that form or the BETWEEN form, so a different range or a missing NULL case still fails, and the constraint must be VALIDATED.
+                and exists (select 1 from pg_constraint c where c.conrelid = 'public.crm_organisations'::regclass and c.contype = 'c' and c.convalidated
+                              and regexp_replace(lower(pg_get_constraintdef(c.oid)), '[()\s]', '', 'g') in (
+                                'checkoutreach_priorityisnulloroutreach_priority>=1andoutreach_priority<=5',
+                                'checkoutreach_priorityisnulloroutreach_prioritybetween1and5'))
+              then 'OK' else 'MISSING or no validated 1-to-5 check' end
   union all select 6, 'crm_opportunities.event_edition_id exists, nullable, and references crm_event_editions with no cascade (an edition with enquiries cannot be deleted)',
          case when exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'crm_opportunities' and column_name = 'event_edition_id' and is_nullable = 'YES')
                 and exists (select 1 from pg_constraint where conrelid = 'public.crm_opportunities'::regclass and contype = 'f' and confrelid = 'public.crm_event_editions'::regclass and confdeltype = 'a')

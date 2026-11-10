@@ -26,3 +26,13 @@ Not touched: `crm_create_opportunity`, `crm_update_opportunity` (so JARVIS and e
 
 ## Rollback
 `supabase/manual-sql/crm_events_90_rollback.sql` (export the three tables and the new columns first; it reports how many links and observations it removes). The previous app version ignores the new columns and tables, so the app can be rolled back without the SQL.
+
+## Owner-run result (Enginious HR Engine V2)
+- **Applied:** `20261224000100_crm_events_outreach.sql` as it stands at commit `fd1e00d`, applied by the owner to Enginious HR Engine V2 (2026-11-10). It is not edited or re-run by this note, and no further migration was added.
+- **First verifier run** (`crm_events_20_verify_readonly.sql` from `fd1e00d`): every row passed except row 5, the outreach priority check.
+- **Row 5 was a false failure of the verifier, not of the database.** A separate read-only query on V2 confirmed that `crm_organisations.outreach_priority` is `smallint` and that its constraint is validated:
+  `CHECK (((outreach_priority IS NULL) OR ((outreach_priority >= 1) AND (outreach_priority <= 5))))`.
+  The old row looked for the literal text `BETWEEN 1 AND 5`, but PostgreSQL never prints BETWEEN: it shows the equivalent comparisons.
+- **Fix (verifier only):** row 5 now requires the constraint to be **validated** and compares its whole definition (case, spaces and brackets ignored) with the form PostgreSQL prints, or the BETWEEN form. A different range, a missing NULL case or an unvalidated constraint still fails. Checked against the exact definition above on a local database built from the same migration: row 5 says OK.
+- **To do (owner):** run the corrected `crm_events_20_verify_readonly.sql` on V2 once more; every row must say OK. This PR stays unmerged until that is confirmed and required CI is green on the final head. The result of that run is recorded here when reported.
+
