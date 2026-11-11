@@ -63,4 +63,26 @@ describe("enquiry dates filled from an event edition", () => {
     const s = chooseEdition(initialEditionDates(null, null), { id: "z", start: "2027-01-01", end: "2027-12-31" });
     expect(dates(s)).toEqual(["2027-01-01", "2027-12-31"]);
   });
+  it("a date the person typed and then emptied stays empty when an edition is chosen or changed; only Use edition dates fills it", () => {
+    // Typed before any edition, then deliberately emptied.
+    let s = typeDate(initialEditionDates(null, null), "start", "2027-03-29");
+    s = typeDate(s, "start", "");
+    s = chooseEdition(s, A);
+    expect(dates(s)).toEqual(["", "2027-04-02"]);
+    expect(editionDatesNote(s, A).differs).toBe(true);
+    // Filled from an edition, edited by hand, then emptied: still the person's decision after switching editions.
+    s = chooseEdition(initialEditionDates(null, null), A);
+    s = typeDate(s, "end", "2027-04-05");
+    s = typeDate(s, "end", "");
+    s = chooseEdition(s, B);
+    expect(dates(s)).toEqual(["2028-03-28", ""]);
+    s = chooseEdition(chooseEdition(s, null), A);
+    expect(dates(s)).toEqual(["2027-03-30", ""]);
+    expect(dates(applyEditionDates(s, A))).toEqual(["2027-03-30", "2027-04-02"]);
+    // A saved enquiry date emptied in the edit form stays empty when another edition is chosen.
+    s = typeDate(initialEditionDates("2027-03-29", "2027-04-05", "a"), "end", "");
+    expect(dates(chooseEdition(s, B))).toEqual(["2027-03-29", ""]);
+    // A field that never held anything is still filled.
+    expect(dates(chooseEdition(typeDate(initialEditionDates(null, null), "start", ""), A))).toEqual(["2027-03-30", "2027-04-02"]);
+  });
 });

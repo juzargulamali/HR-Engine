@@ -82,7 +82,7 @@ JARVIS can draft the scope wording for an estimate: line descriptions, quantitie
 - links: Enquiries -> /sales/opportunities; Full new-enquiry form -> /sales/new
 - screens: /sales/opportunities; /sales/new
 
-Enquiries live in Sales. The quick form needs a title, where it came from, an agency or an end client (or both) and the next action with its date. Search finds any enquiry by reference, title, agency or client, however old. The chips above the list show My open enquiries, Overdue, Due today, Awaiting first response and No next action.
+Enquiries live in Sales. The quick form needs a title, where it came from, an agency or an end client (or both) and the next action with its date. Search finds any enquiry by reference, title, agency or client, however old. The list shows 100 at a time (Previous and Next). The chips above it show My open enquiries, Overdue, Due today, Awaiting first response and No next action; each number is how many enquiries that chip will show.
 
 1. Open Enquiries in Sales.
 2. Press Add enquiry.
@@ -133,7 +133,7 @@ The enquiry's owner, or a Sales founder, can edit its details while it is open. 
 1. Open the enquiry.
 2. Press Edit details.
 3. Change what you need and save. If someone else changed it first you will be asked to reload.
-4. Choosing a different Event / Exhibition fills a show date that is empty; a date already on the enquiry is kept, and Use edition dates replaces it if you want. Create event or edition is under that field here too.
+4. Choosing a different Event / Exhibition fills a show date that is empty; a date already on the enquiry is kept, and Use edition dates replaces it if you want. A date you empty on purpose stays empty. Create event or edition is under that field here too.
 
 ## Change an enquiry's stage
 - id: sales-move-stage
@@ -161,7 +161,7 @@ Won and Lost are closed on their own form, which asks for the evidence or the re
 
 1. Open the enquiry.
 2. Choose the Won or Lost action and fill in the form.
-3. After Won, use the button on the Delivery handover card: prepare and submit it, or answer the Project Manager's question and resubmit.
+3. After Won, use the button on the Delivery handover card: prepare and submit it, or answer the Project Manager's question and resubmit. A new brief starts with the linked event in Notes for the Project Manager, because the Project Manager cannot see Sales events; keep or edit it.
 4. When it says Project created, Open project takes you to the delivery project if you have access to it.
 5. The chip My won: handover open on the Enquiries list finds your won enquiries whose handover is not accepted yet.
 

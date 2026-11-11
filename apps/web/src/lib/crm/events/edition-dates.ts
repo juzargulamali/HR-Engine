@@ -6,7 +6,7 @@
  *   "none"     empty and never set: the next edition chosen fills it;
  *   "edition"  filled from the chosen edition and not touched since: a different edition replaces it (or clears it, when that edition has no such date);
  *   "manual"   typed by the person (or already saved on the enquiry): never replaced, only by the explicit "Use edition dates";
- *   "cleared"  filled from an edition and then emptied on purpose: stays empty.
+ *   "cleared"  had a value (filled from an edition, typed, or saved on the enquiry) and was then emptied on purpose: stays empty.
  * Installation and dismantling dates are separate fields and are never touched here. Saved enquiry dates start as "manual": opening the edit form changes nothing,
  * and editing an edition later never reaches a saved enquiry.
  */
@@ -23,7 +23,9 @@ export const initialEditionDates = (start: string | null | undefined, end: strin
 /** The person typed in (or emptied) a date field. */
 export function typeDate(state: EditionDatesState, which: "start" | "end", value: string): EditionDatesState {
   const was = state[which];
-  const origin: DateOrigin = value ? "manual" : was.origin === "edition" || was.origin === "cleared" ? "cleared" : "none";
+  // Emptying a field that held a value is a decision (whether the value came from an edition or was typed): it stays empty until the person fills it or
+  // chooses "Use edition dates". Only a field that never held anything is "none".
+  const origin: DateOrigin = value ? "manual" : was.origin === "none" && !was.value ? "none" : "cleared";
   return { ...state, [which]: { value, origin } };
 }
 

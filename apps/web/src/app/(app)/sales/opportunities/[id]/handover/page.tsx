@@ -8,6 +8,7 @@ import { AvailabilityBadge, StageBadge } from "@/components/sales/badges";
 import { formatDate, formatDateTime, formatMoney } from "@/components/sales/format";
 import { displayNameFor, getCrmContext } from "@/lib/crm/context";
 import { loadOpportunityDetailResult } from "@/lib/crm/data";
+import { loadEditionLabel } from "@/lib/crm/events/data";
 import { createClient } from "@/lib/supabase/server";
 import { HANDOVER_REOPENED_NOTICE } from "../closure-helpers";
 import { ContactsPanel } from "../contacts-panel";
@@ -115,6 +116,11 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
   const pkg = buildHandoverPackage({ opp, proposals: detail.proposals, files: detail.files, contactCount: detail.contacts.length, availability: detail.item.availability });
   const latestSent = detail.proposals.find((p) => p.status === "sent");
   const show = dateRangeText(opp.event_start, opp.event_end, formatDate);
+  // The Project Manager cannot read the event edition: events are Sales data (readable only with a Sales grant) and no Projects screen shows them. So a NEW brief
+  // starts with the edition written into "Notes for the Project Manager", which the PM does read. It is a suggestion in a field Sales reviews, edits or removes
+  // before saving; a saved brief keeps its own notes. If the edition cannot be read nothing is written (never a guess).
+  const edition = opp.event_edition_id ? await loadEditionLabel(opp.event_edition_id).catch(() => null) : null;
+  const editionNote = edition ? `Event / Exhibition: ${edition.label}. The dates in this brief are this enquiry's own.` : "";
   const zoho = detail.zoho;
   const earlierRecord = !!handover && (status !== "draft" || !!pmId || !!(handover.notes ?? "").trim());
   // Only used when Projects & Tasks is not installed in this environment (the older, Sales-side record is then the only handover there is).
@@ -194,7 +200,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
         personName={(id) => (id ? ctx.personName(id) : "Unknown")}
         defaults={{
           title: opp.title, clientName: "", location: opp.location ?? "", siteTimezone: suggestion.zone, siteTimezoneNote: suggestion.because, installStart: opp.install_start ?? "", eventStart: opp.event_start ?? "",
-          eventEnd: opp.event_end ?? "", scope: opp.scope ?? "", exclusions: opp.exclusions ?? "", notes: "", technologies: opp.technologies, risks: opp.risks,
+          eventEnd: opp.event_end ?? "", scope: opp.scope ?? "", exclusions: opp.exclusions ?? "", notes: editionNote, technologies: opp.technologies, risks: opp.risks,
         }}
       />
 

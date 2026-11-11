@@ -34,17 +34,20 @@ vi.mock("@/lib/crm/data", () => ({
 vi.mock("../view", () => ({ buildOppView: () => ({ opp, canEdit, isWon: true, ownerName: "Sales Owner" }) }));
 vi.mock("../contacts-panel", () => ({ ContactsPanel: () => null }));
 vi.mock("react", async (orig) => ({ ...(await orig<typeof import("react")>()), Suspense: ({ children }: { children: React.ReactNode }) => children }));
+let editionLabel: { label: string; eventId: string; archived: boolean } | null = null;
+let editionFails = false;
+vi.mock("@/lib/crm/events/data", () => ({ loadEditionLabel: async () => { if (editionFails) throw new Error("down"); return editionLabel; } }));
 vi.mock("../event-fact", () => ({ EventFact: ({ editionId }: { editionId: string | null }) => `EDITION:${editionId ?? "none"}` as unknown as null }));
 let projectState: { installed: boolean; status: Record<string, unknown> | null; row: unknown };
 vi.mock("./project-handover", () => ({
   loadProjectHandover: async () => projectState,
-  ProjectHandoverPanel: ({ defaults, state }: { defaults: { siteTimezone: string; siteTimezoneNote?: string }; state: { failed?: boolean } }) => <div data-testid="brief" data-tz={defaults.siteTimezone} data-failed={String(!!state.failed)}>{defaults.siteTimezoneNote}</div>,
+  ProjectHandoverPanel: ({ defaults, state }: { defaults: { siteTimezone: string; siteTimezoneNote?: string; notes?: string }; state: { failed?: boolean } }) => <div data-testid="brief" data-tz={defaults.siteTimezone} data-notes={defaults.notes ?? ""} data-failed={String(!!state.failed)}>{defaults.siteTimezoneNote}</div>,
 }));
 
 import HandoverPage from "./page";
 
 const render = async () => renderToStaticMarkup(await HandoverPage({ params: Promise.resolve({ id: "o1" }) }));
-beforeEach(() => { directoryFails = false; canEdit = true; handover = null; outcome = { kind: "ok" }; failedSections = []; estimateSends = []; projectState = { installed: true, status: null, row: null }; });
+beforeEach(() => { directoryFails = false; canEdit = true; handover = null; outcome = { kind: "ok" }; failedSections = []; estimateSends = []; editionLabel = null; editionFails = false; delete (opp as Record<string, unknown>).event_edition_id; projectState = { installed: true, status: null, row: null }; });
 
 describe("Sales handover page", () => {
   it("shows ONE process, Prepare brief to Project created, and no second PM or status form", async () => {
@@ -177,5 +180,14 @@ describe("Sales handover page", () => {
     expect(html).toContain("No proposal is recorded as accepted");
     failedSections = ["estimateSends"];
     expect(await render()).toContain("Could not load which estimates were recorded as sent");
+  });
+
+  it("a new delivery brief starts with the event edition in the notes the Project Manager reads; nothing is written when there is no link or it cannot be read", async () => {
+    expect(await render()).toContain('data-notes=""');
+    (opp as Record<string, unknown>).event_edition_id = "11111111-1111-4111-8111-111111111111";
+    editionLabel = { label: "Fictional Expo Global · 2026 · Riyadh", eventId: "ev", archived: false };
+    expect(await render()).toContain("data-notes=\"Event / Exhibition: Fictional Expo Global · 2026 · Riyadh. The dates in this brief are this enquiry&#x27;s own.\"");
+    editionFails = true;
+    expect(await render()).toContain('data-notes=""');
   });
 });
