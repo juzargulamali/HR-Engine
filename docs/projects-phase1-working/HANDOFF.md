@@ -10,7 +10,7 @@ Saved on 2026-11-11 so the work survives the session. Delete this folder when th
 * Local results at `15c0f7f`: lint and typecheck pass; web 267 files / 3,072 tests; domain 43 / 516; database 73 files / 1,942. Later commits are small text and failed-read fixes plus docs; the suite was not rerun after them.
 
 ## Still to do
-1. `modules/projects-handovers-equipment-and-workflow.md` (fifth reference, with the end-to-end workflow trace) and its guidance proposals: being written when this note was saved. Commit it when present.
+1. DONE: `modules/projects-handovers-equipment-and-workflow.md` (fifth reference, with the end-to-end workflow trace) is committed, and its guidance proposals are in this folder. All five references: 208 coverage rows and 93 action rows in total (36+52+40+36+44 and 10+24+19+18+22), before de-duplication.
 2. Assemble from the five references' `## Coverage rows` and `## Actions` tables: the full `modules/projects-coverage-index.md` (replace the compact one; unique numbers, totals equal to entries) and a new `modules/projects-action-catalogue.md`.
 3. Spot-check the references against the code (labels, permissions, functions) and correct them.
 4. Merge the guidance proposals in this folder (`guidance-*.md`) into `docs/enginious-os/staff-guidance/projects.md`, run `npm run build:jarvis-knowledge`, then `npx vitest run src/lib/jarvis` in `apps/web`.
@@ -18,6 +18,7 @@ Saved on 2026-11-11 so the work survives the session. Delete this folder when th
 6. Rerun lint, typecheck, `npm test` and the database tests; push; complete the draft PR description (head SHA, CI, migration and rollout order, which scenarios were verified locally and which need a signed-in Preview).
 
 ## Findings from the readers that are NOT fixed (pre-existing; candidates for a follow-up)
+* A Projects founder who is not the named Project Manager cannot accept a handover (`proj_accept_handover`). A Warehouse person who is not a Manager is shown the handover import button but the function refuses them. The Equipment page ignores a failed import-log read.
 * Failed secondary reads shown as empty on People, Feedback & changes, History, Files & client plan, the Calendar, and parts of Work (milestone progress, feedback, plan outdated, bookings for a non-manager); a failed booking-conflict check reads as "no overlap".
 * `proj_comment_task` has no finished-project check; several member, team and scope functions rely on the page to hide controls on a finished project.
 * No version check on project status change, reassign, block, unblock, milestone and deliverable status. "Create project" has no retry key.

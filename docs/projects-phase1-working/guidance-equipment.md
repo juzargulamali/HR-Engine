@@ -51,7 +51,7 @@ Where your company uses dispatch notes, each time the warehouse sends equipment 
 - area: projects
 - status: published
 - keywords: who does what; won job; handover to project; project workflow; next step; sales to projects; warehouse; dispatch; returns; complete project; start to finish; whose turn
-- links: Handovers -> /projects/handovers; Projects -> /projects; My Work -> /projects/work; Equipment requests -> /inventory/requests
+- links: Handovers -> /projects/handovers; Projects -> /projects; My Work -> /projects/work; Requests -> /inventory/requests
 - screens: /projects/handovers; /projects/[id]/work; /projects/[id]/equipment
 
 A won job passes from Sales to a founder, to the Project Manager, to the warehouse and back. Sales submits the handover. A founder names the Project Manager, who accepts it: that creates the project and opens its Work page. The Project Manager adds the team, plans the tasks and submits the equipment request. The warehouse reserves, sends out and later records what came back. Completing the project does not return equipment.
