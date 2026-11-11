@@ -407,7 +407,7 @@ function SalesLookupView({ card, ...p }: { card: SalesLookupCard } & ReadCardPro
   );
 }
 
-/** A factual summary: the app's own figures with their definitions, then (only when it matched them) the AI model's wording, labelled, and its suggestions apart from the facts. */
+/** A factual summary: the app's own figures with their definitions; "in words" written by the app for a period (or a checked AI summary for one enquiry); the AI model's suggestions apart from the facts. */
 function SalesSummaryView({ card, ...p }: { card: SalesSummaryCard } & ReadCardProps) {
   const { busy, error, run } = useRerun(p);
   const d = card.descriptor;
@@ -438,9 +438,14 @@ function SalesSummaryView({ card, ...p }: { card: SalesSummaryCard } & ReadCardP
       ))}
       {card.narrative ? (
         <div className="space-y-1 rounded-md bg-secondary/60 px-2 py-1.5" data-testid="summary-narrative">
-          <p className="text-xs font-semibold">In words (AI model)</p>
+          <p className="text-xs font-semibold">{card.narrativeBy === "ai" ? "Summary by the AI model (check it against the record)" : "In words (written by Enginious OS from the figures above)"}</p>
           <p className="whitespace-pre-wrap break-words">{card.narrative}</p>
-          {card.suggestions.length > 0 ? <><p className="text-xs font-semibold">Suggestions (not recorded facts)</p><ul className="list-disc pl-4 text-xs">{card.suggestions.map((x) => <li key={x}>{x}</li>)}</ul></> : null}
+        </div>
+      ) : null}
+      {card.suggestions.length > 0 ? (
+        <div className="space-y-1 rounded-md border border-dashed border-border px-2 py-1.5" data-testid="summary-suggestions">
+          <p className="text-xs font-semibold">Suggestions from the AI model (ideas, not recorded facts)</p>
+          <ul className="list-disc pl-4 text-xs">{card.suggestions.map((x) => <li key={x}>{x}</li>)}</ul>
         </div>
       ) : null}
       {card.narrativeNote ? <p className="text-xs text-muted-foreground" data-testid="summary-narrative-note">{card.narrativeNote}</p> : null}
@@ -449,7 +454,7 @@ function SalesSummaryView({ card, ...p }: { card: SalesSummaryCard } & ReadCardP
       {d.kind === "period" ? (
         <div className="flex flex-wrap gap-2">
           {!d.compare ? <Button type="button" size="sm" variant="outline" disabled={busy || p.companyStale} onClick={() => void run({ ...d, compare: true })}>Compare with the previous period</Button> : null}
-          {!card.narrative && !d.narrative ? <Button type="button" size="sm" variant="outline" disabled={busy || p.companyStale} onClick={() => void run({ ...d, narrative: true })}>Put it in words (uses the AI model)</Button> : null}
+          {!card.narrative && !d.narrative ? <Button type="button" size="sm" variant="outline" disabled={busy || p.companyStale} onClick={() => void run({ ...d, narrative: true })}>Put it in words and suggest next steps (suggestions use the AI model)</Button> : null}
         </div>
       ) : null}
       {error ? <Alert variant="destructive">{error}</Alert> : null}

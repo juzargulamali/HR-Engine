@@ -1,7 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { displaySafe } from "../outbound";
-import { hasStoredFinancial, redactAppText } from "../protected";
+import { mentionsMoney, redactAppText } from "../protected";
 import type { ScopeDraftCard } from "../protocol";
 import { logProviderFailure } from "../provider/diagnostics";
 import { JarvisProviderError, type FactLine } from "../provider/types";
@@ -66,7 +66,7 @@ export const scopeDraft: JarvisActionDefinition<Input, Input, ScopeDraftCard, ne
       for (const [label, key, max] of [["Brief", "brief", 1500], ["Scope", "scope", 3000], ["Exclusions", "exclusions", 800]] as const) {
         const red = redactAppText(typeof row?.[key] === "string" ? (row[key] as string) : null, max);
         if (red.omitted) notes.push(`The enquiry's ${label.toLowerCase()} stays inside Enginious OS and was not used.`);
-        else if (red.removed > 0) notes.push(`${red.removed} sentence${red.removed === 1 ? "" : "s"} of the enquiry's ${label.toLowerCase()} mention figures and were left out.`);
+        else if (red.removed > 0) notes.push(`${red.removed} sentence${red.removed === 1 ? "" : "s"} of the enquiry's ${label.toLowerCase()} carry details that stay inside Enginious OS and were left out.`);
         if (red.text) parts.push(`${label}:\n${red.text}`);
       }
       recordText = parts.join("\n\n");
@@ -91,11 +91,11 @@ export const scopeDraft: JarvisActionDefinition<Input, Input, ScopeDraftCard, ne
     if (!draft) { logProviderFailure(SCOPE_DRAFT_ID, new JarvisProviderError("malformed")); throw new JarvisRefusalError("provider_error", "I could not make sense of that. Try asking it another way, or write the lines in the Estimate screen."); }
     // A scope draft carries no money, whoever supplied it: a line with an amount is dropped here, not left to the model.
     const lines = draft.split("\n");
-    const kept = lines.filter((l) => !hasStoredFinancial(l));
+    const kept = lines.filter((l) => !mentionsMoney(l));
     if (kept.length < lines.length) notes.push("Lines that mentioned an amount of money were left out: prices are entered in the Estimate screen.");
     const text = kept.join("\n").trim();
     if (!text) throw new JarvisRefusalError("protected_content", "The draft contained only amounts, which belong in the Estimate screen. Ask for the scope wording without prices.");
-    const questions = (Array.isArray(o.questions) ? o.questions : []).filter((x): x is string => typeof x === "string" && x.trim().length > 0 && !hasStoredFinancial(x)).map((x) => x.trim().slice(0, 240)).slice(0, 6);
+    const questions = (Array.isArray(o.questions) ? o.questions : []).filter((x): x is string => typeof x === "string" && x.trim().length > 0 && !mentionsMoney(x)).map((x) => x.trim().slice(0, 240)).slice(0, 6);
     return {
       values: input, target: { kind: "new" }, valid: false,
       card: { kind: "estimate.scope", text, questions, enquiry, note: ["A draft of scope wording only. It has no prices, creates no estimate and saves nothing: copy what you need into the Estimate screen and enter the amounts there.", ...notes].join(" "), links: enquiry ? [{ label: `Open ${enquiry.reference}`, href: enquiry.href }, { label: "Proposals & quotes", href: "/sales/proposals" }] : [{ label: "Proposals & quotes", href: "/sales/proposals" }] },

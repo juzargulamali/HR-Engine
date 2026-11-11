@@ -9,14 +9,15 @@ vi.mock("server-only", () => ({}));
 import { registerAllJarvisActions } from "./actions";
 import { createAssistant, type JarvisAssistant } from "./assistant";
 import { gateProvider } from "./outbound";
-import { findProtectedContent, hasStoredFinancial, redactAppText } from "./protected";
+import { findProtectedContent, mentionsMoney, redactAppText } from "./protected";
 import type { SalesLookupCard, SalesSummaryCard, ScopeDraftCard, SendResult } from "./protocol";
 import { simulatedBehaviour, simulatedProviderCalls } from "./provider/simulated";
 import type { JarvisProvider, StructuredRequest } from "./provider/types";
 import { routeMessage } from "./router";
 import { ACTIVITY_COLUMNS, ACTIVITY_TEXT_COLUMNS, ENQUIRY_COLUMNS, ENQUIRY_TEXT_COLUMNS, FINANCIAL_COLUMNS, FOLLOW_UP_COLUMNS } from "./sales/projection";
 import { parseSalesQuery, refineQuery } from "./sales/query-parse";
-import { narrativeMatchesFacts, resolveWindow } from "./sales/summary";
+import { cleanSuggestion, factSentences, proseStaysInRecord, resolveWindow } from "./sales/summary";
+import { MAX_PAGES } from "./sales/projection";
 import { fakeDeps, ID, mkOpp, newWorld, type World } from "./testing/fake-world";
 
 let w: World;
@@ -40,6 +41,7 @@ const text = (card: unknown) => JSON.stringify(card).replace(/[0-9a-f]{8}-[0-9a-
 const metric = (c: SalesSummaryCard, label: string) => c.metrics.find((m) => m.label === label);
 
 /** Sentinels: stored financial facts that must never reach a provider request, and the same amount as a figure the person supplies, which may. */
+/** STRUCTURED financial fields (value, budget note, payment terms): never sent. Figures written inside a stored scope or note: sent as written (owner policy). */
 const STORED = { value: 918273, budget: "Stored budget AED 918,273 agreed", terms: "50% deposit, balance 30 days", scopeLine: "Hire rate 4455 per day for the LED wall.", noteLine: "Client said their budget is AED 77,001." };
 
 describe("routing: a Sales question becomes a validated descriptor, locally; actions and writing requests are not hijacked", () => {
@@ -203,6 +205,59 @@ describe("Stage 2: lookups (no provider call, explicit columns, exact totals, ho
     // the follow-up re-runs the same question with one thing changed
     const again = lookup(await ask("make it 20 days", { context: { lastQuery: { kind: "lookup", descriptor: c.descriptor } } }));
     expect(again.title).toMatch(/20 days/);
+  });
+
+  it("TRUNCATED READS: a capped response is never read as absence. Activity and follow-up reads are paged against an exact count; when they cannot be completed the answer says so instead of claiming 'no activity' or 'no next action'", async () => {
+    // 20 open enquiries of mine, EVERY one with recent activity and open follow-ups (12 of each): the true answers are "none are quiet" and "none lack a next action"
+    w.opps = []; w.followUps = []; w.activities = [];
+    for (let i = 0; i < 20; i++) {
+      const o = mkOpp({ company_id: ID.co1, owner_id: ID.u1, client_org_id: w.orgs[1]!.id, stage: "qualified", created_at: daysAgo(40), first_response_at: daysAgo(39) });
+      w.opps.push(o);
+      for (let k = 0; k < 12; k++) {
+        w.activities.push({ id: `act-${String(i).padStart(3, "0")}-${String(k).padStart(2, "0")}`, opportunity_id: o.id, kind: "call", body: "Spoke to the client", occurred_at: daysAgo(1), internal: false, created_by: ID.u1 });
+        w.followUps.push({ id: `fu-${String(i).padStart(3, "0")}-${String(k).padStart(2, "0")}`, opportunity_id: o.id, title: "Next step", due_at: at("2099-11-20T06:00:00Z"), kind: "call", assigned_to: ID.u1 });
+      }
+    }
+    // the server returns at most 25 rows per response, silently (like the hosted API's cap, far below the 240 rows that match): a single read would see the
+    // activities of only 3 of the 20 enquiries and call the other 17 "quiet"
+    w.maxRows = 25;
+    w.selectLog.length = 0;
+    const quiet = lookup(await ask("Which of my enquiries have had no activity for 14 days?"));
+    expect(quiet.total).toBe(0); // paging against the exact count read all 240 rows: nobody is wrongly listed as quiet
+    expect(w.selectLog.filter((x) => x.table === "crm_activities")).toHaveLength(10); // ten pages for ONE batch of ids; no per-enquiry query
+    const att = lookup(await ask("What needs my attention today?"));
+    expect(att.sections.map((x) => x.heading)).not.toContain("No next action planned");
+    expect(att.unavailable).toEqual([]);
+    // a cap so low that the page limit is not enough: the read is INCOMPLETE, and that is what is said
+    w.maxRows = 1;
+    expect(12).toBeGreaterThan(MAX_PAGES); // one enquiry alone has more matching rows than the pages allow at this cap
+    expect(await ask("Which of my enquiries have had no activity for 14 days?")).toMatchObject({ ok: false, code: "lookup_failed", message: expect.stringMatching(/could not read all the records[\s\S]*incomplete read cannot show that something is missing/) });
+    const partial = lookup(await ask("What needs my attention today?"));
+    expect(partial.unavailable.join(" ")).toMatch(/enquiries with no next action \(their follow-ups could not be read completely\)/);
+    expect(partial.sections.map((x) => x.heading)).not.toContain("No next action planned"); // not one enquiry is accused of having no next action
+    expect(partial.empty).toBeNull();
+  });
+
+  it("FOLLOW-UP CONTEXT: a refinement applies to the descriptor the card shows NOW (a chosen client is kept when the scope changes; a comparison is kept when the period changes)", async () => {
+    w.orgs.push({ ...w.orgs[0]!, id: "c0000000-0000-4000-8000-000000000009", name: "Fictional Wave Agency Riyadh" });
+    const q = lookup(await ask("My open enquiries for Fictional Wave"));
+    expect(q.choices).toHaveLength(2);
+    const chosen = lookup(await a.act({ companyId: ID.co1, actionId: "jarvis.sales.lookup.run", input: q.choices[0]!.descriptor }));
+    expect(chosen.descriptor).toMatchObject({ scope: "mine", org: { id: w.orgs[0]!.id } });
+    // the panel now sends the CHOSEN card's descriptor (see the launcher test); the refinement keeps the client and changes only the scope
+    const wide = lookup(await ask("the whole company instead", { context: { lastQuery: { kind: "lookup", descriptor: chosen.descriptor } } }));
+    expect(wide.descriptor).toMatchObject({ scope: "company", org: { id: w.orgs[0]!.id } });
+    expect(wide.filters.join(" ")).toMatch(/client or agency: Fictional Wave Agency/);
+    expect(wide.sections[0]!.rows.map((r) => r.id)).toEqual([mine.id]); // still that client's enquiries only, not everyone's
+    // had the panel sent the ORIGINAL question, the client would have been asked for again
+    const stale = lookup(await ask("the whole company instead", { context: { lastQuery: { kind: "lookup", descriptor: q.descriptor } } }));
+    expect(stale.choices).toHaveLength(2);
+    // a comparison switched on from the card survives a period refinement
+    const first = summary(await ask("How many enquiries did we win or lose this month?"));
+    const compared = summary(await a.act({ companyId: ID.co1, actionId: "jarvis.sales.summary.run", input: { ...first.descriptor, compare: true } }));
+    const lastMonth = summary(await ask("show last month instead", { context: { lastQuery: { kind: "summary", descriptor: compared.descriptor } } }));
+    expect(lastMonth.descriptor).toMatchObject({ period: "last_month", compare: true });
+    expect(lastMonth.comparedWith).not.toBeNull();
   });
 
   it("one enquiry by reference: status, parties, dates, follow-ups and last activity; never its value or budget; another company's reference is not found", async () => {
@@ -371,52 +426,70 @@ describe("Stage 3: summaries (figures computed by the app; the model only words 
     expect(won.rows).toHaveLength(25);
   });
 
-  it("PROVIDER REQUEST (sentinels): a summary in words sends counts, names and definitions; never a stored value, budget or priced lost reason; the app's figures stay authoritative", async () => {
+  it("PROVIDER REQUEST (sentinels): 'in words' is written by Enginious OS from its own figures; the model receives counts and names and is asked only for suggestions; structured value and budget fields never leave", async () => {
     const c = summary(await ask("Summarise this month's enquiries"));
     expect(simulatedProviderCalls).toHaveLength(1);
     const req = simulatedProviderCalls[0]!;
     expect(req.sources).toEqual(["user_text", "sales_facts"]);
     expect(req.task).toBe("sales_summary");
+    expect(req.instructions).toMatch(/Your ONLY job is to suggest/);
     for (const piece of ["Enquiries created: 5", "Won: 2", "Lost: 1", "Share won of those closed (%): 67", "Events with the most enquiries: Fictional Tomorrow Transport Forum\nCount for the line above: 2", "Recorded lost reasons: Budget lower than scope\nCount for the line above: 1", "Fictional Enginious UAE LLC", "2099-10-01 to 2099-10-14"]) expect(req.input, piece).toContain(piece);
-    expect(req.input).not.toMatch(/918273|918,273|Stored budget|deposit|AED/);
+    expect(req.input).not.toMatch(/918273|918,273|Stored budget|deposit/); // the structured value, budget note and payment terms are in no projection
     expect(req.facts).toBeUndefined(); // the gate folded the facts into the one text it screened
-    expect(c.narrative).toMatch(/^In short: /);
-    expect(c.narrativeNote).toMatch(/Wording by the AI model/);
+    // every number sits in a fixed sentence next to its own metric
+    expect(c.narrativeBy).toBe("app");
+    expect(c.narrative).toBe("In October 2099 so far (2099-10-01 to 2099-10-14, Dubai dates), 5 enquiries were created. 2 enquiries were won and 1 was lost, counted by closing date and current stage. Of the 3 closed, 67% were won. 1 closure was later reopened and is not counted as won or lost. The event with the most enquiries created in the period is Fictional Tomorrow Transport Forum, with 2. The most frequent recorded lost reason is \"Budget lower than scope\" (1). That is the reason as recorded, not an analysis. A won enquiry is not a delivered project.");
     expect(c.suggestions).toEqual(["Review the open follow-ups."]);
-    expect(metric(c, "Won")!.value).toBe(2); // figures come from the app, not from the wording
-    expect(JSON.stringify(c)).not.toMatch(/"execute"|"role"/);
+    expect(JSON.stringify(c)).not.toMatch(/"execute"|"role"|In short/);
     expect([...w.usage.values()]).toEqual([1]);
-    // a recorded lost reason that carries a price is counted without its wording, on the card and in the request
+    // a recorded lost reason is ordinary stored text: it is shown and sent as written, the figure in it included (owner policy)
     simulatedProviderCalls.length = 0;
     const sep = summary(await ask("Summarise last month's enquiries"));
-    expect(sep.groups.find((g) => g.heading === "Recorded lost reasons")!.rows.map((r) => r.label).sort()).toEqual(["A reason with details that stay on the enquiry", "Event cancelled"].sort());
-    expect(simulatedProviderCalls[0]!.input).not.toMatch(/40,000|another supplier/);
+    expect(sep.groups.find((g) => g.heading === "Recorded lost reasons")!.rows.map((r) => r.label).sort()).toEqual(["Event cancelled", "Went with another supplier at AED 40,000"].sort());
+    expect(simulatedProviderCalls[0]!.input).toContain("Recorded lost reasons: Went with another supplier at AED 40,000");
   });
 
-  it("the wording cannot change the facts: a wrong number, an amount of money, a delivery claim or an unusable answer is dropped and the figures are shown alone", async () => {
-    for (const bad of ["wrong_number", "money", "delivered", "malformed"] as const) {
+  it("NARRATIVE ACCURACY (QA: Won 8, Lost 2): the model cannot state a period's facts at all, so it cannot swap them, invent one or call wins completed projects; a suggestion that carries a number or a result is dropped", async () => {
+    // the QA case: 8 won, 2 lost
+    w.opps = w.opps.filter((o) => o.company_id !== ID.co1);
+    for (let i = 0; i < 8; i++) w.opps.push(mkOpp({ company_id: ID.co1, client_org_id: w.orgs[1]!.id, created_at: inOct(2), stage: "won", closed_at: inOct(10) }));
+    for (let i = 0; i < 2; i++) w.opps.push(mkOpp({ company_id: ID.co1, client_org_id: w.orgs[1]!.id, created_at: inOct(2), stage: "lost", closed_at: inOct(11), lost_reason: "Event cancelled" }));
+    w.closures = [];
+    const ok = summary(await ask("Summarise this month's enquiries"));
+    expect(ok.narrative).toMatch(/8 enquiries were won and 2 were lost, counted by closing date and current stage\. Of the 10 closed, 80% were won\./);
+    for (const bad of ["swapped", "wrong_number", "outcome", "malformed", "bad_suggestions"] as const) {
       simulatedBehaviour.summary = bad;
       const c = summary(await ask("Summarise this month's enquiries"));
-      expect(c.narrative, bad).toBeNull();
-      expect(c.suggestions, bad).toEqual([]);
-      expect(c.narrativeNote, bad).toMatch(/did not match the figures|could not be used/);
-      expect(metric(c, "Enquiries created")!.value, bad).toBe(5);
-      expect(text(c), bad).not.toMatch(/9871|450,000|delivered\./);
+      // whatever the model returned as a "summary" is not used: the sentences are the app's, identical to the honest run
+      expect(c.narrative, bad).toBe(ok.narrative);
+      expect(c.narrativeBy, bad).toBe("app");
+      expect(metric(c, "Won")!.value, bad).toBe(8);
+      expect(metric(c, "Lost")!.value, bad).toBe(2);
+      expect(text(c), bad).not.toMatch(/won 2 enquiries|lost 8|won 3 enquiries|completed 8 projects|9871|delivered and invoiced/i);
+      if (bad === "bad_suggestions") { expect(c.suggestions).toEqual(["Call the agencies that went quiet."]); expect(c.narrativeNote).toMatch(/stated figures or results and were left out/); }
+      if (bad === "malformed") { expect(c.suggestions).toEqual([]); expect(c.narrativeNote).toMatch(/could not be used/); }
     }
-    expect(narrativeMatchesFacts("There were 5 created and 2 won.", new Set(["5", "2"]))).toBe(true);
-    expect(narrativeMatchesFacts("There were 6 created.", new Set(["5", "2"]))).toBe(false);
-    expect(narrativeMatchesFacts("About 2.5 per week.", new Set(["2", "5"]))).toBe(false);
+    // the three sentences QA got accepted are not acceptable as suggestions either
+    for (const t of ["We won 2 enquiries and lost 8.", "We won 3 enquiries.", "We completed 8 projects.", "Follow up the two oldest.", "Zero enquiries need action.", "Invoice the finished work."]) expect(cleanSuggestion(t), t).toBeNull();
+    expect(cleanSuggestion("Call the agencies that went quiet.")).toBe("Call the agencies that went quiet.");
+    // the sentence builder ties each figure to its metric (no free prose, no "numbers that are always allowed")
+    expect(factSentences({ period: "P", previous: "Q", focus: "won_lost", now: { created: 0, won: 8, lost: 2, reopened: 0 }, before: { created: 0, won: 2, lost: 8, reopened: 0 }, topEvent: null, topReason: null })).toEqual(["In P, 8 enquiries were won and 2 were lost, counted by closing date and current stage.", "Of the 10 closed, 80% were won.", "Compared with Q: won is up 6 from 2; lost is down 6 from 8.", "A won enquiry is not a delivered project."]);
+    // prose about ONE enquiry: a number or a result that is not in its record fails, including small numbers
+    const record = "Stage: Negotiation\nOpen follow-ups (count): 2\nThe agency confirmed 8 screens.";
+    expect(proseStaysInRecord("Two follow-ups are open and the agency confirmed 8 screens.", record)).toBe(true);
+    for (const t of ["There are 3 open follow-ups.", "One follow-up is open.", "The enquiry was won.", "The work was completed.", "8 screens were delivered."]) expect(proseStaysInRecord(t, record), t).toBe(false);
   });
 
-  it("a provider failure, a paused chat or a reached limit leaves the successful lookup usable", async () => {
+  it("a provider failure, a paused chat or a reached limit leaves the figures and the app's own sentences intact", async () => {
     const failing: JarvisProvider = { kind: "simulated", structured: async () => { throw new (await import("./provider/types")).JarvisProviderError("timeout"); } };
     const t = summary(await make({ provider: failing }).send({ companyId: ID.co1, text: "Summarise this month's enquiries" }));
     expect(metric(t, "Enquiries created")!.value).toBe(5);
-    expect(t.narrative).toBeNull();
+    expect(t.narrative).toMatch(/5 enquiries were created/);
+    expect(t.suggestions).toEqual([]);
     expect(t.narrativeNote).toMatch(/took too long[\s\S]*computed by Enginious OS/);
     const paused = summary(await make({ config: { paused: ["chat"] } }).send({ companyId: ID.co1, text: "Summarise this month's enquiries" }));
     expect(paused.narrativeNote).toMatch(/paused/);
-    expect(metric(paused, "Won")!.value).toBe(2);
+    expect(paused.narrative).toMatch(/2 enquiries were won and 1 was lost/);
     const limited = summary(await make({ config: { dailyLimit: 0 } }).send({ companyId: ID.co1, text: "Summarise this month's enquiries" }));
     expect(limited.narrativeNote).toMatch(/limit/);
     expect(simulatedProviderCalls).toHaveLength(0);
@@ -455,7 +528,7 @@ describe("Stage 3: summaries (figures computed by the app; the model only words 
     expect(w.selectLog.filter((x) => x.table === "crm_activities").length).toBeGreaterThanOrEqual(3);
   });
 
-  it("PROVIDER REQUEST (sentinels): one enquiry's summary sends its operational facts and screened text; stored financial fields and financial sentences in its text never leave", async () => {
+  it("PROVIDER REQUEST (sentinels): one enquiry's summary sends its facts and its notes AS WRITTEN, financial figures in them included; structured value, budget note and payment terms, sensitive sentences and a brief marked not for sharing never leave", async () => {
     const e = mkOpp({
       company_id: ID.co1, owner_id: ID.u1, title: "Fictional gesture wall", stage: "proposal_prep", agency_org_id: w.orgs[0]!.id, client_org_id: w.orgs[1]!.id, location: "Fictional Crescent Centre, Abu Dhabi", event_start: "2099-11-18", event_end: "2099-11-20",
       value: STORED.value, currency: "AED", budget_note: STORED.budget, payment_terms: STORED.terms, technologies: [{ name: "Gesture wall software", qty: 2 }],
@@ -463,21 +536,37 @@ describe("Stage 3: summaries (figures computed by the app; the model only words 
       scope: `Software for two counters. ${STORED.scopeLine} The agency supplies the LED wall.`,
     });
     w.opps.push(e);
-    w.activities.push({ id: "a9", opportunity_id: e.id, kind: "call", body: `Agency confirmed two counters. ${STORED.noteLine} Arabic translation is not confirmed.`, occurred_at: daysAgo(2), internal: false, created_by: ID.u1 });
+    w.activities.push({ id: "a9", opportunity_id: e.id, kind: "call", body: `Agency confirmed two counters. ${STORED.noteLine} Their producer Sara's salary is AED 18,500. Arabic translation is not confirmed.`, occurred_at: daysAgo(2), internal: false, created_by: ID.u1 });
     w.followUps.push({ id: "f9", opportunity_id: e.id, title: "Email the scope response", due_at: at("2099-10-20T06:00:00Z"), kind: "email", assigned_to: ID.u1 });
     const c = summary(await ask(`Summarise ${e.reference} and its next steps`));
     expect(simulatedProviderCalls).toHaveLength(1);
     const req = simulatedProviderCalls[0]!;
     expect(req.sources).toEqual(["user_text", "sales_facts", "sales_record_text"]);
-    // approved operational facts arrive, non-financial numbers included
-    for (const piece of [`Enquiry reference: ${e.reference}`, "Enquiry title: Fictional gesture wall", "Stage: Proposal preparation", "Agency: Fictional Wave Agency", "End client: Fictional Harbour Brands", "Event start date: 2099-11-18", "Requested technology: Gesture wall software (quantity 2)", "Open follow-up: Email the scope response, due 2099-10-20", "two counters, six products per counter, on an RTX 4070", "Software for two counters.", "The agency supplies the LED wall.", "Agency confirmed two counters.", "Arabic translation is not confirmed."]) expect(req.input, piece).toContain(piece);
-    // stored financial fields and financial sentences of the record's own text do not
-    for (const secret of ["918273", "918,273", "Stored budget", "deposit", "65,000", "80,000", "4455", "Hire rate", "77,001", "budget is"]) expect(req.input, secret).not.toContain(secret);
+    for (const piece of [`Enquiry reference: ${e.reference}`, "Enquiry title: Fictional gesture wall", "Stage: Proposal preparation", "Agency: Fictional Wave Agency", "End client: Fictional Harbour Brands", "Event start date: 2099-11-18", "Requested technology: Gesture wall software (quantity 2)", "Open follow-up: Email the scope response, due 2099-10-20"]) expect(req.input, piece).toContain(piece);
+    // POSITIVE (owner policy): authorised stored notes and descriptions reach the provider UNCHANGED, the financial figures in them included
+    expect(req.input).toContain("The agency wants a gesture-controlled wall with two counters, six products per counter, on an RTX 4070. Their budget is AED 65,000 to 80,000.");
+    expect(req.input).toContain(`Software for two counters. ${STORED.scopeLine} The agency supplies the LED wall.`);
+    expect(req.input).toContain(STORED.noteLine);
+    // NEGATIVE: the structured financial fields are never read or sent; a sentence with sensitive employee information is removed locally
+    for (const secret of ["918273", "918,273", "Stored budget", "deposit", "balance 30 days", "salary", "18,500"]) expect(req.input, secret).not.toContain(secret);
+    expect(req.input).toContain("Agency confirmed two counters.");
+    expect(req.input).toContain("Arabic translation is not confirmed.");
     expect(w.selectLog.filter((s) => s.table === "crm_opportunities").every((s) => !/\b(?:value|currency|budget_note|payment_terms)\b/.test(s.columns))).toBe(true);
-    expect(c.coverage.join(" ")).toMatch(/1 sentence of the brief mention figures/);
-    expect(c.coverage.join(" ")).toMatch(/Value, budget, payment terms, estimates and proposals were not read/);
+    expect(c.coverage.join(" ")).toMatch(/1 sentence of the call recorded on \d{4}-\d{2}-\d{2} carry details that stay inside Enginious OS/);
+    expect(c.coverage.join(" ")).toMatch(/value, currency, budget note, payment terms, estimates and proposals were not read/);
+    expect(c.narrativeBy).toBe("ai");
     expect(c.narrative).toMatch(/^In short: /);
-    expect(text(c)).not.toMatch(/918273|77,001|4455/);
+    expect(c.narrativeNote).toMatch(/can be wrong/);
+    expect(text(c)).not.toMatch(/918273|Stored budget|18,500/);
+    // a summary that states a number or a result the record does not hold is not shown; the recorded facts stay
+    for (const bad of ["wrong_number", "outcome"] as const) {
+      simulatedBehaviour.summary = bad;
+      const x = summary(await ask(`Summarise ${e.reference} and its next steps`));
+      expect(x.narrative, bad).toBeNull();
+      expect(x.narrativeNote, bad).toMatch(/not in this enquiry's record/);
+      expect(x.supporting[0]!.rows.length, bad).toBeGreaterThan(5);
+    }
+    simulatedBehaviour.summary = "ok";
     // a brief marked as not for external sharing is left out entirely, and the card says so
     e.brief = "CONFIDENTIAL - do not forward\nThe agency wants a gesture wall.";
     simulatedProviderCalls.length = 0;
@@ -492,55 +581,51 @@ describe("Stage 3: summaries (figures computed by the app; the model only words 
   });
 });
 
-describe("the provenance rule at the outbound gate (the same amount, two origins)", () => {
+describe("the outbound gate for app-held data (structure, not money keywords)", () => {
   const sent: StructuredRequest[] = [];
   const inner: JarvisProvider = { kind: "simulated", structured: async (r) => { sent.push(r); return {}; } };
   const base = { task: "sales_summary", instructions: "x", jsonSchema: {}, maxOutputTokens: 100, timeoutMs: 1000 };
   const gate = (id: string) => gateProvider(inner, id)!;
+  const summaryReq = (over: Partial<StructuredRequest>) => ({ ...base, sources: ["user_text", "sales_record_text"] as StructuredRequest["sources"], input: "<request>\nSummarise\n</request>", inputTag: null, ...over });
   beforeEach(() => { sent.length = 0; });
 
-  it("a figure the person supplies goes out; the same figure in app-held text or a fact value is refused; a browser label cannot move it across", async () => {
-    // user-supplied working figures: allowed, in chat and in a summary request
+  it("financial figures in a person's text and in stored notes pass; structured financial fields have no way in; sensitive and sharing-restricted content is refused; a source label cannot widen a capability", async () => {
     await gate("jarvis.sales.chat.reply").structured({ ...base, sources: ["user_text"], input: "<message>\nDraft a reply: our rate is 85 per item, budget AED 77,001, our cost 60.\n</message>", inputTag: null });
-    expect(sent).toHaveLength(1);
-    // the same amounts as app-held record text: refused
-    await expect(gate("jarvis.sales.summary.run").structured({ ...base, sources: ["user_text", "sales_record_text"], input: "<request>\nSummarise\n</request>", inputTag: null, recordText: "Client said their budget is AED 77,001." })).rejects.toMatchObject({ code: "protected_content" });
-    await expect(gate("jarvis.sales.summary.run").structured({ ...base, sources: ["user_text", "sales_record_text"], input: "<request>\nSummarise\n</request>", inputTag: null, recordText: "Rate 85 per item." })).rejects.toMatchObject({ code: "protected_content" });
-    // as a fact value: refused (a currency-less rate, a range, a ratio in words)
-    for (const value of ["Budget AED 77,001", "rate 85 per item", "between 65,000 and 80,000", "margin 30%", "turnover up 12 percent"]) await expect(gate("jarvis.sales.summary.run").structured({ ...base, sources: ["user_text", "sales_facts"], input: "<request>\nSummarise\n</request>", inputTag: null, facts: [{ label: "Enquiry title", value }] }), value).rejects.toMatchObject({ code: "protected_content" });
-    // a number is a count only: not a decimal, not a huge figure
-    await expect(gate("jarvis.sales.summary.run").structured({ ...base, sources: ["user_text", "sales_facts"], input: "<request>\nx\n</request>", inputTag: null, facts: [{ label: "Won", value: 918273.5 }] })).rejects.toMatchObject({ code: "unavailable" });
-    await expect(gate("jarvis.sales.summary.run").structured({ ...base, sources: ["user_text", "sales_facts"], input: "<request>\nx\n</request>", inputTag: null, facts: [{ label: "Value AED 5", value: 1 }] })).rejects.toMatchObject({ code: "unavailable" });
-    // declaring the wrong source does not launder app data: app fields need their app source, and a capability without that source cannot carry them at all
-    await expect(gate("jarvis.sales.summary.run").structured({ ...base, sources: ["user_text"], input: "<request>\nx\n</request>", inputTag: null, recordText: "The agency supplies the LED wall." })).rejects.toMatchObject({ code: "unavailable" });
+    // stored note and description text with figures: allowed (owner policy)
+    await gate("jarvis.sales.summary.run").structured(summaryReq({ recordText: "Client said their budget is AED 77,001.\nHire rate 4455 per day." }));
+    await gate("jarvis.sales.summary.run").structured(summaryReq({ sources: ["user_text", "sales_facts"], facts: [{ label: "Enquiry title", value: "Gala package AED 50,000" }, { label: "Won", value: 2 }] }));
+    expect(sent).toHaveLength(3);
+    expect(sent[1]!.input).toContain("Client said their budget is AED 77,001.\nHire rate 4455 per day.");
+    // a STRUCTURED financial field cannot be dressed as a fact: a label that names money is refused, and a number is a whole-number count only
+    for (const label of ["Value", "Project value", "Budget note", "Payment terms", "Estimate total", "Unit price", "Currency"]) await expect(gate("jarvis.sales.summary.run").structured(summaryReq({ sources: ["user_text", "sales_facts"], facts: [{ label, value: "918273" }] })), label).rejects.toMatchObject({ code: "unavailable" });
+    for (const value of [918273.5, 9182730, Number.NaN]) await expect(gate("jarvis.sales.summary.run").structured(summaryReq({ sources: ["user_text", "sales_facts"], facts: [{ label: "Won", value }] })), String(value)).rejects.toMatchObject({ code: "unavailable" });
+    await expect(gate("jarvis.sales.summary.run").structured(summaryReq({ sources: ["user_text", "sales_facts"], facts: [{ label: "Won in 2099", value: 1 }] }))).rejects.toMatchObject({ code: "unavailable" });
+    // sensitive employee information, credentials, an estimate document and a sharing restriction are refused in app-held text as in a person's text
+    for (const recordText of ["Sara's salary is AED 18,500.", "Passport number N4471923 for the visa.", "The password is Hunter2-Fictional.", "Quotation No: Q-2099-0142\nLED wall AED 40,000\nSubtotal AED 40,000\nVAT 5% AED 2,000\nGrand total AED 42,000", "Internal use only.\nThe agency supplies the LED wall."]) await expect(gate("jarvis.sales.summary.run").structured(summaryReq({ recordText })), recordText).rejects.toMatchObject({ code: "protected_content" });
+    await expect(gate("jarvis.sales.summary.run").structured(summaryReq({ sources: ["user_text", "sales_facts"], facts: [{ label: "Enquiry title", value: "NDA - confidential" }] }))).rejects.toMatchObject({ code: "protected_content" });
+    // app fields need their own approved source, and a capability without that source cannot carry them at all
+    await expect(gate("jarvis.sales.summary.run").structured(summaryReq({ sources: ["user_text"], recordText: "The agency supplies the LED wall." }))).rejects.toMatchObject({ code: "unavailable" });
     await expect(gate("jarvis.sales.chat.reply").structured({ ...base, sources: ["user_text", "sales_record_text"], input: "<message>\nhi\n</message>", inputTag: null, recordText: "The agency supplies the LED wall." })).rejects.toMatchObject({ code: "unavailable" });
     await expect(gate("jarvis.sales.draft_reply").structured({ ...base, sources: ["user_text"], input: "hello", facts: [{ label: "Won", value: 2 }] })).rejects.toMatchObject({ code: "unavailable" });
-    // a sharing restriction inside a record stops the request
-    await expect(gate("jarvis.sales.summary.run").structured({ ...base, sources: ["user_text", "sales_record_text"], input: "<request>\nx\n</request>", inputTag: null, recordText: "Internal use only.\nThe agency supplies the LED wall." })).rejects.toMatchObject({ code: "protected_content" });
-    expect(sent).toHaveLength(1);
-    // clean app data passes, appended by the gate in its own block
-    await gate("jarvis.sales.summary.run").structured({ ...base, sources: ["user_text", "sales_facts", "sales_record_text"], input: "<request>\nSummarise\n</request>", inputTag: null, facts: [{ label: "Won", value: 2 }, { label: "Event start date", value: "2099-11-18" }], recordText: "Two counters, six products per counter, RTX 4070." });
-    expect(sent[1]!.input).toBe("<request>\nSummarise\n</request>\n<enginious_os_data>\nWon: 2\nEvent start date: 2099-11-18\nTwo counters, six products per counter, RTX 4070.\n</enginious_os_data>");
+    expect(sent).toHaveLength(3);
+    await gate("jarvis.sales.summary.run").structured(summaryReq({ sources: ["user_text", "sales_facts", "sales_record_text"], facts: [{ label: "Won", value: 2 }, { label: "Event start date", value: "2099-11-18" }], recordText: "Two counters, six products per counter, RTX 4070." }));
+    expect(sent[3]!.input).toBe("<request>\nSummarise\n</request>\n<enginious_os_data>\nWon: 2\nEvent start date: 2099-11-18\nTwo counters, six products per counter, RTX 4070.\n</enginious_os_data>");
   });
 
-  it("the content screen by origin: working figures pass as user text and fail as app text; non-financial numbers pass in both", () => {
-    for (const t of ["Our rate is 85 per item.", "Client budget: AED 65,000 to 80,000", "Our cost is 60 each.", "Proposed project value AED 120,000.", "Working estimate 45k."]) {
-      expect(findProtectedContent(t, "user"), t).toEqual([]);
-      expect(findProtectedContent(t, "app"), t).toContain("stored_financial");
-    }
-    for (const t of ["Two counters, six products per counter, an RTX 4070.", "Event 18 to 20 May 2027, installation from 16 May after 10 am.", "A 4-by-2.5-metre LED wall and a 55-inch screen.", "Ready on 2027-09-06 for testing; 3 show days.", "1200 wristbands for 6 groups of 12 minutes."]) {
-      expect(findProtectedContent(t, "user"), t).toEqual([]);
-      expect(hasStoredFinancial(t), t).toBe(false);
-    }
-    // sensitive employee data and company results are refused whatever the origin
-    for (const t of ["Sara's salary is AED 18,500.", "Passport number N4471923.", "Turnover last year was AED 3,400,000.", "See the general ledger."]) for (const o of ["user", "app"] as const) expect(findProtectedContent(t, o).length, `${t} (${o})`).toBeGreaterThan(0);
-    expect(redactAppText("Software for two counters. Hire rate 4455 per day. The agency supplies the wall.")).toEqual({ text: "Software for two counters. The agency supplies the wall.", removed: 1, omitted: false });
+  it("the content screen: a figure is not protected content anywhere; protected material is; stored text keeps its figures and loses only protected sentences", () => {
+    for (const t of ["Our rate is 85 per item.", "Client budget: AED 65,000 to 80,000", "Our cost is 60 each.", "Proposed project value AED 120,000.", "Working estimate 45k.", "Two counters, six products per counter, an RTX 4070.", "Event 18 to 20 May 2027, installation from 16 May after 10 am."]) expect(findProtectedContent(t), t).toEqual([]);
+    for (const t of ["Sara's salary is AED 18,500.", "Passport number N4471923.", "Turnover last year was AED 3,400,000.", "See the general ledger."]) expect(findProtectedContent(t).length, t).toBeGreaterThan(0);
+    expect(redactAppText("Software for two counters. Hire rate 4455 per day. The agency supplies the wall.")).toEqual({ text: "Software for two counters. Hire rate 4455 per day. The agency supplies the wall.", removed: 0, omitted: false });
+    expect(redactAppText("Software for two counters. Sara's salary is AED 18,500. Budget AED 77,001.")).toEqual({ text: "Software for two counters. Budget AED 77,001.", removed: 1, omitted: false });
     expect(redactAppText("NDA\nThe agency supplies the wall.")).toMatchObject({ text: "", omitted: true });
+    // "mentions money" is used only to keep an OUTPUT non-financial (scope wording), never to withhold input
+    for (const t of ["LED wall hire at AED 12,000 per day", "Rate 85 per item", "Budget around 50k"]) expect(mentionsMoney(t), t).toBe(true);
+    for (const t of ["Two counters, six products per counter, an RTX 4070.", "A 4-by-2.5-metre LED wall and a 55-inch screen.", "1200 wristbands for 6 groups of 12 minutes."]) expect(mentionsMoney(t), t).toBe(false);
   });
 });
 
 describe("Stage 4: scope wording for an estimate (no prices, nothing saved)", () => {
-  it("drafts scope lines from the request and the enquiry's screened scope; never reads or sends a stored price; a line with money is dropped; nothing is written", async () => {
+  it("drafts scope lines from the request and the enquiry's scope as written; never reads or sends the structured value or budget note; the OUTPUT stays non-financial; nothing is written", async () => {
     const e = mkOpp({ company_id: ID.co1, owner_id: ID.u1, title: "Fictional product counters", stage: "qualified", client_org_id: w.orgs[1]!.id, value: STORED.value, currency: "AED", budget_note: STORED.budget, technologies: [{ name: "Product-recognition counter software", qty: 2 }], scope: `Two counters, each independent. ${STORED.scopeLine} Shipping is excluded.` });
     w.opps.push(e);
     const c = scope(await ask(`Draft the estimate scope for ${e.reference}`));
@@ -548,11 +633,12 @@ describe("Stage 4: scope wording for an estimate (no prices, nothing saved)", ()
     expect(req.task).toBe("estimate_scope");
     expect(req.sources).toEqual(["user_text", "sales_facts", "sales_record_text"]);
     for (const piece of [`Draft the estimate scope for ${e.reference}`, "Requested technology: Product-recognition counter software (quantity 2)", "Two counters, each independent.", "Shipping is excluded."]) expect(req.input, piece).toContain(piece);
-    for (const secret of ["918273", "Stored budget", "4455", "Hire rate"]) expect(req.input, secret).not.toContain(secret);
+    expect(req.input).toContain(STORED.scopeLine); // a figure written in the stored scope goes with it (owner policy)
+    for (const secret of ["918273", "Stored budget"]) expect(req.input, secret).not.toContain(secret); // the structured fields do not
     expect(c.text).toMatch(/Product-recognition counter software \(quantity 2\)/);
+    expect(mentionsMoney(c.text)).toBe(false);
     expect(c.enquiry).toMatchObject({ reference: e.reference });
     expect(c.note).toMatch(/no prices, creates no estimate and saves nothing/);
-    expect(c.note).toMatch(/1 sentence of the enquiry's scope mention figures/);
     expect(c.links.map((l) => l.href)).toContain("/sales/proposals");
     expect(w.rpcLog.filter((x) => !["jarvis_my_access", "jarvis_usage_take"].includes(x.name))).toEqual([]);
     expect(w.readLog).not.toContain("crm_proposals");

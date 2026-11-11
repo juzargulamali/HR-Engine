@@ -5,7 +5,7 @@ import { addDays } from "@/lib/crm/reports";
 import { displaySafe } from "../outbound";
 import type { LookupRow, LookupSection, SalesLookupCard } from "../protocol";
 import { JarvisRefusalError, type JarvisActionDefinition, type JarvisContext } from "../types";
-import { ACTIVITY_COLUMNS, ENQUIRY_COLUMNS, FOLLOW_UP_COLUMNS, inBatches, type EnquiryRow } from "./projection";
+import { ACTIVITY_COLUMNS, ENQUIRY_COLUMNS, FOLLOW_UP_COLUMNS, inBatches, inBatchesComplete, type EnquiryRow } from "./projection";
 
 export const SALES_LOOKUP_ID = "jarvis.sales.lookup.run";
 /** Rows shown per list (the same cap as the first lookup). The total is counted separately and exactly. */
@@ -170,7 +170,9 @@ async function myOpen(ctx: JarvisContext, stages: readonly string[]): Promise<{ 
   if (r.error || typeof r.count !== "number") throw new Error("unreadable");
   return { rows: r.data ?? [], count: r.count };
 }
-const coverage = (count: number) => (count > SCAN_LIMIT ? `You own ${count} open enquiries; this looked at the ${SCAN_LIMIT} newest only.` : null);
+/** Says so when fewer enquiries were looked at than exist (the scan limit, or a smaller cap on the server's side). */
+const coverage = (count: number, read: number) => (count > read ? `You own ${count} open enquiries; this looked at the ${read} newest only.` : null);
+const INCOMPLETE = "I could not read all the records needed to answer that, so I am not answering rather than guessing: an incomplete read cannot show that something is missing. Try again in a moment, or open Enquiries in Sales.";
 
 async function inactive(ctx: JarvisContext, d: Extract<LookupDescriptor, { kind: "inactive" }>): Promise<Built> {
   const cutoff = new Date(ctx.now.getTime() - d.days * 86_400_000).toISOString();
@@ -178,9 +180,11 @@ async function inactive(ctx: JarvisContext, d: Extract<LookupDescriptor, { kind:
   try { mine = await myOpen(ctx, CRM_PIPELINE_STAGES); } catch { return failed(); }
   const ids = mine.rows.map((o) => o.id);
   const recent = new Set<string>();
-  const acts = await inBatches<{ opportunity_id: string }>(ids, (b) => ctx.supabase.from("crm_activities").select(ACTIVITY_COLUMNS).eq("company_id", ctx.companyId).in("opportunity_id", b).gte("occurred_at", cutoff).limit(5000));
+  // "No activity" is a claim of absence, so the activity read must be COMPLETE: paged against an exact count, never one capped response.
+  const acts = await inBatchesComplete<{ opportunity_id: string }>(ids, (b, from, to) => ctx.supabase.from("crm_activities").select(ACTIVITY_COLUMNS, { count: "exact" }).eq("company_id", ctx.companyId).in("opportunity_id", b).gte("occurred_at", cutoff).order("id").range(from, to));
   if (!acts) failed();
-  for (const x of acts!) recent.add(x.opportunity_id);
+  if (!acts!.complete) throw new JarvisRefusalError("lookup_failed", INCOMPLETE);
+  for (const x of acts!.rows) recent.add(x.opportunity_id);
   // An enquiry created inside the window is not "quiet for N days" yet.
   const quiet = mine.rows.filter((o) => !recent.has(o.id) && o.created_at < cutoff);
   const names = await orgNames(ctx.supabase, quiet.slice(0, LOOKUP_LIMIT).flatMap((o) => [o.agency_org_id, o.client_org_id]));
@@ -189,7 +193,7 @@ async function inactive(ctx: JarvisContext, d: Extract<LookupDescriptor, { kind:
     title, scope: "Owned by you · open working stages (On hold, Won and Lost are left out)", total: quiet.length,
     filters: [`no call, email, meeting, note or client response recorded in Enginious OS since ${fmtDate(cutoff)}`, `created before ${fmtDate(cutoff)}`],
     sections: [{ heading: title, total: quiet.length, rows: quiet.slice(0, LOOKUP_LIMIT).map((o) => enquiryRow(o, names, ctx.userId)) }],
-    note: ["This means nothing was RECORDED on the enquiry. It does not mean nobody contacted the client.", coverage(mine.count)].filter(Boolean).join(" "),
+    note: ["This means nothing was RECORDED on the enquiry. It does not mean nobody contacted the client.", coverage(mine.count, mine.rows.length)].filter(Boolean).join(" "),
     empty: `No matching enquiries: every open enquiry you own has activity recorded in the last ${d.days} days (or is newer than that).`, links: [{ label: "Open Enquiries", href: "/sales/opportunities" }],
   };
 }
@@ -245,20 +249,25 @@ async function attention(ctx: JarvisContext): Promise<Built> {
   let note: string | null = null;
   try {
     const mine = await myOpen(ctx, [...CRM_PIPELINE_STAGES, "on_hold"]);
-    note = coverage(mine.count);
+    note = coverage(mine.count, mine.rows.length);
     const names = await orgNames(ctx.supabase, mine.rows.flatMap((o) => [o.agency_org_id, o.client_org_id]));
     const hold = mine.rows.filter((o) => o.stage === "on_hold" && o.hold_review_date && o.hold_review_date <= today && !seen.has(o.id));
     for (const o of hold) seen.add(o.id);
     sections.push({ heading: "On hold: review date has arrived", note: "The hold review date is today or earlier.", total: hold.length, rows: hold.slice(0, LOOKUP_LIMIT).map((o) => enquiryRow(o, names, ctx.userId, `review date ${o.hold_review_date}`)) });
     const active = mine.rows.filter((o) => isCrmActive(o.stage));
     const withNext = new Set<string>();
-    const open = await inBatches<{ opportunity_id: string }>(active.map((o) => o.id), (b) => ctx.supabase.from("crm_follow_ups").select("opportunity_id").eq("company_id", ctx.companyId).eq("status", "open").in("opportunity_id", b).limit(5000));
+    // "No next action" is a claim of absence too: the follow-up read is paged against an exact count. If it cannot be completed, that section is named as
+    // unavailable instead of listing enquiries that may well have a follow-up.
+    const open = await inBatchesComplete<{ opportunity_id: string }>(active.map((o) => o.id), (b, from, to) => ctx.supabase.from("crm_follow_ups").select("opportunity_id", { count: "exact" }).eq("company_id", ctx.companyId).eq("status", "open").in("opportunity_id", b).order("id").range(from, to));
     if (!open) throw new Error("unreadable");
-    for (const x of open) withNext.add(x.opportunity_id);
-    // One enquiry is listed once: under the first reason that applies.
-    const noNext = active.filter((o) => !withNext.has(o.id) && !seen.has(o.id));
-    for (const o of noNext) seen.add(o.id);
-    sections.push({ heading: "No next action planned", note: "An open enquiry you own with no open follow-up.", total: noNext.length, rows: noNext.slice(0, LOOKUP_LIMIT).map((o) => enquiryRow(o, names, ctx.userId)) });
+    if (!open.complete) unavailable.push("enquiries with no next action (their follow-ups could not be read completely)");
+    else {
+      for (const x of open.rows) withNext.add(x.opportunity_id);
+      // One enquiry is listed once: under the first reason that applies.
+      const noNext = active.filter((o) => !withNext.has(o.id) && !seen.has(o.id));
+      for (const o of noNext) seen.add(o.id);
+      sections.push({ heading: "No next action planned", note: "An open enquiry you own with no open follow-up.", total: noNext.length, rows: noNext.slice(0, LOOKUP_LIMIT).map((o) => enquiryRow(o, names, ctx.userId)) });
+    }
     const noResponse = mine.rows.filter((o) => !o.first_response_at && !seen.has(o.id));
     sections.push({ heading: "No first response recorded", note: "An open enquiry you own with no first response recorded yet.", total: noResponse.length, rows: noResponse.slice(0, LOOKUP_LIMIT).map((o) => enquiryRow(o, names, ctx.userId)) });
   } catch { unavailable.push("your open enquiries (hold reviews, enquiries with no next action or no first response)"); }

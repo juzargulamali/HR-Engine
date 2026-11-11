@@ -73,6 +73,8 @@ export interface World {
   closures: { id: string; company_id: string; opportunity_id: string; outcome: string; closed_at: string; reopened_at: string | null; value_at_close?: number | null }[];
   /** Tables whose reads fail (a failed read must never look like an empty result). */
   failTables: string[];
+  /** The most rows ONE response returns, like the hosted API's cap (null = no cap). A request that asks for more gets only this many, silently. */
+  maxRows: number | null;
   /** Every select the person's session made: the table and the exact column list asked for. */
   selectLog: { table: string; columns: string }[];
   /** HR roles and budget grants (what the protected-access check reads through the person's session). */
@@ -93,7 +95,7 @@ export function newWorld(): World {
     signedIn: ID.u1, settings: { enabled: true, writes: true }, pilot: new Set([ID.u1, ID.u2, ID.u3]), pilotCompanies: new Set(),
     grants: [{ user_id: ID.u1, company_id: ID.co1, capabilities: [], revoked_at: null }, { user_id: ID.u1, company_id: ID.co2, capabilities: [], revoked_at: null }, { user_id: ID.u2, company_id: ID.co2, capabilities: [], revoked_at: null }],
     companies: [{ id: ID.co1, legal_name: "Fictional Enginious UAE LLC" }, { id: ID.co2, legal_name: "Fictional Enginious KSA LLC" }],
-    events: [], editions: [], closures: [], failTables: [], selectLog: [],
+    events: [], editions: [], closures: [], failTables: [], maxRows: null, selectLog: [],
     orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], readLog: [], createdArgs: [], registered: [], updates: [], proposals: [], zoho: [], moves: [], evidenceFails: false, activities: [], followUps: [], meetingFailAfterActivity: false, prefs: [], suggestions: [], memoryFn: "ok", followUpReadFails: false, roles: [], budgetGrants: [], protectedAccessFails: false, counter: 0, proofKey: SECRET, dbNow: () => new Date(),
   };
 }
@@ -125,13 +127,14 @@ function builder(w: World, user: string, name: string) {
   let rows = table(w, user, name).slice();
   let error: { message: string; code?: string } | null = (name === "crm_organisations" && w.orgReadFails) || ((name === "crm_proposals" || name === "crm_zoho_references") && w.evidenceFails) || (name === "crm_follow_ups" && w.followUpReadFails) ? { message: "unreadable" } : null;
   if (w.failTables.includes(name)) error = { message: "unreadable" };
-  let wantCount = false, head = false, limitN: number | null = null, selected = "*";
+  let wantCount = false, head = false, limitN: number | null = null, selected = "*", offset = 0;
   const done = () => {
     const count = wantCount ? rows.length : null;
     // Like the database, a select returns ONLY the columns it names: a column that was not asked for is not there to be used or leaked.
     const cols = selected === "*" ? null : selected.split(",").map((c) => c.trim()).filter(Boolean);
     const shape = (r: Row): Row => (cols ? Object.fromEntries(cols.map((c) => [c, r[c] ?? null])) : r);
-    const data = error ? null : head ? null : (limitN === null ? rows : rows.slice(0, limitN)).map(shape);
+    const want = limitN === null ? rows.length : limitN;
+    const data = error ? null : head ? null : rows.slice(offset, offset + Math.min(want, w.maxRows ?? want)).map(shape);
     return { data, error, count: error ? null : count };
   };
   const api = {
@@ -147,6 +150,7 @@ function builder(w: World, user: string, name: string) {
     ilike(c: string, p: string) { const needle = p.replace(/%/g, "").toLowerCase(); rows = rows.filter((r) => String(r[c] ?? "").toLowerCase().includes(needle)); return api; },
     order(c?: string, o?: { ascending?: boolean }) { if (c) { rows = rows.slice().sort((a, b) => String(a[c]).localeCompare(String(b[c]))); if (o?.ascending === false) rows.reverse(); } return api; },
     limit(n: number) { limitN = n; return api; },
+    range(from: number, to: number) { offset = from; limitN = to - from + 1; return api; },
     maybeSingle() { const d = done(); return Promise.resolve({ data: d.data?.[0] ?? null, error }); },
     then(res: (v: { data: Row[] | null; error: typeof error; count: number | null }) => unknown) { return Promise.resolve(done()).then(res); },
   };

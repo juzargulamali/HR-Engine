@@ -10,11 +10,11 @@ import type { FactLine } from "../provider/types";
  *      payment term, estimate or evidence reference is never even read for these capabilities. `select("*")` is not used.
  *   2. What may go to the AI provider is built here, field by field, as fact lines (a fixed label and a plain value). A whole record is never serialised, and a field that is
  *      not named in a builder below cannot be sent, whatever the row carries.
- * Free-text values (a title, a location, a name) are screened under the "app" rule before they become a fact: one that carries a financial figure or other restricted
- * material is replaced by a marker, never sent. Email addresses and phone numbers are not projected at all.
+ * Free-text values (a title, a location, a name) go as written, financial figures included (owner policy); one that carries protected material (a personal ID, a
+ * credential, pay) is replaced by a marker. Email addresses and phone numbers are not projected at all.
  */
 export const ENQUIRY_COLUMNS = "id, reference, title, stage, owner_id, agency_org_id, client_org_id, source, event_start, event_end, install_start, location, created_at, closed_at, stage_changed_at, hold_review_date, first_response_at, event_edition_id, waiting_on";
-/** The free text of ONE enquiry, read only for its own summary or a scope draft, and only through redactAppText. */
+/** The free text of ONE enquiry, read only for its own summary or a scope draft, and only through redactAppText (which keeps figures and removes protected material). */
 export const ENQUIRY_TEXT_COLUMNS = "id, brief, scope, exclusions, technologies, lost_reason, hold_reason";
 export const FOLLOW_UP_COLUMNS = "id, title, kind, due_at, status, opportunity_id, assigned_to";
 export const ACTIVITY_COLUMNS = "id, opportunity_id, kind, occurred_at";
@@ -30,11 +30,11 @@ export interface EnquiryRow {
 }
 
 export const WITHHELD = "[kept inside Enginious OS]";
-/** A short free-text value for the provider: unchanged when clean, the marker when it carries anything restricted (a figure next to a financial word, an ID, ...). */
+/** A short free-text value for the provider: unchanged when clean, the marker when it carries protected material (an ID, a credential, pay). A figure in it is kept. */
 export function safeValue(v: string | null | undefined, max = 160): string | null {
   const t = (v ?? "").replace(/[<>]/g, " ").replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, "").replace(/\s+/g, " ").trim().slice(0, max);
   if (!t) return null;
-  return findProtectedContent(t, "app").length > 0 ? WITHHELD : t;
+  return findProtectedContent(t).length > 0 ? WITHHELD : t;
 }
 
 /** One enquiry as fact lines for the provider. `names` are the organisations and the event the requester's own session could read. */
@@ -71,4 +71,41 @@ export async function inBatches<T>(ids: readonly string[], read: (batch: string[
     out.push(...(r.data ?? []));
   }
   return out;
+}
+
+/** Rows asked for per page of a complete read, and the most pages one read will take. */
+export const PAGE_SIZE = 1000;
+export const MAX_PAGES = 10;
+type Page<T> = { data: T[] | null; error: unknown; count?: number | null };
+/**
+ * A COMPLETE read, or an honest "incomplete". The hosted API caps how many rows one response returns, so a single request can silently hide rows; "nothing came back for
+ * this enquiry" would then be a false absence. Each page is asked for with an exact count; reading continues from the number of rows received until that count is
+ * reached, whatever the server's cap is. `complete` is false when the count is missing, a page comes back empty before the count is reached, or MAX_PAGES is not enough.
+ * Returns null when a read fails. The caller must not treat an incomplete result as proof that something does not exist.
+ */
+export async function readComplete<T>(page: (from: number, to: number) => PromiseLike<Page<T>>): Promise<{ rows: T[]; complete: boolean } | null> {
+  const rows: T[] = [];
+  for (let p = 0; p < MAX_PAGES; p++) {
+    const r = await page(rows.length, rows.length + PAGE_SIZE - 1);
+    if (r.error) return null;
+    const got = r.data ?? [];
+    rows.push(...got);
+    if (typeof r.count !== "number") return { rows, complete: false };
+    if (rows.length >= r.count) return { rows, complete: true };
+    if (got.length === 0) return { rows, complete: false };
+  }
+  return { rows, complete: false };
+}
+/** `readComplete` for each batch of ids (never one request per record). Incomplete if any batch is; null if any read fails. */
+export async function inBatchesComplete<T>(ids: readonly string[], page: (batch: string[], from: number, to: number) => PromiseLike<Page<T>>): Promise<{ rows: T[]; complete: boolean } | null> {
+  const out: T[] = [];
+  let complete = true;
+  for (let i = 0; i < ids.length; i += ID_BATCH) {
+    const batch = ids.slice(i, i + ID_BATCH);
+    const r = await readComplete<T>((from, to) => page(batch, from, to));
+    if (!r) return null;
+    out.push(...r.rows);
+    if (!r.complete) complete = false;
+  }
+  return { rows: out, complete };
 }

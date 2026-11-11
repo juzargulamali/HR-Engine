@@ -14,9 +14,9 @@ export interface StructuredRequest {
   input: string;
   /**
    * App-held data, in the only two shapes the outbound gate accepts. Server code fills these from typed projections (lib/jarvis/sales/projection.ts); nothing the browser
-   * sends can land here. The gate screens both under the "app" rule (no stored financial figure, nothing protected) and appends them to `input` itself.
+   * sends can land here. The gate screens both for protected material (a financial figure in a stored note is allowed; a structured financial field is never selected) and appends them to `input` itself.
    *   facts: operational fact lines. `label` is fixed wording from the code; `value` is a count, a date, a name or a screened title.
-   *   recordText: free text of a record (brief, scope, notes), already reduced locally by redactAppText.
+   *   recordText: free text of a record (brief, scope, notes), with protected sentences already removed locally by redactAppText.
    */
   facts?: FactLine[];
   recordText?: string;

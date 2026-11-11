@@ -1,26 +1,25 @@
 /**
  * Restricted information, in code (rulebook section 3: docs/enginious-os/modules/jarvis-rulebook.md).
  *
- * The rule is PROVENANCE, not whether a number appears:
- *   - "user": what a person deliberately types or pastes for the current task is theirs to submit. Sales context (names, venue, dates, quantities) and working financial
- *     figures (proposed values, budgets, prices, rates, costs, margins on a working estimate) are ALLOWED to go to the AI provider for that task.
- *   - "app": text Enginious OS itself read from the database (a title, a brief, a scope, a note). Operational wording may go out; ANY financial figure in it may not, and a
- *     user edit or confirmation cannot change that. Stored financial FIELDS are never selected for a provider request in the first place (lib/jarvis/sales/projection.ts).
+ * What may go to the AI provider (owner policy, revised 2026-11-11):
+ *   - what a person deliberately types or pastes for the current task, working financial figures included (proposed values, budgets, prices, rates, costs);
+ *   - the ordinary free text of Sales records the requester can see (title, brief, scope, exclusions, activity and meeting notes, recorded reasons), INCLUDING any
+ *     financial figure written inside it. A figure in a note is not a reason to withhold the note.
+ * What never goes, and is NOT decided by this file: structured financial FIELDS (an enquiry's value, currency, budget note, payment terms, estimates, proposals). No
+ * projection selects them (lib/jarvis/sales/projection.ts) and the gate accepts app-held data only as fixed-label fact lines and record text (lib/jarvis/outbound.ts).
  *
- * Whatever its provenance, genuinely restricted material stays inside Enginious OS: employee documents, salaries and payroll, reimbursements, medical and insurance records,
- * private leave details, personal IDs and bank details, credentials, company financial statements, ledgers and company financial results, prepared estimate or quotation
- * documents, and embedded files. This file finds that material. It is the CONTENT layer and deliberately not the only one:
- *   1. structure: a provider call can carry only the sources its rulebook entry approves (lib/jarvis/outbound.ts). App-held data reaches the gate only as typed fact lines
- *      or as record text, in fields the browser cannot fill, and each is screened under the "app" rule;
+ * What this file finds stays inside Enginious OS wherever it came from: employee documents, salaries and payroll, reimbursements, medical and insurance records, private
+ * leave details, personal IDs and bank details, credentials, company financial statements, ledgers and company results, a prepared estimate or quotation DOCUMENT (its
+ * number and totals), and embedded files. A text marked as not for external sharing is refused as a whole (wholeTextRestricted). It is the CONTENT layer and not the only one:
+ *   1. structure: a provider call can carry only the sources its rulebook entry approves; app-held data reaches the gate only in fields the browser cannot fill;
  *   2. content: everything that goes out is screened here, and so is what comes back;
  *   3. fail closed: when the screen finds restricted material, nothing is sent.
- * It is a pattern list: it can miss unusual wording, which is why structured fields come first and free text second.
+ * It is a pattern list: it can miss unusual wording, which is why structured fields come first.
  *
  * Plain data and pure functions: no server imports, no model.
  */
-export type Provenance = "user" | "app";
 export type ProtectedCategory =
-  | "compensation" | "reimbursement" | "medical_insurance" | "personal_id" | "private_leave" | "pricing" | "project_financials" | "credential" | "attachment" | "stored_financial";
+  | "compensation" | "reimbursement" | "medical_insurance" | "personal_id" | "private_leave" | "pricing" | "project_financials" | "credential" | "attachment";
 
 export const PROTECTED_LABEL: Record<ProtectedCategory, string> = {
   compensation: "salary, payroll or employee-document details",
@@ -32,7 +31,6 @@ export const PROTECTED_LABEL: Record<ProtectedCategory, string> = {
   project_financials: "company financial statements or results",
   credential: "a password, key or other credential",
   attachment: "an embedded file",
-  stored_financial: "financial figures held in Enginious OS",
 };
 
 const CURRENCY = "(?:aed|usd|sar|eur|gbp|qar|omr|kwd|bhd|dhs?|dirhams?|riyals?|dollars?|euros?|pounds?)";
@@ -78,18 +76,23 @@ export function looksLikeEstimateDocument(text: string): boolean {
   return totals >= 2 || (ESTIMATE_DOC_REF.test(text) && totals >= 1) || (ESTIMATE_DOC_REF.test(text) && text.split("\n").filter((l) => (l.match(MONEY) ?? []).length > 0).length >= 3);
 }
 
-/** A financial word with a number next to it, in text Enginious OS holds: a value, a budget, a price, a rate, a cost, a discount, a payment. */
+/** A financial word with a number next to it: a value, a budget, a price, a rate, a cost, a discount, a payment. */
 const FINANCIAL_WORD = /\b(?:pric(?:e|es|ed|ing)|rates?|budgets?|costs?|costing|fees?|values?|valued|worth|quot(?:e|es|ed|ation|ations)|estimates?|estimated|discounts?|margins?|mark-?ups?|invoic(?:e|es|ed)|deposits?|payments?|paid|turnover|revenues?|profits?|expenses?|vat|tax(?:es)?|charg(?:e|es|ed)|totals?|amounts?|sum|per\s+(?:item|unit|day|hour|head|person|sqm|piece))\b/gi;
 const ANY_NUMBER = /\b\d+(?:[.,]\d+)*\b/g;
-/** A number that is plainly not money: a calendar date, a clock time, a year, a size, a duration, a count of things. */
+/** A number that is plainly not money: a calendar date or a clock time. */
 const NOT_MONEY = /^(?:\d{4}-\d{2}-\d{2}|\d{1,2}:\d{2})$/;
 
-/** Does text HELD BY THE APP carry a financial figure? Fails closed: a financial word near any number, a currency amount, or a percentage near a financial word. */
-export function hasStoredFinancial(raw: string): boolean {
+/**
+ * Does a line mention an amount of money (a currency amount, or a financial word next to a number or a percentage)? NOT a reason to withhold text from the provider.
+ * It is used only where an OUTPUT must stay non-financial: the scope wording for an estimate (a line with an amount is dropped) and the sentences Enginious OS writes
+ * about counts.
+ */
+export function mentionsMoney(raw: string): boolean {
   const text = raw.normalize("NFKC");
   if ((text.match(MONEY) ?? []).some((m) => !NOT_MONEY.test(m.trim()))) return true;
   return text.split(/(?<=[.!?;])\s+|\n/).some((s) => near(s, FINANCIAL_WORD, ANY_NUMBER, 30) || near(s, FINANCIAL_WORD, PERCENT, 30));
 }
+
 /**
  * A marking that restricts a WHOLE text from external sharing ("External sharing prohibited", "Internal use only", "NDA", "Confidential", "Do not forward"). It is not a
  * detail that can be cut out: a text that carries one is not sent to the provider at all, in any mode, in any edited version, and not as earlier context either. Enforced at
@@ -133,10 +136,9 @@ function near(text: string, a: RegExp, b: RegExp, window = WINDOW): boolean {
 /**
  * The protected details a text contains (empty = none found). Used on everything that could reach the provider, on every model answer before it is shown, on the free-text
  * fields of a lookup before they are displayed, and on anything a person asks JARVIS to remember.
- * `origin` is where the text came from, decided by SERVER code (never by a label from the browser): "user" for what the person typed or pasted for the task (working
- * prices, budgets, rates and costs are allowed), "app" for text read from the database (any financial figure in it is "stored_financial").
+ * The same rule applies to what a person typed and to the free text of a record: a price, a budget or a cost in either is not protected content.
  */
-export function findProtectedContent(raw: string, origin: Provenance = "user"): ProtectedCategory[] {
+export function findProtectedContent(raw: string): ProtectedCategory[] {
   const text = raw.normalize("NFKC");
   const found = new Set<ProtectedCategory>();
   if (CREDENTIAL.test(text)) found.add("credential");
@@ -153,14 +155,14 @@ export function findProtectedContent(raw: string, origin: Provenance = "user"): 
   if (FINANCIAL_DOC.test(text) || near(text, COMPANY_FINANCIAL, MONEY, 50) || near(text, COMPANY_FINANCIAL, PERCENT, 50) || near(text, COMPANY_FINANCIAL, FIGURE, 40)) found.add("project_financials");
   // A prepared estimate or quotation document is not a working figure: it is not pasted to the provider, and never retrieved for it.
   if (looksLikeEstimateDocument(text)) found.add("pricing");
-  if (origin === "app" && hasStoredFinancial(text)) found.add("stored_financial");
   return [...found];
 }
 
 /**
- * Free text Enginious OS holds (a brief, a scope, a note), prepared for the provider LOCALLY: sentences that carry a financial figure or other restricted material are
- * removed and the rest is kept. A text marked as not for external sharing, a text that still fails the screen after that, or one that is too long to judge is omitted
- * entirely. The provider is never asked to redact anything. `removed` is how many sentences were withheld; `omitted` says the whole text was left out.
+ * Free text of a record (a brief, a scope, a note), prepared for the provider LOCALLY. Financial figures in it are kept: the owner allows them. Sentences that carry
+ * protected material (pay, personal IDs, medical or bank details, credentials, company results, an estimate document's totals) are removed and the rest is kept. A text
+ * marked as not for external sharing, one that still fails the screen afterwards, or one too long to judge is omitted entirely. The provider is never asked to redact
+ * anything. `removed` is how many sentences were withheld; `omitted` says the whole text was left out.
  */
 export function redactAppText(raw: string | null | undefined, max = 2000): { text: string; removed: number; omitted: boolean } {
   const text = (raw ?? "").replace(/\r\n?/g, "\n").trim();
@@ -170,11 +172,11 @@ export function redactAppText(raw: string | null | undefined, max = 2000): { tex
   const kept: string[] = [];
   for (const line of text.split("\n")) {
     const parts = line.split(/(?<=[.!?;])\s+/).filter((x) => x.trim());
-    const ok = parts.filter((x) => { const bad = findProtectedContent(x, "app").length > 0; if (bad) removed += 1; return !bad; });
+    const ok = parts.filter((x) => { const bad = findProtectedContent(x).length > 0; if (bad) removed += 1; return !bad; });
     if (ok.length > 0) kept.push(ok.join(" "));
   }
   const out = kept.join("\n").slice(0, max).trim();
-  if (out && findProtectedContent(out, "app").length > 0) return { text: "", removed, omitted: true };
+  if (out && findProtectedContent(out).length > 0) return { text: "", removed, omitted: true };
   return { text: out, removed, omitted: false };
 }
 

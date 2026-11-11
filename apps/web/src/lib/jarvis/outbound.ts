@@ -1,7 +1,7 @@
 import "server-only";
 import { jarvisLog } from "./log";
 import { RESTRICTED_TEXT_MESSAGE } from "./outbound-messages";
-import { describeProtected, findProtectedContent, wholeTextRestricted, type ProtectedCategory, type Provenance } from "./protected";
+import { describeProtected, findProtectedContent, wholeTextRestricted, type ProtectedCategory } from "./protected";
 import type { JarvisProvider, StructuredRequest } from "./provider/types";
 import { ruleFor } from "./rulebook";
 import { JarvisRefusalError } from "./types";
@@ -11,17 +11,20 @@ import { JarvisRefusalError } from "./types";
  * it, so an action cannot obtain an ungated provider), and it applies the rulebook BEFORE the call:
  *   1. the capability must have a rulebook entry that approves a provider call (deny by default: no entry, no call);
  *   2. the request must declare its sources, and each must be one the entry approves;
- *   3. PROVENANCE is structural: what the person supplied is in `input`; what Enginious OS holds can only be in `facts` (typed fact lines) and `recordText` (screened record
- *      text), each of which needs its own approved source. App data found anywhere else has no way in, and a request that declares an app source without the field (or the
- *      field without the source) is refused;
+ *   3. app-held data is structural: what the person supplied is in `input`; what Enginious OS holds can only be in `facts` (fact lines with a fixed, non-financial
+ *      label and a value that is a whole-number count, a date, a name or a title) and `recordText` (free text of a record), each needing its own approved source. A request
+ *      that declares an app source without the field (or the field without the source) is refused. A stored structured financial field has no way in: no projection
+ *      selects one, a label that names money is refused, and a number is accepted only as a count;
  *   4. a text marked as not for external sharing ("External sharing prohibited", "Internal use only", "NDA") is refused outright, for every capability and every part;
- *   5. everything is screened for protected content: the person's text under the "user" rule (working prices, budgets, rates and costs are allowed), the app-held parts
- *      under the "app" rule (ANY financial figure is refused, so a stored value, budget or price cannot leave even if server code selected it by mistake). A hit, or a
- *      request too long to judge, is NOT sent. The provider is never asked to redact anything.
+ *   5. everything is screened for protected content (pay, personal IDs, medical and bank details, credentials, company results, estimate documents, embedded files):
+ *      the person's text, every fact value and every line of record text. A financial figure in the person's text or in a stored note or description is NOT protected
+ *      content (owner policy). A hit, or a request too long to judge, is NOT sent. The provider is never asked to redact anything.
  * There is no provider call that classifies intent: routing is done locally (lib/jarvis/router.ts). Nothing here logs text: only the capability id and category tokens.
  */
 export const OUTBOUND_MAX_CHARS = 24_000;
 /** A fact label is fixed wording written in the code: letters, spaces and a little punctuation. No digits (a figure belongs in the value), no markup. */
+/** A fact line never carries a structured financial field: a label that names money is refused whatever its value. */
+const MONEY_LABEL = /\b(?:value|valued|worth|budget|price|pricing|cost|rate|fee|amount|total|payment|paid|deposit|margin|mark-?up|discount|estimate|quote|quotation|invoice|revenue|turnover|profit|tax|vat|currency)\b/i;
 const FACT_LABEL = /^[A-Za-z][A-Za-z ,()'&/%-]{0,79}$/;
 
 export function outboundRefusal(categories: readonly ProtectedCategory[]): JarvisRefusalError {
@@ -53,7 +56,7 @@ export function gateProvider(provider: JarvisProvider | null, actionId: string):
       const factLines: string[] = [];
       for (const f of facts) {
         // A label is fixed wording from the code; a value is a whole number (a count or a share), a date, a name or a screened title. Anything else is refused.
-        if (typeof f?.label !== "string" || !FACT_LABEL.test(f.label)) notApproved();
+        if (typeof f?.label !== "string" || !FACT_LABEL.test(f.label) || MONEY_LABEL.test(f.label)) notApproved();
         if (typeof f.value === "number" ? !Number.isInteger(f.value) || Math.abs(f.value) > 1_000_000 : typeof f.value !== "string" || f.value.length > 400 || /[<>]/.test(f.value)) notApproved();
         factLines.push(`${f.label}: ${f.value}`);
       }
@@ -64,16 +67,15 @@ export function gateProvider(provider: JarvisProvider | null, actionId: string):
       if (wholeTextRestricted(req.input) || (recordText && wholeTextRestricted(recordText)) || facts.some((f) => typeof f.value === "string" && wholeTextRestricted(f.value))) {
         block("sharing_restricted", new JarvisRefusalError("protected_content", `${RESTRICTED_TEXT_MESSAGE} Continue in Enginious OS yourself (for an enquiry, use the new-enquiry form).`));
       }
-      const found = findProtectedContent(req.input, "user");
+      const found = findProtectedContent(req.input);
       if (found.length > 0) {
         for (const c of found) jarvisLog({ event: "outbound", actionId, outcome: "blocked", code: `protected_${c}` });
         throw outboundRefusal(found);
       }
-      // The app-held parts: each fact value and each line of record text on its own (a count on one line is not "a figure next to" a word on another).
+      // The app-held parts: each fact value and the record text, under the same content rule (a figure in a stored note is allowed; protected material is not).
       const appFound = new Set<ProtectedCategory>();
-      for (const f of facts) if (typeof f.value === "string") for (const c of findProtectedContent(f.value, "app")) appFound.add(c);
-      for (const line of recordText.split("\n")) for (const c of findProtectedContent(line, "app")) appFound.add(c);
-      if (recordText) for (const c of findProtectedContent(recordText, "user")) appFound.add(c);
+      for (const f of facts) if (typeof f.value === "string") for (const c of findProtectedContent(f.value)) appFound.add(c);
+      if (recordText) for (const c of findProtectedContent(recordText)) appFound.add(c);
       if (appFound.size > 0) {
         for (const c of appFound) jarvisLog({ event: "outbound", actionId, outcome: "blocked", code: `app_${c}` });
         throw new JarvisRefusalError("protected_content", "I did not send that to the AI model: a record it would have used contains details that stay inside Enginious OS. Open the record in Enginious OS instead.");
@@ -86,8 +88,8 @@ export function gateProvider(provider: JarvisProvider | null, actionId: string):
 }
 
 /** What a model answer must pass before it is shown: no protected details. Returns the categories found (empty = it may be shown). */
-export function screenResponse(text: string, actionId: string, origin: Provenance = "user"): ProtectedCategory[] {
-  const found = findProtectedContent(text, origin);
+export function screenResponse(text: string, actionId: string): ProtectedCategory[] {
+  const found = findProtectedContent(text);
   for (const c of found) jarvisLog({ event: "outbound", actionId, outcome: "response_withheld", code: `protected_${c}` });
   return found;
 }

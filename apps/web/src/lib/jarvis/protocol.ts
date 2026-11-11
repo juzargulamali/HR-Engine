@@ -327,7 +327,7 @@ export interface SalesLookupCard {
 }
 export type SummaryDescriptor = import("./sales/summary").SummaryDescriptor;
 export interface SummaryMetric { label: string; value: number; previous?: number | null; definition: string; href?: string | null }
-/** A factual Sales summary. Every number is computed by the app; `narrative` (when present) is the AI model's wording of those same facts and is labelled as such. */
+/** A factual Sales summary. Every number is computed by the app, and for a period the sentences about them are written by the app too; the AI model contributes suggestions (and, for one enquiry, a checked summary), labelled as such. */
 export interface SalesSummaryCard {
   kind: "summary.sales";
   title: string;
@@ -344,8 +344,9 @@ export interface SalesSummaryCard {
   supporting: LookupSection[];
   coverage: string[];
   unavailable: string[];
-  /** The model's wording of the facts above, or null (not asked for, paused, failed, or it did not match the facts). */
+  /** The summary in words, or null. For a period it is written by Enginious OS from its own figures ("app"); for one enquiry it is the AI model's summary of that record ("ai"), shown only when it passed the check against the record. */
   narrative: string | null;
+  narrativeBy: "app" | "ai" | null;
   /** Suggestions the model made, shown apart from the recorded facts. */
   suggestions: string[];
   narrativeNote: string | null;
