@@ -41,7 +41,7 @@ describe("the event and edition form", () => {
     expect(saveEventEdition).toHaveBeenCalledTimes(1);
     expect(posted(0)).toMatchObject({ name: "Fictional Tech Week", kind: "exhibition", start: "2027-03-30", end: "2027-04-02", city: "Riyadh", venue: "Fictional Hall" });
     expect(posted(0).eventId).toBeUndefined();
-    expect(onCreated).toHaveBeenCalledWith({ eventId: "ev-new", eventName: "Fictional Tech Week", newEvent: true, editionId: "ed-new", label: "Fictional Tech Week · 2027 · Riyadh", detail: "Fictional Hall · 2027-03-30" });
+    expect(onCreated).toHaveBeenCalledWith({ eventId: "ev-new", eventName: "Fictional Tech Week", newEvent: true, editionId: "ed-new", label: "Fictional Tech Week · 2027 · Riyadh", detail: "Fictional Hall · 2027-03-30", start: "2027-03-30", end: "2027-04-02" });
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -78,7 +78,11 @@ describe("Create event or edition from Quick Add", () => {
   const props = {
     companies: [{ id: "co", name: "Fictional Co", currency: "AED", hasSettings: true, canAssignOwner: false, canOpenSettings: false, people: [] }],
     organisations: [{ id: "client", name: "Fictional Client Only", kind: "client" as const, roles: ["client"], place: null }],
-    editions: [{ id: "g27", label: "Fictional Expo Global · 2027 · Dubai", detail: "2027-10-11", archived: false }],
+    editions: [
+      { id: "g27", label: "Fictional Expo Global · 2027 · Dubai", detail: "2027-10-11", archived: false, start: "2027-10-11", end: "2027-10-15" },
+      { id: "g28", label: "Fictional Expo Global · 2028 · Dubai", detail: "2028-10-09", archived: false, start: "2028-10-09", end: "2028-10-13" },
+      { id: "nodates", label: "Fictional Undated Show · 2029", detail: "", archived: false, start: null, end: null },
+    ],
     events: EVENTS, currentUserId: "u1", currentUserName: "Fictional Person", today: "2026-11-11",
   };
   const openForm = () => {
@@ -128,5 +132,52 @@ describe("Create event or edition from Quick Add", () => {
     expect(draft()).toEqual(DRAFT);
     expect(edition()).toBe("");
     expect(createOpportunity).not.toHaveBeenCalled();
+  });
+
+  const value = (label: string) => (screen.getByLabelText(label) as HTMLInputElement).value;
+  const choose = (typed: string, option: RegExp) => {
+    const fieldEl = screen.getByRole("combobox", { name: /Event \/ Exhibition/ });
+    fireEvent.focus(fieldEl);
+    fireEvent.change(fieldEl, { target: { value: typed } });
+    fireEvent.click(screen.getByRole("option", { name: option }));
+  };
+  it("choosing an edition fills Event start and end; an overridden date survives switching editions; the other follows the new edition", () => {
+    render(<QuickAddEnquiryForm {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: /Add enquiry/ }));
+    choose("2027", /Fictional Expo Global · 2027/);
+    expect([value("Event start"), value("Event end")]).toEqual(["2027-10-11", "2027-10-15"]);
+    expect(screen.getByText(/Dates filled from the selected edition\. You can edit them/)).toBeTruthy();
+    expect(screen.getByText(/Event dates on this enquiry: 11 Oct 2027 to 15 Oct 2027/)).toBeTruthy();
+    expect(value("Installation")).toBe("");                                   // installation is never touched
+    set("Event end", "2027-10-16");                                           // the person overrides ONE date
+    expect(screen.getByText(/These dates differ from the selected edition/)).toBeTruthy();
+    choose("2028", /Fictional Expo Global · 2028/);
+    expect([value("Event start"), value("Event end")]).toEqual(["2028-10-09", "2027-10-16"]);   // start followed the edition, the override stayed
+    fireEvent.click(screen.getByRole("button", { name: "Use edition dates" }));
+    expect([value("Event start"), value("Event end")]).toEqual(["2028-10-09", "2028-10-13"]);
+  });
+  it("dates typed before choosing an edition are kept; unlinking keeps the dates; an edition without dates clears only what was inherited", () => {
+    render(<QuickAddEnquiryForm {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: /Add enquiry/ }));
+    set("Event start", "2027-10-10");
+    choose("2027", /Fictional Expo Global · 2027/);
+    expect([value("Event start"), value("Event end")]).toEqual(["2027-10-10", "2027-10-15"]);   // typed start kept, empty end filled
+    expect(screen.getByRole("button", { name: "Use edition dates" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Clear Event/ }));
+    expect([value("Event start"), value("Event end")]).toEqual(["2027-10-10", "2027-10-15"]);   // unlinking keeps the enquiry's dates
+    choose("undated", /Fictional Undated Show/);
+    expect([value("Event start"), value("Event end")]).toEqual(["2027-10-10", ""]);            // the typed start stays; the end inherited from 2027 is cleared (this edition has none)
+  });
+  it("a newly created edition is selected and its dates fill the enquiry's empty dates", async () => {
+    saveEventEdition.mockResolvedValue({ error: null, id: "ev-new", editionId: "ed-new" });
+    render(<QuickAddEnquiryForm {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: /Add enquiry/ }));
+    set("What is the enquiry?", "Fictional stand");
+    fireEvent.click(screen.getByRole("button", { name: "Create event or edition" }));
+    set("Event name", "Fictional New Show"); set("Starts", "2027-05-04"); set("Ends", "2027-05-06");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Add event and first edition" })); });
+    await waitFor(() => expect(edition()).toBe("ed-new"));
+    expect([value("Event start"), value("Event end")]).toEqual(["2027-05-04", "2027-05-06"]);
+    expect(value("What is the enquiry?")).toBe("Fictional stand");
   });
 });

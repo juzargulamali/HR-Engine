@@ -10,6 +10,8 @@ const created = vi.fn();
 const loadInquiryOrganisations = vi.fn();
 vi.mock("@/lib/actions/crm", () => ({ checkDuplicates: vi.fn(), createOpportunity: (...a: unknown[]) => created(...a), updateOpportunity: vi.fn(), loadInquiryOrganisations: () => loadInquiryOrganisations() }));
 vi.mock("@/components/workspace/unsaved", () => ({ useUnsavedChanges: () => undefined }));
+const saveEventEdition = vi.fn();
+vi.mock("@/lib/actions/events", () => ({ saveEventEdition: (...a: unknown[]) => saveEventEdition(...a) }));
 
 import { EventEditionPicker, OrganisationPicker, type EnquiryOrganisation } from "./new-enquiry-form";
 import { EditDetailsDialog, type EditableOpportunity } from "../opportunities/[id]/edit-details";
@@ -18,7 +20,7 @@ import { EditDetailsDialog, type EditableOpportunity } from "../opportunities/[i
 HTMLDialogElement.prototype.showModal = function showModal() { this.setAttribute("open", ""); };
 HTMLDialogElement.prototype.close = function close() { this.removeAttribute("open"); };
 
-afterEach(() => { cleanup(); created.mockReset(); loadInquiryOrganisations.mockReset(); });
+afterEach(() => { cleanup(); created.mockReset(); loadInquiryOrganisations.mockReset(); saveEventEdition.mockReset(); });
 
 const orgs: EnquiryOrganisation[] = [
   { id: "both", name: "Fictional Both Roles Co", kind: "agency", roles: ["agency", "client"], place: null },
@@ -124,7 +126,7 @@ describe("edit: Edit details offers the same fields", () => {
     eventStart: null, eventEnd: null, installStart: null, location: null, scope: null, exclusions: null, waitingOn: null, technologies: [], risks: [],
   };
   const editions = [{ id: "g26", label: "GITEX Global · 2026 · Dubai", detail: "", archived: false }, { id: "g27", label: "GITEX Global · 2027 · Dubai", detail: "", archived: false }];
-  const ok = { ok: true, organisations: orgs, editions, editionsFailed: false };
+  const ok = { ok: true, organisations: orgs, editions, events: [], editionsFailed: false };
   const open = (over: Partial<EditableOpportunity> = {}) => render(<EditDetailsDialog open onClose={() => undefined} data={{ ...data, ...over }} mode="full" availabilityWillNeedRecheck={false} />);
   const ready = async () => waitFor(() => expect((screen.getByRole("combobox", { name: /^Agency/ }) as HTMLInputElement).disabled).toBe(false));
   const formOf = () => screen.getByRole("combobox", { name: /^Agency/ }).closest("form") as HTMLFormElement;
@@ -183,5 +185,55 @@ describe("edit: Edit details offers the same fields", () => {
     open({ agencyOrgId: "client" });
     await ready();
     await waitFor(() => expect((screen.getByRole("combobox", { name: /^Agency/ }) as HTMLInputElement).value).toBe("Fictional Client Only"));
+  });
+
+  describe("show dates and the event edition", () => {
+    const dated = [
+      { id: "g26", label: "GITEX Global · 2026 · Dubai", detail: "", archived: false, start: "2026-10-12", end: "2026-10-16" },
+      { id: "g27", label: "GITEX Global · 2027 · Dubai", detail: "", archived: false, start: "2027-10-11", end: "2027-10-15" },
+    ];
+    const withDates = { ok: true, organisations: orgs, editions: dated, events: [{ id: "ev-gitex", name: "GITEX Global", editions: 2 }], editionsFailed: false };
+    const val = (label: string) => (screen.getByLabelText(label) as HTMLInputElement).value;
+    it("opening the form never changes the saved dates, even when they differ from the linked edition; it says so and offers the edition's dates", async () => {
+      loadInquiryOrganisations.mockResolvedValue(withDates);
+      open({ eventEditionId: "g26", eventStart: "2026-10-11", eventEnd: "2026-10-18" });
+      await ready();
+      expect([val("Show starts"), val("Show ends")]).toEqual(["2026-10-11", "2026-10-18"]);
+      expect(screen.getByText(/These dates differ from the selected edition/)).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Use edition dates" }));
+      expect([val("Show starts"), val("Show ends")]).toEqual(["2026-10-12", "2026-10-16"]);
+      const form = new FormData(formOf());
+      expect([form.get("event_start"), form.get("event_end")]).toEqual(["2026-10-12", "2026-10-16"]);
+    });
+    it("choosing another edition keeps the saved date and fills only the empty one", async () => {
+      loadInquiryOrganisations.mockResolvedValue(withDates);
+      open({ eventEditionId: "g26", eventStart: "2026-10-11", eventEnd: null });
+      await ready();
+      choose("Event", "2027", /GITEX Global · 2027/);
+      expect([val("Show starts"), val("Show ends")]).toEqual(["2026-10-11", "2027-10-15"]);
+      expect(new FormData(formOf()).get("event_edition_id")).toBe("g27");
+    });
+    it("Create event or edition keeps every unsaved field, selects the new edition and fills the empty show dates; Cancel changes nothing", async () => {
+      loadInquiryOrganisations.mockResolvedValue(withDates);
+      saveEventEdition.mockResolvedValue({ error: null, id: "ev-new", editionId: "ed-new" });
+      open({ eventStart: null, eventEnd: null });
+      await ready();
+      fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Fictional edited title" } });
+      fireEvent.change(screen.getByLabelText("Location"), { target: { value: "Fictional Hall 3" } });
+      type("Event", "Fictional Spring Show");
+      fireEvent.click(screen.getByRole("button", { name: "Create event or edition" }));
+      expect((screen.getByLabelText("Event name") as HTMLInputElement).value).toBe("Fictional Spring Show");
+      fireEvent.click(screen.getAllByRole("button", { name: "Cancel" }).at(-1)!);            // the event form's Cancel
+      expect(screen.queryByLabelText("Event name")).toBeNull();
+      expect([val("Title"), val("Location"), val("Show starts")]).toEqual(["Fictional edited title", "Fictional Hall 3", ""]);
+      fireEvent.click(screen.getByRole("button", { name: "Create event or edition" }));
+      fireEvent.change(screen.getByLabelText("Starts"), { target: { value: "2027-05-04" } });
+      fireEvent.change(screen.getByLabelText("Ends"), { target: { value: "2027-05-06" } });
+      fireEvent.click(screen.getByRole("button", { name: "Add event and first edition" }));
+      await waitFor(() => expect(posted("event_edition_id")).toBe("ed-new"));
+      expect([val("Title"), val("Location")]).toEqual(["Fictional edited title", "Fictional Hall 3"]);
+      expect([val("Show starts"), val("Show ends")]).toEqual(["2027-05-04", "2027-05-06"]);
+      await waitFor(() => expect((screen.getByRole("combobox", { name: /Event \/ Exhibition/ }) as HTMLInputElement).value).toBe("Fictional Spring Show · 2027"));
+    });
   });
 });

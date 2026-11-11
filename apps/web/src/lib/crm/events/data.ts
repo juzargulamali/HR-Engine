@@ -63,7 +63,8 @@ export async function loadEvent(eventId: string): Promise<{
   return { event: evRes.data, editions, observations, orgs, enquiries: enqRes.data as LinkedEnquiry[] };
 }
 
-export interface EditionOption { id: string; label: string; detail: string; archived: boolean }
+/** `start` / `end`: the edition's own calendar dates (YYYY-MM-DD), used to fill an enquiry's event dates when the edition is chosen. */
+export interface EditionOption { id: string; label: string; detail: string; archived: boolean; start?: string | null; end?: string | null }
 
 /**
  * The editions an enquiry may be linked to: every live edition of a live event (newest first), plus `keep` (the one the enquiry already has, even if archived, so it still
@@ -88,10 +89,9 @@ export async function loadEditionPicker(keep: string | null = null): Promise<{ e
     .filter((d) => d.id === keep || (!d.archived_at && byEvent.get(d.event_id) && !byEvent.get(d.event_id)!.archived_at))
     .flatMap((d) => {
       const e = byEvent.get(d.event_id);
-      return e ? [{ id: d.id, label: editionLabel(e, d), detail: [d.venue, d.start_date].filter(Boolean).join(" · "), archived: !!(d.archived_at || e.archived_at), start: d.start_date }] : [];
+      return e ? [{ id: d.id, label: editionLabel(e, d), detail: [d.venue, d.start_date].filter(Boolean).join(" · "), archived: !!(d.archived_at || e.archived_at), start: d.start_date, end: d.end_date }] : [];
     })
-    .sort((a, b) => b.start.localeCompare(a.start) || a.label.localeCompare(b.label))
-    .map(({ start: _start, ...o }) => o);
+    .sort((a, b) => b.start.localeCompare(a.start) || a.label.localeCompare(b.label));
   const count = new Map<string, number>();
   for (const d of editions) count.set(d.event_id, (count.get(d.event_id) ?? 0) + 1);
   const choices = events.filter((e) => !e.archived_at).map((e) => ({ id: e.id, name: e.name, editions: count.get(e.id) ?? 0 })).sort((a, b) => a.name.localeCompare(b.name));
