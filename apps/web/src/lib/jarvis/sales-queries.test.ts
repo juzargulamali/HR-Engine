@@ -35,6 +35,8 @@ const lookup = (r: SendResult): SalesLookupCard => { if (!r.ok || r.kind !== "ac
 const summary = (r: SendResult): SalesSummaryCard => { if (!r.ok || r.kind !== "action" || r.card.kind !== "summary.sales") throw new Error(`expected a Sales summary, got ${JSON.stringify(r).slice(0, 300)}`); return r.card; };
 const scope = (r: SendResult): ScopeDraftCard => { if (!r.ok || r.kind !== "action" || r.card.kind !== "estimate.scope") throw new Error(`expected a scope draft, got ${JSON.stringify(r).slice(0, 300)}`); return r.card; };
 const ask = (text: string, extra: Partial<Parameters<JarvisAssistant["send"]>[0]> = {}) => a.send({ companyId: ID.co1, text, ...extra });
+/** A card as text WITHOUT its random record ids, so "this figure is not on the card" cannot be confused by digits inside an id. */
+const text = (card: unknown) => JSON.stringify(card).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<id>");
 const metric = (c: SalesSummaryCard, label: string) => c.metrics.find((m) => m.label === label);
 
 /** Sentinels: stored financial facts that must never reach a provider request, and the same amount as a figure the person supplies, which may. */
@@ -164,7 +166,7 @@ describe("Stage 2: lookups (no provider call, explicit columns, exact totals, ho
     // nothing financial was read for any of it, and none of it is on a card
     const cols = w.selectLog.filter((s) => s.table === "crm_opportunities").map((s) => s.columns).join(",");
     for (const f of FINANCIAL_COLUMNS) expect(cols.split(",").map((c) => c.trim()), f).not.toContain(f);
-    expect(JSON.stringify([own, all, byOrg, byEvent])).not.toMatch(/918273|918,273|deposit/);
+    expect(text([own, all, byOrg, byEvent])).not.toMatch(/918273|918,273|deposit/);
     expect(simulatedProviderCalls).toHaveLength(0);
   });
 
@@ -212,7 +214,7 @@ describe("Stage 2: lookups (no provider call, explicit columns, exact totals, ho
     expect(c.sections[1]!.heading).toBe("Open follow-ups");
     expect(c.sections[1]!.total).toBe(4);
     expect(c.note).toMatch(/Value, budget, estimates and proposals are on the enquiry page/);
-    expect(JSON.stringify(c)).not.toMatch(/918273|918,273|deposit/);
+    expect(text(c)).not.toMatch(/918273|918,273|deposit/);
     // the same words for "another company" and "does not exist"
     const other = await ask(`What is the status of ${ksa.reference}?`);
     const missing = await ask("What is the status of OPP-UAE-2026-9999?");
@@ -399,7 +401,7 @@ describe("Stage 3: summaries (figures computed by the app; the model only words 
       expect(c.suggestions, bad).toEqual([]);
       expect(c.narrativeNote, bad).toMatch(/did not match the figures|could not be used/);
       expect(metric(c, "Enquiries created")!.value, bad).toBe(5);
-      expect(JSON.stringify(c), bad).not.toMatch(/9871|450,000|delivered\./);
+      expect(text(c), bad).not.toMatch(/9871|450,000|delivered\./);
     }
     expect(narrativeMatchesFacts("There were 5 created and 2 won.", new Set(["5", "2"]))).toBe(true);
     expect(narrativeMatchesFacts("There were 6 created.", new Set(["5", "2"]))).toBe(false);
@@ -429,7 +431,9 @@ describe("Stage 3: summaries (figures computed by the app; the model only words 
     const next = summary(await ask("show last month instead", { context: { lastQuery: { kind: "summary", descriptor: tampered } } }));
     expect(next.period).toMatch(/September 2099/);
     expect(metric(next, "Won")!.value).toBe(1);
-    expect(JSON.stringify(next)).not.toContain("999");
+    // the tampered number and the extra keys are nowhere: the figures are the app's own, and the descriptor that comes back holds only its own keys
+    expect(next.metrics.map((m) => m.value)).toEqual([1, 2, 33]);
+    expect(Object.keys(next.descriptor).sort()).toEqual(["compare", "focus", "kind", "narrative", "period"]);
     // the company switched: the same follow-up answers for the company selected now
     const ksa = summary(await a.send({ companyId: ID.co2, text: "show this month instead", context: { lastQuery: { kind: "summary", descriptor: first.descriptor } } }));
     expect(ksa.company.name).toBe("Fictional Enginious KSA LLC");
@@ -473,7 +477,7 @@ describe("Stage 3: summaries (figures computed by the app; the model only words 
     expect(c.coverage.join(" ")).toMatch(/1 sentence of the brief mention figures/);
     expect(c.coverage.join(" ")).toMatch(/Value, budget, payment terms, estimates and proposals were not read/);
     expect(c.narrative).toMatch(/^In short: /);
-    expect(JSON.stringify(c)).not.toMatch(/918273|77,001|4455/);
+    expect(text(c)).not.toMatch(/918273|77,001|4455/);
     // a brief marked as not for external sharing is left out entirely, and the card says so
     e.brief = "CONFIDENTIAL - do not forward\nThe agency wants a gesture wall.";
     simulatedProviderCalls.length = 0;
