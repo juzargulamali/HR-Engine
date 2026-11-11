@@ -1,6 +1,8 @@
-# Chat (app-wide panel, Sales groups)
+# Chat (app-wide panel: Sales groups and project groups)
 
 Status: **merged on `main` as PR #73** (merge `296b74814b8851c08b20a73b19e82d5eecea167f`, 2026-11-10; required CI `lint-typecheck-test` and `rls-policies` green on head `ab89a98846747dd0f721f52adfd9d1acbde8aeff`). Migration `20261225000100_chat_sales_groups.sql` is **applied on hosted V2 by the owner** (owner-reported: `chat_20_verify_readonly.sql` passed **7 of 7 checks**; Claude ran no hosted SQL and did not see the rows). **Vercel Production is not verified by Claude** (`docs/chat-deployment.md`, "Owner-run result"; `docs/launch-refinement-install-order.md` row 22). This release enables the three Sales groups only. Projects discussions and JARVIS are untouched and nothing is migrated. *(Corrected 2026-11-10: this line used to say "Draft PR, not merged, migration not applied anywhere".)*
+
+**Release 2 (Projects & Tasks Phase 1, draft PR, not merged):** one group per project and the Projects Discussion moved into Chat: section 9. Migration `20261230000100_chat_project_groups.sql` is **not applied anywhere by Claude; hosted status `Unverified`**. Where sections 1 to 8 say "only the three Sales groups exist" or "project groups planned", read them with section 9.
 
 ## 1. The entry point
 | Control | What it does | Who | Behind it | Tests |
@@ -51,3 +53,29 @@ Direct messages; an all-company Sales group; project groups and Projects-discuss
 
 ## 8. Tests
 `packages/rls-tests/test/chat-sales-groups.rls.test.ts` (membership by grant only, company access alone denied, history/post/read/members/mentions refused for a non-member, unread and mention counts, restricted placeholders with no leakage, revoke and restore), `lib/chat/model.test.ts`, `components/chat/chat-launcher.test.tsx`, and the focused browser flow `apps/web/os-shell-checks/chat-sales-groups-flow.mjs`.
+
+
+## 9. Project groups and the end of the Discussion tab (release 2)
+Source: `supabase/migrations/20261230000100_chat_project_groups.sql`; `apps/web/src/lib/chat/data.ts` (`loadProjectChat`, `projectChatInstalled`, `loadProjectUnread`), `lib/chat/model.ts`, `components/chat/chat-launcher.tsx`, `chat-thread.tsx`, `project-chat-button.tsx`; `app/(app)/projects/[id]/layout.tsx`, `discussion/page.tsx`; rollout in `docs/chat-deployment.md` ("Release 2").
+
+**One group per project**, shown as `<reference> · <name>` (the project's current name, not a stored copy), listed under **Projects** in the same panel, most recent conversation first, after the Sales groups. Above eight groups the list has a search box. A project-only member (no Sales group) gets the Chat button on every signed-in page.
+
+**Membership is active enrolment in that project, computed on every call:** a `proj_project_members` row that is not removed, an active profile, and still eligible for the project (`proj_user_eligible`, the test `proj_is_active_member` uses). Adding someone to the project adds them on the next call; removing or deactivating them, or revoking their Projects access, removes the group, its preview, its unread count, its history and the right to post or be mentioned on the next call. **A Projects grant, a founder grant, Sales access or membership of another project grants nothing.** *Difference from the old Discussion:* a company founder who is not enrolled could read a project's Discussion; they are not a member of its chat group.
+
+| Function | Change |
+|---|---|
+| `chat_my_groups()` | Also lists the caller's project groups, with `gkind`, `project_id`, `read_only`. Creates a missing group for a project the caller is enrolled in. A finished project's group is listed only while it has messages |
+| `chat_is_member` (internal) | Sales rule as before, or active enrolment for a project group. Every other function (`chat_messages`, `chat_post`, `chat_mark_read`, `chat_group_members`) checks it, so history, posting, read markers, the member list and mentions are refused to a non-member with the same "You are not a member of this group" |
+| `chat_group_members` | For a project group: the project's current members |
+| `chat_post` | A finished project (completed or archived) is read-only, as its Discussion was |
+| `chat_project_group(project)` | New. The group id of one project, for a member only; anyone else, and an unknown project, get the same refusal |
+
+**Opening a group from anywhere:** `?chat=<group id>` on any signed-in page (the launcher opens it and removes the parameter), or the project header's **Chat** button. The launcher opens a group only if the server lists it for the person; otherwise it says the conversation is not available. A group that stops being listed closes its thread on the next refresh (30 s, or on window focus) and leaves the unread total; a refused read or post shows "You no longer have access to this group".
+
+**The Discussion tab is removed** once the migration is applied: a project has Work, Timeline, Equipment (and Budget). `/projects/[id]/discussion` (old links, old mention notices) sends a member to `/projects/[id]/work?chat=<group>`; someone who may open the project but is not on its team is told where the conversation is and shown none of it; a failed check says it could not load. On a database **without** the migration the tab and the old page still work (that is also the rollback state). Project unread counts on the Projects directory, My Work and My Day now come from Chat (`loadProjectUnread`).
+
+**Transfer of the old messages:** every Discussion message that is not deleted is copied once, with its author, its original time and its original order; mentions are copied; a stable source id (`source = 'proj_messages'`, `source_id`) under a unique index makes a rerun copy nothing. A person's read marker starts at the newest message the first time a group is listed for them, so the history is not unread. Until the new app is live, a message posted in the old Discussion is mirrored into the group at once (trigger). **Not carried over:** deleted messages; reply threading (replies become ordinary messages in time order); editing and deleting messages (Chat has neither); the "jump to a task" picker; the per-message `project_mention` / `project_reply` notices (a mention is the red marker on the Chat button, and no message text is written to a notification).
+
+**Unchanged:** the three Sales groups, their membership, unread behaviour and the restricted shared items (the same functions; `chat-sales-groups.rls.test.ts` still passes). Task comments stay on tasks; formal history stays in History.
+
+Tests: `packages/rls-tests/test/chat-project-groups.rls.test.ts` (12: one group per project, verify pack, transfer once in order with authors and times, rerun and re-apply copy nothing, names follow renames, no group / preview / unread / history / post / read marker / member list for a grant holder, founder, Sales person or another project's member, mentions limited to current members, add and remove and revoke and deactivate, finished projects read-only, mirror, project deletion, Sales groups unchanged, rollback then release 1 then forward again), `components/chat/chat-launcher.test.tsx`, `lib/chat/model.test.ts`, `projects/[id]/discussion/page.test.tsx`, `lib/projects/load-errors.test.ts`.

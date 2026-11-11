@@ -147,9 +147,9 @@ export function DeliverySummary({ facts }: { facts: readonly SummaryFact[] }) {
           <div key={f.label} className="min-w-0">
             <dt className="text-[13px] text-muted-foreground">{f.label}</dt>
             <dd className="break-words text-sm">
-              <span className={cn("font-medium", f.tone === "red" ? TONE_TEXT.red : f.tone === "amber" ? TONE_TEXT.amber : undefined)}>{f.value}</span>
+              <span className={cn("block font-medium", f.tone === "red" ? TONE_TEXT.red : f.tone === "amber" ? TONE_TEXT.amber : undefined)}>{f.value}</span>
               {f.detail ? <span className="block text-[13px] text-muted-foreground">{f.detail}</span> : null}
-              <Link href={f.href} className="mt-0.5 inline-block text-[13px] font-medium text-accent underline-offset-4 hover:underline">{f.linkText}</Link>
+              <Link href={f.href} className="mt-0.5 block w-fit text-[13px] font-medium text-accent underline-offset-4 hover:underline">{f.linkText}</Link>
             </dd>
           </div>
         ))}

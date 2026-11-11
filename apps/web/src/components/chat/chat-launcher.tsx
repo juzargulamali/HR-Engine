@@ -51,7 +51,7 @@ export function ChatLauncher({ userId, initialGroups }: { userId: string; initia
   useFocusTrap(panelRef, open && phone);
 
   const refresh = useCallback(async () => {
-    const r = await chatGroups();
+    const r = await chatGroups().catch(() => ({ ok: false as const }));
     if (!r.ok) return;
     const lost = groupsRef.current.filter((g) => !r.groups.some((n) => n.id === g.id));
     groupsRef.current = r.groups;
@@ -66,7 +66,8 @@ export function ChatLauncher({ userId, initialGroups }: { userId: string; initia
   const openById = useCallback(async (groupId: string) => {
     let known = groupsRef.current.some((g) => g.id === groupId);
     if (!known) {
-      const r = await chatGroups();
+      // A failed refresh (offline, signed out) changes nothing: the group stays unopened and the notice below says so.
+      const r = await chatGroups().catch(() => ({ ok: false as const }));
       if (r.ok) { groupsRef.current = r.groups; setGroups(r.groups); known = r.groups.some((g) => g.id === groupId); }
     }
     if (groupsRef.current.length === 0) return;

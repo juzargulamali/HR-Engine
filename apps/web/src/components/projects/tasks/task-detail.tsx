@@ -24,7 +24,8 @@ export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData;
   const { task, row } = data;
   const fmtDay = (d: string | null) => (d ? dateText(d) : "no date");
   const control = toControlRow(row);
-  const main = data.readOnly ? [] : primaryMoves(row);
+  // A blocked task leads with the blocker, not with a button that moves it on (the Status control below still offers what is allowed).
+  const main = data.readOnly || task.blocked_at ? [] : primaryMoves(row);
   const step = nextStep({
     status: task.status, requiresReview: task.requires_review, blocked: !!task.blocked_at, blockedReason: task.blocked_reason, unblockOwnerName: task.unblock_owner_id ? view.nameOf(task.unblock_owner_id) : null,
     unblockAction: task.unblock_action, role: data.role, viewerIsAssignee: task.assignee_id === data.viewerId, viewerIsUnblocker: !!task.blocked_at && task.unblock_owner_id === data.viewerId,

@@ -345,10 +345,11 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "handovers",
       "new project"
     ],
-    "summary": "Your own tasks are under My Work; the Projects page lists the projects you can see, and each project has its tabs (work, plan, calendar, equipment, budget and more). JARVIS cannot read or change projects yet: use the screens.",
+    "summary": "Your own tasks are under My Work; the Projects page lists the projects you can see. A project opens on Work, with Timeline and Equipment beside it (and Budget for the people who may open it); the rest is under Manage project. The project's conversation is its group in Chat. JARVIS cannot read or change projects yet: use the screens.",
     "steps": [
-      "Open My Work for your tasks.",
-      "Open Projects for the directory and choose a project."
+      "Open My Work for your tasks, the reviews waiting for you and the blockers you can clear.",
+      "Open Projects for the directory and choose a project. It opens on Work.",
+      "Read What needs doing at the top of Work: it lists what needs you and what is waiting on someone else."
     ],
     "links": [
       {
@@ -368,6 +369,149 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "/projects",
       "/projects/work",
       "/projects/calendar"
+    ]
+  },
+  {
+    "id": "projects-my-work",
+    "area": "projects",
+    "title": "My Work: tasks, reviews and blockers",
+    "keywords": [
+      "my work",
+      "my tasks",
+      "waiting for my review",
+      "review queue",
+      "blockers",
+      "blocked task",
+      "who can unblock",
+      "sent for review",
+      "overdue task",
+      "start a task",
+      "submit for review",
+      "mark done"
+    ],
+    "summary": "My Work keeps three things apart: My tasks (work you must do), Waiting for my review (work others sent you to accept or send back) and Blockers I can help clear (blocked tasks that name you, or that nobody is named on in a project you manage). Work you sent for review is listed separately as waiting on someone else. A task opens in a panel beside the list, so your search, filters and view stay.",
+    "steps": [
+      "Open My Work and choose My tasks, Waiting for my review or Blockers I can help clear.",
+      "Open a task. The top says where it stands, when it is due, what blocks it and who can unblock it.",
+      "Use the main button: Start, Send for review or Mark done on your own task; Accept and complete or Request changes on a review.",
+      "Add a comment on the task if something needs saying about that task.",
+      "Close the panel to return to the same list."
+    ],
+    "links": [
+      {
+        "label": "My Work",
+        "href": "/projects/work"
+      }
+    ],
+    "screens": [
+      "/projects/work"
+    ]
+  },
+  {
+    "id": "projects-work-page",
+    "area": "projects",
+    "title": "A project's Work page",
+    "keywords": [
+      "work page",
+      "what needs doing",
+      "next action",
+      "needs you",
+      "waiting on someone else",
+      "delivery summary",
+      "next milestone",
+      "site booking",
+      "equipment draft",
+      "import failed",
+      "waiting for warehouse",
+      "recent activity",
+      "project manager"
+    ],
+    "summary": "Work is where a project starts. What needs doing is first: under Needs you are blockers you can clear, reviews, your overdue tasks and, for the Project Manager, overdue milestones and equipment decisions; under Waiting on someone else is everything that is another person's step. Each line shows its owner and due date, or says that none is recorded. The Project Manager also gets a delivery summary: next milestone, next site booking and equipment.",
+    "steps": [
+      "Open the project. Work is the first tab.",
+      "Read Needs you and open a line to go to that task or record.",
+      "For equipment, the Project Manager opens Equipment to review a draft and submit it; nothing is submitted for you.",
+      "If the line says Import failed, press Import the handover equipment to try again, or open Equipment.",
+      "Use Recent activity and Go to for the timeline, files, dependencies and site bookings."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/work"
+    ]
+  },
+  {
+    "id": "projects-chat",
+    "area": "projects",
+    "title": "Project chat",
+    "keywords": [
+      "project chat",
+      "project discussion",
+      "discussion tab",
+      "message the project team",
+      "chat group",
+      "mention",
+      "unread messages",
+      "reply to the team",
+      "where is the discussion"
+    ],
+    "summary": "Each project has one group in Chat, named by the project's reference and name. It replaces the Discussion tab: the earlier messages are in the group. Everyone on the project's team is in it and can read and reply from any page with the Chat button; people who are not on the team do not see it. Type @ to mention a team member: they see a red marker on the Chat button. A finished project's conversation can be read but not added to. Comments about one task stay on that task.",
+    "steps": [
+      "Press the Chat button at the corner of any page and choose the project under Projects.",
+      "Or open the project and press Chat in its header.",
+      "Write your message; type @ and choose a name to mention someone.",
+      "An old Discussion link opens the same group."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/work",
+      "/projects/[id]/discussion"
+    ]
+  },
+  {
+    "id": "projects-handover",
+    "area": "projects",
+    "title": "Accept a Sales handover",
+    "keywords": [
+      "handover",
+      "accept handover",
+      "ask sales a question",
+      "clarification",
+      "delivery brief",
+      "project manager",
+      "assign project manager",
+      "new project from sales",
+      "handovers waiting"
+    ],
+    "summary": "When Sales wins a job, the handover comes to Projects. Handovers waiting on you are listed first, the longest wait at the top, however many older finished ones there are. My Day opens the exact brief. The brief starts with the agreed scope, the site and dates, the equipment, the dependencies and risks, and any question you already asked Sales.",
+    "steps": [
+      "Open the handover from My Day, or open Handovers.",
+      "Read the brief.",
+      "Press Accept handover to create the project with you as Project Manager; it opens on the project's Work page.",
+      "Or press Ask Sales a question; the handover goes back to Sales and you are told when they resubmit.",
+      "If you press Accept twice, the same project opens: a second one is never created."
+    ],
+    "links": [
+      {
+        "label": "Handovers",
+        "href": "/projects/handovers"
+      },
+      {
+        "label": "My Work",
+        "href": "/projects/work"
+      }
+    ],
+    "screens": [
+      "/projects/handovers"
     ]
   },
   {

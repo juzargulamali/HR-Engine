@@ -40,7 +40,7 @@ describe("jarvis.sales.help.answer: answers from reviewed guidance, reads nothin
   });
   it("modules JARVIS cannot act in (Projects, Inventory, People & HR) get guidance only: where to find it, no records read", async () => {
     w.readLog.length = 0;
-    for (const [q, id] of [["How do I request leave?", "people-leave"], ["How do I find equipment requests in the warehouse?", "inventory-where"], ["Where do I see my tasks in projects?", "projects-where"]] as const) {
+    for (const [q, id] of [["How do I request leave?", "people-leave"], ["How do I find equipment requests in the warehouse?", "inventory-where"], ["Where do I see my tasks in projects?", "projects-my-work"]] as const) {
       const c = cardOf(await ask(q));
       expect(c.entries.map((e) => e.id)).toContain(id);
     }
