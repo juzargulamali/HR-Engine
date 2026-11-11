@@ -85,11 +85,13 @@ export function handoverWaitsOnMe(h: { status: string; pm_user_id: string | null
 
 // ---- My Work: which tasks the table shows ---------------------------------------------------------------------------
 
-export const MY_WORK_SHOWS = ["mine", "team", "overdue", "review"] as const;
+export const MY_WORK_SHOWS = ["mine", "review", "blockers", "waiting", "overdue", "team"] as const;
 export type MyWorkShow = (typeof MY_WORK_SHOWS)[number];
-export const MY_WORK_LABELS: Record<MyWorkShow, string> = { mine: "My tasks", team: "My team", overdue: "Overdue", review: "Waiting for review" };
+export const MY_WORK_LABELS: Record<MyWorkShow, string> = {
+  mine: "My tasks", review: "Waiting for my review", blockers: "Blockers I can help clear", waiting: "Sent for review (waiting on someone else)", overdue: "Overdue", team: "My team",
+};
 
-/** Only the four known choices; "My team" is also refused (back to My tasks) for someone who leads nothing, whatever the address says. */
+/** Only the known choices; "My team" is also refused (back to My tasks) for someone who leads nothing, whatever the address says. */
 export function parseMyWorkShow(raw: string, canSeeTeam: boolean): MyWorkShow {
   const v = (MY_WORK_SHOWS as readonly string[]).includes(raw) ? (raw as MyWorkShow) : "mine";
   return v === "team" && !canSeeTeam ? "mine" : v;
@@ -99,6 +101,8 @@ export interface MyWorkSets<T> {
   mine: readonly T[];
   team: readonly T[];
   reviews: readonly T[];
+  blockers?: readonly T[];
+  waiting?: readonly T[];
 }
 
 /** The rows for the chosen filter. Overdue is the person's own open tasks whose due date is before today (plain dates). */
@@ -106,6 +110,8 @@ export function selectMyWorkRows<T extends { dueDate: string | null; open: boole
   switch (show) {
     case "team": return [...sets.team];
     case "review": return [...sets.reviews];
+    case "blockers": return [...(sets.blockers ?? [])];
+    case "waiting": return [...(sets.waiting ?? [])];
     case "overdue": return sets.mine.filter((t) => t.open && t.dueDate !== null && t.dueDate < today);
     default: return [...sets.mine];
   }

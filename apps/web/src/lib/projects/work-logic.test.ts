@@ -92,3 +92,24 @@ describe("My Work selection", () => {
     expect(narrowMyWork(rows, "zzz", "")).toEqual([]);
   });
 });
+
+import { MY_WORK_LABELS as LABELS, parseMyWorkShow as parseShow, selectMyWorkRows as selectRows } from "./work-logic";
+describe("My Work: three different kinds of attention", () => {
+  const row = (id: string, dueDate: string | null = null) => ({ id, dueDate, open: true });
+  const sets = { mine: [row("a", "2026-11-01"), row("b")], team: [row("t")], reviews: [row("r")], blockers: [row("x"), row("y")], waiting: [row("w")] };
+  it("My tasks, Waiting for my review and Blockers I can help clear are separate lists, and work sent for review is its own list", () => {
+    expect(selectRows(sets, "mine", "2026-11-11").map((r) => r.id)).toEqual(["a", "b"]);
+    expect(selectRows(sets, "review", "2026-11-11").map((r) => r.id)).toEqual(["r"]);
+    expect(selectRows(sets, "blockers", "2026-11-11").map((r) => r.id)).toEqual(["x", "y"]);
+    expect(selectRows(sets, "waiting", "2026-11-11").map((r) => r.id)).toEqual(["w"]);
+    expect(selectRows(sets, "overdue", "2026-11-11").map((r) => r.id)).toEqual(["a"]);
+    expect(LABELS.blockers).toBe("Blockers I can help clear");
+    expect(LABELS.waiting).toMatch(/waiting on someone else/);
+  });
+  it("the team view stays for people who lead something and is refused for everyone else", () => {
+    expect(parseShow("team", true)).toBe("team");
+    expect(parseShow("team", false)).toBe("mine");
+    expect(parseShow("blockers", false)).toBe("blockers");
+    expect(parseShow("nonsense", true)).toBe("mine");
+  });
+});

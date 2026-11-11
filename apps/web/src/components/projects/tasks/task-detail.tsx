@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { OsPill } from "@/components/os/pills";
 import { BlockedBadge, PriorityBadge, TaskStatusBadge } from "@/components/projects/badges";
@@ -9,41 +8,47 @@ import { dateText, formatDateTime } from "@/lib/projects/format";
 import type { ProjectView } from "@/lib/projects/data";
 import { describeTaskEvent } from "@/app/(app)/projects/[id]/work/helpers";
 import { TaskActionsMenu } from "./task-actions-menu";
-import { TaskAssigneeControl, TaskDueControl, TaskStatusControl } from "./task-controls";
+import { TaskAssigneeControl, TaskDueControl, TaskPrimaryAction, TaskStatusControl } from "./task-controls";
 import { CommentForm } from "./task-forms";
 import type { TaskDetailData } from "./task-detail-data";
 import { toControlRow } from "./task-table";
-import { defaultUnblocker } from "./task-logic";
+import { defaultUnblocker, nextStep, primaryMoves } from "./task-logic";
+import { cn } from "@/lib/utils";
 
 /**
- * One task, shown the same way in the side panel and on its own page: the status, who and when at a glance (each editable only by
- * the people who may), the rarer actions under "More", then details, dependencies, history and comments. `taskHref` says how a
+ * One task, shown the same way in the side panel and on its own page. First the next step (status, due date, blocker and who can clear it, and the main button for this person);
+ * then the description, status / assignee / due (each editable only by the people who may) with the rarer actions under "More"; then comments, details, dependencies and history. `taskHref` says how a
  * related task is opened (in the panel, or as its own page).
  */
 export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData; view: ProjectView; taskHref: (taskId: string) => string }) {
   const { task, row } = data;
   const fmtDay = (d: string | null) => (d ? dateText(d) : "no date");
   const control = toControlRow(row);
+  const main = data.readOnly ? [] : primaryMoves(row);
+  const step = nextStep({
+    status: task.status, requiresReview: task.requires_review, blocked: !!task.blocked_at, blockedReason: task.blocked_reason, unblockOwnerName: task.unblock_owner_id ? view.nameOf(task.unblock_owner_id) : null,
+    unblockAction: task.unblock_action, role: data.role, viewerIsAssignee: task.assignee_id === data.viewerId, viewerIsUnblocker: !!task.blocked_at && task.unblock_owner_id === data.viewerId,
+    readOnly: data.readOnly, pmName: view.pmName, open: row.open,
+  });
   const asLink = (id: string, children: React.ReactNode) =>
     taskHref(id).includes("?") ? <PanelLink href={taskHref(id)} className="underline-offset-4 hover:underline">{children}</PanelLink> : <Link href={taskHref(id)} className="underline-offset-4 hover:underline">{children}</Link>;
   return (
     <div className="space-y-5">
-      <div>
+      {/* First: where it stands, when it is due, what blocks it and who can clear that, and the one thing THIS person can do next. */}
+      <section aria-label="Next step" className={cn("rounded-md border p-3", task.blocked_at ? "border-destructive/50 bg-destructive/5" : step.forViewer ? "border-primary/50 bg-primary/5" : "border-border")} data-testid="task-next-step">
         <div className="flex flex-wrap items-center gap-2">
           <TaskStatusBadge status={task.status} />
           {task.blocked_at ? <BlockedBadge /> : null}
           <PriorityBadge priority={task.priority} />
           {task.requires_review ? <OsPill tone="blue">Needs review</OsPill> : null}
+          <span className={cn("text-sm", row.due.overdue ? "font-medium text-destructive" : "text-muted-foreground")}>{task.due_date ? `Due ${row.due.text}` : "No due date recorded"}</span>
         </div>
-        {task.description ? <p className="mt-2 whitespace-pre-wrap text-sm">{task.description}</p> : <Muted className="mt-2">No description.</Muted>}
-      </div>
+        <p className="mt-2 text-sm font-medium" data-testid="task-next-step-text">{step.text}</p>
+        {task.blocked_at ? <p className="mt-0.5 text-[13px] text-muted-foreground">Blocked since {formatDateTime(task.blocked_at)}.{data.canUnblock ? " You can clear the blocker under More." : ""}</p> : null}
+        {main.length > 0 ? <div className="mt-2.5"><TaskPrimaryAction row={control} moves={main} /></div> : null}
+      </section>
 
-      {task.blocked_at ? (
-        <Alert variant="destructive" role="status">
-          <p className="font-medium">Blocked since {formatDateTime(task.blocked_at)}: {task.blocked_reason}</p>
-          <p className="mt-1">To unblock: {[task.unblock_owner_id ? view.nameOf(task.unblock_owner_id) : null, task.unblock_action].filter(Boolean).join(" · ") || "not stated"}.</p>
-        </Alert>
-      ) : null}
+      {task.description ? <p className="whitespace-pre-wrap text-sm">{task.description}</p> : <Muted>No description.</Muted>}
 
       <div className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-border p-3">
         <dl className="grid min-w-0 flex-1 gap-x-6 gap-y-3 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.1fr)]">
@@ -72,13 +77,22 @@ export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData;
           milestones={data.milestones}
         />
       </div>
-      {data.role === null ? (
-        <Muted>{data.readOnly ? "This project is completed, so its tasks are read-only. A founder can reopen it." : "Only the assignee, the department head or the Project Manager can change this task. You can comment."}</Muted>
-      ) : task.requires_review && task.status === "ready_for_review" && task.assignee_id === data.viewerId ? (
-        <Muted>This task needs review. A department head or the Project Manager accepts it; you cannot complete your own reviewed work.</Muted>
-      ) : task.blocked_at && row.open && !task.requires_review ? (
-        <Muted>Clear the blocker before marking it done.</Muted>
-      ) : null}
+      <Panel title={`Comments (${data.comments.length})`} description="About this task only. The project's conversation is in Chat; formal changes are in History.">
+        {data.comments.length === 0 ? (
+          <Muted className="mb-4">No comments yet.</Muted>
+        ) : (
+          <ul className="mb-4 space-y-3">
+            {data.comments.map((c) => (
+              <li key={c.id} className="rounded-md border border-border p-3">
+                <p className="whitespace-pre-wrap text-sm">{c.body}</p>
+                <p className="mt-1 text-[13px] text-muted-foreground">{view.nameOf(c.author_id)} · {formatDateTime(c.created_at)}{c.edited_at ? " · edited" : ""}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+        {data.readOnly ? <Muted>This project is read-only.</Muted> : <CommentForm projectId={view.project.id} taskId={task.id} />}
+      </Panel>
+
 
       <Panel title="Details">
         <dl className="grid gap-4 sm:grid-cols-2">
@@ -97,22 +111,6 @@ export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData;
           <DependencyList heading="Depends on" ids={data.dependsOn} tasksById={data.tasksById} empty="Does not depend on another task." link={asLink} />
           <DependencyList heading="Waiting on this one" ids={data.blocks} tasksById={data.tasksById} empty="No task depends on this one." link={asLink} />
         </div>
-      </Panel>
-
-      <Panel title={`Comments (${data.comments.length})`}>
-        {data.comments.length === 0 ? (
-          <Muted className="mb-4">No comments yet.</Muted>
-        ) : (
-          <ul className="mb-4 space-y-3">
-            {data.comments.map((c) => (
-              <li key={c.id} className="rounded-md border border-border p-3">
-                <p className="whitespace-pre-wrap text-sm">{c.body}</p>
-                <p className="mt-1 text-[13px] text-muted-foreground">{view.nameOf(c.author_id)} · {formatDateTime(c.created_at)}{c.edited_at ? " · edited" : ""}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-        {data.readOnly ? <Muted>This project is read-only.</Muted> : <CommentForm projectId={view.project.id} taskId={task.id} />}
       </Panel>
 
       <Panel title="History" description="Reassignments, date changes with their reasons, status changes and blockers. Nothing here can be edited.">

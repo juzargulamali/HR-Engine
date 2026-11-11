@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Pencil } from "lucide-react";
 import { reassignProjectTask, setProjectTaskStatus } from "@/lib/actions/projectsDelivery";
 import { Alert } from "@/components/ui/alert";
@@ -10,6 +11,7 @@ import { TASK_STATUS_LABELS, type TaskStatus } from "@enginious-hr/domain";
 import { OsChoiceMenu, type OsChoice } from "@/components/os/choice-menu";
 import { statusTone, TaskStatusBadge } from "@/components/projects/badges";
 import { DueDateForm, StatusMoveForm } from "./task-forms";
+import { Button } from "@/components/ui/button";
 import type { TaskMoveSpec } from "./task-logic";
 
 /** The few fields of a row the controls need (plain data, so it can cross from the server page to the browser). */
@@ -119,5 +121,42 @@ export function TaskAssigneeControl({ row }: { row: ControlRow }) {
         return { error: r.error };
       }}
     />
+  );
+}
+
+/**
+ * The task's main button(s): the moves the page worked out as the next step for THIS person (see primaryMoves). A plain move is saved at once; one that needs a reason or a
+ * decision opens the same small form the Status control uses. The action and the database decide again whether it is allowed.
+ */
+export function TaskPrimaryAction({ row, moves }: { row: ControlRow; moves: TaskMoveSpec[] }) {
+  const router = useRouter();
+  const [dialog, setDialog] = useState<TaskMoveSpec | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  if (moves.length === 0) return null;
+  const run = (m: TaskMoveSpec) => {
+    setError(null);
+    if (m.mode === "dialog") { setDialog(m); return; }
+    start(async () => {
+      try {
+        const r = await saveMove(row, m.to);
+        if (r.error) setError(r.error); else router.refresh();
+      } catch { setError("The change could not be saved. Check your connection and try again."); }
+    });
+  };
+  return (
+    <div data-testid="task-primary-action">
+      <div className="flex flex-wrap gap-2">
+        {moves.map((m, i) => (
+          <Button key={`${m.to}-${m.label}`} type="button" variant={i === 0 ? "default" : "outline"} disabled={pending} onClick={() => run(m)} className="min-h-10">
+            {pending && m.mode === "direct" ? "Saving…" : m.label}
+          </Button>
+        ))}
+      </div>
+      {error ? <Alert variant="destructive" role="alert" className="mt-2">{error}</Alert> : null}
+      <Modal open={dialog !== null} onClose={() => setDialog(null)} title={dialog?.label ?? ""}>
+        {dialog ? <StatusMoveForm projectId={row.projectId} taskId={row.id} version={row.version} move={dialog} taskTitle={row.title} onDone={() => setDialog(null)} /> : null}
+      </Modal>
+    </div>
   );
 }
