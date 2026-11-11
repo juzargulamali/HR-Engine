@@ -5,7 +5,7 @@ import { formatDateTime } from "./format";
 
 // Early stages are plain, work in progress is blue, a decision is teal, a pause is amber; won is green and lost is quiet. The words always say the stage.
 const STAGE_TONE: Record<string, OsTone> = {
-  new: "neutral", qualified: "cyan", proposal_prep: "blue", proposal_sent: "blue", quote_sent: "blue", negotiation: "cyan",
+  new: "neutral", qualified: "cyan", proposal_prep: "blue", proposal_sent: "blue", estimate_sent: "blue", quote_sent: "blue", negotiation: "cyan",
   on_hold: "amber", won: "green", lost: "quiet",
 };
 

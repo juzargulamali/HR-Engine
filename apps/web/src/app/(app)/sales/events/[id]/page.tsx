@@ -13,7 +13,7 @@ import { formatDate, todayInDubai } from "@/components/sales/format";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadEvent, loadOrgChoices, type EventOrg, type OrgChoiceRow } from "@/lib/crm/events/data";
 import {
-  AGENCY_ROLE_LABEL, buildExhibitorGrid, countEnquiries, dateRangeText, editionLabel, editionPhase, enquiriesByEdition, EVENT_KIND_LABEL, observationLine, outreachLeads, PHASE_LABEL, placeText, sortLeads,
+  addEditionLabel, AGENCY_ROLE_LABEL, buildExhibitorGrid, countEnquiries, dateRangeText, editionLabel, editionPhase, enquiriesByEdition, EVENT_KIND_LABEL, observationLine, outreachLeads, PHASE_LABEL, placeText, sortLeads,
   type ExhibitorCell, type ObservationLite,
 } from "@/lib/crm/events/model";
 import { countryLabel } from "@/lib/crm/clients-agencies/normalise";
@@ -122,7 +122,7 @@ export default async function EventPage({ params, searchParams }: { params: Prom
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {live.length > 0 ? <RecordObservationButton editions={editionChoices} orgs={orgsForForm} editionId={selected && !selected.archived_at ? selected.id : undefined} /> : null}
-          {!event.archived_at ? <EditionButton eventId={event.id} label="Add next edition" variant="outline" /> : null}
+          {!event.archived_at ? <EditionButton eventId={event.id} label={addEditionLabel(editions.length)} variant="outline" /> : null}
           <EditEventButton values={{ id: event.id, name: event.name, kind: event.kind, website: event.website ?? "", note: event.note ?? "" }} />
           {!event.archived_at ? <ArchiveButton kind="event" id={event.id} name={event.name} /> : null}
         </div>
@@ -147,7 +147,7 @@ export default async function EventPage({ params, searchParams }: { params: Prom
       <Card>
         <CardHeader className="pb-2"><CardTitle>Editions</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          {editions.length === 0 ? <p className="text-sm text-muted-foreground">No edition yet. Add the first one with “Add next edition”.</p> : (
+          {editions.length === 0 ? <p className="text-sm text-muted-foreground">No edition yet. Add the first one with “Add first edition”.</p> : (
             <>
               <p className="text-sm text-muted-foreground">Enquiries linked to each edition, for <strong>{scope.label}</strong> (counted from the enquiries, never typed in; open = not won or lost, closed = won or lost). Enquiries of a company you cannot access are never counted.</p>
               <div className="relative overflow-x-auto">

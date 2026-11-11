@@ -10,7 +10,8 @@ export function buildEnquiryActions(view: OppView): EnquiryActionsProps {
   const { opp, detail, canEdit, isActive, isHold, isOpen, isWon } = view;
   const hasSentProposal = detail.proposals.some((p) => p.status === "sent" || p.status === "accepted");
   const hasQuoteRef = !!detail.zoho?.quote_ref?.trim();
-  const moveOptions = canEdit && isActive ? crmAllowedMoves(opp.stage).map((to) => ({ id: to, label: crmStageLabel(to), requirement: stageMoveRequirement(to, { hasSentProposal, hasQuoteRef }) })) : null;
+  const hasSentEstimate = detail.estimateSends.length > 0;
+  const moveOptions = canEdit && isActive ? crmAllowedMoves(opp.stage).map((to) => ({ id: to, label: crmStageLabel(to), requirement: stageMoveRequirement(to, { hasSentProposal, hasQuoteRef, hasSentEstimate }) })) : null;
   const availability = detail.item.availability;
   return {
     opportunityId: opp.id,

@@ -1,7 +1,8 @@
 import { canAssignOwner, canManageCrmSettings, isCrmFounder } from "@enginious-hr/domain";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadOrganisations } from "@/lib/crm/data";
-import { loadEditionOptions, type EditionOption } from "@/lib/crm/events/data";
+import { loadEditionPicker, type EditionOption } from "@/lib/crm/events/data";
+import type { EventChoice } from "@/lib/crm/events/model";
 import { todayInDubai } from "./format";
 import { QuickAddEnquiryForm } from "./quick-add-enquiry-form";
 
@@ -23,8 +24,9 @@ export async function QuickAddEnquiry() {
   }
   // The editions are optional: if they cannot be read the form still works and says so next to the Event field.
   let editions: EditionOption[] = [];
+  let events: EventChoice[] = [];
   let editionsFailed = false;
-  try { editions = await loadEditionOptions(); } catch (e) { console.error("[crm] quick add: editions load failed", e); editionsFailed = true; }
+  try { ({ editions, events } = await loadEditionPicker()); } catch (e) { console.error("[crm] quick add: editions load failed", e); editionsFailed = true; }
   return (
     <QuickAddEnquiryForm
       companies={ctx.companies.map((c) => ({
@@ -38,6 +40,7 @@ export async function QuickAddEnquiry() {
       }))}
       organisations={organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, roles: o.roles, place: o.place, country: o.country_code, website: o.website }))}
       editions={editions}
+      events={events}
       editionsFailed={editionsFailed}
       currentUserId={ctx.userId}
       currentUserName={ctx.fullName ?? "Me"}

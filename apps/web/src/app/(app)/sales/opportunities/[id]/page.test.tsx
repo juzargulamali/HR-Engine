@@ -31,7 +31,7 @@ let failedSections: string[] = [];
 let followUps: unknown[] = [{ id: "f1", status: "open", title: "Call", due_at: new Date().toISOString(), assigned_to: "u1", kind: "call" }];
 const detail = () => ({
   item: { opp, value: 100, companyName: "Enginious UAE", ownerName: "Sales Owner", agency: null, client: { id: "org1", name: "Orbit" }, nextFollowUp: (followUps[0] ?? null), openFollowUps: followUps.length, availability: "unverified" },
-  contacts: [], activities: [], followUps, events: [], files: [], proposals: [], zoho: null, approvals: [], handover: null, closures: [],
+  contacts: [], activities: [], followUps, events: [], files: [], proposals: [], zoho: null, approvals: [], handover: null, closures: [], estimateSends: [], estimateSendsInstalled: true,
 });
 vi.mock("@/lib/crm/data", () => ({
   loadOpportunityDetailResult: async () => (outcome.kind === "ok" ? { kind: "ok", failed: new Set(failedSections), detail: detail() } : outcome),

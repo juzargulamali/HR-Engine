@@ -5,7 +5,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 const rpc = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc }) }));
 
-import { archiveEdition, archiveEvent, removeObservation, saveEdition, saveEvent, saveObservation, setOpportunityEdition, setOutreachPriority } from "./events";
+import { archiveEdition, archiveEvent, removeObservation, saveEdition, saveEvent, saveEventEdition, saveObservation, setOpportunityEdition, setOutreachPriority } from "./events";
 
 const A = "11111111-1111-4111-8111-111111111111"; // edition
 const B = "22222222-2222-4222-8222-222222222222"; // exhibitor
@@ -105,5 +105,36 @@ describe("linking an enquiry to an edition", () => {
     await setOpportunityEdition(B, null, 4);
     expect(calls("crm_set_opportunity_edition")).toEqual([{ p_id: B, p_edition: A, p_expected_version: 3 }, { p_id: B, p_edition: null, p_expected_version: 4 }]);
     expect((await setOpportunityEdition("nope", A, 1)).error).toMatch(/Missing/);
+  });
+});
+
+describe("event with its first edition (one save)", () => {
+  const form = { name: " Fictional Tech Week ", kind: "conference", start: "2027-03-30", end: "2027-04-02", city: "Riyadh", country: "sa", venue: "Fictional Hall" };
+  it("adds a NEW event and its first edition through the one atomic function, never as two saves", async () => {
+    rpc.mockResolvedValue({ data: { event_id: E, edition_id: A }, error: null });
+    expect(await saveEventEdition({ error: null }, fd(form))).toEqual({ error: null, id: E, editionId: A });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(calls("crm_add_event_with_edition")[0]).toEqual({ p_name: "Fictional Tech Week", p_kind: "conference", p_start: "2027-03-30", p_end: "2027-04-02", p_city: "Riyadh", p_country: "SA", p_venue: "Fictional Hall", p_website: null, p_event_note: null, p_edition_note: null });
+  });
+  it("adds an edition to an EXISTING event through the existing edition function", async () => {
+    rpc.mockResolvedValue({ data: A, error: null });
+    expect(await saveEventEdition({ error: null }, fd({ eventId: E, start: "2028-10-09", end: "2028-10-13" }))).toEqual({ error: null, id: E, editionId: A });
+    expect(calls("crm_save_edition")[0]).toEqual({ p_id: null, p_event: E, p_start: "2028-10-09", p_end: "2028-10-13", p_city: null, p_country: null, p_venue: null, p_note: null });
+    expect(calls("crm_add_event_with_edition")).toEqual([]);
+  });
+  it("checks both parts before the database: no name, an end before the start, a bad country", async () => {
+    expect((await saveEventEdition({ error: null }, fd({ ...form, name: " " }))).error).toMatch(/event name/);
+    expect((await saveEventEdition({ error: null }, fd({ ...form, end: "2027-03-01" }))).error).toMatch(/end date/);
+    expect((await saveEventEdition({ error: null }, fd({ ...form, country: "U1" }))).error).toMatch(/two-letter/);
+    expect((await saveEventEdition({ error: null }, fd({ ...form, start: "" }))).error).toMatch(/valid date/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("a refusal is shown in words and is never retried as two separate saves; a database without the function says so", async () => {
+    rpc.mockResolvedValue({ data: null, error: { message: "An event with that name already exists. Open it and add the next edition instead." } });
+    expect((await saveEventEdition({ error: null }, fd(form))).error).toMatch(/already exists/);
+    rpc.mockResolvedValue({ data: null, error: { message: "Could not find the function public.crm_add_event_with_edition(p_city, p_country) in the schema cache" } });
+    expect((await saveEventEdition({ error: null }, fd(form))).error).toMatch(/not available yet.*Nothing was saved/);
+    expect(calls("crm_save_event")).toEqual([]);
+    expect(calls("crm_save_edition")).toEqual([]);
   });
 });

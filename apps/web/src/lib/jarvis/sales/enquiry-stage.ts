@@ -6,7 +6,7 @@ import { JarvisRefusalError, type GenericResult, type JarvisActionDefinition, ty
 import { enquiryRef, isOwnerOrFounder, LOOKUP_WORDS, readEnquiry, type EnquiryRow } from "./enquiry-read";
 import { proofRpcArgs } from "../token";
 import { rpcOutcome } from "./rpc-outcome";
-import { CLOSING_WORDS, NEVER_THROUGH_JARVIS, stageFromText, transitionsFrom, type Evidence } from "./stage-transitions";
+import { CLOSING_WORDS, ESTIMATE_SENT_NOT_THROUGH_JARVIS, NEVER_THROUGH_JARVIS, stageFromText, transitionsFrom, type Evidence } from "./stage-transitions";
 
 export const CHANGE_STAGE_ID = "jarvis.sales.enquiry.change_stage";
 
@@ -47,14 +47,14 @@ async function build(ctx: JarvisContext, e: EnquiryRow, to: string | null, extra
   if (extraProblem) problems.push({ field: "to", message: extraProblem });
   let values: StageValues | null = null;
   const chosen = to ? transitions.find((t) => t.to === to) : undefined;
-  if (to && !chosen) problems.push({ field: "to", message: to === e.stage ? "The enquiry is already at that stage." : "JARVIS cannot move an enquiry to that stage." });
+  if (to && !chosen) problems.push({ field: "to", message: to === e.stage ? "The enquiry is already at that stage." : to === "estimate_sent" ? ESTIMATE_SENT_NOT_THROUGH_JARVIS : "JARVIS cannot move an enquiry to that stage." });
   else if (chosen && !chosen.enabled) problems.push({ field: "to", message: chosen.reason ?? "That move is not available." });
   else if (chosen) values = { companyId: ctx.companyId, enquiryId: e.id, from: e.stage, to: chosen.to };
   if (!to && !extraProblem) problems.push({ field: "to", message: "Choose the stage to move it to." });
   const evidence: EnquiryStageCard["evidence"] = [];
   if (to === "proposal_sent") evidence.push({ label: "A proposal recorded as sent", met: ev.proposalSent === "unknown" ? null : ev.proposalSent, text: ev.proposalSent === true ? "A proposal is recorded as sent." : ev.proposalSent === "unknown" ? "Could not be checked." : "None is recorded." });
   if (to === "quote_sent") evidence.push({ label: "The Zoho Books quote reference", met: ev.zohoQuoteRef === "unknown" ? null : ev.zohoQuoteRef, text: ev.zohoQuoteRef === true ? "The quote reference is recorded." : ev.zohoQuoteRef === "unknown" ? "Could not be checked." : "None is recorded." });
-  if (to && to !== "proposal_sent" && to !== "quote_sent") evidence.push({ label: "Evidence", met: true, text: "This move needs no extra evidence." });
+  if (to && to !== "proposal_sent" && to !== "quote_sent" && to !== "estimate_sent") evidence.push({ label: "Evidence", met: true, text: "This move needs no extra evidence." });
   const c: EnquiryStageCard = {
     kind: "enquiry.stage", enquiry: { ...enquiryRef(e), version: e.version ?? 1 }, from: e.stage, fromLabel: crmStageLabel(e.stage),
     to: values ? values.to : to, toLabel: to ? crmStageLabel(to) : null, transitions, evidence, effects: EFFECTS, values, problems, valid: !!values && problems.length === 0,

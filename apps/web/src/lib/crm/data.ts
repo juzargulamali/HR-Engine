@@ -3,7 +3,7 @@ import { availabilityDisplay, type AvailabilityDisplay } from "@enginious-hr/dom
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
-  CrmActivityRow, CrmApprovalRow, CrmClosureRow, CrmContactRow, CrmFileRow, CrmFollowUpRow, CrmHandoverRow, CrmOpportunityEventRow,
+  CrmActivityRow, CrmApprovalRow, CrmClosureRow, CrmEstimateSendRow, CrmContactRow, CrmFileRow, CrmFollowUpRow, CrmHandoverRow, CrmOpportunityEventRow,
   CrmOpportunityRow, CrmOrganisationRow, CrmProposalRow, CrmReminderRow, CrmZohoReferenceRow,
 } from "@/types/crm";
 import type { CrmContext } from "./context";
@@ -95,10 +95,14 @@ export interface OpportunityDetail {
   handover: CrmHandoverRow | null;
   /** Every Won/Lost the opportunity has had, newest first; a reopened one is kept with who reopened it and why. */
   closures: CrmClosureRow[];
+  /** Estimates of this enquiry that were explicitly recorded as sent to the client (newest first). Empty when none, when the read failed (see `failed`) or when the database does not have the feature yet. */
+  estimateSends: CrmEstimateSendRow[];
+  /** False only when the database has no record of sent estimates at all (its migration is not applied): the action is then not offered. */
+  estimateSendsInstalled: boolean;
 }
 
 /** The parts of the enquiry page that can fail on their own (the enquiry itself and the names of its parties are not among them: if those fail there is no page). */
-export type DetailSection = "contacts" | "activities" | "followUps" | "events" | "files" | "proposals" | "zoho" | "approvals" | "handover" | "closures";
+export type DetailSection = "contacts" | "activities" | "followUps" | "events" | "files" | "proposals" | "zoho" | "approvals" | "handover" | "closures" | "estimateSends";
 
 /**
  * What reading one enquiry can end in, four different things that must never look alike:
@@ -113,6 +117,8 @@ export type OpportunityDetailResult =
   | { kind: "denied" }
   | { kind: "error" };
 
+/** The data service or the database saying the table itself is not there. */
+const isMissingTable = (e: { code?: string; message?: string }) => e.code === "42P01" || e.code === "PGRST205" || /could not find the table|relation .* does not exist/i.test(e.message ?? "");
 const isDenied = (e: { code?: string; message?: string }) => e.code === "42501" || /permission denied|row-level security/i.test(e.message ?? "");
 
 export async function loadOpportunityDetailResult(ctx: CrmContext, id: string): Promise<OpportunityDetailResult> {
@@ -126,7 +132,7 @@ export async function loadOpportunityDetailResult(ctx: CrmContext, id: string): 
     }
     const opp = oppRes.data;
     if (!opp) return { kind: "not_found" };
-    const [orgs, links, acts, fus, evs, files, props, zoho, appr, hand, clos] = await Promise.all([
+    const [orgs, links, acts, fus, evs, files, props, zoho, appr, hand, clos, sends] = await Promise.all([
       supabase.from("crm_organisations").select("*").in("id", [opp.agency_org_id, opp.client_org_id].filter((x): x is string => !!x)),
       supabase.from("crm_opportunity_contacts").select("contact_id, role").eq("opportunity_id", id),
       supabase.from("crm_activities").select("*").eq("opportunity_id", id).order("occurred_at", { ascending: false }),
@@ -138,6 +144,8 @@ export async function loadOpportunityDetailResult(ctx: CrmContext, id: string): 
       supabase.from("crm_approvals").select("*").eq("opportunity_id", id).order("requested_at", { ascending: false }),
       supabase.from("crm_handovers").select("*").eq("opportunity_id", id).maybeSingle(),
       supabase.from("crm_closures").select("*").eq("opportunity_id", id).order("closed_at", { ascending: false }),
+      // Not in the generated types (like the estimate tables); read through the person's own session.
+      (supabase as unknown as SupabaseClient).from("crm_estimate_sends").select("*").eq("opportunity_id", id).order("recorded_at", { ascending: false }),
     ]);
     // The parties' names are part of the page header ("No client recorded" would be a lie), so without them there is no page.
     if (orgs.error) {
@@ -150,6 +158,9 @@ export async function loadOpportunityDetailResult(ctx: CrmContext, id: string): 
     };
     note("activities", acts); note("followUps", fus); note("events", evs); note("files", files); note("proposals", props);
     note("zoho", zoho); note("approvals", appr); note("handover", hand); note("closures", clos); note("contacts", links);
+    // A database without the table (the Estimate sent migration is not applied yet) is a known state, not a failed read: there are no records and the action is not offered.
+    const sendsMissing = !!sends.error && isMissingTable(sends.error);
+    if (!sendsMissing) note("estimateSends", sends);
     const orgBy = new Map((orgs.data ?? []).map((o) => [o.id, o]));
     const open = (fus.data ?? []).filter((f) => f.status === "open");
     const nextBy = new Map<string, CrmFollowUpRow>();
@@ -182,6 +193,8 @@ export async function loadOpportunityDetailResult(ctx: CrmContext, id: string): 
       approvals: appr.data ?? [],
       handover: hand.data ?? null,
       closures: clos.data ?? [],
+      estimateSends: sendsMissing ? [] : ((sends.data ?? []) as CrmEstimateSendRow[]),
+      estimateSendsInstalled: !sendsMissing,
     };
     return { kind: "ok", detail, failed };
   } catch (e) {

@@ -1,7 +1,7 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import type { CrmEventEditionRow, CrmEventRow, CrmObservationRow, CrmOrganisationRow } from "@/types/crm";
-import { editionLabel, type LinkedEnquiry } from "./model";
+import { editionLabel, type EventChoice, type LinkedEnquiry } from "./model";
 
 /** A failed query must surface as an error (the page says "could not load"), never as "no data". */
 function ok(...results: { error?: { message: string } | null }[]): void {
@@ -70,13 +70,21 @@ export interface EditionOption { id: string; label: string; detail: string; arch
  * shows and can be cleared or changed). Read through the viewer's session; shared by every company.
  */
 export async function loadEditionOptions(keep: string | null = null): Promise<EditionOption[]> {
+  return (await loadEditionPicker(keep)).editions;
+}
+
+/**
+ * What the Event / Exhibition field of an enquiry needs: the editions to choose from (as loadEditionOptions) and the live events (A to Z, with how many editions
+ * each has), so a missing event or edition can be added from the field. One read of each table. Throws when a read fails.
+ */
+export async function loadEditionPicker(keep: string | null = null): Promise<{ editions: EditionOption[]; events: EventChoice[] }> {
   const supabase = await createClient();
   const [events, editions] = await Promise.all([
     readAll<Pick<CrmEventRow, "id" | "name" | "archived_at">>((a, b) => supabase.from("crm_events").select("id, name, archived_at").order("id").range(a, b)),
     readAll<CrmEventEditionRow>((a, b) => supabase.from("crm_event_editions").select("*").order("id").range(a, b)),
   ]);
   const byEvent = new Map(events.map((e) => [e.id, e]));
-  return editions
+  const options = editions
     .filter((d) => d.id === keep || (!d.archived_at && byEvent.get(d.event_id) && !byEvent.get(d.event_id)!.archived_at))
     .flatMap((d) => {
       const e = byEvent.get(d.event_id);
@@ -84,6 +92,10 @@ export async function loadEditionOptions(keep: string | null = null): Promise<Ed
     })
     .sort((a, b) => b.start.localeCompare(a.start) || a.label.localeCompare(b.label))
     .map(({ start: _start, ...o }) => o);
+  const count = new Map<string, number>();
+  for (const d of editions) count.set(d.event_id, (count.get(d.event_id) ?? 0) + 1);
+  const choices = events.filter((e) => !e.archived_at).map((e) => ({ id: e.id, name: e.name, editions: count.get(e.id) ?? 0 })).sort((a, b) => a.name.localeCompare(b.name));
+  return { editions: options, events: choices };
 }
 
 /** The label and event of one edition, for an enquiry that is linked to it. null = not readable (never a guess). */

@@ -337,6 +337,19 @@ export type CrmApprovalRow = {
   instruction: string | null;
 }
 
+/** One "this estimate revision was sent to the client" record (migration 20261228000100). Written only by crm_record_estimate_sent. */
+export type CrmEstimateSendRow = {
+  id: string;
+  proposal_id: string;
+  opportunity_id: string;
+  company_id: string;
+  reference: string;
+  revision: number;
+  sent_on: string;
+  recorded_by: string;
+  recorded_at: string;
+};
+
 export type CrmClosureRow = {
   id: string;
   opportunity_id: string;

@@ -52,7 +52,7 @@ export async function ProposalsPanel({ view }: { view: OppView }) {
                     {p.id === latestSentId ? <Badge variant="outline">Latest sent</Badge> : null}
                   </div>
                   {p.note ? <p className="break-words text-sm">{estimate ? estimateNoteText(p.note) : p.note}</p> : null}
-                  {estimate ? <p className="text-sm"><Link href={`/sales/opportunities/${opp.id}/quotations/${p.id}`} className="underline-offset-2 hover:underline">Open the estimate</Link> <span className="text-muted-foreground">· an estimate is not recorded as sent</span></p> : null}
+                  {estimate ? <p className="text-sm"><Link href={`/sales/opportunities/${opp.id}/quotations/${p.id}`} className="underline-offset-2 hover:underline">Open the estimate</Link> <span className="text-muted-foreground">· an estimate is recorded as sent on the Estimates tab, not here</span></p> : null}
                   <p className="break-words text-sm text-muted-foreground">
                     {file ? `Document: ${fileDisplayName(file)}` : "No document linked"} · added by {ctx.personName(p.created_by)} on {formatDate(p.created_at)}
                     {p.sent_on ? ` · recorded as sent on ${formatDate(p.sent_on)}` : ""}

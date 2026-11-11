@@ -10,12 +10,12 @@ Approved, staff-facing guidance. JARVIS answers "how do I" questions from the to
 - links: Enquiries -> /sales/opportunities; Follow-ups -> /sales/follow-ups; Clients & Agencies -> /sales/accounts; Reports -> /sales/reports
 - screens: /sales
 
-Sales & CRM follows each enquiry from the first message to the handover. An enquiry moves through the stages New enquiry, Qualified, Proposal preparation, Proposal sent, Quote sent and Negotiation, and ends as Won or Lost. Every open enquiry keeps one next action, so Follow-ups always shows what to do next. A won enquiry is handed over to the project team; winning it does not by itself mean the project was delivered.
+Sales & CRM follows each enquiry from the first message to the handover. An enquiry moves through the stages New enquiry, Qualified, Proposal preparation, Proposal sent or Estimate sent, Quote sent and Negotiation, and ends as Won or Lost. Every open enquiry keeps one next action, so Follow-ups always shows what to do next. A won enquiry is handed over to the project team; winning it does not by itself mean the project was delivered.
 
 1. Add the enquiry in Enquiries (title, source, agency or end client, and the next action with its date).
 2. Work it from Follow-ups: log each call, email or meeting on the enquiry and plan the next step.
-3. Move it to the next stage as it progresses. Proposal sent needs a proposal recorded as sent; Quote sent needs the Zoho Books quote reference.
-4. Build the estimate from the enquiry when a price is needed. Prices stay in the Estimate screen.
+3. Move it to the next stage as it progresses. Proposal sent needs a proposal recorded as sent; Estimate sent needs an estimate recorded as sent; Quote sent needs the Zoho Books quote reference.
+4. Build the estimate from the enquiry when a price is needed. Prices stay in the Estimate screen. After you send it to the client, record it as sent on the Estimates tab.
 5. Mark it Won or Lost from the enquiry page, then complete the handover for a won enquiry. Reports shows the pipeline and results for your company.
 
 ## See your overdue follow-ups
@@ -78,7 +78,7 @@ JARVIS can draft the scope wording for an estimate: line descriptions, quantitie
 - id: sales-add-enquiry
 - area: sales
 - status: published
-- keywords: add enquiry; new enquiry; create enquiry; add an enquiry; create an enquiry; log an enquiry; new inquiry; add inquiry; create inquiry; quick add; enter a lead; new lead
+- keywords: add enquiry; new enquiry; create enquiry; add an enquiry; create an enquiry; log an enquiry; new inquiry; add inquiry; create inquiry; quick add; enter a lead; new lead; event not listed; create event or edition; add a missing event
 - links: Enquiries -> /sales/opportunities; Full new-enquiry form -> /sales/new
 - screens: /sales/opportunities; /sales/new
 
@@ -87,7 +87,8 @@ Enquiries live in Sales. The quick form needs a title, where it came from, an ag
 1. Open Enquiries in Sales.
 2. Press Add enquiry.
 3. Fill in the title, the source, the agency and/or end client, and what happens next and when.
-4. Save. The enquiry opens so you can add more details.
+4. If the enquiry is for a show, choose it in Event / Exhibition. If the show or its edition is not listed, press Create event or edition under the field: it adds the event with its first edition, or a missing edition of an existing event, and selects it. What you have typed in the enquiry stays as it is; the enquiry is saved only when you save it.
+5. Save. The enquiry opens so you can add more details.
 
 ## See and plan follow-ups
 - id: sales-follow-ups
@@ -136,11 +137,11 @@ The enquiry's owner, or a Sales founder, can edit its details while it is open. 
 - id: sales-move-stage
 - area: sales
 - status: published
-- keywords: change stage; move stage; change status; move to; stage; status of an enquiry; pipeline; board; qualified; negotiation; proposal sent; quote sent; on hold; put on hold; resume
+- keywords: change stage; move stage; change status; move to; stage; status of an enquiry; pipeline; board; qualified; negotiation; proposal sent; estimate sent; quote sent; on hold; put on hold; resume
 - links: Enquiries -> /sales/opportunities; Board view -> /sales/opportunities?view=board
 - screens: /sales/opportunities/[id]; /sales/pipeline
 
-The enquiry's owner or a Sales founder moves it: one step back, or any step forward. Proposal sent needs a proposal recorded as sent first, and Quote sent needs the Zoho Books quote reference. Won, Lost and On hold have their own forms.
+The enquiry's owner or a Sales founder moves it: one step back, or any step forward. Proposal sent and Estimate sent sit side by side: an enquiry can reach either, or both. Proposal sent needs a proposal recorded as sent, Estimate sent needs an estimate recorded as sent (Estimates tab), and Quote sent needs the Zoho Books quote reference. Won, Lost and On hold have their own forms.
 
 1. Open the enquiry (or use the Board view of Enquiries).
 2. Choose Move to another stage and pick the stage.
@@ -178,21 +179,23 @@ Clients & Agencies holds every organisation. Search first so you do not add the 
 - id: sales-estimates
 - area: sales
 - status: published
-- keywords: estimate; estimates; quotation; quote; boq; price an enquiry; pricing; vat; revision; pdf of the estimate; excel of the estimate
+- keywords: estimate; estimates; quotation; quote; boq; price an enquiry; pricing; vat; revision; pdf of the estimate; excel of the estimate; record estimate as sent; estimate sent; sent the estimate
 - links: Enquiries -> /sales/opportunities
 - screens: /sales/proposals
 
-Estimates are built on the enquiry's Estimates tab in three steps: details, items, then preview and finalise. An estimate is budgetary: it cannot be recorded as sent. Official quotations go through the Zoho Books workflow.
+Estimates are built on the enquiry's Estimates tab in three steps: details, items, then preview and finalise. An estimate is budgetary; official quotations go through the Zoho Books workflow. Finalising or downloading an estimate does not send it and does not record it as sent: you send it yourself, then record that here.
 
 1. Open the enquiry and go to the Estimates tab.
 2. Create an estimate and fill in the details and the items.
 3. Preview, then finalise. A finalised estimate is frozen; make a revision to change it.
+4. After you have sent it to the client, press Record estimate as sent on that revision, confirm the date it went out, and choose whether to move the enquiry to Estimate sent.
+5. If the enquiry is already at Quote sent or Negotiation, the estimate is recorded and the stage stays where it is.
 
 ## Events & Exhibitions
 - id: sales-events
 - area: sales
 - status: published
-- keywords: events and exhibitions; exhibitions; trade shows; trade fair; expo; upcoming shows; event calendar; add an event; add an edition; which shows are coming; conference
+- keywords: events and exhibitions; exhibitions; trade shows; trade fair; expo; upcoming shows; event calendar; calendar view; month view; add an event; add an edition; first edition; which shows are coming; conference
 - links: Events & Exhibitions -> /sales/events; Import events -> /sales/events/import
 - screens: /sales/events
 
@@ -200,14 +203,15 @@ Events & Exhibitions is the shared calendar of shows, one row per edition, with 
 
 1. Open Events & Exhibitions in Sales.
 2. Use the filters to find a show, then open it to see its editions, who exhibited and the agencies to contact.
-3. Press Add event for a show that is not listed, or Add edition for its next year.
-4. To add many at once, use Import events with the template.
+3. Press Add event for a show that is not listed. One form takes the name, the type and the first edition's dates and place, and one save adds both. If the name already exists, the form shows that event and offers to add the edition to it instead.
+4. Press Add edition for the next year of a show that is already listed.
+5. Switch from List to Calendar to see the shows by month (Previous, Next and Today move between months; a show's name is on each of its days and opens that edition). To add many shows at once, use Import events with the template.
 
 ## Work one event: who exhibited, agencies to contact, observations
 - id: sales-event-page
 - area: sales
 - status: published
-- keywords: record an observation; who exhibited; which agency built the stand; agencies to contact; exhibitor history; stand builder; event page; add next edition; archive an event; outreach priority
+- keywords: record an observation; who exhibited; which agency built the stand; agencies to contact; exhibitor history; stand builder; event page; add first edition; add next edition; archive an event; outreach priority
 - links: Events & Exhibitions -> /sales/events; Clients & Agencies -> /sales/accounts
 - screens: /sales/events/[id]
 
@@ -216,7 +220,7 @@ An event page shows the same show across its editions: who exhibited each year a
 1. Press Record an observation, choose the edition and the exhibitor, then the agency (or Agency unknown).
 2. Read Who exhibited, and with which agency to compare the years.
 3. Under Agencies to contact, set the outreach priority and open the account to start outreach or a follow-up.
-4. Press Add next edition when the next dates are known. Archive keeps the history; nothing is deleted.
+4. Press Add first edition on an event that has none yet, or Add next edition when the next dates are known. Archive keeps the history; nothing is deleted.
 
 ## Import events from a spreadsheet
 - id: sales-events-import

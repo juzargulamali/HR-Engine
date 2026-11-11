@@ -63,7 +63,7 @@ A deterministic **help fallback** ("What can you do?") answers from the registry
 
 ### 2.2 Status transitions (derived from `crm_move_stage`; JARVIS is deliberately narrower)
 
-The database allows, among the six working stages, one step back or any step forward, and gates two TARGETS on evidence. JARVIS offers **exactly one step in either direction**, and a move INTO a gated stage only when its evidence is recorded (checked when the card is built and again at execution; the database checks it a third time).
+The database allows, among the working stages, one step back or any step forward, and gates the "sent" targets on evidence. **Estimate sent (added 2026-11-11, migration `20261228000100`, at the same step as Proposal sent) is outside JARVIS's write scope:** it is not one of the six stages JARVIS moves between (`WORKING`, written out in `sales/stage-transitions.ts`), JARVIS never offers a move to or from it and says where to do it instead (the Estimates tab, or Move stage on the enquiry page), and `jarvis_change_stage` refuses it in the database. The transition table below is unchanged. For the six stages: JARVIS offers **exactly one step in either direction**, and a move INTO a gated stage only when its evidence is recorded (checked when the card is built and again at execution; the database checks it a third time).
 
 | Move | JARVIS | Why |
 |---|---|---|
@@ -301,7 +301,7 @@ Input is a **query descriptor** (`lookupDescriptor`, `sales/lookup.ts`), built l
 | Follow-ups due today / upcoming | Open follow-ups assigned to the signed-in person, selected company | Due today = due later today, Dubai date (a follow-up whose time has passed is overdue, as on the Follow-ups page: `followUpTiming`). Upcoming = from tomorrow for the stated number of days (default 7, at most 60) |
 | Overdue follow-ups | Unchanged: `jarvis.sales.followups.overdue` | Due time passed, still open |
 | Open enquiries | Mine (default) or every open enquiry of the company (what the Enquiries screen shows any Sales user: `crm_has_access`). Filters: stage, client or agency, linked event (any edition). A name that matches several organisations or events gives one question with choices | Open = the six working stages and On hold |
-| No recorded activity | The person's own enquiries in the six working stages, created before the window, with no row in `crm_activities` inside it. Default 14 days when none is stated; at most 365 | "Nothing was recorded", not "nobody contacted the client" (the card says so) |
+| No recorded activity | The person's own enquiries in the working stages (`CRM_PIPELINE_STAGES`; seven since the Estimate sent stage, which lookups show and filter by like any other stage: reading only), created before the window, with no row in `crm_activities` inside it. Default 14 days when none is stated; at most 365 | "Nothing was recorded", not "nobody contacted the client" (the card says so) |
 | One enquiry's status | By reference, or the enquiry the page shows; selected company only. Another company's or an unknown reference gives the same "not found or cannot see" | Stage and date, parties, dates, open follow-ups (5 shown, exact count), last recorded activity |
 | What needs my attention today | Overdue and due-today follow-ups; on-hold enquiries the person owns whose review date has arrived; their active enquiries with no open follow-up; their open enquiries with no first response. One enquiry appears once, under the first reason | The same kinds as the Sales overview (`attentionItems`, `lib/crm/reports.ts`) |
 

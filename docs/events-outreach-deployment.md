@@ -29,6 +29,18 @@ Not touched: `crm_create_opportunity`, `crm_update_opportunity` (so JARVIS and e
 ## Rollback
 `supabase/manual-sql/crm_events_90_rollback.sql` (export the three tables and the new columns first; it reports how many links and observations it removes). The previous app version ignores the new columns and tables, so the app can be rolled back without the SQL.
 
+## Event with its first edition (later migration `20261227000100_crm_event_first_edition.sql`; install-order row 24)
+**Status: applied on the hosted Supabase project (shared by Preview and Production) by the owner, 2026-11-11 (owner-run, owner-reported: preflight, migration and verifier passed as expected; Claude ran no hosted SQL and did not see the rows).** Details: `docs/pr79-owner-rollout.md` section 5. (Until then this line read "not applied anywhere by Claude; hosted status `Unverified`".) Written 2026-11-11 with the change on branch `claude/events-first-edition-calendar`.
+
+What it is: one new function, `crm_add_event_with_edition(name, kind, start, end, city, country, venue, website, event note, edition note)`, returning the two new ids. It checks both parts, then calls the existing `crm_save_event` and `crm_save_edition` inside the one call, so a refused edition leaves no event behind. It changes no table, column, policy, grant or existing function. Why a new function was needed: the two existing saves are separate calls from the app, each its own transaction, and the transactional `crm_import_events` has different rules (a country is required, there is no event type, rows are classified against existing editions and answered with a preview).
+
+1. Run `supabase/manual-sql/crm_event_first_edition_00_preflight_readonly.sql` (read-only): rows 1 to 3 must say OK.
+2. Apply `supabase/migrations/20261227000100_crm_event_first_edition.sql` (idempotent: `create or replace`).
+3. Run `supabase/manual-sql/crm_event_first_edition_20_verify_readonly.sql` (read-only): rows 1 to 4 must say OK.
+4. Deploy the app (either order is safe; before the migration, Add event answers "not available yet ... Nothing was saved").
+
+Rollback: `supabase/manual-sql/crm_event_first_edition_90_rollback.sql` drops the function and deletes no data. The previous app does not call it.
+
 ## Owner-run result (Enginious HR Engine V2)
 - **Applied:** `20261224000100_crm_events_outreach.sql` as it stands at commit `fd1e00d`, applied by the owner to Enginious HR Engine V2 (2026-11-10). It is not edited or re-run by this note, and no further migration was added.
 - **First verifier run** (`crm_events_20_verify_readonly.sql` from `fd1e00d`): every row passed except row 5, the outreach priority check.

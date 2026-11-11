@@ -866,7 +866,7 @@ function FinaliseStep({ p, details, notes, patchNotes, calc, cur, pendingWork, r
           <Button type="button" disabled={!canFinalise} onClick={finalise}>Finalise estimate</Button>
         </div>
         {p.needsApproval ? <p className="text-sm text-muted-foreground">This company needs approval of the exact version before it is finalised. Editing the draft after approval asks for it again.</p> : null}
-        <p className="text-sm text-muted-foreground">Finalising freezes this version only. It does not reserve equipment, stock or dates, does not record anything as sent, and does not move the enquiry.</p>
+        <p className="text-sm text-muted-foreground">Finalising freezes this version only. It does not reserve equipment, stock or dates, does not record anything as sent, and does not move the enquiry. After you send it to the client, use Record estimate as sent on the enquiry&apos;s Estimates tab.</p>
       </section>
     </div>
   );

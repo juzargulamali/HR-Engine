@@ -19,6 +19,8 @@ import { FIELD_NOUN, hasRoleFor, offeredFor, type InquiryField } from "@/lib/crm
 import { SearchCombobox, type ComboOption } from "@/components/sales/combobox";
 import { countryLabel } from "@/lib/crm/clients-agencies/normalise";
 import type { EditionOption } from "@/lib/crm/events/data";
+import type { EventChoice } from "@/lib/crm/events/model";
+import { EventEditionDialog, useCreatedEditions } from "@/components/sales/event-edition-dialog";
 import {
   AddContactDialog, AddOrganisationDialog,
   type CreatedContact, type CreatedOrganisation, type OrganisationKind,
@@ -110,16 +112,23 @@ export function OrganisationPicker({
 }
 
 /** The optional Event / Exhibition field: one specific edition from the shared database ("GITEX Global · 2027 · Dubai"). Nothing is guessed from old free text. */
-export function EventEditionPicker({ id, name = "eventEditionId", value, onChange, editions, loadError }: {
+export function EventEditionPicker({ id, name = "eventEditionId", value, onChange, editions, loadError, onCreate }: {
   id: string; name?: string; value: string; onChange: (id: string) => void; editions: readonly EditionOption[]; loadError?: boolean;
+  /** Opens the form that adds a missing event or edition, with the text typed so far. Leave out where nothing can be added from the field. */
+  onCreate?: (typed: string) => void;
 }) {
   const options = useMemo<ComboOption[]>(() => editions.map((e) => ({ id: e.id, label: e.archived ? `${e.label} (archived)` : e.label, detail: e.detail })), [editions]);
+  const [typed, setTyped] = useState("");
   if (loadError) return <p className="text-sm text-destructive" role="alert">Could not load the events, so an event cannot be linked right now. You can link it later from the enquiry.</p>;
   return (
     <SearchCombobox
       id={id} name={name} label="Event / Exhibition (optional)" hint="Link the enquiry to the specific show it is for. Leave empty if it is not for an event." options={options} value={value} onChange={onChange}
-      placeholder="Type an event name or year"
-      emptyText={(q) => <>Nothing matches “{q}”. <Link href="/sales/events" className="underline underline-offset-2">Add the event or its edition</Link> in Events &amp; Exhibitions first.</>}
+      placeholder="Type an event name or year" onQueryChange={setTyped}
+      emptyText={(q) => onCreate
+        ? <>Nothing matches “{q}”. Use Create event or edition below to add it.</>
+        : <>Nothing matches “{q}”. <Link href="/sales/events" className="underline underline-offset-2">Add the event or its edition</Link> in Events &amp; Exhibitions first.</>}
+      // The text typed is passed on only while nothing is chosen: once an edition is chosen the field shows its label, which is not an event name.
+      footer={onCreate ? <Button type="button" size="sm" variant="ghost" onClick={() => onCreate(value ? "" : typed.trim())}><Plus className="h-4 w-4" aria-hidden /> Create event or edition</Button> : undefined}
     />
   );
 }
@@ -164,12 +173,14 @@ export function DuplicateWarning({ matches, onDismiss, checkFailed = false }: { 
 }
 
 export function NewEnquiryForm({
-  companies, organisations: serverOrganisations, contacts: serverContacts, currentUserId, currentUserName, today, prefill, editions = [], editionsFailed = false,
+  companies, organisations: serverOrganisations, contacts: serverContacts, currentUserId, currentUserName, today, prefill, editions: serverEditions = [], events: serverEvents = [], editionsFailed = false,
 }: {
   companies: EnquiryCompany[];
   organisations: EnquiryOrganisation[];
   /** The editions an enquiry can be linked to (shared by every company) and whether they could not be loaded. */
   editions?: EditionOption[];
+  /** The live events, so a missing event or edition can be added from the Event / Exhibition field. */
+  events?: EventChoice[];
   editionsFailed?: boolean;
   contacts: EnquiryContact[];
   currentUserId: string;
@@ -204,6 +215,10 @@ export function NewEnquiryForm({
   const [agencyId, setAgencyId] = useState(prefill && prefillField === "agency" ? prefill.org.id : "");
   const [clientId, setClientId] = useState(prefill && prefillField === "client" ? prefill.org.id : "");
   const [editionId, setEditionId] = useState("");
+  // An event or edition added from this page is offered (and chosen) straight away; the enquiry itself is saved only by its own button.
+  const { allEditions: editions, allEvents: events, add: addEdition } = useCreatedEditions(serverEditions, serverEvents);
+  const [eventDialog, setEventDialog] = useState<{ name: string } | null>(null);
+  const [eventEnd, setEventEnd] = useState("");
   const [checkedContacts, setCheckedContacts] = useState<Set<string>>(new Set());
   const [eventStart, setEventStart] = useState("");
   const [installStart, setInstallStart] = useState("");
@@ -331,7 +346,7 @@ export function NewEnquiryForm({
                 />
               </div>
               {!agencyId && !clientId ? <p className="text-sm text-muted-foreground">Required: choose at least one of agency or end client.</p> : null}
-              <EventEditionPicker id="enq-event" value={editionId} onChange={setEditionId} editions={editions} loadError={editionsFailed} />
+              <EventEditionPicker id="enq-event" value={editionId} onChange={setEditionId} editions={editions} loadError={editionsFailed} onCreate={(name) => setEventDialog({ name })} />
             </fieldset>
 
             <fieldset className="space-y-2">
@@ -397,7 +412,7 @@ export function NewEnquiryForm({
                 <Input id="enq-event-start" name="eventStart" type="date" value={eventStart} onChange={(e) => setEventStart(e.target.value)} />
               </Field>
               <Field label="Event end" htmlFor="enq-event-end">
-                <Input id="enq-event-end" name="eventEnd" type="date" min={eventStart || undefined} />
+                <Input id="enq-event-end" name="eventEnd" type="date" min={eventStart || undefined} value={eventEnd} onChange={(e) => setEventEnd(e.target.value)} />
               </Field>
               <Field label="Installation date" htmlFor="enq-install">
                 <Input id="enq-install" name="installStart" type="date" value={installStart} onChange={(e) => setInstallStart(e.target.value)} />
@@ -479,6 +494,13 @@ export function NewEnquiryForm({
         </aside>
       </form>
 
+      <EventEditionDialog
+        open={eventDialog !== null}
+        onClose={() => setEventDialog(null)}
+        events={events}
+        initial={{ name: eventDialog?.name ?? "", start: eventStart, end: eventEnd }}
+        onCreated={(c) => { addEdition(c); setEditionId(c.editionId); }}
+      />
       <AddOrganisationDialog
         open={orgDialog !== null}
         onClose={() => setOrgDialog(null)}

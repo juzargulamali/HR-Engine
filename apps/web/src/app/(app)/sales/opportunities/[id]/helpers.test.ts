@@ -56,14 +56,14 @@ describe("isOnlyOpenFollowUp", () => {
 
 describe("stageMoveRequirement", () => {
   it("asks for a sent proposal before Proposal sent", () => {
-    expect(stageMoveRequirement("proposal_sent", { hasSentProposal: false, hasQuoteRef: true })).toMatch(/proposal as sent/);
-    expect(stageMoveRequirement("proposal_sent", { hasSentProposal: true, hasQuoteRef: false })).toBeNull();
+    expect(stageMoveRequirement("proposal_sent", { hasSentProposal: false, hasQuoteRef: true, hasSentEstimate: true })).toMatch(/proposal as sent/);
+    expect(stageMoveRequirement("proposal_sent", { hasSentProposal: true, hasQuoteRef: false, hasSentEstimate: true })).toBeNull();
   });
   it("asks for the Zoho quote reference before Quote sent", () => {
-    expect(stageMoveRequirement("quote_sent", { hasSentProposal: true, hasQuoteRef: false })).toMatch(/quote reference/);
-    expect(stageMoveRequirement("quote_sent", { hasSentProposal: false, hasQuoteRef: true })).toBeNull();
+    expect(stageMoveRequirement("quote_sent", { hasSentProposal: true, hasQuoteRef: false, hasSentEstimate: true })).toMatch(/quote reference/);
+    expect(stageMoveRequirement("quote_sent", { hasSentProposal: false, hasQuoteRef: true, hasSentEstimate: true })).toBeNull();
   });
-  it("has no requirement for other stages", () => expect(stageMoveRequirement("negotiation", { hasSentProposal: false, hasQuoteRef: false })).toBeNull());
+  it("has no requirement for other stages", () => expect(stageMoveRequirement("negotiation", { hasSentProposal: false, hasQuoteRef: false, hasSentEstimate: false })).toBeNull());
 });
 
 describe("composeReason", () => {

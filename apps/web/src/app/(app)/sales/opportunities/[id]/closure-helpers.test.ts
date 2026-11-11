@@ -22,7 +22,7 @@ describe("defaultReopenStage", () => {
 });
 
 describe("reopenStageOptions", () => {
-  it("lists exactly the six working stages", () => expect(reopenStageOptions("qualified").map((o) => o.id)).toEqual(["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation"]));
+  it("lists exactly the working stages (Estimate sent next to Proposal sent)", () => expect(reopenStageOptions("qualified").map((o) => o.id)).toEqual(["new", "qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation"]));
   it("marks the stage it was closed from as the default", () => {
     const opts = reopenStageOptions("quote_sent");
     expect(opts.filter((o) => o.isDefault).map((o) => o.id)).toEqual(["quote_sent"]);

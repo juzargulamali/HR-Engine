@@ -421,7 +421,7 @@ const reopenSchema = z.object({
   id: uuid, reason: z.string().trim().min(1, "Say why it is being reopened"),
   nextTitle: z.string().trim().min(1, "Say what the new next action is"), nextDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a date"),
   nextTime: optionalText, nextKind: z.enum(["call", "email", "meeting", "proposal", "other"]).default("other"),
-  toStage: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.enum(["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation"]).optional()),
+  toStage: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.enum(["new", "qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation"]).optional()),
   expectedVersion: z.coerce.number().int().optional(),
 });
 /** Reopens a Won or Lost opportunity. The closure stays in the history; a handover already prepared is left untouched. */
@@ -587,10 +587,31 @@ export async function setProposalStatus(_prev: ActionState, formData: FormData):
     // (the database supersedes the previously sent version) and could unlock the Proposal sent stage. Fail closed when the check itself cannot be made.
     const est = await (supabase as unknown as SupabaseClient).from("crm_quotations").select("proposal_id").eq("proposal_id", p.data.proposalId).maybeSingle();
     if (est.error) return { error: "Could not check whether this version is an estimate, so nothing was recorded. Try again." };
-    if (est.data) return { error: "This version is an estimate. An estimate is never recorded as sent. Record the proposal you actually sent to the client instead." };
+    if (est.data) return { error: "This version is an estimate, so it is not recorded here. On the Estimates tab use Record estimate as sent; here, record the proposal you actually sent to the client." };
   }
   const { error } = await supabase.rpc("crm_set_proposal_status", { p_proposal_id: p.data.proposalId, p_status: p.data.status, p_sent_on: p.data.sentOn ?? null });
   if (error) return fail(error.message);
+  refresh(p.data.opportunityId);
+  return { error: null };
+}
+
+const estimateSentSchema = z.object({
+  proposalId: uuid, opportunityId: uuid, sentOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter the date the estimate was sent"),
+  move: z.preprocess((v) => v === "on" || v === "true", z.boolean()), version: z.preprocess((v) => (v === "" || v == null ? undefined : Number(v)), z.number().int().optional()),
+});
+/**
+ * Records that a finalised estimate was sent to the client: a fact about something the person already did outside the app (nothing is sent from here, and
+ * finalising or downloading an estimate never records it). With `move`, the enquiry also goes to Estimate sent in the same transaction; the database refuses a
+ * move backwards. Owner or founder; the database (crm_record_estimate_sent, migration 20261228000100) repeats every check.
+ */
+export async function recordEstimateSent(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const p = estimateSentSchema.safeParse(Object.fromEntries(formData));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const { error } = await (await createClient()).rpc("crm_record_estimate_sent", { p_proposal: p.data.proposalId, p_sent_on: p.data.sentOn, p_move: p.data.move, p_expected_version: p.data.version ?? null });
+  if (error) {
+    if (/could not find the function|schema cache/i.test(error.message)) return { error: "Recording an estimate as sent is not available yet: the database update for it has not been applied. Nothing was recorded." };
+    return fail(error.message);
+  }
   refresh(p.data.opportunityId);
   return { error: null };
 }
