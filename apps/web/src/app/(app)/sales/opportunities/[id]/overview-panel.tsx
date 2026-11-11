@@ -1,6 +1,7 @@
 import { crmSourceLabel, isCommerciallyWon } from "@enginious-hr/domain";
 import { Suspense } from "react";
 import { EventFact } from "./event-fact";
+import { TabLink } from "./detail-tabs";
 import { ApprovalBadge, AvailabilityBadge, DueText } from "@/components/sales/badges";
 import { formatDate, formatDateTime, formatMoney } from "@/components/sales/format";
 import { Badge } from "@/components/ui/badge";
@@ -60,7 +61,18 @@ export function OverviewPanel({ view, picker = null }: { view: OppView; picker?:
                 </>
               )}
             </Fact>
-            <Fact label="Equipment availability"><AvailabilityBadge state={item.availability} /></Fact>
+            <Fact label="Equipment availability">
+              <AvailabilityBadge state={item.availability} />
+              {/* When it was checked and the window it covered, as recorded. A check is never a reservation, and a change to the dates, quantities or equipment makes it stale. */}
+              {(opp.availability_state === "confirmed" || opp.availability_state === "unavailable") && opp.availability_at ? (
+                <span className="mt-1 block text-sm text-muted-foreground">
+                  Checked {formatDate(opp.availability_at)} by {ctx.personName(opp.availability_by)}
+                  {opp.availability_covers ? ` for ${[opp.availability_covers.install_start ? `installation ${formatDate(opp.availability_covers.install_start)}` : null, opp.availability_covers.event_start ? `show ${formatDate(opp.availability_covers.event_start)}${opp.availability_covers.event_end ? ` to ${formatDate(opp.availability_covers.event_end)}` : ""}` : null].filter(Boolean).join(", ") || "no dates"} and ${opp.availability_covers.technologies.length} ${opp.availability_covers.technologies.length === 1 ? "technology line" : "technology lines"}` : ""}.
+                </span>
+              ) : null}
+              {item.availability === "needs_recheck" ? <span className="mt-1 block text-sm font-medium text-[hsl(var(--os-amber))]">The dates, quantities or equipment changed after that check. <TabLink tab="commercial" href={`/sales/opportunities/${opp.id}?tab=commercial`} className="underline underline-offset-2">Recheck availability</TabLink></span> : null}
+              <span className="mt-1 block text-sm text-muted-foreground">Stock not reserved: a check is a dated answer, and winning an enquiry reserves nothing.</span>
+            </Fact>
             <Fact label="Commercial approval">
               {anyFailed(view, "approvals") ? <span className="text-sm text-destructive">Could not load the approval history.</span> : <ApprovalBadge policy={policy} latest={detail.approvals[0] ? { state: detail.approvals[0].state } : null} />}
             </Fact>

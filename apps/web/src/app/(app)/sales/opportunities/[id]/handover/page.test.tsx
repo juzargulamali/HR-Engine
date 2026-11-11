@@ -25,13 +25,16 @@ const opp = {
 let handover: Record<string, unknown> | null = null;
 let outcome: { kind: "ok" | "not_found" | "denied" | "error" } = { kind: "ok" };
 let failedSections: string[] = [];
+let estimateSends: Record<string, unknown>[] = [];
 vi.mock("@/lib/crm/data", () => ({
   loadOpportunityDetailResult: async () => (outcome.kind === "ok"
-    ? { kind: "ok", failed: new Set(failedSections), detail: { item: { opp, companyName: "Enginious KSA", value: 100000, availability: "confirmed" }, handover, proposals: [], files: [], contacts: [{ id: "k1" }], zoho: null } }
+    ? { kind: "ok", failed: new Set(failedSections), detail: { item: { opp, companyName: "Enginious KSA", value: 100000, availability: "confirmed" }, handover, proposals: [], files: [], contacts: [{ id: "k1" }], zoho: null, estimateSends } }
     : outcome),
 }));
 vi.mock("../view", () => ({ buildOppView: () => ({ opp, canEdit, isWon: true, ownerName: "Sales Owner" }) }));
 vi.mock("../contacts-panel", () => ({ ContactsPanel: () => null }));
+vi.mock("react", async (orig) => ({ ...(await orig<typeof import("react")>()), Suspense: ({ children }: { children: React.ReactNode }) => children }));
+vi.mock("../event-fact", () => ({ EventFact: ({ editionId }: { editionId: string | null }) => `EDITION:${editionId ?? "none"}` as unknown as null }));
 let projectState: { installed: boolean; status: Record<string, unknown> | null; row: unknown };
 vi.mock("./project-handover", () => ({
   loadProjectHandover: async () => projectState,
@@ -41,7 +44,7 @@ vi.mock("./project-handover", () => ({
 import HandoverPage from "./page";
 
 const render = async () => renderToStaticMarkup(await HandoverPage({ params: Promise.resolve({ id: "o1" }) }));
-beforeEach(() => { directoryFails = false; canEdit = true; handover = null; outcome = { kind: "ok" }; failedSections = []; projectState = { installed: true, status: null, row: null }; });
+beforeEach(() => { directoryFails = false; canEdit = true; handover = null; outcome = { kind: "ok" }; failedSections = []; estimateSends = []; projectState = { installed: true, status: null, row: null }; });
 
 describe("Sales handover page", () => {
   it("shows ONE process, Prepare brief to Project created, and no second PM or status form", async () => {
@@ -158,5 +161,21 @@ describe("Sales handover page", () => {
       expect(html).not.toContain("Handover process");
       expect(html).not.toContain("not installed");
     });
+  });
+
+  it("shows the event edition, says the dates are the enquiry's own, and lists estimates recorded as sent without calling one accepted", async () => {
+    const plain = await render();
+    expect(plain).toContain("EDITION:none");
+    expect(plain).toContain("These are this enquiry&#x27;s own dates");
+    expect(plain).not.toContain("Estimates recorded as sent to the client");
+    estimateSends = [{ id: "s1", proposal_id: "p-est", reference: "EST-KSA-2026-0004", revision: 2, sent_on: "2026-11-15" }];
+    const html = await render();
+    expect(html).toContain("Estimates recorded as sent to the client");
+    expect(html).toContain("EST-KSA-2026-0004 · revision 2");
+    expect(html).toContain('href="/sales/opportunities/o1/quotations/p-est"');
+    expect(html).toContain("Recorded as sent, not as accepted");
+    expect(html).toContain("No proposal is recorded as accepted");
+    failedSections = ["estimateSends"];
+    expect(await render()).toContain("Could not load which estimates were recorded as sent");
   });
 });

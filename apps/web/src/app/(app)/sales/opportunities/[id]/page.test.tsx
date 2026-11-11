@@ -21,6 +21,8 @@ vi.mock("./quotations-panel", () => ({ QuotationsPanel: mark("panel-quotations")
 vi.mock("./reopen-dialog", () => ({ ReopenButton: mark("reopen") }));
 vi.mock("./scope-panel", () => ({ ScopePanel: mark("panel-scope"), toEditable: () => ({}) }));
 vi.mock("./stage-actions", () => ({ HoldButton: mark("hold"), MoveStageButton: mark("move-stage"), ResumeButton: mark("resume") }));
+vi.mock("./enquiry-guide", () => ({ EnquiryGuide: mark("guide") }));
+vi.mock("react", async (orig) => ({ ...(await orig<typeof import("react")>()), Suspense: ({ children }: { children: React.ReactNode }) => children }));
 vi.mock("./detail-tabs", () => ({ DetailTabs: () => "TABS" as unknown as null }));
 
 const opp = { id: "o1", company_id: "c1", owner_id: "u1", reference: "OPP-UAE-2026-0001", title: "Launch", stage: "new", currency: "AED", value: 100, version: 3, closed_at: null, evidence_type: null, hold_review_date: null, stage_before_close: null };
@@ -70,19 +72,12 @@ describe("Enquiry page: a failed read is 'Could not load', distinct from not fou
     expect(html).toContain("ACTION:move-stage");
     expect(html).not.toContain("Could not load");
   });
-  it("a successful read with no follow-up still warns 'No next action is scheduled' and offers to add one", async () => {
+  it("the next action, the stage guidance and the latest activity are the guide's (tested in enquiry-guide.test.tsx): the page always renders it for a read enquiry", async () => {
     followUps = [];
-    const html = await render();
-    expect(html).toContain("No next action is scheduled");
-    expect(html).toContain("ACTION:add-follow-up");
-  });
-  it("failed follow-ups: the next action says 'Could not load', there is NO 'No next action is scheduled' warning and no add button", async () => {
-    followUps = [];
+    expect(await render()).toContain("ACTION:guide");
     failedSections = ["followUps"];
     const html = await render();
-    expect(html).toContain("Could not load");
-    expect(html).not.toContain("No next action is scheduled");
-    expect(html).not.toContain("ACTION:add-follow-up");
+    expect(html).toContain("ACTION:guide");
     expect(html).not.toContain("None scheduled");
   });
   it("failed proposals or Zoho references: no stage move is offered (its requirement hints would be wrong) and it says why; hold and close stay", async () => {

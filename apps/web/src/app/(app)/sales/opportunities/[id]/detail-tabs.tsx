@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export interface DetailTab {
@@ -10,11 +10,33 @@ export interface DetailTab {
   content: React.ReactNode;
 }
 
+export const DETAIL_TAB_EVENT = "os:enquiry-tab";
+
+/**
+ * A link to one of the enquiry's tabs from elsewhere on the page. It switches the tab in place (nothing typed in another tab is lost); its address (`?tab=`)
+ * still works on its own, for a new browser tab or with scripting off.
+ */
+export function TabLink({ tab, href, className, children }: { tab: string; href: string; className?: string; children: React.ReactNode }) {
+  return <a href={href} className={className} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; e.preventDefault(); window.dispatchEvent(new CustomEvent(DETAIL_TAB_EVENT, { detail: tab })); }}>{children}</a>;
+}
+
 /** Accessible tabs (arrow keys, Home/End) over server-rendered panels. */
 export function DetailTabs({ tabs, initial }: { tabs: DetailTab[]; initial: string }) {
   const base = useId();
   const [active, setActive] = useState(tabs.some((t) => t.id === initial) ? initial : (tabs[0]?.id ?? ""));
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const list = useRef<HTMLDivElement>(null);
+  // A link elsewhere on the page ("Open the full activity", "Record estimate as sent") asks for a tab: switch to it and bring the tabs into view.
+  useEffect(() => {
+    const open = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      if (!tabs.some((t) => t.id === id)) return;
+      setActive(id);
+      list.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    };
+    window.addEventListener(DETAIL_TAB_EVENT, open);
+    return () => window.removeEventListener(DETAIL_TAB_EVENT, open);
+  }, [tabs]);
   const focusTab = (id: string | undefined) => {
     if (!id) return;
     setActive(id);
@@ -28,7 +50,7 @@ export function DetailTabs({ tabs, initial }: { tabs: DetailTab[]; initial: stri
   };
   return (
     <div>
-      <div role="tablist" aria-label="Opportunity sections" className="-mx-1 flex gap-1 overflow-x-auto border-b border-border pb-px">
+      <div ref={list} role="tablist" aria-label="Opportunity sections" className="-mx-1 flex gap-1 overflow-x-auto border-b border-border pb-px">
         {tabs.map((t, i) => (
           <button
             key={t.id}

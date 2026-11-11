@@ -13,6 +13,8 @@ import { HANDOVER_REOPENED_NOTICE } from "../closure-helpers";
 import { ContactsPanel } from "../contacts-panel";
 import { buildHandoverPackage, dateRangeText, fileDisplayName, HANDOVER_STATUS_LABELS } from "../helpers";
 import { Fact, Muted, Panel } from "../parts";
+import { EventFact } from "../event-fact";
+import { Suspense } from "react";
 import { suggestSiteTimezone } from "@/lib/projects/site-timezone";
 import { buildOppView } from "../view";
 import { HandoverProcess } from "@/components/projects/handover-process";
@@ -232,6 +234,18 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
           ) : (
             <Muted>No proposal is recorded as accepted.{latestSent ? ` The latest sent is version ${latestSent.version} (${formatDate(latestSent.sent_on)}); it was not recorded as accepted.` : ""}</Muted>
           )}
+          {/* What the client was sent is stated exactly as recorded. An estimate recorded as sent is never presented as the accepted document: acceptance is its own record. */}
+          {failed.has("estimateSends") ? <p role="alert" className="mt-3 text-sm text-destructive">Could not load which estimates were recorded as sent.</p> : detail.estimateSends.length > 0 ? (
+            <div className="mt-3 border-t border-border pt-3 text-sm">
+              <p className="font-medium">Estimates recorded as sent to the client</p>
+              <ul className="mt-1 space-y-1">
+                {detail.estimateSends.map((s) => (
+                  <li key={s.id}><Link href={`/sales/opportunities/${opp.id}/quotations/${s.proposal_id}`} className="underline-offset-2 hover:underline">{s.reference} · revision {s.revision}</Link>, sent {formatDate(s.sent_on)}</li>
+                ))}
+              </ul>
+              <p className="mt-1 text-muted-foreground">Recorded as sent, not as accepted. Which revision the client agreed to is what the confirmation of the win and the scope below say.</p>
+            </div>
+          ) : null}
         </Panel>
         <Panel title="Confirmation of the win">
           <div className="space-y-1 text-sm">
@@ -257,7 +271,9 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
             <Fact label="Installation starts">{opp.install_start ? formatDate(opp.install_start) : "Not confirmed"}</Fact>
             <Fact label="Show">{show ?? "Not confirmed"}</Fact>
             <Fact label="Location">{opp.location ?? "Not recorded"}</Fact>
+            <Fact label="Event / Exhibition"><Suspense fallback="…"><EventFact editionId={opp.event_edition_id} /></Suspense></Fact>
           </dl>
+          <p className="mt-3 text-sm text-muted-foreground">These are this enquiry&apos;s own dates. They may differ from the event edition&apos;s dates on purpose.</p>
         </Panel>
         <Panel title="Money and payment">
           <dl className="space-y-3">

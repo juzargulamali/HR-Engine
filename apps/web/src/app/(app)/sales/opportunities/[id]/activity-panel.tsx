@@ -1,21 +1,20 @@
-import { History, MessageSquare } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { formatDateTime } from "@/components/sales/format";
 import { AddActivityForm } from "./add-activity-form";
-import { describeHistoryEvent } from "./closure-helpers";
 import { ClosureHistory } from "./closure-history";
-import { buildTimeline, describeEvent, planNextProps } from "./helpers";
+import { planNextProps } from "./helpers";
 import { Muted, Panel } from "./parts";
 import { LoadError } from "@/components/workspace/states";
+import { TIMELINE_READ_LIMIT, timelineItems } from "./timeline";
+import { TimelineList } from "./timeline-list";
 import { anyFailed, planNextInput, type OppView } from "./view";
-
-const KIND_LABEL = { call: "Call", email: "Email", meeting: "Meeting", note: "Note", client_response: "Client response" } as const;
 
 /** What people did (calls, notes, client replies) and what changed on the record (stage, owner, value…), newest first, in one list. */
 export function ActivityPanel({ view, showForm = true }: { view: OppView; showForm?: boolean }) {
   const { detail, ctx, opp, isLost } = view;
   const timelineFailed = anyFailed(view, "activities", "events");
-  const timeline = timelineFailed ? [] : buildTimeline(detail.activities, detail.events);
+  // Follow-ups are part of the story (planned, completed, cancelled). If they could not be read the timeline still shows, and says they are missing.
+  const followUpsMissing = anyFailed(view, "followUps");
+  const timeline = timelineFailed ? [] : timelineItems({ opportunityId: opp.id, activities: detail.activities, events: detail.events, followUps: followUpsMissing ? [] : detail.followUps, firstResponseAt: opp.first_response_at }, ctx.personName);
+  const mayBeCut = detail.activities.length >= TIMELINE_READ_LIMIT || detail.events.length >= TIMELINE_READ_LIMIT;
   // The "log an activity" form plans the next follow-up from the follow-ups: without them it is not offered (and says why).
   const followUpsFailed = anyFailed(view, "followUps");
   const next = followUpsFailed ? null : planNextProps(planNextInput(view));
@@ -32,37 +31,15 @@ export function ActivityPanel({ view, showForm = true }: { view: OppView; showFo
         </Panel>
       )}
       <ClosureHistory view={view} />
-      <Panel title="Timeline" description="Activities and changes to the record together.">
+      <Panel title="Timeline" id="timeline" description="Everything recorded on this enquiry, newest first: what people wrote, and what the app recorded (stage changes, follow-ups, estimates and proposals recorded as sent, handover).">
         {timelineFailed ? (
           <LoadError what="the timeline" retryHref={retry} note="It is not empty: the activities or the history could not be read." />
-        ) : timeline.length === 0 ? (
-          <Muted>Nothing has been recorded yet.</Muted>
         ) : (
-          <ol className="divide-y divide-border/70">
-            {timeline.map((t) =>
-              t.kind === "activity" ? (
-                <li key={t.id} className="flex gap-3 py-3 first:pt-0 last:pb-0">
-                  <MessageSquare className="mt-0.5 h-4 w-4 flex-none text-muted-foreground" aria-hidden />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <Badge variant="outline">{KIND_LABEL[t.activity.kind]}</Badge>
-                      {t.activity.is_internal ? <Badge variant="secondary">Internal note</Badge> : null}
-                    </div>
-                    <p className="mt-1 whitespace-pre-wrap break-words text-sm">{t.activity.body}</p>
-                    <p className="mt-0.5 text-sm text-muted-foreground">{ctx.personName(t.activity.created_by)} · {formatDateTime(t.at)}</p>
-                  </div>
-                </li>
-              ) : (
-                <li key={t.id} className="flex gap-3 py-3 first:pt-0 last:pb-0">
-                  <History className="mt-0.5 h-4 w-4 flex-none text-muted-foreground" aria-hidden />
-                  <div className="min-w-0 flex-1">
-                    <p className="break-words text-sm">{describeHistoryEvent(t.event) ?? describeEvent(t.event, ctx.personName)}</p>
-                    <p className="mt-0.5 text-sm text-muted-foreground">{t.event.actor_id ? ctx.personName(t.event.actor_id) : "System"} · {formatDateTime(t.at)}</p>
-                  </div>
-                </li>
-              ),
-            )}
-          </ol>
+          <>
+            {followUpsMissing ? <p role="alert" className="mb-3 text-sm text-destructive">Could not load the follow-ups, so follow-ups planned or completed are missing from this timeline.</p> : null}
+            {mayBeCut ? <p role="status" className="mb-3 text-sm text-[hsl(var(--os-amber))]">This enquiry has a very long history: the oldest entries may not be shown.</p> : null}
+            <TimelineList items={timeline} />
+          </>
         )}
       </Panel>
     </div>
