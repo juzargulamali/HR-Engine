@@ -89,7 +89,7 @@ export async function loadHandoverRead(opportunityId: string): Promise<HandoverR
 }
 
 /** "none": Projects is not installed. "error": a read failed. "ok": the person's OWN won enquiries whose handover is not accepted yet, however old the win. */
-export type MyOpenHandovers = { status: "none" } | { status: "error" } | { status: "ok"; ids: string[] };
+export type MyOpenHandovers = { status: "none" } | { status: "error" } | { status: "ok"; rows: { id: string; companyId: string }[] };
 
 /**
  * The signed-in person's own won enquiries that still have no ACCEPTED handover, with no age limit (My Day stops reminding after its window; this keeps them
@@ -99,14 +99,14 @@ export type MyOpenHandovers = { status: "none" } | { status: "error" } | { statu
 export async function loadMyOpenHandovers(ctx: CrmContext): Promise<MyOpenHandovers> {
   try {
     const supabase = await createClient();
-    const won: { id: string }[] = [];
+    const won: { id: string; company_id: string }[] = [];
     for (let from = 0; ; from += 1000) {
-      const r = await supabase.from("crm_opportunities").select("id").eq("owner_id", ctx.userId).eq("stage", "won").order("id").range(from, from + 999);
+      const r = await supabase.from("crm_opportunities").select("id, company_id").eq("owner_id", ctx.userId).eq("stage", "won").order("id").range(from, from + 999);
       if (r.error) return { status: "error" };
       won.push(...(r.data ?? []));
       if ((r.data ?? []).length < 1000) break;
     }
-    if (won.length === 0) return { status: "ok", ids: [] };
+    if (won.length === 0) return { status: "ok", rows: [] };
     const accepted = new Set<string>();
     for (let from = 0; ; from += 1000) {
       const r = await supabase.from("proj_handovers").select("crm_opportunity_id").eq("sales_owner_id", ctx.userId).eq("status", "accepted").order("crm_opportunity_id").range(from, from + 999);
@@ -115,7 +115,7 @@ export async function loadMyOpenHandovers(ctx: CrmContext): Promise<MyOpenHandov
       for (const h of r.data ?? []) accepted.add(h.crm_opportunity_id);
       if ((r.data ?? []).length < 1000) break;
     }
-    return { status: "ok", ids: won.map((o) => o.id).filter((id) => !accepted.has(id)) };
+    return { status: "ok", rows: won.filter((o) => !accepted.has(o.id)).map((o) => ({ id: o.id, companyId: o.company_id })) };
   } catch (e) {
     console.error("[crm] my open handovers failed", e);
     return { status: "error" };

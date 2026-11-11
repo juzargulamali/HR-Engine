@@ -144,12 +144,14 @@ describe("Sales reports", () => {
   });
 
   it("applies the chosen company in the database, to the enquiries and to the reopened-closures note, and reads everything when no company is chosen", async () => {
-    await render({ company: "c2" });
-    expect(lastScope).toEqual({ company: "c2" });
+    await render({ company: "c2", from: "2026-08-01", to: "2026-10-31" });
+    // The company, and only what a period report needs: open, created in the window or closed in it (a day wider than the period; each figure applies its exact rule).
+    expect(lastScope).toEqual({ company: "c2", anyOf: { open: true, createdFrom: "2026-07-31T00:00:00Z", createdTo: "2026-11-02T00:00:00Z", closedFrom: "2026-07-31T00:00:00Z", closedTo: "2026-11-02T00:00:00Z" } });
     expect(closureFilters).toEqual([["company_id", "c2"]]);
     closureFilters = [];
     const all = await render();
-    expect(lastScope).toEqual({});
+    expect(lastScope).not.toHaveProperty("company");
+    expect(lastScope).toHaveProperty("anyOf.open", true);
     expect(closureFilters).toEqual([]);
     expect(sourceCard(all)).toContain("n = 6 enquiries");
     expect(sourceCard(await render({ company: "c2" }))).toContain("n = 3 enquiries");

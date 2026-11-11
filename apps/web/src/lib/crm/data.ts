@@ -32,8 +32,6 @@ export interface OpportunityListItem {
 const PAGE = 1000;
 /** Ids sent in one `in (...)` filter: keeps the request address short. */
 const ID_CHUNK = 150;
-/** A search by organisation name is pushed into the query only while it matches this few organisations; a broader search reads the whole scope and filters it. */
-const ORG_MATCH_CAP = 60;
 
 type Res<T> = { data: T[] | null; error: { message: string } | null };
 
@@ -58,9 +56,6 @@ export async function readForIds<T>(ids: readonly string[], read: (chunk: string
   return out;
 }
 
-/** A value inside a data-service `or(...)` filter: quoted, so a comma, a bracket or a dot in what was typed cannot change the filter. */
-const orValue = (v: string) => `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-
 /** What to read. Everything is applied IN THE DATABASE, inside what the person may see (row-level security), before any page is cut. */
 export interface OpportunityScope {
   company?: string;
@@ -69,41 +64,40 @@ export interface OpportunityScope {
   stage?: string;
   /** Default: everything. */
   status?: "open" | "closed" | "all";
-  /** Search text: title, reference, agency name or end-client name. */
-  q?: string;
+  /** Any of these periods (a superset is fine: the report functions apply the exact Dubai-day rule): still open, created in [from, to), or closed in [from, to). Leave out for everything. */
+  anyOf?: { open: true; createdFrom: string; createdTo: string; closedFrom: string; closedTo: string };
 }
 
 /**
- * The enquiries the signed-in user may see (RLS decides) that match `scope`, COMPLETE: read page by page, newest first, so an old enquiry is found as surely as a
- * new one. Names and the next open follow-up are resolved from reads limited to those enquiries. Throws when any read fails.
+ * The enquiries the signed-in user may see (RLS decides) that match `scope`, COMPLETE: read page by page, newest first. Names and the next open follow-up are
+ * resolved from reads limited to those enquiries. Throws when any read fails. Used by Reports (scoped to what the period needs), Follow-ups, My Day and the
+ * proposals list; the Enquiries list and board use the bounded read in enquiry-list-data.ts and come here only where its function is not installed.
  */
 export async function loadOpportunities(ctx: CrmContext, scope: OpportunityScope = {}): Promise<OpportunityListItem[]> {
   const supabase = await createClient();
-  const q = (scope.q ?? "").trim();
-  // Search: enquiries whose title or reference contains the text, or whose agency / end client is one of the organisations whose name does.
-  let search: string | null = null;
-  if (q) {
-    const like = orValue(`%${q}%`);
-    const orgRes = await supabase.from("crm_organisations").select("id").ilike("name", `%${q}%`).limit(ORG_MATCH_CAP + 1);
-    ok(orgRes);
-    const orgIds = (orgRes.data ?? []).map((o) => o.id);
-    // Too many organisations match to list them in one filter: read the whole scope instead (the caller filters by the same text), so nothing is missed.
-    if (orgIds.length <= ORG_MATCH_CAP) {
-      const parts = [`title.ilike.${like}`, `reference.ilike.${like}`];
-      if (orgIds.length) parts.push(`agency_org_id.in.(${orgIds.join(",")})`, `client_org_id.in.(${orgIds.join(",")})`);
-      search = parts.join(",");
-    }
-  }
-  const rows = await readPaged<CrmOpportunityRow>((from, to) => {
+  const filtered = () => {
     let query = supabase.from("crm_opportunities").select("*");
     if (scope.company) query = query.eq("company_id", scope.company);
     if (scope.owner) query = query.eq("owner_id", scope.owner);
     if (scope.stage) query = query.eq("stage", scope.stage as CrmOpportunityRow["stage"]);
     else if (scope.status === "open") query = query.not("stage", "in", "(won,lost)");
     else if (scope.status === "closed") query = query.in("stage", ["won", "lost"]);
-    if (search) query = query.or(search);
-    return query.order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to);
-  });
+    return query;
+  };
+  const page = (build: () => ReturnType<typeof filtered>) => readPaged<CrmOpportunityRow>((from, to) => build().order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to));
+  let rows: CrmOpportunityRow[];
+  if (scope.anyOf) {
+    // Three plain reads (open; created in the window; closed in the window), merged by id: each enquiry a period report needs, and no others.
+    const w = scope.anyOf;
+    const parts = await Promise.all([
+      page(() => filtered().not("stage", "in", "(won,lost)")),
+      page(() => filtered().gte("created_at", w.createdFrom).lt("created_at", w.createdTo)),
+      page(() => filtered().in("stage", ["won", "lost"]).gte("closed_at", w.closedFrom).lt("closed_at", w.closedTo)),
+    ]);
+    const seen = new Map<string, CrmOpportunityRow>();
+    for (const r of parts.flat()) seen.set(r.id, r);
+    rows = [...seen.values()].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id));
+  } else rows = await page(filtered);
   if (rows.length === 0) return [];
   const orgIds = [...new Set(rows.flatMap((o) => [o.agency_org_id, o.client_org_id]).filter((x): x is string => !!x))];
   const ids = rows.map((o) => o.id);

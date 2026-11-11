@@ -14,6 +14,8 @@ export interface BoardColumn {
   hint?: React.ReactNode;
   /** A coloured top edge for the lane (the words always say what the lane is). */
   tone?: "cyan" | "blue" | "amber" | "red" | "green";
+  /** How many records belong to this lane in all, when the page holds only the first of them. The header shows it and the lane says how many are shown. */
+  total?: number;
 }
 
 export interface BoardItem {
@@ -108,7 +110,7 @@ export function Board({ columns, items, onMove, ariaLabel, emptyColumnText = "No
                 <header className="mb-2 px-1">
                   <h3 id={`${liveId}-${col.id}`} className="flex items-center justify-between gap-2 text-sm font-semibold">
                     {col.label}
-                    <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-medium tabular-nums" aria-label={`${cards.length} in ${col.label}`}>{cards.length}</span>
+                    <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-medium tabular-nums" aria-label={`${col.total ?? cards.length} in ${col.label}`}>{col.total ?? cards.length}</span>
                   </h3>
                   {col.hint ? <div className="mt-0.5 min-h-4 text-sm text-muted-foreground">{col.hint}</div> : null}
                 </header>
@@ -154,6 +156,7 @@ export function Board({ columns, items, onMove, ariaLabel, emptyColumnText = "No
                     })}
                   </ul>
                 )}
+                {col.total != null && col.total > cards.length ? <p className="mt-2 px-1 text-sm text-muted-foreground" role="note">Showing the first {cards.length} of {col.total}. Search or filter to see the rest.</p> : null}
               </section>
             );
           })}

@@ -11,7 +11,7 @@ import { formatDate, formatMoney } from "@/components/sales/format";
 import { LoadError } from "@/components/workspace/states";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadFollowUps, loadOpportunities, num, readForIds, readPaged, type FollowUpListItem, type OpportunityListItem } from "@/lib/crm/data";
-import {
+import { addDays,
   elapsedFirstResponse, enquiriesBySource, followUpCounts, openPipelineByOwner, openPipelineByStage, reopenedClosures, resolvePeriod, timelinessByCompany, wonLostInPeriod, wonValueRows, zohoSummary,
   type CompanyTimeliness, type ReportOpp, type WonValueRow,
 } from "@/lib/crm/reports";
@@ -41,8 +41,14 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const company = ctx.companies.some((c) => c.id === first(sp.company)) ? first(sp.company) : "";
 
   // The enquiries are what almost every card is built from: without them there is no report. The follow-ups feed one card only, so their failure is that card's.
-  // The company is applied in the database and the read is complete (page by page): no figure is built from "the newest rows".
-  const [itemsRes, followUpsRes] = await Promise.allSettled([loadOpportunities(ctx, company ? { company } : {}), loadFollowUps(ctx)]);
+  // Only what the report needs is read, completely: the enquiries that are still open (the pipeline cards), those created in the period (sources, first response)
+  // and those closed in the period (Won and Lost), for the chosen company. The window is a day wider on each side than the period; every figure then applies
+  // its own exact Dubai-day rule (inPeriod) and its own definition, exactly as before, so no definition changes: only fewer rows are read.
+  const window = { from: `${addDays(period.from, -1)}T00:00:00Z`, to: `${addDays(period.to, 2)}T00:00:00Z` };
+  const [itemsRes, followUpsRes] = await Promise.allSettled([
+    loadOpportunities(ctx, { ...(company ? { company } : {}), anyOf: { open: true, createdFrom: window.from, createdTo: window.to, closedFrom: window.from, closedTo: window.to } }),
+    loadFollowUps(ctx),
+  ]);
   if (itemsRes.status === "rejected") {
     console.error("[crm] reports load failed", itemsRes.reason);
     return (
