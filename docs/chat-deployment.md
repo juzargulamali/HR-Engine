@@ -37,7 +37,7 @@ Direct messages, an all-company Sales group, project groups (planned: the panel 
 
 
 ## Release 2: project groups and the Discussion transfer (migration `20261230000100_chat_project_groups.sql`; install-order row 27)
-**Status: not applied anywhere by Claude; hosted status `Unverified`.** Written with the Projects & Tasks Phase 1 draft PR. Rehearsed locally on a real PostgreSQL, including a rerun, a second apply, the rollback and applying it again (`packages/rls-tests/test/chat-project-groups.rls.test.ts`).
+**Status:** **applied on the hosted Supabase project (shared by Preview and Production) by the owner, owner-reported on 2026-11-11: the preflight and the post-migration verify passed, and the signed-in Preview tests of PR #82 passed. Owner-run and owner-reported; not run, seen or independently verified by Claude.** PR #82 merged as `30c7895adc75f834a60b00ed3bca7015b1654282`. Production: the signed-in smoke check is pending the owner's confirmation. Written with the Projects & Tasks Phase 1 PR; before the owner's report this line read "not applied anywhere by Claude; hosted status `Unverified`" (history). Rehearsed locally on a real PostgreSQL, including a rerun, a second apply, the rollback and applying it again (`packages/rls-tests/test/chat-project-groups.rls.test.ts`).
 
 ### Rollout order (migration first, then the app)
 Preview and Production share one database, so the order matters:

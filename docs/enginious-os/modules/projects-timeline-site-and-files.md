@@ -2,7 +2,7 @@
 
 Part of the Projects & Tasks Map: [coverage index](./projects-coverage-index.md) (every screen, numbered) and [action catalogue](./projects-action-catalogue.md) (every action that changes data). The two tables at the end of this file are their source.
 
-Status: Projects & Tasks Phase 1 branch `claude/admiring-cray-uky379`, draft, not merged; code read only, nothing run; this slice was not changed by Phase 1. Written by reading the files cited in each section on that branch. No app, test, database or hosted project was run or opened for this document, so every "Tests" cell names a test file that exists and what its test titles say, not a result. No hosted facts are stated. Anything that code reading could not confirm is marked `Unverified` and collected in section 12.
+Status: Projects & Tasks Phase 1 branch `claude/admiring-cray-uky379`, merged as PR #82 (merge `30c7895adc75f834a60b00ed3bca7015b1654282`, 2026-11-11); code read only, nothing run; this slice was not changed by Phase 1. Written by reading the files cited in each section on that branch. No app, test, database or hosted project was run or opened for this document, so every "Tests" cell names a test file that exists and what its test titles say, not a result. No hosted facts are stated. Anything that code reading could not confirm is marked `Unverified` and collected in section 12.
 
 Related: the compact index [`projects-phase1-changes.md`](./projects-phase1-changes.md); flows in [`../04-flows-sales-to-warehouse-and-others.md`](../04-flows-sales-to-warehouse-and-others.md).
 

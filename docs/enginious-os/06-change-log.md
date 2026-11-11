@@ -8,6 +8,15 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-11 | Release: PR #82 (Projects & Tasks Phase 1) merged; release status reconciled | docs only, branch `claude/admiring-cray-uky379` restarted from `main` `30c7895`; **no application code, no migration, no SQL run**
+* **Merged (checked on GitHub):** PR #82, merge commit `30c7895adc75f834a60b00ed3bca7015b1654282`, merge method merge, pinned to head `9809cb40ada4c76de6236049271022752c08c304`, at the owner's request.
+* **Required CI on that exact head:** `lint-typecheck-test` and `rls-policies` both passed (read from GitHub immediately before the merge).
+* **Hosted database (owner-run, owner-reported; not verified by Claude):** migration 27 `20261230000100_chat_project_groups.sql` applied; its preflight and post-migration verify passed.
+* **Preview (owner-reported):** the signed-in Preview tests passed.
+* **Production:** Claude cannot read the Vercel deployment of the merge commit, so its status is `Unverified`; the signed-in Production smoke check is **pending the owner's confirmation**.
+* **Follow-up list (unchanged, not part of this release):** the issues found while documenting stay in the "Known and not fixed" bullet of the entry below and in the references it names. No fix for them is in PR #82.
+* The entry below says "draft PR #82, not merged" in its heading: that is history as written before the merge.
+
 ### 2026-11-11 | Projects & Tasks Phase 1: Work as the starting point, My Work, task detail, handovers, completion reliability, Project Chat; the Projects & Tasks Map | branch `claude/admiring-cray-uky379` from `main` `a7fe625` (draft PR #82, not merged); **one additive migration `20261230000100` (not applied by Claude); no hosted SQL**
 * **Project Chat (migration `20261230000100_chat_project_groups.sql`, install-order row 27):** one Chat group per project; membership is active enrolment in that project, computed on every call (a Projects grant, a founder grant or Sales access alone gives nothing; a founder who is not enrolled no longer reads the conversation). Discussion messages are copied once with author, time and order (stable source id, rerun-safe); a mirror keeps the old tab's new messages in step until the app is merged. The Discussion tab is removed once the migration exists; `/projects/<id>/discussion` sends a member to the group. Project unread counts (directory, My Work, My Day) come from Chat. Reference: `modules/app-chat.md` section 9; rollout, verify and recovery: `docs/chat-deployment.md` "Release 2".
 * **Work:** "What needs doing" first (needs you / waiting on someone else, with owner, due date and link), a delivery summary for whoever manages the project, the equipment states the system can confirm (Equipment draft needs submission, Import failed — review with the existing import as recovery, Waiting for Warehouse), a recent-activity preview from the change log (no chat or comment text), direct entry points. `lib/projects/work-attention.ts`, `lib/projects/equipment-state.ts`.
