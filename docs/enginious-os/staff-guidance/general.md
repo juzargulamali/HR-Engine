@@ -58,9 +58,10 @@ JARVIS can remember a few writing preferences for you, such as short emails or B
 - keywords: what does jarvis send; anthropic; data sent; is it private; privacy; does jarvis share; can i paste prices; can i paste a budget; confidential; what stays inside
 - links: Enquiries -> /sales/opportunities; Proposals & quotes -> /sales/proposals
 
-The text you type or paste for a task is sent to Anthropic, including working prices, budgets and costs you supply. For a summary of an enquiry or scope wording, JARVIS also sends that enquiry's brief, scope and notes as written, with any figures in them. Never sent: the value, budget and payment-terms fields, estimates, proposals, files, and anything marked confidential. Lookups stay inside Enginious OS. Do not paste salaries, IDs, bank or medical details.
+Lookups and plain period counts run inside Enginious OS. Text you type for a draft goes to Anthropic, with any working prices or costs you supply. Explain & suggest on a period summary sends selected Sales facts: the company, the period, the counts and the breakdown labels, which can include recorded lost reasons. An enquiry summary or scope wording sends that enquiry's brief, scope and notes as written, figures included. Never sent: value, budget and payment-terms fields, estimates, files.
 
 1. Type working figures yourself when a draft needs them: JARVIS uses them as your assumptions.
 2. For an enquiry's value, budget or estimate, open the enquiry or Proposals & quotes: JARVIS does not read those fields.
-3. Text marked confidential, NDA or internal only is not sent: use the screen instead.
-4. Press What gets shared under the message box in JARVIS to read the full list.
+3. Before you press Explain & suggest, read the line above it: it says what that button sends.
+4. Text marked confidential, NDA or internal only is not sent: use the screen instead.
+5. Press What gets shared under the message box in JARVIS to read the full list.

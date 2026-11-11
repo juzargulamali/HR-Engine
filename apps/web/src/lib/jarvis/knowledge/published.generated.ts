@@ -134,10 +134,11 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "confidential",
       "what stays inside"
     ],
-    "summary": "The text you type or paste for a task is sent to Anthropic, including working prices, budgets and costs you supply. For a summary of an enquiry or scope wording, JARVIS also sends that enquiry's brief, scope and notes as written, with any figures in them. Never sent: the value, budget and payment-terms fields, estimates, proposals, files, and anything marked confidential. Lookups stay inside Enginious OS. Do not paste salaries, IDs, bank or medical details.",
+    "summary": "Lookups and plain period counts run inside Enginious OS. Text you type for a draft goes to Anthropic, with any working prices or costs you supply. Explain & suggest on a period summary sends selected Sales facts: the company, the period, the counts and the breakdown labels, which can include recorded lost reasons. An enquiry summary or scope wording sends that enquiry's brief, scope and notes as written, figures included. Never sent: value, budget and payment-terms fields, estimates, files.",
     "steps": [
       "Type working figures yourself when a draft needs them: JARVIS uses them as your assumptions.",
       "For an enquiry's value, budget or estimate, open the enquiry or Proposals & quotes: JARVIS does not read those fields.",
+      "Before you press Explain & suggest, read the line above it: it says what that button sends.",
       "Text marked confidential, NDA or internal only is not sent: use the screen instead.",
       "Press What gets shared under the message box in JARVIS to read the full list."
     ],
@@ -500,10 +501,11 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "next steps for an enquiry",
       "trends"
     ],
-    "summary": "JARVIS counts enquiries for a period: created, won, lost, the share won, by event, by source and recorded lost reasons, and can compare with the previous period. Every figure is counted by Enginious OS with its definition and dates, and \"in words\" is written by Enginious OS too; the AI model only adds suggestions. Counts only: no values. For one enquiry, the AI model summarises its notes; check it against the record. A won enquiry is not a delivered project.",
+    "summary": "JARVIS counts enquiries for a period inside Enginious OS: created, won, lost, share won, by event, by source and recorded lost reasons. Counts only, no values. Explain & suggest sends the company, the period, the counts and the breakdown labels (lost reasons included) to Anthropic: Enginious OS writes the factual sentences and Anthropic adds suggestions. For one enquiry, the AI model summarises its notes; check it against the record. A won enquiry is not a delivered project.",
     "steps": [
       "Ask, for example, \"How many enquiries did we win or lose last month?\" or \"Summarise this month's enquiries\".",
-      "Change it in a few words: \"show last month instead\", \"compare with the previous period\".",
+      "Change it in a few words (\"show last month instead\") or press Compare periods.",
+      "Press Explain & suggest, or ask it to \"summarise\", only if you want suggestions from Anthropic; a plain count stays inside Enginious OS.",
       "For one enquiry, ask \"Summarise\" with its reference to get its facts and suggested next steps.",
       "Open Reports for values and the full report."
     ],

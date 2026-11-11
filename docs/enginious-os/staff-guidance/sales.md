@@ -52,12 +52,13 @@ In JARVIS you can ask about your Sales work for the selected company: what needs
 - keywords: summarise enquiries; summary of this month; how many enquiries; how many did we win; won and lost; win rate; which events have the most enquiries; compare with last month; what changed; summarise this enquiry; next steps for an enquiry; trends
 - links: Reports -> /sales/reports; Enquiries -> /sales/opportunities
 
-JARVIS counts enquiries for a period: created, won, lost, the share won, by event, by source and recorded lost reasons, and can compare with the previous period. Every figure is counted by Enginious OS with its definition and dates, and "in words" is written by Enginious OS too; the AI model only adds suggestions. Counts only: no values. For one enquiry, the AI model summarises its notes; check it against the record. A won enquiry is not a delivered project.
+JARVIS counts enquiries for a period inside Enginious OS: created, won, lost, share won, by event, by source and recorded lost reasons. Counts only, no values. Explain & suggest sends the company, the period, the counts and the breakdown labels (lost reasons included) to Anthropic: Enginious OS writes the factual sentences and Anthropic adds suggestions. For one enquiry, the AI model summarises its notes; check it against the record. A won enquiry is not a delivered project.
 
 1. Ask, for example, "How many enquiries did we win or lose last month?" or "Summarise this month's enquiries".
-2. Change it in a few words: "show last month instead", "compare with the previous period".
-3. For one enquiry, ask "Summarise" with its reference to get its facts and suggested next steps.
-4. Open Reports for values and the full report.
+2. Change it in a few words ("show last month instead") or press Compare periods.
+3. Press Explain & suggest, or ask it to "summarise", only if you want suggestions from Anthropic; a plain count stays inside Enginious OS.
+4. For one enquiry, ask "Summarise" with its reference to get its facts and suggested next steps.
+5. Open Reports for values and the full report.
 
 ## Draft the scope wording for an estimate with JARVIS
 - id: sales-jarvis-scope-draft
