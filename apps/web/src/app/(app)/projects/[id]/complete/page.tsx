@@ -8,6 +8,7 @@ import { loadProjectView } from "@/lib/projects/data";
 import { todayIso } from "@/lib/projects/format";
 import { createClient } from "@/lib/supabase/server";
 import { CompleteClient } from "./complete-client";
+import { completionReadState } from "./complete-helpers";
 
 export const metadata = { title: "Complete project" };
 
@@ -39,10 +40,22 @@ export default async function CompletePage({ params }: { params: Promise<{ id: s
   }
 
   const supabase = await createClient();
-  const [{ data: review }, { data: evidence }] = await Promise.all([
+  const [reviewRes, evidenceRes] = await Promise.all([
     supabase.rpc("proj_completion_review", { p_project_id: id }),
     supabase.from("proj_files").select("id, label, original_name, created_at").eq("project_id", id).eq("purpose", "completion_evidence").is("deleted_at", null).order("created_at", { ascending: false }),
   ]);
+  // Three different answers, never folded together: the read worked (possibly with nothing in it), the database refused this person, or the read failed.
+  const reviewState = completionReadState(reviewRes.error);
+  if (reviewState === "denied") {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Complete project" />
+        <Alert role="status" data-testid="completion-denied">You do not have access to this project&apos;s completion review, so it cannot be completed from your account. The Project Manager is {view.pmName}. This is an access decision, not a loading problem: reloading will not change it.</Alert>
+      </div>
+    );
+  }
+  if (reviewRes.error) console.error("[projects] completion review load failed", reviewRes.error.message);
+  if (evidenceRes.error) console.error("[projects] completion evidence load failed", evidenceRes.error.message);
 
   return (
     <div className="space-y-5">
@@ -54,8 +67,10 @@ export default async function CompletePage({ params }: { params: Promise<{ id: s
         <CompleteClient
           projectId={id}
           projectKind={project.kind}
-          items={review ?? []}
-          evidenceFiles={(evidence ?? []).map((f) => ({ id: f.id, label: f.label || f.original_name || "Untitled file" }))}
+          items={reviewRes.data ?? []}
+          evidenceFiles={(evidenceRes.data ?? []).map((f) => ({ id: f.id, label: f.label || f.original_name || "Untitled file" }))}
+          reviewFailed={reviewState === "failed"}
+          evidenceFailed={!!evidenceRes.error}
           today={todayIso()}
         />
       </Panel>

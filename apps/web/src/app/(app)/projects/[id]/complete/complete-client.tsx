@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useActionState, useEffect, useMemo, useState } from "react";
+import { startTransition, useActionState, useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { COMPLETION_EVIDENCE_TYPES, completionActionsFor, type CompletionItemKind } from "@enginious-hr/domain";
@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { applyToKind, buildResolutions, evidenceProblems, itemKey, unresolvedItems, type Choices } from "./complete-helpers";
+import { applyToKind, buildResolutions, completionLoadProblems, evidenceProblems, itemKey, unresolvedItems, type Choices } from "./complete-helpers";
 
 const KIND_TITLES: Record<CompletionItemKind, string> = {
   task: "Unfinished tasks", deliverable: "Open deliverables", milestone: "Milestones not accepted", feedback: "Client feedback still open", booking: "Upcoming site bookings",
@@ -30,9 +30,13 @@ interface Props {
   items: ProjCompletionReviewRow[];
   evidenceFiles: { id: string; label: string }[];
   today: string;
+  /** The unfinished-work review could not be read (NOT the same as "nothing is unfinished"). */
+  reviewFailed?: boolean;
+  /** The list of uploaded completion evidence could not be read (NOT the same as "none uploaded"). */
+  evidenceFailed?: boolean;
 }
 
-export function CompleteClient({ projectId, projectKind, items, evidenceFiles, today }: Props) {
+export function CompleteClient({ projectId, projectKind, items, evidenceFiles, today, reviewFailed = false, evidenceFailed = false }: Props) {
   const router = useRouter();
   const [choices, setChoices] = useState<Choices>({});
   const [bulk, setBulk] = useState<Record<string, { action: string; note: string }>>({});
@@ -42,7 +46,12 @@ export function CompleteClient({ projectId, projectKind, items, evidenceFiles, t
   const unresolved = useMemo(() => unresolvedItems(items, choices), [items, choices]);
   const resolutions = useMemo(() => buildResolutions(items, choices), [items, choices]);
   const problems = useMemo(() => evidenceProblems({ projectKind, ...evidence, today }), [projectKind, evidence, today]);
-  const ready = unresolved.length === 0 && problems.length === 0;
+  // Confirmation stays off until everything it rests on has actually loaded: a failed read is never treated as "nothing to decide" or "no evidence".
+  const loadProblems = completionLoadProblems({ reviewFailed, evidenceFailed, projectKind });
+  const ready = unresolved.length === 0 && problems.length === 0 && loadProblems.length === 0;
+  const [retrying, startRetry] = useTransition();
+  // Retry reads the page's data again without leaving it, so decisions already typed are kept.
+  const retry = <Button type="button" variant="outline" size="sm" disabled={retrying} onClick={() => startRetry(() => router.refresh())}>{retrying ? "Trying again…" : "Retry"}</Button>;
 
   useEffect(() => {
     if (state.error === null && state.id) {
@@ -69,7 +78,13 @@ export function CompleteClient({ projectId, projectKind, items, evidenceFiles, t
 
       <section aria-labelledby="unfinished" className="space-y-4">
         <h2 id="unfinished" className="text-base font-semibold">1. Unfinished work</h2>
-        {items.length === 0 ? (
+        {reviewFailed ? (
+          <Alert variant="destructive" role="alert" data-testid="completion-review-failed">
+            <p className="font-medium">Could not load the unfinished work of this project.</p>
+            <p className="mt-0.5">Open tasks, deliverables, milestones, client feedback and upcoming site bookings could not be read. This is a loading problem, not “nothing is unfinished”, so the project cannot be completed until it loads.</p>
+            <div className="mt-2">{retry}</div>
+          </Alert>
+        ) : items.length === 0 ? (
           <Alert role="status">Nothing is unfinished: no open tasks, deliverables, milestones, client feedback or upcoming site bookings. You can go straight to the evidence.</Alert>
         ) : (
           <>
@@ -151,7 +166,14 @@ export function CompleteClient({ projectId, projectKind, items, evidenceFiles, t
                 <Input id="ev-date" name="confirmedOn" type="date" max={today} value={evidence.confirmedOn} onChange={(e) => setEvidence({ ...evidence, confirmedOn: e.target.value })} required />
               </Field>
             </div>
-            {evidence.evidenceType === "uploaded_confirmation" ? (
+            {evidenceFailed ? (
+              <Alert variant="destructive" role="alert" data-testid="completion-evidence-failed">
+                <p className="font-medium">Could not load the uploaded completion evidence.</p>
+                <p className="mt-0.5">The files added to Documents as “Completion evidence” could not be read. This is a loading problem, not “none uploaded”, so the project cannot be completed until it loads.</p>
+                <div className="mt-2">{retry}</div>
+              </Alert>
+            ) : null}
+            {evidence.evidenceType === "uploaded_confirmation" && !evidenceFailed ? (
               <Field label="Uploaded confirmation" htmlFor="ev-file" hint="Only files added to Documents as “Completion evidence” can be chosen.">
                 <Select id="ev-file" name="fileId" value={evidence.fileId} onChange={(e) => setEvidence({ ...evidence, fileId: e.target.value })}>
                   <option value="">{evidenceFiles.length === 0 ? "No completion evidence uploaded yet" : "Choose…"}</option>
@@ -179,6 +201,7 @@ export function CompleteClient({ projectId, projectKind, items, evidenceFiles, t
         <div role="status" className="rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm">
           <p className="font-medium">Before you can complete the project:</p>
           <ul className="mt-1 list-disc pl-5 text-muted-foreground">
+            {loadProblems.map((p) => <li key={p}>{p} Use Retry above.</li>)}
             {unresolved.length > 0 ? <li>{unresolved.length} item{unresolved.length === 1 ? "" : "s"} still need a decision and a reason.</li> : null}
             {problems.map((p) => <li key={p}>{p}</li>)}
           </ul>
