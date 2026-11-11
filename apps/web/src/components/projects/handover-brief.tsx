@@ -5,6 +5,15 @@ import type { ProjHandoverRow } from "@/types/projects";
 
 type Brief = Pick<ProjHandoverRow, "client_name" | "location" | "site_timezone" | "install_start" | "event_start" | "event_end" | "technologies" | "scope" | "exclusions" | "risks" | "notes" | "crm_reference">;
 
+function Block({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="min-w-0 rounded-md border border-border p-3" aria-label={title}>
+      <h3 className="text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
+      <div className="mt-1 space-y-1 text-sm">{children}</div>
+    </section>
+  );
+}
+
 /**
  * The member-safe delivery brief of a handover, read-only. It is exactly what Sales chose to share: the database never copies a value,
  * budget, payment terms or purchase-order detail into it, so there is nothing commercial to show.
@@ -13,12 +22,6 @@ type Brief = Pick<ProjHandoverRow, "client_name" | "location" | "site_timezone" 
  */
 export function HandoverBrief({ h, clarification, salesHref }: { h: Brief; clarification?: { note: string; at: string | null; answered: boolean } | null; salesHref?: string | null }) {
   const risks = (h.risks ?? []).filter((r): r is string => typeof r === "string");
-  const Block = ({ title, children }: { title: string; children: React.ReactNode }) => (
-    <section className="min-w-0 rounded-md border border-border p-3" aria-label={title}>
-      <h3 className="text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
-      <div className="mt-1 space-y-1 text-sm">{children}</div>
-    </section>
-  );
   return (
     <div className="space-y-4" data-testid="handover-brief">
       {clarification ? (
