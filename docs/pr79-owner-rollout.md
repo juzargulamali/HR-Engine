@@ -58,7 +58,8 @@ Required CI on the PR head; the automated tests; and, on a disposable local Post
 | Section 1, SQL steps 1 to 7 | **Passed.** Both preflights, both migrations, both verifiers and the JARVIS verifier gave the expected results. Row-level output was not sent to Claude |
 | Section 2, Preview checks A to C | **Passed**: one-save event creation, an edition created from a partly filled enquiry with the draft kept, and the calendar |
 | Clean-up after A to C | **Done** (the `QA #79` event archived) |
-| Section 3, Production check D (Estimate sent) | **Not done yet**: waits for PR #79 to be merged and Production to serve it |
+| Merge | PR #79 merged as `f9388b979348a39151001dbb2820431ff7a22e97` (GitHub, read by Claude) |
+| Section 3, Production check D (Estimate sent) | **Pending (owner):** to be checked on the first real estimate sent after Production serves the merge. The Production deployment of the merge commit is not reported to Claude |
 
 Still not checked by anyone: Estimate sent and Record estimate as sent in a browser; the phone layout; the full New enquiry page.
 

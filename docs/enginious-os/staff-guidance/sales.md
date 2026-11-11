@@ -82,12 +82,12 @@ JARVIS can draft the scope wording for an estimate: line descriptions, quantitie
 - links: Enquiries -> /sales/opportunities; Full new-enquiry form -> /sales/new
 - screens: /sales/opportunities; /sales/new
 
-Enquiries live in Sales. The quick form needs a title, where it came from, an agency or an end client (or both) and the next action with its date.
+Enquiries live in Sales. The quick form needs a title, where it came from, an agency or an end client (or both) and the next action with its date. Search finds any enquiry by reference, title, agency or client, however old. The chips above the list show My open enquiries, Overdue, Due today, Awaiting first response and No next action.
 
 1. Open Enquiries in Sales.
 2. Press Add enquiry.
 3. Fill in the title, the source, the agency and/or end client, and what happens next and when.
-4. If the enquiry is for a show, choose it in Event / Exhibition. If the show or its edition is not listed, press Create event or edition under the field: it adds the event with its first edition, or a missing edition of an existing event, and selects it. What you have typed in the enquiry stays as it is; the enquiry is saved only when you save it.
+4. If the enquiry is for a show, choose it in Event / Exhibition: the event start and end are filled from that edition and you can still change them. Dates you typed first are kept. If the show or its edition is not listed, press Create event or edition under the field; what you have typed stays as it is.
 5. Save. The enquiry opens so you can add more details.
 
 ## See and plan follow-ups
@@ -98,7 +98,7 @@ Enquiries live in Sales. The quick form needs a title, where it came from, an ag
 - links: Follow-ups -> /sales/follow-ups; Enquiries -> /sales/opportunities
 - screens: /sales/follow-ups
 
-The Follow-ups page lists what you need to do next on your enquiries. Every enquiry that is still being worked needs one open next action, so planning the next step is part of finishing the current one.
+The Follow-ups page lists what you need to do next on your enquiries. Every enquiry that is still being worked needs one open next action, so planning the next step is part of finishing the current one. On an enquiry, the Next action card at the top shows the action, who owns it and when it is due; if none is recorded it says so and offers Add follow-up.
 
 1. Open Follow-ups in Sales to see what is due.
 2. To add one, open the enquiry and use Add follow-up (or Schedule next action in the side panel).
@@ -108,16 +108,17 @@ The Follow-ups page lists what you need to do next on your enquiries. Every enqu
 - id: sales-log-update
 - area: sales
 - status: published
-- keywords: log a call; log call; log an email; log a meeting; add update; add an update; activity; record a call; note on an enquiry; meeting notes; add a note; timeline; log activity
+- keywords: log a call; log call; log an email; log a meeting; add update; add an update; activity; record a call; note on an enquiry; meeting notes; add a note; timeline; log activity; history; comments; comment history; what happened; first response; pick up an enquiry; where does it stand
 - links: Enquiries -> /sales/opportunities
 - screens: /sales/opportunities/[id]
 
-Updates are the enquiry's diary. Add one after a call, an email or a meeting; you can plan the next step in the same box.
+Updates are the enquiry's diary. Add one after a call, an email or a meeting; you can plan the next step in the same box. The first call, email or meeting you log is recorded as the first response. To pick up someone else's enquiry, read the three cards at the top: Next action, Where it stands and Latest activity.
 
 1. Open the enquiry.
 2. Press Add update.
 3. Choose the type (call, email, meeting, note or client response) and write what happened.
 4. Turn on Plan the next step if you want a follow-up created at the same time.
+5. To read what happened, open Activity & history. All activity shows everything in order; Comments and notes shows only what people wrote. Lines the app recorded (stage changes, follow-ups, estimates recorded as sent, handover) are marked as such.
 
 ## Edit an enquiry's details
 - id: sales-edit-details
@@ -132,6 +133,7 @@ The enquiry's owner, or a Sales founder, can edit its details while it is open. 
 1. Open the enquiry.
 2. Press Edit details.
 3. Change what you need and save. If someone else changed it first you will be asked to reload.
+4. Choosing a different Event / Exhibition fills a show date that is empty; a date already on the enquiry is kept, and Use edition dates replaces it if you want. Create event or edition is under that field here too.
 
 ## Change an enquiry's stage
 - id: sales-move-stage
@@ -151,15 +153,17 @@ The enquiry's owner or a Sales founder moves it: one step back, or any step forw
 - id: sales-close-handover
 - area: sales
 - status: published
-- keywords: mark won; mark as won; won; lost; mark lost; close an enquiry; close enquiry; handover; hand over; hand-over; reopen; re-open
+- keywords: mark won; mark as won; won; lost; mark lost; close an enquiry; close enquiry; handover; hand over; hand-over; reopen; re-open; track a handover; handover status; project created; open project; pm asked a question
 - links: Enquiries -> /sales/opportunities
 - screens: /sales/opportunities/[id]
 
-Won and Lost are closed on their own form, which asks for the evidence or the reason. After Won, the handover to Projects is prepared from the enquiry. JARVIS does not close, reopen or hand over enquiries: do those on the enquiry page.
+Won and Lost are closed on their own form, which asks for the evidence or the reason. After Won, the enquiry shows a Delivery handover card: Handover needed, Waiting for PM assignment, Waiting for PM acceptance, PM asked a question, or Project created, with who has it next. JARVIS does not close, reopen or hand over enquiries: do those on the enquiry page.
 
 1. Open the enquiry.
 2. Choose the Won or Lost action and fill in the form.
-3. After Won, open the handover from the enquiry.
+3. After Won, use the button on the Delivery handover card: prepare and submit it, or answer the Project Manager's question and resubmit.
+4. When it says Project created, Open project takes you to the delivery project if you have access to it.
+5. The chip My won: handover open on the Enquiries list finds your won enquiries whose handover is not accepted yet.
 
 ## Find or add a client or agency
 - id: sales-clients-agencies

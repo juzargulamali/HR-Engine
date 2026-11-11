@@ -66,6 +66,17 @@ The "gaps" list is built from facts on the enquiry (`buildHandoverPackage`): ava
 
 The standalone `submitHandover` action exists (`projectsCore.ts`) but no Sales control calls it (the combined action is used); not catalogued as a separate tool.
 
+### 2.3 Where the handover shows on the enquiry and the list (2026-11-11, Sales employee launch, branch `claude/admiring-cray-uky379`; no migration; not seen signed-in)
+| Place | What it shows | Behind it |
+|---|---|---|
+| Enquiry page, card **Delivery handover** (Won only) | One state, the next owner and one action: **Handover needed** (none open, or a draft; next with the Sales owner; Prepare / Continue the handover for the owner or a founder), **Waiting for PM assignment** (submitted; a Projects founder), **Waiting for PM acceptance** (the named Project Manager), **PM asked a question** (the question itself; Answer and resubmit), **Project created** (accepted). "Handover not available" where Projects & Tasks is not installed; "Could not check the handover" when the read fails. A withdrawn handover is not returned by the read, so it shows as Handover needed, worded "none was started, or an earlier one was withdrawn" | `handoverGuide` (`lib/crm/enquiry-guide.ts`), `loadHandoverRead` -> `proj_handover_for_opportunity` (any Sales grantee of the company; unchanged) |
+| **Open project <reference>** | Only when the function returned the project's reference, which it does only if the person may see the project's summary (`proj_can_view_summary`). Otherwise: "the delivery project exists. You do not have access to the project itself" and no link. The project's Discussion and History stay on the project's own tabs for the people working on it; nothing from them is copied into Sales | same; Projects access rules unchanged |
+| Enquiries list, chip **My won: handover open N** | The person's own won enquiries with no accepted handover, with no age limit (My Day stops reminding after 90 days) | `loadMyOpenHandovers` ([`sales-enquiries.md`](./sales-enquiries.md) section 2) |
+| Handover page, **Accepted proposal** panel | Below the accepted proposal (or "No proposal is recorded as accepted"): **Estimates recorded as sent to the client**, each reference, revision and sent date, linking to that revision, with "Recorded as sent, not as accepted". The page never treats the latest document as the accepted one | `detail.estimateSends` |
+| Handover page, **Dates and place** | Adds the linked **Event / Exhibition** and "These are this enquiry's own dates. They may differ from the event edition's dates on purpose" | `EventFact` |
+
+**Verified by reading, not changed:** the delivery brief is prefilled from the enquiry's own title, location, installation and show dates, scope, exclusions, technologies and risks (`handover/page.tsx`, the form's initial values) and the client name is typed by Sales. **Gap (named):** the event edition is shown to Sales on this page but is not a field of the Projects handover or project, so the Project Manager does not see the edition link; and no record says which estimate revision the client approved (only "accepted" on an ordinary proposal exists). Tests: `handover/page.test.tsx` (1 added), `enquiry-guide.test.tsx` "won".
+
 ## 3. What a handover creates, step by step (verified from the SQL)
 
 | Step | Function | Rows written | Notifications (in-app `notifications` rows via `proj_notify`; nothing is e-mailed) |

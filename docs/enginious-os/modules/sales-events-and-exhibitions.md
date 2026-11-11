@@ -55,7 +55,7 @@ Who "can use it" is what the screen offers; the named function is the real gate.
 Fields: **Edition** (native select), **Exhibitor / client** (search-as-you-type over the shared directory), What did you see (**Exhibited** / **Did not exhibit**), **Agency** (search over accounts recorded as agencies) or tick **Agency unknown**, optional **Stand number**, **Agency role** (Stand builder, Stand design, AV / technology, Fabrication, Other), a **Confirmed** tick (unticked = Unverified) and a note. It creates no enquiry and needs none. Did not exhibit takes no agency, stand or role. Typing in a search field never selects or creates an account: choose a match, or add the account first (the empty state links to Clients & Agencies). `saveObservation` -> `crm_record_observation` / `crm_update_observation`; the shape is enforced again by the table CHECK (`crm_event_observations_shape`) and the agency must hold the Agency role (`crm_observation_check`). Tests: `actions/events.test.ts`, RLS "observations", flow step 4 (on a 390 x 844 touch viewport).
 
 ### 3.5 The event and edition form (`components/sales/event-edition-dialog.tsx`)
-One dialog, used by **Add event** (3.1) and by **Create event or edition** on an enquiry's Event / Exhibition field ([sales-enquiries.md](./sales-enquiries.md) section 3.4).
+One dialog, used by **Add event** (3.1) and by **Create event or edition** on an enquiry's Event / Exhibition field in New enquiry, Quick add and (since 2026-11-11) Edit details; the edition it creates also carries its dates back, which fill the enquiry's empty show dates ([sales-enquiries.md](./sales-enquiries.md) section 3.4).
 
 | Part | What it does | Behind it |
 |---|---|---|
