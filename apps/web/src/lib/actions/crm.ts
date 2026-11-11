@@ -10,7 +10,8 @@ import type { ActionState } from "./companies";
 import { friendlyCrmError } from "@/lib/crm/errors";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadOrganisations } from "@/lib/crm/data";
-import { loadEditionOptions, type EditionOption } from "@/lib/crm/events/data";
+import { loadEditionPicker, type EditionOption } from "@/lib/crm/events/data";
+import type { EventChoice } from "@/lib/crm/events/model";
 import { diffZohoForm, isMissingDatabaseFunction, ZOHO_FIELDS, ZOHO_FORM_NAMES, ZOHO_SAVE_UNAVAILABLE } from "@/lib/crm/zoho-save";
 
 /**
@@ -142,16 +143,16 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
 
 /** The organisations the edit form's agency and end-client pickers choose from (read through the person's own session). A failed read says so; it is never an empty list. */
 export async function loadInquiryOrganisations(keepEdition?: string | null): Promise<
-  { ok: true; organisations: { id: string; name: string; kind: "agency" | "client" | "direct"; roles: string[]; place: string | null; country: string | null; website: string | null }[]; editions: EditionOption[]; editionsFailed: boolean } | { ok: false; error: string }
+  { ok: true; organisations: { id: string; name: string; kind: "agency" | "client" | "direct"; roles: string[]; place: string | null; country: string | null; website: string | null }[]; editions: EditionOption[]; events: EventChoice[]; editionsFailed: boolean } | { ok: false; error: string }
 > {
   const ctx = await getCrmContext();
   if (!ctx || ctx.loadFailed || ctx.companies.length === 0) return { ok: false, error: "You do not have Sales access." };
   try {
     const { organisations } = await loadOrganisations();
     // The editions are optional: if they cannot be read the agency and end-client pickers still work and the Event field says so.
-    let editions: EditionOption[] = []; let editionsFailed = false;
-    try { editions = await loadEditionOptions(keepEdition ?? null); } catch (e) { console.error("[crm] edit: editions load failed", e); editionsFailed = true; }
-    return { ok: true, organisations: organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, roles: o.roles, place: o.place, country: o.country_code, website: o.website })), editions, editionsFailed };
+    let editions: EditionOption[] = []; let events: EventChoice[] = []; let editionsFailed = false;
+    try { ({ editions, events } = await loadEditionPicker(keepEdition ?? null)); } catch (e) { console.error("[crm] edit: editions load failed", e); editionsFailed = true; }
+    return { ok: true, organisations: organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, roles: o.roles, place: o.place, country: o.country_code, website: o.website })), editions, events, editionsFailed };
   } catch (e) {
     console.error("[crm] edit: organisations load failed", e);
     return { ok: false, error: "Could not load the organisations. Close this and try again." };

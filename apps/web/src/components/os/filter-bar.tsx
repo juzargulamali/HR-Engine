@@ -36,7 +36,7 @@ export function OsFilterBar({ search, filters, clearHref, children }: { search: 
   };
 
   const active = filters.filter((f) => f.value !== "");
-  const chipText = (f: ToolbarFilter) => `${f.label}: ${f.options.find((o) => o.value === f.value)?.label ?? f.value}`;
+  const chipText = (f: ToolbarFilter) => `${f.label}: ${(f.options ?? []).find((o) => o.value === f.value)?.label ?? f.value}`;
 
   return (
     <div role="search" className="space-y-2.5">
@@ -65,7 +65,7 @@ export function OsFilterBar({ search, filters, clearHref, children }: { search: 
             <div key={f.name} className="min-w-0">
               <label htmlFor={`ob-${f.name}`} className="mb-1 block text-[13px] font-medium text-muted-foreground">{f.label}</label>
               <Select id={`ob-${f.name}`} value={f.value} onChange={(e) => go({ [f.name]: e.target.value || null })}>
-                {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                {(f.options ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </Select>
             </div>
           ))}

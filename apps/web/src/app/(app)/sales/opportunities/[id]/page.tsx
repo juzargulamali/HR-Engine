@@ -1,4 +1,3 @@
-import { WonHandoverPrompt } from "@/components/sales/won-handover-prompt";
 import Link from "next/link";
 import { BackLink } from "@/components/workspace/list-memory";
 import { notFound } from "next/navigation";
@@ -27,6 +26,8 @@ import { ReopenButton } from "./reopen-dialog";
 import { ScopePanel, toEditable } from "./scope-panel";
 import { HoldButton, MoveStageButton, ResumeButton } from "./stage-actions";
 import { buildOppView } from "./view";
+import { EnquiryGuide } from "./enquiry-guide";
+import { Suspense } from "react";
 import { LoadError } from "@/components/workspace/states";
 
 export const metadata = { title: "Opportunity" };
@@ -102,12 +103,7 @@ export default async function OpportunityPage({ params, searchParams }: { params
             <div className="min-w-0"><dt className="text-sm text-muted-foreground">{partyLabel}</dt><dd className="break-words">{clientLine}</dd></div>
             <div className="min-w-0"><dt className="text-sm text-muted-foreground">Owner</dt><dd className="break-words font-medium">{view.ownerName}</dd></div>
             <div className="min-w-0"><dt className="text-sm text-muted-foreground">Value</dt><dd className="font-medium">{formatMoney(item.value, opp.currency)}</dd></div>
-            <div className="min-w-0">
-              <dt className="text-sm text-muted-foreground">Next action</dt>
-              <dd className="break-words">
-                {failed.has("followUps") ? <span className="text-destructive">Could not load</span> : next ? <>{next.title} <span className="block text-sm"><DueText dueAt={next.due_at} /></span></> : <span className="text-muted-foreground">{isOpen ? (isHold ? "None (on hold)" : "None scheduled") : "Closed"}</span>}
-              </dd>
-            </div>
+            <div className="min-w-0"><dt className="text-sm text-muted-foreground">In this stage since</dt><dd>{formatDate(opp.stage_changed_at)}</dd></div>
           </dl>
           </div>
           <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4" role="group" aria-label="Opportunity actions">
@@ -144,7 +140,6 @@ export default async function OpportunityPage({ params, searchParams }: { params
         {isWon ? (
           <Alert variant="success" role="status">
             <p><strong>Won</strong> on {formatDate(opp.closed_at)}{opp.evidence_type ? `, confirmed by ${EVIDENCE[opp.evidence_type]} ${opp.evidence_reference ?? ""} dated ${formatDate(opp.evidence_date)}` : ""}.</p>
-            <WonHandoverPrompt opportunityId={opp.id} />
             {reopenNote ? <p className="mt-1 text-sm">{reopenNote}</p> : <p className="mt-1 text-sm">If it was recorded by mistake or has changed, use Reopen. The win stays in the history.</p>}
           </Alert>
         ) : null}
@@ -160,14 +155,11 @@ export default async function OpportunityPage({ params, searchParams }: { params
             <p className="mt-1"><Link href={`/sales/opportunities/${opp.id}/handover`} className="font-medium underline">See the handover record as it was</Link></p>
           </Alert>
         ) : null}
-        {isActive && !failed.has("followUps") && !next ? (
-          <Alert variant="warning">
-            <p><strong>No next action is scheduled.</strong> Every active opportunity needs one, so it is not forgotten.</p>
-            <div className="mt-2"><NewFollowUpButton opportunityId={opp.id} people={view.people} canAssign={canEdit || view.canAssign} currentUserId={ctx.userId} /></div>
-          </Alert>
-        ) : null}
         {isOpen && !canEdit ? <Alert role="status">Only the owner ({view.ownerName}) or a founder can change the stage, edit the details or close this opportunity. You can add notes, files and follow-ups.</Alert> : null}
 
+        <Suspense fallback={<div className="os-card p-4 text-sm text-muted-foreground" role="status">Loading the next action and latest activity…</div>}>
+          <EnquiryGuide view={view} currentUserId={ctx.userId} />
+        </Suspense>
       </header>
 
       <DetailTabs tabs={tabs} initial={tab ?? "overview"} />

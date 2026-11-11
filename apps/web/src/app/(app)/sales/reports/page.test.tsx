@@ -24,15 +24,23 @@ let oppsFail = false;
 let followUpsFail = false;
 let zohoResult: { data: unknown[] | null; error: { message: string } | null } = { data: [], error: null };
 let closuresResult: { data: unknown[] | null; error: { message: string } | null } = { data: [], error: null };
+let lastScope: Record<string, unknown> | undefined;
+let closureFilters: [string, unknown][] = [];
+const one = async (r: { data: unknown[] | null; error: { message: string } | null }) => { if (r.error) throw new Error(r.error.message); return r.data ?? []; };
 vi.mock("@/lib/crm/data", () => ({
-  loadOpportunities: async () => { if (oppsFail) throw new Error("Sales data could not be loaded: down"); return items; },
+  // The real loader applies the scope in the database; the stand-in applies the same company filter so a test can prove it was asked for.
+  loadOpportunities: async (_ctx: unknown, scope: { company?: string } = {}) => { lastScope = scope; if (oppsFail) throw new Error("Sales data could not be loaded: down"); return items.filter((i) => !scope.company || i.opp.company_id === scope.company); },
   loadFollowUps: async () => { if (followUpsFail) throw new Error("Sales data could not be loaded: down"); return { open: [], done: [] }; },
   num: (v: unknown) => (v == null ? null : Number(v)),
+  readPaged: async (page: (from: number, to: number) => Promise<{ data: unknown[] | null; error: { message: string } | null }>) => one(await page(0, 999)),
+  readForIds: async (ids: string[], read: (chunk: string[], from: number, to: number) => Promise<{ data: unknown[] | null; error: { message: string } | null }>) => (ids.length ? one(await read(ids, 0, 999)) : []),
 }));
 const table = (t: string) => {
   const b: Record<string, unknown> = {};
   const done = () => (t === "crm_zoho_references" ? zohoResult : closuresResult);
-  b.select = () => b; b.not = () => b; b.limit = async () => done();
+  b.select = () => b; b.not = () => b; b.in = () => b; b.order = () => b;
+  b.eq = (k: string, v: unknown) => { if (t === "crm_closures") closureFilters.push([k, v]); return b; };
+  b.range = async () => done();
   return b;
 };
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ from: table }) }));
@@ -42,7 +50,7 @@ const render = async (sp: Record<string, string> = {}) => renderToStaticMarkup(a
 const sourceCard = (html: string) => html.slice(html.indexOf("Enquiries by source"), html.indexOf("Won value<"));
 
 beforeEach(() => {
-  n = 0; oppsFail = false; followUpsFail = false;
+  n = 0; oppsFail = false; followUpsFail = false; lastScope = undefined; closureFilters = [];
   zohoResult = { data: [], error: null }; closuresResult = { data: [], error: null };
   items = [item("c1", "agency_call"), item("c1", "agency_call"), item("c1", "website"), item("c2", "linkedin"), item("c2", "whatsapp"), item("c2", "whatsapp")];
 });
@@ -133,5 +141,19 @@ describe("Sales reports", () => {
     const html = await render();
     expect(html).toContain("Not enough data yet");
     expect(html).not.toContain("Could not load");
+  });
+
+  it("applies the chosen company in the database, to the enquiries and to the reopened-closures note, and reads everything when no company is chosen", async () => {
+    await render({ company: "c2", from: "2026-08-01", to: "2026-10-31" });
+    // The company, and only what a period report needs: open, created in the window or closed in it (a day wider than the period; each figure applies its exact rule).
+    expect(lastScope).toEqual({ company: "c2", anyOf: { open: true, createdFrom: "2026-07-31T00:00:00Z", createdTo: "2026-11-02T00:00:00Z", closedFrom: "2026-07-31T00:00:00Z", closedTo: "2026-11-02T00:00:00Z" } });
+    expect(closureFilters).toEqual([["company_id", "c2"]]);
+    closureFilters = [];
+    const all = await render();
+    expect(lastScope).not.toHaveProperty("company");
+    expect(lastScope).toHaveProperty("anyOf.open", true);
+    expect(closureFilters).toEqual([]);
+    expect(sourceCard(all)).toContain("n = 6 enquiries");
+    expect(sourceCard(await render({ company: "c2" }))).toContain("n = 3 enquiries");
   });
 });

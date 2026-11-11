@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CRM_SOURCES, type DuplicateMatch } from "@enginious-hr/domain";
 import { checkDuplicates, createOpportunity } from "@/lib/actions/crm";
 import { Alert } from "@/components/ui/alert";
+import { formatDate } from "@/components/sales/format";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,6 +16,7 @@ import { DuplicateWarning, EventEditionPicker, OrganisationPicker, type EnquiryC
 import type { EditionOption } from "@/lib/crm/events/data";
 import type { EventChoice } from "@/lib/crm/events/model";
 import { EventEditionDialog, useCreatedEditions } from "@/components/sales/event-edition-dialog";
+import { useEditionDates } from "@/components/sales/use-edition-dates";
 import { parseTechnologyRows, type TechnologyRow } from "@/app/(app)/sales/new/technologies";
 
 let techKey = 1;
@@ -26,13 +28,13 @@ function QuickForm({ companies, organisations: serverOrganisations, editions: se
   const company = companies.find((c) => c.id === companyId) ?? null;
   const [agencyId, setAgencyId] = useState("");
   const [clientId, setClientId] = useState("");
-  const [editionId, setEditionId] = useState("");
   // An event or edition added from this form is offered (and chosen) straight away; the enquiry itself is saved only by its own button.
   const { allEditions: editions, allEvents: events, add: addEdition } = useCreatedEditions(serverEditions, serverEvents);
   const [eventDialog, setEventDialog] = useState<{ name: string } | null>(null);
-  const [eventEnd, setEventEnd] = useState("");
+  // Event start and end follow the chosen edition until the person sets them (lib/crm/events/edition-dates.ts); both stay editable.
+  const dates = useEditionDates({ editions });
+  const { editionId, start: eventStart, end: eventEnd, setStart: setEventStart, setEnd: setEventEnd, setEdition: setEditionId } = dates;
   const [title, setTitle] = useState("");
-  const [eventStart, setEventStart] = useState("");
   const [installStart, setInstallStart] = useState("");
   const [location, setLocation] = useState("");
   const [techRows, setTechRows] = useState<TechnologyRow[]>(() => [emptyTech()]);
@@ -94,6 +96,7 @@ function QuickForm({ companies, organisations: serverOrganisations, editions: se
             <OrganisationPicker id="qa-client" name="clientOrgId" label="End client" hint="The brand the work is for." value={clientId} onChange={setClientId} organisations={organisations} field="client" onAdd={() => setOrgDialog("client")} />
           </div>
           <EventEditionPicker id="qa-event" value={editionId} onChange={setEditionId} editions={editions} loadError={editionsFailed} onCreate={(name) => setEventDialog({ name })} />
+          {editionId && (eventStart || eventEnd) ? <p className="text-sm text-muted-foreground" role="status">Event dates on this enquiry: {eventStart ? formatDate(eventStart) : "start not set"} to {eventEnd ? formatDate(eventEnd) : "end not set"}. Change them under Add more details.</p> : null}
         </fieldset>
 
         <Field label="Where did it come from?" htmlFor="qa-source">
@@ -120,6 +123,7 @@ function QuickForm({ companies, organisations: serverOrganisations, editions: se
             <Field label="Event end" htmlFor="qa-ee"><Input id="qa-ee" name="eventEnd" type="date" min={eventStart || undefined} value={eventEnd} onChange={(e) => setEventEnd(e.target.value)} /></Field>
             <Field label="Installation" htmlFor="qa-is"><Input id="qa-is" name="installStart" type="date" value={installStart} onChange={(e) => setInstallStart(e.target.value)} /></Field>
           </div>
+          {dates.note}
           <Field label="Location" htmlFor="qa-loc"><Input id="qa-loc" name="location" value={location} onChange={(e) => setLocation(e.target.value)} /></Field>
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium">Technologies requested</legend>
@@ -156,7 +160,7 @@ function QuickForm({ companies, organisations: serverOrganisations, editions: se
         onClose={() => setEventDialog(null)}
         events={events}
         initial={{ name: eventDialog?.name ?? "", start: eventStart, end: eventEnd }}
-        onCreated={(c) => { addEdition(c); setEditionId(c.editionId); }}
+        onCreated={(c) => { addEdition(c); setEditionId(c.editionId, { id: c.editionId, start: c.start, end: c.end }); }}
       />
       <AddOrganisationDialog
         open={orgDialog !== null}

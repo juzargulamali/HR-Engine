@@ -136,3 +136,16 @@ Reminders appear in-app first. To enable emails: (1) confirm the Microsoft Graph
 1. Deploy the previous app version (the Sales menu disappears by itself when the tables are absent).
 2. If no business data exists yet, run `supabase/manual-sql/crm_90_rollback.sql`. It **refuses** while opportunities, organisations, contacts, files, proposals, follow-ups or closures exist (export first, then deliberately change one flag) and while either bucket contains files (empty `crm-files` and `crm-quarantine` in the Storage UI first). It never touches an HR object.
 3. Run `crm_00_preflight_readonly.sql` again: section C must show "no CRM tables or functions exist yet".
+
+## Bounded Enquiries read (migration `20261229000100_crm_enquiry_list.sql`; install-order row 26)
+**Status:** **applied on the hosted Supabase project (shared by Preview and Production) by the owner, owner-reported on 2026-11-11: the preflight and the post-migration verify passed, and signed-in Preview QA of draft PR #80 passed. Owner-run and owner-reported; not run, seen or independently verified by Claude.** PR #80 is still a draft and not merged; Production is not verified for it. Written 2026-11-11 with draft PR #80; before the owner's report this line read "not applied anywhere by Claude; hosted status `Unverified`" (history).
+
+Why a function: the Enquiries list needs, together, a search across the enquiry and the names of its agency and end client, a sort by the next follow-up's due time, exact counts for the quick filters and every board lane, and only one page of rows. One table request cannot give that, so the app used to read every matching enquiry with every column and work it out in memory. `crm_enquiry_list` does it in the database and returns one page (or the first cards of each lane) with the counts. It is read-only and **security invoker**: it reads as the caller, so the existing row-level security decides what is visible. Nothing else is changed.
+
+1. Run `supabase/manual-sql/crm_enquiry_list_00_preflight_readonly.sql` (read-only): rows 1 and 2 must say OK.
+2. Apply `supabase/migrations/20261229000100_crm_enquiry_list.sql` (idempotent: `create or replace`).
+3. Run `supabase/manual-sql/crm_enquiry_list_20_verify_readonly.sql` (read-only): rows 1 to 4 must say OK.
+4. Deploy the app in either order: without the function the list and board read the earlier way and give the same answers.
+
+Rollback: `supabase/manual-sql/crm_enquiry_list_90_rollback.sql` drops the function and deletes no data.
+

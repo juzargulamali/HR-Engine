@@ -11,9 +11,50 @@ export interface ToolbarFilter {
   name: string;
   label: string;
   value: string;
-  options: readonly { value: string; label: string }[];
+  /** The choices of a "select" filter (the default kind). Not used by the other kinds. */
+  options?: readonly { value: string; label: string }[];
+  /**
+   * "select" (the default) is a list of choices. "text" is a short typed filter, applied a moment after typing stops. "date" is a date, applied when a
+   * whole date is chosen or the field is emptied. "toggle" is a tick box whose value is "1" when ticked.
+   */
+  kind?: "select" | "text" | "date" | "toggle";
+  placeholder?: string;
   /** Less common filter: kept under a "More filters" disclosure, which opens by itself while one of them is set. */
   secondary?: boolean;
+  /** A chooser that is not a filter (for example which company's list is shown): it never counts as "in use", shows no chip and is left alone by Clear. */
+  scopeOnly?: boolean;
+}
+
+/** A typed or date filter. It keeps its own text so the address catching up never interrupts typing, and follows the address when that changes elsewhere (Back, Clear, a chip). */
+function TypedFilter({ f, apply }: { f: ToolbarFilter; apply: (value: string) => void }) {
+  const [text, setText] = useState(f.value);
+  const [seen, setSeen] = useState(f.value);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  if (f.value !== seen) { setSeen(f.value); setText(f.value); }
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  const date = f.kind === "date";
+  const onChange = (v: string) => {
+    setText(v);
+    if (timer.current) clearTimeout(timer.current);
+    if (date) apply(v);
+    else timer.current = setTimeout(() => apply(v.trim().slice(0, 100)), 300);
+  };
+  return (
+    <input id={`lt-${f.name}`} type={date ? "date" : "text"} value={text} onChange={(e) => onChange(e.target.value)} placeholder={f.placeholder} maxLength={date ? undefined : 100}
+      className="os-search h-10 w-full rounded-lg border border-input bg-transparent px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+  );
+}
+
+/** A tick box. It shows the new state at once (the address catches up a moment later) and follows the address when that changes elsewhere. */
+function ToggleFilter({ f, apply }: { f: ToolbarFilter; apply: (on: boolean) => void }) {
+  const [on, setOn] = useState(f.value !== "");
+  const [seen, setSeen] = useState(f.value);
+  if (f.value !== seen) { setSeen(f.value); setOn(f.value !== ""); }
+  return (
+    <label className="flex h-10 items-center gap-2 text-sm font-medium">
+      <input id={`lt-${f.name}`} type="checkbox" checked={on} onChange={(e) => { setOn(e.target.checked); apply(e.target.checked); }} className="h-4 w-4" /> {f.label}
+    </label>
+  );
 }
 
 /**
@@ -37,7 +78,15 @@ export function ListToolbar({ search, filters, clearHref, resetKeys, children }:
   }
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
-  const go = (patch: Record<string, string | null>) => start(() => router.replace(withParams(pathname, sp, { ...Object.fromEntries((resetKeys ?? []).map((k) => [k, null])), ...patch }), { scroll: false }));
+  // Two filters changed in quick succession: the second builds on the first even when the address has not caught up yet, so neither is lost.
+  const spText = sp.toString();
+  const latest = useRef(spText);
+  useEffect(() => { latest.current = spText; }, [spText]);
+  const go = (patch: Record<string, string | null>) => {
+    const next = withParams(pathname, new URLSearchParams(latest.current), { ...Object.fromEntries((resetKeys ?? []).map((k) => [k, null])), ...patch });
+    latest.current = next.includes("?") ? next.slice(next.indexOf("?") + 1) : "";
+    start(() => router.replace(next, { scroll: false }));
+  };
   const onSearch = (v: string) => {
     setText(v);
     if (timer.current) clearTimeout(timer.current);
@@ -45,20 +94,24 @@ export function ListToolbar({ search, filters, clearHref, resetKeys, children }:
   };
   const primary = filters.filter((f) => !f.secondary);
   const secondary = filters.filter((f) => f.secondary);
-  const secondaryOn = secondary.filter((f) => f.value !== "");
+  const secondaryOn = secondary.filter((f) => f.value !== "" && !f.scopeOnly);
   const secondaryActive = secondaryOn.length > 0;
   const [open, setOpen] = useState(false);
   const panelId = useId();
-  const chipText = (f: ToolbarFilter) => `${f.label}: ${f.options.find((o) => o.value === f.value)?.label ?? f.value}`;
-  const field = (f: ToolbarFilter) => (
+  const chipText = (f: ToolbarFilter) => (f.kind === "toggle" ? f.label : `${f.label}: ${f.options?.find((o) => o.value === f.value)?.label ?? f.value}`);
+  const field = (f: ToolbarFilter) => f.kind === "toggle" ? (
+    <ToggleFilter key={f.name} f={f} apply={(on) => go({ [f.name]: on ? "1" : null })} />
+  ) : (
     <div key={f.name} className="min-w-[8.5rem]">
       <label htmlFor={`lt-${f.name}`} className="mb-1 block text-[13px] font-medium text-muted-foreground">{f.label}</label>
-      <Select id={`lt-${f.name}`} value={f.value} onChange={(e) => go({ [f.name]: e.target.value || null })}>
-        {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </Select>
+      {f.kind === "text" || f.kind === "date" ? <TypedFilter f={f} apply={(v) => go({ [f.name]: v || null })} /> : (
+        <Select id={`lt-${f.name}`} value={f.value} onChange={(e) => go({ [f.name]: e.target.value || null })}>
+          {(f.options ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </Select>
+      )}
     </div>
   );
-  const active = filters.some((f) => f.value !== "") || (search?.value ?? "") !== "";
+  const active = filters.some((f) => f.value !== "" && !f.scopeOnly) || (search?.value ?? "") !== "";
 
   return (
     <div className="flex flex-wrap items-end gap-3" role="search">

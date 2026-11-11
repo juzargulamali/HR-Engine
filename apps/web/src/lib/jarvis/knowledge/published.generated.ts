@@ -575,12 +575,12 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "create event or edition",
       "add a missing event"
     ],
-    "summary": "Enquiries live in Sales. The quick form needs a title, where it came from, an agency or an end client (or both) and the next action with its date.",
+    "summary": "Enquiries live in Sales. The quick form needs a title, where it came from, an agency or an end client (or both) and the next action with its date. Search finds any enquiry by reference, title, agency or client, however old. The list shows 100 at a time (Previous and Next). The chips above it show My open enquiries, Overdue, Due today, Awaiting first response and No next action; each number is how many enquiries that chip will show.",
     "steps": [
       "Open Enquiries in Sales.",
       "Press Add enquiry.",
       "Fill in the title, the source, the agency and/or end client, and what happens next and when.",
-      "If the enquiry is for a show, choose it in Event / Exhibition. If the show or its edition is not listed, press Create event or edition under the field: it adds the event with its first edition, or a missing edition of an existing event, and selects it. What you have typed in the enquiry stays as it is; the enquiry is saved only when you save it.",
+      "If the enquiry is for a show, choose it in Event / Exhibition: the event start and end are filled from that edition and you can still change them. Dates you typed first are kept. If the show or its edition is not listed, press Create event or edition under the field; what you have typed stays as it is.",
       "Save. The enquiry opens so you can add more details."
     ],
     "links": [
@@ -617,7 +617,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "add a follow-up",
       "log a follow-up"
     ],
-    "summary": "The Follow-ups page lists what you need to do next on your enquiries. Every enquiry that is still being worked needs one open next action, so planning the next step is part of finishing the current one.",
+    "summary": "The Follow-ups page lists what you need to do next on your enquiries. Every enquiry that is still being worked needs one open next action, so planning the next step is part of finishing the current one. On an enquiry, the Next action card at the top shows the action, who owns it and when it is due; if none is recorded it says so and offers Add follow-up.",
     "steps": [
       "Open Follow-ups in Sales to see what is due.",
       "To add one, open the enquiry and use Add follow-up (or Schedule next action in the side panel).",
@@ -654,14 +654,22 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "meeting notes",
       "add a note",
       "timeline",
-      "log activity"
+      "log activity",
+      "history",
+      "comments",
+      "comment history",
+      "what happened",
+      "first response",
+      "pick up an enquiry",
+      "where does it stand"
     ],
-    "summary": "Updates are the enquiry's diary. Add one after a call, an email or a meeting; you can plan the next step in the same box.",
+    "summary": "Updates are the enquiry's diary. Add one after a call, an email or a meeting; you can plan the next step in the same box. The first call, email or meeting you log is recorded as the first response. To pick up someone else's enquiry, read the three cards at the top: Next action, Where it stands and Latest activity.",
     "steps": [
       "Open the enquiry.",
       "Press Add update.",
       "Choose the type (call, email, meeting, note or client response) and write what happened.",
-      "Turn on Plan the next step if you want a follow-up created at the same time."
+      "Turn on Plan the next step if you want a follow-up created at the same time.",
+      "To read what happened, open Activity & history. All activity shows everything in order; Comments and notes shows only what people wrote. Lines the app recorded (stage changes, follow-ups, estimates recorded as sent, handover) are marked as such."
     ],
     "links": [
       {
@@ -693,7 +701,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "steps": [
       "Open the enquiry.",
       "Press Edit details.",
-      "Change what you need and save. If someone else changed it first you will be asked to reload."
+      "Change what you need and save. If someone else changed it first you will be asked to reload.",
+      "Choosing a different Event / Exhibition fills a show date that is empty; a date already on the enquiry is kept, and Use edition dates replaces it if you want. A date you empty on purpose stays empty. Create event or edition is under that field here too."
     ],
     "links": [
       {
@@ -764,13 +773,20 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "hand over",
       "hand-over",
       "reopen",
-      "re-open"
+      "re-open",
+      "track a handover",
+      "handover status",
+      "project created",
+      "open project",
+      "pm asked a question"
     ],
-    "summary": "Won and Lost are closed on their own form, which asks for the evidence or the reason. After Won, the handover to Projects is prepared from the enquiry. JARVIS does not close, reopen or hand over enquiries: do those on the enquiry page.",
+    "summary": "Won and Lost are closed on their own form, which asks for the evidence or the reason. After Won, the enquiry shows a Delivery handover card: Handover needed, Waiting for PM assignment, Waiting for PM acceptance, PM asked a question, or Project created, with who has it next. JARVIS does not close, reopen or hand over enquiries: do those on the enquiry page.",
     "steps": [
       "Open the enquiry.",
       "Choose the Won or Lost action and fill in the form.",
-      "After Won, open the handover from the enquiry."
+      "After Won, use the button on the Delivery handover card: prepare and submit it, or answer the Project Manager's question and resubmit. A new brief starts with the linked event in Notes for the Project Manager, because the Project Manager cannot see Sales events; keep or edit it.",
+      "When it says Project created, Open project takes you to the delivery project if you have access to it.",
+      "The chip My won: handover open on the Enquiries list finds your won enquiries whose handover is not accepted yet."
     ],
     "links": [
       {
@@ -805,7 +821,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ],
     "summary": "Clients & Agencies holds every organisation. Search first so you do not add the same one twice. An organisation can be an agency, a direct client, an end client or a technology company, and an enquiry's agency and end-client boxes offer only organisations with the matching role.",
     "steps": [
-      "Open Clients & Agencies and search by name.",
+      "Open Clients & Agencies and search by name. The search and the filters apply as you type or choose; More filters holds country, lead source and exhibition.",
       "If it is not there, add it with its roles (and country and website if you know them).",
       "To add many at once, use Import from Excel."
     ],
@@ -886,7 +902,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "summary": "Events & Exhibitions is the shared calendar of shows, one row per edition, with how many enquiries are linked to each. It opens on upcoming editions; you can filter by name, country and dates, or switch to past editions. Everyone in Sales sees the same calendar; the enquiry figures count only the enquiries you can see. It helps you see which shows are coming up, how much business each one has brought, and which to prepare for.",
     "steps": [
       "Open Events & Exhibitions in Sales.",
-      "Use the filters to find a show, then open it to see its editions, who exhibited and the agencies to contact.",
+      "Search or choose a filter to find a show: the list changes as soon as you choose, and Clear removes the filters. Open a show to see its editions, who exhibited and the agencies to contact.",
       "Press Add event for a show that is not listed. One form takes the name, the type and the first edition's dates and place, and one save adds both. If the name already exists, the form shows that event and offers to add the edition to it instead.",
       "Press Add edition for the next year of a show that is already listed.",
       "Switch from List to Calendar to see the shows by month (Previous, Next and Today move between months; a show's name is on each of its days and opens that edition). To add many shows at once, use Import events with the template."
@@ -997,7 +1013,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "steps": [
       "Open Outreach in Sales to see what is assigned to you.",
       "Open an account from its card to log what you did and set the next action.",
-      "Filter by status or Overdue only to choose what to do first.",
+      "Choose a status or tick Overdue only to decide what to do first: the list changes as soon as you choose, and Clear removes the filters.",
       "Accounts are assigned from Clients & Agencies by the people who manage Sales assignments."
     ],
     "links": [

@@ -16,7 +16,7 @@ import { Modal } from "@/components/sales/modal";
 /** What the form starts with: the name typed so far and any dates already entered (for example on the enquiry it was opened from). */
 export interface EventEditionInitial { name?: string; start?: string; end?: string; eventId?: string }
 /** What was just saved: the event (new or existing), its new edition and the words a picker shows for it. */
-export interface CreatedEdition { eventId: string; eventName: string; newEvent: boolean; editionId: string; label: string; detail: string }
+export interface CreatedEdition { eventId: string; eventName: string; newEvent: boolean; editionId: string; label: string; detail: string; start: string; end: string }
 
 /**
  * The ONE form that adds an event together with its first edition, or adds a missing edition to an existing event. Used by Add event on Events & Exhibitions and by
@@ -50,7 +50,7 @@ function EventEditionForm({ onClose, events, initial, onCreated }: { onClose: ()
     const eventName = mode === "new" ? name.trim() : chosen?.name ?? "";
     onCreated({
       eventId: state.id, eventName, newEvent: mode === "new", editionId: state.editionId,
-      label: editionLabel({ name: eventName }, { start_date: start, city: city.trim() || null }), detail: [venue.trim(), start].filter(Boolean).join(" · "),
+      label: editionLabel({ name: eventName }, { start_date: start, city: city.trim() || null }), detail: [venue.trim(), start].filter(Boolean).join(" · "), start, end,
     });
     onClose();
   };
@@ -109,7 +109,7 @@ export function useCreatedEditions(editions: readonly EditionOption[], events: r
   const [added, setAdded] = useState<CreatedEdition[]>([]);
   const allEditions = useMemo<EditionOption[]>(() => {
     const have = new Set(editions.map((e) => e.id));
-    return [...added.filter((a) => !have.has(a.editionId)).map((a) => ({ id: a.editionId, label: a.label, detail: a.detail, archived: false })), ...editions];
+    return [...added.filter((a) => !have.has(a.editionId)).map((a) => ({ id: a.editionId, label: a.label, detail: a.detail, archived: false, start: a.start, end: a.end })), ...editions];
   }, [added, editions]);
   const allEvents = useMemo<EventChoice[]>(() => {
     const have = new Set(editions.map((e) => e.id));

@@ -1,6 +1,5 @@
-import { CRM_PIPELINE_STAGES, CRM_STAGES, crmAllowedMoves, crmStageLabel, isCrmActive } from "@enginious-hr/domain";
+import { CRM_PIPELINE_STAGES, CRM_STAGES, crmAllowedMoves, crmStageLabel, followUpTiming, isCrmActive, isCrmOpen } from "@enginious-hr/domain";
 import { compareNullable, type SortState } from "@/components/workspace/url-state";
-import type { OpportunityListItem } from "./data";
 import { organisationLabel } from "./reports";
 
 /**
@@ -42,7 +41,18 @@ export const installOrShowDate = (opp: { install_start: string | null; event_sta
 const stageRank = (stage: string): string => String(Math.max(0, CRM_STAGES.findIndex((s) => s.id === stage))).padStart(2, "0");
 
 /** A stable copy of the list in the requested order. Missing values always sort last. Values sort by currency first: amounts in different currencies are never compared. */
-export function sortEnquiries<T extends OpportunityListItem>(items: readonly T[], sort: SortState<EnquirySortKey>): T[] {
+/** What the list helpers need of an enquiry: both the full list item and the bounded list item have it. */
+export interface SortableEnquiry {
+  opp: { id: string; reference: string; title: string; stage: string; company_id: string; owner_id: string; currency: string; created_at: string; install_start: string | null; event_start: string | null; first_response_at: string | null };
+  value: number | null;
+  ownerName: string;
+  agency: { name: string } | null;
+  client: { name: string } | null;
+  nextFollowUp: { due_at: string } | null;
+  openFollowUps: number;
+}
+
+export function sortEnquiries<T extends SortableEnquiry>(items: readonly T[], sort: SortState<EnquirySortKey>): T[] {
   const text = (i: T): string | null => {
     switch (sort.key) {
       case "enquiry": return i.opp.title;
@@ -114,4 +124,88 @@ export function boardMoveTargets(i: BoardMoveInput): { moveTo: string[]; lockedR
   }
   if (isCrmActive(i.stage)) return { moveTo: [...crmAllowedMoves(i.stage), "on_hold", "won", "lost"] };
   return { moveTo: [] };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// What an enquiry needs now (the quick filters above the list)
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * Read from the recorded follow-ups and first response only, with the same rules as My Day and Follow-ups (`attentionItems`): the enquiry's NEXT open follow-up
+ * is overdue or due today (Dubai day); an open enquiry has no first response recorded; a working-stage enquiry has no open follow-up at all.
+ */
+export type EnquiryNeed = "overdue" | "due_today" | "no_first_response" | "no_next_action";
+export const ENQUIRY_NEEDS: readonly { id: EnquiryNeed; label: string; tone: "red" | "amber" | "blue" }[] = [
+  { id: "overdue", label: "Overdue", tone: "red" },
+  { id: "due_today", label: "Due today", tone: "amber" },
+  { id: "no_first_response", label: "Awaiting first response", tone: "blue" },
+  { id: "no_next_action", label: "No next action", tone: "amber" },
+];
+export const parseNeed = (v: string): EnquiryNeed | "" => (ENQUIRY_NEEDS.some((n) => n.id === v) ? (v as EnquiryNeed) : "");
+
+type NeedInput = { opp: { stage: string; first_response_at: string | null }; nextFollowUp: { due_at: string } | null; openFollowUps: number };
+export function enquiryNeeds(i: NeedInput, now: Date = new Date()): EnquiryNeed[] {
+  const out: EnquiryNeed[] = [];
+  if (i.nextFollowUp && isCrmOpen(i.opp.stage)) {
+    const t = followUpTiming(i.nextFollowUp.due_at, now);
+    if (t === "overdue") out.push("overdue");
+    else if (t === "due_today") out.push("due_today");
+  }
+  if (isCrmOpen(i.opp.stage) && !i.opp.first_response_at) out.push("no_first_response");
+  if (isCrmActive(i.opp.stage) && i.openFollowUps === 0) out.push("no_next_action");
+  return out;
+}
+/** How many of `items` need each thing (an enquiry can count under more than one). */
+export function needCounts(items: readonly NeedInput[], now: Date = new Date()): Record<EnquiryNeed, number> {
+  const counts: Record<EnquiryNeed, number> = { overdue: 0, due_today: 0, no_first_response: 0, no_next_action: 0 };
+  for (const i of items) for (const n of enquiryNeeds(i, now)) counts[n] += 1;
+  return counts;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// One list request, and the same answer computed in the app (used only where the database function is not installed)
+// ---------------------------------------------------------------------------------------------------------------
+
+export interface EnquiryListQuery {
+  q: string; company: string; owner: string; stage: string; status: "open" | "closed" | "all"; need: EnquiryNeed | "";
+  /** Only these enquiries (the "My won: handover open" view). */
+  ids?: string[];
+  sort: SortState<EnquirySortKey>;
+  limit: number; offset: number;
+  /** Board: the first N enquiries of each stage, by next due time. Leave out for one page of the table. */
+  perStage?: number;
+}
+
+/**
+ * The rules of crm_enquiry_list in the app, over enquiries that were already read completely for the query's company, owner, stage and status:
+ * the search, the need filter, the counts (needs over the filters without the need; stages over the filters with it) and one page or the first cards per lane.
+ */
+export function listFromItems<T extends SortableEnquiry>(all: readonly T[], query: EnquiryListQuery, now: Date = new Date()): { matched: number; needs: Record<EnquiryNeed, number>; stages: { stage: string; count: number; unvalued: number; totals: Record<string, number> }[]; items: T[] } {
+  const ids = query.ids ? new Set(query.ids) : null;
+  const needle = query.q.trim().toLowerCase();
+  // The same rules as filterOpportunities (reports.ts) and as the database function: a chosen stage wins over open / closed; the search is "contains", any case.
+  const base = all.filter((i) => {
+    const o = i.opp;
+    if (ids && !ids.has(o.id)) return false;
+    if (query.stage) { if (o.stage !== query.stage) return false; }
+    else if (query.status === "open" ? !isCrmOpen(o.stage) : query.status === "closed" ? isCrmOpen(o.stage) : false) return false;
+    if (query.company && o.company_id !== query.company) return false;
+    if (query.owner && o.owner_id !== query.owner) return false;
+    return !needle || [o.reference, o.title, i.agency?.name, i.client?.name].some((v) => v?.toLowerCase().includes(needle));
+  });
+  const needs = needCounts(base, now);
+  const need = query.need;
+  const sel = need ? base.filter((i) => enquiryNeeds(i, now).includes(need)) : base;
+  const by = new Map<string, T[]>();
+  for (const i of sel) by.set(i.opp.stage, [...(by.get(i.opp.stage) ?? []), i]);
+  const stages = [...by.entries()].map(([stage, rows]) => {
+    const totals: Record<string, number> = {};
+    for (const r of rows) if (r.value != null) totals[r.opp.currency] = (totals[r.opp.currency] ?? 0) + r.value;
+    return { stage, count: rows.length, unvalued: rows.filter((r) => r.value == null).length, totals };
+  }).sort((a, b) => a.stage.localeCompare(b.stage));
+  const byDue = (a: T, b: T) => compareNullable(a.nextFollowUp?.due_at, b.nextFollowUp?.due_at, "asc") || a.opp.reference.localeCompare(b.opp.reference);
+  const items = query.perStage != null
+    ? [...by.values()].flatMap((rows) => [...rows].sort(byDue).slice(0, Math.max(0, query.perStage ?? 0)))
+    : sortEnquiries(sel, query.sort).slice(Math.max(0, query.offset), Math.max(0, query.offset) + Math.max(1, query.limit));
+  return { matched: sel.length, needs, stages, items };
 }

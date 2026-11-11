@@ -21,6 +21,7 @@ import { countryLabel } from "@/lib/crm/clients-agencies/normalise";
 import type { EditionOption } from "@/lib/crm/events/data";
 import type { EventChoice } from "@/lib/crm/events/model";
 import { EventEditionDialog, useCreatedEditions } from "@/components/sales/event-edition-dialog";
+import { useEditionDates } from "@/components/sales/use-edition-dates";
 import {
   AddContactDialog, AddOrganisationDialog,
   type CreatedContact, type CreatedOrganisation, type OrganisationKind,
@@ -214,13 +215,13 @@ export function NewEnquiryForm({
   const prefillField = prefill ? (hasRoleFor(prefill.org, "client") || !hasRoleFor(prefill.org, "agency") ? "client" : "agency") : null;
   const [agencyId, setAgencyId] = useState(prefill && prefillField === "agency" ? prefill.org.id : "");
   const [clientId, setClientId] = useState(prefill && prefillField === "client" ? prefill.org.id : "");
-  const [editionId, setEditionId] = useState("");
   // An event or edition added from this page is offered (and chosen) straight away; the enquiry itself is saved only by its own button.
   const { allEditions: editions, allEvents: events, add: addEdition } = useCreatedEditions(serverEditions, serverEvents);
   const [eventDialog, setEventDialog] = useState<{ name: string } | null>(null);
-  const [eventEnd, setEventEnd] = useState("");
+  // Event start and end follow the chosen edition until the person sets them (lib/crm/events/edition-dates.ts); both stay editable.
+  const dates = useEditionDates({ editions });
+  const { editionId, start: eventStart, end: eventEnd, setStart: setEventStart, setEnd: setEventEnd, setEdition: setEditionId } = dates;
   const [checkedContacts, setCheckedContacts] = useState<Set<string>>(new Set());
-  const [eventStart, setEventStart] = useState("");
   const [installStart, setInstallStart] = useState("");
   const [location, setLocation] = useState("");
   const [techRows, setTechRows] = useState<TechnologyRow[]>(() => [emptyTechRow()]);
@@ -418,6 +419,7 @@ export function NewEnquiryForm({
                 <Input id="enq-install" name="installStart" type="date" value={installStart} onChange={(e) => setInstallStart(e.target.value)} />
               </Field>
             </div>
+            {dates.note}
             <Field label="Location" htmlFor="enq-location" hint="Venue or city.">
               <Input id="enq-location" name="location" value={location} onChange={(e) => setLocation(e.target.value)} />
             </Field>
@@ -499,7 +501,7 @@ export function NewEnquiryForm({
         onClose={() => setEventDialog(null)}
         events={events}
         initial={{ name: eventDialog?.name ?? "", start: eventStart, end: eventEnd }}
-        onCreated={(c) => { addEdition(c); setEditionId(c.editionId); }}
+        onCreated={(c) => { addEdition(c); setEditionId(c.editionId, { id: c.editionId, start: c.start, end: c.end }); }}
       />
       <AddOrganisationDialog
         open={orgDialog !== null}

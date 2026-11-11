@@ -103,13 +103,17 @@ await step("quick filters: counts, one at a time, kept in the address, reset wit
   await nav.getByRole("link", { name: /Dormant/ }).click(); await page.waitForURL((u) => !u.search.includes("rel="));
   eq((await names()).length, D.length, "reset by clicking the active chip");
 });
-await step("More filters: closed without filters, a count when a hidden filter is active", async () => {
-  eq(await page.locator("details summary", { hasText: "More filters" }).count(), 1, "disclosure");
-  eq(await page.locator("details").first().evaluate((d) => d.open), false, "closed");
+await step("More filters: closed without filters, a count when a hidden filter is active; filters apply without an Apply button", async () => {
+  const more = page.getByRole("button", { name: /More filters/ });
+  eq(await more.count(), 1, "More filters button");
+  eq(await more.getAttribute("aria-expanded"), "false", "closed");
+  eq(await page.getByRole("button", { name: /^Apply$/ }).count(), 0, "an Apply button");
   await page.goto(`${URL_}&country=AE`, { waitUntil: "networkidle" });
-  if (!(await page.locator("details summary").innerText()).includes("1 active")) throw new Error("no active count");
-  eq(await page.locator("details").first().evaluate((d) => d.open), true, "open when active");
+  eq(await page.getByLabel("1 in use").count(), 1, "active count");
+  eq(await more.getAttribute("aria-expanded"), "true", "open when active");
   eq((await names()).length, 5, "AE rows");
+  await page.getByRole("button", { name: "Remove filter: Country" }).click(); await page.waitForURL((u) => !u.search.includes("country="));
+  eq((await names()).length, D.length, "all rows after removing the filter");
 });
 await step("selection: select all on this page, label, assign dialog lists only the selected, cleared when the view changes", async () => {
   await page.goto(`${URL_}&rel=won`, { waitUntil: "networkidle" });

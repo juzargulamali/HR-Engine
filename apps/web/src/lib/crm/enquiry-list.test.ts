@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardColumnFor, boardColumns, boardMoveKind, boardMoveTargets, installOrShowDate, sortEnquiries, type EnquirySortKey } from "./enquiry-list";
+import { boardColumnFor, boardColumns, boardMoveKind, boardMoveTargets, installOrShowDate, sortEnquiries, type EnquirySortKey, enquiryNeeds, needCounts, parseNeed } from "./enquiry-list";
 import type { OpportunityListItem } from "./data";
 
 const item = (id: string, over: Partial<OpportunityListItem["opp"]> & { value?: number | null; due?: string | null; owner?: string; agency?: string | null; client?: string | null } = {}): OpportunityListItem =>
@@ -89,5 +89,31 @@ describe("board", () => {
     const other = boardMoveTargets({ ...base, stage: "new", canEdit: false, ownerName: "Bo" });
     expect(other.moveTo).toEqual([]);
     expect(other.lockedReason).toContain("Bo");
+  });
+});
+
+describe("what an enquiry needs now (the quick filters)", () => {
+  const NOW = new Date("2026-11-11T08:00:00Z");
+  const row = (stage: string, over: { first?: string | null; due?: string | null; open?: number } = {}) => ({
+    opp: { stage, first_response_at: over.first === undefined ? "2026-11-01T08:00:00Z" : over.first }, nextFollowUp: over.due ? { due_at: over.due } : null, openFollowUps: over.open ?? (over.due ? 1 : 0),
+  });
+  it("reads only the recorded follow-up and first response, with the My Day rules", () => {
+    expect(enquiryNeeds(row("qualified", { due: "2026-11-05T06:00:00Z" }), NOW)).toEqual(["overdue"]);
+    expect(enquiryNeeds(row("qualified", { due: "2026-11-11T12:00:00Z" }), NOW)).toEqual(["due_today"]);
+    expect(enquiryNeeds(row("qualified", { due: "2026-11-20T06:00:00Z" }), NOW)).toEqual([]);
+    expect(enquiryNeeds(row("new", { first: null, due: "2026-11-20T06:00:00Z" }), NOW)).toEqual(["no_first_response"]);
+    expect(enquiryNeeds(row("estimate_sent"), NOW)).toEqual(["no_next_action"]);
+    expect(enquiryNeeds(row("new", { first: null }), NOW)).toEqual(["no_first_response", "no_next_action"]);
+  });
+  it("on hold needs no next action; a closed enquiry needs nothing", () => {
+    expect(enquiryNeeds(row("on_hold"), NOW)).toEqual([]);
+    expect(enquiryNeeds(row("on_hold", { first: null }), NOW)).toEqual(["no_first_response"]);
+    for (const s of ["won", "lost"]) expect(enquiryNeeds(row(s, { first: null, due: "2026-11-01T06:00:00Z" }), NOW)).toEqual([]);
+  });
+  it("counts each need over the rows given, and only known values are accepted from the address", () => {
+    expect(needCounts([row("qualified", { due: "2026-11-05T06:00:00Z" }), row("new", { first: null }), row("negotiation")], NOW)).toEqual({ overdue: 1, due_today: 0, no_first_response: 1, no_next_action: 2 });
+    expect(parseNeed("overdue")).toBe("overdue");
+    expect(parseNeed("handover")).toBe("");
+    expect(parseNeed("anything")).toBe("");
   });
 });
