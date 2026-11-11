@@ -13,7 +13,7 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 * **Required CI on the exact head (GitHub, read by Claude before merging):** `lint-typecheck-test` success, `rls-policies` success.
 * **Signed-in Preview (owner-reported, not seen by Claude):** the owner completed the check and approved the merge.
 * **Hosted database:** no migration and no SQL in this release.
-* **Production: `Unverified`.** Claude could not read Vercel's deployment status for the merge commit and has no signed-in Production access, so the read-only smoke check ("Show my open enquiries" as the pilot user) was not performed. Both are for the owner to confirm.
+* **Production smoke check: owner-verified (2026-11-11, owner-run and owner-reported; not seen by Claude).** The owner ran "Show my open enquiries" in Production as the pilot user after the merge: the company, the count and the links were correct. Claude could not read Vercel's deployment status for the merge commit and has no signed-in Production access; the Vercel status itself was not separately reported.
 * **Docs corrected for the present state:** `docs/jarvis-deployment.md` (new "Release of PR #77"), `05` ledger, `README.md` stamp row, `modules/jarvis.md` section 15 heading, `modules/sales-action-catalogue.md` Stages 2 to 4 note, and the heading of the entry below. Dated history is left in place.
 
 ### 2026-11-11 | JARVIS Stages 2 to 4: Sales lookups, factual summaries, scope wording for an estimate, and the provenance rule for what may reach Anthropic | branch `claude/admiring-cray-uky379` from `main` `d6d7224`; **later merged as PR #77, merge `720f785`** (this heading said "draft PR, not merged"); **no migration**
