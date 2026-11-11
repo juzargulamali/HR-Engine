@@ -75,18 +75,18 @@ export function ChatLauncher({ userId, initialGroups }: { userId: string; initia
     else { setOpenGroup(null); setNotice("That conversation is not available to you. A project's chat is open to the people on that project."); }
   }, []);
 
-  // `?chat=<group id>` in the address: open it, then take the parameter out so Back and a reload do not reopen the panel.
-  useEffect(() => {
-    if (!asked) return;
-    void openById(asked);
-    router.replace(withParams(pathname, sp, { [CHAT_PARAM]: null }), { scroll: false });
-  }, [asked, openById, pathname, router, sp]);
-
   useEffect(() => {
     const onOpen = (e: Event) => { const id = (e as CustomEvent<{ groupId?: string }>).detail?.groupId; if (id) void openById(id); };
     window.addEventListener(CHAT_OPEN_EVENT, onOpen);
     return () => window.removeEventListener(CHAT_OPEN_EVENT, onOpen);
   }, [openById]);
+
+  // `?chat=<group id>` in the address: open it, then take the parameter out so Back and a reload do not reopen the panel.
+  useEffect(() => {
+    if (!asked) return;
+    window.dispatchEvent(new CustomEvent(CHAT_OPEN_EVENT, { detail: { groupId: asked } }));   // handled by the listener above
+    router.replace(withParams(pathname, sp, { [CHAT_PARAM]: null }), { scroll: false });
+  }, [asked, pathname, router, sp]);
 
   useEffect(() => {
     const t = setInterval(() => { if (document.visibilityState === "visible" && groupsRef.current.length > 0) void refresh(); }, POLL_MS);
