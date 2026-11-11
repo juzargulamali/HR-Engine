@@ -47,6 +47,18 @@ One check in Production, as the pilot user or any Sales owner:
 
 **Clean up after D:** the app has no delete for an enquiry, an estimate or an organisation. Mark the enquiry **Lost** with the reason "QA #79 test record" (it then counts as one Lost enquiry in Reports for that period, and its `EST-` number stays used), and rename the organisation, if you created one, so it reads as a test entry. If true removal is wanted, ask for a cleanup SQL: none is provided here because it has not been written or tested.
 
-## 4. What was verified before this (not on hosted)
+## 4. What was verified before the owner's run (not on hosted)
 
 Required CI on the PR head; the automated tests; and, on a disposable local PostgreSQL built from every migration: the two preflights, both migrations, both verifiers and the JARVIS verifier (70 of 70 checks, before and after), plus A, B (the database part), C (the dates) and D through the same database functions as a signed-in ordinary Sales user. **Not verified by anyone yet:** A to D in a browser, and the hosted database.
+
+## 5. Results (owner-run and owner-reported, 2026-11-11; not run or seen by Claude)
+
+| Part | Result as reported |
+|---|---|
+| Section 1, SQL steps 1 to 7 | **Passed.** Both preflights, both migrations, both verifiers and the JARVIS verifier gave the expected results. Row-level output was not sent to Claude |
+| Section 2, Preview checks A to C | **Passed**: one-save event creation, an edition created from a partly filled enquiry with the draft kept, and the calendar |
+| Clean-up after A to C | **Done** (the `QA #79` event archived) |
+| Section 3, Production check D (Estimate sent) | **Not done yet**: waits for PR #79 to be merged and Production to serve it |
+
+Still not checked by anyone: Estimate sent and Record estimate as sent in a browser; the phone layout; the full New enquiry page.
+

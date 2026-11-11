@@ -132,7 +132,7 @@ where legal_name = 'Enginious LLC FZ';
 ```
 
 ## Estimate sent stage (migration `20261228000100_crm_estimate_sent_stage.sql`; install-order row 25)
-**Status: not applied anywhere by Claude; hosted status `Unverified`.** Written 2026-11-11 with the change on branch `claude/events-first-edition-calendar` (PR #79).
+**Status: applied on the hosted Supabase project (shared by Preview and Production) by the owner, 2026-11-11 (owner-run, owner-reported: preflight, migration and verifier passed as expected; Claude ran no hosted SQL and did not see the rows).** Details: `docs/pr79-owner-rollout.md` section 5. (Until then this line read "not applied anywhere by Claude; hosted status `Unverified`".) Written 2026-11-11 with the change on branch `claude/events-first-edition-calendar` (PR #79).
 
 What it does: adds the stage **Estimate sent** at the same step as Proposal sent, and the recorded fact "this finalised estimate revision was sent to the client on this date" (`crm_estimate_sends`, written only by `crm_record_estimate_sent`, owner or founder). A move to Estimate sent needs such a record for that enquiry. It does not move any enquiry, mark any estimate or change any stored stage. The estimate guard of `20261221000100` is untouched: an estimate row still cannot be marked `sent`, so it cannot unlock Proposal sent or supersede a sent proposal. It replaces four functions with their applied bodies plus the stated lines (`crm_stage_index`, `crm_move_stage`, `crm_generate_reminders`, `jarvis_change_stage`); the test `crm-estimate-sent-stage.rls.test.ts` compares each with what was installed before.
 
