@@ -5,7 +5,7 @@ import { addDays } from "@/lib/crm/reports";
 import { displaySafe } from "../outbound";
 import type { LookupRow, LookupSection, SalesLookupCard } from "../protocol";
 import { JarvisRefusalError, type JarvisActionDefinition, type JarvisContext } from "../types";
-import { ACTIVITY_COLUMNS, ENQUIRY_COLUMNS, FOLLOW_UP_COLUMNS, type EnquiryRow } from "./projection";
+import { ACTIVITY_COLUMNS, ENQUIRY_COLUMNS, FOLLOW_UP_COLUMNS, inBatches, type EnquiryRow } from "./projection";
 
 export const SALES_LOOKUP_ID = "jarvis.sales.lookup.run";
 /** Rows shown per list (the same cap as the first lookup). The total is counted separately and exactly. */
@@ -54,9 +54,9 @@ async function orgNames(sb: Sb, ids: (string | null)[]): Promise<Map<string, str
   const want = [...new Set(ids.filter((x): x is string => !!x))];
   const out = new Map<string, string>();
   if (want.length === 0) return out;
-  const r = (await sb.from("crm_organisations").select("id, name").in("id", want)) as Res<{ id: string; name: string }>;
-  if (r.error) failed();
-  for (const o of r.data ?? []) out.set(o.id, o.name);
+  const rows = await inBatches<{ id: string; name: string }>(want, (b) => sb.from("crm_organisations").select("id, name").in("id", b));
+  if (!rows) failed();
+  for (const o of rows!) out.set(o.id, o.name);
   return out;
 }
 async function enquiryRefs(ctx: JarvisContext, ids: (string | null)[]): Promise<Map<string, { id: string; reference: string; title: string }>> {
@@ -178,11 +178,9 @@ async function inactive(ctx: JarvisContext, d: Extract<LookupDescriptor, { kind:
   try { mine = await myOpen(ctx, CRM_PIPELINE_STAGES); } catch { return failed(); }
   const ids = mine.rows.map((o) => o.id);
   const recent = new Set<string>();
-  if (ids.length > 0) {
-    const a = (await ctx.supabase.from("crm_activities").select(ACTIVITY_COLUMNS).eq("company_id", ctx.companyId).in("opportunity_id", ids).gte("occurred_at", cutoff).limit(5000)) as Res<{ opportunity_id: string }>;
-    if (a.error) failed();
-    for (const x of a.data ?? []) recent.add(x.opportunity_id);
-  }
+  const acts = await inBatches<{ opportunity_id: string }>(ids, (b) => ctx.supabase.from("crm_activities").select(ACTIVITY_COLUMNS).eq("company_id", ctx.companyId).in("opportunity_id", b).gte("occurred_at", cutoff).limit(5000));
+  if (!acts) failed();
+  for (const x of acts!) recent.add(x.opportunity_id);
   // An enquiry created inside the window is not "quiet for N days" yet.
   const quiet = mine.rows.filter((o) => !recent.has(o.id) && o.created_at < cutoff);
   const names = await orgNames(ctx.supabase, quiet.slice(0, LOOKUP_LIMIT).flatMap((o) => [o.agency_org_id, o.client_org_id]));
@@ -254,11 +252,9 @@ async function attention(ctx: JarvisContext): Promise<Built> {
     sections.push({ heading: "On hold: review date has arrived", note: "The hold review date is today or earlier.", total: hold.length, rows: hold.slice(0, LOOKUP_LIMIT).map((o) => enquiryRow(o, names, ctx.userId, `review date ${o.hold_review_date}`)) });
     const active = mine.rows.filter((o) => isCrmActive(o.stage));
     const withNext = new Set<string>();
-    if (active.length > 0) {
-      const open = (await ctx.supabase.from("crm_follow_ups").select("opportunity_id").eq("company_id", ctx.companyId).eq("status", "open").in("opportunity_id", active.map((o) => o.id)).limit(5000)) as Res<{ opportunity_id: string }>;
-      if (open.error) throw new Error("unreadable");
-      for (const x of open.data ?? []) withNext.add(x.opportunity_id);
-    }
+    const open = await inBatches<{ opportunity_id: string }>(active.map((o) => o.id), (b) => ctx.supabase.from("crm_follow_ups").select("opportunity_id").eq("company_id", ctx.companyId).eq("status", "open").in("opportunity_id", b).limit(5000));
+    if (!open) throw new Error("unreadable");
+    for (const x of open) withNext.add(x.opportunity_id);
     // One enquiry is listed once: under the first reason that applies.
     const noNext = active.filter((o) => !withNext.has(o.id) && !seen.has(o.id));
     for (const o of noNext) seen.add(o.id);

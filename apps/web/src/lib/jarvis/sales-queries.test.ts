@@ -436,10 +436,19 @@ describe("Stage 3: summaries (figures computed by the app; the model only words 
     expect(metric(ksa, "Won")!.value).toBe(1);
     w.grants.find((g) => g.user_id === ID.u1 && g.company_id === ID.co1)!.revoked_at = new Date().toISOString();
     expect((await ask("show last month instead", { context: { lastQuery: { kind: "summary", descriptor: first.descriptor } } })).ok).toBe(false);
-    // in the middle of a general conversation a short line is not hijacked by an old summary
+    // "make that shorter" refers to the summary only while the panel still sends its question (the panel drops it once a general chat reply is the latest answer);
+    // without it, the same line continues the general conversation
     w.grants.find((g) => g.user_id === ID.u1 && g.company_id === ID.co1)!.revoked_at = null;
-    const chatty = await ask("make that shorter", { context: { turns: [{ role: "user", text: "Draft an email" }, { role: "jarvis", text: "Hello [name], ..." }], lastQuery: { kind: "summary", descriptor: first.descriptor } } });
+    const turns = [{ role: "user" as const, text: "Draft an email" }, { role: "jarvis" as const, text: "Hello [name], ..." }];
+    const chatty = await ask("make that shorter", { context: { turns } });
     expect(chatty.ok && chatty.kind === "action" && chatty.card.kind).toBe("chat.reply");
+    const refined = summary(await ask("make that shorter", { context: { turns, lastQuery: { kind: "summary", descriptor: first.descriptor } } }));
+    expect(refined.descriptor).toMatchObject({ kind: "period", narrative: true });
+    // more ids than one filter carries are read in batches, with the same result
+    for (let i = 0; i < 230; i++) w.opps.push(mkOpp({ company_id: ID.co1, owner_id: ID.u1, client_org_id: w.orgs[1]!.id, stage: "new", created_at: at("2099-08-01T08:00:00Z") }));
+    const quiet = await ask("Which of my enquiries have had no activity for 14 days?");
+    expect(quiet.ok && quiet.kind === "action" && quiet.card.kind === "lookup.sales" && quiet.card.total).toBe(230);
+    expect(w.selectLog.filter((x) => x.table === "crm_activities").length).toBeGreaterThanOrEqual(3);
   });
 
   it("PROVIDER REQUEST (sentinels): one enquiry's summary sends its operational facts and screened text; stored financial fields and financial sentences in its text never leave", async () => {

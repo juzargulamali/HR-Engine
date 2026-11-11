@@ -184,7 +184,7 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
       else if (r.kind === "action") {
         if (r.card.kind === "chat.reply") turnsRef.current = [...turnsRef.current, { role: "user" as const, text: t }, { role: "jarvis" as const, text: r.card.text }].slice(-MAX_TURNS);
         lookupRef.current = r.card.kind === "lookup.followups" ? { period: r.card.period } : r.card.kind === "lookup.sales" || r.card.kind === "summary.sales" ? null : lookupRef.current;
-        queryRef.current = r.card.kind === "lookup.sales" ? { kind: "lookup", descriptor: r.card.descriptor } : r.card.kind === "summary.sales" ? { kind: "summary", descriptor: r.card.descriptor } : r.card.kind === "lookup.followups" ? null : queryRef.current;
+        queryRef.current = r.card.kind === "lookup.sales" ? { kind: "lookup", descriptor: r.card.descriptor } : r.card.kind === "summary.sales" ? { kind: "summary", descriptor: r.card.descriptor } : r.card.kind === "lookup.followups" || r.card.kind === "chat.reply" ? null : queryRef.current;
         push({ role: "jarvis", kind: "action", actionId: r.actionId, state: { card: r.card, confirmation: r.confirmation }, companyId, rev: 0 });
       }
       else push({ role: "jarvis", kind: "card", state: { card: r.card, confirmation: r.confirmation }, companyId, rev: 0 });

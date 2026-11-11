@@ -8,7 +8,7 @@ import type { LookupSection, SalesSummaryCard, SummaryMetric } from "../protocol
 import { logProviderFailure } from "../provider/diagnostics";
 import { JarvisProviderError, type FactLine } from "../provider/types";
 import { JarvisRefusalError, type JarvisActionDefinition, type JarvisContext } from "../types";
-import { ACTIVITY_TEXT_COLUMNS, ENQUIRY_COLUMNS, ENQUIRY_TEXT_COLUMNS, enquiryFacts, FOLLOW_UP_COLUMNS, safeValue, WITHHELD, type EnquiryRow } from "./projection";
+import { ACTIVITY_TEXT_COLUMNS, ENQUIRY_COLUMNS, ENQUIRY_TEXT_COLUMNS, enquiryFacts, FOLLOW_UP_COLUMNS, inBatches, safeValue, WITHHELD, type EnquiryRow } from "./projection";
 
 export const SALES_SUMMARY_ID = "jarvis.sales.summary.run";
 export const SUMMARY_TASK = "sales_summary";
@@ -175,10 +175,10 @@ async function periodSummary(ctx: JarvisContext, d: Extract<SummaryDescriptor, {
     const editions = [...new Set(rows.map((r) => r.event_edition_id).filter((x): x is string => !!x))];
     const eventOf = new Map<string, string>();
     if (editions.length > 0) {
-      const eds = (await ctx.supabase.from("crm_event_editions").select("id, event_id").in("id", editions)) as Res<{ id: string; event_id: string }>;
-      const evs = eds.error ? null : ((await ctx.supabase.from("crm_events").select("id, name").in("id", [...new Set((eds.data ?? []).map((e) => e.event_id))])) as Res<{ id: string; name: string }>);
-      if (!evs || evs.error) unavailable.push("the names of the linked events");
-      else { const names = new Map((evs.data ?? []).map((e) => [e.id, e.name])); for (const e of eds.data ?? []) eventOf.set(e.id, names.get(e.event_id) ?? "An event you cannot see"); }
+      const eds = await inBatches<{ id: string; event_id: string }>(editions, (b) => ctx.supabase.from("crm_event_editions").select("id, event_id").in("id", b));
+      const evs = eds ? await inBatches<{ id: string; name: string }>([...new Set(eds.map((e) => e.event_id))], (b) => ctx.supabase.from("crm_events").select("id, name").in("id", b)) : null;
+      if (!eds || !evs) unavailable.push("the names of the linked events");
+      else { const names = new Map(evs.map((e) => [e.id, e.name])); for (const e of eds) eventOf.set(e.id, names.get(e.event_id) ?? "An event you cannot see"); }
     }
     const byEvent = new Map<string, number>();
     let unlinked = 0;

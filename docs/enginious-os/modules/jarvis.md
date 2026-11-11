@@ -300,7 +300,7 @@ Input is a **query descriptor** (`lookupDescriptor`, `sales/lookup.ts`), built l
 | One enquiry's status | By reference, or the enquiry the page shows; selected company only. Another company's or an unknown reference gives the same "not found or cannot see" | Stage and date, parties, dates, open follow-ups (5 shown, exact count), last recorded activity |
 | What needs my attention today | Overdue and due-today follow-ups; on-hold enquiries the person owns whose review date has arrived; their active enquiries with no open follow-up; their open enquiries with no first response. One enquiry appears once, under the first reason | The same kinds as the Sales overview (`attentionItems`, `lib/crm/reports.ts`) |
 
-Every card shows the company, the scope, the filters, the as-of time in Dubai, the exact total (a separate `count: exact`, not the page) and how many are shown (25). The "no activity" and "attention" passes read at most 500 of the person's open enquiries and say so when there are more. States: no matches (`empty`), not permitted (refusal), failed read (`lookup_failed`), a named unavailable part (partial), paused (`lookups`). A question that names a company other than the selected one is not answered about the wrong company.
+Every card shows the company, the scope, the filters, the as-of time in Dubai, the exact total (a separate `count: exact`, not the page) and how many are shown (25). The "no activity" and "attention" passes read at most 500 of the person's open enquiries and say so when there are more; long id lists are read in batches of 100 (`inBatches`, `sales/projection.ts`), with no per-row reads. States: no matches (`empty`), not permitted (refusal), failed read (`lookup_failed`), a named unavailable part (partial), paused (`lookups`). A question that names a company other than the selected one is not answered about the wrong company.
 
 ### 15.3 Summaries `jarvis.sales.summary.run` (increment 3)
 
@@ -318,7 +318,7 @@ Periods are Dubai calendar dates (`resolveWindow`): this month so far, last mont
 
 **One enquiry** ("summarise OPP-... and its next steps"): its operational facts (`enquiryFacts`), open follow-ups, technologies and quantities as fact lines; its brief, scope, exclusions, recorded lost or hold reason and five most recent activity notes after `redactAppText`. Value, currency, budget note, payment terms, estimates, proposals and files are not read. The card lists what was left out.
 
-A follow-up ("show last month instead", "compare with the previous period", "make that shorter") is the last descriptor with one thing changed (`refineQuery`), validated and run again under the current permissions and the currently selected company. Rows, numbers or narrative the browser holds are not used. It is not applied in the middle of a general chat conversation.
+A follow-up ("show last month instead", "compare with the previous period", "make that shorter") is the last descriptor with one thing changed (`refineQuery`), validated and run again under the current permissions and the currently selected company. Rows, numbers or narrative the browser holds are not used. The panel sends the last question only while that card is the latest answer: once a general chat reply follows it, the question is dropped, so a chat line is not captured by an old card.
 
 ### 15.4 Scope wording for an estimate `jarvis.sales.estimate.scope_draft` and the existing actions (increment 4)
 

@@ -191,7 +191,8 @@ export function routeMessage(raw: string, ctx: RouteContext = {}): Route {
     // A follow-up to the lookup the person just ran ("show last month instead"): the lookup runs again, under today's permissions.
     if (ctx.lastLookup && text.length <= 60 && periodIn(text) && !WRITE.test(text)) return { kind: "lookup", period: periodIn(text)! };
     // A follow-up to the Sales lookup or summary just shown ("the whole company instead", "show last month", "make that shorter"): the same question with one thing changed.
-    const refined = ctx.lastQuery && !ctx.hasChatContext ? refineQuery(text, ctx.lastQuery) : null;
+    // The panel sends the last question only while that card is the most recent answer (a general chat reply after it clears it), so an old card does not capture a chat line.
+    const refined = ctx.lastQuery ? refineQuery(text, ctx.lastQuery) : null;
     if (refined) return { kind: "query", query: refined };
     // A Sales question about the records (lookup, count, summary, scope wording). Not a request to change something (those are the Sales actions below) and not a
     // request for a piece of writing, except a summary of the records or the scope wording of an estimate.

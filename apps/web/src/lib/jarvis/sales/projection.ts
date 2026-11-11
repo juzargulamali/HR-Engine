@@ -59,3 +59,16 @@ export function enquiryFacts(row: EnquiryRow, names: { agency?: string | null; c
   add("Owner", safeValue(names.owner, 80));
   return out;
 }
+
+/** The most ids one "in (...)" filter carries. A longer list is read in batches, so the request address stays short whatever the number of records. */
+export const ID_BATCH = 100;
+/** Runs `read` once per batch of ids and returns all rows; `null` when any batch failed (the caller reports a failed read, never a partial list as if it were whole). */
+export async function inBatches<T>(ids: readonly string[], read: (batch: string[]) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[] | null> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += ID_BATCH) {
+    const r = await read(ids.slice(i, i + ID_BATCH));
+    if (r.error) return null;
+    out.push(...(r.data ?? []));
+  }
+  return out;
+}
