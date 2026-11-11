@@ -568,7 +568,7 @@ describe("general chat, clarifying question, lookup and memory in the panel", ()
     expect(actions.querySelector("div")!.className).toMatch(/flex-wrap/);
     for (const b of within(actions).getAllByRole("button")) expect(b.className).toMatch(/whitespace-normal/);
     const notice = screen.getByTestId("summary-ai-notice");
-    expect(notice.textContent).toMatch(/sends these counts and names to Anthropic/);
+    expect(notice.textContent).toBe("Sends the company, reporting period, counts and breakdown labels, which may include recorded lost reasons, to Anthropic for suggestions. Enginious OS writes the factual summary.");
     // the notice comes BEFORE the button that sends: earlier in the document than "Explain & suggest", inside the same block
     const explain = within(actions).getByRole("button", { name: "Explain & suggest" });
     expect(actions.contains(notice)).toBe(true);

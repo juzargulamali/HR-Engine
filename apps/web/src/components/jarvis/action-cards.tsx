@@ -499,7 +499,7 @@ function SalesSummaryView({ card, ...p }: { card: SalesSummaryCard } & ReadCardP
       {d.kind === "period" && (!d.compare || canExplain) ? (
         <div className="space-y-1.5" data-testid="summary-actions">
           {/* What the AI action sends is said BEFORE the button that sends it. */}
-          {canExplain ? <p className="text-xs leading-snug text-muted-foreground break-words" data-testid="summary-ai-notice">Explain &amp; suggest sends these counts and names to Anthropic for suggestions. The sentences are written by Enginious OS.</p> : null}
+          {canExplain ? <p className="text-xs leading-snug text-muted-foreground break-words" data-testid="summary-ai-notice">Sends the company, reporting period, counts and breakdown labels, which may include recorded lost reasons, to Anthropic for suggestions. Enginious OS writes the factual summary.</p> : null}
           <div className="flex flex-wrap gap-2">
             {!d.compare ? <Button type="button" size="sm" variant="outline" className="h-auto min-h-8 whitespace-normal py-1" disabled={busy || p.companyStale} onClick={() => void run({ ...d, compare: true })}>Compare periods</Button> : null}
             {canExplain ? <Button type="button" size="sm" variant="outline" className="h-auto min-h-8 whitespace-normal py-1" disabled={busy || p.companyStale} onClick={() => void run({ ...d, narrative: true })}>Explain &amp; suggest</Button> : null}
