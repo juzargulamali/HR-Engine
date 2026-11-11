@@ -10,8 +10,16 @@ export interface StructuredRequest {
   task: string;
   /** The fixed instruction text of the task (never built from user text). */
   instructions: string;
-  /** The untrusted text to read (the pasted brief) and nothing else. */
+  /** The untrusted text the PERSON supplied for this task (the pasted brief, the message, the bounded conversation). Never text the app read from the database. */
   input: string;
+  /**
+   * App-held data, in the only two shapes the outbound gate accepts. Server code fills these from typed projections (lib/jarvis/sales/projection.ts); nothing the browser
+   * sends can land here. The gate screens both for protected material (a financial figure in a stored note is allowed; a structured financial field is never selected) and appends them to `input` itself.
+   *   facts: operational fact lines. `label` is fixed wording from the code; `value` is a count, a date, a name or a screened title.
+   *   recordText: free text of a record (brief, scope, notes), with protected sentences already removed locally by redactAppText.
+   */
+  facts?: FactLine[];
+  recordText?: string;
   /** The tag the provider wraps `input` in (default "brief"); null = `input` already carries its own tags. */
   inputTag?: string | null;
   /** Task-specific closing instruction for the system text (default: extract only, never guess). */
@@ -21,6 +29,9 @@ export interface StructuredRequest {
   maxOutputTokens: number;
   timeoutMs: number;
 }
+
+/** One operational fact for the provider: fixed label, plain value. */
+export interface FactLine { label: string; value: string | number }
 
 export type JarvisProviderFailure = "timeout" | "http" | "malformed" | "network";
 

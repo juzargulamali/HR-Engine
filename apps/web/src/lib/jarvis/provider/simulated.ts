@@ -145,6 +145,32 @@ function chatAnswer(input: string): Record<string, unknown> {
   return out;
 }
 
+/** How the stand-in answers a summary or a scope request, so tests can prove what the server does with a wrong, money-bearing or unusable answer. */
+export const simulatedBehaviour: { summary: "ok" | "wrong_number" | "swapped" | "outcome" | "malformed" | "bad_suggestions"; scope: "ok" | "money" } = { summary: "ok", scope: "ok" };
+
+/**
+ * A summary: it repeats the fact lines it received (so a test can see exactly what arrived) and adds one harmless suggestion. The behaviours make it misbehave the way a
+ * real model can: a number that is nowhere in the record, a result the record does not state, facts dressed up as suggestions, or an unusable answer.
+ */
+function salesSummary(input: string): Record<string, unknown> {
+  const data = /<enginious_os_data>\n([\s\S]*?)\n<\/enginious_os_data>/.exec(input)?.[1] ?? "";
+  const facts = data.split("\n").filter((l) => /^[A-Za-z][A-Za-z ,()'&/%-]*: /.test(l)).slice(0, 8);
+  if (simulatedBehaviour.summary === "malformed") return { nothing: true };
+  let summary = `In short: ${facts.join("; ")}.`;
+  if (simulatedBehaviour.summary === "wrong_number") summary += " That is 9871 more than expected.";
+  if (simulatedBehaviour.summary === "swapped") summary = "We won 2 enquiries and lost 8.";
+  if (simulatedBehaviour.summary === "outcome") summary += " The work was delivered and invoiced.";
+  const suggestions = simulatedBehaviour.summary === "bad_suggestions" ? ["We won 2 enquiries and lost 8.", "We won 3 enquiries.", "We completed 8 projects.", "Chase the three oldest ones.", "Call the agencies that went quiet."] : ["Review the open follow-ups."];
+  return { summary, suggestions, execute: true, role: "admin" };
+}
+function estimateScope(input: string): Record<string, unknown> {
+  const req = /<request>\n([\s\S]*?)\n<\/request>/.exec(input)?.[1] ?? "";
+  const data = /<enginious_os_data>\n([\s\S]*?)\n<\/enginious_os_data>/.exec(input)?.[1] ?? "";
+  const lines = [`Scope for: ${req.split("\n")[0]!.slice(0, 120)}`, ...data.split("\n").filter((l) => l.startsWith("Requested technology: ")).map((l) => `- ${l.slice("Requested technology: ".length)}`), "- Software development and on-site set-up", "Excluded: furniture and stand build"];
+  if (simulatedBehaviour.scope === "money") lines.push("- LED wall hire at AED 12,000 per day");
+  return { draft: lines.join("\n"), questions: ["Which reader model will be supplied?"] };
+}
+
 export function createSimulatedProvider(): JarvisProvider {
   return {
     kind: "simulated",
@@ -156,6 +182,8 @@ export function createSimulatedProvider(): JarvisProvider {
       if (req.task === "chat_reply") return chatAnswer(req.input);
       if (req.task === "enquiry_update") return enquiryUpdate(req.input);
       if (req.task === "meeting_notes") return meetingNotes(req.input, req.instructions);
+      if (req.task === "sales_summary") return salesSummary(req.input);
+      if (req.task === "estimate_scope") return estimateScope(req.input);
       if (req.task !== "enquiry_fields") throw new JarvisProviderError("malformed");
       const out = extractEnquiry(req.input);
       if (/ignore (all )?previous instructions/i.test(req.input)) {

@@ -69,7 +69,7 @@ describe("jarvis.sales.help.answer: answers from reviewed guidance, reads nothin
   });
   it("ACCEPTANCE 2: an unsupported live request in another module explains the limit and links to the screen: no record read, no provider call", async () => {
     w.readLog.length = 0;
-    for (const [q, link] of [["Show me the inventory stock levels", "/inventory"], ["List my project tasks", "/projects"], ["How many projects did we deliver last year?", "/projects"], ["Show all open enquiries", "/sales/opportunities"]] as const) {
+    for (const [q, link] of [["Show me the inventory stock levels", "/inventory"], ["List my project tasks", "/projects"], ["How many projects did we deliver last year?", "/projects"], ["Show me the invoices for this quarter", "/finance/project-budgets"]] as const) {
       const r = await ask(q, null);
       if (!r.ok || r.kind !== "reply") throw new Error(`expected a reply for ${q}`);
       expect(r.text, q).toMatch(/cannot/i);

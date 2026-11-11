@@ -13,15 +13,25 @@
 export type JarvisSwitch = "jarvis" | "writes" | "help" | "lookups" | "chat" | "memory";
 
 /**
- * What a provider request may be built from. A request DECLARES its sources and the gate refuses any that the capability does not approve. ONLY these exist: nothing the app
- * reads from the database (a CRM record, a saved quote, a historical price, a margin, a budget, a note) is a source, so none of it can be attached to a request.
- *   user_text             what the person typed or pasted for THIS task, as they wrote it: Sales context (names, venue, dates, quantities, quoted prices, unit rates, client
- *                         budgets) is allowed; genuinely restricted material is screened out first (lib/jarvis/protected.ts)
+ * What a provider request may be built from. A request DECLARES its sources and the gate refuses any that the capability does not approve. ONLY these exist.
+ *   user_text             what the person typed or pasted for THIS task, as they wrote it: Sales context and working financial figures (prices, rates, budgets, costs)
+ *                         are allowed; protected material is screened out first (lib/jarvis/protected.ts)
  *   conversation_context  the last few turns of the current GENERAL conversation, as the browser holds them (bounded, screened again on every call; never stored). Cards,
  *                         lookups and text submitted for a Sales task are never part of it
  *   preferences           fixed sentences chosen by the person's saved, structured preferences (never free text)
+ *   sales_facts           OPERATIONAL fact lines about Sales records the requester can see, built by server code from an explicit field projection
+ *                         (lib/jarvis/sales/projection.ts): names, references, titles, stages, dates, follow-up state, counts and count-based shares. NEVER a structured
+ *                         financial field (value, currency, budget note, payment terms, estimate, proposal): those are in no projection, and the gate refuses a fact
+ *                         label that names money and any number that is not a whole-number count
+ *   sales_record_text     the ordinary free text of ONE record the requester can see (brief, scope, exclusions, meeting or activity notes, a recorded reason), as
+ *                         written, INCLUDING financial figures inside it (owner policy, 2026-11-11). Sentences with protected material (pay, IDs, medical, bank,
+ *                         credentials, company results) are removed locally first; a text marked not for sharing is omitted entirely
+ * A generic "record" source does not exist: a capability names exactly which of these it may use, and the gate refuses anything else. This is not permission to send whole
+ * database records, prepared estimate or quotation documents, attachments or anything the requester cannot see.
  */
-export type OutboundSource = "user_text" | "conversation_context" | "preferences";
+export type OutboundSource = "user_text" | "conversation_context" | "preferences" | "sales_facts" | "sales_record_text";
+/** The sources that carry app-held data. They travel in their own request fields (never inside `input`), which only server code fills. */
+export const APP_SOURCES: readonly OutboundSource[] = ["sales_facts", "sales_record_text"];
 
 export interface JarvisRule {
   id: string;
@@ -66,6 +76,26 @@ export const JARVIS_RULES: JarvisRule[] = [
     who: SALES, scope: "The selected company only; open follow-ups assigned to the signed-in person, read through their own session",
     display: ["follow-up title", "follow-up type", "due date and days overdue", "enquiry reference and title", "link to the enquiry", "company name", "cutoff time", "count"],
     outbound: NO_PROVIDER, confirmation: "none", pausedBy: ["jarvis", "lookups"],
+  },
+  {
+    id: "jarvis.sales.lookup.run", title: "Look up Sales follow-ups and enquiries", kind: "lookup",
+    who: SALES, scope: "The selected company only. Follow-ups assigned to the signed-in person; enquiries they own, or every enquiry of the company (what the Enquiries screen shows a Sales user); the shared directory of clients, agencies and events for names. Read through their own session with an explicit column list that has no financial column",
+    display: ["enquiry reference, title, stage, owner (you or another owner), agency and end client names, location, event and installation dates, created and closed dates, hold review date", "follow-up title, type and due date", "last recorded activity type and date", "exact totals, the filters, the scope, the as-of time", "links to the records and screens"],
+    outbound: NO_PROVIDER, confirmation: "none", pausedBy: ["jarvis", "lookups"],
+  },
+  {
+    id: "jarvis.sales.summary.run", title: "Summarise Sales enquiries (counts for a period, or one enquiry)", kind: "lookup",
+    who: SALES, scope: "The selected company only: the enquiries Sales reports shows a Sales user, as counts for a period (created, won, lost, share won, by event, by source, recorded lost reasons) or ONE enquiry the person can see. Read through their own session with explicit columns; no financial column is read",
+    display: ["counts and count-based shares computed by the app, with their definitions, the period, the scope and coverage notes", "a bounded list of supporting records with links", "the model's wording of those facts, labelled, only when it matches them", "suggested next steps, labelled as suggestions"],
+    outbound: { provider: true, sources: ["user_text", "sales_facts", "sales_record_text"], note: "A fixed request sentence; operational fact lines (company name, period, counts, count-based shares, event names, sources, screened lost reasons; for one enquiry its reference, title, stage, agency, end client, linked event, location, dates, source, follow-up titles and due dates, requested technologies and quantities); and for ONE enquiry its brief, scope, exclusions, recorded reason and the five most recent activity notes as written (financial figures in them included), after sentences with protected material were removed locally. Never: the structured value, currency, budget note, payment terms, estimates, proposals, files, contact emails or phone numbers, other people's names." },
+    confirmation: "none", pausedBy: ["jarvis", "lookups"],
+  },
+  {
+    id: "jarvis.sales.estimate.scope_draft", title: "Draft the scope wording for an estimate (no prices)", kind: "draft",
+    who: SALES, scope: "The person's request; optionally ONE enquiry of the selected company that they can see. No estimate, proposal, quotation, file or price is read",
+    display: ["a copyable draft of line descriptions, quantities, dependencies and exclusions", "clarification questions", "links to the enquiry and to Proposals & quotes"],
+    outbound: { provider: true, sources: ["user_text", "sales_facts", "sales_record_text"], note: "The request as written; when an enquiry is named, its reference, title, location, dates and requested technologies as fact lines, and its brief, scope and exclusions as written (figures in them included; protected sentences removed locally). Never a prepared estimate or quotation document, or a structured financial field. The OUTPUT stays non-financial: a line of the answer that carries an amount is dropped before display." },
+    confirmation: "none", pausedBy: ["jarvis", "chat"],
   },
   {
     id: "jarvis.sales.enquiry.create_from_brief", title: "Create an enquiry from a brief", kind: "write",
@@ -138,4 +168,4 @@ export const ruleFor = (id: string | null | undefined): JarvisRule | null => (id
 /** The information that never appears in a JARVIS response and never goes to the provider, in the rulebook's words. */
 /** What stays inside Enginious OS even when it is pasted, in the rulebook's words. */
 export const PROTECTED_SUMMARY =
-  "employee documents, salaries and payroll, reimbursements, medical and insurance records, private leave details, personal IDs and bank details, credentials, company financial statements and ledgers, internal costing and margins, and anything marked as not for external sharing";
+  "employee documents, salaries and payroll, reimbursements, medical and insurance records, private leave details, personal IDs and bank details, credentials, company financial statements, ledgers and results, prepared estimate or quotation documents, and anything marked as not for external sharing";

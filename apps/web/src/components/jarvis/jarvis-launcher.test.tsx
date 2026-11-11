@@ -74,7 +74,23 @@ describe("launcher and panel", () => {
     expect(within(d).getByText("Enginious OS assistant")).toBeTruthy();
     expect(within(d).getByTestId("jarvis-capability").textContent).toBe("Sales & CRM");
     expect(within(d).getByTestId("jarvis-welcome").textContent).toMatch(/^Ask me anything/);
-    expect(within(d).getByTestId("jarvis-anthropic-notice").textContent).toBe("The text you submit for this task is sent to Anthropic to prepare a draft.");
+    // the composer starts at two lines; one short line says what uses Anthropic, with the full explanation one disclosure away, collapsed
+    expect(within(d).getByTestId("jarvis-composer").getAttribute("rows")).toBe("2");
+    expect(within(d).getByTestId("jarvis-composer").className).toMatch(/max-h-\[9\.75rem\][\s\S]*overflow-y-auto/);
+    expect(within(d).getByTestId("jarvis-anthropic-notice").textContent).toBe("AI drafts and suggestions use Anthropic. Lookups stay in Enginious OS.");
+    const shared = within(d).getByTestId("jarvis-shared") as HTMLDetailsElement;
+    expect(shared.tagName).toBe("DETAILS"); // a native disclosure: focusable, opened with Enter or Space
+    expect(shared.open).toBe(false);
+    expect(shared.querySelector("summary")!.textContent).toMatch(/What gets shared$/);
+    const detail = within(d).getByTestId("jarvis-shared-detail");
+    expect(detail.className).toMatch(/max-h-40[\s\S]*overflow-y-auto/); // scrolls inside itself on a short screen
+    expect(detail.textContent).toMatch(/Sent to Anthropic:[\s\S]*brief, scope and notes as written, including figures written in them/);
+    expect(detail.textContent).toMatch(/Never sent:[\s\S]*value, budget and payment-terms fields; estimates, proposals, prepared estimate or quotation documents; attachments and files/);
+    expect(detail.textContent).toMatch(/Nothing is saved until you confirm a review card/);
+    // Send stays in the composer row whatever the length of the text
+    fireEvent.change(within(d).getByTestId("jarvis-composer"), { target: { value: Array.from({ length: 40 }, (_, i) => `Line ${i} of a fictional brief`).join("\n") } });
+    expect(within(d).getByRole("button", { name: "Send" })).toBeTruthy();
+    fireEvent.change(within(d).getByTestId("jarvis-composer"), { target: { value: "" } });
     expect(l.getAttribute("aria-expanded")).toBe("true");
   });
   it("moves focus into the panel on open, closes on Escape and returns focus to the launcher; also closes with the Close button", async () => {
@@ -466,6 +482,159 @@ describe("general chat, clarifying question, lookup and memory in the panel", ()
     expect(screen.getByTestId("lookup-empty").textContent).toMatch(/No matching follow-ups/);
     type("show this month");
     expect((await screen.findByTestId("jarvis-error")).textContent).toMatch(/failed lookup, not an empty list/);
+  });
+  it("a Sales lookup shows scope, filters, time, the exact total next to what is shown, a named missing part and one question with choices; a follow-up carries the question (never rows)", async () => {
+    const base = { kind: "lookup.sales" as const, company: { id: CO1, name: companies[0]!.name }, asOf: new Date().toISOString(), asOfLabel: "14 Oct 2099, 10:00 (Dubai)", unavailable: [] as string[], note: null, empty: null, choices: [], links: [{ label: "Open Enquiries", href: "/sales/opportunities" }] };
+    const rows = Array.from({ length: 2 }, (_, i) => ({ id: `o${i}`, primary: `OPP-UAE-2099-000${i} · Fictional job ${i}`, secondary: "Qualified · owned by you", meta: null, href: `/sales/opportunities/o${i}` }));
+    const list: SendResult = { ok: true, kind: "action", actionId: "jarvis.sales.lookup.run", confirmation: null, card: { ...base, title: "Your open enquiries", scope: "Owned by you", filters: ["open (not Won or Lost; On hold included)"], total: 41, shown: 2, sections: [{ heading: "Your open enquiries", total: 41, rows }], unavailable: ["its open follow-ups"], descriptor: { kind: "enquiries", scope: "mine", stage: null, org: null, event: null, named: null } } };
+    const question: SendResult = { ok: true, kind: "action", actionId: "jarvis.sales.lookup.run", confirmation: null, card: { ...base, title: "Which one do you mean?", scope: "", filters: [], total: null, shown: 0, sections: [], note: "More than one client or agency matches that name.", choices: [{ label: "Fictional Wave Agency", descriptor: { kind: "enquiries", scope: "company", stage: null, org: { id: "33333333-3333-4333-8333-333333333333", name: null }, event: null, named: null } }], descriptor: { kind: "enquiries", scope: "company", stage: null, org: null, event: null, named: "Fictional Wave" } } };
+    const chosenDescriptor = { kind: "enquiries" as const, scope: "company" as const, stage: null, org: { id: "33333333-3333-4333-8333-333333333333", name: null }, event: null, named: null };
+    const chosenCard: SendResult = { ok: true, kind: "action", actionId: "jarvis.sales.lookup.run", confirmation: null, card: { ...base, title: "Open enquiries", scope: "Everyone's enquiries in this company", filters: ["client or agency: Fictional Wave Agency"], total: 2, shown: 2, sections: [{ heading: "Open enquiries", total: 2, rows }], descriptor: chosenDescriptor } };
+    const replies: SendResult[] = [list, question, list, list];
+    const api = fakeApi({ send: async () => replies.shift()!, act: async () => chosenCard });
+    mount(api);
+    openPanel();
+    type("Show my open enquiries");
+    const c = await screen.findByTestId("jarvis-sales-lookup");
+    expect(within(c).getByTestId("lookup-scope").textContent).toMatch(/Fictional Enginious UAE LLC · Owned by you · open \(not Won or Lost; On hold included\) · as of 14 Oct 2099, 10:00 \(Dubai\)/);
+    expect(within(c).getByTestId("lookup-title").textContent).toBe("Your open enquiries41"); // the title and the exact count together
+    expect(within(c).getByTestId("lookup-more").textContent).toBe("Showing 2 of 41. Open the screen to see them all.");
+    expect(within(c).getByTestId("card-links").textContent).toMatch(/Open Enquiries/);
+    expect(within(c).getByTestId("lookup-partial").textContent).toMatch(/incomplete[\s\S]*its open follow-ups[\s\S]*missing, not empty/);
+    expect(within(c).getByRole("link", { name: /OPP-UAE-2099-0001/ }).getAttribute("href")).toBe("/sales/opportunities/o1");
+    type("Open enquiries for Fictional Wave");
+    await waitFor(() => expect(screen.getAllByTestId("jarvis-sales-lookup")).toHaveLength(2));
+    // the follow-up carried the QUESTION behind the first card, not its rows
+    const ctx = (api.calls.send[1]![0] as { context: { lastQuery: { kind: string; descriptor: Record<string, unknown> } } }).context.lastQuery;
+    expect(ctx).toEqual({ kind: "lookup", descriptor: { kind: "enquiries", scope: "mine", stage: null, org: null, event: null, named: null } });
+    expect(JSON.stringify(ctx)).not.toMatch(/Fictional job|OPP-UAE/);
+    fireEvent.click(within(screen.getByTestId("lookup-choices")).getByRole("button", { name: "Fictional Wave Agency" }));
+    await waitFor(() => expect(api.calls.act).toHaveLength(1));
+    expect(api.calls.act[0]![0]).toMatchObject({ actionId: "jarvis.sales.lookup.run", companyId: CO1, input: { kind: "enquiries", org: { id: "33333333-3333-4333-8333-333333333333" } } });
+    // the card now shows the chosen client's enquiries: a typed follow-up refines THAT question (the client filter is kept), not the ambiguous one
+    await waitFor(() => expect(screen.queryByTestId("lookup-choices")).toBeNull());
+    type("the whole company instead");
+    await waitFor(() => expect(api.calls.send).toHaveLength(3));
+    expect((api.calls.send[2]![0] as { context: { lastQuery: unknown } }).context.lastQuery).toEqual({ kind: "lookup", descriptor: chosenDescriptor });
+    // another company is selected: a question asked for the first company is not sent with a follow-up for the second
+    fireEvent.change(screen.getByLabelText("Company for JARVIS"), { target: { value: CO2 } });
+    type("only Negotiation");
+    await waitFor(() => expect(api.calls.send).toHaveLength(4));
+    expect(api.calls.send[3]![0]).toMatchObject({ companyId: CO2, context: { lastQuery: null } });
+  });
+  it("a Sales summary shows the app's figures with definitions and dates; AI wording is labelled and apart from suggestions; without wording the figures stand alone with the reason", async () => {
+    const card = (over: Record<string, unknown>): SendResult => ({ ok: true, kind: "action", actionId: "jarvis.sales.summary.run", confirmation: null, card: { kind: "summary.sales", title: "Sales enquiries summary", company: { id: CO1, name: companies[0]!.name }, scope: "Everyone's enquiries in this company · counts only, no values", period: "October 2099 so far (2099-10-01 to 2099-10-14, Dubai dates)", comparedWith: null, asOfLabel: "14 Oct 2099, 10:00 (Dubai)", metrics: [{ label: "Won", value: 2, previous: 1, definition: "Enquiries that are Won now and whose closing date falls in the period." }], groups: [{ heading: "Events with the most enquiries", definition: "Per event.", rows: [{ label: "Fictional Forum", count: 2 }], more: 0 }], supporting: [], coverage: ["A won enquiry is not a delivered project: delivery is not covered here."], unavailable: [], narrative: null, narrativeBy: null, suggestions: [], narrativeNote: null, links: [{ label: "Open Sales reports", href: "/sales/reports" }], descriptor: { kind: "period", period: "this_month", compare: false, focus: "all", narrative: false }, ...over } as never });
+    const replies: SendResult[] = [card({ narrative: "In October 2099 so far, 2 enquiries were won.", narrativeBy: "app", suggestions: ["Review the open follow-ups."] }), card({ narrativeNote: "The AI model could not be reached. Everything here was computed by Enginious OS and is complete without it.", descriptor: { kind: "period", period: "last_month", compare: true, focus: "all", narrative: true } })];
+    const api = fakeApi({ send: async () => replies.shift()!, act: async () => card({ comparedWith: "the same days of September 2099", descriptor: { kind: "period", period: "this_month", compare: true, focus: "all", narrative: false } }) });
+    mount(api);
+    openPanel();
+    type("Summarise this month's enquiries");
+    const c = await screen.findByTestId("jarvis-sales-summary");
+    expect(within(c).getByTestId("summary-scope").textContent).toMatch(/2099-10-01 to 2099-10-14, Dubai dates/);
+    // the result leads, then the company and the period; definitions are under "How this is counted", collapsed
+    expect(within(c).getByTestId("summary-headline").textContent).toBe("2 won");
+    expect(within(c).getByTestId("summary-scope").textContent).toMatch(/^Fictional Enginious UAE LLC · October 2099 so far/);
+    expect(within(c).getByTestId("summary-metrics").textContent).toBe("Won2 · before: 1 (+1)");
+    const counted = within(c).getByTestId("summary-counted") as HTMLDetailsElement;
+    expect(counted.open).toBe(false);
+    expect(counted.querySelector("summary")!.textContent).toBe("How this is counted");
+    expect(within(c).getByTestId("summary-definitions").textContent).toMatch(/WonEnquiries that are Won now and whose closing date falls in the period\./);
+    // the two actions have short labels that wrap, and the Anthropic notice is visible before the AI one
+    const actions = within(c).getByTestId("summary-actions");
+    expect(within(actions).getAllByRole("button").map((b) => b.textContent)).toEqual(["Compare periods"]); // this card is already in words
+    expect(within(c).getByTestId("summary-narrative").textContent).toBe("In words (written by Enginious OS from the figures above)In October 2099 so far, 2 enquiries were won.");
+    expect(within(c).getByTestId("summary-suggestions").textContent).toBe("Suggestions from the AI model (ideas, not recorded facts)Review the open follow-ups.");
+    expect(within(c).getByTestId("summary-coverage").textContent).toMatch(/not a delivered project/);
+    fireEvent.click(within(c).getByRole("button", { name: "Compare periods" }));
+    await waitFor(() => expect(api.calls.act[0]![0]).toMatchObject({ actionId: "jarvis.sales.summary.run", input: { kind: "period", period: "this_month", compare: true } }));
+    // the card reran itself with the comparison ON: a typed refinement must carry THAT question, not the one first asked
+    await waitFor(() => expect(screen.getByTestId("summary-scope").textContent).toMatch(/compared with the same days of September 2099/));
+    type("show last month instead");
+    await waitFor(() => expect(api.calls.send).toHaveLength(2));
+    expect((api.calls.send[1]![0] as { context: { lastQuery: unknown } }).context.lastQuery).toEqual({ kind: "summary", descriptor: { kind: "period", period: "this_month", compare: true, focus: "all", narrative: false } });
+    await waitFor(() => expect(screen.getAllByTestId("summary-narrative-note").some((n) => /could not be reached/.test(n.textContent ?? ""))).toBe(true));
+  });
+  it("the summary headline uses the server's figures: won, lost and share; with nothing closed it says so instead of a percentage; a partial read stays visible next to it", async () => {
+    const mk = (metrics: { label: string; value: number }[], over: Record<string, unknown> = {}): SendResult => ({ ok: true, kind: "action", actionId: "jarvis.sales.summary.run", confirmation: null, card: { kind: "summary.sales", title: "Won and lost enquiries", company: { id: CO1, name: companies[0]!.name }, scope: "counts only", period: "October 2099 so far (2099-10-01 to 2099-10-14, Dubai dates)", comparedWith: null, asOfLabel: "14 Oct 2099, 10:00 (Dubai)", metrics: metrics.map((m) => ({ ...m, previous: null, definition: `${m.label} definition.` })), groups: [], supporting: [], coverage: ["No enquiry was closed in the period, so no share won is calculated (nothing to divide by)."], unavailable: [], narrative: null, narrativeBy: null, suggestions: [], narrativeNote: null, links: [], descriptor: { kind: "period", period: "this_month", compare: true, focus: "won_lost", narrative: true }, ...over } as never });
+    const replies = [mk([{ label: "Won", value: 1 }, { label: "Lost", value: 0 }, { label: "Share won of those closed (%)", value: 100 }], { descriptor: { kind: "period", period: "this_month", compare: false, focus: "won_lost", narrative: false } }), mk([{ label: "Won", value: 0 }, { label: "Lost", value: 0 }], { unavailable: ["the recorded lost reasons"] }), mk([{ label: "Enquiries created", value: 5 }, { label: "Won", value: 2 }, { label: "Lost", value: 1 }, { label: "Share won of those closed (%)", value: 67 }, { label: "Closures later reopened", value: 1 }])];
+    const api = fakeApi({ send: async () => replies.shift()! });
+    mount(api);
+    openPanel();
+    type("How many did we win or lose this month?");
+    expect((await screen.findByTestId("summary-headline")).textContent).toBe("1 won · 0 lost · 100% won");
+    // both actions have short labels that wrap on a narrow panel, and the Anthropic notice is visible before the AI one
+    const actions = screen.getByTestId("summary-actions");
+    expect(within(actions).getAllByRole("button").map((b) => b.textContent)).toEqual(["Compare periods", "Explain & suggest"]);
+    expect(actions.querySelector("div")!.className).toMatch(/flex-wrap/);
+    for (const b of within(actions).getAllByRole("button")) expect(b.className).toMatch(/whitespace-normal/);
+    const notice = screen.getByTestId("summary-ai-notice");
+    expect(notice.textContent).toBe("Sends the company, reporting period, counts and breakdown labels, which may include recorded lost reasons, to Anthropic for suggestions. Enginious OS writes the factual summary.");
+    // the notice comes BEFORE the button that sends: earlier in the document than "Explain & suggest", inside the same block
+    const explain = within(actions).getByRole("button", { name: "Explain & suggest" });
+    expect(actions.contains(notice)).toBe(true);
+    expect(notice.compareDocumentPosition(explain) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice.className).toMatch(/break-words/);
+    type("and again");
+    await waitFor(() => expect(screen.getAllByTestId("summary-headline")).toHaveLength(2));
+    expect(screen.getAllByTestId("summary-headline")[1]!.textContent).toBe("0 won · 0 lost · no share won (nothing closed)");
+    expect(screen.getByTestId("summary-partial").textContent).toMatch(/incomplete[\s\S]*recorded lost reasons[\s\S]*missing, not zero/); // outside any disclosure
+    expect(screen.getByTestId("summary-partial").closest("details")).toBeNull();
+    type("everything");
+    await waitFor(() => expect(screen.getAllByTestId("summary-headline")).toHaveLength(3));
+    expect(screen.getAllByTestId("summary-headline")[2]!.textContent).toBe("5 created · 2 won · 1 lost · 67% won");
+    // a card that already compares and explains offers neither button again
+    expect(screen.getAllByTestId("summary-actions")).toHaveLength(1); // only the first card still has them
+  });
+  it("a breakdown that covers only some records says so NEXT TO that breakdown, visible with 'How this is counted' closed; definitions and the reopening explanation stay inside the disclosure", async () => {
+    const BREAK = "The breakdowns below cover the 2000 newest of the 2600 enquiries created in the period.";
+    const LOST = "The lost reasons below cover 400 of the 520 enquiries lost in the period.";
+    const OTHER = "A won enquiry is not a delivered project: delivery is not covered here.";
+    const REOPEN = "Closures recorded in this period that were subsequently reopened; the enquiry may have closed again.";
+    const api = fakeApi({ send: async () => ({ ok: true, kind: "action", actionId: "jarvis.sales.summary.run", confirmation: null, card: { kind: "summary.sales", title: "Sales enquiries summary", company: { id: CO1, name: companies[0]!.name }, scope: "counts only", period: "2099 so far (2099-01-01 to 2099-10-14, Dubai dates)", comparedWith: null, asOfLabel: "14 Oct 2099, 10:00 (Dubai)",
+      metrics: [{ label: "Enquiries created", value: 2600, previous: null, definition: "Creation date in the period." }, { label: "Closures later reopened", value: 3, previous: null, definition: REOPEN }],
+      groups: [{ heading: "Events with the most enquiries", definition: "Per event, all editions.", rows: [{ label: "Fictional Forum", count: 40 }], more: 0 }, { heading: "Where they came from", definition: "By recorded source.", rows: [{ label: "Referral", count: 900 }], more: 0 }, { heading: "Recorded lost reasons", definition: "As typed.", rows: [{ label: "Event cancelled", count: 12 }], more: 0 }],
+      supporting: [], coverage: [BREAK, OTHER, LOST], unavailable: [], narrative: null, narrativeBy: null, suggestions: [], narrativeNote: null, links: [], descriptor: { kind: "period", period: "this_year", compare: true, focus: "all", narrative: true } } as never }) });
+    mount(api);
+    openPanel();
+    type("Summarise this year's enquiries");
+    const c = await screen.findByTestId("jarvis-sales-summary");
+    const counted = within(c).getByTestId("summary-counted") as HTMLDetailsElement;
+    expect(counted.open).toBe(false);
+    // each partial warning sits inside the breakdown it limits, outside the disclosure
+    const groups = within(c).getAllByTestId("summary-group");
+    const warningsOf = (i: number) => within(groups[i]!).queryAllByTestId("summary-partial-coverage").map((n) => n.textContent);
+    expect(warningsOf(0)).toEqual([BREAK]); // events
+    expect(warningsOf(1)).toEqual([BREAK]); // sources: the same limited read
+    expect(warningsOf(2)).toEqual([LOST]); // lost reasons
+    for (const n of within(c).getAllByTestId("summary-partial-coverage")) expect(n.closest("details")).toBeNull();
+    // the disclosure keeps the definitions, the reopening explanation and the other notes, and does not repeat the partial warnings
+    expect(within(counted).getByTestId("summary-definitions").textContent).toContain(REOPEN);
+    expect(within(counted).getByTestId("summary-coverage").textContent).toBe(OTHER);
+    expect(counted.textContent).not.toContain(BREAK);
+    expect(counted.textContent).not.toContain(LOST);
+  });
+  it("a limited-scan notice stays visible next to the lookup result, outside any disclosure", async () => {
+    const api = fakeApi({ send: async () => ({ ok: true, kind: "action", actionId: "jarvis.sales.lookup.run", confirmation: null, card: { kind: "lookup.sales", title: "Your enquiries with no recorded activity for 14 days", company: { id: CO1, name: companies[0]!.name }, scope: "Owned by you", filters: [], asOf: new Date().toISOString(), asOfLabel: "14 Oct 2099, 10:00 (Dubai)", total: 0, shown: 0, sections: [], unavailable: [], note: "You own 501 open enquiries; this looked at the 500 newest only.", empty: "No matching enquiries among the enquiries checked.", choices: [], links: [{ label: "Open Enquiries", href: "/sales/opportunities" }], descriptor: { kind: "inactive", days: 14 } } }) });
+    mount(api);
+    openPanel();
+    type("Which of my enquiries have had no activity for 14 days?");
+    const c = await screen.findByTestId("jarvis-sales-lookup");
+    expect(within(c).getByTestId("lookup-note").textContent).toBe("You own 501 open enquiries; this looked at the 500 newest only.");
+    expect(within(c).getByTestId("lookup-note").closest("details")).toBeNull();
+    expect(within(c).getByTestId("lookup-empty").textContent).toBe("No matching enquiries among the enquiries checked.");
+    expect(within(c).getByTestId("lookup-count").textContent).toBe("0");
+  });
+  it("scope wording for an estimate is a draft to copy: it says there are no prices and nothing is saved, and has no save button", async () => {
+    const api = fakeApi({ send: async () => ({ ok: true, kind: "action", actionId: "jarvis.sales.estimate.scope_draft", confirmation: null, card: { kind: "estimate.scope", text: "- Counter software (quantity 2)\nExcluded: shipping", questions: ["Which reader model will be supplied?"], enquiry: { reference: "OPP-UAE-2099-0007", title: "Fictional counters", href: "/sales/opportunities/o7" }, note: "A draft of scope wording only. It has no prices, creates no estimate and saves nothing: copy what you need into the Estimate screen and enter the amounts there.", links: [{ label: "Proposals & quotes", href: "/sales/proposals" }] } }) });
+    mount(api);
+    openPanel();
+    type("Draft the estimate scope for OPP-UAE-2099-0007");
+    const c = await screen.findByTestId("jarvis-scope-draft");
+    expect(within(c).getByTestId("scope-text").textContent).toMatch(/Counter software \(quantity 2\)/);
+    expect(within(c).getByTestId("scope-questions").textContent).toMatch(/reader model/);
+    expect(within(c).getByTestId("scope-note").textContent).toMatch(/no prices, creates no estimate and saves nothing/);
+    expect(within(c).getByRole("button", { name: "Copy" })).toBeTruthy();
+    expect(within(c).queryByRole("button", { name: /save|create|confirm|send/i })).toBeNull();
   });
   it("a brief that could not be separated shows the text that WOULD be sent, editable, with the form as the other way; sending it carries the original text and the edited version", async () => {
     const api = fakeApi({ send: async (a) => ((a as { briefOutbound: string | null }).briefOutbound ? cardResult() : { ok: true, kind: "brief_review", text: "I have not sent anything.", outbound: "Title: Gala\nThe crew bonus is AED 5,000.", formHref: "/sales/new" }) });

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
-import type { ActionCard, ActionConfirmResult, ChatReplyCard, ConfirmationView, FollowUpsLookupCard, EnquiryStageCard, EnquiryUpdateCard, HelpAnswerCard, MeetingCard, MeetingValues, OrgRegisterCard, OrgRole, OrgValues, ReplyDraftCard, SendResult, StatusResult, UpdateForm } from "@/lib/jarvis/protocol";
+import type { ActionCard, ActionConfirmResult, ChatReplyCard, ConfirmationView, FollowUpsLookupCard, LookupSection, SalesLookupCard, SalesSummaryCard, ScopeDraftCard, EnquiryStageCard, EnquiryUpdateCard, HelpAnswerCard, MeetingCard, MeetingValues, OrgRegisterCard, OrgRole, OrgValues, ReplyDraftCard, SendResult, StatusResult, UpdateForm } from "@/lib/jarvis/protocol";
 
 /** What the cards of the other actions call. Each is a server action that re-authorises the person on every call; this file decides nothing about access. */
 export interface ActionApi {
@@ -36,6 +36,9 @@ export function ActionCardView(p: ActionCardProps) {
     case "help.answer": return <HelpAnswerView card={p.state.card} api={p.api} companyId={p.companyId} actionId={p.actionId} onState={p.onState} />;
     case "chat.reply": return <ChatReplyView card={p.state.card} />;
     case "lookup.followups": return <FollowUpsView card={p.state.card} />;
+    case "lookup.sales": return <SalesLookupView card={p.state.card} api={p.api} companyId={p.companyId} actionId={p.actionId} onState={p.onState} companyStale={p.companyStale} />;
+    case "summary.sales": return <SalesSummaryView card={p.state.card} api={p.api} companyId={p.companyId} actionId={p.actionId} onState={p.onState} companyStale={p.companyStale} />;
+    case "estimate.scope": return <ScopeDraftView card={p.state.card} />;
     case "org.register": return <OrgRegisterView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
     case "meeting.record": return <MeetingView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
     case "enquiry.stage": return <StageView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
@@ -339,6 +342,191 @@ function FollowUpsView({ card }: { card: FollowUpsLookupCard }) {
       )}
       {card.truncated ? <p className="text-xs text-muted-foreground">Showing the {card.total} oldest. The Follow-ups page has them all.</p> : null}
       <p className="text-xs"><Link href={card.followUpsHref} className="font-medium underline underline-offset-2">Open Follow-ups</Link> <span className="text-muted-foreground">· Say &quot;show last month instead&quot; to change the dates.</span></p>
+    </section>
+  );
+}
+
+/** Rows of a lookup or a summary: records with links, or label and value pairs of one record. The heading states the exact total next to what is shown. */
+function SectionList({ s }: { s: LookupSection }) {
+  return (
+    <div className="space-y-1" data-testid="lookup-section" data-total={s.total}>
+      <p className="text-xs font-semibold">{s.heading}{s.facts ? "" : ` (${s.total})`}</p>
+      {s.note ? <p className="text-xs text-muted-foreground">{s.note}</p> : null}
+      {s.facts ? (
+        <dl className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-xs">
+          {s.rows.map((r) => <div key={r.id} className="contents"><dt className="text-muted-foreground">{r.primary}</dt><dd className="break-words">{r.secondary}</dd></div>)}
+        </dl>
+      ) : s.rows.length === 0 ? <p className="text-xs text-muted-foreground">None.</p> : (
+        <ul className="space-y-1.5">
+          {s.rows.map((r) => (
+            <li key={r.id} className="rounded-md border border-border px-2 py-1.5">
+              {r.href ? <Link href={r.href} className="font-medium underline underline-offset-2 break-words">{r.primary}</Link> : <p className="font-medium break-words">{r.primary}</p>}
+              {r.secondary ? <p className="text-xs text-muted-foreground break-words">{r.secondary}</p> : null}
+              {r.meta ? <p className="text-xs text-muted-foreground break-words">{r.meta}</p> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!s.facts && s.total > s.rows.length ? <p className="text-xs text-muted-foreground" data-testid="lookup-more">Showing {s.rows.length} of {s.total}. Open the screen to see them all.</p> : null}
+    </div>
+  );
+}
+const CardLinks = ({ links }: { links: { label: string; href: string }[] }) => (links.length === 0 ? null : <p className="flex flex-wrap gap-x-3 gap-y-1 border-t border-border pt-2 text-xs" data-testid="card-links">{links.map((l) => <Link key={l.href + l.label} href={l.href} className="font-medium text-primary underline underline-offset-2">{l.label} →</Link>)}</p>);
+type ReadCardProps = { api: ActionApi; companyId: string; actionId: string; onState: (s: ActionCardState) => void; companyStale: boolean };
+/** Runs the same read action again with another descriptor (a choice, "add AI wording"). The server validates and authorises it like any request; a refusal is shown in words. */
+function useRerun(p: ReadCardProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function run(input: unknown) {
+    if (busy || p.companyStale) return;
+    setBusy(true); setError(null);
+    let r: SendResult;
+    try { r = await p.api.act({ companyId: p.companyId, actionId: p.actionId, input }); } catch { r = { ok: false, code: "unavailable", message: "That could not be loaded just now. Try again in a moment." }; }
+    setBusy(false);
+    if (r.ok && r.kind === "action") p.onState({ card: r.card, confirmation: r.confirmation }); else if (!r.ok) setError(r.message);
+  }
+  return { busy, error, run };
+}
+
+/** A Sales lookup: computed inside Enginious OS. The result comes first (title and exact count), then one compact line of scope, filters and time; a partial read or a limited scan is said next to the result. */
+function SalesLookupView({ card, ...p }: { card: SalesLookupCard } & ReadCardProps) {
+  const { busy, error, run } = useRerun(p);
+  return (
+    <section aria-label={card.title} className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm" data-testid="jarvis-sales-lookup" data-kind={card.descriptor.kind} data-total={card.total ?? ""}>
+      <h3 className="flex flex-wrap items-baseline gap-x-2 font-heading text-sm font-semibold" data-testid="lookup-title">
+        <span className="break-words">{card.title}</span>
+        {card.total !== null ? <span className="rounded-md bg-secondary px-1.5 py-0.5 text-xs font-semibold" data-testid="lookup-count">{card.total}</span> : null}
+      </h3>
+      <p className="text-xs text-muted-foreground break-words" data-testid="lookup-scope">{[card.company.name, card.scope, ...card.filters, `as of ${card.asOfLabel}`].filter(Boolean).join(" · ")}</p>
+      {p.companyStale ? <Alert variant="destructive">You have selected another company since this was shown. Ask again for the company you want.</Alert> : null}
+      {card.unavailable.length > 0 ? <Alert variant="destructive" data-testid="lookup-partial">This answer is incomplete. I could not load: {card.unavailable.join("; ")}. Those parts are missing, not empty.</Alert> : null}
+      {card.note ? <p className="rounded-md border border-border bg-secondary/60 px-2 py-1 text-xs" data-testid="lookup-note">{card.note}</p> : null}
+      {card.empty ? <p data-testid="lookup-empty">{card.empty}</p> : null}
+      {card.choices.length > 0 ? <div className="flex flex-wrap gap-2" data-testid="lookup-choices">{card.choices.map((c) => <Button key={c.label} type="button" size="sm" variant="outline" className="h-auto min-h-8 max-w-full whitespace-normal py-1 text-left" disabled={busy || p.companyStale} onClick={() => void run(c.descriptor)}>{c.label}</Button>)}</div> : null}
+      {card.sections.map((s) => <SectionList key={s.heading} s={s} />)}
+      {error ? <Alert variant="destructive">{error}</Alert> : null}
+      <CardLinks links={card.links} />
+    </section>
+  );
+}
+
+/** The result of a summary in one line, from the figures the server computed (nothing is calculated here): "5 created · 2 won · 1 lost · 67% won". */
+function summaryHeadline(card: SalesSummaryCard): string | null {
+  const v = (label: string) => card.metrics.find((m) => m.label === label)?.value;
+  const created = v("Enquiries created"), won = v("Won"), lost = v("Lost"), share = v("Share won of those closed (%)");
+  const parts = [typeof created === "number" ? `${created} created` : null, typeof won === "number" ? `${won} won` : null, typeof lost === "number" ? `${lost} lost` : null,
+    typeof share === "number" ? `${share}% won` : typeof won === "number" && typeof lost === "number" ? "no share won (nothing closed)" : null].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/**
+ * Coverage notes that say a BREAKDOWN covers only some of the records ("The breakdowns below cover the 2000 newest of the 2600 ...", "The lost reasons below cover 400 of
+ * the 520 ..."). They are the server's own coverage lines, shown next to the breakdown they limit so they are seen with "How this is counted" closed; every other
+ * coverage line stays in that disclosure. Nothing is calculated here.
+ */
+const LOST_REASONS_PARTIAL = /^The lost reasons below cover\b/;
+const BREAKDOWNS_PARTIAL = /^The breakdowns below cover\b/;
+function partialCoverage(card: SalesSummaryCard): { forGroup: (heading: string) => string[]; rest: string[] } {
+  const lost = card.coverage.filter((c) => LOST_REASONS_PARTIAL.test(c));
+  const breakdowns = card.coverage.filter((c) => BREAKDOWNS_PARTIAL.test(c));
+  const shown = new Set<string>();
+  const forGroup = (heading: string) => { const notes = heading === "Recorded lost reasons" ? lost : breakdowns; for (const n of notes) shown.add(n); return notes; };
+  // A partial note whose breakdown is not on the card (it could not be loaded, or was not asked for) is not hidden: it stays with the other notes.
+  for (const g of card.groups) forGroup(g.heading);
+  return { forGroup, rest: card.coverage.filter((c) => !shown.has(c)) };
+}
+
+/**
+ * A factual summary. The result leads (one line of the app's own figures), then the company and period; a partial read stays next to it. Definitions and the notes on how
+ * things are counted are one disclosure away ("How this is counted"). "In words" for a period is written by the app; the AI model's suggestions are in their own block.
+ */
+function SalesSummaryView({ card, ...p }: { card: SalesSummaryCard } & ReadCardProps) {
+  const { busy, error, run } = useRerun(p);
+  const d = card.descriptor;
+  const headline = summaryHeadline(card);
+  const partial = partialCoverage(card);
+  const canExplain = d.kind === "period" && !card.narrative && !d.narrative;
+  const counted = card.metrics.length > 0 || card.groups.length > 0 || partial.rest.length > 0;
+  return (
+    <section aria-label={card.title} className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm" data-testid="jarvis-sales-summary" data-kind={d.kind}>
+      <h3 className="font-heading text-sm font-semibold">{card.title}</h3>
+      {headline ? <p className="text-base font-semibold leading-snug break-words" data-testid="summary-headline">{headline}</p> : null}
+      <p className="text-xs text-muted-foreground break-words" data-testid="summary-scope">{[card.company.name, card.period, card.comparedWith ? `compared with ${card.comparedWith}` : null, card.scope, `as of ${card.asOfLabel}`].filter(Boolean).join(" · ")}</p>
+      {p.companyStale ? <Alert variant="destructive">You have selected another company since this was shown. Ask again for the company you want.</Alert> : null}
+      {card.unavailable.length > 0 ? <Alert variant="destructive" data-testid="summary-partial">This summary is incomplete. I could not load: {card.unavailable.join("; ")}. Those parts are missing, not zero.</Alert> : null}
+      {card.metrics.length > 0 ? (
+        <dl className="flex flex-wrap gap-1.5" data-testid="summary-metrics">
+          {card.metrics.map((m) => (
+            <div key={m.label} className="min-w-0 rounded-md border border-border px-2 py-1">
+              <dt className="text-[11px] text-muted-foreground">{m.label}</dt>
+              <dd><span className="font-semibold" data-testid="metric-value">{m.value}</span>{typeof m.previous === "number" ? <span className="text-xs text-muted-foreground"> · before: {m.previous} ({m.value === m.previous ? "no change" : `${m.value > m.previous ? "+" : ""}${m.value - m.previous}`})</span> : null}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {card.groups.map((g) => (
+        <div key={g.heading} className="space-y-0.5" data-testid="summary-group">
+          <p className="text-xs font-semibold">{g.heading}</p>
+          {partial.forGroup(g.heading).map((n) => <p key={n} className="rounded-md border border-border bg-secondary/60 px-2 py-1 text-xs" data-testid="summary-partial-coverage">{n}</p>)}
+          {g.rows.length === 0 ? <p className="text-xs text-muted-foreground">None.</p> : <ul className="text-xs">{g.rows.map((r) => <li key={r.label} className="flex justify-between gap-2"><span className="min-w-0 break-words">{r.label}</span><span className="font-medium">{r.count}</span></li>)}</ul>}
+          {g.more > 0 ? <p className="text-xs text-muted-foreground">and {g.more} more.</p> : null}
+        </div>
+      ))}
+      {card.narrative ? (
+        <div className="space-y-1 rounded-md bg-secondary/60 px-2 py-1.5" data-testid="summary-narrative">
+          <p className="text-xs font-semibold">{card.narrativeBy === "ai" ? "Summary by the AI model (check it against the record)" : "In words (written by Enginious OS from the figures above)"}</p>
+          <p className="whitespace-pre-wrap break-words">{card.narrative}</p>
+        </div>
+      ) : null}
+      {card.suggestions.length > 0 ? (
+        <div className="space-y-1 rounded-md border border-dashed border-border px-2 py-1.5" data-testid="summary-suggestions">
+          <p className="text-xs font-semibold">Suggestions from the AI model (ideas, not recorded facts)</p>
+          <ul className="list-disc pl-4 text-xs">{card.suggestions.map((x) => <li key={x}>{x}</li>)}</ul>
+        </div>
+      ) : null}
+      {card.narrativeNote ? <p className="text-xs text-muted-foreground" data-testid="summary-narrative-note">{card.narrativeNote}</p> : null}
+      {card.supporting.map((s) => <SectionList key={s.heading} s={s} />)}
+      {counted ? (
+        <details className="rounded-md border border-border px-2 py-1 text-xs" data-testid="summary-counted">
+          <summary className="cursor-pointer font-medium">How this is counted</summary>
+          <div className="mt-1 max-h-48 space-y-1 overflow-y-auto text-muted-foreground">
+            {card.metrics.length > 0 ? <dl className="space-y-1" data-testid="summary-definitions">{card.metrics.map((m) => <div key={m.label}><dt className="font-medium text-foreground">{m.label}</dt><dd>{m.definition}</dd></div>)}</dl> : null}
+            {card.groups.map((g) => <p key={g.heading}><span className="font-medium text-foreground">{g.heading}: </span>{g.definition}</p>)}
+            {partial.rest.length > 0 ? <ul className="list-disc pl-4" data-testid="summary-coverage">{partial.rest.map((x) => <li key={x}>{x}</li>)}</ul> : null}
+          </div>
+        </details>
+      ) : null}
+      {d.kind === "period" && (!d.compare || canExplain) ? (
+        <div className="space-y-1.5" data-testid="summary-actions">
+          {/* What the AI action sends is said BEFORE the button that sends it. */}
+          {canExplain ? <p className="text-xs leading-snug text-muted-foreground break-words" data-testid="summary-ai-notice">Sends the company, reporting period, counts and breakdown labels, which may include recorded lost reasons, to Anthropic for suggestions. Enginious OS writes the factual summary.</p> : null}
+          <div className="flex flex-wrap gap-2">
+            {!d.compare ? <Button type="button" size="sm" variant="outline" className="h-auto min-h-8 whitespace-normal py-1" disabled={busy || p.companyStale} onClick={() => void run({ ...d, compare: true })}>Compare periods</Button> : null}
+            {canExplain ? <Button type="button" size="sm" variant="outline" className="h-auto min-h-8 whitespace-normal py-1" disabled={busy || p.companyStale} onClick={() => void run({ ...d, narrative: true })}>Explain &amp; suggest</Button> : null}
+          </div>
+        </div>
+      ) : null}
+      {error ? <Alert variant="destructive">{error}</Alert> : null}
+      <CardLinks links={card.links} />
+    </section>
+  );
+}
+
+/** Scope wording for an estimate: a draft to copy into the Estimate screen. No prices, nothing saved. */
+function ScopeDraftView({ card }: { card: ScopeDraftCard }) {
+  const [copied, setCopied] = useState<"idle" | "yes" | "no">("idle");
+  async function copy() { try { await navigator.clipboard.writeText(card.text); setCopied("yes"); } catch { setCopied("no"); } }
+  return (
+    <section aria-label="Scope draft" className="space-y-2 rounded-lg bg-secondary/60 px-3 py-2 text-sm" data-testid="jarvis-scope-draft">
+      <h3 className="font-heading text-sm font-semibold">Scope wording{card.enquiry ? ` for ${card.enquiry.reference}` : ""} (draft, no prices)</h3>
+      <p className="whitespace-pre-wrap break-words" data-testid="scope-text">{card.text}</p>
+      {card.questions.length > 0 ? <><p className="text-xs font-semibold">Questions to ask</p><ul className="list-disc pl-4 text-xs" data-testid="scope-questions">{card.questions.map((q) => <li key={q}>{q}</li>)}</ul></> : null}
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <Button type="button" size="sm" variant="outline" onClick={() => void copy()} data-testid="scope-copy">{copied === "yes" ? "Copied" : "Copy"}</Button>
+        {copied === "no" ? <span>Could not copy: select the text instead.</span> : null}
+      </div>
+      <p className="text-xs text-muted-foreground" data-testid="scope-note">{card.note}</p>
+      <CardLinks links={card.links} />
     </section>
   );
 }

@@ -102,10 +102,21 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
   const [busy, setBusy] = useState(false);
   const turnsRef = useRef<ChatTurn[]>([]);
   const lookupRef = useRef<{ period: LookupPeriod } | null>(null);
+  /** The question behind the Sales lookup or summary last shown: sent back so "show last month instead" means something. A question only; the server re-reads everything. */
+  const queryRef = useRef<{ kind: "lookup" | "summary"; descriptor: unknown; companyId: string; messageId: number | null } | null>(null);
+  /** The question to send with a follow-up: only the one behind the latest card, and only for the company it was asked for. */
+  const lastQueryFor = (company: string) => (queryRef.current && queryRef.current.companyId === company ? { kind: queryRef.current.kind, descriptor: queryRef.current.descriptor } : null);
   const phone = useIsPhone();
   const panelRef = useRef<HTMLDivElement>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // The composer grows with its content (a pasted brief) up to its CSS max height, then scrolls inside itself; it shrinks back when the text is sent or cleared.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    if (el.scrollHeight > 0) el.style.height = `${el.scrollHeight + 2}px`;
+  }, [text, open]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasOpen = useRef(false);
   const companyRef = useRef(companyId);
@@ -170,7 +181,7 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
     if (!forced) push({ role: "user", text: t.length > 160 ? `${t.slice(0, 160)}… (${t.length} characters)` : t });
     setText("");
     try {
-      const r = await api.send({ companyId, text: t, intent: forced ? forced.intent : mode?.key ?? null, enquiryId: chip?.id ?? null, context: { turns: turnsRef.current, lastLookup: lookupRef.current }, briefOutbound: forced?.briefOutbound ?? null, screen: screenRef.current });
+      const r = await api.send({ companyId, text: t, intent: forced ? forced.intent : mode?.key ?? null, enquiryId: chip?.id ?? null, context: { turns: turnsRef.current, lastLookup: lookupRef.current, lastQuery: lastQueryFor(companyId) }, briefOutbound: forced?.briefOutbound ?? null, screen: screenRef.current });
       if (!r.ok) push({ role: "jarvis", kind: "text", tone: "error", text: r.message });
       else if (r.kind === "help") push({ role: "jarvis", kind: "help", help: r.help });
       else if (r.kind === "not_available") push({ role: "jarvis", kind: "text", tone: "info", text: `${r.title}: ${r.reason}` });
@@ -181,7 +192,8 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
       else if (r.kind === "memory") push({ role: "jarvis", kind: "memory", text: r.text, preferences: r.preferences });
       else if (r.kind === "action") {
         if (r.card.kind === "chat.reply") turnsRef.current = [...turnsRef.current, { role: "user" as const, text: t }, { role: "jarvis" as const, text: r.card.text }].slice(-MAX_TURNS);
-        lookupRef.current = r.card.kind === "lookup.followups" ? { period: r.card.period } : lookupRef.current;
+        lookupRef.current = r.card.kind === "lookup.followups" ? { period: r.card.period } : r.card.kind === "lookup.sales" || r.card.kind === "summary.sales" ? null : lookupRef.current;
+        queryRef.current = r.card.kind === "lookup.sales" ? { kind: "lookup", descriptor: r.card.descriptor, companyId, messageId: null } : r.card.kind === "summary.sales" ? { kind: "summary", descriptor: r.card.descriptor, companyId, messageId: null } : r.card.kind === "lookup.followups" || r.card.kind === "chat.reply" ? null : queryRef.current;
         push({ role: "jarvis", kind: "action", actionId: r.actionId, state: { card: r.card, confirmation: r.confirmation }, companyId, rev: 0 });
       }
       else push({ role: "jarvis", kind: "card", state: { card: r.card, confirmation: r.confirmation }, companyId, rev: 0 });
@@ -321,7 +333,12 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
                       companyId={m.companyId}
                       companyStale={m.companyId !== companyId}
                       api={api}
-                      onState={(s) => setMessages((ms) => ms.map((x) => (x.id === m.id && x.role === "jarvis" && x.kind === "action" ? { ...x, state: s, rev: x.rev + 1 } : x)))}
+                      onState={(s) => {
+                        // A card that reran itself (a chosen client, "compare", "in words") now shows a DIFFERENT question: when it is the latest answer, a typed
+                        // follow-up must refine that question, not the one first asked.
+                        if (messages[messages.length - 1]?.id === m.id && (s.card.kind === "lookup.sales" || s.card.kind === "summary.sales")) queryRef.current = { kind: s.card.kind === "lookup.sales" ? "lookup" : "summary", descriptor: s.card.descriptor, companyId: m.companyId, messageId: m.id };
+                        setMessages((ms) => ms.map((x) => (x.id === m.id && x.role === "jarvis" && x.kind === "action" ? { ...x, state: s, rev: x.rev + 1 } : x)));
+                      }}
                     />
                   );
                 }
@@ -351,22 +368,35 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
               <Textarea
                 id={`${titleId}-in`}
                 ref={inputRef}
-                rows={3}
+                rows={2}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); void send(text); } }}
                 placeholder={mode?.placeholder ?? "Ask a question, ask for a draft, or paste a brief…"}
                 disabled={busy}
-                className="max-h-40 resize-y"
+                // Two lines to start; it grows with what is typed or pasted up to about six lines, then scrolls inside itself so the conversation keeps its room.
+                className="max-h-[9.75rem] min-h-[3.25rem] resize-none overflow-y-auto"
+                data-testid="jarvis-composer"
               />
               <div className="flex items-center justify-between gap-2">
                 <p className={`text-[11px] ${text.length > maxInputChars ? "text-destructive" : "text-muted-foreground"}`}>{text.length > 0 ? `${text.length} / ${maxInputChars}` : "Ctrl+Enter sends."}</p>
-                <div className="flex gap-2">
-                  {messages.length > 0 ? <Button type="button" size="sm" variant="ghost" aria-label="Clear conversation" onClick={() => { setMessages([]); setNotice(null); turnsRef.current = []; lookupRef.current = null; }} disabled={busy}>Clear</Button> : null}
+                <div className="flex shrink-0 gap-2">
+                  {messages.length > 0 ? <Button type="button" size="sm" variant="ghost" aria-label="Clear conversation" onClick={() => { setMessages([]); setNotice(null); turnsRef.current = []; lookupRef.current = null; queryRef.current = null; }} disabled={busy}>Clear</Button> : null}
                   <Button type="submit" size="sm" disabled={busy || text.trim() === ""}>Send</Button>
                 </div>
               </div>
-              <p className="text-[11px] text-muted-foreground"><span data-testid="jarvis-anthropic-notice">The text you submit for this task is sent to Anthropic to prepare a draft.</span> Lookups and guidance stay inside Enginious OS, and records are never attached. Do not paste salaries, personal IDs, bank or medical details, or internal costings: JARVIS will not send them. Nothing is saved until you confirm a review card, JARVIS does not send emails, and this conversation is not stored.</p>
+              <details className="text-[11px] text-muted-foreground" data-testid="jarvis-shared">
+                <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                  <span data-testid="jarvis-anthropic-notice">AI drafts and suggestions use Anthropic. Lookups stay in Enginious OS.</span>{" "}
+                  <span className="font-medium text-foreground underline underline-offset-2">What gets shared</span>
+                </summary>
+                <div className="mt-1 max-h-40 space-y-1 overflow-y-auto rounded-md border border-border bg-secondary/40 p-2" data-testid="jarvis-shared-detail">
+                  <p><span className="font-medium text-foreground">Sent to Anthropic:</span> the text you submit for a task (a brief, a message, a request), including working prices, budgets and costs you type yourself. For suggestions on a summary, a summary of one enquiry, or scope wording, JARVIS also sends counts, names, dates and that enquiry&apos;s brief, scope and notes as written, including figures written in them.</p>
+                  <p><span className="font-medium text-foreground">Never sent:</span> an enquiry&apos;s value, budget and payment-terms fields; estimates, proposals, prepared estimate or quotation documents; attachments and files; and anything marked confidential, NDA or internal only.</p>
+                  <p><span className="font-medium text-foreground">Stays in Enginious OS:</span> lookups and guidance. Do not paste salaries, personal IDs, bank or medical details or financial statements: JARVIS will not send them.</p>
+                  <p>Nothing is saved until you confirm a review card. JARVIS does not send emails, and this conversation is not stored.</p>
+                </div>
+              </details>
             </form>
           </div>
         </>

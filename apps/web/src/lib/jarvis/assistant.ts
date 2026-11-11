@@ -9,6 +9,9 @@ import { ABOUT_THIS_SCREEN, routeMessage, type LiveArea } from "./router";
 import { prepareBrief, RESTRICTED_BRIEF_MESSAGE } from "./sales/brief-outbound";
 import { CHAT_ID } from "./sales/chat";
 import { OVERDUE_FOLLOWUPS_ID } from "./sales/followups-overdue";
+import { SALES_LOOKUP_ID } from "./sales/lookup";
+import { SCOPE_DRAFT_ID } from "./sales/scope-draft";
+import { SALES_SUMMARY_ID } from "./sales/summary";
 import { HELP_ANSWER_ID } from "./sales/help-answer";
 import { createDispatcher, type JarvisDeps } from "./dispatcher";
 import { jarvisLog } from "./log";
@@ -47,16 +50,18 @@ const APP_HOW = /^\s*(?:how\s+(?:do|can|should|would)\s+(?:i|we)|how\s+to|where\
 const PREFERENCE_VALUES: Record<string, Record<string, unknown>> = Object.fromEntries(Object.entries(PREFERENCES).map(([k, v]) => [k, v.options]));
 
 const GREETINGS: Record<string, string> = {
-  how_are_you: "I am well, thank you, and ready to help. Ask me a question, ask for a draft, ask how something works in Enginious OS, or say \"show my overdue Sales follow-ups\".",
-  hello: "Hello. What can I help you with? You can ask a question, ask for a draft, ask how something works in Enginious OS, or say \"show my overdue Sales follow-ups\".",
+  how_are_you: "I am well, thank you, and ready to help. Ask me a question, ask for a draft, ask how something works in Enginious OS, or ask about your Sales work, for example \"what needs my attention today?\".",
+  hello: "Hello. What can I help you with? You can ask a question, ask for a draft, ask how something works in Enginious OS, or ask about your Sales work, for example \"what needs my attention today?\".",
   thanks: "You are welcome.",
   bye: "Goodbye. This conversation is not kept.",
   confirm: "Nothing is saved from a chat message. If a review card is open, check it and press its confirm button; otherwise tell me what you would like to do.",
 };
 
-const ONLY_LOOKUP = "The one live lookup I have today is \"Show my overdue Sales follow-ups\".";
+const ONLY_LOOKUP = "My live lookups cover Sales & CRM only.";
+/** The read-only actions a card may run again with a new descriptor (a choice, a follow-up). Each call is authorised and validated like any other. */
+const READ_ACTIONS = [SALES_LOOKUP_ID, SALES_SUMMARY_ID];
 const UNSUPPORTED: Record<LiveArea, { text: string; links: ReplyLink[] }> = {
-  sales: { text: `I cannot look that up in Sales & CRM yet. ${ONLY_LOOKUP} Summaries, counts and trends are planned next; for now, open the screen.`, links: [{ label: "Enquiries", href: "/sales/opportunities" }, { label: "Follow-ups", href: "/sales/follow-ups" }, { label: "Clients & Agencies", href: "/sales/accounts" }, { label: "Reports", href: "/sales/reports" }] },
+  sales: { text: "I cannot look that up in Sales & CRM. I can list follow-ups (overdue, due today, upcoming), open enquiries (yours or the company's, by stage, client, agency or event), enquiries with no recorded activity, one enquiry's status, what needs your attention today, and count-based summaries for a period. For anything else, open the screen.", links: [{ label: "Enquiries", href: "/sales/opportunities" }, { label: "Follow-ups", href: "/sales/follow-ups" }, { label: "Clients & Agencies", href: "/sales/accounts" }, { label: "Reports", href: "/sales/reports" }] },
   delivered: { text: "I cannot answer delivery counts. A won enquiry is not a delivered project, and there is no approved Projects source or agreed definition of \"delivered\" for JARVIS yet. Open Projects to see the projects you have access to.", links: [{ label: "Projects", href: "/projects" }, { label: "Sales reports", href: "/sales/reports" }] },
   projects: { text: `I cannot read or change Projects & Tasks: JARVIS has no live access to that module yet. ${ONLY_LOOKUP} Open the screen instead.`, links: [{ label: "My Work", href: "/projects/work" }, { label: "Projects", href: "/projects" }] },
   inventory: { text: `I cannot read or change Inventory: JARVIS has no live access to that module yet. ${ONLY_LOOKUP} Open the screen instead.`, links: [{ label: "Inventory", href: "/inventory" }, { label: "My equipment", href: "/inventory/mine" }] },
@@ -185,7 +190,9 @@ export function createAssistant(deps: JarvisDeps) {
         jarvisLog({ event: "outbound", outcome: "blocked", code: "sharing_restricted" });
         return { ok: true, kind: "reply", text: wholeTextRestricted(text) ? RESTRICTED_BRIEF_MESSAGE : `${RESTRICTED_TEXT_MESSAGE} It is in the earlier part of this conversation: press Clear to start again without it.`, links: [{ label: "New-enquiry form", href: "/sales/new" }] };
       }
-      const routed = routeMessage(text, { intent: intent?.key ?? null, hasChatContext: turns.length > 0, lastLookup: !!req.context?.lastLookup, hasEnquiry: !!req.enquiryId, screen: resolveScreen(req.screen ?? null)?.id ?? null });
+      const lq = req.context?.lastQuery;
+      const lastQuery = lq && (lq.kind === "lookup" || lq.kind === "summary") && lq.descriptor && typeof lq.descriptor === "object" && !Array.isArray(lq.descriptor) ? { kind: lq.kind, descriptor: lq.descriptor as Record<string, unknown> } : null;
+      const routed = routeMessage(text, { intent: intent?.key ?? null, hasChatContext: turns.length > 0, lastLookup: !!req.context?.lastLookup, hasEnquiry: !!req.enquiryId, screen: resolveScreen(req.screen ?? null)?.id ?? null, lastQuery });
       jarvisLog({ event: "route", outcome: routed.kind });
       const reply = (t: string, links: ReplyLink[] = []): SendResult => ({ ok: true, kind: "reply", text: t, links });
       const proposeFor = async (actionId: string, input: unknown) => asAction(actionId, await d.propose({ actionId, companyId: req.companyId, input }));
@@ -215,6 +222,24 @@ export function createAssistant(deps: JarvisDeps) {
         case "capabilities": return { ok: true, kind: "help", help: d.help() };
         case "memory": return rememberFromText(auth.ctx, routed.op, text);
         case "lookup": return proposeFor(OVERDUE_FOLLOWUPS_ID, { period: routed.period });
+        case "query": {
+          // A company named in the question that is not the one selected: say so instead of answering about the wrong company. (A descriptor never carries a company.)
+          const mine = await deps.companies({ supabase: auth.ctx.supabase, userId: auth.ctx.userId });
+          const other = mine === "error" ? null : mine.find((c) => c.id !== req.companyId && c.name && text.toLowerCase().includes(c.name.toLowerCase()));
+          if (other) return reply(`That question names ${other.name}, but another company is selected in this panel. Choose ${other.name} at the top of the panel and ask again.`);
+          const q = routed.query;
+          // Stored values, budgets and prices are not read, counted or summarised by JARVIS, and are never sent to the AI model: the person is pointed to the screen.
+          if (q.kind === "financial") return reply("I do not read, total or summarise values, budgets, prices or other financial figures held in Enginious OS, and they are never sent to the AI model. Open the enquiry for its value and budget, Proposals & quotes for estimates, or Sales reports for totals. I can give you counts instead, for example \"how many enquiries did we win last month?\".", [{ label: "Sales reports", href: "/sales/reports" }, { label: "Enquiries", href: "/sales/opportunities" }, { label: "Proposals & quotes", href: "/sales/proposals" }]);
+          const onPage = req.enquiryId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.enquiryId) ? req.enquiryId : null;
+          if (q.kind === "scope") {
+            // The enquiry named by its reference, else the one the page shows. Neither is trusted: the action reads it again through the person's own session.
+            let enquiryId: string | null = onPage;
+            if (ENQUIRY_REFERENCE.test(text)) { const r = await resolveEnquiry(auth.ctx.supabase, text, null); if (!r.ok) return r; enquiryId = r.id; }
+            return proposeFor(SCOPE_DRAFT_ID, { text, enquiryId });
+          }
+          const descriptor = (q.descriptor.kind === "enquiry" && !q.descriptor.reference) ? { ...q.descriptor, id: onPage } : q.descriptor;
+          return proposeFor(q.kind === "lookup" ? SALES_LOOKUP_ID : SALES_SUMMARY_ID, descriptor);
+        }
         case "unsupported_live": return reply(UNSUPPORTED[routed.area].text, UNSUPPORTED[routed.area].links);
         case "need_brief": return reply("Paste the client's message or brief and I will turn it into an enquiry for you to review. Nothing is saved until you confirm.");
         case "clarify_brief": return { ok: true, kind: "clarify", text: "Is this a client brief you want turned into a new enquiry?", options: [{ label: "Yes, prepare an enquiry", intent: "enquiry" }, { label: "No, just answer it", intent: "chat" }] };
@@ -295,7 +320,7 @@ export function createAssistant(deps: JarvisDeps) {
     /** Propose again for one of the other actions (the card's "Review changes", a search, a choice). Same checks as `send`; never writes. */
     async act(req: { companyId: string; actionId: string; input: unknown }): Promise<SendResult> {
       const mode = modeByAction(req.actionId);
-      if (!mode || mode.key === "enquiry") return { ok: false, code: "unknown_action", message: "That is not something JARVIS can do." };
+      if (!READ_ACTIONS.includes(req.actionId) && (!mode || mode.key === "enquiry")) return { ok: false, code: "unknown_action", message: "That is not something JARVIS can do." };
       return asAction(req.actionId, await d.propose({ actionId: req.actionId, companyId: req.companyId, input: req.input }));
     },
 

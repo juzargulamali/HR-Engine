@@ -5,6 +5,7 @@ import type { JarvisModeKey } from "./modes";
 import { ENQUIRY_REFERENCE } from "./modes";
 import { findProtectedContent, protectedTopic, type ProtectedCategory } from "./protected";
 import type { LookupPeriod } from "./protocol";
+import { parseSalesQuery, refineQuery, type ParsedQuery } from "./sales/query-parse";
 
 /**
  * LOCAL ROUTING. Decides what a typed message is, deterministically and BEFORE any provider call (no model is ever asked to classify): a greeting, a question about what
@@ -19,6 +20,8 @@ export type Route =
   | { kind: "capabilities" }
   | { kind: "memory"; op: "save" | "show" | "forget" }
   | { kind: "lookup"; period: LookupPeriod }
+  /** A Sales question answered from the records the person can see: a lookup, a factual summary, or scope wording for an estimate. The descriptor is validated again by the action. */
+  | { kind: "query"; query: ParsedQuery }
   | { kind: "unsupported_live"; area: LiveArea }
   | { kind: "mode"; key: JarvisModeKey; chosen: boolean }
   | { kind: "brief" }
@@ -33,6 +36,8 @@ export interface RouteContext {
   intent?: JarvisModeKey | null; hasChatContext?: boolean; lastLookup?: boolean; hasEnquiry?: boolean;
   /** The APPROVED identifier of the screen the person is on (lib/jarvis/help/screens.ts), or null. A hint for choosing guidance; never permission. */
   screen?: string | null;
+  /** The question behind the Sales lookup or summary the panel last showed (a descriptor from the browser: a hint for a follow-up, validated again before use). */
+  lastQuery?: { kind: "lookup" | "summary"; descriptor: Record<string, unknown> } | null;
 }
 
 const CAPABILITIES = /^\s*(?:help|what can (?:you|jarvis) do|what do you do|what are you able to do|capabilit(?:y|ies)|what are your capabilit(?:y|ies)|options)\s*[?!.]*\s*$/i;
@@ -185,6 +190,17 @@ export function routeMessage(raw: string, ctx: RouteContext = {}): Route {
     if (OVERDUE.test(text)) return { kind: "lookup", period: periodIn(text) ?? "all" };
     // A follow-up to the lookup the person just ran ("show last month instead"): the lookup runs again, under today's permissions.
     if (ctx.lastLookup && text.length <= 60 && periodIn(text) && !WRITE.test(text)) return { kind: "lookup", period: periodIn(text)! };
+    // A follow-up to the Sales lookup or summary just shown ("the whole company instead", "show last month", "make that shorter"): the same question with one thing changed.
+    // The panel sends the last question only while that card is the most recent answer (a general chat reply after it clears it), so an old card does not capture a chat line.
+    const refined = ctx.lastQuery ? refineQuery(text, ctx.lastQuery) : null;
+    if (refined) return { kind: "query", query: refined };
+    // A Sales question about the records (lookup, count, summary, scope wording). Not a request to change something (those are the Sales actions below) and not a
+    // request for a piece of writing, except a summary of the records or the scope wording of an estimate.
+    // "Open enquiries for ..." describes enquiries that are open; it does not ask to open (create) one.
+    const openOnes = /^\s*(?:please\s+)?(?:(?:show|list|give|find)\s+(?:me\s+)?)?(?:all\s+|my\s+|our\s+|the\s+)*open\s+(?:sales\s+)?(?:enquiries|inquiries|opportunities|leads|deals)\b/i.test(text);
+    const isAction = (wantsRecord && !openOnes) || INTENTS.some((i) => i.re.test(text) && !(i.not && i.not.test(text))) || /^\s*(?:please\s+)?(?:draft|write)\b[^.\n]{0,40}\b(?:reply|response|e-?mail|message)\b/i.test(text);
+    const query = isAction ? null : parseSalesQuery(text, { enquiryOnPage: !!ctx.hasEnquiry });
+    if (query && ((query.kind !== "lookup" && query.kind !== "financial") || !WRITE.test(text) || /^\s*(?:please\s+)?summari[sz]e\b/i.test(text))) return { kind: "query", query };
     if (LIVE_ASK.test(text) || (!c.allowed && c.category === "other_modules")) {
       const area = LIVE.find((l) => l.re.test(text))?.area;
       if (area) return { kind: "unsupported_live", area };
