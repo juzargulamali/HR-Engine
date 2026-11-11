@@ -1,3 +1,4 @@
+import { handoverHref } from "@/lib/projects/handover-list";
 import type { LucideIcon } from "lucide-react";
 import { BadgeCheck, CalendarClock, ClipboardCheck, ClipboardList, FileCheck2, FileClock, FolderKanban, IdCard, Inbox, AlarmClock, ReceiptText, ShieldCheck } from "lucide-react";
 import { HANDOVER_KIND_LABEL } from "@/lib/crm/handover-attention";
@@ -192,7 +193,7 @@ export function projectDecisionCandidates(d: Pick<ProjectsAttention, "handoverLi
     ...d.handoverList.map((h): AttentionCandidate => ({
       key: `opp:${h.opportunityId}`, source: "project-decisions", icon: FolderKanban, title: h.title, context: h.reference,
       what: h.status === "pm_assigned" ? "Project handover waiting for you to accept" : "Project handover waiting for a project manager to be assigned",
-      ...(waitingAgeText(h.at, now) ? { when: waitingAgeText(h.at, now)! } : {}), tier: 2, at: h.at, href: "/projects/handovers",
+      ...(waitingAgeText(h.at, now) ? { when: waitingAgeText(h.at, now)! } : {}), tier: 2, at: h.at, href: handoverHref(h.id),
     })),
     ...d.scopeList.map((r): AttentionCandidate => ({
       key: `scope:${r.id}`, source: "project-decisions", icon: FolderKanban, title: r.title, context: `${r.projectReference} · ${r.projectName}`, what: "Scope change waiting for your decision",
