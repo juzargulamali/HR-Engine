@@ -185,7 +185,10 @@ export function routeMessage(raw: string, ctx: RouteContext = {}): Route {
   // A question with no subject of its own is answered from the current screen's guide only when it is about that screen or asks what it is for ("what is the benefit?");
   // a bare "why?" in the middle of a conversation is not.
   const strongGuide = guide.kind !== "none" && guide.score >= STRONG_GUIDE && (hasSubject(text) || aboutScreen || (text.length <= 120 && asksPurpose(text)));
-  const askingHow = strongGuide && /^\s*(?:which|what|who|where)\b/i.test(text);
+  // A question about stored money ("what is the total value of ...") is never taken for a how-to question, however well a guide happens to share its words: the guide score
+  // moves as guidance is published, the rule that JARVIS does not read or total financial figures does not.
+  const financialAsk = strongGuide && !WRITE.test(text) && text.length <= 200 && parseSalesQuery(text, { enquiryOnPage: !!ctx.hasEnquiry })?.kind === "financial";
+  const askingHow = strongGuide && !financialAsk && /^\s*(?:which|what|who|where)\b/i.test(text);
   if (!howTo && !aboutScreen && !askingHow && text.length <= 200) {
     if (OVERDUE.test(text)) return { kind: "lookup", period: periodIn(text) ?? "all" };
     // A follow-up to the lookup the person just ran ("show last month instead"): the lookup runs again, under today's permissions.

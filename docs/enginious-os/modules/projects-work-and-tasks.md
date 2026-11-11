@@ -1,6 +1,8 @@
 # Projects & Tasks: a project's Work page, tasks, milestones and deliverables
 
-Status: written against the Projects & Tasks Phase 1 branch `claude/admiring-cray-uky379` (draft, **not merged**). **Code read only; nothing was run** (no app, no test, no database, no hosted project). Hosted facts are not stated here. Anything that reading the code could not confirm is marked `Unverified`. The compact index for the whole module is [`projects-coverage-index.md`](./projects-coverage-index.md); where this file and that index overlap, the facts were re-checked in the code cited here.
+Part of the Projects & Tasks Map: [coverage index](./projects-coverage-index.md) (every screen, numbered) and [action catalogue](./projects-action-catalogue.md) (every action that changes data). The two tables at the end of this file are their source.
+
+Status: written against the Projects & Tasks Phase 1 branch `claude/admiring-cray-uky379` (draft, **not merged**). **Code read only; nothing was run** (no app, no test, no database, no hosted project). Hosted facts are not stated here. Anything that reading the code could not confirm is marked `Unverified`. The compact index for the whole module is [`projects-phase1-changes.md`](./projects-phase1-changes.md); where this file and that index overlap, the facts were re-checked in the code cited here.
 
 Path shorthand used in the Source columns:
 

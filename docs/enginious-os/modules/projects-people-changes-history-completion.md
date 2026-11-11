@@ -1,6 +1,8 @@
 # Projects & Tasks: People & access, Feedback & changes, History, Completion and reopening
 
-Status: written against the Projects & Tasks Phase 1 branch `claude/admiring-cray-uky379`, draft, not merged; code read only, nothing run (no app, no database, no test, no hosted project). Every claim cites the file it was read from. Anything that code reading could not confirm is marked `Unverified`. No hosted fact is stated here. Index: [`projects-coverage-index.md`](./projects-coverage-index.md) (rows 11, 13, 14, 15). Chat membership: [`app-chat.md`](./app-chat.md) section 9.
+Part of the Projects & Tasks Map: [coverage index](./projects-coverage-index.md) (every screen, numbered) and [action catalogue](./projects-action-catalogue.md) (every action that changes data). The two tables at the end of this file are their source.
+
+Status: written against the Projects & Tasks Phase 1 branch `claude/admiring-cray-uky379`, draft, not merged; code read only, nothing run (no app, no database, no test, no hosted project). Every claim cites the file it was read from. Anything that code reading could not confirm is marked `Unverified`. No hosted fact is stated here. Index: [`projects-phase1-changes.md`](./projects-phase1-changes.md) (rows 11, 13, 14, 15). Chat membership: [`app-chat.md`](./app-chat.md) section 9.
 
 Short names used for sources:
 
