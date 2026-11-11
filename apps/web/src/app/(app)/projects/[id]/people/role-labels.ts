@@ -34,7 +34,7 @@ export const ROLE_EXPLANATIONS: { role: string; can: string }[] = [
   { role: "Project Manager", can: "Manages the scope, people, departments, milestones and delivery of this project, accepts milestones, and prepares the client timeline." },
   { role: "Temporary leader", can: "Has the Project Manager's project powers until the end date. Cannot change who the Project Manager is or appoint other leaders." },
   { role: "Department head", can: "Manages their department's deliverables and tasks, hands work to people in the department, accepts the department's deliverables and reviews its tasks." },
-  { role: "Member", can: "Reads the project workspace and discussion, updates their own tasks, creates tasks for themselves and comments." },
+  { role: "Member", can: "Reads the project workspace and its chat group, updates their own tasks, creates tasks for themselves and comments." },
 ];
 
 export const HR_INDEPENDENCE_NOTE =

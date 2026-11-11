@@ -202,7 +202,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
       )}
 
       {!salesOnly && rows.some((r) => !canSeeProjectDetails(r, ctx.grants)) ? (
-        <Muted>Projects you are not part of show their summary only. Their plans, discussion and files are for their members and founders.</Muted>
+        <Muted>Projects you are not part of show their summary only. Their plans, chat and files are for their members and founders.</Muted>
       ) : null}
 
       {openRow ? (

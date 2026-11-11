@@ -59,7 +59,7 @@ export function MemberActions({ projectId, person, teams, openTasks, others, can
           </Field>
         </ActionForm>
       </Modal>
-      <Modal open={remove} onClose={() => setRemove(false)} title="Remove from project" description={`${person.name} loses access to the project's details, discussion, files and notifications straight away.`}>
+      <Modal open={remove} onClose={() => setRemove(false)} title="Remove from project" description={`${person.name} loses access to the project's details, chat group, files and notifications straight away.`}>
         <ActionForm action={removeProjectMember} submitLabel="Remove" variant="destructive" onDone={() => setRemove(false)} secondary={cancel(() => setRemove(false))}>
           <input type="hidden" name="projectId" value={projectId} />
           <input type="hidden" name="userId" value={person.id} />
