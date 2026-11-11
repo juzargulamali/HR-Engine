@@ -253,7 +253,23 @@ Fictional data only; no real client data is entered or needed. **Writes stay off
 
 ## Stages 2 to 4 (Sales lookups, summaries, scope wording): what a Preview or Production needs
 
-**Status: draft PR, not merged, not deployed. Nothing was applied, enabled or changed on hosted by Claude.**
+**Status: merged (PR #77, 2026-11-11). Production smoke check owner-verified (2026-11-11, owner-reported; not seen by Claude); see "Release of PR #77" directly below. Nothing was applied, enabled or changed on hosted by Claude.** (Until the release this line read "draft PR, not merged, not deployed".)
+
+### Release of PR #77 (2026-11-11): status and evidence
+
+Four facts, kept apart. "Owner-reported" means the owner did the check and told Claude the result; Claude did not see the hosted system.
+
+| Fact | Status | Evidence |
+|---|---|---|
+| Merged | PR #77 merged into `main` with a merge commit as `720f7858fa6b3b9f4fa0b3b4016820357c0b90e3` (2026-11-11 08:58 UTC), pinned to head `3db3a1a852e0b936e699e4b82b1d8e11e3bae0ca`. The owner asked for the merge | GitHub, read by Claude |
+| Required CI on the exact head | `lint-typecheck-test` success, `rls-policies` success on `3db3a1a852e0b936e699e4b82b1d8e11e3bae0ca` | GitHub, read by Claude before merging |
+| Signed-in Preview check before the merge | **Owner-reported (2026-11-11): the owner completed the signed-in Preview check and approved the merge.** What was exercised was not listed to Claude; not seen or independently verified by Claude | Owner-reported |
+| Hosted database | **No migration and no SQL in this release.** Nothing to apply; nothing was run | The PR adds no file under `supabase/migrations` |
+| Production deployment of `720f7858fa6b3b9f4fa0b3b4016820357c0b90e3` | **Not separately reported.** Claude could not read Vercel's status for the merge commit and has no Vercel access. The owner's smoke check below was run in Production after the merge and used a Stage 2 lookup, which exists only in this release, so it is consistent with Production serving it; the Vercel deployment status itself was not reported to Claude | Inferred from the owner's check; not checked by Claude |
+| Production smoke check (pilot user, read-only: "Show my open enquiries") | **Owner-verified (2026-11-11, owner-run and owner-reported): run in Production as the pilot user after PR #77 merged; the selected company, the result count and the links were correct.** Not run, seen or independently verified by Claude (no signed-in Production access) | Owner-reported |
+| Pilot controls | Not changed by this release and not re-checked. Last owner-reported state: "Release of PR #74" below | |
+
+Stop or roll back: `JARVIS_PAUSE=lookups,chat` (and a redeploy) stops the new capabilities; or revert the merge commit. Neither touches the database.
 
 | Part | Needs | Notes |
 |---|---|---|

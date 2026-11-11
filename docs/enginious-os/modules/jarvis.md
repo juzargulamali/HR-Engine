@@ -271,7 +271,7 @@ Part 2 screenshots (isolated stack, simulated provider, fictional data): `../scr
 
 See [`jarvis-rulebook.md`](./jarvis-rulebook.md) section 7. Sales summaries and scope-only estimate help are built (section 15). Not built: live access to Projects, Inventory, Finance, People & HR or Approvals; any financial summary; priced estimates; sending messages. A won enquiry is not a delivered project: delivery counts wait for an approved Projects source and an agreed definition.
 
-## 15. Stages 2 to 4: Sales lookups, factual summaries, scope wording, and the provenance rule (draft PR on `claude/admiring-cray-uky379`; not merged, not deployed)
+## 15. Stages 2 to 4: Sales lookups, factual summaries, scope wording, and the provenance rule (PR #77, merged 2026-11-11 as `720f785`; Production smoke check owner-verified 2026-11-11, see `docs/jarvis-deployment.md` "Release of PR #77")
 
 **Status.** Built and tested locally with fictional data, the simulated provider and an intercepted provider request, and on a local PostgreSQL 16 for the reads. **No migration** (existing tables and read policies only). No live AI provider was called. Not on any Preview or Production until the owner reviews and merges. Verification gaps are listed at the end of this section.
 
