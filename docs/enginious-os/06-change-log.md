@@ -8,6 +8,14 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-11 | Release: PR #80 (Sales & CRM employee launch and filter consistency) merged; release status reconciled | docs only, branch `claude/admiring-cray-uky379` restarted from `main` `3ff5592`; **no application code, no migration, no SQL run**
+* **Merged (checked on GitHub):** PR #80, merge commit `3ff55925116ccb9f33bb6d2d69c8ec236e2bc07f`, merge method merge, at the owner's request.
+* **Required CI on the exact head `261559173c0bd642fbec75f189657df0d6660ac2`:** `lint-typecheck-test` and `rls-policies` both passed (read from GitHub before the merge).
+* **Hosted database (owner-run, owner-reported; not verified by Claude):** migration 26 `20261229000100_crm_enquiry_list.sql` applied with its preflight and verify passing.
+* **Preview (owner-reported):** signed-in QA of `fe31534` passed, and the final check of the filter change on `2615591` passed.
+* **Production:** deployment of the merge commit and any signed-in Production check are `Unverified`.
+* The two entries below say "draft PR #80, not merged" in their headings: that is history as written before the merge.
+
 ### 2026-11-11 | Filters on Clients & Agencies, Outreach and Events & Exhibitions match Enquiries; owner's migration 26 and Preview QA report recorded | branch `claude/admiring-cray-uky379` (draft PR #80, not merged); **no migration, no hosted SQL by Claude**
 * **Owner report recorded (owner-run, owner-reported 2026-11-11; not run, seen or verified by Claude):** migration 26 `20261229000100_crm_enquiry_list.sql` applied on the hosted Supabase project (shared by Preview and Production); its preflight and post-migration verify passed; signed-in Preview QA of PR #80 passed. Recorded in `docs/launch-refinement-install-order.md` row 26, `docs/crm-deployment.md` ("Bounded Enquiries read") and 05. That QA was on the head before this change (`fe31534`); the filter change below has **not** had a signed-in Preview check. Merged: no. Production: not verified.
 * **Filters (UI only):** `/sales/accounts`, `/sales/outreach` and `/sales/events` now use the Sales > Enquiries toolbar (`apps/web/src/components/workspace/list-toolbar.tsx`): same filter icon and More filters panel, the number-in-use indicator, chips with Remove, and Clear. **No Apply button**: a choice applies at once, typed text about a third of a second after typing stops. Each page keeps its own filter options and defaults (Outreach: Not closed; Events: Upcoming). Changing a filter keeps the search, the sort, the company, the relationship chip, the List or Calendar view and the calendar's month. None of the three lists has pages (Clients & Agencies and Events show the first 100), so there is no page to reset.
