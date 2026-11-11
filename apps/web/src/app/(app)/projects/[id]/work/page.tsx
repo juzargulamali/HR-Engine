@@ -183,6 +183,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
   const shortcuts = [
     ...(outdatedRes.data === true ? [{ href: `/projects/${id}/documents`, label: "Files & client plan", note: "The issued client timeline is out of date." }] : view.project.kind === "client" ? [{ href: `/projects/${id}/documents`, label: "Files & client plan", note: "Project files and the client-facing plan." }] : []),
     { href: `/projects/${id}/plan`, label: "Timeline", note: nextMilestone ? `Next milestone: ${nextMilestone.title}, ${dateText(nextMilestone.due_date)}.` : "Dates, activities and milestones." },
+    ...(depRes.error ? [{ href: `/projects/${id}/plan?plan=site&mode=list`, label: "Dependencies", note: "Could not load the dependencies just now. Open the site plan to see them." }] : []),
     ...(openDeps.length > 0 ? [{ href: `/projects/${id}/plan?plan=site&mode=list`, label: "Dependencies", note: `${openDeps.length} not confirmed yet (waiting on another party).` }] : []),
     ...(upcomingBookings.length > 0 ? [{ href: `/projects/${id}/plan?plan=site&mode=list#bookings`, label: "Site bookings", note: `${upcomingBookings.length} upcoming.` }] : []),
   ];
