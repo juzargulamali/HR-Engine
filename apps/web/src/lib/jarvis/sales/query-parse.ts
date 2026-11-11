@@ -10,6 +10,8 @@ import { CRM_STAGES } from "@enginious-hr/domain";
 export type ParsedQuery =
   | { kind: "lookup"; descriptor: Record<string, unknown> }
   | { kind: "summary"; descriptor: Record<string, unknown> }
+  /** A question about money held in Enginious OS (values, budgets, prices, revenue): answered with the screen to open, never read, summarised or sent. */
+  | { kind: "financial" }
   | { kind: "scope" };
 
 const REFERENCE = /\bOPP-[A-Z0-9]{2,8}-\d{4}-\d{3,6}\b/i;
@@ -26,6 +28,8 @@ const MOST = /\bmost\b|\btop\b|\brank|\bbiggest\b|\bbusiest\b/i;
 const SCOPE_DRAFT = /\b(?:estimate|estimates|quotation|quote)\b[^.\n]{0,40}\b(?:scope|line\s+items?|line\s+descriptions?|deliverables|wording)\b|\b(?:scope|deliverables|line\s+items?|line\s+descriptions?)\b[^.\n]{0,40}\b(?:for|of)\b[^.\n]{0,20}\b(?:an?\s+|the\s+|this\s+|my\s+)?(?:estimate|quotation|quote)\b|\bscope\s+of\s+work\b/i;
 /** The person is talking about a text they are giving, not asking about the records. */
 const ABOUT_A_TEXT = /\b(?:this|the\s+following|below)\s+(?:e-?mail|message|text|note|notes|thread|conversation|paragraph|draft|brief|article)\b|:\s*\S[\s\S]{120,}$/i;
+/** Asking for a stored amount of money about Sales records. */
+const MONEY_ASK = /\b(?:values?|worth|revenue|turnover|profits?|margins?|budgets?|prices?|pricing|quoted|amounts?|how\s+much|income|sales\s+figures?|invoiced|collected)\b/i;
 const COMPANY_WIDE = /\b(?:our|team(?:'s)?|company(?:'s)?|company[-\s]wide|everyone(?:'s)?|everybody|whole|all\s+(?:open\s+)?(?:enquir|the\s+enquir|of\s+(?:our|the)))\b/i;
 const MINE = /\b(?:my|mine|i\s+own|i'm\s+working|assigned\s+to\s+me|owned\s+by\s+me)\b/i;
 
@@ -72,6 +76,8 @@ export function parseSalesQuery(raw: string, opts: { enquiryOnPage?: boolean } =
   const thisEnquiry = reference !== null || (opts.enquiryOnPage === true && /\b(?:this|the)\s+(?:enquiry|inquiry|opportunity|one)\b/i.test(text));
   // Scope wording for an estimate is a draft, not a lookup: it never reads a prepared estimate.
   if (SCOPE_DRAFT.test(text)) return { kind: "scope" };
+  // Money held in Enginious OS is not looked up, counted, summarised or sent: the person is pointed to the screen.
+  if (MONEY_ASK.test(text) && (ENQUIRY.test(text) || thisEnquiry || /\b(?:we|our|sales|won|pipeline)\b/i.test(text)) && (COUNT.test(text) || SUMMARISE.test(text) || /^\s*(?:please\s+)?(?:what|how|which|show|list|give|tell|total)\b/i.test(text) || /\?\s*$/.test(text))) return { kind: "financial" };
   if (SUMMARISE.test(text) && thisEnquiry) return { kind: "summary", descriptor: { kind: "enquiry", reference } };
   if (ATTENTION.test(text)) return { kind: "lookup", descriptor: { kind: "attention" } };
   if (FOLLOW_UP.test(text) && !COUNT.test(text) && !SUMMARISE.test(text)) {

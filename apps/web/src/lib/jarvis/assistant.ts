@@ -228,6 +228,8 @@ export function createAssistant(deps: JarvisDeps) {
           const other = mine === "error" ? null : mine.find((c) => c.id !== req.companyId && c.name && text.toLowerCase().includes(c.name.toLowerCase()));
           if (other) return reply(`That question names ${other.name}, but another company is selected in this panel. Choose ${other.name} at the top of the panel and ask again.`);
           const q = routed.query;
+          // Stored values, budgets and prices are not read, counted or summarised by JARVIS, and are never sent to the AI model: the person is pointed to the screen.
+          if (q.kind === "financial") return reply("I do not read, total or summarise values, budgets, prices or other financial figures held in Enginious OS, and they are never sent to the AI model. Open the enquiry for its value and budget, Proposals & quotes for estimates, or Sales reports for totals. I can give you counts instead, for example \"how many enquiries did we win last month?\".", [{ label: "Sales reports", href: "/sales/reports" }, { label: "Enquiries", href: "/sales/opportunities" }, { label: "Proposals & quotes", href: "/sales/proposals" }]);
           const onPage = req.enquiryId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.enquiryId) ? req.enquiryId : null;
           if (q.kind === "scope") {
             // The enquiry named by its reference, else the one the page shows. Neither is trusted: the action reads it again through the person's own session.

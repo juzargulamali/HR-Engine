@@ -42,7 +42,7 @@ const STORED = { value: 918273, budget: "Stored budget AED 918,273 agreed", term
 
 describe("routing: a Sales question becomes a validated descriptor, locally; actions and writing requests are not hijacked", () => {
   it("questions are read by what they ask, not by a list of sentences", () => {
-    const kinds = (t: string, ctx = {}) => { const r = routeMessage(t, ctx); return r.kind === "query" ? (r.query.kind === "scope" ? "scope" : `${r.query.kind}:${String(r.query.descriptor.kind)}`) : r.kind; };
+    const kinds = (t: string, ctx = {}) => { const r = routeMessage(t, ctx); return r.kind === "query" ? (r.query.kind === "scope" || r.query.kind === "financial" ? r.query.kind : `${r.query.kind}:${String(r.query.descriptor.kind)}`) : r.kind; };
     for (const t of ["What needs my attention today?", "what should I focus on today", "What's on my plate?"]) expect(kinds(t), t).toBe("lookup:attention");
     for (const t of ["Show my follow-ups due today", "which follow-ups do I have today?"]) expect(parseSalesQuery(t), t).toEqual({ kind: "lookup", descriptor: { kind: "followups", when: "today" } });
     expect(parseSalesQuery("Show my upcoming follow-ups for the next 14 days")).toEqual({ kind: "lookup", descriptor: { kind: "followups", when: "upcoming", days: 14 } });
@@ -72,6 +72,24 @@ describe("routing: a Sales question becomes a validated descriptor, locally; act
     expect(kinds("confirmed")).toBe("greeting"); // a chat line is never a write confirmation
     // overdue keeps its own lookup
     expect(kinds("Show my overdue Sales follow-ups")).toBe("lookup");
+  });
+
+  it("a question about stored money is answered with the screen to open: nothing is read, nothing is sent; a draft that uses a figure the person supplies is still a draft", async () => {
+    w.opps.push(mkOpp({ company_id: ID.co1, owner_id: ID.u1, value: 918273, currency: "AED", budget_note: "Stored budget AED 918,273" }));
+    w.readLog.length = 0;
+    for (const t of ["What is the total value of our open enquiries?", "How much revenue did we win last month?", `What is the budget for ${w.opps[0]!.reference}?`, "Summarise the value of our pipeline", "Which enquiry has the highest value?"]) {
+      const r = await ask(t);
+      expect(r.ok && r.kind === "reply" && r.text, t).toMatch(/do not read, total or summarise values, budgets, prices/);
+      expect(r.ok && r.kind === "reply" && r.links.map((l) => l.href), t).toContain("/sales/reports");
+    }
+    expect(w.readLog.filter((x) => x.startsWith("crm_o") || x === "crm_follow_ups")).toEqual([]);
+    expect(simulatedProviderCalls).toHaveLength(0);
+    // a figure the person supplies for a piece of writing is ordinary writing
+    const draft = await ask("Draft a reply to the client offering 85 per item for 1,200 items; our budget for the job is AED 90,000");
+    expect(draft.ok && draft.kind === "action" && draft.card.kind).toBe("chat.reply");
+    expect(simulatedProviderCalls[0]!.input).toContain("our budget for the job is AED 90,000");
+    // counts stay available
+    expect(parseSalesQuery("How many enquiries did we win last month?")).toMatchObject({ kind: "summary" });
   });
 
   it("a follow-up changes ONE thing of the last question; the result is a fresh descriptor, validated and run again", () => {

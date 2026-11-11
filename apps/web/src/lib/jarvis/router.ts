@@ -199,7 +199,7 @@ export function routeMessage(raw: string, ctx: RouteContext = {}): Route {
     const openOnes = /^\s*(?:please\s+)?(?:(?:show|list|give|find)\s+(?:me\s+)?)?(?:all\s+|my\s+|our\s+|the\s+)*open\s+(?:sales\s+)?(?:enquiries|inquiries|opportunities|leads|deals)\b/i.test(text);
     const isAction = (wantsRecord && !openOnes) || INTENTS.some((i) => i.re.test(text) && !(i.not && i.not.test(text))) || /^\s*(?:please\s+)?(?:draft|write)\b[^.\n]{0,40}\b(?:reply|response|e-?mail|message)\b/i.test(text);
     const query = isAction ? null : parseSalesQuery(text, { enquiryOnPage: !!ctx.hasEnquiry });
-    if (query && (query.kind !== "lookup" || !WRITE.test(text))) return { kind: "query", query };
+    if (query && ((query.kind !== "lookup" && query.kind !== "financial") || !WRITE.test(text) || /^\s*(?:please\s+)?summari[sz]e\b/i.test(text))) return { kind: "query", query };
     if (LIVE_ASK.test(text) || (!c.allowed && c.category === "other_modules")) {
       const area = LIVE.find((l) => l.re.test(text))?.area;
       if (area) return { kind: "unsupported_live", area };
