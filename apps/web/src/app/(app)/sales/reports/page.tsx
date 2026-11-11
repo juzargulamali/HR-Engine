@@ -10,13 +10,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatDate, formatMoney } from "@/components/sales/format";
 import { LoadError } from "@/components/workspace/states";
 import { getCrmContext } from "@/lib/crm/context";
-import { loadFollowUps, loadOpportunities, num, type FollowUpListItem, type OpportunityListItem } from "@/lib/crm/data";
+import { loadFollowUps, loadOpportunities, num, readForIds, readPaged, type FollowUpListItem, type OpportunityListItem } from "@/lib/crm/data";
 import {
   elapsedFirstResponse, enquiriesBySource, followUpCounts, openPipelineByOwner, openPipelineByStage, reopenedClosures, resolvePeriod, timelinessByCompany, wonLostInPeriod, wonValueRows, zohoSummary,
   type CompanyTimeliness, type ReportOpp, type WonValueRow,
 } from "@/lib/crm/reports";
 import { createClient } from "@/lib/supabase/server";
-import type { CrmZohoReferenceRow } from "@/types/crm";
+import type { CrmClosureRow, CrmZohoReferenceRow } from "@/types/crm";
 import { CurrencyTotals } from "../currency-totals";
 
 export const metadata = { title: "Sales reports" };
@@ -41,7 +41,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const company = ctx.companies.some((c) => c.id === first(sp.company)) ? first(sp.company) : "";
 
   // The enquiries are what almost every card is built from: without them there is no report. The follow-ups feed one card only, so their failure is that card's.
-  const [itemsRes, followUpsRes] = await Promise.allSettled([loadOpportunities(ctx), loadFollowUps(ctx)]);
+  // The company is applied in the database and the read is complete (page by page): no figure is built from "the newest rows".
+  const [itemsRes, followUpsRes] = await Promise.allSettled([loadOpportunities(ctx, company ? { company } : {}), loadFollowUps(ctx)]);
   if (itemsRes.status === "rejected") {
     console.error("[crm] reports load failed", itemsRes.reason);
     return (
@@ -81,18 +82,24 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   let zohoRows: CrmZohoReferenceRow[] = [];
   if (wl.wonOpps.length > 0) {
     const supabase = await createClient();
-    const { data, error } = await supabase.from("crm_zoho_references").select("*").limit(5000);
-    if (error) { zohoFailed = true; console.error("[crm] reports zoho references failed", error.message); }
-    else zohoRows = data ?? [];
+    // Only the references of the won enquiries in view, read completely (never "the first rows of the table").
+    try { zohoRows = await readForIds<CrmZohoReferenceRow>(wl.wonOpps.map((o) => o.id), (chunk, from, to) => supabase.from("crm_zoho_references").select("*").in("opportunity_id", chunk).order("opportunity_id").range(from, to)); }
+    catch (e) { zohoFailed = true; console.error("[crm] reports zoho references failed", e); }
   }
   // Closures that were later reopened are kept in history; they are not outcomes any more, so count them separately.
   let reopened = { won: 0, lost: 0, total: 0 };
   let reopenedFailed = false;
   {
     const supabase = await createClient();
-    const { data, error } = await supabase.from("crm_closures").select("outcome, closed_at, reopened_at").not("reopened_at", "is", null).limit(5000);
-    if (error) { reopenedFailed = true; console.error("[crm] reports reopened closures failed", error.message); }
-    else reopened = reopenedClosures(data ?? [], period);
+    // The chosen company applies to this note as it does to every other figure, and the read is complete.
+    try {
+      const rows = await readPaged<Pick<CrmClosureRow, "outcome" | "closed_at" | "reopened_at">>((from, to) => {
+        let query = supabase.from("crm_closures").select("outcome, closed_at, reopened_at").not("reopened_at", "is", null);
+        if (company) query = query.eq("company_id", company);
+        return query.order("closed_at").order("id").range(from, to);
+      });
+      reopened = reopenedClosures(rows, period);
+    } catch (e) { reopenedFailed = true; console.error("[crm] reports reopened closures failed", e); }
   }
   const failedCards = [followUpsFailed ? "Follow-ups" : null, reopenedFailed ? "the reopened-closures note under Won and lost" : null, zohoFailed ? "Won value against invoice and payment references" : null].filter((x): x is string => x !== null);
   const wonRows = wonValueRows(wl.wonOpps, zohoRows);

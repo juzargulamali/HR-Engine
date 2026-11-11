@@ -28,31 +28,110 @@ export interface OpportunityListItem {
   availability: AvailabilityDisplay;
 }
 
-/** Everything the signed-in user may see (RLS decides), with names and the next follow-up resolved. */
-export async function loadOpportunities(ctx: CrmContext): Promise<OpportunityListItem[]> {
+/** The data service returns at most this many rows per request (Supabase default): every list here is read page by page until a short page. */
+const PAGE = 1000;
+/** Ids sent in one `in (...)` filter: keeps the request address short. */
+const ID_CHUNK = 150;
+/** A search by organisation name is pushed into the query only while it matches this few organisations; a broader search reads the whole scope and filters it. */
+const ORG_MATCH_CAP = 60;
+
+type Res<T> = { data: T[] | null; error: { message: string } | null };
+
+/** Reads every row of a query, page by page, in the query's own stable order. Throws when any page fails: a short list must never look complete. */
+export async function readPaged<T>(page: (from: number, to: number) => PromiseLike<Res<T>>): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const r = await page(from, from + PAGE - 1);
+    ok(r);
+    out.push(...(r.data ?? []));
+    if ((r.data ?? []).length < PAGE) return out;
+  }
+}
+
+/** Reads the rows that belong to `ids`, a chunk of ids at a time (each chunk itself page by page). */
+export async function readForIds<T>(ids: readonly string[], read: (chunk: string[], from: number, to: number) => PromiseLike<Res<T>>): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += ID_CHUNK) {
+    const chunk = ids.slice(i, i + ID_CHUNK);
+    out.push(...await readPaged<T>((from, to) => read(chunk, from, to)));
+  }
+  return out;
+}
+
+/** A value inside a data-service `or(...)` filter: quoted, so a comma, a bracket or a dot in what was typed cannot change the filter. */
+const orValue = (v: string) => `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+
+/** What to read. Everything is applied IN THE DATABASE, inside what the person may see (row-level security), before any page is cut. */
+export interface OpportunityScope {
+  company?: string;
+  owner?: string;
+  /** One stage; it wins over `status` (asking for Won is never emptied by "open"). */
+  stage?: string;
+  /** Default: everything. */
+  status?: "open" | "closed" | "all";
+  /** Search text: title, reference, agency name or end-client name. */
+  q?: string;
+}
+
+/**
+ * The enquiries the signed-in user may see (RLS decides) that match `scope`, COMPLETE: read page by page, newest first, so an old enquiry is found as surely as a
+ * new one. Names and the next open follow-up are resolved from reads limited to those enquiries. Throws when any read fails.
+ */
+export async function loadOpportunities(ctx: CrmContext, scope: OpportunityScope = {}): Promise<OpportunityListItem[]> {
   const supabase = await createClient();
-  const oppsRes = await supabase.from("crm_opportunities").select("*").order("created_at", { ascending: false }).limit(2000);
-  ok(oppsRes);
-  const opps = oppsRes.data;
-  const rows = opps ?? [];
+  const q = (scope.q ?? "").trim();
+  // Search: enquiries whose title or reference contains the text, or whose agency / end client is one of the organisations whose name does.
+  let search: string | null = null;
+  if (q) {
+    const like = orValue(`%${q}%`);
+    const orgRes = await supabase.from("crm_organisations").select("id").ilike("name", `%${q}%`).limit(ORG_MATCH_CAP + 1);
+    ok(orgRes);
+    const orgIds = (orgRes.data ?? []).map((o) => o.id);
+    // Too many organisations match to list them in one filter: read the whole scope instead (the caller filters by the same text), so nothing is missed.
+    if (orgIds.length <= ORG_MATCH_CAP) {
+      const parts = [`title.ilike.${like}`, `reference.ilike.${like}`];
+      if (orgIds.length) parts.push(`agency_org_id.in.(${orgIds.join(",")})`, `client_org_id.in.(${orgIds.join(",")})`);
+      search = parts.join(",");
+    }
+  }
+  const rows = await readPaged<CrmOpportunityRow>((from, to) => {
+    let query = supabase.from("crm_opportunities").select("*");
+    if (scope.company) query = query.eq("company_id", scope.company);
+    if (scope.owner) query = query.eq("owner_id", scope.owner);
+    if (scope.stage) query = query.eq("stage", scope.stage as CrmOpportunityRow["stage"]);
+    else if (scope.status === "open") query = query.not("stage", "in", "(won,lost)");
+    else if (scope.status === "closed") query = query.in("stage", ["won", "lost"]);
+    if (search) query = query.or(search);
+    return query.order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to);
+  });
   if (rows.length === 0) return [];
   const orgIds = [...new Set(rows.flatMap((o) => [o.agency_org_id, o.client_org_id]).filter((x): x is string => !!x))];
-  const [orgsRes, fuRes] = await Promise.all([
-    orgIds.length ? supabase.from("crm_organisations").select("*").in("id", orgIds) : Promise.resolve({ data: [] as CrmOrganisationRow[], error: null }),
-    supabase.from("crm_follow_ups").select("*").eq("status", "open").order("due_at"),
+  const ids = rows.map((o) => o.id);
+  // The open follow-ups of THESE enquiries (soonest first). For a large set one complete read of the open follow-ups is fewer requests than hundreds of id chunks.
+  const followUpsRead = ids.length > 4 * ID_CHUNK
+    ? readPaged<CrmFollowUpRow>((from, to) => supabase.from("crm_follow_ups").select("*").eq("status", "open").not("opportunity_id", "is", null).order("due_at").order("id").range(from, to))
+    : readForIds<CrmFollowUpRow>(ids, (chunk, from, to) => supabase.from("crm_follow_ups").select("*").eq("status", "open").in("opportunity_id", chunk).order("due_at").order("id").range(from, to));
+  const [orgs, followUps] = await Promise.all([
+    readForIds<CrmOrganisationRow>(orgIds, (chunk, from, to) => supabase.from("crm_organisations").select("*").in("id", chunk).order("id").range(from, to)),
+    followUpsRead,
   ]);
-  ok(orgsRes, fuRes);
-  const orgs = orgsRes.data;
-  const followUps = fuRes.data;
-  const orgBy = new Map((orgs ?? []).map((o) => [o.id, o]));
+  const orgBy = new Map(orgs.map((o) => [o.id, o]));
   const nextBy = new Map<string, CrmFollowUpRow>();
   const countBy = new Map<string, number>();
-  for (const f of followUps ?? []) {
+  for (const f of [...followUps].sort((a, b) => a.due_at.localeCompare(b.due_at))) {
     if (!f.opportunity_id) continue;   // a follow-up on an account with no inquiry belongs to no opportunity
     if (!nextBy.has(f.opportunity_id)) nextBy.set(f.opportunity_id, f);
     countBy.set(f.opportunity_id, (countBy.get(f.opportunity_id) ?? 0) + 1);
   }
   return rows.map((o) => toItem(ctx, o, orgBy, nextBy, countBy));
+}
+
+/** How many enquiries the person may see in all (an exact count from the database, not the length of a page). Throws when it cannot be counted. */
+export async function countOpportunities(): Promise<number> {
+  const supabase = await createClient();
+  const res = await supabase.from("crm_opportunities").select("id", { count: "exact", head: true });
+  if (res.error) throw new Error(`Sales data could not be loaded: ${res.error.message}`);
+  return res.count ?? 0;
 }
 
 function toItem(
@@ -229,26 +308,20 @@ export interface FollowUpListItem {
 export async function loadFollowUps(ctx: CrmContext): Promise<{ open: FollowUpListItem[]; done: FollowUpListItem[] }> {
   const supabase = await createClient();
   const [openRes, doneRes] = await Promise.all([
-    supabase.from("crm_follow_ups").select("*").eq("status", "open").order("due_at").limit(1000),
+    readPaged<CrmFollowUpRow>((from, to) => supabase.from("crm_follow_ups").select("*").eq("status", "open").order("due_at").order("id").range(from, to)),
     supabase.from("crm_follow_ups").select("*").eq("status", "done").order("completed_at", { ascending: false }).limit(30),
   ]);
-  ok(openRes, doneRes);
-  const open = openRes.data;
+  ok(doneRes);
+  const open = openRes;
   const done = doneRes.data;
   const all = [...(open ?? []), ...(done ?? [])];
   const oppIds = [...new Set(all.map((f) => f.opportunity_id).filter((x): x is string => !!x))];
   type OppBits = Pick<CrmOpportunityRow, "id" | "reference" | "title" | "stage" | "company_id" | "owner_id" | "agency_org_id" | "client_org_id">;
   // A failed read here must not silently drop follow-ups (their enquiry or account would look missing): it throws like every other read in this file.
-  const oppsRes = oppIds.length
-    ? await supabase.from("crm_opportunities").select("id, reference, title, stage, company_id, owner_id, agency_org_id, client_org_id").in("id", oppIds)
-    : { data: [] as OppBits[], error: null };
-  ok(oppsRes);
-  const opps = oppsRes.data;
+  const opps = await readForIds<OppBits>(oppIds, (chunk, from, to) => supabase.from("crm_opportunities").select("id, reference, title, stage, company_id, owner_id, agency_org_id, client_org_id").in("id", chunk).order("id").range(from, to));
   const accountIds = all.filter((f) => !f.opportunity_id).map((f) => f.organisation_id).filter((x): x is string => !!x);
   const orgIds = [...new Set([...(opps ?? []).flatMap((o) => [o.agency_org_id, o.client_org_id]), ...accountIds].filter((x): x is string => !!x))];
-  const orgRowsRes = orgIds.length ? await supabase.from("crm_organisations").select("id, name").in("id", orgIds) : { data: [] as { id: string; name: string }[], error: null };
-  ok(orgRowsRes);
-  const orgRows = orgRowsRes.data;
+  const orgRows = await readForIds<{ id: string; name: string }>(orgIds, (chunk, from, to) => supabase.from("crm_organisations").select("id, name").in("id", chunk).order("id").range(from, to));
   const orgName = new Map((orgRows ?? []).map((o) => [o.id, o.name]));
   const oppBy = new Map((opps ?? []).map((o) => [o.id, o]));
   const wrap = (f: CrmFollowUpRow): FollowUpListItem | null => {

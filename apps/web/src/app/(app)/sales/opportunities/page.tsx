@@ -19,14 +19,15 @@ import { LoadError } from "@/components/workspace/states";
 import { ViewSwitch } from "@/components/workspace/view-switch";
 import { firstParam, nextSort, parseColumns, parseRecordId, parseSort, parseView, sortToParam, withParams } from "@/components/workspace/url-state";
 import { getCrmContext } from "@/lib/crm/context";
-import { loadOpportunities, type OpportunityListItem } from "@/lib/crm/data";
+import { countOpportunities, loadOpportunities, type OpportunityListItem } from "@/lib/crm/data";
 import {
-  ENQUIRY_ALL_COLUMNS, ENQUIRY_COLUMNS, ENQUIRY_DEFAULT_COLUMNS, ENQUIRY_DEFAULT_SORT, ENQUIRY_SORT_KEYS, boardColumnFor, boardColumns, boardMoveTargets,
+  ENQUIRY_ALL_COLUMNS, ENQUIRY_COLUMNS, ENQUIRY_DEFAULT_COLUMNS, ENQUIRY_DEFAULT_SORT, ENQUIRY_SORT_KEYS, boardColumnFor, boardColumns, boardMoveTargets, ENQUIRY_NEEDS, enquiryNeeds, needCounts, parseNeed,
   installOrShowDate, sortEnquiries, type EnquiryColumn, type EnquirySortKey,
 } from "@/lib/crm/enquiry-list";
 import { filterOpportunities, openPipelineByStage, organisationLabel, type OppStatusFilter } from "@/lib/crm/reports";
 import { canEditOpportunity } from "@enginious-hr/domain";
 import { EnquirySidePanel } from "../_panel/enquiry-panel";
+import { loadMyOpenHandovers } from "@/lib/crm/handover-attention-data";
 import { CurrencyTotals } from "../currency-totals";
 import type { BoardColumn } from "@/components/workspace/board";
 import { EnquiryBoard, type BoardMeta } from "./enquiry-board";
@@ -57,6 +58,9 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
   const multiCompany = ctx.companies.length > 1;
   const offered = ENQUIRY_ALL_COLUMNS.filter((c) => multiCompany || c !== "company");
   const cols = parseColumns(firstParam(sp, "cols"), offered, ENQUIRY_DEFAULT_COLUMNS);
+  const need = parseNeed(firstParam(sp, "need"));
+  // "My won enquiries whose handover is not accepted yet": its own view (mine, Won), whatever the other filters say.
+  const handoverView = firstParam(sp, "need") === "handover";
   const openId = parseRecordId(firstParam(sp, "open"));
   const here = (patch: Record<string, string | null> = {}) => withParams(BASE, sp, patch);
 
@@ -70,9 +74,16 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
     </div>
   );
 
+  // Search and filters are applied in the database, across everything the person may see, BEFORE any row limit: an old enquiry is found by its reference as
+  // surely as a new one, and the board's lanes count every match. `total` is an exact count of what the person may see, not the size of a page.
+  const ownerFilter = owner === "me" ? ctx.userId : owner;
   let items: OpportunityListItem[];
+  let total: number;
   try {
-    items = await loadOpportunities(ctx);
+    [items, total] = await Promise.all([
+      loadOpportunities(ctx, handoverView ? { q, company, owner: ctx.userId, stage: "won" } : { q, stage: view === "board" ? "" : stage, company, owner: ownerFilter, status }),
+      countOpportunities(),
+    ]);
   } catch (e) {
     console.error("[crm] enquiry list load failed", e);
     return (
@@ -83,9 +94,38 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
     );
   }
 
-  const ownerFilter = owner === "me" ? ctx.userId : owner;
-  const rows = filterOpportunities(items, { q, stage: view === "board" ? "" : stage, company, owner: ownerFilter, mine: false, status }, ctx.userId);
-  const filterActive = !!(q || (view === "table" && stage) || company || owner || status !== "open");
+  // The person's own won enquiries with no accepted handover, however old the win (My Day stops reminding after its window). A failed check is said, not shown as none.
+  const myHandovers = await loadMyOpenHandovers(ctx);
+  const openHandoverIds = new Set(myHandovers.status === "ok" ? myHandovers.ids : []);
+  const matched = handoverView
+    ? filterOpportunities(items, { q, stage: "won", company, owner: ctx.userId, mine: false, status: "all" }, ctx.userId).filter((i) => openHandoverIds.has(i.opp.id))
+    : filterOpportunities(items, { q, stage: view === "board" ? "" : stage, company, owner: ownerFilter, mine: false, status }, ctx.userId);
+  // The quick filters count, and narrow, what the other filters matched: so "Overdue 3" is always 3 of the enquiries on screen.
+  const now = new Date();
+  const counts = needCounts(matched, now);
+  const rows = need ? matched.filter((i) => enquiryNeeds(i, now).includes(need)) : matched;
+  const filterActive = !!(q || (view === "table" && stage) || company || owner || status !== "open" || need || handoverView);
+  const myOpen = owner === "me" && status === "open" && !handoverView;
+  const chip = "inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-sm font-medium";
+  const quick = (
+    <nav aria-label="Quick filters" className="flex flex-wrap items-center gap-2">
+      <Link href={here({ owner: myOpen ? null : "me", mine: null, status: null, open: null })} scroll={false} aria-current={myOpen ? "true" : undefined}
+        className={cn(chip, myOpen ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:text-foreground")}>My open enquiries</Link>
+      {ENQUIRY_NEEDS.map((n) => (
+        <Link key={n.id} href={here({ need: need === n.id ? null : n.id, open: null })} scroll={false} aria-current={need === n.id ? "true" : undefined}
+          className={cn(chip, need === n.id ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:text-foreground")}>
+          <span className="os-dot" data-tone={counts[n.id] > 0 ? n.tone : "quiet"} aria-hidden />{n.label}<span className="tabular-nums text-foreground">{counts[n.id]}</span>
+        </Link>
+      ))}
+      {myHandovers.status === "error" ? <span className="text-sm text-destructive" role="alert">Could not check your won handovers.</span>
+        : myHandovers.status === "ok" && (myHandovers.ids.length > 0 || handoverView) ? (
+          <Link href={here({ need: handoverView ? null : "handover", open: null })} scroll={false} aria-current={handoverView ? "true" : undefined}
+            className={cn(chip, handoverView ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:text-foreground")}>
+            <span className="os-dot" data-tone={myHandovers.ids.length > 0 ? "amber" : "quiet"} aria-hidden />My won: handover open<span className="tabular-nums text-foreground">{myHandovers.ids.length}</span>
+          </Link>
+        ) : null}
+    </nav>
+  );
 
   const filters: ToolbarFilter[] = [
     ...(view === "table" ? [{ name: "stage", label: "Stage", value: stage, options: [{ value: "", label: "Any stage" }, ...CRM_STAGES.map((s) => ({ value: s.id, label: s.label }))] }] : []),
@@ -95,7 +135,7 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
   ];
 
   const toolbar = (
-    <ListToolbar search={{ value: q, placeholder: "Search title, reference, agency or client" }} filters={filters} clearHref={here({ q: null, stage: null, owner: null, mine: null, status: null, company: null })}>
+    <ListToolbar search={{ value: q, placeholder: "Search title, reference, agency or client" }} filters={filters} clearHref={here({ q: null, stage: null, owner: null, mine: null, status: null, company: null, need: null })}>
       <ViewSwitch current={view} tableHref={here({ view: null })} boardHref={here({ view: "board" })} boardLabel="Board" />
       {view === "table" ? <ColumnsMenu columns={ENQUIRY_COLUMNS.filter((c) => offered.includes(c.id))} selected={cols} defaults={ENQUIRY_DEFAULT_COLUMNS} /> : null}
     </ListToolbar>
@@ -103,7 +143,7 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
 
   const panel = openId ? <EnquirySidePanel openId={openId} closeHref={here({ open: null })} /> : null;
 
-  if (items.length === 0) {
+  if (total === 0) {
     return (
       <div className="space-y-5">
         {header}
@@ -118,12 +158,13 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
       <RememberList section="enquiries" />
       {header}
       {toolbar}
+      {quick}
       {rows.length === 0 ? (
-        <EmptyState title="Nothing matches" description="Clear a filter or search for something else." action={<Link href={here({ q: null, stage: null, owner: null, mine: null, status: null, company: null })} scroll={false} className={buttonVariants({ variant: "outline", size: "sm" })}>Clear filters</Link>} />
+        <EmptyState title="Nothing matches" description="Clear a filter or search for something else." action={<Link href={here({ q: null, stage: null, owner: null, mine: null, status: null, company: null, need: null })} scroll={false} className={buttonVariants({ variant: "outline", size: "sm" })}>Clear filters</Link>} />
       ) : view === "board" ? (
         <BoardView rows={rows} ctx={ctx} here={here} />
       ) : (
-        <TableView rows={rows} total={items.length} cols={cols} sort={sort} here={here} openId={openId} filterActive={filterActive} />
+        <TableView rows={rows} total={total} cols={cols} sort={sort} here={here} openId={openId} filterActive={filterActive} />
       )}
       {panel}
     </div>

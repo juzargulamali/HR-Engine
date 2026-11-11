@@ -1,4 +1,4 @@
-import { CRM_PIPELINE_STAGES, CRM_STAGES, crmAllowedMoves, crmStageLabel, isCrmActive } from "@enginious-hr/domain";
+import { CRM_PIPELINE_STAGES, CRM_STAGES, crmAllowedMoves, crmStageLabel, followUpTiming, isCrmActive, isCrmOpen } from "@enginious-hr/domain";
 import { compareNullable, type SortState } from "@/components/workspace/url-state";
 import type { OpportunityListItem } from "./data";
 import { organisationLabel } from "./reports";
@@ -114,4 +114,40 @@ export function boardMoveTargets(i: BoardMoveInput): { moveTo: string[]; lockedR
   }
   if (isCrmActive(i.stage)) return { moveTo: [...crmAllowedMoves(i.stage), "on_hold", "won", "lost"] };
   return { moveTo: [] };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// What an enquiry needs now (the quick filters above the list)
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * Read from the recorded follow-ups and first response only, with the same rules as My Day and Follow-ups (`attentionItems`): the enquiry's NEXT open follow-up
+ * is overdue or due today (Dubai day); an open enquiry has no first response recorded; a working-stage enquiry has no open follow-up at all.
+ */
+export type EnquiryNeed = "overdue" | "due_today" | "no_first_response" | "no_next_action";
+export const ENQUIRY_NEEDS: readonly { id: EnquiryNeed; label: string; tone: "red" | "amber" | "blue" }[] = [
+  { id: "overdue", label: "Overdue", tone: "red" },
+  { id: "due_today", label: "Due today", tone: "amber" },
+  { id: "no_first_response", label: "Awaiting first response", tone: "blue" },
+  { id: "no_next_action", label: "No next action", tone: "amber" },
+];
+export const parseNeed = (v: string): EnquiryNeed | "" => (ENQUIRY_NEEDS.some((n) => n.id === v) ? (v as EnquiryNeed) : "");
+
+type NeedInput = { opp: { stage: string; first_response_at: string | null }; nextFollowUp: { due_at: string } | null; openFollowUps: number };
+export function enquiryNeeds(i: NeedInput, now: Date = new Date()): EnquiryNeed[] {
+  const out: EnquiryNeed[] = [];
+  if (i.nextFollowUp && isCrmOpen(i.opp.stage)) {
+    const t = followUpTiming(i.nextFollowUp.due_at, now);
+    if (t === "overdue") out.push("overdue");
+    else if (t === "due_today") out.push("due_today");
+  }
+  if (isCrmOpen(i.opp.stage) && !i.opp.first_response_at) out.push("no_first_response");
+  if (isCrmActive(i.opp.stage) && i.openFollowUps === 0) out.push("no_next_action");
+  return out;
+}
+/** How many of `items` need each thing (an enquiry can count under more than one). */
+export function needCounts(items: readonly NeedInput[], now: Date = new Date()): Record<EnquiryNeed, number> {
+  const counts: Record<EnquiryNeed, number> = { overdue: 0, due_today: 0, no_first_response: 0, no_next_action: 0 };
+  for (const i of items) for (const n of enquiryNeeds(i, now)) counts[n] += 1;
+  return counts;
 }
