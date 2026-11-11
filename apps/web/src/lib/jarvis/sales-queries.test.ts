@@ -18,6 +18,7 @@ import { ACTIVITY_COLUMNS, ACTIVITY_TEXT_COLUMNS, ENQUIRY_COLUMNS, ENQUIRY_TEXT_
 import { parseSalesQuery, refineQuery } from "./sales/query-parse";
 import { cleanSuggestion, factSentences, proseStaysInRecord, resolveWindow } from "./sales/summary";
 import { MAX_PAGES } from "./sales/projection";
+import { SCAN_LIMIT } from "./sales/lookup";
 import { fakeDeps, ID, mkOpp, newWorld, type World } from "./testing/fake-world";
 
 let w: World;
@@ -205,6 +206,39 @@ describe("Stage 2: lookups (no provider call, explicit columns, exact totals, ho
     // the follow-up re-runs the same question with one thing changed
     const again = lookup(await ask("make it 20 days", { context: { lastQuery: { kind: "lookup", descriptor: c.descriptor } } }));
     expect(again.title).toMatch(/20 days/);
+  });
+
+  it("LIMITED SCAN: when more open enquiries exist than the scan reads, an empty result says 'among the enquiries checked', keeps the coverage notice, and never claims an all-clear; the all-clear wording returns when the scan is complete", async () => {
+    // 500 recent enquiries of mine, each with recent activity, an open follow-up and a first response; plus ONE older enquiry with nothing recorded and no next action.
+    // The scan reads the 500 newest, so the old one (which matches both questions) is outside it.
+    w.opps = []; w.followUps = []; w.activities = [];
+    for (let i = 0; i < SCAN_LIMIT; i++) {
+      const o = mkOpp({ company_id: ID.co1, owner_id: ID.u1, client_org_id: w.orgs[1]!.id, stage: "qualified", created_at: daysAgo(40), first_response_at: daysAgo(39) });
+      w.opps.push(o);
+      w.activities.push({ id: `la-${i}`, opportunity_id: o.id, kind: "call", body: "Spoke to the client", occurred_at: daysAgo(1), internal: false, created_by: ID.u1 });
+      w.followUps.push({ id: `lf-${i}`, opportunity_id: o.id, title: "Next step", due_at: at("2099-11-20T06:00:00Z"), kind: "call", assigned_to: ID.u1 });
+    }
+    const old = mkOpp({ company_id: ID.co1, owner_id: ID.u1, client_org_id: w.orgs[1]!.id, stage: "qualified", created_at: daysAgo(400), title: "Fictional forgotten job" });
+    w.opps.push(old);
+    const quiet = lookup(await ask("Which of my enquiries have had no activity for 14 days?"));
+    expect(quiet.total).toBe(0);
+    expect(quiet.empty).toBe("No matching enquiries among the enquiries checked.");
+    expect(quiet.note).toContain(`You own ${SCAN_LIMIT + 1} open enquiries; this looked at the ${SCAN_LIMIT} newest only.`);
+    expect(text(quiet)).not.toMatch(/every open enquiry you own has activity/);
+    const att = lookup(await ask("What needs my attention today?"));
+    expect(att.total).toBe(0);
+    expect(att.empty).toBe("No attention items found in the records checked. Some enquiries were outside this scan.");
+    expect(att.note).toContain(`You own ${SCAN_LIMIT + 1} open enquiries; this looked at the ${SCAN_LIMIT} newest only.`);
+    expect(text(att)).not.toMatch(/Nothing in Sales & CRM needs your attention|every open enquiry you own has a next action/);
+    // the same data with the whole set inside the scan: the older enquiry is found, so nothing is wrongly cleared
+    w.opps = [...w.opps.slice(0, 20), old];
+    const found = lookup(await ask("Which of my enquiries have had no activity for 14 days?"));
+    expect(found.sections[0]!.rows.map((r) => r.id)).toEqual([old.id]);
+    expect(found.note).not.toMatch(/newest only/);
+    // and when a complete scan really finds nothing, the broader all-clear wording is used
+    w.opps = w.opps.slice(0, 20);
+    expect(lookup(await ask("Which of my enquiries have had no activity for 14 days?")).empty).toBe("No matching enquiries: every open enquiry you own has activity recorded in the last 14 days (or is newer than that).");
+    expect(lookup(await ask("What needs my attention today?")).empty).toMatch(/^Nothing in Sales & CRM needs your attention right now/);
   });
 
   it("TRUNCATED READS: a capped response is never read as absence. Activity and follow-up reads are paged against an exact count; when they cannot be completed the answer says so instead of claiming 'no activity' or 'no next action'", async () => {
@@ -438,7 +472,7 @@ describe("Stage 3: summaries (figures computed by the app; the model only words 
     expect(req.facts).toBeUndefined(); // the gate folded the facts into the one text it screened
     // every number sits in a fixed sentence next to its own metric
     expect(c.narrativeBy).toBe("app");
-    expect(c.narrative).toBe("In October 2099 so far (2099-10-01 to 2099-10-14, Dubai dates), 5 enquiries were created. 2 enquiries were won and 1 was lost, counted by closing date and current stage. Of the 3 closed, 67% were won. 1 closure was later reopened and is not counted as won or lost. The event with the most enquiries created in the period is Fictional Tomorrow Transport Forum, with 2. The most frequent recorded lost reason is \"Budget lower than scope\" (1). That is the reason as recorded, not an analysis. A won enquiry is not a delivered project.");
+    expect(c.narrative).toBe("In October 2099 so far (2099-10-01 to 2099-10-14, Dubai dates), 5 enquiries were created. 2 enquiries were won and 1 was lost, counted by closing date and current stage. Of the 3 closed, 67% were won. 1 closure recorded in this period was subsequently reopened; the enquiry may have closed again. The event with the most enquiries created in the period is Fictional Tomorrow Transport Forum, with 2. The most frequent recorded lost reason is \"Budget lower than scope\" (1). That is the reason as recorded, not an analysis. A won enquiry is not a delivered project.");
     expect(c.suggestions).toEqual(["Review the open follow-ups."]);
     expect(JSON.stringify(c)).not.toMatch(/"execute"|"role"|In short/);
     expect([...w.usage.values()]).toEqual([1]);
@@ -447,6 +481,24 @@ describe("Stage 3: summaries (figures computed by the app; the model only words 
     const sep = summary(await ask("Summarise last month's enquiries"));
     expect(sep.groups.find((g) => g.heading === "Recorded lost reasons")!.rows.map((r) => r.label).sort()).toEqual(["Event cancelled", "Went with another supplier at AED 40,000"].sort());
     expect(simulatedProviderCalls[0]!.input).toContain("Recorded lost reasons: Went with another supplier at AED 40,000");
+  });
+
+  it("REOPENED CLOSURES: an enquiry closed, reopened and closed again is counted as Won where it stands now, and the reopened-closure wording does not say it is still open or left out of Won and Lost", async () => {
+    // one enquiry: won on 8 October, reopened on 9 October, won again on 12 October (its current stage and closing date)
+    w.opps = w.opps.filter((o) => o.company_id !== ID.co1);
+    const again = mkOpp({ company_id: ID.co1, client_org_id: w.orgs[1]!.id, created_at: inOct(2), stage: "won", closed_at: inOct(12) });
+    w.opps.push(again);
+    w.closures = [{ id: "c-first", company_id: ID.co1, opportunity_id: again.id, outcome: "won", closed_at: inOct(8), reopened_at: inOct(9) }, { id: "c-second", company_id: ID.co1, opportunity_id: again.id, outcome: "won", closed_at: inOct(12), reopened_at: null }];
+    const c = summary(await ask("Summarise this month's enquiries"));
+    expect(metric(c, "Won")!.value).toBe(1); // it IS won now, and counted once
+    expect(metric(c, "Lost")!.value).toBe(0);
+    const reopened = metric(c, "Closures later reopened")!;
+    expect(reopened.value).toBe(1); // the calculation is unchanged: closures recorded in the period that were reopened afterwards
+    expect(reopened.definition).toBe("Closures recorded in this period that were subsequently reopened; the enquiry may have closed again. Won and Lost above use each enquiry's current stage and latest closing date, so an enquiry that closed again is counted there.");
+    expect(c.narrative).toContain("1 enquiry was won and 0 were lost, counted by closing date and current stage. Of the 1 closed, 100% were won. 1 closure recorded in this period was subsequently reopened; the enquiry may have closed again.");
+    // nothing on the card says the reopened enquiry is still open or excluded from Won and Lost
+    expect(text(c)).not.toMatch(/open again|still open|NOT in Won|not counted as won|not in Won or Lost/i);
+    expect(factSentences({ period: "P", previous: null, focus: "all", now: { created: 3, won: 2, lost: 1, reopened: 2 }, before: null, topEvent: null, topReason: null })).toContain("2 closures recorded in this period were subsequently reopened; the enquiry may have closed again.");
   });
 
   it("NARRATIVE ACCURACY (QA: Won 8, Lost 2): the model cannot state a period's facts at all, so it cannot swap them, invent one or call wins completed projects; a suggestion that carries a number or a result is dropped", async () => {

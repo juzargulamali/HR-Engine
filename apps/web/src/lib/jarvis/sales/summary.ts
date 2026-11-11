@@ -140,7 +140,8 @@ export function factSentences(f: { period: string; previous: string | null; focu
     out.push(`${f.focus === "won_lost" ? `In ${f.period}, ` : ""}${plural(now.won, "enquiry was", "enquiries were")} won and ${plural(now.lost, "was", "were")} lost, counted by closing date and current stage.`);
     const closed = now.won + now.lost;
     out.push(closed > 0 ? `Of the ${closed} closed, ${Math.round((now.won / closed) * 100)}% were won.` : "Nothing was closed in the period, so no share won is calculated.");
-    if (now.reopened > 0) out.push(`${plural(now.reopened, "closure was", "closures were")} later reopened and ${now.reopened === 1 ? "is" : "are"} not counted as won or lost.`);
+    // A reopened enquiry may have closed again since: this sentence says nothing about where it stands now, so it cannot contradict the Won and Lost figures.
+    if (now.reopened > 0) out.push(`${plural(now.reopened, "closure", "closures")} recorded in this period ${now.reopened === 1 ? "was" : "were"} subsequently reopened; the enquiry may have closed again.`);
   }
   if (before && f.previous) {
     const parts: string[] = [];
@@ -217,7 +218,7 @@ async function periodSummary(ctx: JarvisContext, d: Extract<SummaryDescriptor, {
     metrics.push(m("Won", "won", "Enquiries that are Won now and whose closing date falls in the period."), m("Lost", "lost", "Enquiries that are Lost now and whose closing date falls in the period."));
     if (share !== null) metrics.push({ label: "Share won of those closed (%)", value: share, previous: before && before.won + before.lost > 0 ? Math.round((before.won / (before.won + before.lost)) * 100) : null, definition: `Won divided by Won plus Lost in the period: ${now.won} of ${closed}. Counts only, not value.` });
     else coverage.push("No enquiry was closed in the period, so no share won is calculated (nothing to divide by).");
-    if (now.reopened > 0 || (before?.reopened ?? 0) > 0) metrics.push(m("Closures later reopened", "reopened", "Closures recorded in the period that were reopened afterwards. They are open again, so they are NOT in Won or Lost above."));
+    if (now.reopened > 0 || (before?.reopened ?? 0) > 0) metrics.push(m("Closures later reopened", "reopened", "Closures recorded in this period that were subsequently reopened; the enquiry may have closed again. Won and Lost above use each enquiry's current stage and latest closing date, so an enquiry that closed again is counted there."));
   }
   coverage.push("Won and Lost are read from each enquiry's CURRENT stage and closing date. An enquiry that was closed, reopened and closed again counts once, at its latest closing date.");
   coverage.push("A won enquiry is not a delivered project: delivery is not covered here.");

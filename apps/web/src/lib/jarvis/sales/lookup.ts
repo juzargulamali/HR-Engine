@@ -194,7 +194,8 @@ async function inactive(ctx: JarvisContext, d: Extract<LookupDescriptor, { kind:
     filters: [`no call, email, meeting, note or client response recorded in Enginious OS since ${fmtDate(cutoff)}`, `created before ${fmtDate(cutoff)}`],
     sections: [{ heading: title, total: quiet.length, rows: quiet.slice(0, LOOKUP_LIMIT).map((o) => enquiryRow(o, names, ctx.userId)) }],
     note: ["This means nothing was RECORDED on the enquiry. It does not mean nobody contacted the client.", coverage(mine.count, mine.rows.length)].filter(Boolean).join(" "),
-    empty: `No matching enquiries: every open enquiry you own has activity recorded in the last ${d.days} days (or is newer than that).`, links: [{ label: "Open Enquiries", href: "/sales/opportunities" }],
+    // The all-clear is said only when every open enquiry was checked. After a limited scan an older enquiry outside it may well match.
+    empty: mine.count > mine.rows.length ? "No matching enquiries among the enquiries checked." : `No matching enquiries: every open enquiry you own has activity recorded in the last ${d.days} days (or is newer than that).`, links: [{ label: "Open Enquiries", href: "/sales/opportunities" }],
   };
 }
 
@@ -247,9 +248,11 @@ async function attention(ctx: JarvisContext): Promise<Built> {
   await fu("Overdue follow-ups", "The due time has passed and the follow-up is still open.", null, nowIso);
   await fu("Follow-ups due today", "Due later today.", nowIso, dayStart(addDays(today, 1)));
   let note: string | null = null;
+  let partialScan = false;
   try {
     const mine = await myOpen(ctx, [...CRM_PIPELINE_STAGES, "on_hold"]);
     note = coverage(mine.count, mine.rows.length);
+    partialScan = mine.count > mine.rows.length;
     const names = await orgNames(ctx.supabase, mine.rows.flatMap((o) => [o.agency_org_id, o.client_org_id]));
     const hold = mine.rows.filter((o) => o.stage === "on_hold" && o.hold_review_date && o.hold_review_date <= today && !seen.has(o.id));
     for (const o of hold) seen.add(o.id);
@@ -274,7 +277,9 @@ async function attention(ctx: JarvisContext): Promise<Built> {
   if (sections.length === 0) failed();
   return {
     title: "What needs your attention today", scope: "Your follow-ups and the enquiries you own · Sales & CRM only", filters: [`today is ${today} (Dubai)`], sections: sections.filter((s) => s.total > 0), unavailable,
-    total: sections.reduce((n, s) => n + s.total, 0), note, empty: unavailable.length > 0 ? undefined : "Nothing in Sales & CRM needs your attention right now: no overdue or due-today follow-ups, no hold reviews, and every open enquiry you own has a next action and a first response.",
+    total: sections.reduce((n, s) => n + s.total, 0), note,
+    // "Nothing needs your attention" is said only when every read and the whole enquiry scan completed.
+    empty: unavailable.length > 0 ? undefined : partialScan ? "No attention items found in the records checked. Some enquiries were outside this scan." : "Nothing in Sales & CRM needs your attention right now: no overdue or due-today follow-ups, no hold reviews, and every open enquiry you own has a next action and a first response.",
     links: [{ label: "Open Follow-ups", href: "/sales/follow-ups" }, { label: "Open Enquiries", href: "/sales/opportunities" }],
   };
 }
