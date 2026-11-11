@@ -36,7 +36,7 @@ const opp = {
 const ctx = { userId: "u1", grants: [{ companyId: "c1", capabilities: ["founder"] }], companies: [{ id: "c1", name: "Enginious UAE", countryCode: "AE", settings: { approval_policy: "required" } }], people: [], personName: () => "Sales Owner", companyName: () => "Enginious UAE" };
 const detail = () => ({
   item: { opp, value: 100, companyName: "Enginious UAE", ownerName: "Sales Owner", agency: null, client: null, nextFollowUp: null, openFollowUps: 0, availability: "unverified" },
-  contacts: [], activities: [], followUps: [], events: [], files: [], proposals: [], zoho: null, approvals: [], handover: null, closures: [],
+  contacts: [], activities: [], followUps: [], events: [], files: [], proposals: [], zoho: null, approvals: [], handover: null, closures: [], estimateSends: [], estimateSendsInstalled: true,
 });
 const view = (...failed: DetailSection[]) => buildOppView(ctx as never, detail() as never, new Set(failed));
 const html = async (c: React.ReactNode | Promise<React.ReactNode>) => renderToStaticMarkup(await c as React.ReactElement);

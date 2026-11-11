@@ -185,7 +185,7 @@ function BoardView({ rows, ctx, here }: { rows: OpportunityListItem[]; ctx: NonN
 // Table
 // ---------------------------------------------------------------------------------------------------------------
 
-const BOARD_TONE: Record<string, BoardColumn["tone"]> = { new: undefined, qualified: "cyan", proposal_prep: "blue", proposal_sent: "blue", quote_sent: "blue", negotiation: "cyan", on_hold: "amber", won: "green", lost: undefined };
+const BOARD_TONE: Record<string, BoardColumn["tone"]> = { new: undefined, qualified: "cyan", proposal_prep: "blue", proposal_sent: "blue", estimate_sent: "blue", quote_sent: "blue", negotiation: "cyan", on_hold: "amber", won: "green", lost: undefined };
 const SORTABLE: Partial<Record<EnquiryColumn, EnquirySortKey>> = { enquiry: "enquiry", party: "party", owner: "owner", stage: "stage", due: "due", dates: "dates", value: "value", created: "created" };
 
 function TableView({ rows, total, cols, sort, here, openId, filterActive }: {

@@ -293,3 +293,24 @@ describe("reopenedClosures", () => {
   });
   it("is zero with no data", () => expect(reopenedClosures([], period)).toEqual({ won: 0, lost: 0, total: 0 }));
 });
+
+describe("the Estimate sent stage in reports", () => {
+  const opps = [
+    opp({ stage: "estimate_sent", currency: "AED", value: 300 }),
+    opp({ stage: "proposal_sent", currency: "AED", value: 200 }),
+    opp({ stage: "won", closed_at: "2026-09-01T05:00:00Z", evidence_reference: "PO-1", currency: "AED", value: 500 }),
+    opp({ stage: "lost", closed_at: "2026-09-04T05:00:00Z", lost_reason: "Price" }),
+  ];
+  it("is one more open stage of the pipeline, next to Proposal sent, with its own total", () => {
+    const stages = openPipelineByStage(opps);
+    expect(stages.map((s) => s.stage)).toEqual(["new", "qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation", "on_hold"]);
+    expect(stages.find((s) => s.stage === "estimate_sent")).toMatchObject({ count: 1, totals: { AED: 300 } });
+    expect(stages.find((s) => s.stage === "proposal_sent")).toMatchObject({ count: 1, totals: { AED: 200 } });
+  });
+  it("does not change Won and Lost: they are counted from closures only", () => {
+    const withIt = wonLostInPeriod(opps, PERIOD);
+    const without = wonLostInPeriod(opps.filter((o) => o.stage !== "estimate_sent"), PERIOD);
+    expect(withIt).toEqual(without);
+    expect(withIt).toMatchObject({ won: 1, lost: 1, winRatePercent: 50 });
+  });
+});

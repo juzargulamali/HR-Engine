@@ -389,12 +389,12 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "enquiry to handover",
       "how does the crm work"
     ],
-    "summary": "Sales & CRM follows each enquiry from the first message to the handover. An enquiry moves through the stages New enquiry, Qualified, Proposal preparation, Proposal sent, Quote sent and Negotiation, and ends as Won or Lost. Every open enquiry keeps one next action, so Follow-ups always shows what to do next. A won enquiry is handed over to the project team; winning it does not by itself mean the project was delivered.",
+    "summary": "Sales & CRM follows each enquiry from the first message to the handover. An enquiry moves through the stages New enquiry, Qualified, Proposal preparation, Proposal sent or Estimate sent, Quote sent and Negotiation, and ends as Won or Lost. Every open enquiry keeps one next action, so Follow-ups always shows what to do next. A won enquiry is handed over to the project team; winning it does not by itself mean the project was delivered.",
     "steps": [
       "Add the enquiry in Enquiries (title, source, agency or end client, and the next action with its date).",
       "Work it from Follow-ups: log each call, email or meeting on the enquiry and plan the next step.",
-      "Move it to the next stage as it progresses. Proposal sent needs a proposal recorded as sent; Quote sent needs the Zoho Books quote reference.",
-      "Build the estimate from the enquiry when a price is needed. Prices stay in the Estimate screen.",
+      "Move it to the next stage as it progresses. Proposal sent needs a proposal recorded as sent; Estimate sent needs an estimate recorded as sent; Quote sent needs the Zoho Books quote reference.",
+      "Build the estimate from the enquiry when a price is needed. Prices stay in the Estimate screen. After you send it to the client, record it as sent on the Estimates tab.",
       "Mark it Won or Lost from the enquiry page, then complete the handover for a won enquiry. Reports shows the pipeline and results for your company."
     ],
     "links": [
@@ -721,12 +721,13 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "qualified",
       "negotiation",
       "proposal sent",
+      "estimate sent",
       "quote sent",
       "on hold",
       "put on hold",
       "resume"
     ],
-    "summary": "The enquiry's owner or a Sales founder moves it: one step back, or any step forward. Proposal sent needs a proposal recorded as sent first, and Quote sent needs the Zoho Books quote reference. Won, Lost and On hold have their own forms.",
+    "summary": "The enquiry's owner or a Sales founder moves it: one step back, or any step forward. Proposal sent and Estimate sent sit side by side: an enquiry can reach either, or both. Proposal sent needs a proposal recorded as sent, Estimate sent needs an estimate recorded as sent (Estimates tab), and Quote sent needs the Zoho Books quote reference. Won, Lost and On hold have their own forms.",
     "steps": [
       "Open the enquiry (or use the Board view of Enquiries).",
       "Choose Move to another stage and pick the stage.",
@@ -839,13 +840,18 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "vat",
       "revision",
       "pdf of the estimate",
-      "excel of the estimate"
+      "excel of the estimate",
+      "record estimate as sent",
+      "estimate sent",
+      "sent the estimate"
     ],
-    "summary": "Estimates are built on the enquiry's Estimates tab in three steps: details, items, then preview and finalise. An estimate is budgetary: it cannot be recorded as sent. Official quotations go through the Zoho Books workflow.",
+    "summary": "Estimates are built on the enquiry's Estimates tab in three steps: details, items, then preview and finalise. An estimate is budgetary; official quotations go through the Zoho Books workflow. Finalising or downloading an estimate does not send it and does not record it as sent: you send it yourself, then record that here.",
     "steps": [
       "Open the enquiry and go to the Estimates tab.",
       "Create an estimate and fill in the details and the items.",
-      "Preview, then finalise. A finalised estimate is frozen; make a revision to change it."
+      "Preview, then finalise. A finalised estimate is frozen; make a revision to change it.",
+      "After you have sent it to the client, press Record estimate as sent on that revision, confirm the date it went out, and choose whether to move the enquiry to Estimate sent.",
+      "If the enquiry is already at Quote sent or Negotiation, the estimate is recorded and the stage stays where it is."
     ],
     "links": [
       {

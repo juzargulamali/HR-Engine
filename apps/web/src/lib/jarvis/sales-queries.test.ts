@@ -57,6 +57,9 @@ describe("routing: a Sales question becomes a validated descriptor, locally; act
     expect(parseSalesQuery("What is the status of OPP-UAE-2026-0007?")).toEqual({ kind: "lookup", descriptor: { kind: "enquiry", reference: "OPP-UAE-2026-0007" } });
     expect(parseSalesQuery("Show my open enquiries")).toMatchObject({ kind: "lookup", descriptor: { kind: "enquiries", scope: "mine", stage: null, named: null } });
     expect(parseSalesQuery("List all our open enquiries in Negotiation")).toMatchObject({ descriptor: { kind: "enquiries", scope: "company", stage: "negotiation" } });
+    // The stage list is the shared one, so the Estimate sent stage is a lookup filter (reading only; JARVIS does not move an enquiry to it).
+    expect(parseSalesQuery("List all our open enquiries at Estimate sent")).toMatchObject({ descriptor: { kind: "enquiries", scope: "company", stage: "estimate_sent" } });
+    expect(parseSalesQuery("Show my open enquiries in Proposal sent")).toMatchObject({ descriptor: { kind: "enquiries", stage: "proposal_sent" } });
     expect(parseSalesQuery("Open enquiries for Fictional Wave Agency")).toMatchObject({ descriptor: { kind: "enquiries", scope: "company", named: "Fictional Wave Agency" } });
     expect(parseSalesQuery("Summarise this month's enquiries")).toEqual({ kind: "summary", descriptor: { kind: "period", period: "this_month", compare: false, focus: "all", narrative: true } });
     expect(parseSalesQuery("How many enquiries did we win or lose last month?")).toEqual({ kind: "summary", descriptor: { kind: "period", period: "last_month", compare: false, focus: "won_lost", narrative: false } });

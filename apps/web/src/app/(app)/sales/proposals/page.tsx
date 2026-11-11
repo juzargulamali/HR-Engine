@@ -49,7 +49,7 @@ function FileCell({ row }: { row: Row }) {
   return <span className="break-words">{label}</span>;
 }
 
-const sentText = (p: CrmProposalRow, estimate?: { finalised: boolean } | null) => (estimate && p.status === "draft" ? "Estimates are not recorded as sent" : p.sent_on ? formatDate(p.sent_on) : p.status === "draft" ? "Not sent yet" : "Date not recorded");
+const sentText = (p: CrmProposalRow, estimate?: { finalised: boolean } | null) => (estimate && p.status === "draft" ? "Recorded on the enquiry's Estimates tab" : p.sent_on ? formatDate(p.sent_on) : p.status === "draft" ? "Not sent yet" : "Date not recorded");
 
 export default async function ProposalsPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
   const ctx = await getCrmContext();

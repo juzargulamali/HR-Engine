@@ -55,7 +55,7 @@ describe("sortEnquiries", () => {
 
 describe("board", () => {
   it("has the pipeline stages, then on hold, then won and lost", () => {
-    expect(boardColumns().map((c) => c.id)).toEqual(["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);
+    expect(boardColumns().map((c) => c.id)).toEqual(["new", "qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);   // Estimate sent sits next to Proposal sent
     expect(boardColumnFor("on_hold")).toBe("on_hold");
     expect(boardColumnFor("mystery")).toBe("new");
   });
@@ -69,8 +69,13 @@ describe("board", () => {
   });
   const base = { stageBeforeHold: null, canEdit: true, ownerName: "Ann" };
   it("offers a working card one step back or any step forward, hold, won and lost", () => {
-    expect(boardMoveTargets({ ...base, stage: "qualified" }).moveTo).toEqual(["new", "proposal_prep", "proposal_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);
-    expect(boardMoveTargets({ ...base, stage: "new" }).moveTo).toEqual(["qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);
+    expect(boardMoveTargets({ ...base, stage: "qualified" }).moveTo).toEqual(["new", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);
+    expect(boardMoveTargets({ ...base, stage: "new" }).moveTo).toEqual(["qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);
+    // Proposal sent and Estimate sent are the same step: each offers the other, one step back is Proposal preparation, and Quote sent steps back to either.
+    expect(boardMoveTargets({ ...base, stage: "estimate_sent" }).moveTo).toEqual(["proposal_prep", "proposal_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);
+    expect(boardMoveTargets({ ...base, stage: "proposal_sent" }).moveTo).toEqual(["proposal_prep", "estimate_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);
+    expect(boardMoveTargets({ ...base, stage: "quote_sent" }).moveTo).toEqual(["proposal_sent", "estimate_sent", "negotiation", "on_hold", "won", "lost"]);
+    expect(boardMoveTargets({ ...base, stage: "on_hold", stageBeforeHold: "estimate_sent" }).moveTo).toEqual(["estimate_sent", "lost"]);
   });
   it("lets a held card resume into the stage it came from or be lost, never won", () => {
     expect(boardMoveTargets({ ...base, stage: "on_hold", stageBeforeHold: "quote_sent" }).moveTo).toEqual(["quote_sent", "lost"]);

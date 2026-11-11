@@ -1781,6 +1781,7 @@ export interface Database {
         Returns: string;
       };
       crm_update_opportunity: { Args: { p_id: string; p_expected_version: number | null; p_patch: Record<string, unknown> }; Returns: number };
+      crm_record_estimate_sent: { Args: { p_proposal: string; p_sent_on: string; p_move?: boolean; p_expected_version?: number | null }; Returns: unknown };
       crm_move_stage: { Args: { p_id: string; p_to: string; p_expected_version?: number | null }; Returns: number };
       crm_hold_opportunity: { Args: { p_id: string; p_reason: string; p_review_date: string; p_expected_version?: number | null }; Returns: number };
       crm_resume_opportunity: { Args: { p_id: string; p_next_title: string; p_next_due: string; p_next_kind?: string; p_expected_version?: number | null }; Returns: number };

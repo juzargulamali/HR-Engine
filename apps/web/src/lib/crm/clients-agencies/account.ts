@@ -1,3 +1,4 @@
+import { CRM_PIPELINE_STAGES } from "@enginious-hr/domain";
 import type { CrmActivityRow, CrmFollowUpRow, CrmOpportunityRow, CrmProposalRow, CrmZohoReferenceRow } from "@/types/crm";
 
 /** Pure derivations for one account page. Everything here is computed from recorded rows; nothing is assumed. */
@@ -67,7 +68,7 @@ export function enquiryStats(opps: readonly (Pick<OppLite, "id" | "company_id" |
   };
 }
 
-export const OPEN_STAGES_FOR_REPLY = new Set(["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation"]);
+export const OPEN_STAGES_FOR_REPLY = new Set<string>(CRM_PIPELINE_STAGES);
 export const dubaiDate = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: "Asia/Dubai" });
 
 /** First client response recorded on or after the day the quote was sent (a date, or null when none is recorded). */

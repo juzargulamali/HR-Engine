@@ -63,10 +63,11 @@ export default async function OpportunityPage({ params, searchParams }: { params
   const { item } = detail;
   const { opp, canEdit, isActive, isHold, isWon, isLost, isOpen } = view;
   const next = view.nextFollowUp;
-  const needsGateFacts = failed.has("proposals") || failed.has("zoho");
+  const needsGateFacts = failed.has("proposals") || failed.has("zoho") || failed.has("estimateSends");
   const hasSentProposal = detail.proposals.some((p) => p.status === "sent" || p.status === "accepted");
   const hasQuoteRef = !!detail.zoho?.quote_ref?.trim();
-  const moveOptions = crmAllowedMoves(opp.stage).map((to) => ({ id: to, label: crmStageLabel(to), requirement: stageMoveRequirement(to, { hasSentProposal, hasQuoteRef }) }));
+  const hasSentEstimate = detail.estimateSends.length > 0;
+  const moveOptions = crmAllowedMoves(opp.stage).map((to) => ({ id: to, label: crmStageLabel(to), requirement: stageMoveRequirement(to, { hasSentProposal, hasQuoteRef, hasSentEstimate }) }));
   const holdReviewPassed = !!opp.hold_review_date && opp.hold_review_date < todayInDubai();
   const partyLabel = item.client ? "Client" : item.agency ? "Agency" : "Client";
   const clientLine = item.client && item.agency ? `${item.client.name} via ${item.agency.name}` : (item.client?.name ?? item.agency?.name ?? "No client recorded");

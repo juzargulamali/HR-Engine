@@ -1,4 +1,4 @@
-import { crmStageLabel, CRM_PIPELINE_STAGES } from "@enginious-hr/domain";
+import { crmStageLabel } from "@enginious-hr/domain";
 import type { StageTransitionView } from "../protocol";
 
 /**
@@ -7,7 +7,10 @@ import type { StageTransitionView } from "../protocol";
  *   Quote sent: the Zoho Books quote reference). JARVIS is deliberately narrower: exactly ONE step in either direction, and a move INTO a gated stage only when its evidence is
  *   recorded (the database checks it again). On hold, Won, Lost, reopen and handover are never offered: they have their own forms, evidence and side effects.
  */
-export const WORKING: readonly string[] = CRM_PIPELINE_STAGES;
+// Written out on purpose: these are the six stages JARVIS may move an enquiry between. Estimate sent (added later, at the same level as Proposal sent) is NOT one
+// of them: it is reached by recording an estimate as sent on the Estimates tab, and jarvis_change_stage refuses it too (migration 20261228000100).
+export const WORKING: readonly string[] = ["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation"];
+export const ESTIMATE_SENT_NOT_THROUGH_JARVIS = "Moving an enquiry to or from Estimate sent is not available through JARVIS. Record the estimate as sent on the enquiry's Estimates tab, or use Move stage on the enquiry page.";
 export const NEVER_THROUGH_JARVIS = "Putting an enquiry on hold, marking it Won or Lost, reopening it and handing it over are not available through JARVIS: they need their own form, evidence and approval. Use the buttons on the enquiry page.";
 
 export interface Evidence { proposalSent: boolean | "unknown"; zohoQuoteRef: boolean | "unknown" }
@@ -17,6 +20,7 @@ export function transitionsFrom(stage: string, ev: Evidence): StageTransitionVie
   return WORKING.filter((s) => s !== stage).map((to) => {
     const j = WORKING.indexOf(to);
     const base = { to, toLabel: crmStageLabel(to), direction: (i >= 0 && j < i ? "back" : "forward") as "forward" | "back" };
+    if (stage === "estimate_sent") return { ...base, enabled: false, reason: ESTIMATE_SENT_NOT_THROUGH_JARVIS };
     if (i < 0) return { ...base, enabled: false, reason: `${crmStageLabel(stage)} enquiries cannot be moved like this. ${NEVER_THROUGH_JARVIS}` };
     if (Math.abs(j - i) !== 1) return { ...base, enabled: false, reason: j > i ? "That skips stages. JARVIS moves one step at a time (the enquiry page can skip forward)." : "Only one step back is allowed." };
     if (to === "proposal_sent" && ev.proposalSent !== true) return { ...base, enabled: false, reason: ev.proposalSent === "unknown" ? "Could not check whether a proposal is recorded as sent. Try again in a moment." : "Record a proposal as sent first (Proposals & files tab of the enquiry): a draft or an estimate does not count." };
@@ -38,7 +42,7 @@ export function transitionTable(): { from: string; to: string; withEvidence: boo
 }
 
 const WORDS: [string, RegExp][] = [
-  ["proposal_sent", /\bproposal\s+sent\b/i], ["quote_sent", /\bquote\s+sent\b/i], ["proposal_prep", /\bproposal\s+(?:prep(?:aration)?|preparation)\b|\bprep\b/i],
+  ["estimate_sent", /\bestimate\s+sent\b/i], ["proposal_sent", /\bproposal\s+sent\b/i], ["quote_sent", /\bquote\s+sent\b/i], ["proposal_prep", /\bproposal\s+(?:prep(?:aration)?|preparation)\b|\bprep\b/i],
   ["negotiation", /\bnegotiat\w*\b/i], ["qualified", /\bqualif\w*\b/i], ["new", /\bnew(?:\s+enquiry)?\b/i],
 ];
 /** The stage a typed request names, or null. */

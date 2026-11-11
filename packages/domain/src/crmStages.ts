@@ -3,7 +3,7 @@
  * renamed without changing history. Mirrors crm_stage_index / crm_move_stage in
  * supabase/migrations/20261115000200_crm_workflow_functions.sql.
  */
-export const CRM_STAGE_IDS = ["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"] as const;
+export const CRM_STAGE_IDS = ["new", "qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"] as const;
 export type CrmStageId = (typeof CRM_STAGE_IDS)[number];
 
 export const CRM_STAGES: { id: CrmStageId; label: string; open: boolean }[] = [
@@ -11,6 +11,7 @@ export const CRM_STAGES: { id: CrmStageId; label: string; open: boolean }[] = [
   { id: "qualified", label: "Qualified", open: true },
   { id: "proposal_prep", label: "Proposal preparation", open: true },
   { id: "proposal_sent", label: "Proposal sent", open: true },
+  { id: "estimate_sent", label: "Estimate sent", open: true },
   { id: "quote_sent", label: "Quote sent", open: true },
   { id: "negotiation", label: "Negotiation", open: true },
   { id: "on_hold", label: "On hold", open: true },
@@ -18,8 +19,15 @@ export const CRM_STAGES: { id: CrmStageId; label: string; open: boolean }[] = [
   { id: "lost", label: "Lost", open: false },
 ];
 
-/** The ordered working stages (everything open except On hold). */
-export const CRM_PIPELINE_STAGES: CrmStageId[] = ["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation"];
+/**
+ * The working stages (everything open except On hold), in the order the board shows them. Proposal sent and Estimate sent are ALTERNATIVE milestones at the same
+ * level: an enquiry reaches either (or both, one after the other), each on its own recorded evidence, before Quote sent.
+ */
+export const CRM_PIPELINE_STAGES: CrmStageId[] = ["new", "qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation"];
+
+/** The step a working stage is at (crm_stage_index in the database): Proposal sent and Estimate sent share step 4. null for On hold, Won, Lost and anything unknown. */
+const STAGE_STEP: Record<string, number> = { new: 1, qualified: 2, proposal_prep: 3, proposal_sent: 4, estimate_sent: 4, quote_sent: 5, negotiation: 6 };
+export const crmStageStep = (stage: string): number | null => STAGE_STEP[stage] ?? null;
 
 export const crmStageLabel = (id: string): string => CRM_STAGES.find((s) => s.id === id)?.label ?? id;
 export const isCrmClosed = (stage: string) => stage === "won" || stage === "lost";
@@ -28,14 +36,18 @@ export const isCrmOpen = (stage: string) => !isCrmClosed(stage);
 export const isCrmActive = (stage: string) => (CRM_PIPELINE_STAGES as string[]).includes(stage);
 
 /**
- * Plain stage moves: one step back or any step forward within the working stages. On hold, Won and Lost are never
- * plain moves (they carry a reason or evidence), and a held or closed opportunity does not move.
+ * Plain stage moves: one step back or any step forward within the working stages, and across between Proposal sent and Estimate sent (the same step). On hold,
+ * Won and Lost are never plain moves (they carry a reason or evidence), and a held or closed opportunity does not move. Mirrors crm_move_stage
+ * (supabase/migrations/20261228000100_crm_estimate_sent_stage.sql); the database also checks the evidence each "sent" stage needs.
  */
 export function crmAllowedMoves(from: string): CrmStageId[] {
-  const i = (CRM_PIPELINE_STAGES as string[]).indexOf(from);
-  if (i < 0) return [];
-  return CRM_PIPELINE_STAGES.filter((_, j) => j !== i && j >= i - 1);
+  const step = crmStageStep(from);
+  if (step === null) return [];
+  return CRM_PIPELINE_STAGES.filter((s) => s !== from && STAGE_STEP[s]! >= step - 1);
 }
+
+/** True when moving to Estimate sent from this stage would not be a step backwards (the "record estimate as sent" form offers the move only then). */
+export const canAdvanceToEstimateSent = (stage: string): boolean => { const step = crmStageStep(stage); return step !== null && stage !== "estimate_sent" && step <= STAGE_STEP.estimate_sent!; };
 
 export const CRM_SOURCES: { id: string; label: string }[] = [
   { id: "agency_call", label: "Agency call (outbound)" },

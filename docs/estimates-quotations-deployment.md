@@ -130,3 +130,16 @@ select legal_name, trn, address, phone, email, website, logo_path is not null as
 from companies
 where legal_name = 'Enginious LLC FZ';
 ```
+
+## Estimate sent stage (migration `20261228000100_crm_estimate_sent_stage.sql`; install-order row 25)
+**Status: not applied anywhere by Claude; hosted status `Unverified`.** Written 2026-11-11 with the change on branch `claude/events-first-edition-calendar` (PR #79).
+
+What it does: adds the stage **Estimate sent** at the same step as Proposal sent, and the recorded fact "this finalised estimate revision was sent to the client on this date" (`crm_estimate_sends`, written only by `crm_record_estimate_sent`, owner or founder). A move to Estimate sent needs such a record for that enquiry. It does not move any enquiry, mark any estimate or change any stored stage. The estimate guard of `20261221000100` is untouched: an estimate row still cannot be marked `sent`, so it cannot unlock Proposal sent or supersede a sent proposal. It replaces four functions with their applied bodies plus the stated lines (`crm_stage_index`, `crm_move_stage`, `crm_generate_reminders`, `jarvis_change_stage`); the test `crm-estimate-sent-stage.rls.test.ts` compares each with what was installed before.
+
+1. Run `supabase/manual-sql/crm_estimate_sent_00_preflight_readonly.sql` (read-only): rows 1 to 5 must say OK.
+2. Apply `supabase/migrations/20261228000100_crm_estimate_sent_stage.sql` (idempotent).
+3. Run `supabase/manual-sql/crm_estimate_sent_20_verify_readonly.sql` (read-only): rows 1 to 10 must say OK; row 11 reads `0 / 0` straight after.
+4. Because it replaces `jarvis_change_stage`, run `supabase/manual-sql/jarvis_20_verify_readonly.sql` again (read-only): every check must still say OK.
+5. Deploy the app. Before the migration the app lists the stage but the database refuses it, and Record estimate as sent is not offered.
+
+Rollback: `supabase/manual-sql/crm_estimate_sent_90_rollback.sql`. It stops, changing nothing, while any enquiry is at Estimate sent (or was held or closed from it): move those enquiries in the app first. Export `crm_estimate_sends` first; the table is deleted. It restores the four previous function bodies exactly.

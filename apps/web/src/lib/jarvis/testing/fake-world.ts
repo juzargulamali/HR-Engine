@@ -308,6 +308,8 @@ function rpc(w: World, user: string, name: string, args: Record<string, unknown>
         if (prior) return prior;
         // The signed version must still be current: raised before anything is written (no ledger row).
         if ((opp.version ?? 1) !== args.p_version) return { data: null, error: { message: "This enquiry was changed by someone else after you reviewed it. Review the details again.", code: "40001" } };
+        // Mirrors migration 20261228000100: JARVIS's write scope did not grow with the Estimate sent stage.
+        if (to === "estimate_sent" || opp.stage === "estimate_sent") return { data: null, error: { message: "JARVIS cannot move an enquiry to or from Estimate sent. Use the enquiry page.", code: "22023" } };
         if (j < 0) return { data: null, error: { message: "JARVIS cannot move an enquiry to that stage", code: "22023" } };
         if (i >= 0 && Math.abs(j - i) !== 1) return { data: null, error: { message: "JARVIS moves an enquiry one step at a time", code: "22023" } };
         if (w.createMode === "network") return { data: null, error: { message: "TypeError: fetch failed" } };

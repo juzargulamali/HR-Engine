@@ -72,6 +72,9 @@ export function describeEvent(e: Pick<CrmOpportunityEventRow, "kind" | "from_val
       // The estimate functions write "v1 estimate draft", "<ref> rev 2 draft" and "<ref> rev 2 issued" (migration 20261220000100, unchanged): shown as estimate events.
       const est = /^(v\d+) estimate draft$/.exec(e.to_value ?? "");
       if (est) return `Estimate ${est[1]} drafted.`;
+      // crm_record_estimate_sent (migration 20261228000100): the person confirmed that this exact revision was sent to the client on that date.
+      const sent = /^Estimate (\S+) rev (\d+) recorded as sent on (\d{4}-\d{2}-\d{2})$/.exec(e.to_value ?? "");
+      if (sent) return `Estimate ${sent[1]} revision ${sent[2]} recorded as sent to the client on ${sent[3]}.`;
       const rev = /^(\S+) rev (\d+) (issued|draft)$/.exec(e.to_value ?? "");
       if (rev) return `Estimate ${rev[1]} revision ${rev[2]} ${rev[3] === "issued" ? "finalised" : "drafted"}.`;
       return e.from_value ? `Proposal ${e.to_value ?? ""} (was ${e.from_value}).` : `Proposal ${e.to_value ?? ""}.`;
@@ -106,8 +109,9 @@ export function planNextProps(view: { openFollowUps: readonly Pick<CrmFollowUpRo
 }
 
 /** What the database insists on before a plain move, stated in words; null when the move has no extra requirement. */
-export function stageMoveRequirement(to: string, ctx: { hasSentProposal: boolean; hasQuoteRef: boolean }): string | null {
+export function stageMoveRequirement(to: string, ctx: { hasSentProposal: boolean; hasQuoteRef: boolean; hasSentEstimate: boolean }): string | null {
   if (to === "proposal_sent" && !ctx.hasSentProposal) return "Record a proposal as sent first (Proposals & files tab).";
+  if (to === "estimate_sent" && !ctx.hasSentEstimate) return "Record an estimate as sent first (Estimates tab).";
   if (to === "quote_sent" && !ctx.hasQuoteRef) return "Record the Zoho Books quote reference first (Commercial tab).";
   return null;
 }

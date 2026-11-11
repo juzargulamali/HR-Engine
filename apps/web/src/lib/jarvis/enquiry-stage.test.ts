@@ -39,6 +39,16 @@ describe("the transition table (derived from crm_move_stage; JARVIS is narrower)
     }
     expect(rows.filter((r) => r.withoutEvidence).map((r) => `${r.from}>${r.to}`)).toEqual(["new>qualified", "qualified>new", "qualified>proposal_prep", "proposal_prep>qualified", "proposal_sent>proposal_prep", "quote_sent>negotiation", "negotiation>quote_sent".replace("negotiation>quote_sent", "quote_sent>negotiation")].filter((x, i, arr) => arr.indexOf(x) === i).filter((x) => x !== "negotiation>quote_sent"));
   });
+  it("Estimate sent is outside JARVIS's write scope: it is not one of the six stages, never a target, and an enquiry at it is not moved", () => {
+    expect(WORKING).toEqual(["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation"]);
+    for (const from of WORKING) expect(transitionsFrom(from, { proposalSent: true, zohoQuoteRef: true }).map((t) => t.to)).not.toContain("estimate_sent");
+    const from = transitionsFrom("estimate_sent", { proposalSent: true, zohoQuoteRef: true });
+    expect(from.every((t) => !t.enabled)).toBe(true);
+    expect(from[0]!.reason).toMatch(/to or from Estimate sent is not available through JARVIS.*Estimates tab/);
+    // The words are understood (so the answer can say where to do it), not acted on.
+    expect(stageFromText("move it to estimate sent")).toBe("estimate_sent");
+    expect(stageFromText("change the status to proposal sent")).toBe("proposal_sent");
+  });
   it("never offers a move for On hold, Won or Lost, whatever the evidence", () => {
     for (const s of ["on_hold", "won", "lost", "nonsense"]) for (const t of transitionsFrom(s, { proposalSent: true, zohoQuoteRef: true })) expect(t.enabled, `${s}>${t.to}`).toBe(false);
     for (const t of transitionsFrom("new", { proposalSent: true, zohoQuoteRef: true })) expect(["on_hold", "won", "lost"]).not.toContain(t.to);
