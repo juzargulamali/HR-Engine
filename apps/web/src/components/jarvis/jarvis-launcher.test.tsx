@@ -467,6 +467,62 @@ describe("general chat, clarifying question, lookup and memory in the panel", ()
     type("show this month");
     expect((await screen.findByTestId("jarvis-error")).textContent).toMatch(/failed lookup, not an empty list/);
   });
+  it("a Sales lookup shows scope, filters, time, the exact total next to what is shown, a named missing part and one question with choices; a follow-up carries the question (never rows)", async () => {
+    const base = { kind: "lookup.sales" as const, company: { id: CO1, name: companies[0]!.name }, asOf: new Date().toISOString(), asOfLabel: "14 Oct 2099, 10:00 (Dubai)", unavailable: [] as string[], note: null, empty: null, choices: [], links: [{ label: "Open Enquiries", href: "/sales/opportunities" }] };
+    const rows = Array.from({ length: 2 }, (_, i) => ({ id: `o${i}`, primary: `OPP-UAE-2099-000${i} · Fictional job ${i}`, secondary: "Qualified · owned by you", meta: null, href: `/sales/opportunities/o${i}` }));
+    const list: SendResult = { ok: true, kind: "action", actionId: "jarvis.sales.lookup.run", confirmation: null, card: { ...base, title: "Your open enquiries", scope: "Owned by you", filters: ["open (not Won or Lost; On hold included)"], total: 41, shown: 2, sections: [{ heading: "Your open enquiries", total: 41, rows }], unavailable: ["its open follow-ups"], descriptor: { kind: "enquiries", scope: "mine", stage: null, org: null, event: null, named: null } } };
+    const question: SendResult = { ok: true, kind: "action", actionId: "jarvis.sales.lookup.run", confirmation: null, card: { ...base, title: "Which one do you mean?", scope: "", filters: [], total: null, shown: 0, sections: [], note: "More than one client or agency matches that name.", choices: [{ label: "Fictional Wave Agency", descriptor: { kind: "enquiries", scope: "company", stage: null, org: { id: "33333333-3333-4333-8333-333333333333", name: null }, event: null, named: null } }], descriptor: { kind: "enquiries", scope: "company", stage: null, org: null, event: null, named: "Fictional Wave" } } };
+    const replies: SendResult[] = [list, question];
+    const api = fakeApi({ send: async () => replies.shift()!, act: async () => list });
+    mount(api);
+    openPanel();
+    type("Show my open enquiries");
+    const c = await screen.findByTestId("jarvis-sales-lookup");
+    expect(within(c).getByTestId("lookup-scope").textContent).toMatch(/Fictional Enginious UAE LLC · Owned by you · open \(not Won or Lost; On hold included\) · as of 14 Oct 2099, 10:00 \(Dubai\)/);
+    expect(within(c).getByTestId("lookup-more").textContent).toBe("Showing 2 of 41. Open the screen to see them all.");
+    expect(within(c).getByTestId("lookup-partial").textContent).toMatch(/incomplete[\s\S]*its open follow-ups[\s\S]*missing, not empty/);
+    expect(within(c).getByRole("link", { name: /OPP-UAE-2099-0001/ }).getAttribute("href")).toBe("/sales/opportunities/o1");
+    type("Open enquiries for Fictional Wave");
+    await waitFor(() => expect(screen.getAllByTestId("jarvis-sales-lookup")).toHaveLength(2));
+    // the follow-up carried the QUESTION behind the first card, not its rows
+    const ctx = (api.calls.send[1]![0] as { context: { lastQuery: { kind: string; descriptor: Record<string, unknown> } } }).context.lastQuery;
+    expect(ctx).toEqual({ kind: "lookup", descriptor: { kind: "enquiries", scope: "mine", stage: null, org: null, event: null, named: null } });
+    expect(JSON.stringify(ctx)).not.toMatch(/Fictional job|OPP-UAE/);
+    fireEvent.click(within(screen.getByTestId("lookup-choices")).getByRole("button", { name: "Fictional Wave Agency" }));
+    await waitFor(() => expect(api.calls.act).toHaveLength(1));
+    expect(api.calls.act[0]![0]).toMatchObject({ actionId: "jarvis.sales.lookup.run", companyId: CO1, input: { kind: "enquiries", org: { id: "33333333-3333-4333-8333-333333333333" } } });
+  });
+  it("a Sales summary shows the app's figures with definitions and dates; AI wording is labelled and apart from suggestions; without wording the figures stand alone with the reason", async () => {
+    const card = (over: Record<string, unknown>): SendResult => ({ ok: true, kind: "action", actionId: "jarvis.sales.summary.run", confirmation: null, card: { kind: "summary.sales", title: "Sales enquiries summary", company: { id: CO1, name: companies[0]!.name }, scope: "Everyone's enquiries in this company · counts only, no values", period: "October 2099 so far (2099-10-01 to 2099-10-14, Dubai dates)", comparedWith: null, asOfLabel: "14 Oct 2099, 10:00 (Dubai)", metrics: [{ label: "Won", value: 2, previous: 1, definition: "Enquiries that are Won now and whose closing date falls in the period." }], groups: [{ heading: "Events with the most enquiries", definition: "Per event.", rows: [{ label: "Fictional Forum", count: 2 }], more: 0 }], supporting: [], coverage: ["A won enquiry is not a delivered project: delivery is not covered here."], unavailable: [], narrative: null, suggestions: [], narrativeNote: null, links: [{ label: "Open Sales reports", href: "/sales/reports" }], descriptor: { kind: "period", period: "this_month", compare: false, focus: "all", narrative: false }, ...over } as never });
+    const replies: SendResult[] = [card({ narrative: "In short: two were won.", suggestions: ["Review the open follow-ups."], narrativeNote: "Wording by the AI model from the figures above. Check the figures, not the wording." }), card({ narrativeNote: "The AI model's wording did not match the figures, so I am not showing it. The figures above were computed by Enginious OS and are correct.", descriptor: { kind: "period", period: "this_month", compare: false, focus: "all", narrative: true } })];
+    const api = fakeApi({ send: async () => replies.shift()!, act: async () => card({}) });
+    mount(api);
+    openPanel();
+    type("Summarise this month's enquiries");
+    const c = await screen.findByTestId("jarvis-sales-summary");
+    expect(within(c).getByTestId("summary-scope").textContent).toMatch(/2099-10-01 to 2099-10-14, Dubai dates/);
+    expect(within(c).getByTestId("summary-metrics").textContent).toMatch(/Won2 · before: 1 \(\+1\)Enquiries that are Won now/);
+    expect(within(c).getByTestId("summary-narrative").textContent).toMatch(/In words \(AI model\)In short: two were won\.Suggestions \(not recorded facts\)Review the open follow-ups\./);
+    expect(within(c).getByTestId("summary-coverage").textContent).toMatch(/not a delivered project/);
+    fireEvent.click(within(c).getByRole("button", { name: "Compare with the previous period" }));
+    await waitFor(() => expect(api.calls.act[0]![0]).toMatchObject({ actionId: "jarvis.sales.summary.run", input: { kind: "period", period: "this_month", compare: true } }));
+    type("show last month instead");
+    await waitFor(() => expect(api.calls.send).toHaveLength(2));
+    expect((api.calls.send[1]![0] as { context: { lastQuery: unknown } }).context.lastQuery).toMatchObject({ kind: "summary", descriptor: { kind: "period", period: "this_month" } });
+    await waitFor(() => expect(screen.getAllByTestId("summary-narrative-note").some((n) => /did not match the figures/.test(n.textContent ?? ""))).toBe(true));
+  });
+  it("scope wording for an estimate is a draft to copy: it says there are no prices and nothing is saved, and has no save button", async () => {
+    const api = fakeApi({ send: async () => ({ ok: true, kind: "action", actionId: "jarvis.sales.estimate.scope_draft", confirmation: null, card: { kind: "estimate.scope", text: "- Counter software (quantity 2)\nExcluded: shipping", questions: ["Which reader model will be supplied?"], enquiry: { reference: "OPP-UAE-2099-0007", title: "Fictional counters", href: "/sales/opportunities/o7" }, note: "A draft of scope wording only. It has no prices, creates no estimate and saves nothing: copy what you need into the Estimate screen and enter the amounts there.", links: [{ label: "Proposals & quotes", href: "/sales/proposals" }] } }) });
+    mount(api);
+    openPanel();
+    type("Draft the estimate scope for OPP-UAE-2099-0007");
+    const c = await screen.findByTestId("jarvis-scope-draft");
+    expect(within(c).getByTestId("scope-text").textContent).toMatch(/Counter software \(quantity 2\)/);
+    expect(within(c).getByTestId("scope-questions").textContent).toMatch(/reader model/);
+    expect(within(c).getByTestId("scope-note").textContent).toMatch(/no prices, creates no estimate and saves nothing/);
+    expect(within(c).getByRole("button", { name: "Copy" })).toBeTruthy();
+    expect(within(c).queryByRole("button", { name: /save|create|confirm|send/i })).toBeNull();
+  });
   it("a brief that could not be separated shows the text that WOULD be sent, editable, with the form as the other way; sending it carries the original text and the edited version", async () => {
     const api = fakeApi({ send: async (a) => ((a as { briefOutbound: string | null }).briefOutbound ? cardResult() : { ok: true, kind: "brief_review", text: "I have not sent anything.", outbound: "Title: Gala\nThe crew bonus is AED 5,000.", formHref: "/sales/new" }) });
     mount(api);

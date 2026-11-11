@@ -22,6 +22,8 @@ const sendContext = z.object({
   // Bounded on purpose: a few recent turns of the general conversation, only to support a follow-up such as "make it shorter". It is not stored and is never permission.
   turns: z.array(z.object({ role: z.enum(["user", "jarvis"]), text: z.string().max(20_000) })).max(12).optional(),
   lastLookup: z.object({ period: z.enum(["all", "last_month", "this_month", "last_7_days", "last_30_days"]) }).nullable().optional(),
+  // The QUESTION behind the Sales lookup or summary last shown (never its rows). Size-bounded here; its shape is validated by the action's own schema before anything is read.
+  lastQuery: z.object({ kind: z.enum(["lookup", "summary"]), descriptor: z.record(z.string(), z.unknown()).refine((d) => JSON.stringify(d).length <= 600) }).nullable().optional(),
 }).nullable().optional();
 
 export async function jarvisSend(input: { companyId: string; text: string; intent?: string | null; enquiryId?: string | null; context?: SendContext | null; briefOutbound?: string | null; screen?: string | null }): Promise<SendResult> {

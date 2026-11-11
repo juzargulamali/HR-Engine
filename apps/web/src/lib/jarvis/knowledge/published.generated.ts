@@ -74,7 +74,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "chatbot",
       "who are you"
     ],
-    "summary": "JARVIS is the Enginious OS assistant. Ask it a question, ask for a draft to copy, ask how something works, or ask for your overdue Sales follow-ups. In Sales & CRM it prepares enquiries, updates and meeting notes for you to review; nothing is saved until you confirm, and it never sends messages. The text you submit for a task is sent to Anthropic to prepare a draft; records in Enginious OS are never attached. It does not look up saved prices and does not handle pay, personal or medical details: use the screens.",
+    "summary": "JARVIS is the Enginious OS assistant. Ask a question, ask for a draft to copy, ask how something works, or ask about your Sales work: follow-ups, open enquiries, what needs your attention, counts for a period. In Sales & CRM it prepares enquiries, updates and meeting notes for you to review; nothing is saved until you confirm, and it never sends messages. It does not read or show saved prices, values or budgets, and does not handle pay, personal or medical details: use the screens.",
     "steps": [
       "Open JARVIS from the button on the right edge.",
       "Type what you need in plain words, or use one of the shortcuts.",
@@ -114,6 +114,40 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       {
         "label": "My Day",
         "href": "/"
+      }
+    ],
+    "screens": []
+  },
+  {
+    "id": "jarvis-data-sent",
+    "area": "general",
+    "title": "What JARVIS sends to Anthropic, and what stays here",
+    "keywords": [
+      "what does jarvis send",
+      "anthropic",
+      "data sent",
+      "is it private",
+      "privacy",
+      "does jarvis share",
+      "can i paste prices",
+      "can i paste a budget",
+      "confidential",
+      "what stays inside"
+    ],
+    "summary": "The text you type or paste for a task is sent to Anthropic to prepare the answer, including working prices, budgets, rates and costs you supply. For a summary in words, JARVIS also sends counts, names, dates and screened enquiry text. Values, budgets, prices and estimates stored in Enginious OS are never sent, and lookups stay inside Enginious OS. Do not paste salaries, IDs, bank or medical details, financial statements or prepared estimates.",
+    "steps": [
+      "Type working figures yourself when a draft needs them: JARVIS uses them as your assumptions.",
+      "For a stored value, budget or estimate, open the enquiry or Proposals & quotes.",
+      "Text marked confidential, NDA or internal only is not sent: use the screen instead."
+    ],
+    "links": [
+      {
+        "label": "Enquiries",
+        "href": "/sales/opportunities"
+      },
+      {
+        "label": "Proposals & quotes",
+        "href": "/sales/proposals"
       }
     ],
     "screens": []
@@ -396,7 +430,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "what is overdue",
       "overdue actions"
     ],
-    "summary": "A follow-up is overdue once its due time has passed and it is still open. The Follow-ups page groups them at the top. In JARVIS you can also type \"Show my overdue Sales follow-ups\" to list your own for the selected company.",
+    "summary": "A follow-up is overdue once its due time has passed and it is still open. The Follow-ups page groups them at the top. In JARVIS you can also type \"Show my overdue Sales follow-ups\" to list your own for the selected company, or \"What needs my attention today?\" for everything.",
     "steps": [
       "Open Follow-ups in Sales. Overdue items are listed first.",
       "Open the enquiry from the item, do the work, then complete or reschedule the follow-up."
@@ -410,6 +444,112 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "screens": [
       "/sales/follow-ups"
     ]
+  },
+  {
+    "id": "sales-jarvis-lookups",
+    "area": "sales",
+    "title": "Ask JARVIS about your follow-ups and enquiries",
+    "keywords": [
+      "what needs my attention",
+      "attention today",
+      "my priorities",
+      "follow-ups due today",
+      "upcoming follow-ups",
+      "my open enquiries",
+      "open enquiries for a client",
+      "enquiries with no activity",
+      "quiet enquiries",
+      "status of an enquiry",
+      "ask jarvis about enquiries"
+    ],
+    "summary": "In JARVIS you can ask about your Sales work for the selected company: what needs your attention today, follow-ups due today or coming up, your open enquiries (or everyone's), open enquiries for a client, agency or event, enquiries with no recorded activity, and the status of one enquiry. The answer shows whose records, the filters, the time and the exact total. It stays inside Enginious OS and never shows values or budgets.",
+    "steps": [
+      "Open JARVIS and choose the company at the top of the panel.",
+      "Type the question, for example \"What needs my attention today?\" or \"Open enquiries for\" and the client's name.",
+      "Refine it in a few words: \"the whole company instead\", \"only Negotiation\", \"make it 30 days\".",
+      "Open a record from its link to act on it."
+    ],
+    "links": [
+      {
+        "label": "Follow-ups",
+        "href": "/sales/follow-ups"
+      },
+      {
+        "label": "Enquiries",
+        "href": "/sales/opportunities"
+      }
+    ],
+    "screens": []
+  },
+  {
+    "id": "sales-jarvis-summaries",
+    "area": "sales",
+    "title": "Ask JARVIS for a Sales summary",
+    "keywords": [
+      "summarise enquiries",
+      "summary of this month",
+      "how many enquiries",
+      "how many did we win",
+      "won and lost",
+      "win rate",
+      "which events have the most enquiries",
+      "compare with last month",
+      "what changed",
+      "summarise this enquiry",
+      "next steps for an enquiry",
+      "trends"
+    ],
+    "summary": "JARVIS counts enquiries for a period: created, won, lost, the share won, by event, by source and recorded lost reasons, and can compare with the previous period. Every figure is counted by Enginious OS and comes with its definition and dates. Counts only: no values. Ask for it \"in words\" and the AI model words the same figures; if its wording does not match them, you see the figures alone. A won enquiry is not a delivered project.",
+    "steps": [
+      "Ask, for example, \"How many enquiries did we win or lose last month?\" or \"Summarise this month's enquiries\".",
+      "Change it in a few words: \"show last month instead\", \"compare with the previous period\".",
+      "For one enquiry, ask \"Summarise\" with its reference to get its facts and suggested next steps.",
+      "Open Reports for values and the full report."
+    ],
+    "links": [
+      {
+        "label": "Reports",
+        "href": "/sales/reports"
+      },
+      {
+        "label": "Enquiries",
+        "href": "/sales/opportunities"
+      }
+    ],
+    "screens": []
+  },
+  {
+    "id": "sales-jarvis-scope-draft",
+    "area": "sales",
+    "title": "Draft the scope wording for an estimate with JARVIS",
+    "keywords": [
+      "estimate scope",
+      "scope of work",
+      "draft estimate lines",
+      "line descriptions",
+      "estimate wording",
+      "deliverables for an estimate",
+      "quotation scope",
+      "help with an estimate"
+    ],
+    "summary": "JARVIS can draft the scope wording for an estimate: line descriptions, quantities, what the client supplies, dependencies, exclusions and questions to ask. It is a draft to copy. It has no prices, reads no saved estimate or price, and does not create, approve or send an estimate: you enter amounts in the Estimate screen.",
+    "steps": [
+      "Ask \"Draft the estimate scope for\" and the enquiry's reference, or paste the requirements.",
+      "Check the draft and the questions, then press Copy.",
+      "Open the enquiry's estimate and paste the lines you want.",
+      "Enter quantities and prices there and finish the estimate as usual."
+    ],
+    "links": [
+      {
+        "label": "Proposals & quotes",
+        "href": "/sales/proposals"
+      },
+      {
+        "label": "Enquiries",
+        "href": "/sales/opportunities"
+      }
+    ],
+    "screens": []
   },
   {
     "id": "sales-add-enquiry",

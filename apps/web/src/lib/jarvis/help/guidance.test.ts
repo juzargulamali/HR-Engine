@@ -32,7 +32,7 @@ describe("reviewed guidance", () => {
   it("every screen a guide is written for is a real page route, and every published guide names at least one screen or is general", () => {
     const known = routes();
     for (const g of GUIDANCE) for (const sc of g.screens ?? []) expect(known, `${g.id}: no page for screen ${sc}`).toContain(sc);
-    expect(GUIDANCE.filter((g) => (g.screens ?? []).length === 0).map((g) => g.id).sort()).toEqual(["jarvis-about", "jarvis-memory"]);
+    expect(GUIDANCE.filter((g) => (g.screens ?? []).length === 0).map((g) => g.id).sort()).toEqual(["jarvis-about", "jarvis-data-sent", "jarvis-memory", "sales-jarvis-lookups", "sales-jarvis-scope-draft", "sales-jarvis-summaries"]); // guides about JARVIS itself, not about one screen
   });
   it("is staff-facing: no code paths, SQL, migration names, table or function names, or permission internals", () => {
     const text = JSON.stringify(GUIDANCE.map(({ keywords: _k, ...visible }) => visible));

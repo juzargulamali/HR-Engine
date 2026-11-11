@@ -14,6 +14,8 @@ export interface Opp {
   id: string; company_id: string; reference: string; title: string; stage: string; agency_org_id: string | null; client_org_id: string | null; event_start: string | null; install_start: string | null; location: string | null;
   technologies: { name: string; qty: number }[]; created_at: string;
   owner_id?: string | null; version?: number; currency?: string | null; value?: number | null; budget_note?: string | null; brief?: string | null; event_end?: string | null; scope?: string | null; waiting_on?: string | null;
+  closed_at?: string | null; stage_changed_at?: string | null; hold_review_date?: string | null; first_response_at?: string | null; event_edition_id?: string | null; source?: string | null;
+  lost_reason?: string | null; hold_reason?: string | null; exclusions?: string | null; payment_terms?: string | null;
 }
 let oppCounter = 100;
 /** A fictional enquiry row for the unit tests (the fake database lets a person see it only when they hold a grant for its company). */
@@ -65,6 +67,14 @@ export interface World {
   suggestions: { user_id: string; topic_id: string; body: string; status: string }[];
   memoryFn: "ok" | "missing" | "error";
   followUpReadFails: boolean;
+  /** Shared event directory (crm_events, crm_event_editions) and closure history (crm_closures), for the lookups and summaries. */
+  events: { id: string; name: string; archived_at: string | null }[];
+  editions: { id: string; event_id: string }[];
+  closures: { id: string; company_id: string; opportunity_id: string; outcome: string; closed_at: string; reopened_at: string | null; value_at_close?: number | null }[];
+  /** Tables whose reads fail (a failed read must never look like an empty result). */
+  failTables: string[];
+  /** Every select the person's session made: the table and the exact column list asked for. */
+  selectLog: { table: string; columns: string }[];
   /** HR roles and budget grants (what the protected-access check reads through the person's session). */
   roles: { user_id: string; role: string }[];
   budgetGrants: { user_id: string; company_id: string }[];
@@ -83,6 +93,7 @@ export function newWorld(): World {
     signedIn: ID.u1, settings: { enabled: true, writes: true }, pilot: new Set([ID.u1, ID.u2, ID.u3]), pilotCompanies: new Set(),
     grants: [{ user_id: ID.u1, company_id: ID.co1, capabilities: [], revoked_at: null }, { user_id: ID.u1, company_id: ID.co2, capabilities: [], revoked_at: null }, { user_id: ID.u2, company_id: ID.co2, capabilities: [], revoked_at: null }],
     companies: [{ id: ID.co1, legal_name: "Fictional Enginious UAE LLC" }, { id: ID.co2, legal_name: "Fictional Enginious KSA LLC" }],
+    events: [], editions: [], closures: [], failTables: [], selectLog: [],
     orgs, opps: [], ledger: new Map(), usage: new Map(), createMode: "ok", dupFails: false, accessFn: "ok", orgReadFails: false, rpcLog: [], readLog: [], createdArgs: [], registered: [], updates: [], proposals: [], zoho: [], moves: [], evidenceFails: false, activities: [], followUps: [], meetingFailAfterActivity: false, prefs: [], suggestions: [], memoryFn: "ok", followUpReadFails: false, roles: [], budgetGrants: [], protectedAccessFails: false, counter: 0, proofKey: SECRET, dbNow: () => new Date(),
   };
 }
@@ -100,6 +111,10 @@ function table(w: World, user: string, name: string): Row[] {
     case "crm_proposals": return w.proposals.filter((p) => w.opps.some((o) => o.id === p.opportunity_id && has.has(o.company_id))) as unknown as Row[];
     case "crm_zoho_references": return w.zoho.filter((p) => w.opps.some((o) => o.id === p.opportunity_id && has.has(o.company_id))) as unknown as Row[];
     case "crm_follow_ups": return w.followUps.map((f) => ({ status: "open", ...f, company_id: f.company_id ?? w.opps.find((o) => o.id === f.opportunity_id)?.company_id })).filter((f) => has.has(f.company_id as string)) as unknown as Row[];
+    case "crm_activities": return w.activities.map((a) => ({ ...a, company_id: w.opps.find((o) => o.id === a.opportunity_id)?.company_id })).filter((a) => has.has(a.company_id as string)) as unknown as Row[];
+    case "crm_events": return has.size > 0 ? (w.events as unknown as Row[]) : [];
+    case "crm_event_editions": return has.size > 0 ? (w.editions as unknown as Row[]) : [];
+    case "crm_closures": return w.closures.filter((c) => has.has(c.company_id)) as unknown as Row[];
     case "jarvis_action_ledger": return [...w.ledger.values()].filter((l) => l.user_id === user) as unknown as Row[];
     default: return [];
   }
@@ -109,18 +124,31 @@ function builder(w: World, user: string, name: string) {
   w.readLog.push(name);
   let rows = table(w, user, name).slice();
   let error: { message: string; code?: string } | null = (name === "crm_organisations" && w.orgReadFails) || ((name === "crm_proposals" || name === "crm_zoho_references") && w.evidenceFails) || (name === "crm_follow_ups" && w.followUpReadFails) ? { message: "unreadable" } : null;
+  if (w.failTables.includes(name)) error = { message: "unreadable" };
+  let wantCount = false, head = false, limitN: number | null = null, selected = "*";
+  const done = () => {
+    const count = wantCount ? rows.length : null;
+    // Like the database, a select returns ONLY the columns it names: a column that was not asked for is not there to be used or leaked.
+    const cols = selected === "*" ? null : selected.split(",").map((c) => c.trim()).filter(Boolean);
+    const shape = (r: Row): Row => (cols ? Object.fromEntries(cols.map((c) => [c, r[c] ?? null])) : r);
+    const data = error ? null : head ? null : (limitN === null ? rows : rows.slice(0, limitN)).map(shape);
+    return { data, error, count: error ? null : count };
+  };
   const api = {
-    select() { return api; },
+    select(columns?: string, opts?: { count?: string; head?: boolean }) { selected = columns ?? "*"; w.selectLog.push({ table: name, columns: selected }); wantCount = opts?.count === "exact"; head = !!opts?.head; return api; },
     eq(c: string, v: unknown) { rows = rows.filter((r) => r[c] === v); return api; },
     is(c: string, v: unknown) { rows = rows.filter((r) => (r[c] ?? null) === v); return api; },
-    lt(c: string, v: string) { rows = rows.filter((r) => String(r[c]) < v); return api; },
-    gte(c: string, v: string) { rows = rows.filter((r) => String(r[c]) >= v); return api; },
+    not(c: string, op: string, v: unknown) { if (op === "is" && v === null) rows = rows.filter((r) => (r[c] ?? null) !== null); return api; },
+    lt(c: string, v: string) { rows = rows.filter((r) => r[c] != null && String(r[c]) < v); return api; },
+    gte(c: string, v: string) { rows = rows.filter((r) => r[c] != null && String(r[c]) >= v); return api; },
     in(c: string, vs: unknown[]) { rows = rows.filter((r) => vs.includes(r[c])); return api; },
+    // "a.eq.x,b.eq.y": any of the pairs
+    or(expr: string) { const pairs = expr.split(",").map((p) => p.split(".eq.")); rows = rows.filter((r) => pairs.some(([c, v]) => String(r[c!] ?? "") === v)); return api; },
     ilike(c: string, p: string) { const needle = p.replace(/%/g, "").toLowerCase(); rows = rows.filter((r) => String(r[c] ?? "").toLowerCase().includes(needle)); return api; },
-    order(c?: string) { if (c) rows = rows.slice().sort((a, b) => String(a[c]).localeCompare(String(b[c]))); return api; },
-    limit(n: number) { rows = rows.slice(0, n); return api; },
-    maybeSingle() { return Promise.resolve({ data: error ? null : (rows[0] ?? null), error }); },
-    then(res: (v: { data: Row[] | null; error: typeof error }) => unknown) { return Promise.resolve({ data: error ? null : rows, error }).then(res); },
+    order(c?: string, o?: { ascending?: boolean }) { if (c) { rows = rows.slice().sort((a, b) => String(a[c]).localeCompare(String(b[c]))); if (o?.ascending === false) rows.reverse(); } return api; },
+    limit(n: number) { limitN = n; return api; },
+    maybeSingle() { const d = done(); return Promise.resolve({ data: d.data?.[0] ?? null, error }); },
+    then(res: (v: { data: Row[] | null; error: typeof error; count: number | null }) => unknown) { return Promise.resolve(done()).then(res); },
   };
   return api;
 }

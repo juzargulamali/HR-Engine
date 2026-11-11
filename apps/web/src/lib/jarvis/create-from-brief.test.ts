@@ -522,7 +522,7 @@ describe("limits, provider failures and availability (ordinary CRM stays usable)
     const h = await a.send({ companyId: ID.co1, text: "What can you do?" });
     const enabled = h.ok && h.kind === "help" ? h.help.enabled.map((x) => x.id) : [];
     const disabled = h.ok && h.kind === "help" ? h.help.disabled.map((x) => x.id) : [];
-    const ALL = ["jarvis.sales.enquiry.create_from_brief", "jarvis.sales.draft_reply", "jarvis.sales.help.answer", "jarvis.sales.organisation.register", "jarvis.sales.enquiry.update", "jarvis.sales.enquiry.change_stage", "jarvis.sales.meeting.record", "jarvis.sales.chat.reply", "jarvis.sales.followups.overdue"];
+    const ALL = ["jarvis.sales.enquiry.create_from_brief", "jarvis.sales.draft_reply", "jarvis.sales.help.answer", "jarvis.sales.organisation.register", "jarvis.sales.enquiry.update", "jarvis.sales.enquiry.change_stage", "jarvis.sales.meeting.record", "jarvis.sales.chat.reply", "jarvis.sales.followups.overdue", "jarvis.sales.lookup.run", "jarvis.sales.summary.run", "jarvis.sales.estimate.scope_draft"];
     expect(enabled).toContain("jarvis.sales.enquiry.create_from_brief");
     expect([...enabled, ...disabled].sort()).toEqual([...ALL].sort());
     expect(h.ok && h.kind === "help" && h.help.disabled.every((x) => x.reason.length > 10)).toBe(true);
@@ -883,15 +883,12 @@ Please make the next action a call to the agency on 19 July 2027 to confirm the 
       expect(c.values.budgetNote, lines).toMatch(note);
       expect(c.notice, lines).toMatch(/not one exact client budget/);
     }
-    // an internal cost never becomes the client budget, and (as internal costing) it is not sent automatically either: the person is shown the clean excerpt
-    const internal = await a.send({ companyId: ID.co1, text: `${base}\nInternal budget: AED 50000\nClient budget: AED 85000` });
-    if (!internal.ok || internal.kind !== "brief_review") throw new Error(`expected the clean-excerpt step, got ${JSON.stringify(internal).slice(0, 160)}`);
-    expect(internal.outbound).toContain("Client budget: AED 85000");
-    expect(internal.outbound).not.toContain("50000");
+    // POLICY (provenance): an internal working cost the person supplies goes out with the brief as written, but it never becomes the client budget: with an internal figure
+    // next to the client's, the value is left for the reviewer and the internal wording is not copied to the budget note
     simulatedProviderCalls.length = 0;
-    const sentClean = card(await a.send({ companyId: ID.co1, text: `${base}\nInternal budget: AED 50000\nClient budget: AED 85000`, intent: "enquiry", briefOutbound: internal.outbound }));
-    expect(simulatedProviderCalls[0]!.input).not.toContain("50000");
-    expect(sentClean.card.values).toMatchObject({ value: null, currency: null }); // conflicting with an internal figure: left for the reviewer
+    const sentClean = card(await a.send({ companyId: ID.co1, text: `${base}\nInternal budget: AED 50000\nClient budget: AED 85000` }));
+    expect(simulatedProviderCalls[0]!.input).toContain("Internal budget: AED 50000");
+    expect(sentClean.card.values).toMatchObject({ value: null, currency: null });
     expect(sentClean.card.values.budgetNote).toBe("Client budget: AED 85000");
   });
 
@@ -972,23 +969,21 @@ Please make the next action a call to the agency on 19 July 2027 to confirm the 
     expect(ok.body().messages[0]!.content).toContain("available on 2099-02-05 at 85 per item");
   });
 
-  it("QA 2: an amount explicitly identified as OUR cost is restricted with any number and no currency ('Our cost is 85 per item.'); 'Offer the client 85 per item' stays allowed (intercepted)", async () => {
+  it("POLICY (provenance, supersedes QA 2): a working cost the person supplies ('Our cost is 85 per item.') is allowed like a price or a budget, in the Sales reply, the general draft and a brief; company financial results and financial documents still are not (intercepted)", async () => {
     vi.spyOn(console, "info").mockImplementation(() => undefined);
     const { findProtectedContent } = await import("./protected");
-    for (const t of ["Our cost is 85 per item.", "Internal cost: 85 each", "Cost price 12 per unit.", "It costs us 40 per wristband.", "Supplier cost 7.5 per metre."]) expect(findProtectedContent(t), t).toContain("project_financials");
-    for (const t of ["Offer the client 85 per item.", "The price is 85 per item for 1,200 items.", "We quoted 85 per item.", "Client budget: AED 50000-65000", "Our team arrives 3 hours before doors."]) expect(findProtectedContent(t), t).toEqual([]);
+    for (const t of ["Our cost is 85 per item.", "Internal cost: 85 each", "Cost price 12 per unit.", "It costs us 40 per wristband.", "Supplier cost 7.5 per metre.", "Working margin 30% on a cost of AED 60,000.", "Offer the client 85 per item.", "The price is 85 per item for 1,200 items.", "We quoted 85 per item.", "Client budget: AED 50000-65000", "Our team arrives 3 hours before doors.", "Two counters, six products per counter, an RTX 4070, 18 to 20 May 2027."]) expect(findProtectedContent(t), t).toEqual([]);
+    // still restricted whoever types them: company results, financial documents, a prepared estimate document
+    for (const t of ["Turnover last year was AED 3,400,000.", "Net profit 12% in 2026.", "See the balance sheet.", "Quotation No: Q-2026-0142\nLED wall AED 40,000\nSubtotal AED 40,000\nVAT 5% AED 2,000\nGrand total AED 42,000"]) expect(findProtectedContent(t).length, t).toBeGreaterThan(0);
     const e = mkOpp({ company_id: ID.co1, owner_id: ID.u1 }); w.opps.push(e);
     const { assistant, f, body } = await live({ content: [{ type: "tool_use", id: "t", name: "record_fields", input: { subject: "Re: wristbands", body: "We can offer 85 per item.", toConfirm: [], usedValues: [] } }] });
-    // the internal cost stops the Sales reply and the general draft: nothing is sent
-    expect(await assistant.send({ companyId: ID.co1, intent: "reply", enquiryId: e.id, text: "They asked for a price. Our cost is 85 per item." })).toMatchObject({ ok: false, code: "protected_content" });
-    expect(await assistant.send({ companyId: ID.co1, text: "Draft an email to the client. Our cost is 85 per item." })).toMatchObject({ ok: false, code: "protected_content" });
-    expect(f).toHaveBeenCalledTimes(0);
-    // in a brief it is left out of the clean excerpt, which is offered instead of being sent
-    const brief = await assistant.send({ companyId: ID.co1, text: "Title: Fictional gala\nAgency: Fictional Wave Agency\nNext: Call on 2099-01-12\nOffer the client 85 per item. Our cost is 85 per item." });
-    if (!brief.ok || brief.kind !== "brief_review") throw new Error("expected the clean-excerpt step");
-    expect(brief.outbound).toContain("Offer the client 85 per item.");
-    expect(brief.outbound).not.toContain("Our cost");
-    expect(f).toHaveBeenCalledTimes(0);
+    expect((await assistant.send({ companyId: ID.co1, intent: "reply", enquiryId: e.id, text: "They asked for a price. Our cost is 85 per item." })).ok).toBe(true);
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(body().messages[0]!.content).toContain("Our cost is 85 per item.");
+    // a brief with a supplied cost is sent as written: no clean-excerpt step
+    const brief = await assistant.send({ companyId: ID.co1, text: "Title: Fictional gala\nAgency: Fictional Wave Agency\nNext: Call on 2099-01-12\nOffer the client 85 per item. Our cost is 60 per item." });
+    expect(brief.ok && brief.kind).toBe("card");
+    f.mockClear();
     // the client-facing price is allowed and reaches the provider as written
     expect((await assistant.send({ companyId: ID.co1, intent: "reply", enquiryId: e.id, text: "They asked for a price. Offer the client 85 per item." })).ok).toBe(true);
     expect(f).toHaveBeenCalledTimes(1);

@@ -1,7 +1,7 @@
 import "server-only";
 import { jarvisLog } from "./log";
 import { RESTRICTED_TEXT_MESSAGE } from "./outbound-messages";
-import { describeProtected, findProtectedContent, wholeTextRestricted, type ProtectedCategory } from "./protected";
+import { describeProtected, findProtectedContent, wholeTextRestricted, type ProtectedCategory, type Provenance } from "./protected";
 import type { JarvisProvider, StructuredRequest } from "./provider/types";
 import { ruleFor } from "./rulebook";
 import { JarvisRefusalError } from "./types";
@@ -10,14 +10,19 @@ import { JarvisRefusalError } from "./types";
  * THE OUTBOUND GATE: the one place a request can leave Enginious OS for the AI provider. Every action receives its provider already wrapped by this gate (the dispatcher does
  * it, so an action cannot obtain an ungated provider), and it applies the rulebook BEFORE the call:
  *   1. the capability must have a rulebook entry that approves a provider call (deny by default: no entry, no call);
- *   2. the request must declare its sources, and each must be one the entry approves (so a record field, a database row, the Map or an attachment cannot be added later
- *      without the rulebook changing);
- *   3. a text marked as not for external sharing ("External sharing prohibited", "Internal use only", "NDA") is refused outright, for every capability;
- *   4. the whole outgoing text is screened for protected content (and the person's free text again, whatever earlier check ran); a hit, or a text that is too long to judge,
- *      is NOT sent: the person is asked for a version without those details.
+ *   2. the request must declare its sources, and each must be one the entry approves;
+ *   3. PROVENANCE is structural: what the person supplied is in `input`; what Enginious OS holds can only be in `facts` (typed fact lines) and `recordText` (screened record
+ *      text), each of which needs its own approved source. App data found anywhere else has no way in, and a request that declares an app source without the field (or the
+ *      field without the source) is refused;
+ *   4. a text marked as not for external sharing ("External sharing prohibited", "Internal use only", "NDA") is refused outright, for every capability and every part;
+ *   5. everything is screened for protected content: the person's text under the "user" rule (working prices, budgets, rates and costs are allowed), the app-held parts
+ *      under the "app" rule (ANY financial figure is refused, so a stored value, budget or price cannot leave even if server code selected it by mistake). A hit, or a
+ *      request too long to judge, is NOT sent. The provider is never asked to redact anything.
  * There is no provider call that classifies intent: routing is done locally (lib/jarvis/router.ts). Nothing here logs text: only the capability id and category tokens.
  */
 export const OUTBOUND_MAX_CHARS = 24_000;
+/** A fact label is fixed wording written in the code: letters, spaces and a little punctuation. No digits (a figure belongs in the value), no markup. */
+const FACT_LABEL = /^[A-Za-z][A-Za-z ,()'&/%-]{0,79}$/;
 
 export function outboundRefusal(categories: readonly ProtectedCategory[]): JarvisRefusalError {
   return new JarvisRefusalError(
@@ -37,34 +42,52 @@ export function gateProvider(provider: JarvisProvider | null, actionId: string):
         throw new JarvisRefusalError("unavailable", "JARVIS cannot do that: it is not an approved use of the AI model.");
       }
       const sources = req.sources ?? [];
-      if (sources.length === 0 || sources.some((s) => !rule.outbound.sources.includes(s))) {
-        jarvisLog({ event: "outbound", actionId, outcome: "blocked", code: "source_not_approved" });
-        throw new JarvisRefusalError("unavailable", "JARVIS cannot do that: it would send information that is not approved for the AI model.");
+      const block = (code: string, e: JarvisRefusalError): never => { jarvisLog({ event: "outbound", actionId, outcome: "blocked", code }); throw e; };
+      const notApproved = () => block("source_not_approved", new JarvisRefusalError("unavailable", "JARVIS cannot do that: it would send information that is not approved for the AI model."));
+      if (sources.length === 0 || sources.some((s) => !rule.outbound.sources.includes(s))) notApproved();
+      // App-held data travels only in its own fields, and only with its own approved source. Neither can stand in for the other.
+      const facts = req.facts ?? [];
+      const recordText = (req.recordText ?? "").trim();
+      if ((facts.length > 0) !== sources.includes("sales_facts") || (recordText.length > 0) !== sources.includes("sales_record_text")) notApproved();
+      if ((facts.length > 0 || recordText) && req.inputTag !== null) notApproved();
+      const factLines: string[] = [];
+      for (const f of facts) {
+        // A label is fixed wording from the code; a value is a whole number (a count or a share), a date, a name or a screened title. Anything else is refused.
+        if (typeof f?.label !== "string" || !FACT_LABEL.test(f.label)) notApproved();
+        if (typeof f.value === "number" ? !Number.isInteger(f.value) || Math.abs(f.value) > 1_000_000 : typeof f.value !== "string" || f.value.length > 400 || /[<>]/.test(f.value)) notApproved();
+        factLines.push(`${f.label}: ${f.value}`);
       }
-      if (req.input.length > OUTBOUND_MAX_CHARS) {
-        jarvisLog({ event: "outbound", actionId, outcome: "blocked", code: "too_long" });
-        throw new JarvisRefusalError("invalid_input", "That is too long for JARVIS to check safely. Send a shorter version.");
-      }
+      const app = [factLines.join("\n"), recordText].filter(Boolean).join("\n");
+      if (req.input.length + app.length > OUTBOUND_MAX_CHARS) block("too_long", new JarvisRefusalError("invalid_input", "That is too long for JARVIS to check safely. Send a shorter version."));
       // A sharing restriction on the text is absolute and is checked HERE, for every capability: whatever mode was chosen, whatever was edited, and whether the marking
-      // sits in the message or in the earlier context, a text marked as not for external sharing makes no provider call.
-      if (wholeTextRestricted(req.input)) {
-        jarvisLog({ event: "outbound", actionId, outcome: "blocked", code: "sharing_restricted" });
-        throw new JarvisRefusalError("protected_content", `${RESTRICTED_TEXT_MESSAGE} Continue in Enginious OS yourself (for an enquiry, use the new-enquiry form).`);
+      // sits in the message, in the earlier context or in a record, a text marked as not for external sharing makes no provider call.
+      if (wholeTextRestricted(req.input) || (recordText && wholeTextRestricted(recordText)) || facts.some((f) => typeof f.value === "string" && wholeTextRestricted(f.value))) {
+        block("sharing_restricted", new JarvisRefusalError("protected_content", `${RESTRICTED_TEXT_MESSAGE} Continue in Enginious OS yourself (for an enquiry, use the new-enquiry form).`));
       }
-      const found = findProtectedContent(req.input);
+      const found = findProtectedContent(req.input, "user");
       if (found.length > 0) {
         for (const c of found) jarvisLog({ event: "outbound", actionId, outcome: "blocked", code: `protected_${c}` });
         throw outboundRefusal(found);
       }
+      // The app-held parts: each fact value and each line of record text on its own (a count on one line is not "a figure next to" a word on another).
+      const appFound = new Set<ProtectedCategory>();
+      for (const f of facts) if (typeof f.value === "string") for (const c of findProtectedContent(f.value, "app")) appFound.add(c);
+      for (const line of recordText.split("\n")) for (const c of findProtectedContent(line, "app")) appFound.add(c);
+      if (recordText) for (const c of findProtectedContent(recordText, "user")) appFound.add(c);
+      if (appFound.size > 0) {
+        for (const c of appFound) jarvisLog({ event: "outbound", actionId, outcome: "blocked", code: `app_${c}` });
+        throw new JarvisRefusalError("protected_content", "I did not send that to the AI model: a record it would have used contains details that stay inside Enginious OS. Open the record in Enginious OS instead.");
+      }
       jarvisLog({ event: "outbound", actionId, outcome: "sent", providerKind: provider.kind });
-      return provider.structured(req);
+      const { facts: _f, recordText: _r, ...rest } = req;
+      return provider.structured({ ...rest, input: app ? `${req.input}\n<enginious_os_data>\n${app}\n</enginious_os_data>` : req.input });
     },
   };
 }
 
 /** What a model answer must pass before it is shown: no protected details. Returns the categories found (empty = it may be shown). */
-export function screenResponse(text: string, actionId: string): ProtectedCategory[] {
-  const found = findProtectedContent(text);
+export function screenResponse(text: string, actionId: string, origin: Provenance = "user"): ProtectedCategory[] {
+  const found = findProtectedContent(text, origin);
   for (const c of found) jarvisLog({ event: "outbound", actionId, outcome: "response_withheld", code: `protected_${c}` });
   return found;
 }

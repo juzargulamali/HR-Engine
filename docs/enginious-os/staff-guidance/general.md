@@ -33,7 +33,7 @@ Decisions that are waiting for you are listed on the Approvals page. The page is
 - keywords: jarvis; assistant; what can you do; what can jarvis do; what are you; can jarvis; ai assistant; chatbot; who are you
 - links: Enquiries -> /sales/opportunities; Follow-ups -> /sales/follow-ups
 
-JARVIS is the Enginious OS assistant. Ask it a question, ask for a draft to copy, ask how something works, or ask for your overdue Sales follow-ups. In Sales & CRM it prepares enquiries, updates and meeting notes for you to review; nothing is saved until you confirm, and it never sends messages. The text you submit for a task is sent to Anthropic to prepare a draft; records in Enginious OS are never attached. It does not look up saved prices and does not handle pay, personal or medical details: use the screens.
+JARVIS is the Enginious OS assistant. Ask a question, ask for a draft to copy, ask how something works, or ask about your Sales work: follow-ups, open enquiries, what needs your attention, counts for a period. In Sales & CRM it prepares enquiries, updates and meeting notes for you to review; nothing is saved until you confirm, and it never sends messages. It does not read or show saved prices, values or budgets, and does not handle pay, personal or medical details: use the screens.
 
 1. Open JARVIS from the button on the right edge.
 2. Type what you need in plain words, or use one of the shortcuts.
@@ -50,3 +50,16 @@ JARVIS can remember a few writing preferences for you, such as short emails or B
 
 1. Say, for example, "Remember that I prefer short emails in British English".
 2. Open What JARVIS remembers in the JARVIS panel to see, change or delete a preference.
+
+## What JARVIS sends to Anthropic, and what stays here
+- id: jarvis-data-sent
+- area: general
+- status: published
+- keywords: what does jarvis send; anthropic; data sent; is it private; privacy; does jarvis share; can i paste prices; can i paste a budget; confidential; what stays inside
+- links: Enquiries -> /sales/opportunities; Proposals & quotes -> /sales/proposals
+
+The text you type or paste for a task is sent to Anthropic to prepare the answer, including working prices, budgets, rates and costs you supply. For a summary in words, JARVIS also sends counts, names, dates and screened enquiry text. Values, budgets, prices and estimates stored in Enginious OS are never sent, and lookups stay inside Enginious OS. Do not paste salaries, IDs, bank or medical details, financial statements or prepared estimates.
+
+1. Type working figures yourself when a draft needs them: JARVIS uses them as your assumptions.
+2. For a stored value, budget or estimate, open the enquiry or Proposals & quotes.
+3. Text marked confidential, NDA or internal only is not sent: use the screen instead.

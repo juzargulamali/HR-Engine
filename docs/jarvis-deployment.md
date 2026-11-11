@@ -251,6 +251,21 @@ Fictional data only; no real client data is entered or needed. **Writes stay off
 7. The Preview built from the verified `feat/jarvis` head, pointing at V2.
 8. Optionally, the targeted `service_role` revoke migration outlined above, applied before the test (independent of it, not during it).
 
+## Stages 2 to 4 (Sales lookups, summaries, scope wording): what a Preview or Production needs
+
+**Status: draft PR, not merged, not deployed. Nothing was applied, enabled or changed on hosted by Claude.**
+
+| Part | Needs | Notes |
+|---|---|---|
+| Lookups, summaries, scope draft, the provenance rule | **Only the app deployment.** No migration, no new environment variable, no new switch | They read existing tables through the person's own session under the existing policies |
+| Pausing | The existing `JARVIS_PAUSE` values: `lookups` pauses lookups and summaries; `chat` pauses the scope draft and the AI wording of a summary (its figures still show) | A redeploy applies a change, as before |
+| Daily limit | Unchanged. AI wording of a summary and a scope draft count one request each; lookups and figures count nothing | `JARVIS_DAILY_LIMIT` |
+| Pilot | Unchanged. Do not add users or companies for this | |
+
+**Rollback of the app behaviour:** set `JARVIS_PAUSE=lookups,chat` to stop the new capabilities at once (the Sales actions keep working), or revert the merge commit. There is no database object to remove.
+
+**Preview QA checklist for this work (signed-in pilot user, fictional or existing data; none of these steps creates a record):** (1) "What needs my attention today?": sections with reasons, the company, "as of ... (Dubai)", links that open the records; (2) "Show my follow-ups due today" and "the next 14 days": the dates in the filter line are right for today in Dubai; (3) "Show my open enquiries", then "the whole company instead", then "only Negotiation": the total and "Showing N of M" agree with the Enquiries screen for the same filter; (4) "Open enquiries for" and a client's name: that client's enquiries, or one question when several match; (5) "Which of my enquiries have had no activity for 14 days?": check two against their timelines; (6) "What is the status of" and a reference: no value or budget on the card; a reference from a company you have not selected says it cannot be found; (7) "How many enquiries did we win or lose last month?": the numbers match Sales reports for the same dates; no AI wording; (8) "Summarise this month's enquiries": the same numbers, then a block "In words (AI model)" that contains no number that is not above it and no money; press "Compare with the previous period"; say "show last month instead"; (9) on an enquiry that has a value and a budget note, "Summarise this enquiry and its next steps": the wording mentions neither; the card says what was left out; (10) "Draft the estimate scope for" and a reference: lines and questions, no amounts, a Copy button, no estimate created (check Proposals & quotes); (11) "Draft a reply to the client offering 85 per item, our cost is 60" in general chat: a draft that uses your figures; (12) select another company and repeat (3): only that company's records; (13) the earlier milestone 3 checks that touch routing: "How are you today?", a brief pasted in normal chat opens the review card, "confirmed" saves nothing.
+
 ## Release of PR #74 (2026-11-10): status and evidence
 
 Four facts, kept apart. "Owner-reported" means the owner ran the check and gave Claude the result on the date shown; Claude did not see the hosted system.

@@ -77,7 +77,7 @@ describe("ACCEPTANCE 4: protected values never reach the provider, a response, m
     `Draft an email to Sara confirming her salary is ${SALARY} from January`,
     `Write a note to HR: Omar's passport number is ${PASSPORT} and it expires soon`,
     "Draft a message saying Lina is on sick leave after her surgery",
-    "Summarise this: our cost price is AED 300,000 and the margin is 7%",
+    "Summarise this: turnover was AED 3,400,000 and net profit 7% last year",
     "Tidy this up: the general ledger and the balance sheet for the UAE company",
     "Rewrite this payslip text for Omar",
     "Draft an email: your reimbursement of AED 2,400 was approved",
@@ -199,8 +199,10 @@ describe("ACCEPTANCE 3: 'Show my overdue Sales follow-ups' returns only authoris
     const payload = JSON.stringify(simulatedProviderCalls[0]);
     for (const record of ["Call the agency", "52,000", "revised quote", uae.reference, uae.id, "Fictional harbour gala", "Fictional Enginious UAE LLC", "N4471923"]) expect(payload).not.toContain(record);
     expect(simulatedProviderCalls[0]!.sources).toEqual(["user_text"]);
-    // the rulebook has no source through which a record could be attached at all
-    expect(new Set(JARVIS_RULES.flatMap((r) => r.outbound.sources))).toEqual(new Set(["user_text", "conversation_context", "preferences"]));
+    // the general chat has no source through which a record could be attached; app-held data has exactly two typed sources, used only by the summary and the scope draft
+    expect(JARVIS_RULES.find((r) => r.id === "jarvis.sales.chat.reply")!.outbound.sources).toEqual(["user_text", "conversation_context", "preferences"]);
+    expect(new Set(JARVIS_RULES.flatMap((r) => r.outbound.sources))).toEqual(new Set(["user_text", "conversation_context", "preferences", "sales_facts", "sales_record_text"]));
+    expect(JARVIS_RULES.filter((r) => r.outbound.sources.some((s) => s === "sales_facts" || s === "sales_record_text")).map((r) => r.id).sort()).toEqual(["jarvis.sales.estimate.scope_draft", "jarvis.sales.summary.run"]);
   });
   it("two people with different access: each sees only their own, and a company the requester cannot see is refused as NO ACCESS, not as an empty list", async () => {
     expect(lookupOf(await a.send({ companyId: ID.co2, text: "Show my overdue Sales follow-ups" })).items.map((i) => i.id)).toEqual(["f5"]);

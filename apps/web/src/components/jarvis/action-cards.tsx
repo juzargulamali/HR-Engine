@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
-import type { ActionCard, ActionConfirmResult, ChatReplyCard, ConfirmationView, FollowUpsLookupCard, EnquiryStageCard, EnquiryUpdateCard, HelpAnswerCard, MeetingCard, MeetingValues, OrgRegisterCard, OrgRole, OrgValues, ReplyDraftCard, SendResult, StatusResult, UpdateForm } from "@/lib/jarvis/protocol";
+import type { ActionCard, ActionConfirmResult, ChatReplyCard, ConfirmationView, FollowUpsLookupCard, LookupSection, SalesLookupCard, SalesSummaryCard, ScopeDraftCard, EnquiryStageCard, EnquiryUpdateCard, HelpAnswerCard, MeetingCard, MeetingValues, OrgRegisterCard, OrgRole, OrgValues, ReplyDraftCard, SendResult, StatusResult, UpdateForm } from "@/lib/jarvis/protocol";
 
 /** What the cards of the other actions call. Each is a server action that re-authorises the person on every call; this file decides nothing about access. */
 export interface ActionApi {
@@ -36,6 +36,9 @@ export function ActionCardView(p: ActionCardProps) {
     case "help.answer": return <HelpAnswerView card={p.state.card} api={p.api} companyId={p.companyId} actionId={p.actionId} onState={p.onState} />;
     case "chat.reply": return <ChatReplyView card={p.state.card} />;
     case "lookup.followups": return <FollowUpsView card={p.state.card} />;
+    case "lookup.sales": return <SalesLookupView card={p.state.card} api={p.api} companyId={p.companyId} actionId={p.actionId} onState={p.onState} companyStale={p.companyStale} />;
+    case "summary.sales": return <SalesSummaryView card={p.state.card} api={p.api} companyId={p.companyId} actionId={p.actionId} onState={p.onState} companyStale={p.companyStale} />;
+    case "estimate.scope": return <ScopeDraftView card={p.state.card} />;
     case "org.register": return <OrgRegisterView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
     case "meeting.record": return <MeetingView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
     case "enquiry.stage": return <StageView {...p} card={p.state.card} confirmation={p.state.confirmation} />;
@@ -339,6 +342,137 @@ function FollowUpsView({ card }: { card: FollowUpsLookupCard }) {
       )}
       {card.truncated ? <p className="text-xs text-muted-foreground">Showing the {card.total} oldest. The Follow-ups page has them all.</p> : null}
       <p className="text-xs"><Link href={card.followUpsHref} className="font-medium underline underline-offset-2">Open Follow-ups</Link> <span className="text-muted-foreground">· Say &quot;show last month instead&quot; to change the dates.</span></p>
+    </section>
+  );
+}
+
+/** Rows of a lookup or a summary: records with links, or label and value pairs of one record. The heading states the exact total next to what is shown. */
+function SectionList({ s }: { s: LookupSection }) {
+  return (
+    <div className="space-y-1" data-testid="lookup-section" data-total={s.total}>
+      <p className="text-xs font-semibold">{s.heading}{s.facts ? "" : ` (${s.total})`}</p>
+      {s.note ? <p className="text-xs text-muted-foreground">{s.note}</p> : null}
+      {s.facts ? (
+        <dl className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-xs">
+          {s.rows.map((r) => <div key={r.id} className="contents"><dt className="text-muted-foreground">{r.primary}</dt><dd className="break-words">{r.secondary}</dd></div>)}
+        </dl>
+      ) : s.rows.length === 0 ? <p className="text-xs text-muted-foreground">None.</p> : (
+        <ul className="space-y-1.5">
+          {s.rows.map((r) => (
+            <li key={r.id} className="rounded-md border border-border px-2 py-1.5">
+              {r.href ? <Link href={r.href} className="font-medium underline underline-offset-2 break-words">{r.primary}</Link> : <p className="font-medium break-words">{r.primary}</p>}
+              {r.secondary ? <p className="text-xs text-muted-foreground break-words">{r.secondary}</p> : null}
+              {r.meta ? <p className="text-xs text-muted-foreground break-words">{r.meta}</p> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!s.facts && s.total > s.rows.length ? <p className="text-xs text-muted-foreground" data-testid="lookup-more">Showing {s.rows.length} of {s.total}. Open the screen to see them all.</p> : null}
+    </div>
+  );
+}
+const CardLinks = ({ links }: { links: { label: string; href: string }[] }) => (links.length === 0 ? null : <p className="flex flex-wrap gap-x-3 gap-y-1 text-xs">{links.map((l) => <Link key={l.href + l.label} href={l.href} className="font-medium underline underline-offset-2">{l.label}</Link>)}</p>);
+type ReadCardProps = { api: ActionApi; companyId: string; actionId: string; onState: (s: ActionCardState) => void; companyStale: boolean };
+/** Runs the same read action again with another descriptor (a choice, "add AI wording"). The server validates and authorises it like any request; a refusal is shown in words. */
+function useRerun(p: ReadCardProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function run(input: unknown) {
+    if (busy || p.companyStale) return;
+    setBusy(true); setError(null);
+    let r: SendResult;
+    try { r = await p.api.act({ companyId: p.companyId, actionId: p.actionId, input }); } catch { r = { ok: false, code: "unavailable", message: "That could not be loaded just now. Try again in a moment." }; }
+    setBusy(false);
+    if (r.ok && r.kind === "action") p.onState({ card: r.card, confirmation: r.confirmation }); else if (!r.ok) setError(r.message);
+  }
+  return { busy, error, run };
+}
+
+/** A Sales lookup: computed inside Enginious OS. Says whose records, which filters, when, how many exist and how many are shown; names any part that could not be read. */
+function SalesLookupView({ card, ...p }: { card: SalesLookupCard } & ReadCardProps) {
+  const { busy, error, run } = useRerun(p);
+  return (
+    <section aria-label={card.title} className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm" data-testid="jarvis-sales-lookup" data-kind={card.descriptor.kind} data-total={card.total ?? ""}>
+      <h3 className="font-heading text-sm font-semibold">{card.title}</h3>
+      <p className="text-xs text-muted-foreground" data-testid="lookup-scope">{[card.company.name, card.scope, ...card.filters, `as of ${card.asOfLabel}`].filter(Boolean).join(" · ")}</p>
+      {p.companyStale ? <Alert variant="destructive">You have selected another company since this was shown. Ask again for the company you want.</Alert> : null}
+      {card.unavailable.length > 0 ? <Alert variant="destructive" data-testid="lookup-partial">This answer is incomplete. I could not load: {card.unavailable.join("; ")}. Those parts are missing, not empty.</Alert> : null}
+      {card.note ? <p className="text-xs text-muted-foreground" data-testid="lookup-note">{card.note}</p> : null}
+      {card.empty ? <p data-testid="lookup-empty">{card.empty}</p> : null}
+      {card.choices.length > 0 ? <div className="flex flex-wrap gap-2" data-testid="lookup-choices">{card.choices.map((c) => <Button key={c.label} type="button" size="sm" variant="outline" disabled={busy || p.companyStale} onClick={() => void run(c.descriptor)}>{c.label}</Button>)}</div> : null}
+      {card.sections.map((s) => <SectionList key={s.heading} s={s} />)}
+      {error ? <Alert variant="destructive">{error}</Alert> : null}
+      <CardLinks links={card.links} />
+    </section>
+  );
+}
+
+/** A factual summary: the app's own figures with their definitions, then (only when it matched them) the AI model's wording, labelled, and its suggestions apart from the facts. */
+function SalesSummaryView({ card, ...p }: { card: SalesSummaryCard } & ReadCardProps) {
+  const { busy, error, run } = useRerun(p);
+  const d = card.descriptor;
+  return (
+    <section aria-label={card.title} className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm" data-testid="jarvis-sales-summary" data-kind={d.kind}>
+      <h3 className="font-heading text-sm font-semibold">{card.title}</h3>
+      <p className="text-xs text-muted-foreground" data-testid="summary-scope">{[card.company.name, card.scope, card.period, card.comparedWith ? `compared with ${card.comparedWith}` : null, `as of ${card.asOfLabel}`].filter(Boolean).join(" · ")}</p>
+      {p.companyStale ? <Alert variant="destructive">You have selected another company since this was shown. Ask again for the company you want.</Alert> : null}
+      {card.unavailable.length > 0 ? <Alert variant="destructive" data-testid="summary-partial">This summary is incomplete. I could not load: {card.unavailable.join("; ")}. Those parts are missing, not zero.</Alert> : null}
+      {card.metrics.length > 0 ? (
+        <dl className="space-y-1" data-testid="summary-metrics">
+          {card.metrics.map((m) => (
+            <div key={m.label} className="rounded-md border border-border px-2 py-1.5">
+              <dt className="text-xs text-muted-foreground">{m.label}</dt>
+              <dd><span className="font-semibold" data-testid="metric-value">{m.value}</span>{typeof m.previous === "number" ? <span className="text-xs text-muted-foreground"> · before: {m.previous} ({m.value === m.previous ? "no change" : `${m.value > m.previous ? "+" : ""}${m.value - m.previous}`})</span> : null}</dd>
+              <dd className="text-xs text-muted-foreground">{m.definition}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {card.groups.map((g) => (
+        <div key={g.heading} className="space-y-0.5" data-testid="summary-group">
+          <p className="text-xs font-semibold">{g.heading}</p>
+          <p className="text-xs text-muted-foreground">{g.definition}</p>
+          {g.rows.length === 0 ? <p className="text-xs text-muted-foreground">None.</p> : <ul className="text-xs">{g.rows.map((r) => <li key={r.label} className="flex justify-between gap-2"><span className="break-words">{r.label}</span><span className="font-medium">{r.count}</span></li>)}</ul>}
+          {g.more > 0 ? <p className="text-xs text-muted-foreground">and {g.more} more.</p> : null}
+        </div>
+      ))}
+      {card.narrative ? (
+        <div className="space-y-1 rounded-md bg-secondary/60 px-2 py-1.5" data-testid="summary-narrative">
+          <p className="text-xs font-semibold">In words (AI model)</p>
+          <p className="whitespace-pre-wrap break-words">{card.narrative}</p>
+          {card.suggestions.length > 0 ? <><p className="text-xs font-semibold">Suggestions (not recorded facts)</p><ul className="list-disc pl-4 text-xs">{card.suggestions.map((x) => <li key={x}>{x}</li>)}</ul></> : null}
+        </div>
+      ) : null}
+      {card.narrativeNote ? <p className="text-xs text-muted-foreground" data-testid="summary-narrative-note">{card.narrativeNote}</p> : null}
+      {card.supporting.map((s) => <SectionList key={s.heading} s={s} />)}
+      {card.coverage.length > 0 ? <ul className="list-disc pl-4 text-xs text-muted-foreground" data-testid="summary-coverage">{card.coverage.map((x) => <li key={x}>{x}</li>)}</ul> : null}
+      {d.kind === "period" ? (
+        <div className="flex flex-wrap gap-2">
+          {!d.compare ? <Button type="button" size="sm" variant="outline" disabled={busy || p.companyStale} onClick={() => void run({ ...d, compare: true })}>Compare with the previous period</Button> : null}
+          {!card.narrative && !d.narrative ? <Button type="button" size="sm" variant="outline" disabled={busy || p.companyStale} onClick={() => void run({ ...d, narrative: true })}>Put it in words (uses the AI model)</Button> : null}
+        </div>
+      ) : null}
+      {error ? <Alert variant="destructive">{error}</Alert> : null}
+      <CardLinks links={card.links} />
+    </section>
+  );
+}
+
+/** Scope wording for an estimate: a draft to copy into the Estimate screen. No prices, nothing saved. */
+function ScopeDraftView({ card }: { card: ScopeDraftCard }) {
+  const [copied, setCopied] = useState<"idle" | "yes" | "no">("idle");
+  async function copy() { try { await navigator.clipboard.writeText(card.text); setCopied("yes"); } catch { setCopied("no"); } }
+  return (
+    <section aria-label="Scope draft" className="space-y-2 rounded-lg bg-secondary/60 px-3 py-2 text-sm" data-testid="jarvis-scope-draft">
+      <h3 className="font-heading text-sm font-semibold">Scope wording{card.enquiry ? ` for ${card.enquiry.reference}` : ""} (draft, no prices)</h3>
+      <p className="whitespace-pre-wrap break-words" data-testid="scope-text">{card.text}</p>
+      {card.questions.length > 0 ? <><p className="text-xs font-semibold">Questions to ask</p><ul className="list-disc pl-4 text-xs" data-testid="scope-questions">{card.questions.map((q) => <li key={q}>{q}</li>)}</ul></> : null}
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <Button type="button" size="sm" variant="outline" onClick={() => void copy()} data-testid="scope-copy">{copied === "yes" ? "Copied" : "Copy"}</Button>
+        {copied === "no" ? <span>Could not copy: select the text instead.</span> : null}
+      </div>
+      <p className="text-xs text-muted-foreground" data-testid="scope-note">{card.note}</p>
+      <CardLinks links={card.links} />
     </section>
   );
 }

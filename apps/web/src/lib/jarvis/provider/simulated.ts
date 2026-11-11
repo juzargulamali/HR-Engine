@@ -145,6 +145,28 @@ function chatAnswer(input: string): Record<string, unknown> {
   return out;
 }
 
+/** How the stand-in answers a summary or a scope request, so tests can prove what the server does with a wrong, money-bearing or unusable answer. */
+export const simulatedBehaviour: { summary: "ok" | "wrong_number" | "money" | "malformed" | "delivered"; scope: "ok" | "money" } = { summary: "ok", scope: "ok" };
+
+/** Wording of the facts it was given: it repeats the fact lines it received (so a test can see exactly what arrived) and never adds a number of its own, unless told to. */
+function salesSummary(input: string): Record<string, unknown> {
+  const data = /<enginious_os_data>\n([\s\S]*?)\n<\/enginious_os_data>/.exec(input)?.[1] ?? "";
+  const facts = data.split("\n").filter((l) => /^[A-Za-z][A-Za-z ,()'&/%-]*: /.test(l)).slice(0, 8);
+  if (simulatedBehaviour.summary === "malformed") return { nothing: true };
+  let summary = `In short: ${facts.join("; ")}.`;
+  if (simulatedBehaviour.summary === "wrong_number") summary += " That is 9871 more than expected.";
+  if (simulatedBehaviour.summary === "money") summary += " The pipeline is worth AED 450,000.";
+  if (simulatedBehaviour.summary === "delivered") summary += " All of them were delivered.";
+  return { summary, suggestions: ["Review the open follow-ups."], execute: true, role: "admin" };
+}
+function estimateScope(input: string): Record<string, unknown> {
+  const req = /<request>\n([\s\S]*?)\n<\/request>/.exec(input)?.[1] ?? "";
+  const data = /<enginious_os_data>\n([\s\S]*?)\n<\/enginious_os_data>/.exec(input)?.[1] ?? "";
+  const lines = [`Scope for: ${req.split("\n")[0]!.slice(0, 120)}`, ...data.split("\n").filter((l) => l.startsWith("Requested technology: ")).map((l) => `- ${l.slice("Requested technology: ".length)}`), "- Software development and on-site set-up", "Excluded: furniture and stand build"];
+  if (simulatedBehaviour.scope === "money") lines.push("- LED wall hire at AED 12,000 per day");
+  return { draft: lines.join("\n"), questions: ["Which reader model will be supplied?"] };
+}
+
 export function createSimulatedProvider(): JarvisProvider {
   return {
     kind: "simulated",
@@ -156,6 +178,8 @@ export function createSimulatedProvider(): JarvisProvider {
       if (req.task === "chat_reply") return chatAnswer(req.input);
       if (req.task === "enquiry_update") return enquiryUpdate(req.input);
       if (req.task === "meeting_notes") return meetingNotes(req.input, req.instructions);
+      if (req.task === "sales_summary") return salesSummary(req.input);
+      if (req.task === "estimate_scope") return estimateScope(req.input);
       if (req.task !== "enquiry_fields") throw new JarvisProviderError("malformed");
       const out = extractEnquiry(req.input);
       if (/ignore (all )?previous instructions/i.test(req.input)) {

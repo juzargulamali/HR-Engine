@@ -102,6 +102,8 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
   const [busy, setBusy] = useState(false);
   const turnsRef = useRef<ChatTurn[]>([]);
   const lookupRef = useRef<{ period: LookupPeriod } | null>(null);
+  /** The question behind the Sales lookup or summary last shown: sent back so "show last month instead" means something. A question only; the server re-reads everything. */
+  const queryRef = useRef<{ kind: "lookup" | "summary"; descriptor: unknown } | null>(null);
   const phone = useIsPhone();
   const panelRef = useRef<HTMLDivElement>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
@@ -170,7 +172,7 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
     if (!forced) push({ role: "user", text: t.length > 160 ? `${t.slice(0, 160)}… (${t.length} characters)` : t });
     setText("");
     try {
-      const r = await api.send({ companyId, text: t, intent: forced ? forced.intent : mode?.key ?? null, enquiryId: chip?.id ?? null, context: { turns: turnsRef.current, lastLookup: lookupRef.current }, briefOutbound: forced?.briefOutbound ?? null, screen: screenRef.current });
+      const r = await api.send({ companyId, text: t, intent: forced ? forced.intent : mode?.key ?? null, enquiryId: chip?.id ?? null, context: { turns: turnsRef.current, lastLookup: lookupRef.current, lastQuery: queryRef.current }, briefOutbound: forced?.briefOutbound ?? null, screen: screenRef.current });
       if (!r.ok) push({ role: "jarvis", kind: "text", tone: "error", text: r.message });
       else if (r.kind === "help") push({ role: "jarvis", kind: "help", help: r.help });
       else if (r.kind === "not_available") push({ role: "jarvis", kind: "text", tone: "info", text: `${r.title}: ${r.reason}` });
@@ -181,7 +183,8 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
       else if (r.kind === "memory") push({ role: "jarvis", kind: "memory", text: r.text, preferences: r.preferences });
       else if (r.kind === "action") {
         if (r.card.kind === "chat.reply") turnsRef.current = [...turnsRef.current, { role: "user" as const, text: t }, { role: "jarvis" as const, text: r.card.text }].slice(-MAX_TURNS);
-        lookupRef.current = r.card.kind === "lookup.followups" ? { period: r.card.period } : lookupRef.current;
+        lookupRef.current = r.card.kind === "lookup.followups" ? { period: r.card.period } : r.card.kind === "lookup.sales" || r.card.kind === "summary.sales" ? null : lookupRef.current;
+        queryRef.current = r.card.kind === "lookup.sales" ? { kind: "lookup", descriptor: r.card.descriptor } : r.card.kind === "summary.sales" ? { kind: "summary", descriptor: r.card.descriptor } : r.card.kind === "lookup.followups" ? null : queryRef.current;
         push({ role: "jarvis", kind: "action", actionId: r.actionId, state: { card: r.card, confirmation: r.confirmation }, companyId, rev: 0 });
       }
       else push({ role: "jarvis", kind: "card", state: { card: r.card, confirmation: r.confirmation }, companyId, rev: 0 });
@@ -362,11 +365,11 @@ export function JarvisLauncher({ companies, writes, maxInputChars, enabledAction
               <div className="flex items-center justify-between gap-2">
                 <p className={`text-[11px] ${text.length > maxInputChars ? "text-destructive" : "text-muted-foreground"}`}>{text.length > 0 ? `${text.length} / ${maxInputChars}` : "Ctrl+Enter sends."}</p>
                 <div className="flex gap-2">
-                  {messages.length > 0 ? <Button type="button" size="sm" variant="ghost" aria-label="Clear conversation" onClick={() => { setMessages([]); setNotice(null); turnsRef.current = []; lookupRef.current = null; }} disabled={busy}>Clear</Button> : null}
+                  {messages.length > 0 ? <Button type="button" size="sm" variant="ghost" aria-label="Clear conversation" onClick={() => { setMessages([]); setNotice(null); turnsRef.current = []; lookupRef.current = null; queryRef.current = null; }} disabled={busy}>Clear</Button> : null}
                   <Button type="submit" size="sm" disabled={busy || text.trim() === ""}>Send</Button>
                 </div>
               </div>
-              <p className="text-[11px] text-muted-foreground"><span data-testid="jarvis-anthropic-notice">The text you submit for this task is sent to Anthropic to prepare a draft.</span> Lookups and guidance stay inside Enginious OS, and records are never attached. Do not paste salaries, personal IDs, bank or medical details, or internal costings: JARVIS will not send them. Nothing is saved until you confirm a review card, JARVIS does not send emails, and this conversation is not stored.</p>
+              <p className="text-[11px] text-muted-foreground"><span data-testid="jarvis-anthropic-notice">The text you submit for this task is sent to Anthropic to prepare a draft.</span> Lookups and guidance stay inside Enginious OS. A summary in words, or scope wording for an enquiry, sends counts, names, dates and screened enquiry text; values, budgets, prices and estimates held in Enginious OS are never sent. Working figures you type yourself go with your text. Do not paste salaries, personal IDs, bank or medical details, financial statements or prepared estimates: JARVIS will not send them. Nothing is saved until you confirm a review card, JARVIS does not send emails, and this conversation is not stored.</p>
             </form>
           </div>
         </>

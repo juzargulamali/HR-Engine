@@ -56,7 +56,10 @@ afterEach(() => { vi.restoreAllMocks(); });
 
 describe("the callers of provider.structured", () => {
   it("the table covers EVERY registered action that uses the provider (a new caller must be added to this suite)", () => {
-    expect(listJarvisActions().filter((a) => a.usesProvider).map((a) => a.id).sort()).toEqual(callers.map((c) => c.id).sort());
+    // The Sales summary and the scope draft send app-held facts through their own request fields and (the summary) fall back to the app's figures on a provider failure,
+    // so their request shape, payload and failure behaviour are tested in sales-queries.test.ts instead of this table.
+    const ELSEWHERE = ["jarvis.sales.summary.run", "jarvis.sales.estimate.scope_draft"];
+    expect(listJarvisActions().filter((a) => a.usesProvider && !ELSEWHERE.includes(a.id)).map((a) => a.id).sort()).toEqual(callers.map((c) => c.id).sort());
   });
 });
 

@@ -26,10 +26,52 @@ Sales & CRM follows each enquiry from the first message to the handover. An enqu
 - links: Follow-ups -> /sales/follow-ups
 - screens: /sales/follow-ups
 
-A follow-up is overdue once its due time has passed and it is still open. The Follow-ups page groups them at the top. In JARVIS you can also type "Show my overdue Sales follow-ups" to list your own for the selected company.
+A follow-up is overdue once its due time has passed and it is still open. The Follow-ups page groups them at the top. In JARVIS you can also type "Show my overdue Sales follow-ups" to list your own for the selected company, or "What needs my attention today?" for everything.
 
 1. Open Follow-ups in Sales. Overdue items are listed first.
 2. Open the enquiry from the item, do the work, then complete or reschedule the follow-up.
+
+## Ask JARVIS about your follow-ups and enquiries
+- id: sales-jarvis-lookups
+- area: sales
+- status: published
+- keywords: what needs my attention; attention today; my priorities; follow-ups due today; upcoming follow-ups; my open enquiries; open enquiries for a client; enquiries with no activity; quiet enquiries; status of an enquiry; ask jarvis about enquiries
+- links: Follow-ups -> /sales/follow-ups; Enquiries -> /sales/opportunities
+
+In JARVIS you can ask about your Sales work for the selected company: what needs your attention today, follow-ups due today or coming up, your open enquiries (or everyone's), open enquiries for a client, agency or event, enquiries with no recorded activity, and the status of one enquiry. The answer shows whose records, the filters, the time and the exact total. It stays inside Enginious OS and never shows values or budgets.
+
+1. Open JARVIS and choose the company at the top of the panel.
+2. Type the question, for example "What needs my attention today?" or "Open enquiries for" and the client's name.
+3. Refine it in a few words: "the whole company instead", "only Negotiation", "make it 30 days".
+4. Open a record from its link to act on it.
+
+## Ask JARVIS for a Sales summary
+- id: sales-jarvis-summaries
+- area: sales
+- status: published
+- keywords: summarise enquiries; summary of this month; how many enquiries; how many did we win; won and lost; win rate; which events have the most enquiries; compare with last month; what changed; summarise this enquiry; next steps for an enquiry; trends
+- links: Reports -> /sales/reports; Enquiries -> /sales/opportunities
+
+JARVIS counts enquiries for a period: created, won, lost, the share won, by event, by source and recorded lost reasons, and can compare with the previous period. Every figure is counted by Enginious OS and comes with its definition and dates. Counts only: no values. Ask for it "in words" and the AI model words the same figures; if its wording does not match them, you see the figures alone. A won enquiry is not a delivered project.
+
+1. Ask, for example, "How many enquiries did we win or lose last month?" or "Summarise this month's enquiries".
+2. Change it in a few words: "show last month instead", "compare with the previous period".
+3. For one enquiry, ask "Summarise" with its reference to get its facts and suggested next steps.
+4. Open Reports for values and the full report.
+
+## Draft the scope wording for an estimate with JARVIS
+- id: sales-jarvis-scope-draft
+- area: sales
+- status: published
+- keywords: estimate scope; scope of work; draft estimate lines; line descriptions; estimate wording; deliverables for an estimate; quotation scope; help with an estimate
+- links: Proposals & quotes -> /sales/proposals; Enquiries -> /sales/opportunities
+
+JARVIS can draft the scope wording for an estimate: line descriptions, quantities, what the client supplies, dependencies, exclusions and questions to ask. It is a draft to copy. It has no prices, reads no saved estimate or price, and does not create, approve or send an estimate: you enter amounts in the Estimate screen.
+
+1. Ask "Draft the estimate scope for" and the enquiry's reference, or paste the requirements.
+2. Check the draft and the questions, then press Copy.
+3. Open the enquiry's estimate and paste the lines you want.
+4. Enter quantities and prices there and finish the estimate as usual.
 
 ## Add an enquiry
 - id: sales-add-enquiry

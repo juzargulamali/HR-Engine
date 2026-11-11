@@ -13,7 +13,7 @@ import { LIMITS } from "./enquiry-values";
  *   - a brief restricted AS A WHOLE ("External sharing prohibited", "Internal use only", "NDA", "Confidential": `wholeTextRestricted`, enforced again at the outbound gate):
  *     no provider call in any version; the person uses the new-enquiry form; an edited text does not lift the restriction;
  *   - genuinely restricted material inside an otherwise usable brief (employee documents, salaries, medical records, personal IDs, bank details, credentials, company
- *     financial statements, internal costing and margins): the brief is NOT sent automatically. The person is shown a clean excerpt (the brief without those sentences) to
+ *     financial statements and results, a prepared estimate or quotation document): the brief is NOT sent automatically. The person is shown a clean excerpt (the brief without those sentences) to
  *     check, edit and send, or continues with the form;
  *   - email addresses and phone numbers: replaced by "[contact withheld]" (they are not needed to prepare an enquiry).
  *
@@ -74,7 +74,7 @@ function readBudget(lines: string[]): { budget: PreparedBrief["budget"]; unclear
       const before = whole.slice(Math.max(0, hit.index! - 30), hit.index!).split(/[.!?]\s/).pop()!;
       const internal = /\b(?:internal|our|target|cost|crew|production)\s+(?:\w+\s+)?$/i.test(before);
       const isClient = !internal && (/\b(?:end[\s-]?client|client|customer|brand)(?:['’]s)?\s+(?:total\s+|overall\s+|approved\s+|maximum\s+|max\s+)?$/i.test(before) || /\btheir\s+(?:total\s+|overall\s+|approved\s+)?$/i.test(before) || /^budget\s+(?:from|of|given\s+by|set\s+by)\s+the\s+(?:end\s+)?client\b/i.test(l));
-      // An internal figure is never the client's budget and its wording is not copied to the card (it is internal costing).
+      // An internal figure is never the client's budget and its wording is not copied to the budget note of the card (it goes out with the brief as the person wrote it).
       if (internal) { unclear = true; continue; }
       wording.push(`${before.trim() ? `${before.trim()} ` : ""}${l}`.trim());
       if (!isClient || RANGE.test(rest)) { unclear = true; continue; }

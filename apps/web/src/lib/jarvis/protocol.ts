@@ -270,7 +270,12 @@ export interface ChatReplyCard {
 
 /** The bounded context the panel sends with a message: the last few turns of the general conversation, and whether a lookup was just shown. Never stored; never treated as permission. */
 export interface ChatTurn { role: "user" | "jarvis"; text: string }
-export interface SendContext { turns?: ChatTurn[]; lastLookup?: { period: LookupPeriod } | null }
+export interface SendContext {
+  turns?: ChatTurn[];
+  lastLookup?: { period: LookupPeriod } | null;
+  /** The question behind the Sales lookup or summary the panel last showed (a descriptor, never rows). The server validates it again and re-reads everything. */
+  lastQuery?: { kind: "lookup"; descriptor: unknown } | { kind: "summary"; descriptor: unknown } | null;
+}
 
 /** `jarvis.sales.followups.overdue`: computed and shown inside Enginious OS; nothing goes to the provider. An empty `items` means NO MATCHING RECORDS (a failed read and no access are refusals, never an empty list). */
 export type LookupPeriod = "all" | "last_month" | "this_month" | "last_7_days" | "last_30_days";
@@ -290,4 +295,70 @@ export interface FollowUpsLookupCard {
   followUpsHref: string;
 }
 
-export type ActionCard = ReplyDraftCard | HelpAnswerCard | OrgRegisterCard | EnquiryUpdateCard | EnquiryStageCard | MeetingCard | ChatReplyCard | FollowUpsLookupCard;
+/** One row of a Sales lookup: what it is, where it stands, and the link to open it. Built by the server from an explicit column list with no financial column. */
+export interface LookupRow { id: string; primary: string; secondary: string | null; meta: string | null; href: string | null }
+/** `total` is the exact number that match; `rows` may be fewer (the display cap). `facts`: label and value pairs of ONE record rather than a list of records. */
+export interface LookupSection { heading: string; note?: string; total: number; rows: LookupRow[]; facts?: boolean }
+export type LookupDescriptor = import("./sales/lookup").LookupDescriptor;
+/** A Sales lookup, computed and shown inside Enginious OS (no provider call). */
+export interface SalesLookupCard {
+  kind: "lookup.sales";
+  title: string;
+  company: { id: string; name: string };
+  /** Whose records: the person's own, or everyone's in the company (as the matching screen shows). */
+  scope: string;
+  filters: string[];
+  asOf: string;
+  asOfLabel: string;
+  /** The exact number of matching records (counted separately from the rows shown); null for a single record or a question. */
+  total: number | null;
+  shown: number;
+  sections: LookupSection[];
+  /** Parts that could not be read: the answer is PARTIAL and says so. Never shown as zero. */
+  unavailable: string[];
+  note: string | null;
+  /** Set only when the lookup succeeded and nothing matched. */
+  empty: string | null;
+  /** One short question: which organisation or event did you mean? Each choice is a complete descriptor to run. */
+  choices: { label: string; descriptor: LookupDescriptor }[];
+  links: ReplyLink[];
+  /** The validated question this card answers; the panel sends it back for a follow-up ("show the whole company instead"). It is a question, never permission. */
+  descriptor: LookupDescriptor;
+}
+export type SummaryDescriptor = import("./sales/summary").SummaryDescriptor;
+export interface SummaryMetric { label: string; value: number; previous?: number | null; definition: string; href?: string | null }
+/** A factual Sales summary. Every number is computed by the app; `narrative` (when present) is the AI model's wording of those same facts and is labelled as such. */
+export interface SalesSummaryCard {
+  kind: "summary.sales";
+  title: string;
+  company: { id: string; name: string };
+  scope: string;
+  /** The resolved period in words with its dates (Dubai calendar), and the comparison period when one was asked for. */
+  period: string | null;
+  comparedWith: string | null;
+  asOfLabel: string;
+  metrics: SummaryMetric[];
+  /** Grouped counts (by event, by recorded lost reason, by source): each list states what it counts. */
+  groups: { heading: string; definition: string; rows: { label: string; count: number }[]; more: number }[];
+  /** A bounded list of supporting records, with links. */
+  supporting: LookupSection[];
+  coverage: string[];
+  unavailable: string[];
+  /** The model's wording of the facts above, or null (not asked for, paused, failed, or it did not match the facts). */
+  narrative: string | null;
+  /** Suggestions the model made, shown apart from the recorded facts. */
+  suggestions: string[];
+  narrativeNote: string | null;
+  links: ReplyLink[];
+  descriptor: SummaryDescriptor;
+}
+/** A scope-only draft for an estimate: wording, quantities, dependencies, exclusions and questions. No prices; nothing is saved. */
+export interface ScopeDraftCard {
+  kind: "estimate.scope";
+  text: string;
+  questions: string[];
+  enquiry: { reference: string; title: string; href: string } | null;
+  note: string;
+  links: ReplyLink[];
+}
+export type ActionCard = ReplyDraftCard | HelpAnswerCard | OrgRegisterCard | EnquiryUpdateCard | EnquiryStageCard | MeetingCard | ChatReplyCard | FollowUpsLookupCard | SalesLookupCard | SalesSummaryCard | ScopeDraftCard;
