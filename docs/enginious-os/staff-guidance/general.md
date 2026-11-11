@@ -63,3 +63,4 @@ The text you type or paste for a task is sent to Anthropic, including working pr
 1. Type working figures yourself when a draft needs them: JARVIS uses them as your assumptions.
 2. For an enquiry's value, budget or estimate, open the enquiry or Proposals & quotes: JARVIS does not read those fields.
 3. Text marked confidential, NDA or internal only is not sent: use the screen instead.
+4. Press What gets shared under the message box in JARVIS to read the full list.

@@ -138,7 +138,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "steps": [
       "Type working figures yourself when a draft needs them: JARVIS uses them as your assumptions.",
       "For an enquiry's value, budget or estimate, open the enquiry or Proposals & quotes: JARVIS does not read those fields.",
-      "Text marked confidential, NDA or internal only is not sent: use the screen instead."
+      "Text marked confidential, NDA or internal only is not sent: use the screen instead.",
+      "Press What gets shared under the message box in JARVIS to read the full list."
     ],
     "links": [
       {

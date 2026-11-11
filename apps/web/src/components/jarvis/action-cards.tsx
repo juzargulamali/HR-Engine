@@ -371,7 +371,7 @@ function SectionList({ s }: { s: LookupSection }) {
     </div>
   );
 }
-const CardLinks = ({ links }: { links: { label: string; href: string }[] }) => (links.length === 0 ? null : <p className="flex flex-wrap gap-x-3 gap-y-1 text-xs">{links.map((l) => <Link key={l.href + l.label} href={l.href} className="font-medium underline underline-offset-2">{l.label}</Link>)}</p>);
+const CardLinks = ({ links }: { links: { label: string; href: string }[] }) => (links.length === 0 ? null : <p className="flex flex-wrap gap-x-3 gap-y-1 border-t border-border pt-2 text-xs" data-testid="card-links">{links.map((l) => <Link key={l.href + l.label} href={l.href} className="font-medium text-primary underline underline-offset-2">{l.label} →</Link>)}</p>);
 type ReadCardProps = { api: ActionApi; companyId: string; actionId: string; onState: (s: ActionCardState) => void; companyStale: boolean };
 /** Runs the same read action again with another descriptor (a choice, "add AI wording"). The server validates and authorises it like any request; a refusal is shown in words. */
 function useRerun(p: ReadCardProps) {
@@ -388,18 +388,21 @@ function useRerun(p: ReadCardProps) {
   return { busy, error, run };
 }
 
-/** A Sales lookup: computed inside Enginious OS. Says whose records, which filters, when, how many exist and how many are shown; names any part that could not be read. */
+/** A Sales lookup: computed inside Enginious OS. The result comes first (title and exact count), then one compact line of scope, filters and time; a partial read or a limited scan is said next to the result. */
 function SalesLookupView({ card, ...p }: { card: SalesLookupCard } & ReadCardProps) {
   const { busy, error, run } = useRerun(p);
   return (
     <section aria-label={card.title} className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm" data-testid="jarvis-sales-lookup" data-kind={card.descriptor.kind} data-total={card.total ?? ""}>
-      <h3 className="font-heading text-sm font-semibold">{card.title}</h3>
-      <p className="text-xs text-muted-foreground" data-testid="lookup-scope">{[card.company.name, card.scope, ...card.filters, `as of ${card.asOfLabel}`].filter(Boolean).join(" · ")}</p>
+      <h3 className="flex flex-wrap items-baseline gap-x-2 font-heading text-sm font-semibold" data-testid="lookup-title">
+        <span className="break-words">{card.title}</span>
+        {card.total !== null ? <span className="rounded-md bg-secondary px-1.5 py-0.5 text-xs font-semibold" data-testid="lookup-count">{card.total}</span> : null}
+      </h3>
+      <p className="text-xs text-muted-foreground break-words" data-testid="lookup-scope">{[card.company.name, card.scope, ...card.filters, `as of ${card.asOfLabel}`].filter(Boolean).join(" · ")}</p>
       {p.companyStale ? <Alert variant="destructive">You have selected another company since this was shown. Ask again for the company you want.</Alert> : null}
       {card.unavailable.length > 0 ? <Alert variant="destructive" data-testid="lookup-partial">This answer is incomplete. I could not load: {card.unavailable.join("; ")}. Those parts are missing, not empty.</Alert> : null}
-      {card.note ? <p className="text-xs text-muted-foreground" data-testid="lookup-note">{card.note}</p> : null}
+      {card.note ? <p className="rounded-md border border-border bg-secondary/60 px-2 py-1 text-xs" data-testid="lookup-note">{card.note}</p> : null}
       {card.empty ? <p data-testid="lookup-empty">{card.empty}</p> : null}
-      {card.choices.length > 0 ? <div className="flex flex-wrap gap-2" data-testid="lookup-choices">{card.choices.map((c) => <Button key={c.label} type="button" size="sm" variant="outline" disabled={busy || p.companyStale} onClick={() => void run(c.descriptor)}>{c.label}</Button>)}</div> : null}
+      {card.choices.length > 0 ? <div className="flex flex-wrap gap-2" data-testid="lookup-choices">{card.choices.map((c) => <Button key={c.label} type="button" size="sm" variant="outline" className="h-auto min-h-8 max-w-full whitespace-normal py-1 text-left" disabled={busy || p.companyStale} onClick={() => void run(c.descriptor)}>{c.label}</Button>)}</div> : null}
       {card.sections.map((s) => <SectionList key={s.heading} s={s} />)}
       {error ? <Alert variant="destructive">{error}</Alert> : null}
       <CardLinks links={card.links} />
@@ -407,23 +410,37 @@ function SalesLookupView({ card, ...p }: { card: SalesLookupCard } & ReadCardPro
   );
 }
 
-/** A factual summary: the app's own figures with their definitions; "in words" written by the app for a period (or a checked AI summary for one enquiry); the AI model's suggestions apart from the facts. */
+/** The result of a summary in one line, from the figures the server computed (nothing is calculated here): "5 created · 2 won · 1 lost · 67% won". */
+function summaryHeadline(card: SalesSummaryCard): string | null {
+  const v = (label: string) => card.metrics.find((m) => m.label === label)?.value;
+  const created = v("Enquiries created"), won = v("Won"), lost = v("Lost"), share = v("Share won of those closed (%)");
+  const parts = [typeof created === "number" ? `${created} created` : null, typeof won === "number" ? `${won} won` : null, typeof lost === "number" ? `${lost} lost` : null,
+    typeof share === "number" ? `${share}% won` : typeof won === "number" && typeof lost === "number" ? "no share won (nothing closed)" : null].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/**
+ * A factual summary. The result leads (one line of the app's own figures), then the company and period; a partial read stays next to it. Definitions and the notes on how
+ * things are counted are one disclosure away ("How this is counted"). "In words" for a period is written by the app; the AI model's suggestions are in their own block.
+ */
 function SalesSummaryView({ card, ...p }: { card: SalesSummaryCard } & ReadCardProps) {
   const { busy, error, run } = useRerun(p);
   const d = card.descriptor;
+  const headline = summaryHeadline(card);
+  const counted = card.metrics.length > 0 || card.coverage.length > 0;
   return (
     <section aria-label={card.title} className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm" data-testid="jarvis-sales-summary" data-kind={d.kind}>
       <h3 className="font-heading text-sm font-semibold">{card.title}</h3>
-      <p className="text-xs text-muted-foreground" data-testid="summary-scope">{[card.company.name, card.scope, card.period, card.comparedWith ? `compared with ${card.comparedWith}` : null, `as of ${card.asOfLabel}`].filter(Boolean).join(" · ")}</p>
+      {headline ? <p className="text-base font-semibold leading-snug break-words" data-testid="summary-headline">{headline}</p> : null}
+      <p className="text-xs text-muted-foreground break-words" data-testid="summary-scope">{[card.company.name, card.period, card.comparedWith ? `compared with ${card.comparedWith}` : null, card.scope, `as of ${card.asOfLabel}`].filter(Boolean).join(" · ")}</p>
       {p.companyStale ? <Alert variant="destructive">You have selected another company since this was shown. Ask again for the company you want.</Alert> : null}
       {card.unavailable.length > 0 ? <Alert variant="destructive" data-testid="summary-partial">This summary is incomplete. I could not load: {card.unavailable.join("; ")}. Those parts are missing, not zero.</Alert> : null}
       {card.metrics.length > 0 ? (
-        <dl className="space-y-1" data-testid="summary-metrics">
+        <dl className="flex flex-wrap gap-1.5" data-testid="summary-metrics">
           {card.metrics.map((m) => (
-            <div key={m.label} className="rounded-md border border-border px-2 py-1.5">
-              <dt className="text-xs text-muted-foreground">{m.label}</dt>
+            <div key={m.label} className="min-w-0 rounded-md border border-border px-2 py-1">
+              <dt className="text-[11px] text-muted-foreground">{m.label}</dt>
               <dd><span className="font-semibold" data-testid="metric-value">{m.value}</span>{typeof m.previous === "number" ? <span className="text-xs text-muted-foreground"> · before: {m.previous} ({m.value === m.previous ? "no change" : `${m.value > m.previous ? "+" : ""}${m.value - m.previous}`})</span> : null}</dd>
-              <dd className="text-xs text-muted-foreground">{m.definition}</dd>
             </div>
           ))}
         </dl>
@@ -431,8 +448,7 @@ function SalesSummaryView({ card, ...p }: { card: SalesSummaryCard } & ReadCardP
       {card.groups.map((g) => (
         <div key={g.heading} className="space-y-0.5" data-testid="summary-group">
           <p className="text-xs font-semibold">{g.heading}</p>
-          <p className="text-xs text-muted-foreground">{g.definition}</p>
-          {g.rows.length === 0 ? <p className="text-xs text-muted-foreground">None.</p> : <ul className="text-xs">{g.rows.map((r) => <li key={r.label} className="flex justify-between gap-2"><span className="break-words">{r.label}</span><span className="font-medium">{r.count}</span></li>)}</ul>}
+          {g.rows.length === 0 ? <p className="text-xs text-muted-foreground">None.</p> : <ul className="text-xs">{g.rows.map((r) => <li key={r.label} className="flex justify-between gap-2"><span className="min-w-0 break-words">{r.label}</span><span className="font-medium">{r.count}</span></li>)}</ul>}
           {g.more > 0 ? <p className="text-xs text-muted-foreground">and {g.more} more.</p> : null}
         </div>
       ))}
@@ -450,11 +466,23 @@ function SalesSummaryView({ card, ...p }: { card: SalesSummaryCard } & ReadCardP
       ) : null}
       {card.narrativeNote ? <p className="text-xs text-muted-foreground" data-testid="summary-narrative-note">{card.narrativeNote}</p> : null}
       {card.supporting.map((s) => <SectionList key={s.heading} s={s} />)}
-      {card.coverage.length > 0 ? <ul className="list-disc pl-4 text-xs text-muted-foreground" data-testid="summary-coverage">{card.coverage.map((x) => <li key={x}>{x}</li>)}</ul> : null}
-      {d.kind === "period" ? (
-        <div className="flex flex-wrap gap-2">
-          {!d.compare ? <Button type="button" size="sm" variant="outline" disabled={busy || p.companyStale} onClick={() => void run({ ...d, compare: true })}>Compare with the previous period</Button> : null}
-          {!card.narrative && !d.narrative ? <Button type="button" size="sm" variant="outline" disabled={busy || p.companyStale} onClick={() => void run({ ...d, narrative: true })}>Put it in words and suggest next steps (suggestions use the AI model)</Button> : null}
+      {counted ? (
+        <details className="rounded-md border border-border px-2 py-1 text-xs" data-testid="summary-counted">
+          <summary className="cursor-pointer font-medium">How this is counted</summary>
+          <div className="mt-1 max-h-48 space-y-1 overflow-y-auto text-muted-foreground">
+            {card.metrics.length > 0 ? <dl className="space-y-1" data-testid="summary-definitions">{card.metrics.map((m) => <div key={m.label}><dt className="font-medium text-foreground">{m.label}</dt><dd>{m.definition}</dd></div>)}</dl> : null}
+            {card.groups.map((g) => <p key={g.heading}><span className="font-medium text-foreground">{g.heading}: </span>{g.definition}</p>)}
+            {card.coverage.length > 0 ? <ul className="list-disc pl-4" data-testid="summary-coverage">{card.coverage.map((x) => <li key={x}>{x}</li>)}</ul> : null}
+          </div>
+        </details>
+      ) : null}
+      {d.kind === "period" && (!d.compare || (!card.narrative && !d.narrative)) ? (
+        <div className="space-y-1" data-testid="summary-actions">
+          <div className="flex flex-wrap gap-2">
+            {!d.compare ? <Button type="button" size="sm" variant="outline" className="h-auto min-h-8 whitespace-normal py-1" disabled={busy || p.companyStale} onClick={() => void run({ ...d, compare: true })}>Compare periods</Button> : null}
+            {!card.narrative && !d.narrative ? <Button type="button" size="sm" variant="outline" className="h-auto min-h-8 whitespace-normal py-1" disabled={busy || p.companyStale} onClick={() => void run({ ...d, narrative: true })}>Explain &amp; suggest</Button> : null}
+          </div>
+          {!card.narrative && !d.narrative ? <p className="text-[11px] text-muted-foreground" data-testid="summary-ai-notice">Explain &amp; suggest sends these counts and names to Anthropic for suggestions. The sentences are written by Enginious OS.</p> : null}
         </div>
       ) : null}
       {error ? <Alert variant="destructive">{error}</Alert> : null}
