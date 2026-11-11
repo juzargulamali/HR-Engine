@@ -75,8 +75,11 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
 
   // ---- unread project chat counts (members only: the server lists a project's group only for the people enrolled in it)
   const unreadBy = new Map<string, number>();
+  let unreadError = false;
   if (!salesOnly || directory.some((d) => d.is_member)) {
-    for (const [k, v] of (await loadProjectUnread()) ?? []) unreadBy.set(k, v);
+    const unreadRead = await loadProjectUnread();
+    if (unreadRead === null) unreadError = true;
+    for (const [k, v] of unreadRead ?? []) unreadBy.set(k, v);
   }
 
   // ---- who may add an internal project
@@ -198,6 +201,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
             </TableBody>
           </Table>
           {milestoneError ? <Muted>Next milestones could not be loaded just now; everything else is shown.</Muted> : null}
+          {unreadError ? <Muted>Unread chat counts could not be loaded just now, so no project shows one. The Chat button still lists your groups.</Muted> : null}
         </>
       )}
 

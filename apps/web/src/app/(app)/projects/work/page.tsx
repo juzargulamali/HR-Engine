@@ -146,6 +146,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
       ) : null}
 
       <MyProjects items={myProjects} />
+      {myProjects.length > 0 && (await loadProjectUnread()) === null ? <Alert variant="warning" role="status">Unread chat counts could not be loaded just now, so no project above shows one. The Chat button still lists your groups.</Alert> : null}
 
       <div className="space-y-3">
         <ListToolbar
